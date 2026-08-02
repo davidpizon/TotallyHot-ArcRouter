@@ -47,7 +47,7 @@ scrolling a larger canvas.
 
 | Layer | Surface | Enters by | Exits by |
 |---|---|---|---|
-| **base** | Page background `#0f172a` | n/a — always present | n/a |
+| **base** | Page background `#121212` (was `#0f172a`) | n/a — always present | n/a |
 | **content** | Tab panels, cards, charts | Fade + micro-scale, in place | Fade, faster than enter |
 | **overlay** | `SettingsModal`, `ProviderEditDialog` | Rise: scale up + fade, from above | Fade + shrink slightly |
 | **floating** | `.ls-tooltip`, anchored popovers | Opacity only — **never transform** | Opacity only |
@@ -213,7 +213,7 @@ read the true value throughout.
 
 ```css
 @keyframes value-tick {
-  0%   { color: #38bdf8; }   /* accent sky-400 */
+  0%   { color: #1ed760; }   /* accent, was sky-400 #38bdf8 */
   100% { color: inherit; }
 }
 .value-tick { animation: value-tick 400ms var(--ease-out-quart); }

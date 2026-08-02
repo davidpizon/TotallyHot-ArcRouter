@@ -4,4 +4,4 @@ The base surface for every list item and panel in the dashboard — conversation
 <Card agentColor="#38bdf8">Turn content…</Card>
 ```
 
-No shadow system exists in this product — depth comes entirely from a 1px border + a slightly lighter fill on hover (`#263548`), never from box-shadow.
+No shadow system exists in this product — depth comes entirely from a 1px border + a slightly lighter fill on hover (`#1f1f1f`), never from box-shadow.
