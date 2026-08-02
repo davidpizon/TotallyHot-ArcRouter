@@ -1,0 +1,130 @@
+name: .NET CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Least-privilege default: this job only checks out code and runs dotnet build/test, it never
+# writes back to the repo or calls any other GitHub API.
+permissions:
+  contents: read
+
+concurrency:
+  group: dotnet-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    env:
+      # TotallyHotArcRouter.Gui.csproj targets net10.0-windows (a Windows-only MAUI app) and is
+      # intentionally excluded here - it cannot build on a Linux runner. Every other project,
+      # including its supporting libraries (TotallyHotArcRouter.Gui.Charts/.Console/.Telemetry), targets
+      # plain net10.0 by design specifically so it builds and tests cross-platform (see the
+      # "Plain net10.0 (not net10.0-windows / MAUI)" comments in those csproj files). Each project
+      # below is a test project; restoring/building it also covers the production project(s) it
+      # references via ProjectReference, so no separate list of production projects is needed.
+      PROJECTS: >-
+        src/TotallyHotArcRouter.Tests/TotallyHotArcRouter.Tests.csproj
+        src/TotallyHotArcRouter.Sandbox.Tests/TotallyHotArcRouter.Sandbox.Tests.csproj
+        src/TotallyHotArcRouter.Gui.Admin.Tests/TotallyHotArcRouter.Gui.Admin.Tests.csproj
+        src/TotallyHotArcRouter.Gui.Charts.Tests/TotallyHotArcRouter.Gui.Charts.Tests.csproj
+        src/TotallyHotArcRouter.Gui.Console.Tests/TotallyHotArcRouter.Gui.Console.Tests.csproj
+        src/TotallyHotArcRouter.Gui.Telemetry.Tests/TotallyHotArcRouter.Gui.Telemetry.Tests.csproj
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      # Ubuntu 24.04 restricts unprivileged user namespaces via AppArmor by default
+      # (kernel.apparmor_restrict_unprivileged_userns=1), which blocks `unshare --user
+      # --map-root-user` for non-root processes. TotallyHotArcRouter.Sandbox.Tests' LinuxJailLauncherTests
+      # exercises the real Tier-1 jail launch path (unshare(1)) to verify process-tree cleanup on
+      # cancellation, which needs this. The production LinuxJailLauncher already assumes its
+      # deployment host permits this - a Tier-1-capable sandbox executor host cannot function at all
+      # otherwise - so this loosens the CI runner to match that pre-existing assumption, not a new
+      # requirement introduced by CI. Scoped to this job only; GitHub-hosted runners are ephemeral
+      # and rebuilt for every job, so this setting has no persistence or blast-radius concern.
+      - name: Allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Restore
+        run: |
+          set -euo pipefail
+          for proj in $PROJECTS; do
+            echo "::group::dotnet restore $proj"
+            dotnet restore "$proj"
+            echo "::endgroup::"
+          done
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          for proj in $PROJECTS; do
+            echo "::group::dotnet build $proj"
+            dotnet build "$proj" --configuration Release --no-restore
+            echo "::endgroup::"
+          done
+
+      - name: Test
+        run: |
+          set -euo pipefail
+          for proj in $PROJECTS; do
+            echo "::group::dotnet test $proj"
+            name=$(basename "$proj" .csproj)
+            dotnet test "$proj" --configuration Release --no-restore --no-build \
+              --collect:"XPlat Code Coverage" --settings coverlet.runsettings \
+              --results-directory "TestResults/$name"
+            echo "::endgroup::"
+          done
+
+      # AGENTS.md requires >=80% code coverage. coverlet.runsettings (repo root) already excludes
+      # generated/non-testable code (protobuf stubs, MAUI/WinRT bootstrap) from the line-coverage math
+      # so the bar reflects code we actually own. TotallyHotArcRouter.Gui/.Gui.Tests aren't in $PROJECTS
+      # (Windows-only MAUI, can't build/test on this Linux runner - same exclusion as Build/Test above)
+      # so they're checked against this same 80% bar locally on a Windows dev machine instead; see
+      # coverlet.runsettings' own comment for why the split exists.
+      - name: Check coverage threshold
+        run: |
+          set -euo pipefail
+          dotnet tool install -g dotnet-reportgenerator-globaltool
+          # `dotnet tool install -g` puts the shim in ~/.dotnet/tools, which isn't guaranteed to be on
+          # PATH for this step (only guaranteed for later steps once GITHUB_PATH takes effect) - add it
+          # explicitly so `reportgenerator` below resolves. Prepended, not appended: an already-installed
+          # reportgenerator earlier on PATH (e.g. preinstalled on the runner) must not shadow the version
+          # just installed above.
+          export PATH="$HOME/.dotnet/tools:$PATH"
+          reportgenerator \
+            "-reports:TestResults/**/coverage.cobertura.xml" \
+            "-targetdir:TestResults/Report" \
+            "-reporttypes:JsonSummary;TextSummary"
+          cat TestResults/Report/Summary.txt
+          python3 - <<'PY'
+          import json
+          import sys
+
+          with open("TestResults/Report/Summary.json") as f:
+              data = json.load(f)
+
+          threshold = 80.0
+          failures = [
+              (a["name"], a["coverage"])
+              for a in data["coverage"]["assemblies"]
+              if a["coverage"] < threshold
+          ]
+
+          if failures:
+              print(f"::error::The following assemblies are below the {threshold}% line coverage bar required by AGENTS.md:")
+              for name, coverage in failures:
+                  print(f"::error::  {name}: {coverage}%")
+              sys.exit(1)
+
+          print(f"All assemblies meet the {threshold}% line coverage bar.")
+          PY

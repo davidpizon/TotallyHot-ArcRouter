@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- bUnit component tests for the Razor components that live in the Windows-only MAUI Gui project.
+       Targets the same net10.0-windows TFM so it can reference TotallyHotArcRouter.Gui directly; bUnit renders
+       the already-compiled components with its own renderer, so this project neither compiles .razor nor
+       starts a MAUI runtime. Plain (non-Razor) SDK + StaticWebAssetsEnabled=false avoids inheriting the
+       referenced app's Blazor static-web-asset manifest, which otherwise collides on build. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <RootNamespace>TotallyHot.ArcRouter.Gui.Tests</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>preview</LangVersion>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <IsPackable>false</IsPackable>
+    <StaticWebAssetsEnabled>false</StaticWebAssetsEnabled>
+    <!-- Referencing the MAUI app pulls in its Windows packaging targets, which reject AnyCPU; pin a RID. -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <EnableMsixTooling>false</EnableMsixTooling>
+    <WindowsPackageType>None</WindowsPackageType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="bunit" Version="2.8.6" />
+    <!-- bunit pulls in AngleSharp 1.4.0 transitively, which has a known moderate-severity mXSS
+         vulnerability (GHSA-pgww-w46g-26qg). Pin directly to the patched version. -->
+    <PackageReference Include="AngleSharp" Version="1.7.0" />
+    <PackageReference Include="coverlet.collector" Version="10.0.1">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="FluentAssertions" Version="8.10.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="xunit.v3" Version="3.2.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TotallyHotArcRouter.Gui\TotallyHotArcRouter.Gui.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>
+

@@ -1,0 +1,252 @@
+@* Cost Analytics tab: a metric explorer. The user picks one of the seven ranked Perf/$ metrics, a time
+   range (hour/day/week/month/all-time), and optionally a single session; each metric renders in its own
+   bespoke Apache ECharts format per docs/gui/cost-analytics-visualization-spec.md (dual-directional ROI
+   bars, stepped cumulative cost, token-runaway detection, segmented tool-step bars, cache/latency/context
+   lines). The per-metric chart model is built by the pure, unit-tested TotallyHot.ArcRouter.Gui.Charts.
+   CostChartBuilder and rendered through the shared <EChart> host. Live turns are used when present;
+   MockData.BuildMetricHistory fills the gaps so every metric/range renders. *@
+<div class="h-full flex flex-col gap-3 min-h-0">
+    @* ── CONTROL BAR ── *@
+    <div class="rounded-lg p-3 shrink-0 flex flex-col gap-3" style="background:#1e293b;border:1px solid #334155">
+        @* Metric selector (ranked by priority, left-to-right) *@
+        <div class="flex flex-wrap items-center gap-1.5">
+            @foreach (var def in MetricDefs)
+            {
+                var metric = def.Metric;
+                var isActive = _metric == metric;
+                <button @onclick="() => SelectMetric(metric)"
+                        title="@def.Description"
+                        class="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium transition-colors"
+                        style="color:@(isActive ? "#0f172a" : "#94a3b8");
+                               background:@(isActive ? "#38bdf8" : "#0f172a");
+                               border:1px solid @(isActive ? "#38bdf8" : "#334155")">
+                    @def.Label
+                </button>
+            }
+        </div>
+
+        @* Time range + session scope *@
+        <div class="flex flex-wrap items-center gap-3">
+            <div class="flex items-center gap-1" role="group" aria-label="Time range">
+                @foreach (var (range, label) in Ranges)
+                {
+                    var r = range;
+                    var isActive = _range == r;
+                    <button @onclick="() => SelectRange(r)"
+                            class="rounded px-2.5 py-1 text-xs font-medium transition-colors"
+                            style="color:@(isActive ? "#38bdf8" : "#64748b");
+                                   background:@(isActive ? "#172033" : "transparent");
+                                   border:1px solid @(isActive ? "#334155" : "transparent")">
+                        @label
+                    </button>
+                }
+            </div>
+
+            <div class="w-px h-4" style="background:#334155"></div>
+
+            <select value="@_sessionScope"
+                    @onchange="OnSessionChanged"
+                    class="rounded px-2 py-1.5 text-xs font-mono"
+                    style="background:#0f172a;border:1px solid #334155;color:#e2e8f0">
+                <option value="">All Sessions</option>
+                @foreach (var (id, label) in SessionOptions)
+                {
+                    <option value="@id">@label</option>
+                }
+            </select>
+        </div>
+    </div>
+
+    @* ── CHART ── *@
+    <div class="rounded-lg p-4 flex-1 min-h-0 flex flex-col" style="background:#1e293b;border:1px solid #334155">
+        <div class="flex items-baseline justify-between mb-3 shrink-0">
+            <div>
+                <div class="text-xs font-semibold text-slate-400 uppercase tracking-widest">@_model.Title</div>
+                <div class="text-xs text-slate-600 mt-0.5">@CurrentDef.Description · @RangeCaption</div>
+            </div>
+            <div class="font-mono text-lg font-semibold mt-0.5" style="color:#38bdf8">@_model.Headline</div>
+        </div>
+
+        @if (_model.Points.Count == 0)
+        {
+            <div class="flex-1 flex items-center justify-center text-xs text-slate-500">
+                No data for this metric in the selected range.
+            </div>
+        }
+        else
+        {
+            <div class="flex-1 min-h-0">
+                <EChart ModelJson="@_modelJson" />
+            </div>
+
+            @* Model legend (shared color mapping across every metric). *@
+            @if (_model.Models.Count > 0)
+            {
+                <div class="flex flex-wrap gap-x-4 gap-y-1 mt-2 justify-center shrink-0">
+                    @foreach (var m in _model.Models)
+                    {
+                        <div class="flex items-center gap-1.5 text-xs font-mono text-slate-400">
+                            <span class="w-2 h-2 rounded-sm shrink-0" style="background:@m.Color"></span>
+                            @m.Model
+                        </div>
+                    }
+                </div>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    /// <summary>
+    /// Live conversations from LiveDataStore (same source as the Live Stream tab). Their turns supply
+    /// real tokens/cost/TTFT/model/timestamp; MockData.BuildMetricHistory fills the rest.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public IReadOnlyList<Conversation> Conversations { get; set; } = [];
+
+    /// <summary>
+    /// Session the Live Stream tab currently has selected, used as the initial scope so the two tabs stay
+    /// in sync when the user switches over. Null/empty means show all sessions.
+    /// </summary>
+    [Parameter]
+    public string? InitialSessionId { get; set; }
+
+    private sealed record MetricDef(CostMetric Metric, string Label, string Description);
+
+    // Ranked by business priority (the order the pills appear in), matching the CostMetric enum. The
+    // description doubles as the pill tooltip and the chart subtitle.
+    private static readonly MetricDef[] MetricDefs =
+    [
+        new(CostMetric.RoutingRoi, "Routing ROI", "Dual-directional bars: savings above 0, fallback remediation below"),
+        new(CostMetric.TotalTurnCost, "Turn Cost", "Stepped cumulative cost, area colored by the active model"),
+        new(CostMetric.Tokens, "Tokens", "Cumulative tokens with exponential-runaway detection"),
+        new(CostMetric.ToolExecutionSteps, "Tool Steps", "Per-turn step bars, segmented by the model that handled each stretch"),
+        new(CostMetric.CacheHitRate, "Cache Hit", "Stepped cache-hit-rate line with a gradient track"),
+        new(CostMetric.TimeToFirstToken, "TTFT", "Latency line over per-model background zones; spikes pinned"),
+        new(CostMetric.ContextBufferMargin, "Context", "Context-window fill with a 90% safety threshold"),
+    ];
+
+    private static readonly (MetricRange Range, string Label)[] Ranges =
+    [
+        (MetricRange.Hour, "Hour"),
+        (MetricRange.Day, "Day"),
+        (MetricRange.Week, "Week"),
+        (MetricRange.Month, "Month"),
+        (MetricRange.AllTime, "All"),
+    ];
+
+    private CostMetric _metric = CostMetric.RoutingRoi;
+    private MetricRange _range = MetricRange.Week;
+    private string _sessionScope = string.Empty;
+
+    private IReadOnlyList<MetricTurnPoint> _corpus = [];
+    private CostChartModel _model = new(CostChartKind.DualDirectionalBars, "Routing ROI", "$", "—", null, [], []);
+    private string _modelJson = "{}";
+
+    private MetricDef CurrentDef => MetricDefs.First(d => d.Metric == _metric);
+
+    protected override void OnInitialized()
+    {
+        // Only seed the initial session scope here; the first compute happens in OnParametersSet, which
+        // Blazor always calls right after OnInitialized on the first render - so we avoid computing the
+        // corpus/model twice during initialization.
+        if (!string.IsNullOrEmpty(InitialSessionId))
+        {
+            _sessionScope = InitialSessionId;
+        }
+    }
+
+    // Runs right after OnInitialized on first render, and again whenever the Dashboard re-renders on
+    // LiveDataStore.Changed (new live telemetry) - keeps the chart auto-refreshing as new turns arrive.
+    protected override void OnParametersSet() => Recompute();
+
+    private void SelectMetric(CostMetric metric)
+    {
+        _metric = metric;
+        Recompute();
+    }
+
+    private void SelectRange(MetricRange range)
+    {
+        _range = range;
+        Recompute();
+    }
+
+    private void OnSessionChanged(ChangeEventArgs e)
+    {
+        _sessionScope = (string?)e.Value ?? string.Empty;
+        Recompute();
+    }
+
+    private void Recompute()
+    {
+        var now = DateTimeOffset.UtcNow;
+        _corpus = BuildCorpus(now);
+        _model = CostChartBuilder.Build(
+            _corpus, _metric, _range, string.IsNullOrEmpty(_sessionScope) ? null : _sessionScope, now);
+        _modelJson = ChartJson.Serialize(_model);
+    }
+
+    // Merges live turns (real data) with the mock history corpus. Both are just turn points on the same
+    // time axis; the session scope dropdown lets the user isolate one.
+    private IReadOnlyList<MetricTurnPoint> BuildCorpus(DateTimeOffset now)
+    {
+        var points = new List<MetricTurnPoint>(MockData.BuildMetricHistory(now));
+
+        foreach (var conversation in Conversations)
+        {
+            foreach (var turn in conversation.Turns)
+            {
+                points.Add(new MetricTurnPoint(
+                    TimestampUtc: turn.TimestampUtc,
+                    SessionId: conversation.Id,
+                    Model: turn.Model,
+                    RoutingRoi: turn.RoutingRoi,
+                    TotalCost: turn.TotalCost,
+                    PromptTokens: turn.PromptTokens,
+                    CompletionTokens: turn.CompletionTokens,
+                    ToolExecutionSteps: turn.ToolExecutionSteps,
+                    CacheHitRate: turn.CacheHitRate,
+                    TimeToFirstTokenMs: turn.TimeToFirstTokenMs,
+                    ContextBufferPercent: turn.ContextBufferPercent));
+            }
+        }
+
+        return points;
+    }
+
+    // ── Session dropdown options ──
+    // Live conversations first (with their titles), then the mock demo sessions.
+    private IEnumerable<(string Id, string Label)> SessionOptions
+    {
+        get
+        {
+            foreach (var conversation in Conversations)
+            {
+                yield return (conversation.Id, conversation.Title);
+            }
+
+            var liveIds = Conversations.Select(c => c.Id).ToHashSet(StringComparer.Ordinal);
+            var demoIds = _corpus
+                .Select(p => p.SessionId)
+                .Where(id => !liveIds.Contains(id))
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(id => id, StringComparer.Ordinal);
+            var n = 1;
+            foreach (var id in demoIds)
+            {
+                yield return (id, $"Demo session {n++:D2}");
+            }
+        }
+    }
+
+    private string RangeCaption => _range switch
+    {
+        MetricRange.Hour => "Past hour",
+        MetricRange.Day => "Past 24 hours",
+        MetricRange.Week => "Past 7 days",
+        MetricRange.Month => "Past 30 days",
+        _ => "All time",
+    };
+}
+

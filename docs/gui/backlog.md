@@ -1,0 +1,181 @@
+# TotallyHotArcRouter.Gui: Not-Yet-Implemented Work
+
+A backlog of gaps between what the GUI docs describe/design and what `src/TotallyHotArcRouter.Gui/`
+actually does today. Originally sourced from explicit statements in [`dashboard.md`](dashboard.md)'s
+"Known gaps" section, [`src/TotallyHotArcRouter.Gui/README.md`](../../src/TotallyHotArcRouter.Gui/README.md)'s
+"Current limitations," and deferred/optional items in
+[`livestream-redesign-plan.md`](livestream-redesign-plan.md).
+
+## Open
+
+### 1. Extend live telemetry to the rest of the dashboard
+
+Live Stream and Cost Analytics' Token Compounding chart now read live data (see "Recently
+completed" below and [`../router/telemetry.md`](../router/telemetry.md)); everything else still
+reads `MockData` because no telemetry source exists for it yet:
+
+- **Cost Analytics — real values behind the metric explorer.** The tab is now a metric explorer
+  (see "Recently completed" below) that renders live turns merged with a mock history corpus. Four of
+  its seven metrics still have **no live source** and are populated by mock history only: Routing ROI
+  (needs a "worst case" baseline cost that `ModelRouteResolver` doesn't compute today — the same gap
+  that keeps per-turn `RoutingRoi` at 0), Tool Steps, Cache Hit Rate, and Context Buffer. Wiring
+  these means adding the corresponding fields to `RoutingTelemetryEvent`/the proto and the mapper
+  chain (see the field table in `../router/telemetry.md`).
+- **Model Distribution** — real `TokenBucket`/`ModelShare` data. The Day/Month/3-Month/6-Month/Year
+  time-range filter bar and the From/To date inputs are currently **cosmetic only** — they don't
+  refilter the charts — and only become meaningful once there's real time-series data to filter.
+- **Governance** — real per-provider budget/spend data. The Budget Cap input is editable today but
+  purely client-side: edits recompute the in-memory utilization/status/bar but aren't persisted
+  anywhere and are lost on refresh; needs a real place to write to. See
+  [`../router/agent-cost-tracking.md`](../router/agent-cost-tracking.md) for a proposed persistent
+  usage ledger + budget-window query that would be that "real place," and
+  [`governance-model-cards.md`](governance-model-cards.md) for a proposed *new* per-model
+  pricing/spend section (config-driven, separate from the existing per-provider cap cards) built on
+  top of that ledger.
+- **Header ticker** (Total Saved / System Tokens / Avg. Cost Reduction) — still three hardcoded
+  numbers, not derived from `LiveDataStore.Conversations` at all.
+- **Dynamic chart axis ranges** — axis scales (e.g. the $0–$160 savings scale, the 0–6M token
+  scale) are currently pinned to fit the mock data's known range; need to become dynamic once real
+  data volume varies.
+- **Settings modal actions** — Reset Stats / Clear History currently just close the modal with no
+  effect; they need real actions once there's real state to reset or clear.
+- **Configurable telemetry server address** — `Services/LiveDataStore.cs` hardcodes
+  `https://localhost:5002` (the gRPC channel address - a dedicated TLS port, separate from the
+  plain-HTTP proxy port 5001); there's no settings UI to point at a differently-configured proxy,
+  since the GUI has no settings-persistence mechanism at all yet.
+
+### 2. Authenticate the telemetry gRPC stream
+
+Encryption in transit is now real (`Telemetry/TelemetryTlsCertificate.cs`, a self-signed cert on a
+dedicated port - see [`../router/grpc-migration.md`](../router/grpc-migration.md)'s section 2), fixing
+half of what [`../router/signalr-hub-security.md`](../router/signalr-hub-security.md) originally
+proposed, via a different, gRPC-native mechanism rather than that doc's SignalR-era sketch.
+**Authentication is still missing**: `TelemetryGrpcService`/`Proxy/ProxyServer.cs` have no
+connection-time credential check. It's loopback-only today, so not reachable from the network, but
+any local process (that also trusts, or bypasses trust of, the self-signed cert) can connect and
+receive every broadcast event. This is a real concern now that turn cards' request/response text (see
+"Recently completed" below) is actual prompt/response content flowing over that same unauthenticated
+channel. `signalr-hub-security.md`'s section 2 (shared secret/token) is still the closest existing
+design for this, needing translation from a SignalR `AccessTokenProvider` to a gRPC interceptor/call
+credential, per that doc's own status banner.
+
+## Recently completed
+
+### ✅ Cost Analytics bespoke per-metric charts + whole-app move to Apache ECharts
+
+The Cost Analytics metric explorer's single combo chart was rebuilt into **seven bespoke per-metric
+charts** implementing [`cost-analytics-visualization-spec.md`](cost-analytics-visualization-spec.md):
+dual-directional ROI bars, stepped cumulative cost (area recolored per model), a token-runaway area
+(hatched zone + rippling alert), segmented tool-step bars, a cache-rate gradient line, a TTFT line over
+per-model background zones with pinned spikes, and a context line with a pulsing 90% breach threshold —
+all with "bold" entrance/alert animations. In the same change the **whole dashboard moved off
+ApexCharts to Apache ECharts**: `echarts.min.js` is vendored under `wwwroot/lib/echarts` (Apache-2.0)
+and driven by `wwwroot/js/echarts-interop.js` through the reusable `Components/EChart.razor` host;
+`Blazor-ApexCharts-MAUI`, its `AddApexChartsMaui()` registration, and its CSS are gone, and Model
+Distribution's grouped-bar + donut charts were ported too. The pure, unit-tested
+`TotallyHotArcRouter.Gui.Charts.CostChartBuilder` (+ `CostChartBuilderTests`) builds each chart model and
+derives every rich tooltip figure (baseline cost, per-step model split, cached/uncached tokens,
+context token counts, cold-start split) from the turn's existing fields; `ChartJson` serializes it and
+`ChartJsonTests` guards the C#↔JS field contract; `ChartPalette` (which `ColorUtils` now delegates to)
+supplies deterministic per-model colors. `MockData.BuildMetricHistory` gained fixed exemplar events (a
+runaway, a TTFT spike, a fallback, context breaches) so each chart shows its special state offline.
+This supersedes the previous metric-explorer combo chart (the `MetricTimeSeries` engine and its tests
+were removed); `TokenCompoundingSeries` still backs the `ConversationSummary` sparkline.
+
+### ✅ Cost Analytics metric explorer (7 ranked metrics, time ranges, session scope)
+
+`CostAnalytics.razor` was rewritten from three fixed panels (mock Cumulative Savings line, mock
+ROI-by-Agent bar, live Token-Compounding line) into a **metric explorer**: a ranked selector for the
+seven Perf/$ metrics (Routing ROI → Context Buffer), a Hour/Day/Week/Month/All time-range control, and
+an `All Sessions`/per-session scope that defaults to the Live Stream tab's selection. (The combo chart
+this shipped with was later replaced by the bespoke per-metric charts above.) A real
+`DateTimeOffset TimestampUtc` was added to `ConversationTurn` (passed through by
+`LiveConversationMapper` from `LiveConversationTurn.TimestampUtc`) to place turns onto the time axis.
+
+### ✅ Telemetry transport migrated from SignalR to gRPC
+
+Fully specified in [`../router/grpc-migration.md`](../router/grpc-migration.md) and now implemented
+(minus that doc's `GetModelSpend` RPC and `ModelListEvent` stream case, deliberately descoped - see
+the doc's status banner): `Telemetry/TelemetryHub.cs` is deleted, `TelemetryGrpcService`/
+`TelemetryBroadcaster` replace it server-side, and `LiveDataStore.cs` now speaks gRPC via a
+`GrpcChannel` instead of a SignalR `HubConnection`. `src/Protos/telemetry.proto` is the shared
+contract, compiled independently into both `TotallyHotArcRouter` and `TotallyHotArcRouter.Gui.Telemetry` (not
+`TotallyHotArcRouter.Gui` itself - .NET MAUI's `SingleProject` build doesn't reliably run Grpc.Tools'
+codegen), closing the hand-synced-DTO drift risk that motivated this. See
+[`../router/telemetry.md`](../router/telemetry.md)'s "Transport: gRPC" section for the full mechanism.
+
+### ✅ Turn card request/response text
+
+`TurnCard.razor`'s Request/Response sections now show real data: `Telemetry/RequestTextExtractor.cs`
+pulls the newest user message out of the request body's `messages` array (not the whole resent
+history), and the new `IResponseTextExtractor`/`ResponseTextExtractor` (mirroring `UsageExtractor`'s
+provider-dispatch design) extracts the assistant's reply text for both OpenAI and Anthropic,
+streaming and non-streaming. Both are truncated to 2,000 characters (`TextTruncator`) before being
+placed on `RoutingTelemetryEvent` and broadcast. `Services/LiveConversationMapper.cs` now passes these
+straight through instead of hardcoding `null`. See [`../router/telemetry.md`](../router/telemetry.md)'s
+"Request/response text extraction" section for the full pipeline - and the item below for the
+security gap this makes more pressing.
+
+### ✅ New "Console" tab: streaming log viewer
+
+Fully specified in [`console-tab-plan.md`](console-tab-plan.md) and now implemented: a fifth tab
+showing a real-time, color-coded (`DEBUG`/`INFO`/`WARN`/`ERROR`/`FATAL`) log stream with a
+toggleable auto-scroll (and smart-disengage on manual scroll-up), a copy-all-to-clipboard action
+(via MAUI's native `Clipboard`, not the browser `navigator.clipboard`, since clipboard-write from a
+WebView2 page can be blocked by permission prompts), and a clear-buffer action. The missing
+proxy-side source noted here previously is closed by
+`src/TotallyHotArcRouter/Telemetry/TelemetryLogEventSink.cs` (renamed from `SignalRLogEventSink.cs` when
+the transport migrated to gRPC - see the item above), a custom Serilog `ILogEventSink` that forwards
+every log event (additively, alongside the existing `Console` sink -
+`serilog-logging-guide.md` is otherwise unchanged) as a `LogLineEvent` over the same telemetry gRPC
+stream routing telemetry already uses. `TotallyHotArcRouter.Gui.Console` (+
+`.Tests`) hosts the reusable, unit-tested pieces (`LogLevelColorMapper`, `LogBuffer`), mirroring the
+`TotallyHotArcRouter.Gui.Charts` pattern; `LiveDataStore` and `Components/ConsoleTab.razor` wire it into
+the dashboard.
+
+### ✅ Wire the dashboard to live TotallyHotArcRouter proxy telemetry, with real-time push updates
+
+`src/TotallyHotArcRouter/Telemetry/` now captures per-request session/turn tracking, OpenAI/Anthropic
+token usage (streaming and non-streaming), and estimated cost, and pushes each request as a
+`RoutingTelemetryEvent` over a gRPC stream (`TelemetryService.StreamEvents`) as soon as it's
+forwarded — no polling. `TotallyHotArcRouter.Gui`'s `Services/LiveDataStore.cs` consumes this live, and the
+Live Stream tab plus Cost Analytics' Token Compounding chart now render real conversations instead of
+`MockData`. Full pipeline, field-by-field data provenance, and what's still honestly defaulted
+(Routing ROI, Tool Steps, Cache Hit Rate, Context Buffer) vs. real (Time to First Token,
+Request/Response text) is in [`../router/telemetry.md`](../router/telemetry.md). This closes out both
+former "Open" headline items (live wiring and real-time push) in one implementation, since server
+push (originally SignalR, now gRPC - see the item above) was the chosen transport from the start
+rather than adding polling first.
+
+### ✅ Token-compounding line chart in Cost Analytics *(superseded by the metric explorer above)*
+
+Originally implemented in `CostAnalytics.razor` as a "Token Compounding by Conversation" panel: a
+conversation picker plus a two-series line chart (cumulative prompt tokens, cumulative completion
+tokens) per turn, built via `TotallyHotArcRouter.Gui.Charts.TokenCompoundingSeries.Build`. This is now the
+`Tokens` metric (single-session scope) of the metric explorer; `TokenCompoundingSeries` itself
+remains in use for the `ConversationSummary` sparkline.
+
+### ✅ Token-compounding sparkline on the conversation summary card
+
+Implemented in `ConversationSummary.razor`: a compact inline SVG polyline ("Trend" stat) showing
+per-turn total tokens, built via `TotallyHotArcRouter.Gui.Charts.TokenCompoundingSeries.BuildSparkline`
+and `SparklineLayout.Normalize`.
+
+### ✅ Keyboard-accessible tooltips
+
+`wwwroot/js/tooltips.js` now shows/hides on `focusin`/`focusout` (in addition to hover), dismisses
+on Escape, and the shared tooltip element is hidden via opacity rather than `display:none` so it
+stays in the accessibility tree. Every `data-tip` element not nested inside a `<button>` carries
+`tabindex="0"` and `aria-describedby="ls-tooltip"`. The handful nested inside a `<button>` (e.g. a
+`TurnCard` header's sub-badges) intentionally skip `tabindex` — nesting a focusable element inside a
+button is an ARIA anti-pattern — and the outer button carries a comprehensive `aria-label` instead.
+Smoke-tested against a standalone HTML harness with Playwright/Chromium (see `dashboard.md`'s
+"Verification limitation" note for why that, rather than a full app build, was the verification
+method available in this environment).
+
+## Minor / cosmetic (low priority)
+
+- **Chart tooltips** are custom dark-themed HTML built in `wwwroot/js/echarts-interop.js` to match the
+  card styling, rather than matching the original React design pixel-for-pixel. `dashboard.md` calls
+  this a "minor visual difference," not a functional gap.
+

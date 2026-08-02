@@ -1,0 +1,235 @@
+@* Root dashboard component: header with live status banner, ticker row, tab bar, and the active tab. *@
+@implements IDisposable
+@inject LiveDataStore LiveDataStore
+@inject ProviderAdminStore ProviderStore
+
+<div class="flex flex-col h-screen overflow-hidden" style="background:#0f172a">
+    @* ── HEADER ── *@
+    <header style="background:#1e293b;border-bottom:1px solid #334155">
+        <div class="flex items-center justify-between px-4 py-2.5">
+            @* Brand *@
+            <div class="flex items-center gap-2">
+                <span class="text-sm font-bold tracking-tight text-slate-100">
+                    🤖 Router Optimization Engine
+                </span>
+            </div>
+
+            @* Status banner *@
+            <div class="flex items-center">
+                @if (_breached.Count > 0 && _approaching.Count > 0)
+                {
+                    <button @onclick="HandleAlertClick" class="flex items-center gap-2 hover:opacity-80 transition-opacity">
+                        <span class="font-semibold text-xs" style="color:#ef4444">🚨 @_breached.Count BREACHED</span>
+                        <span class="text-slate-600">|</span>
+                        <span class="font-semibold text-xs" style="color:#f59e0b">⚠️ @_approaching.Count APPROACHING LIMIT</span>
+                    </button>
+                }
+                else if (_breached.Count > 0)
+                {
+                    <button @onclick="HandleAlertClick" class="flex items-center gap-2 hover:opacity-80 transition-opacity">
+                        <span class="font-semibold text-xs" style="color:#ef4444">🚨 @_breached.Count PROVIDER BREACHED</span>
+                    </button>
+                }
+                else if (_approaching.Count > 0)
+                {
+                    <button @onclick="HandleAlertClick" class="flex items-center gap-2 hover:opacity-80 transition-opacity">
+                        <span class="font-semibold text-xs" style="color:#f59e0b">⚠️ @_approaching.Count PROVIDER APPROACHING LIMIT</span>
+                    </button>
+                }
+                else
+                {
+                    <div class="flex items-center gap-2">
+                        <span class="pulse-dot w-1.5 h-1.5 rounded-full" style="background:#10b981"></span>
+                        <span class="text-xs font-medium" style="color:#10b981">System Status: OK</span>
+                    </div>
+                }
+            </div>
+
+            @* Actions *@
+            <div class="flex items-center gap-2">
+                <button @onclick="() => _showSettings = true"
+                        class="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium border border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200 transition-colors">
+                    <Icon Name="settings" Size="12" />
+                    Settings
+                </button>
+            </div>
+        </div>
+
+        @* Ticker row *@
+        <div class="flex items-center gap-6 px-4 py-1.5" style="border-top:1px solid #0f172a;background:#172033">
+            <div class="flex items-center gap-2">
+                <span class="text-xs text-slate-500">Total Saved</span>
+                <span class="font-mono text-xs font-semibold" style="color:#10b981">$142.36</span>
+            </div>
+            <div class="w-px h-3" style="background:#334155"></div>
+            <div class="flex items-center gap-2">
+                <span class="text-xs text-slate-500">System Tokens</span>
+                <span class="font-mono text-xs font-semibold text-slate-200">12.4M</span>
+            </div>
+            <div class="w-px h-3" style="background:#334155"></div>
+            <div class="flex items-center gap-2">
+                <span class="text-xs text-slate-500">Avg. Cost Reduction</span>
+                <span class="font-mono text-xs font-semibold" style="color:#10b981">74.20% ↓</span>
+            </div>
+            <div class="ml-auto flex items-center gap-1.5">
+                <span class="pulse-dot w-1.5 h-1.5 rounded-full" style="background:#10b981"></span>
+                <span class="text-xs font-mono text-slate-600">LIVE</span>
+            </div>
+        </div>
+    </header>
+
+    @* ── TAB BAR ── *@
+    <nav class="flex items-end px-4 gap-0 shrink-0" style="background:#1e293b;border-bottom:1px solid #334155">
+        @foreach (var (tab, icon, label) in Tabs)
+        {
+            var isActive = _activeTab == tab;
+            <button @onclick="() => _activeTab = tab"
+                    class="tab-indicator relative flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium"
+                    style="color:@(isActive ? "#38bdf8" : "#64748b");
+                           background:@(isActive ? "#0f172a" : "transparent");
+                           border-top:1px solid @(isActive ? "#334155" : "transparent");
+                           border-left:1px solid @(isActive ? "#334155" : "transparent");
+                           border-right:1px solid @(isActive ? "#334155" : "transparent");
+                           border-bottom:1px solid @(isActive ? "#0f172a" : "transparent");
+                           border-radius:6px 6px 0 0;
+                           margin-bottom:-1px">
+                <Icon Name="@icon" Size="13" />
+                @label
+            </button>
+        }
+    </nav>
+
+    @* ── WORKSPACE ── *@
+    @* @key on the active tab makes Blazor tear down and rebuild this node on every tab change,
+       which is what re-fires the panel-enter animation (a transition would have nothing to run
+       from). h-full min-h-0 keeps the height chain intact — every tab root is h-full. *@
+    <main class="flex-1 overflow-hidden p-3 min-h-0">
+        <div @key="_activeTab" class="panel-enter h-full min-h-0">
+        @switch (_activeTab)
+        {
+            case Tab.Live:
+                <LiveStream Conversations="LiveDataStore.Conversations" SelectedId="@_selectedConversationId" OnSelect="id => _selectedConversationId = id" />
+                break;
+            case Tab.Analytics:
+                <CostAnalytics Conversations="LiveDataStore.Conversations" InitialSessionId="@_selectedConversationId" />
+                break;
+            case Tab.Distribution:
+                <ModelDistribution TokenBuckets="MockData.TokenBuckets" ModelShares="MockData.ModelShares" />
+                break;
+            case Tab.Governance:
+                <Governance />
+                break;
+            case Tab.Console:
+                <ConsoleTab />
+                break;
+        }
+        </div>
+    </main>
+
+    @* ── SETTINGS MODAL ── *@
+    @if (_showSettings)
+    {
+        <SettingsModal OnClose="() => _showSettings = false" />
+    }
+</div>
+
+@code {
+    private enum Tab
+    {
+        Live,
+        Analytics,
+        Distribution,
+        Governance,
+        Console,
+    }
+
+    private static readonly (Tab Tab, string Icon, string Label)[] Tabs =
+    [
+        (Tab.Live, "activity", "Live Stream"),
+        (Tab.Analytics, "bar-chart", "Cost Analytics"),
+        (Tab.Distribution, "trending-up", "Model Distribution"),
+        (Tab.Governance, "shield-check", "Governance"),
+        (Tab.Console, "terminal", "Console"),
+    ];
+
+    private Tab _activeTab = Tab.Live;
+    // Live Stream starts empty (no telemetry received yet); LiveStream.razor auto-selects the first
+    // conversation once one arrives, so an empty starting id is correct rather than a mock fallback.
+    private string _selectedConversationId = string.Empty;
+    private bool _showSettings;
+
+    // Provider keys whose monthly budget is breached / approaching (>=80%), derived from real budget state
+    // published by ProviderAdminStore. Kept as lists so the banner markup's `.Count` reads unchanged.
+    private List<string> _breached = [];
+    private List<string> _approaching = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        LiveDataStore.Changed += HandleLiveDataChanged;
+        ProviderStore.Changed += HandleProvidersChanged;
+        await LiveDataStore.StartAsync();
+
+        // Best-effort: populates the budget banner. Failures are swallowed by the store (surfaced via its
+        // IsReachable flag), so the dashboard renders "System Status: OK" when the proxy isn't running.
+        await ProviderStore.LoadAsync();
+        RecomputeBudgetAlerts();
+    }
+
+    // LiveDataStore raises Changed from whatever thread the gRPC stream delivered the event on;
+    // InvokeAsync marshals back to this component's render context before calling StateHasChanged.
+    private void HandleLiveDataChanged() => InvokeAsync(StateHasChanged);
+
+    private void HandleProvidersChanged() => InvokeAsync(() =>
+    {
+        RecomputeBudgetAlerts();
+        StateHasChanged();
+    });
+
+    // A provider counts as breached when a set cap is met/exceeded, and approaching when its highest
+    // dimension utilization is in [80%, 100%). Providers with no caps are ignored.
+    private void RecomputeBudgetAlerts()
+    {
+        _breached = ProviderStore.Providers
+            .Where(p => Utilization(p) >= 100d)
+            .Select(p => p.Key)
+            .ToList();
+        _approaching = ProviderStore.Providers
+            .Where(p =>
+            {
+                var pct = Utilization(p);
+                return pct is >= 80d and < 100d;
+            })
+            .Select(p => p.Key)
+            .ToList();
+    }
+
+    // The provider's worst-case utilization across whichever of its two caps are set; -1 when unbudgeted so
+    // it never trips either alert.
+    private static double Utilization(ProviderAdminView p)
+    {
+        // A zero cap is treated as 100% (immediately breached), matching the backend's spend >= cap rule, so
+        // the banner never reads "OK" for a provider that enforcement is actually rejecting.
+        double worst = -1d;
+        if (p.DollarCap is { } dollarCap)
+        {
+            worst = Math.Max(worst, dollarCap <= 0m ? 100d : (double)(p.DollarSpent / dollarCap * 100m));
+        }
+
+        if (p.TokenCap is { } tokenCap)
+        {
+            worst = Math.Max(worst, tokenCap <= 0 ? 100d : (double)p.TokensUsed / tokenCap * 100d);
+        }
+
+        return worst;
+    }
+
+    public void Dispose()
+    {
+        LiveDataStore.Changed -= HandleLiveDataChanged;
+        ProviderStore.Changed -= HandleProvidersChanged;
+    }
+
+    // Clicking the alert banner jumps to the Governance tab's Providers view, where each over-budget
+    // provider's card shows its caps, spend, and utilization bars.
+    private void HandleAlertClick() => _activeTab = Tab.Governance;
+}

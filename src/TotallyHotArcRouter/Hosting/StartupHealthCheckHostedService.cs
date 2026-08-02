@@ -1,0 +1,133 @@
+using TotallyHot.ArcRouter.PriceCatalog;
+using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+
+namespace TotallyHot.ArcRouter.Hosting;
+
+/// <summary>
+/// Runs the startup pricing health checks before the proxy accepts requests. Registered ahead of
+/// <see cref="ProxyHostedService"/> so the generic host awaits its <see cref="StartAsync"/> first -
+/// Kestrel is not bound until checks 1-4 have run.
+/// </summary>
+/// <remarks>
+/// Every check is <em>log-only</em>: a Warning or Error here never blocks startup or the proxy from
+/// binding its port. This is distinct from routing eligibility - a model with no fresh price is excluded
+/// from auto-selection by D1, in per-request routing, not by this gate. See
+/// <c>docs/router/model-price-catalog.md</c>.
+/// </remarks>
+public sealed class StartupHealthCheckHostedService : IHostedService
+{
+    // D1's routing floor, reused here only to describe the check-4 condition in the log message.
+    private static readonly TimeSpan FreshnessFloor = TimeSpan.FromHours(24);
+
+    private readonly ILogger<StartupHealthCheckHostedService> _logger;
+    private readonly PriceCatalogDatabase _database;
+    private readonly PriceCatalogRepository _repository;
+    private readonly PriceCatalogIngestionService _ingestionService;
+    private readonly PriceSourceToggleStore _toggleStore;
+    private readonly ProviderBudgetStore _budgetStore;
+    private readonly ToolCallCapabilityStore _toolCallCapabilityStore;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="StartupHealthCheckHostedService"/> class.
+    /// </summary>
+    public StartupHealthCheckHostedService(
+        ILogger<StartupHealthCheckHostedService> logger,
+        PriceCatalogDatabase database,
+        PriceCatalogRepository repository,
+        PriceCatalogIngestionService ingestionService,
+        PriceSourceToggleStore toggleStore,
+        ProviderBudgetStore budgetStore,
+        ToolCallCapabilityStore toolCallCapabilityStore)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(database);
+        ArgumentNullException.ThrowIfNull(repository);
+        ArgumentNullException.ThrowIfNull(ingestionService);
+        ArgumentNullException.ThrowIfNull(toggleStore);
+        ArgumentNullException.ThrowIfNull(budgetStore);
+        ArgumentNullException.ThrowIfNull(toolCallCapabilityStore);
+
+        _logger = logger;
+        _database = database;
+        _repository = repository;
+        _ingestionService = ingestionService;
+        _toggleStore = toggleStore;
+        _budgetStore = budgetStore;
+        _toolCallCapabilityStore = toolCallCapabilityStore;
+    }
+
+    /// <inheritdoc />
+    public async Task StartAsync(CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("Startup pricing health checks are running.");
+
+        // Check 1: ensure the SQLite database exists, creating it (and its directory) if absent. This also
+        // applies additive column migrations and seeds a row for every source that has a client, so it must
+        // precede the toggle store's first read below.
+        var alreadyExisted = _database.EnsureCreated();
+        if (alreadyExisted)
+        {
+            _logger.LogInformation("Found existing pricing database at {Path}.", _database.DatabasePath);
+        }
+        else
+        {
+            _logger.LogInformation("Created new pricing database at {Path}.", _database.DatabasePath);
+        }
+
+        // The toggle store starts empty by design (its schema may not exist at construction time), so this
+        // is what puts it into service. Every source reads as disabled until this runs.
+        _toggleStore.Reload();
+
+        // Same story for the per-provider budget store: it starts empty (the provider_budgets/provider_spend
+        // tables may not exist at construction), so this first load is what makes caps and current-month
+        // spend visible to routing enforcement and the Governance budget bars.
+        _budgetStore.Reload();
+
+        // And for the tool-call capability store, for the same reason. Until this runs every model reads as
+        // unclassified, which is the safe direction: "unknown" means "forward natively and observe", so a
+        // request arriving before this point behaves exactly as it does today rather than being scanned
+        // under a dialect that hasn't been loaded.
+        _toolCallCapabilityStore.Reload();
+
+        // Check 2: warn when no source is enabled. Read from the database rather than configuration - the
+        // toggle is owned by aggregator_sources.enabled and may have been switched off from the Governance
+        // panel in a previous run (D6).
+        var hasEnabledSource = _toggleStore.List().Any(source => source.Enabled);
+        if (!hasEnabledSource)
+        {
+            _logger.LogWarning(
+                "No pricing data sources are enabled; cost estimates will be unavailable for all paid models.");
+        }
+
+        // Check 3: if at least one source is enabled, attempt a fresh pull. RunCycleAsync itself logs the
+        // zero-fresh-prices Error (D4) when a cycle that ran ends with nothing fresh, so check 4 below
+        // only has to cover the no-sources-ran branch.
+        var ranCycle = false;
+        if (hasEnabledSource)
+        {
+            await _ingestionService.RunCycleAsync(cancellationToken).ConfigureAwait(false);
+            ranCycle = true;
+        }
+
+        // Check 4: no manual prices AND no fresh fetched prices -> Error. "No manual prices" is always
+        // true today: there is no manual-price mechanism in the codebase yet, so this condition reduces to
+        // the fetched-freshness check. A future manual-override feature must update this to consult it.
+        const bool noManualPricesConfigured = true;
+        if (!ranCycle && noManualPricesConfigured && _repository.CountFreshPrices(FreshnessFloor) == 0)
+        {
+            // Only reached when no source ran (check 2 found none enabled); a cycle that ran already
+            // logged this via RunCycleAsync.
+            _logger.LogError(
+                "No pricing data is available: no manual prices are configured and all fetched price data is missing or older than {FreshnessHours} hours.",
+                FreshnessFloor.TotalHours);
+        }
+
+        _logger.LogInformation("Startup pricing health checks complete.");
+    }
+
+    /// <inheritdoc />
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+

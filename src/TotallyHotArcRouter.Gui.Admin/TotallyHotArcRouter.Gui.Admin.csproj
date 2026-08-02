@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Plain net10.0 (not net10.0-windows / MAUI), mirroring TotallyHotArcRouter.Gui.Charts/.Telemetry:
+         the DTOs and the HTTP/JSON client logic for the proxy's /admin management API live here so
+         they build and unit-test on any platform (the MAUI Gui project is Windows-only and excluded
+         from CI). TotallyHotArcRouter.Gui.Services.ProviderAdminStore is the thin MAUI glue that wraps the
+         client in this library, exactly as Services/LiveDataStore wraps TotallyHotArcRouter.Gui.Telemetry.
+         Deliberately does not reference the TotallyHotArcRouter proxy project - it's an independent wire
+         contract for a separately deployable process. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>TotallyHot.ArcRouter.Gui.Admin</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>preview</LangVersion>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+</Project>
+

@@ -1,0 +1,107 @@
+@* Live Stream tab: conversation list (left) and conversation drilldown (right), separated by a
+   draggable divider (wired up by wwwroot/js/split-pane.js). *@
+@using Microsoft.JSInterop
+@inject IJSRuntime Js
+
+@if (SelectedOrDefault is null)
+{
+    <div class="h-full flex items-center justify-center text-xs text-slate-500">No conversations yet.</div>
+    return;
+}
+
+<div @ref="_container" class="flex h-full min-h-0">
+    @* Left panel: search + conversation cards *@
+    <div @ref="_leftPanel" class="ls-left flex flex-col min-h-0">
+        <div class="relative shrink-0 mb-2">
+            <Icon Name="search" Size="13" Class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+            <input type="text"
+                   placeholder="Search conversations, agents, models..."
+                   value="@_search"
+                   @oninput="e => _search = (string?)e.Value ?? string.Empty"
+                   class="w-full rounded pl-8 pr-3 py-2 text-xs font-mono"
+                   style="background:#1e293b;border:1px solid #334155;color:#94a3b8" />
+        </div>
+
+        <div class="flex-1 overflow-y-auto space-y-1.5 pr-1">
+            @{ var staggerIndex = 0; }
+            @foreach (var conversation in Filtered)
+            {
+                <ConversationCard @key="conversation.Id"
+                                  Conversation="conversation"
+                                  IsSelected="Selected.Id == conversation.Id"
+                                  StaggerIndex="_listHasRendered ? 0 : Math.Min(staggerIndex++, 8)"
+                                  OnSelect="OnSelect" />
+            }
+        </div>
+    </div>
+
+    @* Draggable divider *@
+    <div @ref="_divider" class="ls-divider" title="Drag to resize panels"></div>
+
+    @* Right panel: pinned summary + scrollable turn list *@
+    <div class="flex flex-col min-h-0 flex-1 gap-2" style="min-width:0">
+        <ConversationSummary Conversation="Selected" />
+
+        <div class="flex-1 overflow-y-auto space-y-1.5 pr-1">
+            @foreach (var turn in Selected.Turns)
+            {
+                <TurnCard @key="turn.Id" Turn="turn" TotalTurns="Selected.Turns.Count" />
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    /// <summary>All conversations shown in the left panel, most recently active first.</summary>
+    [Parameter, EditorRequired]
+    public IReadOnlyList<Conversation> Conversations { get; set; } = [];
+
+    /// <summary>
+    /// The id of the conversation to drill into. Falls back to the first conversation in
+    /// <see cref="Conversations"/> when it doesn't match any (e.g. empty, or the referenced session hasn't
+    /// arrived yet) - see <see cref="SelectedOrDefault"/>.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public string SelectedId { get; set; } = string.Empty;
+
+    /// <summary>Invoked with a conversation's id when its card is clicked.</summary>
+    [Parameter]
+    public EventCallback<string> OnSelect { get; set; }
+
+    private string _search = string.Empty;
+
+    // Gates the conversation list's entrance stagger to its first appearance only. Cards that arrive
+    // later from the live gRPC stream pass StaggerIndex 0 and animate immediately: staggering a live
+    // append would make a busy stream read as a slot machine (docs/gui/MOTION.md §7).
+    private bool _listHasRendered;
+
+    private ElementReference _container;
+    private ElementReference _divider;
+    private ElementReference _leftPanel;
+
+    private IEnumerable<Conversation> Filtered =>
+        Conversations.Where(c => string.IsNullOrEmpty(_search)
+            || c.Title.Contains(_search, StringComparison.OrdinalIgnoreCase)
+            || c.Id.Contains(_search, StringComparison.OrdinalIgnoreCase)
+            || c.Turns.Any(t => t.Agent.Contains(_search, StringComparison.OrdinalIgnoreCase)
+                || t.Model.Contains(_search, StringComparison.OrdinalIgnoreCase)));
+
+    private Conversation? SelectedOrDefault =>
+        Conversations.FirstOrDefault(c => c.Id == SelectedId) ?? Conversations.FirstOrDefault();
+
+    // Guarded by the @if (SelectedOrDefault is null) { ... return; } check at the top of the markup.
+    private Conversation Selected => SelectedOrDefault!;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Re-invoked on every render: splitPane.init no-ops once the divider is already wired, and
+        // this covers the case where the panels first appear on a later render (empty → populated).
+        if (SelectedOrDefault is not null)
+        {
+            // The list renders for the first time on whichever render first has data, not necessarily
+            // firstRender - so the stagger flag is set here, under the same guard.
+            _listHasRendered = true;
+            await Js.InvokeVoidAsync("splitPane.init", _container, _divider, _leftPanel);
+        }
+    }
+}

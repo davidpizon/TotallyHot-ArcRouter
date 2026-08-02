@@ -1,0 +1,476 @@
+using System.Net;
+using System.Text.Json;
+using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.Proxy;
+using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
+using Moq;
+
+namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
+
+/// <summary>
+/// Coverage for tiers 1-3 of model dialect detection (<c>docs/router/tool-call-normalization.md</c> §3.2,
+/// Phase 3). Every probe is stubbed - no live provider.
+///
+/// <para>
+/// Two of the cases below encode judgment calls rather than mechanics, and they are the ones worth
+/// protecting. <see cref="ATemplateThatMatchesNothing_IsConclusive_AndDoesNotFallBackToTheModelId"/> pins
+/// that ground truth beats a filename even when the ground truth says "none of the above", and
+/// <see cref="AGenericLlamaArchitecture_FallsThroughToTheModelId"/> pins that the architecture read is
+/// deliberately conservative, because <c>llama</c> is reported by a huge population of fine-tunes whose
+/// templates are not Llama's.
+/// </para>
+/// </summary>
+public sealed class ModelDialectResolverTests
+{
+    // Condensed from the real Ollama templates for these models: the tool-call framing is reproduced
+    // verbatim and the surrounding message-loop boilerplate is dropped, since only the framing is read.
+    private const string QwenTemplate = """
+        {{- if .Tools }}
+        You are provided with function signatures within <tools></tools> XML tags:
+        <tools>
+        {{- range .Tools }}
+        {"type": "function", "function": {{ .Function }}}
+        {{- end }}
+        </tools>
+
+        For each function call, return a json object within <tool_call></tool_call> XML tags:
+        <tool_call>
+        {"name": <function-name>, "arguments": <args-json-object>}
+        </tool_call>
+        {{- end }}
+        """;
+
+    private const string Llama3Template = """
+        {{- if .Tools }}
+        Given the following functions, respond with a JSON for a function call.
+        {{- end }}
+        {{- range .ToolCalls }}<|python_tag|>{"name": "{{ .Function.Name }}", "parameters": {{ .Function.Arguments }}}{{ end }}
+        """;
+
+    private const string MistralTemplate = """
+        {{- if .Tools }}[AVAILABLE_TOOLS] {{ .Tools }}[/AVAILABLE_TOOLS]{{ end }}
+        {{- if .ToolCalls }}[TOOL_CALLS] [{{ range .ToolCalls }}{"name": "{{ .Function.Name }}", "arguments": {{ .Function.Arguments }}}{{ end }}]{{ end }}
+        """;
+
+    // A template that plainly supports tools but frames them in no dialect the registry knows - the shape
+    // an unregistered family (DeepSeek today) presents.
+    private const string UnknownDialectTemplate = """
+        {{- if .Tools }}<|tool▁calls▁begin|>{{ .Tools }}<|tool▁calls▁end|>{{ end }}
+        """;
+
+    // A template with no tool support whatsoever - no dialect framing and no .Tools/.ToolCalls to render
+    // schemas or calls with. This is the shape that selects emulation (Phase 5).
+    private const string NoToolSupportTemplate = """
+        {{- range .Messages }}<|im_start|>{{ .Role }}
+        {{ .Content }}<|im_end|>
+        {{ end }}<|im_start|>assistant
+        """;
+
+    private static ProviderOptions Provider(string baseUrl = "http://localhost:11434/v1") => new() { BaseUrl = baseUrl };
+
+    private static ProviderEndpointCapabilities Flavors(bool ollama = false, bool lmStudio = false) =>
+        new("local", OpenAiCompatible: true, LmStudioNative: lmStudio, OllamaNative: ollama,
+            AnthropicCompatible: false, JsonSchemaResponseFormat: lmStudio || ollama,
+            ScannedAtUtc: DateTimeOffset.UtcNow);
+
+    private static string ShowBody(string template) => JsonSerializer.Serialize(new { template });
+
+    private static string LmStudioBody(params (string Id, string Arch)[] models) =>
+        JsonSerializer.Serialize(new { data = models.Select(m => new { id = m.Id, arch = m.Arch }) });
+
+    /// <summary>Answers 200 with the body whose path fragment matches, 404 otherwise.</summary>
+    private static ModelDialectResolver ResolverFor(
+        IReadOnlyDictionary<string, string> okPaths,
+        List<string>? recordedUrls = null)
+    {
+        var handler = new DelegatingHandlerStub(request =>
+        {
+            var url = request.RequestUri!.ToString();
+            recordedUrls?.Add(url);
+
+            var match = okPaths.FirstOrDefault(kvp => url.EndsWith(kvp.Key, StringComparison.OrdinalIgnoreCase));
+            return Task.FromResult(match.Key is not null
+                ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(match.Value) }
+                : new HttpResponseMessage(HttpStatusCode.NotFound));
+        });
+
+        return new ModelDialectResolver(new HttpClient(handler), Mock.Of<IEnvironmentVariableProvider>());
+    }
+
+    // ----- Tier 1: the literal chat template -----
+
+    [Theory]
+    [InlineData("qwen2.5-coder:7b", "hermes", "<tool_call>")]
+    [InlineData("llama3.1:8b", "llama3-json", "<|python_tag|>")]
+    [InlineData("mistral-nemo:latest", "mistral", "[TOOL_CALLS]")]
+    public async Task ATemplateRead_ClassifiesTheModel_AtTemplateConfidence(
+        string modelId, string expectedDialect, string expectedDelimiter)
+    {
+        var template = expectedDialect switch
+        {
+            "hermes" => QwenTemplate,
+            "llama3-json" => Llama3Template,
+            _ => MistralTemplate,
+        };
+        var resolver = ResolverFor(new Dictionary<string, string> { ["/api/show"] = ShowBody(template) });
+
+        var result = await resolver.ResolveAsync(
+            "local", Provider(), Flavors(ollama: true), modelId, modelId, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result);
+        Assert.Equal(expectedDialect, result.Dialect);
+        Assert.Equal(DetectionConfidence.Template, result.Confidence);
+
+        // The evidence names the delimiter that matched, never any of the template text around it.
+        Assert.Contains(expectedDelimiter, result.Evidence, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ATemplateThatMatchesNothing_IsConclusive_AndDoesNotFallBackToTheModelId()
+    {
+        // The model id says "qwen", which tier 3 would happily read as hermes. The template - which is what
+        // actually decides the model's reply syntax - says otherwise, so recording nothing is correct and
+        // recording hermes would arm a scanner that can never match.
+        var resolver = ResolverFor(new Dictionary<string, string> { ["/api/show"] = ShowBody(UnknownDialectTemplate) });
+
+        var result = await resolver.ResolveAsync(
+            "local", Provider(), Flavors(ollama: true), "deepseek-qwen-distill", "deepseek-qwen-distill",
+            TestContext.Current.CancellationToken);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task ATemplateThatRendersNoToolsAtAll_SelectsEmulation()
+    {
+        // The Phase 5 selection signal. Unlike the unmatched-response counter Phase 4 rejected, this is not
+        // an inference from behavior: the chat template is the mechanism that would render a tool schema,
+        // read directly off the model, and it has no path by which one could reach the weights.
+        var resolver = ResolverFor(new Dictionary<string, string> { ["/api/show"] = ShowBody(NoToolSupportTemplate) });
+
+        var result = await resolver.ResolveAsync(
+            "local", Provider(), Flavors(ollama: true), "tinyllama:1.1b", "tinyllama:1.1b",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("emulated", result!.Dialect);
+        Assert.Equal(DetectionConfidence.Template, result.Confidence);
+    }
+
+    [Fact]
+    public async Task ATemplateWithToolsInAnUnknownDialect_IsNotCondemnedToEmulation()
+    {
+        // The guard that keeps "no dialect matched" from being read as "has no tool calling". A DeepSeek
+        // template supports tools perfectly well in framing this build has not registered; emulating it
+        // would strip the native tool support it actually has. Recording nothing leaves it to tier 4.
+        var resolver = ResolverFor(new Dictionary<string, string> { ["/api/show"] = ShowBody(UnknownDialectTemplate) });
+
+        var result = await resolver.ResolveAsync(
+            "local", Provider(), Flavors(ollama: true), "deepseek-r1:7b", "deepseek-r1:7b",
+            TestContext.Current.CancellationToken);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task WhenOllamaCannotAnswerForTheModel_TheModelIdHeuristicStillApplies()
+    {
+        // A 404 from /api/show is "no template was read", which is a different thing from a template that
+        // matched nothing - so the lower tiers must still run.
+        var resolver = ResolverFor(new Dictionary<string, string>());
+
+        var result = await resolver.ResolveAsync(
+            "local", Provider(), Flavors(ollama: true), "qwen2.5-coder", "qwen2.5-coder",
+            TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result);
+        Assert.Equal("hermes", result.Dialect);
+        Assert.Equal(DetectionConfidence.Heuristic, result.Confidence);
+    }
+
+    // ----- Tier 2: the architecture in the model file's metadata -----
+
+    [Fact]
+    public async Task AnLmStudioArchitecture_ClassifiesTheModel_AtTemplateConfidence()
+    {
+        // The model id here is a bare alias that tells tier 3 nothing; arch is the only source that can
+        // answer, which is the case this tier exists for.
+        var resolver = ResolverFor(new Dictionary<string, string>
+        {
+            ["/api/v0/models"] = LmStudioBody(("local-model-a", "qwen2")),
+        });
+
+        var result = await resolver.ResolveAsync(
+            "local", Provider("http://localhost:1234/v1"), Flavors(lmStudio: true), "local-model-a", "local-model-a",
+            TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result);
+        Assert.Equal("hermes", result.Dialect);
+        Assert.Equal(DetectionConfidence.Template, result.Confidence);
+        Assert.Contains("qwen2", result.Evidence, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AGenericLlamaArchitecture_FallsThroughToTheModelId()
+    {
+        // `llama` is reported by Llama 2, Llama 3, and every fine-tune built on them - including Hermes,
+        // whose template is not Llama's. Mapping it would produce a Template-confidence row that is wrong
+        // for a large share of the models carrying it, *and* outrank the tier-3 read that gets this right.
+        var resolver = ResolverFor(new Dictionary<string, string>
+        {
+            ["/api/v0/models"] = LmStudioBody(("hermes-3-llama-3.1-8b", "llama")),
+        });
+
+        var result = await resolver.ResolveAsync(
+            "local", Provider("http://localhost:1234/v1"), Flavors(lmStudio: true),
+            "hermes-3-llama-3.1-8b", "hermes-3-llama-3.1-8b", TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result);
+        Assert.Equal("hermes", result.Dialect);
+        Assert.Equal(DetectionConfidence.Heuristic, result.Confidence);
+    }
+
+    [Fact]
+    public async Task AModelMissingFromTheLmStudioList_FallsThrough()
+    {
+        var resolver = ResolverFor(new Dictionary<string, string>
+        {
+            ["/api/v0/models"] = LmStudioBody(("some-other-model", "qwen2")),
+        });
+
+        var result = await resolver.ResolveAsync(
+            "local", Provider("http://localhost:1234/v1"), Flavors(lmStudio: true), "mistral-7b", "mistral-7b",
+            TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result);
+        Assert.Equal("mistral", result.Dialect);
+        Assert.Equal(DetectionConfidence.Heuristic, result.Confidence);
+    }
+
+    // ----- Tier 3: the model id -----
+
+    [Theory]
+    [InlineData("qwen2.5-coder-7b-instruct", "hermes")]
+    [InlineData("Hermes-2-Pro-Mistral-7B", "hermes")]
+    [InlineData("mixtral-8x7b-instruct", "mistral")]
+    [InlineData("Meta-Llama-3.1-8B-Instruct", "llama3-json")]
+    [InlineData("llama3.2:3b", "llama3-json")]
+    public async Task TheModelId_ClassifiesKnownFamilies(string modelId, string expected)
+    {
+        var resolver = ResolverFor(new Dictionary<string, string>());
+
+        var result = await resolver.ResolveAsync(
+            "local", Provider(), endpointCapabilities: null, modelId, modelId, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result);
+        Assert.Equal(expected, result.Dialect);
+        Assert.Equal(DetectionConfidence.Heuristic, result.Confidence);
+    }
+
+    [Fact]
+    public async Task AHermesFineTuneIsAttributedToHermes_NotToTheBaseItNames()
+    {
+        // "Hermes-2-Pro-Mistral-7B" contains both tokens. Hermes ships its own template regardless of base,
+        // so matching the base would get the best-known case exactly backwards - which is why the heuristic
+        // table's order is load-bearing rather than incidental.
+        var resolver = ResolverFor(new Dictionary<string, string>());
+
+        var result = await resolver.ResolveAsync(
+            "local", Provider(), endpointCapabilities: null, "Hermes-2-Pro-Mistral-7B", "Hermes-2-Pro-Mistral-7B",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("hermes", result!.Dialect);
+    }
+
+    [Theory]
+    [InlineData("gpt-5.4")]
+    [InlineData("claude-sonnet-5")]
+    [InlineData("llama-2-13b-chat")]
+    public async Task AnUnrecognizedModel_RecordsNothing(string modelId)
+    {
+        // Llama 2 is in this list on purpose: it has no tool-call template at all, so matching it on the
+        // "llama" substring would arm a scanner against a model that can never satisfy it.
+        var resolver = ResolverFor(new Dictionary<string, string>());
+
+        var result = await resolver.ResolveAsync(
+            "local", Provider(), endpointCapabilities: null, modelId, modelId, TestContext.Current.CancellationToken);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task TheClientFacingAliasIsConsulted_WhenTheUpstreamIdSaysNothing()
+    {
+        var resolver = ResolverFor(new Dictionary<string, string>());
+
+        var result = await resolver.ResolveAsync(
+            "local", Provider(), endpointCapabilities: null,
+            modelName: "qwen-local", providerModelId: "model-a", TestContext.Current.CancellationToken);
+
+        Assert.Equal("hermes", result!.Dialect);
+        Assert.Equal("qwen-local", result.ModelName);
+    }
+
+    // ----- Probing discipline -----
+
+    [Fact]
+    public async Task NoNativeProbeIsIssued_ForAProviderKnownNotToAnswerOne()
+    {
+        // A cloud provider answers neither native path. Probing them anyway would add two guaranteed-404
+        // round trips to every model added, which is exactly what the Phase 2 flags exist to prevent.
+        var urls = new List<string>();
+        var resolver = ResolverFor(new Dictionary<string, string>(), urls);
+
+        await resolver.ResolveAsync(
+            "openai", Provider("https://api.openai.com/v1"), Flavors(), "qwen-hosted", "qwen-hosted",
+            TestContext.Current.CancellationToken);
+
+        Assert.Empty(urls);
+    }
+
+    [Fact]
+    public async Task NoNativeProbeIsIssued_WhenTheProviderHasNeverBeenScanned()
+    {
+        var urls = new List<string>();
+        var resolver = ResolverFor(new Dictionary<string, string>(), urls);
+
+        await resolver.ResolveAsync(
+            "local", Provider(), endpointCapabilities: null, "qwen2.5", "qwen2.5", TestContext.Current.CancellationToken);
+
+        Assert.Empty(urls);
+    }
+
+    [Fact]
+    public async Task TheNativeProbesTargetTheHostRoot_NotTheV1Base()
+    {
+        // The same trap ProviderEndpointScanner documents: LM Studio and Ollama are configured with a /v1
+        // base because that is where their OpenAI-compatible routes live, but their native APIs sit at the
+        // root. Probing http://localhost:11434/v1/api/show would 404 on every install.
+        var urls = new List<string>();
+        var resolver = ResolverFor(new Dictionary<string, string>(), urls);
+
+        await resolver.ResolveAsync(
+            "local", Provider("http://localhost:11434/v1"), Flavors(ollama: true, lmStudio: true),
+            "some-model", "some-model", TestContext.Current.CancellationToken);
+
+        Assert.Contains("http://localhost:11434/api/show", urls);
+        Assert.Contains("http://localhost:11434/api/v0/models", urls);
+        Assert.DoesNotContain(urls, url => url.Contains("/v1/api/", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task TheOllamaProbeAsksAboutTheUpstreamId_NotTheClientFacingAlias()
+    {
+        // Ollama has never heard of the operator's alias; asking with it 404s and silently costs tier 1.
+        string? requestBody = null;
+        var handler = new DelegatingHandlerStub(async request =>
+        {
+            requestBody = request.Content is null
+                ? null
+                : await request.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(ShowBody(QwenTemplate)) };
+        });
+        var resolver = new ModelDialectResolver(new HttpClient(handler), Mock.Of<IEnvironmentVariableProvider>());
+
+        await resolver.ResolveAsync(
+            "local", Provider(), Flavors(ollama: true),
+            modelName: "fast-coder", providerModelId: "qwen2.5-coder:7b", cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(requestBody);
+        Assert.Contains("qwen2.5-coder:7b", requestBody, StringComparison.Ordinal);
+    }
+
+    // ----- Failure is never an exception -----
+
+    [Fact]
+    public async Task AnUnreachableProvider_ResolvesToTheHeuristic_RatherThanThrowing()
+    {
+        var handler = new DelegatingHandlerStub(_ => throw new HttpRequestException("connection refused"));
+        var resolver = new ModelDialectResolver(new HttpClient(handler), Mock.Of<IEnvironmentVariableProvider>());
+
+        var result = await resolver.ResolveAsync(
+            "local", Provider(), Flavors(ollama: true, lmStudio: true), "qwen2.5-coder", "qwen2.5-coder",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("hermes", result!.Dialect);
+    }
+
+    [Fact]
+    public async Task AMalformedBody_DoesNotThrow()
+    {
+        var resolver = ResolverFor(new Dictionary<string, string>
+        {
+            ["/api/show"] = "<html>not json at all</html>",
+            ["/api/v0/models"] = "{ truncated",
+        });
+
+        var result = await resolver.ResolveAsync(
+            "local", Provider(), Flavors(ollama: true, lmStudio: true), "unknown-model", "unknown-model",
+            TestContext.Current.CancellationToken);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task AnOversizedShowResponse_IsAbandoned_RatherThanBuffered()
+    {
+        // /api/show returns the model's whole Modelfile, license text included, and only the template is
+        // wanted from it. A provider answering with something far larger than any real template - or a
+        // misrouted endpoint streaming something else entirely - must not be read into memory whole. Sent
+        // without a Content-Length so this also pins that the cap is enforced on the stream rather than on a
+        // header the sender can simply omit.
+        var oversized = new string('x', 2 * 1024 * 1024);
+        var handler = new DelegatingHandlerStub(_ =>
+        {
+            var content = new StreamContent(new MemoryStream(System.Text.Encoding.UTF8.GetBytes(
+                JsonSerializer.Serialize(new { template = oversized + "<tool_call>" }))));
+            content.Headers.ContentLength = null;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+        });
+        var resolver = new ModelDialectResolver(new HttpClient(handler), Mock.Of<IEnvironmentVariableProvider>());
+
+        // The body does contain a hermes delimiter, so a resolver that read it whole would answer hermes at
+        // Template confidence. Falling back to the model id is the proof it never read that far.
+        var result = await resolver.ResolveAsync(
+            "local", Provider(), Flavors(ollama: true), "mixtral-8x7b", "mixtral-8x7b",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("mistral", result!.Dialect);
+        Assert.Equal(DetectionConfidence.Heuristic, result.Confidence);
+    }
+
+    [Fact]
+    public async Task AnInvalidBaseUrl_DoesNotThrow()
+    {
+        var resolver = ResolverFor(new Dictionary<string, string>());
+
+        var result = await resolver.ResolveAsync(
+            "local", Provider("not a url"), Flavors(ollama: true, lmStudio: true), "qwen2.5", "qwen2.5",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("hermes", result!.Dialect);
+    }
+
+    // ----- Argument guards -----
+
+    [Fact]
+    public async Task ABlankProviderKeyOrModelName_IsAProgrammingError()
+    {
+        var resolver = ResolverFor(new Dictionary<string, string>());
+
+        await Assert.ThrowsAsync<ArgumentException>(() => resolver.ResolveAsync(
+            " ", Provider(), null, "qwen", "qwen", TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ArgumentException>(() => resolver.ResolveAsync(
+            "local", Provider(), null, " ", "qwen", TestContext.Current.CancellationToken));
+    }
+
+    private sealed class DelegatingHandlerStub : HttpMessageHandler
+    {
+        private readonly Func<HttpRequestMessage, Task<HttpResponseMessage>> _handler;
+
+        public DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler) => _handler = handler;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => _handler(request);
+    }
+}
+

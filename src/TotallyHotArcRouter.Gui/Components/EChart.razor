@@ -1,0 +1,57 @@
+@* Thin reusable Apache ECharts host. Takes a pre-serialized chart-model JSON (built in
+   TotallyHot.ArcRouter.Gui.Charts and serialized with ChartJson) and hands it to wwwroot/js/echarts-interop.js,
+   which owns the ECharts option construction and animations. Re-renders whenever the JSON changes, and
+   disposes the underlying ECharts instance on teardown so a tab/metric switch never leaks a chart. *@
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject IJSRuntime Js
+
+<div id="@_elementId" style="width:100%;height:100%"></div>
+
+@code {
+    // The serialized CostChartModel / GroupedBarsModel / DonutModel to render. Changing it re-renders.
+    [Parameter, EditorRequired]
+    public string ModelJson { get; set; } = string.Empty;
+
+    private readonly string _elementId = "echart-" + Guid.NewGuid().ToString("N");
+    private string? _rendered;
+    private bool _disposed;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // JS interop is only valid after the element exists; re-render only when the model actually
+        // changed so unrelated parent re-renders don't rebuild the chart (and interrupt animations).
+        if (_disposed || _rendered == ModelJson)
+        {
+            return;
+        }
+
+        _rendered = ModelJson;
+        try
+        {
+            await Js.InvokeVoidAsync("echartsInterop.render", _elementId, ModelJson);
+        }
+        catch (JSDisconnectedException)
+        {
+            // WebView tearing down (navigation/app close) - nothing to render into.
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _disposed = true;
+        try
+        {
+            await Js.InvokeVoidAsync("echartsInterop.dispose", _elementId);
+        }
+        catch (JSDisconnectedException)
+        {
+            // WebView already gone; the instance goes with it.
+        }
+        catch (ObjectDisposedException)
+        {
+            // JS runtime disposed ahead of this component.
+        }
+    }
+}
+

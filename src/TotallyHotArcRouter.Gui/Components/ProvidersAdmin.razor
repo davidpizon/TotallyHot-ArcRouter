@@ -1,0 +1,676 @@
+@* Governance > Providers pane: add/remove/edit provider endpoints + credentials and manage each
+   provider's models (with live /v1/models discovery). Talks to the proxy's /admin API via the
+   injected ProviderAdminStore. *@
+@implements IDisposable
+@inject ProviderAdminStore Store
+
+<div class="h-full overflow-y-auto pr-1">
+    @if (!Store.IsLoaded)
+    {
+        <div class="text-sm text-slate-500 p-4">Loading providers…</div>
+    }
+    else if (!Store.IsReachable)
+    {
+        <div class="rounded-lg p-4 space-y-2" style="background:#1e293b;border:1px solid #ef444444">
+            <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
+                <Icon Name="alert-triangle" Size="14" /> Proxy management API unreachable
+            </div>
+            <div class="text-xs text-slate-400">
+                Could not reach <span class="font-mono">@ProviderAdminStore.DefaultManagementAddress</span>. Is the proxy running?
+            </div>
+            @if (!string.IsNullOrEmpty(Store.LastError))
+            {
+                <div class="text-xs text-slate-500 font-mono">@Store.LastError</div>
+            }
+            <button @onclick="Reload"
+                    class="rounded px-3 py-1.5 text-xs font-medium border border-slate-600 text-slate-300 hover:bg-slate-700 transition-colors">
+                Retry
+            </button>
+        </div>
+    }
+    else
+    {
+        <div class="flex items-center justify-between mb-3">
+            <span class="text-xs text-slate-500 uppercase tracking-widest">Configured Providers</span>
+            <button @onclick="OpenAdd"
+                    class="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 transition-colors">
+                <Icon Name="plus" Size="13" /> Add Provider
+            </button>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_opError))
+        {
+            <div class="rounded px-3 py-2 mb-3 text-xs" style="background:#ef444411;border:1px solid #ef444444;color:#fca5a5">
+                @_opError
+            </div>
+        }
+
+        <div class="space-y-3">
+            @foreach (var provider in Store.Providers)
+            {
+                @* A stopped provider dims its border and title, matching PriceSourcesAdmin's disabled
+                   cards. The proxy's routing path skips a stopped provider on the very next request. *@
+                <div @key="provider.Key" class="rounded-lg p-3"
+                     style="background:#1e293b;border:1px solid @(provider.Enabled ? "#334155" : "#33415580")">
+                    @* Header: key + endpoint + actions *@
+                    <div class="flex items-start justify-between gap-2">
+                        <div class="min-w-0">
+                            <div class="flex items-center gap-2">
+                                <Icon Name="server" Size="14" />
+                                <span class="text-sm font-semibold" style="color:@(provider.Enabled ? "#e2e8f0" : "#64748b")">@provider.Key</span>
+                            </div>
+                            <div class="text-xs text-slate-500 mt-0.5 font-mono truncate">@provider.BaseUrl</div>
+                        </div>
+                        <div class="flex items-center gap-1 shrink-0">
+                            <button title="Edit" @onclick="() => OpenEdit(provider)"
+                                    class="rounded p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700 transition-colors">
+                                <Icon Name="settings" Size="14" />
+                            </button>
+                            @* Stop/Play and Remove use the shared floating tooltip (js/tooltips.js) rather
+                               than title=, so the label isn't clipped by this pane's scroll container and
+                               is reachable by keyboard. aria-label carries the accessible *name* - the
+                               tooltip is only a description, and these buttons have no text. *@
+                            <button @onclick="() => ToggleEnabled(provider)"
+                                    data-tip="@(provider.Enabled ? "Stop" : "Play")"
+                                    aria-label="@(provider.Enabled ? $"Stop provider {provider.Key}" : $"Start provider {provider.Key}")"
+                                    aria-describedby="ls-tooltip"
+                                    class="rounded p-1.5 flex items-center justify-center ls-card-action @(provider.Enabled ? "ls-card-action-stop" : "ls-card-action-play")">
+                                <Icon Name="@(provider.Enabled ? "stop" : "play")" Size="14" />
+                            </button>
+                            <button @onclick="() => RemoveProvider(provider)"
+                                    data-tip="Remove"
+                                    aria-label="@($"Remove provider {provider.Key}")"
+                                    aria-describedby="ls-tooltip"
+                                    class="rounded p-1.5 flex items-center justify-center ls-card-action ls-card-action-remove">
+                                <Icon Name="trash" Size="14" />
+                            </button>
+                        </div>
+                    </div>
+
+                    @* Credential status *@
+                    <div class="flex items-center gap-1.5 mt-2 text-xs text-slate-400">
+                        <Icon Name="key" Size="12" />
+                        @if (provider.HasApiKey)
+                        {
+                            <span>Literal key set</span>
+                        }
+                        else if (!string.IsNullOrEmpty(provider.ApiKeyEnvVar))
+                        {
+                            <span>Env var <span class="font-mono text-slate-300">@provider.ApiKeyEnvVar</span></span>
+                        }
+                        else
+                        {
+                            <span class="text-slate-600">No credential</span>
+                        }
+                        @* The flag is only seeded from appsettings.json on a fresh install - once
+                           model-routing.json exists it owns provider config - so show it on the card rather
+                           than leaving it to be discovered inside the edit dialog. *@
+                        @if (provider.IsFree)
+                        {
+                            <span class="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider"
+                                  style="background:rgba(16,185,129,0.12);color:#34d399" title="Requests to this provider report a cost of $0.00">Free</span>
+                        }
+                    </div>
+
+                    @* Models *@
+                    <div class="mt-3 border-t border-slate-700/60 pt-2">
+                        <div class="flex items-center justify-between mb-1.5">
+                            <span class="text-xs text-slate-500 uppercase tracking-wider">Models</span>
+                            <button @onclick="() => RefreshFromEndpoint(provider.Key)"
+                                    class="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-200 transition-colors">
+                                <Icon Name="rotate-ccw" Size="12" /> Refresh from endpoint
+                            </button>
+                        </div>
+
+                        @if (provider.Models.Count == 0)
+                        {
+                            <div class="text-xs text-slate-600 mb-1.5">No models configured.</div>
+                        }
+                        else
+                        {
+                            <div class="space-y-1 mb-1.5">
+                                @foreach (var model in provider.Models)
+                                {
+                                    @* A model that's stopped (operator toggle) or not currently reported by
+                                       the last "Refresh from endpoint" scan dims the same way a stopped
+                                       provider does; "not detected" distinguishes the latter from a
+                                       deliberate stop, mirroring the provider-level "stopped vs. unhealthy"
+                                       distinction ProxyMiddleware already logs separately. *@
+                                    <div @key="model.ModelName" class="flex items-center justify-between text-xs">
+                                        <span class="font-mono" style="color:@(model.Enabled && model.PresentUpstream ? "#cbd5e1" : "#64748b")">@model.ModelName</span>
+                                        <div class="flex items-center gap-2">
+                                            @if (!model.PresentUpstream)
+                                            {
+                                                <span class="text-[10px] uppercase tracking-wider text-amber-500">not detected</span>
+                                            }
+                                            @* How this model expresses tool calls. Empty until "Refresh from
+                                               endpoint" has run, or the model has answered a real
+                                               tools-carrying request. Editable because automatic detection
+                                               can settle on a wrong answer that never self-corrects: an
+                                               intermittently-native model gets recorded openai-native on its
+                                               first lucky reply, after which nothing re-inspects it. Picking
+                                               a value here pins it at operator confidence, which no scan may
+                                               overwrite; "auto-detect" clears the pin. *@
+                                            <select value="@(model.Dialect ?? string.Empty)"
+                                                    @onchange="e => SetModelDialect(provider.Key, model.ModelName, e.Value?.ToString())"
+                                                    aria-label="@($"Tool-call dialect for {model.ModelName}")"
+                                                    title="@($"Tool-call dialect{(string.IsNullOrEmpty(model.Confidence) ? string.Empty : $" (confidence: {model.Confidence})")}")"
+                                                    class="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-mono uppercase tracking-wider text-slate-400 border border-slate-600">
+                                                <option value="">auto-detect</option>
+                                                @foreach (var dialect in ToolDialects)
+                                                {
+                                                    <option value="@dialect">@dialect</option>
+                                                }
+                                            </select>
+                                            <span class="font-mono text-slate-500">@model.ProviderModelId</span>
+                                            @* Start/Stop and Remove use the shared floating tooltip, mirroring the
+                                               provider card's own Stop/Play + Trash pattern above. *@
+                                            <button @onclick="() => ToggleModelEnabled(provider, model)"
+                                                    data-tip="@(model.Enabled ? "Stop" : "Start")"
+                                                    aria-label="@(model.Enabled ? $"Stop model {model.ModelName}" : $"Start model {model.ModelName}")"
+                                                    aria-describedby="ls-tooltip"
+                                                    class="rounded p-1 flex items-center justify-center ls-card-action @(model.Enabled ? "ls-card-action-stop" : "ls-card-action-play")">
+                                                <Icon Name="@(model.Enabled ? "stop" : "play")" Size="12" />
+                                            </button>
+                                            <button title="Remove model" @onclick="() => RemoveModel(provider.Key, model.ModelName)"
+                                                    class="text-red-400 hover:text-red-300 transition-colors">
+                                                <Icon Name="x" Size="12" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        }
+
+                        @* Manual add, for a provider "Refresh from endpoint" can't reach (no OpenAI-shaped
+                           /v1/models - hosted Anthropic, Bedrock) or as a plain override. Collapsed by
+                           default now that reconciliation adds most models automatically; mirrors the
+                           expand/collapse pattern in TurnCard.razor (a per-key toggle + chevron glyph). *@
+                        <button @onclick="() => ToggleAddModelPane(provider.Key)"
+                                aria-expanded="@IsAddModelPaneOpen(provider.Key)"
+                                aria-label="Add model manually"
+                                class="w-full flex items-center justify-center text-xs text-slate-500 hover:text-slate-300 transition-colors">
+                            <span aria-hidden="true">@(IsAddModelPaneOpen(provider.Key) ? "▴" : "▾")</span>
+                        </button>
+
+                        @if (IsAddModelPaneOpen(provider.Key))
+                        {
+                            <div class="flex items-center gap-1.5 mt-1.5">
+                                <input type="text" value="@GetDraft(_draftName, provider.Key)"
+                                       @oninput="e => _draftName[provider.Key] = AsString(e.Value)"
+                                       placeholder="model name"
+                                       class="rounded px-2 py-1 text-xs font-mono flex-1 min-w-0"
+                                       style="background:#0f172a;border:1px solid #334155;color:#e2e8f0" />
+                                <input type="text" value="@GetDraft(_draftId, provider.Key)"
+                                       @oninput="e => _draftId[provider.Key] = AsString(e.Value)"
+                                       placeholder="provider model id (optional)"
+                                       class="rounded px-2 py-1 text-xs font-mono flex-1 min-w-0"
+                                       style="background:#0f172a;border:1px solid #334155;color:#e2e8f0" />
+                                <button @onclick="() => AddModel(provider.Key)"
+                                        class="rounded px-2 py-1 text-xs text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/10 transition-colors shrink-0">
+                                    Add
+                                </button>
+                            </div>
+                        }
+
+                        @* Endpoint capability scan results - which API flavors the endpoint answers
+                           (docs/router/tool-call-normalization.md §3.3). Per-model dialect badges above
+                           reflect the same scan; this summarizes the endpoint itself. "Refresh from
+                           endpoint" also reconciles the Models list above directly (added/removed models),
+                           so there is no separate discovery-results panel to click through anymore. *@
+                        @if (provider.EndpointCapabilities is { } scan)
+                        {
+                            <div class="mt-2 rounded p-2" style="background:#0f172a;border:1px solid #334155">
+                                @if (!string.IsNullOrEmpty(scan.ScanError))
+                                {
+                                    <div class="text-xs text-amber-400">Scan incomplete: @scan.ScanError</div>
+                                }
+                                else if (!scan.OpenAiCompatible && !scan.LmStudioNative && !scan.OllamaNative && !scan.AnthropicCompatible)
+                                {
+                                    <div class="text-xs text-slate-500">Endpoint answered no known API flavor.</div>
+                                }
+                                else
+                                {
+                                    <div class="text-xs text-slate-500 mb-1">Endpoint flavors:</div>
+                                    <div class="flex flex-wrap gap-1">
+                                        @if (scan.OpenAiCompatible)
+                                        {
+                                            <span class="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider" style="background:rgba(16,185,129,0.12);color:#34d399">OpenAI-compatible</span>
+                                        }
+                                        @if (scan.LmStudioNative)
+                                        {
+                                            <span class="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider" style="background:rgba(16,185,129,0.12);color:#34d399">LM Studio native</span>
+                                        }
+                                        @if (scan.OllamaNative)
+                                        {
+                                            <span class="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider" style="background:rgba(16,185,129,0.12);color:#34d399">Ollama native</span>
+                                        }
+                                        @if (scan.AnthropicCompatible)
+                                        {
+                                            <span class="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider" style="background:rgba(16,185,129,0.12);color:#34d399">Anthropic-compatible</span>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+
+                    @* Budget: optional monthly $ / token caps, current-month spend, and two utilization
+                       bar charts (rendered only for a dimension that has a cap). *@
+                    <div class="mt-3 border-t border-slate-700/60 pt-2">
+                        <div class="flex items-center justify-between mb-1.5">
+                            <span class="text-xs text-slate-500 uppercase tracking-wider">Monthly Budget</span>
+                            <button @onclick="() => SaveBudget(provider.Key)"
+                                    class="rounded px-2 py-0.5 text-xs text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/10 transition-colors">
+                                Save
+                            </button>
+                        </div>
+
+                        <div class="flex items-center gap-1.5 mb-2">
+                            <span class="text-xs font-mono text-slate-400">$</span>
+                            <input type="text" value="@GetBudgetDraft(_draftDollarCap, provider.Key, provider.DollarCap?.ToString(CultureInfo.InvariantCulture))"
+                                   @oninput="e => _draftDollarCap[provider.Key] = AsString(e.Value)"
+                                   placeholder="monthly $ cap (optional)"
+                                   class="rounded px-2 py-1 text-xs font-mono flex-1 min-w-0"
+                                   style="background:#0f172a;border:1px solid #334155;color:#e2e8f0" />
+                            <input type="text" value="@GetBudgetDraft(_draftTokenCap, provider.Key, provider.TokenCap?.ToString(CultureInfo.InvariantCulture))"
+                                   @oninput="e => _draftTokenCap[provider.Key] = AsString(e.Value)"
+                                   placeholder="monthly token cap (optional)"
+                                   class="rounded px-2 py-1 text-xs font-mono flex-1 min-w-0"
+                                   style="background:#0f172a;border:1px solid #334155;color:#e2e8f0" />
+                        </div>
+
+                        @if (provider.DollarCap is null && provider.TokenCap is null)
+                        {
+                            <div class="text-xs text-slate-600">No budget set — this provider is unlimited.</div>
+                        }
+                        else
+                        {
+                            <div class="grid grid-cols-2 gap-3">
+                                @* Dollar utilization *@
+                                <div>
+                                    @if (provider.DollarCap is { } dollarCap)
+                                    {
+                                        var dollarPct = UtilizationPercent(provider.DollarSpent, dollarCap);
+                                        <div class="flex justify-between text-xs font-mono text-slate-500 mb-1">
+                                            <span>% $ spent</span>
+                                            <span>$@Money2(provider.DollarSpent) / $@Money2(dollarCap)</span>
+                                        </div>
+                                        <div style="height:96px">
+                                            <EChart ModelJson="@BudgetBarJson("% $ spent", dollarPct)" />
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <div class="text-xs text-slate-600">No $ cap · $@Money2(provider.DollarSpent) spent</div>
+                                    }
+                                </div>
+
+                                @* Token utilization *@
+                                <div>
+                                    @if (provider.TokenCap is { } tokenCap)
+                                    {
+                                        var tokenPct = UtilizationPercent(provider.TokensUsed, tokenCap);
+                                        <div class="flex justify-between text-xs font-mono text-slate-500 mb-1">
+                                            <span>% tokens utilized</span>
+                                            <span>@provider.TokensUsed.ToString("N0", CultureInfo.InvariantCulture) / @tokenCap.ToString("N0", CultureInfo.InvariantCulture)</span>
+                                        </div>
+                                        <div style="height:96px">
+                                            <EChart ModelJson="@BudgetBarJson("% tokens utilized", tokenPct)" />
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <div class="text-xs text-slate-600">No token cap · @provider.TokensUsed.ToString("N0", CultureInfo.InvariantCulture) tokens used</div>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@if (_showDialog)
+{
+    <ProviderEditDialog Key="@_dialogKey"
+                        IsNew="@_dialogIsNew"
+                        BaseUrl="@_dialogBaseUrl"
+                        AuthHeaderName="@_dialogAuthName"
+                        AuthHeaderScheme="@_dialogAuthScheme"
+                        ApiKeyEnvVar="@_dialogEnvVar"
+                        HasApiKey="@_dialogHasKey"
+                        Headers="@_dialogHeaders"
+                        IsFree="@_dialogIsFree"
+                        Error="@_dialogError"
+                        OnSave="SaveDialog"
+                        OnCancel="CancelDialog" />
+}
+
+@if (_removeKey is not null)
+{
+    <RemoveProviderDialog ProviderKey="@_removeKey"
+                          ModelCount="@_removeModelCount"
+                          OnConfirm="ConfirmRemove"
+                          OnCancel="CancelRemove" />
+}
+
+@code {
+    private readonly Dictionary<string, string> _draftName = [];
+    private readonly Dictionary<string, string> _draftId = [];
+    private readonly Dictionary<string, string> _draftDollarCap = [];
+    private readonly Dictionary<string, string> _draftTokenCap = [];
+    // Which providers currently have the "Add model manually" pane expanded - absent/false is the default
+    // (collapsed), matching every other per-provider draft dictionary's "missing key = default" shape.
+    private readonly HashSet<string> _addModelPaneOpen = [];
+    private string? _opError;
+
+    // Non-null while the type-to-confirm removal dialog is open, holding the provider it targets.
+    private string? _removeKey;
+    private int _removeModelCount;
+
+    private bool _showDialog;
+    private bool _dialogIsNew;
+    private string _dialogKey = string.Empty;
+    private string _dialogBaseUrl = string.Empty;
+    private string _dialogAuthName = "Authorization";
+    private string _dialogAuthScheme = "Bearer";
+    private string? _dialogEnvVar;
+    private bool _dialogHasKey;
+    private IReadOnlyList<ProviderHeaderView> _dialogHeaders = [];
+    private bool _dialogIsFree;
+    private string? _dialogError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Store.Changed += OnStoreChanged;
+        await Store.LoadAsync();
+    }
+
+    private void OnStoreChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Store.Changed -= OnStoreChanged;
+
+    private async Task Reload()
+    {
+        _opError = null;
+        await Store.LoadAsync();
+    }
+
+    private void OpenAdd()
+    {
+        _dialogIsNew = true;
+        _dialogKey = string.Empty;
+        _dialogBaseUrl = string.Empty;
+        _dialogAuthName = "Authorization";
+        _dialogAuthScheme = "Bearer";
+        _dialogEnvVar = null;
+        _dialogHasKey = false;
+        _dialogHeaders = [];
+        _dialogIsFree = false;
+        _dialogError = null;
+        _showDialog = true;
+    }
+
+    private void OpenEdit(ProviderAdminView provider)
+    {
+        _dialogIsNew = false;
+        _dialogKey = provider.Key;
+        _dialogBaseUrl = provider.BaseUrl;
+        _dialogAuthName = provider.AuthHeaderName;
+        _dialogAuthScheme = provider.AuthHeaderScheme;
+        _dialogEnvVar = provider.ApiKeyEnvVar;
+        _dialogHasKey = provider.HasApiKey;
+        _dialogHeaders = provider.Headers;
+        _dialogIsFree = provider.IsFree;
+        _dialogError = null;
+        _showDialog = true;
+    }
+
+    private void CancelDialog()
+    {
+        _showDialog = false;
+        _dialogError = null;
+    }
+
+    private async Task SaveDialog(ProviderEditDialog.ProviderEditResult result)
+    {
+        var body = new ProviderWriteRequest(
+            BaseUrl: result.BaseUrl,
+            AuthHeaderName: result.AuthHeaderName,
+            AuthHeaderScheme: result.AuthHeaderScheme,
+            ApiKey: result.ApiKey,
+            ApiKeyEnvVar: result.ApiKeyEnvVar,
+            CredentialMode: result.CredentialMode,
+            Headers: result.Headers,
+            IsFree: result.IsFree);
+
+        try
+        {
+            await Store.UpsertProviderAsync(result.Key, body);
+            _showDialog = false;
+            _dialogError = null;
+        }
+        catch (ProviderAdminException ex)
+        {
+            _dialogError = ex.Message;
+        }
+    }
+
+    // Opens the type-to-confirm dialog rather than removing immediately: this is the sole delete entry
+    // point and removal cascades to the provider's models, so the dialog states that consequence and
+    // makes the user type the key (RemoveProviderDialog).
+    private void RemoveProvider(ProviderAdminView provider)
+    {
+        _removeKey = provider.Key;
+        _removeModelCount = provider.Models.Count;
+    }
+
+    private void CancelRemove()
+    {
+        _removeKey = null;
+        _removeModelCount = 0;
+    }
+
+    private async Task ConfirmRemove()
+    {
+        var key = _removeKey;
+        if (key is null)
+        {
+            return;
+        }
+
+        // Close first so the dialog doesn't sit over the pane while the request is in flight, and so a
+        // server-side rejection lands in the pane's error banner where every other failed operation does.
+        CancelRemove();
+        await RunAsync(() => Store.RemoveProviderAsync(key));
+    }
+
+    // Flips the provider's Enabled flag through the dedicated /enabled route, which preserves every other
+    // configured field. The proxy's routing path (RequestInterceptor/ProxyMiddleware) skips a stopped
+    // provider, so this takes effect on the next request.
+    private async Task ToggleEnabled(ProviderAdminView provider)
+    {
+        await RunAsync(() => Store.SetEnabledAsync(provider.Key, new ProviderEnabledWriteRequest(!provider.Enabled)));
+    }
+
+    // The model-level twin of ToggleEnabled: flips a model's own Start/Stop state through the dedicated
+    // /enabled route, independent of whether the last scan reported it present.
+    private async Task ToggleModelEnabled(ProviderAdminView provider, ModelAdminView model)
+    {
+        await RunAsync(() => Store.SetModelEnabledAsync(provider.Key, model.ModelName, new ModelEnabledWriteRequest(!model.Enabled)));
+    }
+
+    private async Task RemoveModel(string key, string modelName)
+    {
+        await RunAsync(() => Store.RemoveModelAsync(key, modelName));
+    }
+
+    /// <summary>The dialects the override dropdown offers, plus the "auto-detect" entry the markup adds.</summary>
+    private static IReadOnlyList<string> ToolDialects => ToolCallDialectNames.All;
+
+    // Pins how this model expresses tool calls, or - for an empty selection - clears the pin so automatic
+    // detection resumes. Worth an operator control because automatic detection can reach a wrong answer that
+    // never self-corrects: a model that emits native tool_calls on only some replies is recorded
+    // openai-native on the first one that succeeds, and is then never re-inspected.
+    private async Task SetModelDialect(string key, string modelName, string? dialect)
+    {
+        await RunAsync(() => Store.SetModelToolDialectAsync(key, modelName, new ModelToolDialectWriteRequest(dialect)));
+    }
+
+    private bool IsAddModelPaneOpen(string key) => _addModelPaneOpen.Contains(key);
+
+    private void ToggleAddModelPane(string key)
+    {
+        if (!_addModelPaneOpen.Remove(key))
+        {
+            _addModelPaneOpen.Add(key);
+        }
+    }
+
+    private async Task AddModel(string key)
+    {
+        var name = GetDraft(_draftName, key).Trim();
+        if (string.IsNullOrEmpty(name))
+        {
+            return;
+        }
+
+        var id = GetDraft(_draftId, key).Trim();
+        var body = new ModelWriteRequest(string.IsNullOrEmpty(id) ? null : id);
+        if (await RunAsync(() => Store.UpsertModelAsync(key, name, body)))
+        {
+            _draftName[key] = string.Empty;
+            _draftId[key] = string.Empty;
+        }
+    }
+
+    // The router does all the work here (discovery, model-list reconciliation, endpoint-flavor scan,
+    // dialect detection - see ManagementFacade.RefreshFromEndpointAsync); this just triggers it and
+    // publishes the fresh result, same as every other mutation on this page.
+    private async Task RefreshFromEndpoint(string key)
+    {
+        await RunAsync(() => Store.RefreshFromEndpointAsync(key));
+    }
+
+    private async Task<bool> RunAsync(Func<Task> operation)
+    {
+        _opError = null;
+        try
+        {
+            await operation();
+            return true;
+        }
+        catch (ProviderAdminException ex)
+        {
+            _opError = ex.Message;
+            return false;
+        }
+    }
+
+    private static string GetDraft(Dictionary<string, string> drafts, string key) =>
+        drafts.TryGetValue(key, out var value) ? value : string.Empty;
+
+    private static string AsString(object? value) => (string?)value ?? string.Empty;
+
+    // A budget input shows the user's in-progress edit if there is one, otherwise the persisted value (so a
+    // freshly loaded card reflects what's stored). A successful save clears the draft, letting the input
+    // re-seed from the refreshed provider.
+    private static string GetBudgetDraft(Dictionary<string, string> drafts, string key, string? current) =>
+        drafts.TryGetValue(key, out var value) ? value : (current ?? string.Empty);
+
+    // Percentage of a cap consumed, clamped to 0-100 for the bar height. A zero cap reads as 100% (fully
+    // breached) to match the backend's spend >= cap rule - a "$0/month" provider is over budget the moment
+    // it exists, so the bar must show CRITICAL, not an OK-looking 0%.
+    private static double UtilizationPercent(decimal spent, decimal cap) =>
+        cap <= 0m ? 100d : (double)Math.Min(spent / cap * 100m, 100m);
+
+    private static double UtilizationPercent(long used, long cap) =>
+        cap <= 0 ? 100d : Math.Min((double)used / cap * 100d, 100d);
+
+    private static string Money2(decimal value) => value.ToString("F2", CultureInfo.InvariantCulture);
+
+    // OK / approaching / breached, matching the old Budgets view's 80% and 100% thresholds.
+    private static string BarColor(double pct) =>
+        pct >= 100d ? "#ef4444" : pct >= 80d ? "#f59e0b" : "#10b981";
+
+    // A single-bar GroupedBars chart (0-100 y-axis) for one utilization dimension, colored by status. The
+    // renderer ignores the model title, so the human-readable label lives in the surrounding markup.
+    private static string BudgetBarJson(string label, double pct)
+    {
+        var value = (decimal)Math.Round(pct, 1);
+        var model = new GroupedBarsModel(
+            label,
+            [label],
+            100m,
+            [new DistributionSeries("Utilized", BarColor(pct), [value])]);
+        return ChartJson.Serialize(model);
+    }
+
+    private async Task SaveBudget(string key)
+    {
+        _opError = null;
+
+        var provider = Store.Providers.FirstOrDefault(p => string.Equals(p.Key, key, StringComparison.OrdinalIgnoreCase));
+
+        var dollarText = _draftDollarCap.TryGetValue(key, out var d) ? d : provider?.DollarCap?.ToString(CultureInfo.InvariantCulture);
+        var tokenText = _draftTokenCap.TryGetValue(key, out var t) ? t : provider?.TokenCap?.ToString(CultureInfo.InvariantCulture);
+
+        if (!TryParseDecimalCap(dollarText, out var dollarCap))
+        {
+            _opError = "Monthly $ cap must be a non-negative number, or blank for no cap.";
+            return;
+        }
+
+        if (!TryParseLongCap(tokenText, out var tokenCap))
+        {
+            _opError = "Monthly token cap must be a non-negative whole number, or blank for no cap.";
+            return;
+        }
+
+        if (await RunAsync(() => Store.SetBudgetAsync(key, new ProviderBudgetWriteRequest(dollarCap, tokenCap))))
+        {
+            // Drop the drafts so the inputs re-seed from the persisted values the refreshed store now holds.
+            _draftDollarCap.Remove(key);
+            _draftTokenCap.Remove(key);
+        }
+    }
+
+    // Parses an optional decimal cap: blank -> null (no cap); a non-negative number -> that value; anything
+    // else -> rejected (caller shows the error). Mirrors TryParseLongCap for the token dimension.
+    private static bool TryParseDecimalCap(string? text, out decimal? value)
+    {
+        value = null;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return true;
+        }
+
+        if (decimal.TryParse(text.Trim(), NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed) && parsed >= 0m)
+        {
+            value = parsed;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryParseLongCap(string? text, out long? value)
+    {
+        value = null;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return true;
+        }
+
+        if (long.TryParse(text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) && parsed >= 0)
+        {
+            value = parsed;
+            return true;
+        }
+
+        return false;
+    }
+}

@@ -1,0 +1,144 @@
+@* Type-to-confirm removal dialog for a provider (the Governance > Providers trashcan). Removal
+   cascades to the provider's models, so the consequence is spelled out before the user commits -
+   the same safeguard GitHub uses for deleting a repository. Follows SettingsModal's shell
+   (docs/gui/DESIGN.md 4.1) and its "Destructive Actions Zone" body treatment. *@
+<div class="overlay-backdrop fixed inset-0 z-50 flex items-center justify-center"
+     style="background-color:rgba(0,0,0,0.7);backdrop-filter:blur(4px)"
+     @onclick="OnCancel">
+    @* Escape is handled on the panel, not the input, so it works whichever control has focus - keydown
+       bubbles up from every focusable descendant. Enter stays on the input alone (see below). *@
+    <div class="overlay-panel w-full max-w-md rounded-lg border border-slate-700" style="background:#1e293b"
+         tabindex="-1"
+         @onkeydown="HandlePanelKeyDown"
+         @onclick:stopPropagation="true">
+        @* Header *@
+        <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
+            <span class="text-sm font-semibold text-slate-200 tracking-wide uppercase">Remove Provider</span>
+            <button @onclick="OnCancel"
+                    aria-label="Close remove provider dialog"
+                    class="text-slate-400 hover:text-slate-200 transition-colors">
+                <Icon Name="x" Size="16" />
+            </button>
+        </div>
+
+        <div class="p-5 space-y-4">
+            @* Destructive zone label - matches SettingsModal's. *@
+            <div class="flex items-center gap-2 text-xs text-amber-400 font-medium uppercase tracking-widest">
+                <Icon Name="alert-triangle" Size="12" />
+                <span>Destructive Action</span>
+            </div>
+
+            <div class="space-y-3 rounded border p-4" style="border-color:#ef444444;background:#0f172a">
+                <p class="text-xs text-slate-400 leading-5">
+                    This action is <span class="text-red-400 font-semibold">irreversible</span>.
+                    @if (ModelCount > 0)
+                    {
+                        <span>
+                            It will also remove
+                            <span class="text-slate-200 font-semibold">@ModelCount</span>
+                            configured @(ModelCount == 1 ? "model" : "models").
+                        </span>
+                    }
+                    <span class="text-slate-500">Historical metrics are kept.</span>
+                </p>
+                <p class="text-xs text-slate-400 leading-5">
+                    Type
+                    <span class="font-mono text-slate-200 bg-slate-700 px-1.5 py-0.5 rounded text-xs">@ProviderKey</span>
+                    to confirm.
+                </p>
+                <input @ref="_confirmInput"
+                       type="text"
+                       value="@_confirmText"
+                       @oninput="e => _confirmText = (string?)e.Value ?? string.Empty"
+                       @onkeydown="HandleInputKeyDown"
+                       placeholder="Type @(ProviderKey)..."
+                       autocomplete="off"
+                       aria-label="@($"Type {ProviderKey} to confirm removal")"
+                       class="w-full rounded px-3 py-2 text-sm font-mono"
+                       style="background:#1e293b;border:1px solid #334155;color:#e2e8f0" />
+                <div class="flex gap-2">
+                    <button @onclick="OnCancel"
+                            class="flex-1 rounded px-3 py-2 text-xs text-slate-400 border border-slate-600 hover:bg-slate-700 transition-colors">
+                        Cancel
+                    </button>
+                    <button @onclick="Confirm"
+                            disabled="@(!IsConfirmed)"
+                            class="flex-1 rounded px-3 py-2 text-xs font-semibold transition-colors"
+                            style="background:@(IsConfirmed ? "#ef4444" : "#1e293b");
+                                   color:@(IsConfirmed ? "#0f172a" : "#475569");
+                                   border:1px solid @(IsConfirmed ? "transparent" : "#334155");
+                                   cursor:@(IsConfirmed ? "pointer" : "not-allowed")">
+                        Remove
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    /// <summary>The key of the provider being removed - also the word the user must type to confirm.</summary>
+    [Parameter]
+    public string ProviderKey { get; set; } = string.Empty;
+
+    /// <summary>How many configured models will be removed along with the provider; suppressed from the warning when zero.</summary>
+    [Parameter]
+    public int ModelCount { get; set; }
+
+    /// <summary>Invoked when the user confirms - the caller performs the actual removal.</summary>
+    [Parameter]
+    public EventCallback OnConfirm { get; set; }
+
+    /// <summary>Invoked when the modal should close without removing - the backdrop, the X, Cancel, or Escape.</summary>
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    private string _confirmText = string.Empty;
+    private ElementReference _confirmInput;
+    private bool _focusPending = true;
+
+    // Case-sensitive on purpose: provider keys are matched case-insensitively everywhere else, but a
+    // confirmation the user can satisfy with a near-miss isn't much of a confirmation.
+    private bool IsConfirmed => string.Equals(_confirmText, ProviderKey, StringComparison.Ordinal);
+
+    private async Task Confirm()
+    {
+        if (!IsConfirmed)
+        {
+            return;
+        }
+
+        await OnConfirm.InvokeAsync();
+    }
+
+    // Bound on the panel so Escape closes the dialog regardless of which control has focus - Cancel,
+    // Remove, and the close glyph are all focusable, and keydown bubbles from each of them. Handles
+    // *only* Escape: Enter is left to HandleInputKeyDown so one keypress can't confirm twice as it
+    // bubbles past both handlers.
+    private async Task HandlePanelKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Escape")
+        {
+            await OnCancel.InvokeAsync();
+        }
+    }
+
+    // Enter confirms only while typing in the confirmation field, matching the muscle memory of
+    // submitting a form. Escape deliberately isn't handled here - the panel above owns it.
+    private async Task HandleInputKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter")
+        {
+            await Confirm();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focusPending)
+        {
+            _focusPending = false;
+            await _confirmInput.FocusAsync();
+        }
+    }
+}

@@ -1,0 +1,62 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <!-- Windows-only .NET MAUI Blazor Hybrid app: a BlazorWebView hosts the Razor dashboard, and the
+         window lives in the system tray (see Platforms/Windows/TrayWindowManager.cs). -->
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>TotallyHot.ArcRouter.Gui</RootNamespace>
+    <UseMaui>true</UseMaui>
+    <SingleProject>true</SingleProject>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- Matches TotallyHotArcRouter.csproj/.Sandbox.csproj: CS1591 (missing XML doc on a public member)
+         becomes a build error via TreatWarningsAsErrors, so undocumented public API can't creep back
+         in. Razor-compiler-generated partial classes (BuildRenderTree etc.) are emitted with their own
+         `#pragma warning disable 1591`, so this doesn't fight componentgen. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+    <ApplicationTitle>TotallyHotArcRouter</ApplicationTitle>
+    <ApplicationId>com.TotallyHotArcRouter.gui</ApplicationId>
+    <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+    <ApplicationVersion>1</ApplicationVersion>
+
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+
+    <!-- Unpackaged (no MSIX) so `dotnet run` / F5 work without package registration or signing. -->
+    <WindowsPackageType>None</WindowsPackageType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <MauiIcon Include="Resources\AppIcon\appicon.svg" Color="#0f172a" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Maui.Controls" Version="10.0.90" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="10.0.90" />
+    <!-- Charts: Apache ECharts (echarts.min.js, Apache-2.0) is vendored under
+         wwwroot/lib/echarts and driven by wwwroot/js/echarts-interop.js, so charts work offline in the
+         BlazorWebView with no NuGet chart dependency. See docs/gui/cost-analytics-visualization-spec.md. -->
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Plain net10.0 libraries: pure data-transformation logic kept out of this Windows-only
+         project so it's unit-testable on any platform. See the matching .Tests projects.
+         TotallyHotArcRouter.Gui.Telemetry also compiles Protos/telemetry.proto's gRPC client stub
+         (GrpcChannel/TelemetryServiceClient/Contract.* types Services/LiveDataStore.cs uses) - not
+         this project directly - because .NET MAUI's SingleProject build doesn't reliably run
+         Grpc.Tools' codegen; see TotallyHotArcRouter.Gui.Telemetry.csproj's comment for why. Grpc.Net.Client/
+         Google.Protobuf therefore reach this project transitively through that ProjectReference,
+         with no PackageReference of their own needed here. -->
+    <ProjectReference Include="..\TotallyHotArcRouter.Gui.Admin\TotallyHotArcRouter.Gui.Admin.csproj" />
+    <ProjectReference Include="..\TotallyHotArcRouter.Gui.Charts\TotallyHotArcRouter.Gui.Charts.csproj" />
+    <ProjectReference Include="..\TotallyHotArcRouter.Gui.Console\TotallyHotArcRouter.Gui.Console.csproj" />
+    <ProjectReference Include="..\TotallyHotArcRouter.Gui.Telemetry\TotallyHotArcRouter.Gui.Telemetry.csproj" />
+  </ItemGroup>
+
+</Project>
+

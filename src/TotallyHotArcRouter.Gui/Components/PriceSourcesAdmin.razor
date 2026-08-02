@@ -1,0 +1,448 @@
+@* Governance > Price Sources pane: enable/disable each model price feed and pull fresh data on demand.
+   Talks to the proxy's PriceSourceAdminService gRPC API via the injected PriceSourceStore.
+
+   Shows feed metadata only - row counts and schedule, never prices. That's D5 (licensing), not a layout
+   choice: see docs/router/model-price-catalog.md. *@
+@implements IDisposable
+@using System.Threading
+@inject PriceSourceStore Store
+
+<div class="h-full overflow-y-auto pr-1">
+    @if (!Store.IsLoaded)
+    {
+        <div class="text-sm text-slate-500 p-4">Loading price sources…</div>
+    }
+    else if (!Store.IsReachable)
+    {
+        <div class="rounded-lg p-4 space-y-2" style="background:#1e293b;border:1px solid #ef444444">
+            <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
+                <Icon Name="alert-triangle" Size="14" /> Router unreachable
+            </div>
+            <div class="text-xs text-slate-400">
+                Could not reach <span class="font-mono">@TelemetryChannelFactory.DefaultServerAddress</span>. Is the proxy running?
+            </div>
+            @if (!string.IsNullOrEmpty(Store.LastError))
+            {
+                <div class="text-xs text-slate-500 font-mono">@Store.LastError</div>
+            }
+            <button @onclick="Reload"
+                    class="rounded px-3 py-1.5 text-xs font-medium border border-slate-600 text-slate-300 hover:bg-slate-700 transition-colors">
+                Retry
+            </button>
+        </div>
+    }
+    else
+    {
+        <div class="flex items-center justify-between mb-3 gap-2">
+            <span class="text-xs text-slate-500 uppercase tracking-widest">Price Data Sources</span>
+            <div class="flex items-center gap-3 shrink-0">
+                @* One clock, not one per row: a cycle refreshes every enabled source together. *@
+                @if (Store.Schedule is not null)
+                {
+                    <span class="flex items-center gap-1.5 text-xs text-slate-500" title="@DescribeSchedule()">
+                        <Icon Name="clock" Size="12" />
+                        @DescribeCountdown()
+                    </span>
+                }
+                <button @onclick="PullNow"
+                        disabled="@Store.IsRefreshing"
+                        class="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium border transition-colors"
+                        style="border-color:@(Store.IsRefreshing ? "#33415580" : "#475569");
+                               color:@(Store.IsRefreshing ? "#64748b" : "#cbd5e1");
+                               cursor:@(Store.IsRefreshing ? "not-allowed" : "pointer")">
+                    <Icon Name="rotate-ccw" Size="13" />
+                    @(Store.IsRefreshing ? "Pulling…" : "Pull Now")
+                </button>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_opError))
+        {
+            <div class="rounded px-3 py-2 mb-3 text-xs" style="background:#ef444411;border:1px solid #ef444444;color:#fca5a5">
+                @_opError
+            </div>
+        }
+
+        @if (Store.Sources.Count == 0)
+        {
+            <div class="text-xs text-slate-500 p-4">No price sources are registered.</div>
+        }
+
+        <div class="space-y-3" @onpointerup="OnPointerUp" @onpointerleave="CancelDragIfActive" @onpointercancel="CancelDragIfActive">
+            @{ var sources = DisplayOrder; }
+            @for (var i = 0; i < sources.Count; i++)
+            {
+                var index = i;
+                var source = sources[index];
+                var outcome = LastOutcomeFor(source.Name);
+                var borderColor = source.Enabled ? "#334155" : "#33415580";
+                var canReorder = sources.Count > 1;
+
+                var canDrag = canReorder && !Store.IsRefreshing;
+                var isLifted = _dragActive && _dragName == source.Name;
+                var cardBorder = isLifted ? "#38bdf8" : borderColor;
+                var cursor = isLifted ? "grabbing" : (canDrag ? "grab" : "default");
+
+                @* Keep Razor comments outside the tag: written between attributes they are emitted as literal
+                   markup rather than stripped, which reaches the browser as an invalid attribute name and takes
+                   the whole render down.
+
+                   The lifted card is raised and made pointer-transparent so the pointer falls through to the
+                   card beneath it - that card's @onpointerenter is what drives the live reflow. A short
+                   transition animates only the lift (shadow/scale); the slot change itself is instant because
+                   the list is re-keyed rather than transformed. *@
+                <div @key="source.Name" class="rounded-lg p-3 space-y-2.5"
+                     @onpointerdown="e => OnPointerDown(source, e)"
+                     @onpointerenter="e => OnPointerEnter(source, e)"
+                     style="background:#1e293b;border:1px solid @cardBorder;cursor:@cursor;
+                            user-select:@(canDrag ? "none" : "auto");touch-action:@(canDrag ? "none" : "auto");
+                            transition:box-shadow .15s ease, transform .15s ease;
+                            @(isLifted ? "box-shadow:0 12px 28px -6px rgba(0,0,0,.55);transform:scale(1.02);position:relative;z-index:10;pointer-events:none;" : "")">
+                    @* Header: rank controls + name + toggle *@
+                    <div class="flex items-start justify-between gap-2">
+                        <div class="flex items-start gap-2 min-w-0">
+                            @if (canReorder)
+                            {
+                                <div class="flex flex-col items-center shrink-0 -my-0.5" title="Drag to reorder, or use the arrows. Priority: higher wins a contested price.">
+                                    <Icon Name="grip-vertical" Size="12" Class="text-slate-600 mb-0.5" />
+                                    @if (index == 0)
+                                    {
+                                        <div class="p-0.5" style="width:12px;height:12px"></div>
+                                    }
+                                    else
+                                    {
+                                        <button @onclick="() => MoveUp(index)"
+                                                disabled="@Store.IsRefreshing"
+                                                title="Rank higher"
+                                                class="rounded p-0.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+                                            <Icon Name="chevron-up" Size="12" />
+                                        </button>
+                                    }
+                                    @if (index == sources.Count - 1)
+                                    {
+                                        <div class="p-0.5" style="width:12px;height:12px"></div>
+                                    }
+                                    else
+                                    {
+                                        <button @onclick="() => MoveDown(index)"
+                                                disabled="@Store.IsRefreshing"
+                                                title="Rank lower"
+                                                class="rounded p-0.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+                                            <Icon Name="chevron-down" Size="12" />
+                                        </button>
+                                    }
+                                </div>
+                            }
+                            <div class="min-w-0">
+                                <div class="flex items-center gap-2">
+                                    <Icon Name="database" Size="14" />
+                                    <span class="text-sm font-semibold" style="color:@(source.Enabled ? "#e2e8f0" : "#64748b")">
+                                        @source.Name
+                                    </span>
+                                    @if (canReorder)
+                                    {
+                                        <span class="text-xs font-mono text-slate-500">#@(index + 1)</span>
+                                    }
+                                </div>
+                                <div class="text-xs text-slate-500 mt-0.5">
+                                    @if (source.Enabled)
+                                    {
+                                        <span>Polled every cycle and served to routing.</span>
+                                    }
+                                    else
+                                    {
+                                        <span>Disabled — not polled, and its prices are not served.</span>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                        <button @onclick="() => Toggle(source)"
+                                title="@(source.Enabled ? "Disable this source" : "Enable this source")"
+                                class="shrink-0 flex items-center gap-1.5 rounded px-2 py-1 text-xs font-semibold border transition-colors"
+                                style="background:@(source.Enabled ? "#10b98122" : "transparent");
+                                       border-color:@(source.Enabled ? "#10b98144" : "#475569");
+                                       color:@(source.Enabled ? "#10b981" : "#64748b")">
+                            <span class="w-1.5 h-1.5 rounded-full"
+                                  style="background:@(source.Enabled ? "#10b981" : "#475569")"></span>
+                            @(source.Enabled ? "ENABLED" : "DISABLED")
+                        </button>
+                    </div>
+
+                    @* Feed metadata: a count, never prices (D5). *@
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs text-slate-500">Prices stored</span>
+                        <span class="font-mono text-xs text-slate-300">@source.PriceCount.ToString("N0", CultureInfo.InvariantCulture)</span>
+                    </div>
+
+                    @if (outcome is not null)
+                    {
+                        <div class="rounded px-2 py-1.5 text-xs"
+                             style="background:@(outcome.Succeeded ? "#10b98111" : "#ef444411");
+                                    border-top:1px solid @(outcome.Succeeded ? "#10b98122" : "#ef444422")">
+                            @if (outcome.Succeeded)
+                            {
+                                <span style="color:#10b981">✅ Last pull refreshed @outcome.PriceCount.ToString("N0", CultureInfo.InvariantCulture) prices.</span>
+                            }
+                            else
+                            {
+                                <span style="color:#fca5a5">⚠️ Last pull failed: @outcome.Error</span>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    // The countdown renders whole minutes, so a minute is as often as it can change. Ticking per second to
+    // re-render text that is identical 59 times out of 60 would be pure waste against a 4-12h interval.
+    private static readonly TimeSpan TickInterval = TimeSpan.FromMinutes(1);
+
+    private string? _opError;
+    private Timer? _tick;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Store.Changed += OnStoreChanged;
+
+        // Drives only the countdown's own re-render. Deliberately not a poll: it re-reads the clock, never
+        // the router. The panel refreshes its data when the user acts, and a background timer quietly
+        // issuing gRPC calls forever is not something a Governance pane should do on its own.
+        _tick = new Timer(_ => InvokeAsync(StateHasChanged), null, TickInterval, TickInterval);
+
+        await Store.LoadAsync();
+    }
+
+    private void OnStoreChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Store.Changed -= OnStoreChanged;
+        _tick?.Dispose();
+    }
+
+    private async Task Reload()
+    {
+        _opError = null;
+        await Store.LoadAsync();
+    }
+
+    private Task Toggle(PriceSourceStatus source) =>
+        RunAsync(() => Store.SetEnabledAsync(source.Name, !source.Enabled));
+
+    private Task PullNow() => RunAsync(() => Store.RefreshAsync());
+
+    // Store.Sources is already ordered by rank (PriceSourceToggleStore.List() sorts descending), so a plain
+    // list swap by index followed by ReorderAsync is enough - no separate "current rank" bookkeeping needed.
+    private Task MoveUp(int index) => Swap(index, index - 1);
+
+    private Task MoveDown(int index) => Swap(index, index + 1);
+
+    private Task Swap(int index, int otherIndex)
+    {
+        var names = Store.Sources.Select(s => s.Name).ToList();
+        (names[index], names[otherIndex]) = (names[otherIndex], names[index]);
+        return RunAsync(() => Store.ReorderAsync(names));
+    }
+
+    // Drag state. While a drag (or its commit) is in flight the panel renders a private working order
+    // (_order) instead of Store.Sources, so the cards reflow live to open a gap under the pointer; the
+    // lifted card is identified by _dragName and drawn raised.
+    private string? _dragName;
+    private List<PriceSourceStatus>? _order;
+
+    // True only once the drag has actually reflowed the list (the pointer crossed into another card),
+    // not merely on pointerdown. _dragName alone goes true on every pointerdown - including one that
+    // lands on the toggle button or a rank arrow (pointerdown bubbles up to the card before the click
+    // completes) - so gating the lifted/pointer-events:none styling on _dragName alone would briefly make
+    // the card pointer-transparent on an ordinary click, before the click can reach that control.
+    private bool _dragActive;
+
+    /// <summary>
+    /// The order to render: the live drag working-order while a drag or its commit is in flight, otherwise
+    /// the store's own ranked order.
+    /// </summary>
+    private IReadOnlyList<PriceSourceStatus> DisplayOrder => _order ?? Store.Sources;
+
+    /// <remarks>
+    /// Reordering is built on pointer events rather than HTML5 drag-and-drop because WinUI's WebView2 - the
+    /// host BlazorWebView uses on Windows - never delivers in-page drag events (microsoft-ui-xaml#10576).
+    /// A draggable card there is inert. Pointer events are ordinary DOM events and unaffected, which is why
+    /// split-pane.js already drags with them.
+    /// </remarks>
+    private void OnPointerDown(PriceSourceStatus source, PointerEventArgs e)
+    {
+        // Button 0 is the primary button; a right-click is asking for a context menu, not a reorder.
+        if (e.Button != 0 || Store.Sources.Count < 2 || Store.IsRefreshing)
+        {
+            return;
+        }
+
+        _dragName = source.Name;
+        _order = Store.Sources.ToList();
+        _dragActive = false;
+    }
+
+    /// <summary>
+    /// The pointer has moved onto another card: slide the dragged card into that card's slot so the list
+    /// reflows live. A plain click (including one on the toggle or the rank arrows, which bubbles up to
+    /// here) never reaches a second card, so it leaves the order untouched.
+    /// </summary>
+    private void OnPointerEnter(PriceSourceStatus source, PointerEventArgs e)
+    {
+        if (_dragName is null || _order is null || source.Name == _dragName)
+        {
+            return;
+        }
+
+        // Buttons is a bitmask of what is held down right now. Bit 0 clear means the press already ended
+        // somewhere we never saw the release (outside the window, say), so the drag is over - without this
+        // the cards would keep following the cursor with no button down.
+        if ((e.Buttons & 1) == 0)
+        {
+            CancelDrag();
+            return;
+        }
+
+        var from = _order.FindIndex(s => s.Name == _dragName);
+        var to = _order.FindIndex(s => s.Name == source.Name);
+        if (from < 0 || to < 0)
+        {
+            return;
+        }
+
+        var dragged = _order[from];
+        _order.RemoveAt(from);
+        _order.Insert(to, dragged);
+        _dragActive = true;
+    }
+
+    /// <summary>
+    /// Commits the reorder. A drag can jump several ranks at once, so the whole working order is sent
+    /// rather than the adjacent swap <see cref="Swap"/> does for the arrows. The working order stays on
+    /// screen across the round-trip (only the lift is dropped) so the cards do not flash back to their old
+    /// ranks while the server confirms.
+    /// </summary>
+    private async Task OnPointerUp()
+    {
+        var order = _order;
+        _dragName = null;
+
+        if (order is null)
+        {
+            return;
+        }
+
+        var names = order.Select(s => s.Name).ToList();
+        if (names.SequenceEqual(Store.Sources.Select(s => s.Name)))
+        {
+            // A click, or a drag that ended back where it started: nothing to persist.
+            CancelDrag();
+            return;
+        }
+
+        try
+        {
+            await RunAsync(() => Store.ReorderAsync(names));
+        }
+        finally
+        {
+            // Hand rendering back to the store: on success its order now matches, on failure it reverts.
+            _order = null;
+            _dragActive = false;
+        }
+    }
+
+    private void CancelDrag()
+    {
+        _dragName = null;
+        _order = null;
+        _dragActive = false;
+    }
+
+    /// <summary>
+    /// Cancels a drag only if one is actually in progress. Wired to pointerleave/pointercancel on the
+    /// list container instead of <see cref="CancelDrag"/> directly: <see cref="OnPointerUp"/> clears
+    /// <see cref="_dragName"/> the instant the commit starts but deliberately keeps <see cref="_order"/>
+    /// rendered until the round-trip finishes, so the cards don't flash back to their old ranks while the
+    /// server confirms. If the pointer leaves the list (or the OS cancels the pointer, e.g. a touch
+    /// scroll) during that in-flight window, an unconditional cancel would blow away that working order
+    /// and reintroduce exactly the flash this was built to avoid - so this only acts while a drag (not a
+    /// commit) is actually live.
+    /// </summary>
+    private void CancelDragIfActive()
+    {
+        if (_dragName is not null)
+        {
+            CancelDrag();
+        }
+    }
+
+    /// <summary>
+    /// Runs a mutation, surfacing a failure in the inline error banner rather than letting it escape into
+    /// the renderer. Same wrapper shape as ProvidersAdmin's.
+    /// </summary>
+    private async Task<bool> RunAsync(Func<Task> operation)
+    {
+        _opError = null;
+        try
+        {
+            await operation();
+            return true;
+        }
+        catch (PriceSourceAdminException ex)
+        {
+            _opError = ex.Message;
+            return false;
+        }
+    }
+
+    private PriceRefreshOutcome? LastOutcomeFor(string sourceName) =>
+        Store.LastRefreshOutcomes.FirstOrDefault(o =>
+            string.Equals(o.Source, sourceName, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Renders the time until the next scheduled pull, coarsely - whole minutes, and hours once there is an
+    /// hour to show.
+    /// </summary>
+    /// <remarks>
+    /// It stops at "due now" rather than counting into negative time or auto-refreshing: the panel cannot see
+    /// the cycle start, only its own arithmetic, so "due now" is the last thing it actually knows. The pull
+    /// itself lands whether or not anyone is looking, and the next interaction - or Pull Now - brings back
+    /// fresh counts and a fresh anchor.
+    /// </remarks>
+    private string DescribeCountdown()
+    {
+        if (Store.TimeUntilNextPull is not { } remaining)
+        {
+            return string.Empty;
+        }
+
+        // TimeUntilNextPull floors at zero, so this is "due or overdue" - the cycle may be running right now.
+        if (remaining == TimeSpan.Zero)
+        {
+            return "Next pull due now";
+        }
+
+        // The interval is capped at 12h (D4), so hours is the largest unit this ever needs.
+        return remaining switch
+        {
+            { TotalMinutes: < 1 } => "Next pull in under a minute",
+            { TotalHours: < 1 } => $"Next pull in {(int)remaining.TotalMinutes}m",
+            _ => $"Next pull in {(int)remaining.TotalHours}h {remaining.Minutes}m",
+        };
+    }
+
+    /// <summary>
+    /// The countdown's tooltip: the absolute local time it is counting to, plus the cadence. The countdown
+    /// answers "how long?" at a glance; this answers "when, exactly?" without spending header space on it.
+    /// </summary>
+    private string DescribeSchedule() =>
+        Store.Schedule is not { } schedule
+            ? string.Empty
+            : $"Scheduled for {schedule.NextPullUtc.ToLocalTime():t} local, every {schedule.PollInterval.TotalHours:0.#}h. " +
+              "Pulling now resets this.";
+
+}

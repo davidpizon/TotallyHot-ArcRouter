@@ -1,0 +1,202 @@
+syntax = "proto3";
+
+package TotallyHot.ArcRouter.telemetry.v1;
+
+// Deliberately not "...Grpc": TotallyHot.ArcRouter.Telemetry already has hand-written domain types named
+// RoutingTelemetryEvent/LogLineEvent, and Grpc.Core/Grpc.AspNetCore are real NuGet namespaces this
+// code also imports - "Grpc" as a nested-namespace segment risks colliding with both. "Contract"
+// reads unambiguously as "the wire type", distinct from the domain type of the same short name.
+option csharp_namespace = "TotallyHot.ArcRouter.Telemetry.Contract";
+
+import "google/protobuf/timestamp.proto";
+
+// Replaces TotallyHot.ArcRouter.Telemetry.TelemetryHub (SignalR). See
+// docs/router/grpc-migration.md for the design this implements. Compiled independently into both
+// TotallyHot.ArcRouter (GrpcServices="Server") and TotallyHot.ArcRouter.Gui (GrpcServices="Client") from this one
+// file, so the two sides can never structurally drift the way the hand-synced SignalR DTOs could.
+//
+// GetModelSpend and a ModelListEvent stream case are described in grpc-migration.md's design but are
+// intentionally not part of this contract: both would need TotallyHot.ArcRouter.Telemetry's proposed
+// IUsageLedger (docs/router/agent-cost-tracking.md), which has no implementation yet. Beyond the two
+// event types TotallyHot.ArcRouter.Telemetry.TelemetryHub already sent, this service also carries
+// SandboxSignalEvent - the sandboxed executor's live verification signal (architecture doc §15) - which
+// TelemetryHub never had, since the sandbox executor postdates it.
+service TelemetryService {
+  // Streams every routing telemetry event and log line to a connected client for the lifetime of the
+  // call - the gRPC equivalent of today's push-only SignalR hub connection.
+  rpc StreamEvents (StreamEventsRequest) returns (stream TelemetryEvent);
+}
+
+message StreamEventsRequest {}
+
+// The Governance > Price Sources panel's management plane: read the price feeds' status, switch one on or
+// off (docs/router/model-price-catalog.md D6), and trigger an immediate pull.
+//
+// Separate from TelemetryService rather than more RPCs on it: that service is a push-only event stream for
+// the lifetime of a connection, this is unary request/response. They share the :5002 TLS loopback endpoint.
+//
+// LICENSING - read before adding a field. Every message below carries only feed METADATA: source name,
+// enabled flag, rank, row counts, timestamps, error strings. No price value appears here, and none may be
+// added. D5 forbids re-serving aggregated price data outward, and while this channel is loopback-only (which
+// is why the panel is allowed to exist at all), "the transport happens to be local" is not a reason to let
+// price data into a wire contract. A display surface that needs a price reads the SQLite file directly.
+service PriceSourceAdminService {
+  // Returns every source that has a client, whether enabled or not - a disabled source must still be listed
+  // or it could never be switched back on.
+  rpc ListPriceSources (ListPriceSourcesRequest) returns (ListPriceSourcesResponse);
+
+  // Enables or disables one source. Disabling also cancels that source's in-flight fetch, if any.
+  rpc SetPriceSourceEnabled (SetPriceSourceEnabledRequest) returns (ListPriceSourcesResponse);
+
+  // Runs one ingestion cycle now and waits for it. Serialized against the background poll loop: a call that
+  // arrives mid-cycle waits for that cycle rather than starting a second one.
+  rpc RefreshPriceSources (RefreshPriceSourcesRequest) returns (RefreshPriceSourcesResponse);
+
+  // Rewrites every source's rank from the submitted order (highest priority first) and then runs an
+  // ingestion cycle before returning, so contested cells re-resolve under the new order immediately rather
+  // than waiting for the next scheduled poll - the same reasoning D6 applies to disabling a source. The
+  // request must name every existing source exactly once; a partial list is rejected outright rather than
+  // best-effort applied. Returns the same shape as RefreshPriceSources for that reason - it triggers the
+  // same cycle and the caller needs the same information from it.
+  rpc ReorderPriceSources (ReorderPriceSourcesRequest) returns (RefreshPriceSourcesResponse);
+}
+
+message PriceSource {
+  // Removed 2026-07-17: last_updated_utc, a MAX() rollup of this source's price rows. It existed solely for
+  // the panel's per-card "Last updated" age, and went with that row. Reserved rather than freed - reusing
+  // the number would let an old client decode a new field as a timestamp.
+  //
+  // Note this is only the per-source rollup. model_prices.last_updated_utc, the per-row timestamp D1's 24h
+  // routing floor is expressed in, is untouched and load-bearing.
+  reserved 5;
+  reserved "last_updated_utc";
+
+  string name = 1;
+  bool enabled = 2;
+  // Rank arbitrating which source wins a contested (model, provider) cell - higher wins, ties favor the most
+  // recent write. User-reorderable via ReorderPriceSources.
+  int32 priority_score = 3;
+  // How many price rows this source owns - a count, not the prices themselves. 0 for a seeded source that
+  // has never polled.
+  int32 price_count = 4;
+}
+
+message ListPriceSourcesRequest {}
+
+// When the next scheduled ingestion cycle lands, as two facts the client adds together rather than one
+// precomputed instant. The client renders the countdown on Governance → Price Sources.
+message PriceSchedule {
+  // The catalog's poll cadence (PriceCatalogOptions.PollIntervalHours, in the documented 4-12h band).
+  int32 poll_interval_seconds = 1;
+  // When the current interval started counting: the last completed cycle, or the router's start when none
+  // has completed yet. Always set - "no cycle has ever run" is a real schedule, not an absent one, and it is
+  // reachable on a router with every source disabled.
+  //
+  // Deliberately the anchor rather than the last *successful write*: a cycle where every source fails
+  // still restarts the interval, but moves no source's last_updated_utc. Anchoring a countdown on the
+  // latter would run it negative for the whole of an outage - exactly when the next attempt's timing is
+  // what the operator is on this screen to find out.
+  google.protobuf.Timestamp schedule_anchor_utc = 2;
+}
+
+message ListPriceSourcesResponse {
+  repeated PriceSource sources = 1;
+  PriceSchedule schedule = 2;
+}
+
+message SetPriceSourceEnabledRequest {
+  string name = 1;
+  bool enabled = 2;
+}
+
+message RefreshPriceSourcesRequest {}
+
+message ReorderPriceSourcesRequest {
+  // Every existing source's name, highest priority first, each named exactly once.
+  repeated string source_names_in_priority_order = 1;
+}
+
+// Mirrors TotallyHot.ArcRouter.PriceCatalog.SourceOutcome.
+message PriceSourceOutcome {
+  string source = 1;
+  bool succeeded = 2;
+  int32 price_count = 3;
+  // The failure reason, or "disabled during fetch" when the operator switched the source off mid-pull.
+  optional string error = 4;
+}
+
+message RefreshPriceSourcesResponse {
+  repeated PriceSourceOutcome outcomes = 1;
+  int32 fresh_price_count = 2;
+  // The full source list after the cycle, so the client can replace its state in one shot rather than
+  // issuing a follow-up ListPriceSources - the same convention ProviderAdminEndpoints uses for its mutations.
+  repeated PriceSource sources = 3;
+  // The schedule after the cycle. This cycle just re-anchored it, so the client's countdown resets off the
+  // same response that reports the pull - no follow-up call, and no window where the panel shows a pull it
+  // has already completed as still pending.
+  PriceSchedule schedule = 4;
+}
+
+// Envelope: exactly one of these is set per message, matching SignalR's per-message-type dispatch
+// ("RoutingTelemetry" / "LogLine" client methods) with a single Protobuf idiom.
+message TelemetryEvent {
+  oneof event {
+    RoutingTelemetryEvent routing_telemetry = 1;
+    LogLineEvent log_line = 2;
+    SandboxSignalEvent sandbox_signal = 3;
+  }
+}
+
+// Field names map 1:1 onto TotallyHot.ArcRouter.Telemetry.RoutingTelemetryEvent's C# properties (snake_case
+// per Protobuf convention instead of PascalCase) - a wire-format and codegen change, not a
+// data-model redesign.
+message RoutingTelemetryEvent {
+  string session_id = 1;
+  int32 turn_number = 2;
+  bool is_session_synthesized = 3;
+  string requested_model = 4;
+  string resolved_model = 5;
+  string provider = 6;
+  bool is_fallback = 7;
+  optional int32 prompt_tokens = 8;
+  optional int32 completion_tokens = 9;
+  // decimal, not double: see "Decimal encoding" in docs/router/grpc-migration.md - binary floating
+  // point loses precision on currency values, which isn't acceptable for a cost-tracking field.
+  // Encoded/decoded via decimal.ToString(CultureInfo.InvariantCulture) / decimal.Parse(...,
+  // CultureInfo.InvariantCulture) on each end.
+  optional string estimated_cost_usd = 10;
+  bool is_streaming = 11;
+  int64 latency_to_headers_ms = 12;
+  int64 total_duration_ms = 13;
+  int32 status_code = 14;
+  google.protobuf.Timestamp timestamp_utc = 15;
+  optional string request_summary = 16;
+  optional string response_summary = 17;
+}
+
+message LogLineEvent {
+  google.protobuf.Timestamp timestamp_utc = 1;
+  string level = 2;
+  string message = 3;
+}
+
+// Field names map 1:1 onto TotallyHot.ArcRouter.Telemetry.SandboxSignalEvent's C# properties, same convention
+// as RoutingTelemetryEvent above. Powers the dashboard's live sandbox-verification tile (architecture
+// doc §15) - a heuristic quality proxy for live traffic, not a paper-grade metric.
+message SandboxSignalEvent {
+  string correlation_id = 1;
+  string session_id = 2;
+  string dimension = 3;
+  string model = 4;
+  string language = 5;
+  string tier = 6;
+  bool syntax_valid = 7;
+  bool executed = 8;
+  optional int32 exit_code = 9;
+  bool timed_out = 10;
+  double unified_score = 11;
+  int64 wall_clock_ms = 12;
+  int64 peak_memory_bytes = 13;
+  google.protobuf.Timestamp timestamp_utc = 14;
+}
+

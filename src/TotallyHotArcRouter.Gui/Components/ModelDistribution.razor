@@ -1,0 +1,104 @@
+@* Model Distribution tab: time filter bar, token volume histogram, and model market share donut. Both
+   charts render through the shared <EChart> Apache ECharts host from serialized chart models. *@
+<div class="h-full flex flex-col gap-3 min-h-0">
+    @* Time filter bar (visual only for now - the mock data has a single fixed range) *@
+    <div class="flex items-center gap-2 shrink-0">
+        <div class="flex rounded overflow-hidden border border-slate-700">
+            @foreach (var filter in TimeFilters)
+            {
+                var isActive = _activeFilter == filter;
+                <button @onclick="() => _activeFilter = filter"
+                        class="px-3 py-1.5 text-xs font-medium transition-colors"
+                        style="background:@(isActive ? "#38bdf8" : "#1e293b");
+                               color:@(isActive ? "#0f172a" : "#64748b");
+                               border-right:@(filter != "Year" ? "1px solid #334155" : "none")">
+                    @filter
+                </button>
+            }
+        </div>
+        <div class="ml-auto flex items-center gap-2">
+            <input type="text" placeholder="From" class="rounded px-2 py-1.5 text-xs font-mono w-24"
+                   style="background:#1e293b;border:1px solid #334155;color:#64748b" />
+            <span class="text-slate-600 text-xs">—</span>
+            <input type="text" placeholder="To" class="rounded px-2 py-1.5 text-xs font-mono w-24"
+                   style="background:#1e293b;border:1px solid #334155;color:#64748b" />
+        </div>
+    </div>
+
+    @* Charts row *@
+    <div class="flex gap-3 flex-1 min-h-0">
+        @* Token histogram *@
+        <div class="flex-1 rounded-lg p-4 flex flex-col min-h-0" style="background:#1e293b;border:1px solid #334155">
+            <div class="mb-3 shrink-0">
+                <div class="text-xs font-semibold text-slate-400 uppercase tracking-widest">Token Volume Histogram</div>
+                <div class="flex items-center gap-4 mt-1.5">
+                    <span class="flex items-center gap-1.5 text-xs font-mono text-slate-500">
+                        <span class="w-2 h-2 rounded-sm" style="background:#38bdf8"></span> Prompt
+                    </span>
+                    <span class="flex items-center gap-1.5 text-xs font-mono text-slate-500">
+                        <span class="w-2 h-2 rounded-sm" style="background:#10b981"></span> Completion
+                    </span>
+                </div>
+            </div>
+            <div class="flex-1 min-h-0">
+                <EChart ModelJson="@_histogramJson" />
+            </div>
+        </div>
+
+        @* Model market share *@
+        <div class="rounded-lg p-4 flex flex-col min-h-0" style="background:#1e293b;border:1px solid #334155;width:42%">
+            <div class="mb-2 shrink-0">
+                <div class="text-xs font-semibold text-slate-400 uppercase tracking-widest">Model Market Share</div>
+                <div class="text-xs text-slate-600 mt-0.5">By execution volume</div>
+            </div>
+            <div class="flex-1 min-h-0">
+                <EChart ModelJson="@_donutJson" />
+            </div>
+            @* Custom legend matching the original design (the chart's own legend is hidden). *@
+            <div class="flex flex-wrap gap-x-4 gap-y-1 mt-2 justify-center shrink-0">
+                @foreach (var share in ModelShares)
+                {
+                    <div class="flex items-center gap-1.5 text-xs font-mono text-slate-400">
+                        <span class="w-2 h-2 rounded-full shrink-0" style="background:@share.Color"></span>
+                        @share.Model
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private static readonly string[] TimeFilters = ["Day", "Month", "3-Month", "6-Month", "Year"];
+
+    /// <summary>Prompt/completion token volume per time slot, rendered as the grouped-bar histogram.</summary>
+    [Parameter, EditorRequired]
+    public IReadOnlyList<TokenBucket> TokenBuckets { get; set; } = [];
+
+    /// <summary>Per-model market-share percentages, rendered as the donut and its custom legend.</summary>
+    [Parameter, EditorRequired]
+    public IReadOnlyList<ModelShare> ModelShares { get; set; } = [];
+
+    private string _activeFilter = "Month";
+
+    private string _histogramJson = "{}";
+    private string _donutJson = "{}";
+
+    protected override void OnParametersSet()
+    {
+        var histogram = new GroupedBarsModel(
+            "Token Volume Histogram",
+            TokenBuckets.Select(b => b.Slot).ToList(),
+            6_000_000m,
+            [
+                new DistributionSeries("Prompt", "#38bdf8", TokenBuckets.Select(b => b.Prompt).ToList()),
+                new DistributionSeries("Completion", "#10b981", TokenBuckets.Select(b => b.Completion).ToList()),
+            ]);
+        _histogramJson = ChartJson.Serialize(histogram);
+
+        var donut = new DonutModel(
+            "Model Market Share",
+            ModelShares.Select(s => new DistributionSlice(s.Model, s.Value, s.Color)).ToList());
+        _donutJson = ChartJson.Serialize(donut);
+    }
+}

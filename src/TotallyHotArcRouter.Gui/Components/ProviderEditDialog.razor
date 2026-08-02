@@ -1,0 +1,365 @@
+@* Add/edit-provider modal for the Governance tab's provider manager. Captures the endpoint, auth
+   header shape, and a credential mode (literal key, env-var reference, or none). Mirrors
+   SettingsModal's overlay/stop-propagation/EventCallback pattern. *@
+<div class="overlay-backdrop fixed inset-0 z-50 flex items-center justify-center"
+     style="background-color:rgba(0,0,0,0.7);backdrop-filter:blur(4px)"
+     @onclick="OnCancel">
+    <div class="overlay-panel w-full max-w-md rounded-lg border border-slate-700" style="background:#1e293b"
+         @onclick:stopPropagation="true">
+        <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
+            <span class="text-sm font-semibold text-slate-200 tracking-wide uppercase">
+                @(IsNew ? "Add Provider" : $"Edit {Key}")
+            </span>
+            <button @onclick="OnCancel"
+                    aria-label="@(IsNew ? "Close add provider dialog" : $"Close edit dialog for provider {Key}")"
+                    class="text-slate-400 hover:text-slate-200 transition-colors">
+                <Icon Name="x" Size="16" />
+            </button>
+        </div>
+
+        <div class="p-5 space-y-3">
+            @if (IsNew)
+            {
+                <div>
+                    <div class="text-xs text-slate-500 mb-1">Provider Key</div>
+                    <input type="text" value="@_key" @oninput="e => _key = AsString(e.Value)"
+                           placeholder="e.g. ollama"
+                           class="w-full rounded px-3 py-2 text-sm font-mono"
+                           style="background:#0f172a;border:1px solid #334155;color:#e2e8f0" />
+                </div>
+            }
+
+            <div>
+                <div class="text-xs text-slate-500 mb-1">Base URL</div>
+                <input type="text" value="@_baseUrl" @oninput="e => _baseUrl = AsString(e.Value)"
+                       placeholder="https://api.example.com"
+                       class="w-full rounded px-3 py-2 text-sm font-mono"
+                       style="background:#0f172a;border:1px solid #334155;color:#e2e8f0" />
+            </div>
+
+            <div class="grid grid-cols-2 gap-2">
+                <div>
+                    <div class="text-xs text-slate-500 mb-1">Auth Header</div>
+                    <input type="text" value="@_authHeaderName" @oninput="e => _authHeaderName = AsString(e.Value)"
+                           placeholder="Authorization"
+                           class="w-full rounded px-2 py-2 text-sm font-mono"
+                           style="background:#0f172a;border:1px solid #334155;color:#e2e8f0" />
+                </div>
+                <div>
+                    <div class="text-xs text-slate-500 mb-1">Scheme</div>
+                    <input type="text" value="@_authHeaderScheme" @oninput="e => _authHeaderScheme = AsString(e.Value)"
+                           placeholder="Bearer (blank for raw)"
+                           class="w-full rounded px-2 py-2 text-sm font-mono"
+                           style="background:#0f172a;border:1px solid #334155;color:#e2e8f0" />
+                </div>
+            </div>
+
+            <div>
+                <div class="text-xs text-slate-500 mb-1">Credential</div>
+                <select value="@_mode" @onchange="OnModeChanged"
+                        class="w-full rounded px-2 py-2 text-sm"
+                        style="background:#0f172a;border:1px solid #334155;color:#e2e8f0">
+                    <option value="@CredentialMode.EnvVar">Environment variable</option>
+                    <option value="@CredentialMode.Literal">Literal key</option>
+                    <option value="@CredentialMode.None">None (local/unauthenticated)</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="flex items-center gap-2 text-sm cursor-pointer" style="color:#e2e8f0">
+                    <input type="checkbox" checked="@_isFree" @onchange="e => _isFree = e.Value is true" />
+                    <span>Free provider</span>
+                </label>
+                <div class="text-xs text-slate-500 mt-1">
+                    A local runtime or no-cost endpoint. Its requests report a cost of $0.00 rather than an
+                    unknown cost.
+                </div>
+            </div>
+
+            @if (_mode == CredentialMode.EnvVar)
+            {
+                <div>
+                    <div class="text-xs text-slate-500 mb-1">Env Var Name</div>
+                    <input type="text" value="@_apiKeyEnvVar" @oninput="e => _apiKeyEnvVar = AsString(e.Value)"
+                           placeholder="OPENAI_API_KEY"
+                           class="w-full rounded px-3 py-2 text-sm font-mono"
+                           style="background:#0f172a;border:1px solid #334155;color:#e2e8f0" />
+                </div>
+            }
+            else if (_mode == CredentialMode.Literal)
+            {
+                <div>
+                    <div class="text-xs text-slate-500 mb-1">
+                        API Key @(IsNew ? "" : "(leave blank to keep the current key)")
+                    </div>
+                    <input type="password" value="@_apiKey" @oninput="e => _apiKey = AsString(e.Value)"
+                           placeholder="@(IsNew ? "sk-..." : (HasApiKey ? "•••••••••••• (saved)" : "none saved yet"))"
+                           class="w-full rounded px-3 py-2 text-sm font-mono"
+                           style="background:#0f172a;border:1px solid #334155;color:#e2e8f0" />
+                    @* The stored secret is never sent back to the client, so the field is always blank on
+                       edit. Confirm a key exists (until the user types a replacement) so a saved key is
+                       visibly indicated rather than looking unset. *@
+                    @if (!IsNew && HasApiKey && string.IsNullOrEmpty(_apiKey))
+                    {
+                        <div class="flex items-center gap-1 mt-1 text-xs text-emerald-400">
+                            <Icon Name="check-circle" Size="12" /> A key is saved. Leave blank to keep it.
+                        </div>
+                    }
+                </div>
+            }
+
+            @* Custom headers: provider-agnostic extra headers sent on every upstream request (e.g.
+               anthropic-version). Each value is either a literal or read from an environment variable. *@
+            <div class="border-t border-slate-700/60 pt-3">
+                <div class="flex items-center justify-between mb-1.5">
+                    <div class="text-xs text-slate-500 uppercase tracking-wider">Custom Headers</div>
+                    <button type="button" @onclick="AddHeader"
+                            class="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/10 transition-colors">
+                        <Icon Name="plus" Size="12" /> Add header
+                    </button>
+                </div>
+                @if (_headers.Count == 0)
+                {
+                    <div class="text-xs text-slate-600">No custom headers.</div>
+                }
+                else
+                {
+                    <div class="space-y-1.5">
+                        @foreach (var header in _headers)
+                        {
+                            <div class="flex items-center gap-1.5">
+                                <input type="text" value="@header.Name" @oninput="e => header.Name = AsString(e.Value)"
+                                       placeholder="Header-Name"
+                                       class="rounded px-2 py-1 text-xs font-mono flex-1 min-w-0"
+                                       style="background:#0f172a;border:1px solid #334155;color:#e2e8f0" />
+                                <select value="@(header.UseEnvVar ? "env" : "literal")"
+                                        @onchange="e => SetHeaderSource(header, e)"
+                                        class="rounded px-1 py-1 text-xs shrink-0"
+                                        style="background:#0f172a;border:1px solid #334155;color:#e2e8f0">
+                                    <option value="literal">Value</option>
+                                    <option value="env">Env var</option>
+                                </select>
+                                <input type="@(header.UseEnvVar ? "text" : "password")" value="@header.Value" @oninput="e => header.Value = AsString(e.Value)"
+                                       placeholder="@(header.UseEnvVar ? "ENV_VAR_NAME" : (header.HasStoredLiteralValue ? "•••••••• (saved, blank keeps it)" : "value"))"
+                                       class="rounded px-2 py-1 text-xs font-mono flex-1 min-w-0"
+                                       style="background:#0f172a;border:1px solid #334155;color:#e2e8f0" />
+                                <button type="button" title="Remove header" @onclick="() => RemoveHeader(header)"
+                                        class="text-red-400 hover:text-red-300 transition-colors shrink-0">
+                                    <Icon Name="x" Size="12" />
+                                </button>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+
+            @if (!string.IsNullOrEmpty(Error))
+            {
+                <div class="rounded px-3 py-2 text-xs" style="background:#ef444411;border:1px solid #ef444444;color:#fca5a5">
+                    @Error
+                </div>
+            }
+
+            <div class="flex gap-2 pt-1">
+                <button @onclick="OnCancel"
+                        class="flex-1 rounded px-3 py-2 text-xs text-slate-400 border border-slate-600 hover:bg-slate-700 transition-colors">
+                    Cancel
+                </button>
+                <button @onclick="Save"
+                        disabled="@(!CanSave)"
+                        class="flex-1 rounded px-3 py-2 text-xs font-semibold transition-colors"
+                        style="background:@(CanSave ? "#10b981" : "#1e293b");color:@(CanSave ? "#0f172a" : "#475569");
+                               border:1px solid @(CanSave ? "transparent" : "#334155");cursor:@(CanSave ? "pointer" : "not-allowed")">
+                    Save
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    /// <summary>The credential source selected for the provider.</summary>
+    public enum CredentialMode
+    {
+        /// <summary>Reference an environment variable holding the key.</summary>
+        EnvVar,
+
+        /// <summary>Store a literal key.</summary>
+        Literal,
+
+        /// <summary>No credential (e.g. a local Ollama endpoint).</summary>
+        None
+    }
+
+    /// <summary>The provider key. Only editable when <see cref="IsNew"/>.</summary>
+    [Parameter] public string Key { get; set; } = string.Empty;
+
+    /// <summary>Whether the dialog is adding a new provider (vs. editing an existing one).</summary>
+    [Parameter] public bool IsNew { get; set; }
+
+    /// <summary>Initial base URL.</summary>
+    [Parameter] public string BaseUrl { get; set; } = string.Empty;
+
+    /// <summary>Initial auth header name.</summary>
+    [Parameter] public string AuthHeaderName { get; set; } = "Authorization";
+
+    /// <summary>Initial auth header scheme.</summary>
+    [Parameter] public string AuthHeaderScheme { get; set; } = "Bearer";
+
+    /// <summary>Initial env-var name, when the existing provider references one.</summary>
+    [Parameter] public string? ApiKeyEnvVar { get; set; }
+
+    /// <summary>Whether the existing provider already has a literal key stored (affects the default mode).</summary>
+    [Parameter] public bool HasApiKey { get; set; }
+
+    /// <summary>The provider's existing custom headers, seeded into the editable rows.</summary>
+    [Parameter] public IReadOnlyList<ProviderHeaderView> Headers { get; set; } = [];
+
+    /// <summary>Whether the existing provider is flagged as costing nothing.</summary>
+    [Parameter] public bool IsFree { get; set; }
+
+    /// <summary>An error message to display (e.g. a validation failure returned by the proxy).</summary>
+    [Parameter] public string? Error { get; set; }
+
+    /// <summary>Raised with the edited values when the user saves.</summary>
+    [Parameter] public EventCallback<ProviderEditResult> OnSave { get; set; }
+
+    /// <summary>Raised when the user cancels or dismisses the dialog.</summary>
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private string _key = string.Empty;
+    private string _baseUrl = string.Empty;
+    private string _authHeaderName = "Authorization";
+    private string _authHeaderScheme = "Bearer";
+    private string? _apiKey;
+    private string? _apiKeyEnvVar;
+    private CredentialMode _mode = CredentialMode.EnvVar;
+    private bool _isFree;
+    private readonly List<HeaderRow> _headers = [];
+
+    private bool CanSave =>
+        (!IsNew || !string.IsNullOrWhiteSpace(_key)) && !string.IsNullOrWhiteSpace(_baseUrl);
+
+    // Seed the editable fields from the parameters exactly once, when the dialog opens. The dialog is
+    // conditionally rendered (@if (_showDialog)) so a fresh instance — and thus a single OnInitialized —
+    // is created each time it's shown. This must NOT run on every OnParametersSet: the parent re-renders
+    // on every live-telemetry tick, and copying the parameters back into the fields there would silently
+    // revert the user's in-progress edits between typing and clicking Save.
+    protected override void OnInitialized()
+    {
+        _key = Key;
+        _baseUrl = BaseUrl;
+        _authHeaderName = string.IsNullOrWhiteSpace(AuthHeaderName) ? "Authorization" : AuthHeaderName;
+        _authHeaderScheme = AuthHeaderScheme;
+        _apiKeyEnvVar = ApiKeyEnvVar;
+        _mode = HasApiKey ? CredentialMode.Literal : CredentialMode.EnvVar;
+        _isFree = IsFree;
+
+        foreach (var header in Headers)
+        {
+            var useEnvVar = header.Source == HeaderValueSource.EnvVar;
+            _headers.Add(new HeaderRow
+            {
+                Name = header.Name,
+                UseEnvVar = useEnvVar,
+                // The literal value is never returned by the management API (write-only), so a literal
+                // header's row starts blank rather than pre-filled - HasStoredLiteralValue drives the
+                // "saved" placeholder below, and leaving the field blank on save preserves the stored
+                // value (mirrors the API key field's blank-keeps-existing behavior).
+                Value = useEnvVar ? (header.ValueEnvVar ?? string.Empty) : string.Empty,
+                HasStoredLiteralValue = header.Source == HeaderValueSource.Literal
+            });
+        }
+    }
+
+    private void OnModeChanged(ChangeEventArgs e)
+    {
+        if (Enum.TryParse<CredentialMode>(AsString(e.Value), out var mode))
+        {
+            _mode = mode;
+        }
+    }
+
+    private void AddHeader() => _headers.Add(new HeaderRow());
+
+    private void RemoveHeader(HeaderRow header) => _headers.Remove(header);
+
+    private static void SetHeaderSource(HeaderRow header, ChangeEventArgs e) =>
+        header.UseEnvVar = string.Equals(AsString(e.Value), "env", StringComparison.Ordinal);
+
+    private async Task Save()
+    {
+        if (!CanSave)
+        {
+            return;
+        }
+
+        var result = new ProviderEditResult(
+            Key: IsNew ? _key.Trim() : Key,
+            BaseUrl: _baseUrl.Trim(),
+            AuthHeaderName: string.IsNullOrWhiteSpace(_authHeaderName) ? "Authorization" : _authHeaderName.Trim(),
+            AuthHeaderScheme: _authHeaderScheme?.Trim() ?? string.Empty,
+            ApiKey: _mode == CredentialMode.Literal ? _apiKey : null,
+            ApiKeyEnvVar: _mode == CredentialMode.EnvVar ? _apiKeyEnvVar?.Trim() : null,
+            CredentialMode: ToCredentialMode(_mode),
+            Headers: BuildHeaders(),
+            IsFree: _isFree);
+
+        await OnSave.InvokeAsync(result);
+    }
+
+    /// <summary>Projects the editable header rows into wire models, dropping rows with a blank name and
+    /// mapping each row's value to a literal or env-var reference per its selected source. A blank literal
+    /// value is sent as-is (not resolved locally): the management API preserves whatever is already stored
+    /// under that header's name when both Value and ValueEnvVar are blank.</summary>
+    private IReadOnlyList<ProviderHeaderWriteModel> BuildHeaders() =>
+        _headers
+            .Where(h => !string.IsNullOrWhiteSpace(h.Name))
+            .Select(h => h.UseEnvVar
+                ? new ProviderHeaderWriteModel(h.Name.Trim(), null, h.Value.Trim())
+                : new ProviderHeaderWriteModel(h.Name.Trim(), h.Value, null))
+            .ToList();
+
+    private static string AsString(object? value) => (string?)value ?? string.Empty;
+
+    /// <summary>Maps the selected mode to the wire value the proxy expects (see <see cref="ProviderCredentialModes"/>).</summary>
+    private static string ToCredentialMode(CredentialMode mode) => mode switch
+    {
+        CredentialMode.Literal => ProviderCredentialModes.Literal,
+        CredentialMode.EnvVar => ProviderCredentialModes.EnvVar,
+        _ => ProviderCredentialModes.None
+    };
+
+    /// <summary>The values captured by the dialog when the user saves.</summary>
+    /// <param name="Key">The provider key.</param>
+    /// <param name="BaseUrl">The provider base URL.</param>
+    /// <param name="AuthHeaderName">The auth header name.</param>
+    /// <param name="AuthHeaderScheme">The auth header scheme (may be empty).</param>
+    /// <param name="ApiKey">The literal key, or null when not using a literal key (blank keeps any existing key on edit).</param>
+    /// <param name="ApiKeyEnvVar">The env-var name, or null when not using an env var.</param>
+    /// <param name="CredentialMode">The selected credential source (see <see cref="ProviderCredentialModes"/>).</param>
+    /// <param name="Headers">The full set of custom headers as edited.</param>
+    /// <param name="IsFree">Whether the provider is flagged as costing nothing.</param>
+    public sealed record ProviderEditResult(
+        string Key,
+        string BaseUrl,
+        string AuthHeaderName,
+        string AuthHeaderScheme,
+        string? ApiKey,
+        string? ApiKeyEnvVar,
+        string CredentialMode,
+        IReadOnlyList<ProviderHeaderWriteModel> Headers,
+        bool IsFree = false);
+
+    /// <summary>A mutable editor row for one custom header. <see cref="Value"/> holds the literal value or,
+    /// when <see cref="UseEnvVar"/> is set, the environment-variable name.</summary>
+    private sealed class HeaderRow
+    {
+        public string Name { get; set; } = string.Empty;
+        public bool UseEnvVar { get; set; }
+        public string Value { get; set; } = string.Empty;
+
+        /// <summary>Whether this header already has a literal value stored (the value itself is never returned).</summary>
+        public bool HasStoredLiteralValue { get; set; }
+    }
+}

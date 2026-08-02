@@ -1,0 +1,90 @@
+# Temporary, dev/test-only LiteLLM proxy config (PLAN.md TODO 1). Every entry uses `mock_response` so
+# the proxy answers deterministically without ever calling a real provider - no API keys, no network
+# egress, no cost, no flakiness from live rate limits. `api_key` values below are placeholders LiteLLM's
+# startup validation expects to see present, never used since mock_response short-circuits before any
+# real call.
+#
+# Do not add real provider credentials here. This file (and this whole directory) is decommissioned
+# once PLAN.md's TODO 4 closes - see litellm-sidecar/README.md.
+
+model_list:
+  - model_name: claude-opus-4.6
+    litellm_params:
+      model: openai/gpt-3.5-turbo
+      api_key: mock-not-a-real-key-parity-testing
+      mock_response: "This is a mock response from claude-opus-4.6 for parity testing."
+
+  - model_name: claude-sonnet-4.6
+    litellm_params:
+      model: openai/gpt-3.5-turbo
+      api_key: mock-not-a-real-key-parity-testing
+      mock_response: "This is a mock response from claude-sonnet-4.6 for parity testing."
+
+  - model_name: gpt-5.4
+    litellm_params:
+      model: openai/gpt-3.5-turbo
+      api_key: mock-not-a-real-key-parity-testing
+      mock_response: "This is a mock response from gpt-5.4 for parity testing."
+
+  - model_name: qwen3-max
+    litellm_params:
+      model: openai/gpt-3.5-turbo
+      api_key: mock-not-a-real-key-parity-testing
+      mock_response: "This is a mock response from qwen3-max for parity testing."
+
+  - model_name: qwen3.5-plus
+    litellm_params:
+      model: openai/gpt-3.5-turbo
+      api_key: mock-not-a-real-key-parity-testing
+      mock_response: "This is a mock response from qwen3.5-plus for parity testing."
+
+  - model_name: glm-5
+    litellm_params:
+      model: openai/gpt-3.5-turbo
+      api_key: mock-not-a-real-key-parity-testing
+      mock_response: "This is a mock response from glm-5 for parity testing."
+
+  - model_name: kimi-k2.5
+    litellm_params:
+      model: openai/gpt-3.5-turbo
+      api_key: mock-not-a-real-key-parity-testing
+      mock_response: "This is a mock response from kimi-k2.5 for parity testing."
+
+  - model_name: minimax-m2.7
+    litellm_params:
+      model: openai/gpt-3.5-turbo
+      api_key: mock-not-a-real-key-parity-testing
+      mock_response: "This is a mock response from minimax-m2.7 for parity testing."
+
+  # The one entry that is NOT mocked, and the only one that reaches a real model. Tool-call parity
+  # cannot be tested against `mock_response`: a canned string carries no `tool_calls`, so there would be
+  # nothing to diff. This points LiteLLM at the same local LM Studio ArcRouter routes to, so the two can
+  # be asked the identical tools-carrying question and their normalized output compared.
+  #
+  # Used only to (re)capture `RecordedLiteLlmParityTranscripts` by hand - see that file's doc comment.
+  # No test starts this container, and CI never reaches it: the recorded transcripts are replayed
+  # offline, because a test that needs a particular model loaded reports the operator's environment
+  # rather than the code.
+  #
+  # PREREQUISITE, verified the hard way: LM Studio binds to 127.0.0.1 only by default, and a
+  # loopback-bound listener is unreachable from a container under every networking mode - the connection
+  # is refused before any of this config matters. Before capturing, do one of:
+  #   * enable "Serve on Local Network" in LM Studio (binds 0.0.0.0), or
+  #   * run a host-side TCP relay forwarding 0.0.0.0:1234 -> 127.0.0.1:1234.
+  # Then confirm from inside the container before blaming the config:
+  #   podman exec acrouter-litellm-parity-sidecar sh -c 'curl -s http://host.docker.internal:1234/v1/models'
+  #
+  # Under podman on WSL this additionally requires mirrored networking (`networkingMode=mirrored` in
+  # `.wslconfig`) - without it, published ports are DNAT rules rather than listeners and the Windows
+  # host's loopback is not reachable from inside the container.
+  #
+  # Launch note: run the container with MSYS_NO_PATHCONV=1 under Git Bash, or `/app/config.yaml` is
+  # rewritten to a Windows path and LiteLLM exits with "Config file not found".
+  - model_name: local-tool-parity
+    litellm_params:
+      model: openai/qwen2.5-coder-7b-instruct-ghidra-v2
+      api_base: http://host.docker.internal:1234/v1
+      api_key: lm-studio-does-not-check-this
+
+litellm_settings:
+  set_verbose: false

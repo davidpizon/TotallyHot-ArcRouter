@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Plain net10.0 (not net10.0-windows / MAUI), mirroring TotallyHotArcRouter.Gui.Charts: DTOs and pure
+         aggregation logic shared with the Gui, so it builds and unit-tests on any platform.
+         Deliberately does not reference the TotallyHotArcRouter proxy project - it's an independent
+         DTO/wire-contract layer for a separately deployable process, not a compiled-type dependency
+         on the proxy itself. It DOES compile Protos/telemetry.proto (GrpcServices="Client") - see
+         "Why the .proto is compiled here, not in TotallyHotArcRouter.Gui" below. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>TotallyHot.ArcRouter.Gui.Telemetry</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Why the .proto is compiled here, not in TotallyHotArcRouter.Gui (the MAUI project that actually
+         talks the wire protocol, via Services/LiveDataStore.cs): .NET MAUI's SingleProject build
+         (Microsoft.NET.Sdk.Razor + UseMaui=true) runs an inner/outer multi-pass build that Grpc.Tools'
+         codegen target does not reliably hook into - in practice, no protoc invocation happens at all
+         (confirmed: no Protobuf/Grpc/protoc output anywhere in a full rebuild, and no
+         obj/.../Protos/ generated-file output), even though the package restores fine and the
+         .proto's Include path resolves correctly. TotallyHotArcRouter.csproj (plain Microsoft.NET.Sdk.Web,
+         no MAUI) doesn't have this problem. The workaround: compile the .proto in this plain,
+         non-MAUI sibling instead (already referenced by TotallyHotArcRouter.Gui via ProjectReference,
+         already the natural home for the routing-telemetry DTO layer), so Grpc.Tools runs in a normal
+         SDK-style build context. Services/LiveDataStore.cs's using-alias for
+         TotallyHotArcRouter.Telemetry.Contract now resolves through this project's compiled output instead
+         of compiling the .proto directly. -->
+    <PackageReference Include="Grpc.Net.Client" Version="2.80.0" />
+    <PackageReference Include="Google.Protobuf" Version="3.35.1" />
+    <PackageReference Include="Grpc.Tools" Version="2.83.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Protobuf Include="..\Protos\telemetry.proto" Link="Protos\telemetry.proto" GrpcServices="Client" ProtoRoot="..\Protos" />
+  </ItemGroup>
+
+</Project>
+

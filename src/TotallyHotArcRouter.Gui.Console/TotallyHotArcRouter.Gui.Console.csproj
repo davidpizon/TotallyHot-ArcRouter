@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Plain net10.0 (not net10.0-windows / MAUI): pure data-transformation logic shared by the
+         Gui's Console tab, with no Blazor/MAUI dependency, so it builds and unit-tests on any
+         platform (including this repo's Linux CI/agent environment) even though TotallyHotArcRouter.Gui
+         itself is Windows-only. See TotallyHotArcRouter.Gui.Console.Tests for coverage. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>TotallyHot.ArcRouter.Gui.Console</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+</Project>
+

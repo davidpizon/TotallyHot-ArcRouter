@@ -1,0 +1,77 @@
+using TotallyHot.ArcRouter.Gui.Services;
+using FluentAssertions;
+
+namespace TotallyHot.ArcRouter.Gui.Tests;
+
+/// <summary>
+/// Tests for <see cref="ProviderAdminStore"/>'s reachability/error-surfacing contract. No proxy is
+/// running in the test process, so every request against the loopback address below fails fast with a
+/// connection refusal - exactly the "proxy isn't running" path the store is built to degrade gracefully
+/// on, per its own class remarks.
+/// </summary>
+public sealed class ProviderAdminStoreTests
+{
+    // An address nothing listens on, so the underlying HttpClient.SendAsync fails fast with a
+    // connection refusal rather than depending on whether an actual proxy happens to be running
+    // on the store's real default port (5001) on the machine running this test.
+    private const string UnreachableAddress = "http://127.0.0.1:59991";
+
+    [Fact]
+    public void Providers_and_IsLoaded_start_empty_before_any_load()
+    {
+        var store = new ProviderAdminStore(managementAddress: UnreachableAddress);
+
+        store.Providers.Should().BeEmpty();
+        store.IsLoaded.Should().BeFalse();
+        store.IsReachable.Should().BeFalse();
+        store.LastError.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task LoadAsync_surfaces_unreachability_instead_of_throwing()
+    {
+        var store = new ProviderAdminStore(managementAddress: UnreachableAddress);
+
+        await store.LoadAsync(TestContext.Current.CancellationToken);
+
+        store.IsLoaded.Should().BeTrue();
+        store.IsReachable.Should().BeFalse();
+        store.LastError.Should().NotBeNullOrEmpty();
+        store.Providers.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task LoadAsync_raises_Changed_even_on_failure()
+    {
+        var store = new ProviderAdminStore(managementAddress: UnreachableAddress);
+        var raised = false;
+        store.Changed += () => raised = true;
+
+        await store.LoadAsync(TestContext.Current.CancellationToken);
+
+        raised.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task UpsertProviderAsync_propagates_a_ProviderAdminException_when_unreachable()
+    {
+        var store = new ProviderAdminStore(managementAddress: UnreachableAddress);
+        var body = new TotallyHot.ArcRouter.Gui.Admin.ProviderWriteRequest(
+            BaseUrl: "https://example.com", AuthHeaderName: "Authorization", AuthHeaderScheme: "Bearer",
+            ApiKey: null, ApiKeyEnvVar: null);
+
+        var act = () => store.UpsertProviderAsync("test", body);
+
+        await act.Should().ThrowAsync<TotallyHot.ArcRouter.Gui.Admin.ProviderAdminException>();
+    }
+
+    [Fact]
+    public void Constructor_normalizes_a_management_address_missing_a_trailing_slash()
+    {
+        // No exception on construction - the normalized address is only exercised on send, which the
+        // other tests cover; this just guards the constructor path itself doesn't throw either way.
+        var act = () => new ProviderAdminStore(managementAddress: "http://127.0.0.1:59991/already-slashed/");
+        act.Should().NotThrow();
+    }
+}
+

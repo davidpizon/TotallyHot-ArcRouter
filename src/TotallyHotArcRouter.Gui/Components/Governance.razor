@@ -1,0 +1,44 @@
+@* Governance tab: provider/credential/model management (now including per-provider monthly budgets) and
+   price data source control. The two concerns share the tab via a sub-view toggle. Budgets used to be a
+   third sub-view of hardcoded mock pools; they now live on each real provider's card in ProvidersAdmin. *@
+<div class="h-full flex flex-col">
+    @* Sub-view toggle *@
+    <div class="flex items-center gap-1 mb-3 shrink-0">
+        @foreach (var (view, label) in Views)
+        {
+            var isActive = _view == view;
+            <button @onclick="() => _view = view"
+                    class="rounded px-3 py-1.5 text-xs font-medium transition-colors"
+                    style="background:@(isActive ? "#334155" : "transparent");
+                           color:@(isActive ? "#e2e8f0" : "#64748b");
+                           border:1px solid @(isActive ? "#475569" : "#334155")">
+                @label
+            </button>
+        }
+    </div>
+
+    @if (_view == GovView.Providers)
+    {
+        <div class="flex-1 min-h-0">
+            <ProvidersAdmin />
+        </div>
+    }
+    else
+    {
+        <div class="flex-1 min-h-0">
+            <PriceSourcesAdmin />
+        </div>
+    }
+</div>
+
+@code {
+    private enum GovView { Providers, PriceSources }
+
+    private static readonly (GovView View, string Label)[] Views =
+    [
+        (GovView.Providers, "Providers"),
+        (GovView.PriceSources, "Price Sources")
+    ];
+
+    private GovView _view = GovView.Providers;
+}

@@ -1,0 +1,12 @@
+<Project>
+
+  <!--
+    Applies to every project under src/ (MSBuild auto-imports the nearest Directory.Build.props).
+    Enforces AGENTS.md's "All builds must compile without warnings or errors" rule at the compiler
+    level, so a warning fails the build instead of being silently left in place.
+  -->
+  <PropertyGroup>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+</Project>

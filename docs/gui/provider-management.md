@@ -1,0 +1,129 @@
+# Governance Tab: Provider & Credential Management
+
+> **Status: Implemented.** The Governance tab's **Providers** sub-view adds/removes/edits provider
+> endpoints and credentials and manages each provider's models, backed by the `/admin/*` management API
+> on the proxy that reloads the router live. Each provider card also carries an optional **monthly
+> budget** — a `$` cap and/or token cap persisted to SQLite (`provider_budgets`), the current month's
+> spend (`provider_spend`, accumulated by `ProviderBudgetStore` on the telemetry path), and two ECharts
+> utilization bars. A breached provider is skipped in routing and an all-breached request is rejected
+> with 402. This replaced the former mock **Budgets** sub-view (`MockData.Providers`).
+
+## Architecture
+
+The GUI is a separate process from the proxy and, per
+[`../router/telemetry.md`](../router/telemetry.md#gui-consumption), only ever talks to the proxy —
+never to configuration files or providers directly. Provider management follows that rule over a new
+HTTP channel:
+
+```mermaid
+flowchart LR
+    subgraph gui["Governance tab (Providers sub-view)"]
+        razor["ProvidersAdmin.razor"]
+        store["ProviderAdminStore"]
+        client["ProviderAdminClient<br/>(TotallyHotArcRouter.Gui.Admin)"]
+        razor --> store --> client
+    end
+    subgraph proxy["Proxy (port 5001, localhost)"]
+        api["/admin/providers<br/>(minimal API)"]
+        cfg["IProviderConfigStore<br/>(validate + persist +<br/>atomic version bump)"]
+        resolver["ModelRouteResolver<br/>(rebuilds live on<br/>version change)"]
+        api --> cfg --> resolver
+    end
+    client -- "HTTP/JSON" --> api
+```
+
+- **`IProviderConfigStore`** (`src/TotallyHotArcRouter/Proxy/ProviderConfigStore.cs`) is the writable source
+  of truth for `ModelRouting` (providers + model allowlist). It seeds from `appsettings.json` on first
+  run (in memory — nothing is written until an edit), then persists the whole config to
+  `model-routing.json` and becomes the source of truth on later startups. `ModelRouteResolver` reads
+  its snapshots and rebuilds its lookup whenever the version advances, so edits take effect **without
+  restarting the proxy**.
+- **`/admin/*` API** (`src/TotallyHotArcRouter/Proxy/Management/ProviderAdminEndpoints.cs`) is mapped on the
+  plain-HTTP proxy port (5001), alongside LLM forwarding. Endpoints: `GET /admin/providers`,
+  `PUT`/`DELETE /admin/providers/{key}`, `PUT`/`DELETE /admin/providers/{key}/models/{modelName}`,
+  `PUT /admin/providers/{key}/models/{modelName}/enabled` (per-model Start/Stop, the model-level twin
+  of `PUT /admin/providers/{key}/enabled`), and three related model-discovery routes:
+  `discover-models` and `scan-capabilities` are independently callable building blocks, while
+  `POST /admin/providers/{key}/refresh-from-endpoint` is the one the GUI actually calls — see below.
+- **Refresh from endpoint is a single router-side operation**, not the GUI orchestrating several calls.
+  `ManagementFacade.RefreshFromEndpointAsync` discovers the provider's live model list, **reconciles it
+  into `ModelRouting:ModelList`** (a model the endpoint newly reports is added automatically but starts
+  `Enabled: false`; a configured model the endpoint no longer reports is flagged `PresentUpstream: false`
+  and greyed out — **never deleted**, since e.g. LM Studio's `/v1/models` only lists the currently
+  *loaded* model, not everything downloaded), then re-probes endpoint flavors and re-runs tiers 1-3
+  tool-call dialect detection (`docs/router/tool-call-normalization.md` §3.2-3.3). One click, one
+  request; the response is the same `GET /admin/providers` shape (`ModelView` now also carries
+  `Enabled`/`PresentUpstream` alongside `Dialect`/`Confidence`, and `ProviderView` carries
+  `EndpointCapabilities`), so the GUI just re-renders. `ModelRouteEntry.Enabled`/`PresentUpstream` are
+  independent signals: `Enabled` is the operator's own Start/Stop intent and is never touched by a scan;
+  `PresentUpstream` is fully scan-managed, so a model the operator started resumes routable the moment
+  it's rediscovered, with no extra click. Both are enforced on the very next request via
+  `IModelRouteResolver.IsModelEnabled` — a stopped or not-currently-upstream model is treated exactly
+  like an unconfigured one for routing purposes.
+- **`TotallyHotArcRouter.Gui.Admin`** (plain `net10.0`) holds the DTOs and `ProviderAdminClient` HTTP logic,
+  unit-tested in CI. **`ProviderAdminStore`** (MAUI) is the thin singleton the UI binds to, mirroring
+  `LiveDataStore`.
+
+## Credentials
+
+Each provider uses one of: a **literal key**, an **environment-variable reference**, or **none**
+(e.g. a local Ollama endpoint). The literal key is **never returned** by the API (`GET` reports only
+`hasApiKey` + the env-var name), so editing a provider without re-entering the key preserves the
+stored one. Literal keys entered in the UI are stored in plaintext in `model-routing.json` — acceptable
+for a localhost single-developer tool, but prefer the env-var reference to keep secrets out of files.
+
+## Free providers
+
+A provider can be marked **Free** (`ProviderOptions.IsFree`, a checkbox in the edit dialog, shown as a
+`Free` badge on the provider card). It means requests to this provider cost nothing — a local Ollama
+runtime, say — so its models report a cost of **$0.00** instead of an unknown cost. It is independent
+of credentials: a free endpoint may still require a token.
+
+This is the only thing in TotallyHotArcRouter that currently produces a non-null `EstimatedCostUsd`. There is
+no price table — the hand-maintained one was deleted as unverified placeholder data, and real prices
+arrive with [`model-price-catalog.md`](../router/model-price-catalog.md) — so every other model's cost
+reads as unknown. See [`telemetry.md`](../router/telemetry.md#pricing).
+
+**It defaults off, and only fresh installs get it seeded.** `appsettings.json` sets `IsFree: true` on
+`ollama`, but that seed applies only when no `model-routing.json` exists yet; once the file is written,
+it owns provider config and an absent `IsFree` key loads as `false`. So on an existing install a local
+provider reports unknown cost until someone ticks the box. That is why the badge is on the card rather
+than hidden in the dialog: the flag's state should be visible without opening anything.
+
+## Security
+
+The `/admin/*` endpoints inherit the proxy's loopback-only, no-inbound-auth posture (see
+`ProxyMiddleware`'s header-handling notes). Because they read/write credentials, an **optional** shared
+token can be required: set `Management:Token` in configuration and every `/admin/*` request must then
+present a matching `X-Admin-Token` header (401 otherwise). Off by default.
+
+## Manual verification (Windows / MAUI)
+
+The MAUI Gui project is Windows-only and excluded from CI, so the UI is verified manually; all
+extractable logic (the `ProviderAdminClient` and the store/resolver) is covered by CI tests
+(`TotallyHotArcRouter.Gui.Admin.Tests`, `ProviderConfigStoreTests`, `ProviderAdminEndpointsTests`).
+
+1. Start the proxy, then run the Gui. Open **Governance → Providers**.
+2. **Add** a provider (e.g. key `ollama`, base URL `http://localhost:11434/v1`, credential *None*).
+3. **Add** a model under it (`llama3`), then confirm `GET http://localhost:5001/v1/models` lists it
+   with no proxy restart.
+4. **Edit** a provider's base URL without re-entering its key; confirm the key is preserved.
+5. **Refresh from endpoint** on a running provider; confirm a newly-available model appears
+   automatically (stopped, greyed out — click Start to activate it), a dialect badge (e.g. `hermes`,
+   `openai-native`) appears next to a model once the provider's endpoint exposes enough metadata to
+   classify it (`docs/router/tool-call-normalization.md` §3.2 for what each tier needs), and that
+   stopping the provider's model (e.g. unloading it in LM Studio) and refreshing again greys the row out
+   as "not detected" without removing it — reloading the model and refreshing once more should resume it
+   as started, with no extra click, if it was started before.
+6. **Remove** a provider that still has models. The trashcan opens a type-to-confirm dialog
+   (`RemoveProviderDialog`) naming how many models will go with it; the Remove button stays disabled
+   until the provider's key is typed exactly. Confirm the provider *and* its models disappear in one
+   step, and that the provider's historical spend/usage figures are unaffected.
+7. Stop the proxy and reopen the tab; confirm the "management API unreachable" state with a Retry.
+
+## Non-goals
+
+Virtual keys, per-*team* budgets, SSO, and audit logs remain out of scope (PLAN.md Non-Goals).
+Per-*provider* monthly budget caps are now implemented (persisted, enforced, with real current-month
+spend) as part of this Providers sub-view.
+

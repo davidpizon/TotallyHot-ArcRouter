@@ -1,0 +1,26 @@
+# Temporary, dev/test-only LiteLLM reference proxy (PLAN.md TODO 1). Never a runtime dependency of
+# TotallyHotArcRouter, never deployed alongside it - exists solely so the parity tests in TODO 3 have a real,
+# working OpenAI-compatible reference to diff TotallyHotArcRouter's own proxy against. See README.md for how
+# to run it and when to delete it.
+services:
+  litellm-sidecar:
+    image: ghcr.io/berriai/litellm:main-stable
+    container_name: acrouter-litellm-parity-sidecar
+    ports:
+      - "4000:4000"
+    environment:
+      # LiteLLM's own proxy auth token (unrelated to any upstream provider credential) - every
+      # model_list entry in config.yaml uses mock_response, so no real provider API key is ever
+      # needed or read.
+      - LITELLM_MASTER_KEY=mock-not-a-real-key-parity-master
+      - LITELLM_LOG=INFO
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
