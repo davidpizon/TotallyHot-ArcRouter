@@ -14,7 +14,7 @@
     }
     else if (!Store.IsReachable)
     {
-        <div class="rounded-lg p-4 space-y-2" style="background:#1e293b;border:1px solid #ef444444">
+        <div class="rounded-lg p-4 space-y-2" style="background:#181818;border:1px solid #ef444444">
             <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
                 <Icon Name="alert-triangle" Size="14" /> Router unreachable
             </div>
@@ -26,7 +26,7 @@
                 <div class="text-xs text-slate-500 font-mono">@Store.LastError</div>
             }
             <button @onclick="Reload"
-                    class="rounded px-3 py-1.5 text-xs font-medium border border-slate-600 text-slate-300 hover:bg-slate-700 transition-colors">
+                    class="btn btn-ghost">
                 Retry
             </button>
         </div>
@@ -46,10 +46,7 @@
                 }
                 <button @onclick="PullNow"
                         disabled="@Store.IsRefreshing"
-                        class="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium border transition-colors"
-                        style="border-color:@(Store.IsRefreshing ? "#33415580" : "#475569");
-                               color:@(Store.IsRefreshing ? "#64748b" : "#cbd5e1");
-                               cursor:@(Store.IsRefreshing ? "not-allowed" : "pointer")">
+                        class="btn btn-secondary flex items-center gap-1.5">
                     <Icon Name="rotate-ccw" Size="13" />
                     @(Store.IsRefreshing ? "Pulling…" : "Pull Now")
                 </button>
@@ -75,12 +72,12 @@
                 var index = i;
                 var source = sources[index];
                 var outcome = LastOutcomeFor(source.Name);
-                var borderColor = source.Enabled ? "#334155" : "#33415580";
+                var borderColor = source.Enabled ? "#4d4d4d" : "#4d4d4d80";
                 var canReorder = sources.Count > 1;
 
                 var canDrag = canReorder && !Store.IsRefreshing;
                 var isLifted = _dragActive && _dragName == source.Name;
-                var cardBorder = isLifted ? "#38bdf8" : borderColor;
+                var cardBorder = isLifted ? "#1ed760" : borderColor;
                 var cursor = isLifted ? "grabbing" : (canDrag ? "grab" : "default");
 
                 @* Keep Razor comments outside the tag: written between attributes they are emitted as literal
@@ -94,7 +91,7 @@
                 <div @key="source.Name" class="rounded-lg p-3 space-y-2.5"
                      @onpointerdown="e => OnPointerDown(source, e)"
                      @onpointerenter="e => OnPointerEnter(source, e)"
-                     style="background:#1e293b;border:1px solid @cardBorder;cursor:@cursor;
+                     style="background:#181818;border:1px solid @cardBorder;cursor:@cursor;
                             user-select:@(canDrag ? "none" : "auto");touch-action:@(canDrag ? "none" : "auto");
                             transition:box-shadow .15s ease, transform .15s ease;
                             @(isLifted ? "box-shadow:0 12px 28px -6px rgba(0,0,0,.55);transform:scale(1.02);position:relative;z-index:10;pointer-events:none;" : "")">
@@ -136,7 +133,7 @@
                             <div class="min-w-0">
                                 <div class="flex items-center gap-2">
                                     <Icon Name="database" Size="14" />
-                                    <span class="text-sm font-semibold" style="color:@(source.Enabled ? "#e2e8f0" : "#64748b")">
+                                    <span class="text-sm font-semibold" style="color:@(source.Enabled ? "#ffffff" : "#7c7c7c")">
                                         @source.Name
                                     </span>
                                     @if (canReorder)
@@ -160,10 +157,10 @@
                                 title="@(source.Enabled ? "Disable this source" : "Enable this source")"
                                 class="shrink-0 flex items-center gap-1.5 rounded px-2 py-1 text-xs font-semibold border transition-colors"
                                 style="background:@(source.Enabled ? "#10b98122" : "transparent");
-                                       border-color:@(source.Enabled ? "#10b98144" : "#475569");
-                                       color:@(source.Enabled ? "#10b981" : "#64748b")">
+                                       border-color:@(source.Enabled ? "#10b98144" : "#7c7c7c");
+                                       color:@(source.Enabled ? "#10b981" : "#7c7c7c")">
                             <span class="w-1.5 h-1.5 rounded-full"
-                                  style="background:@(source.Enabled ? "#10b981" : "#475569")"></span>
+                                  style="background:@(source.Enabled ? "#10b981" : "#7c7c7c")"></span>
                             @(source.Enabled ? "ENABLED" : "DISABLED")
                         </button>
                     </div>

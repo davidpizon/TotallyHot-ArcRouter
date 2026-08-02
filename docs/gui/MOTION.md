@@ -14,6 +14,14 @@ new and refactored components should be built against. Every section marks which
 Framer Motion, no GSAP, and no JS animation library — and no Tailwind build step, so `app.css` is
 hand-maintained. **All motion is CSS.** Snippets below are CSS only; that is not an omission.
 
+**Aspirational-design conformance (Phase 4 audit):** this motion system already satisfied
+`aspirational-design.md` §5's "motion as meaning" principle before adoption began — every trigger
+below maps to a state change, value change, user interaction, or tab transition, and the only ambient
+loops (`pulse-dot`, `flash-*`) are load-bearing status signals, not decoration. Adoption changed two
+things here: the accent color referenced by Value Tick (§6) and the addition of an unused
+`--dur-entrance` token (§3, §9) for the one aspirational pattern (a full "theater" reveal) this app
+doesn't currently have a use for. See §10 for the full conformance status per pattern.
+
 ---
 
 ## 1. Philosophy
@@ -47,7 +55,7 @@ scrolling a larger canvas.
 
 | Layer | Surface | Enters by | Exits by |
 |---|---|---|---|
-| **base** | Page background `#0f172a` | n/a — always present | n/a |
+| **base** | Page background `#121212` | n/a — always present | n/a |
 | **content** | Tab panels, cards, charts | Fade + micro-scale, in place | Fade, faster than enter |
 | **overlay** | `SettingsModal`, `ProviderEditDialog` | Rise: scale up + fade, from above | Fade + shrink slightly |
 | **floating** | `.ls-tooltip`, anchored popovers | Opacity only — **never transform** | Opacity only |
@@ -85,6 +93,7 @@ they read as breathing rather than blinking.
 | `--dur-default` | `200ms` | Shipping | Tab indicator, row enter, dropdowns, value tick |
 | `--dur-slow` | `300ms` | Proposed | Overlay enter (modals), largest surfaces only |
 | `--dur-exit` | `120ms` | Proposed | Exits — see rule below |
+| `--dur-entrance` | `420ms` | Shipping (token only, unused) | Reserved for a full-screen/theater-style entrance (`aspirational-design.md` §5) — e.g. a first-load empty state or a whole-tab reveal. **Not** used for list rows or dense stat strips; at 420ms those would read as sluggish in a telemetry app the operator scans continuously. `--dur-default`/`--dur-slow` remain correct for everything currently shipping. |
 | `--dur-pulse` | `2s` | Shipping | `.pulse-dot` liveness loop |
 | `--dur-flash` | `1.2s` | Shipping | `.flash-amber` / `.flash-red`, 3 iterations |
 
@@ -213,7 +222,7 @@ read the true value throughout.
 
 ```css
 @keyframes value-tick {
-  0%   { color: #38bdf8; }   /* accent sky-400 */
+  0%   { color: var(--accent); }   /* accent, #1ed760 as of aspirational-design adoption */
   100% { color: inherit; }
 }
 .value-tick { animation: value-tick 400ms var(--ease-out-quart); }
@@ -319,11 +328,12 @@ Add to `app.css` below the compiled Tailwind blob:
 
 ```css
 :root {
-  --dur-instant: 100ms;
-  --dur-fast:    150ms;
-  --dur-default: 200ms;
-  --dur-slow:    300ms;
-  --dur-exit:    120ms;
+  --dur-instant:  100ms;
+  --dur-fast:     150ms;
+  --dur-default:  200ms;
+  --dur-slow:     300ms;
+  --dur-exit:     120ms;
+  --dur-entrance: 420ms;
 
   --ease-standard:     cubic-bezier(.4, 0, .2, 1);
   --ease-out-expo:     cubic-bezier(.16, 1, .3, 1);
@@ -332,6 +342,8 @@ Add to `app.css` below the compiled Tailwind blob:
   --ease-in-out-sine:  cubic-bezier(.37, 0, .63, 1);
 }
 ```
+
+`--dur-entrance` is now defined in `app.css` alongside the rest (§3 explains why it's unused today).
 
 ---
 

@@ -7,7 +7,7 @@
      @onclick="OnCancel">
     @* Escape is handled on the panel, not the input, so it works whichever control has focus - keydown
        bubbles up from every focusable descendant. Enter stays on the input alone (see below). *@
-    <div class="overlay-panel w-full max-w-md rounded-lg border border-slate-700" style="background:#1e293b"
+    <div class="overlay-panel w-full max-w-md rounded-lg border border-slate-700" style="background:#121212"
          tabindex="-1"
          @onkeydown="HandlePanelKeyDown"
          @onclick:stopPropagation="true">
@@ -28,7 +28,7 @@
                 <span>Destructive Action</span>
             </div>
 
-            <div class="space-y-3 rounded border p-4" style="border-color:#ef444444;background:#0f172a">
+            <div class="space-y-3 rounded border p-4" style="border-color:#ef444444;background:#121212">
                 <p class="text-xs text-slate-400 leading-5">
                     This action is <span class="text-red-400 font-semibold">irreversible</span>.
                     @if (ModelCount > 0)
@@ -55,19 +55,15 @@
                        autocomplete="off"
                        aria-label="@($"Type {ProviderKey} to confirm removal")"
                        class="w-full rounded px-3 py-2 text-sm font-mono"
-                       style="background:#1e293b;border:1px solid #334155;color:#e2e8f0" />
+                       style="background:#1f1f1f;border:1px solid #4d4d4d;color:#ffffff" />
                 <div class="flex gap-2">
                     <button @onclick="OnCancel"
-                            class="flex-1 rounded px-3 py-2 text-xs text-slate-400 border border-slate-600 hover:bg-slate-700 transition-colors">
+                            class="flex-1 btn btn-ghost">
                         Cancel
                     </button>
                     <button @onclick="Confirm"
                             disabled="@(!IsConfirmed)"
-                            class="flex-1 rounded px-3 py-2 text-xs font-semibold transition-colors"
-                            style="background:@(IsConfirmed ? "#ef4444" : "#1e293b");
-                                   color:@(IsConfirmed ? "#0f172a" : "#475569");
-                                   border:1px solid @(IsConfirmed ? "transparent" : "#334155");
-                                   cursor:@(IsConfirmed ? "pointer" : "not-allowed")">
+                            class="flex-1 btn btn-critical">
                         Remove
                     </button>
                 </div>

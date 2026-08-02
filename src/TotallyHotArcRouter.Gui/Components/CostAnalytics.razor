@@ -7,7 +7,7 @@
    MockData.BuildMetricHistory fills the gaps so every metric/range renders. *@
 <div class="h-full flex flex-col gap-3 min-h-0">
     @* ── CONTROL BAR ── *@
-    <div class="rounded-lg p-3 shrink-0 flex flex-col gap-3" style="background:#1e293b;border:1px solid #334155">
+    <div class="rounded-lg p-3 shrink-0 flex flex-col gap-3" style="background:#181818;border:1px solid #4d4d4d">
         @* Metric selector (ranked by priority, left-to-right) *@
         <div class="flex flex-wrap items-center gap-1.5">
             @foreach (var def in MetricDefs)
@@ -17,9 +17,9 @@
                 <button @onclick="() => SelectMetric(metric)"
                         title="@def.Description"
                         class="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium transition-colors"
-                        style="color:@(isActive ? "#0f172a" : "#94a3b8");
-                               background:@(isActive ? "#38bdf8" : "#0f172a");
-                               border:1px solid @(isActive ? "#38bdf8" : "#334155")">
+                        style="color:@(isActive ? "#121212" : "#b3b3b3");
+                               background:@(isActive ? "#1ed760" : "#121212");
+                               border:1px solid @(isActive ? "#1ed760" : "#4d4d4d")">
                     @def.Label
                 </button>
             }
@@ -34,20 +34,20 @@
                     var isActive = _range == r;
                     <button @onclick="() => SelectRange(r)"
                             class="rounded px-2.5 py-1 text-xs font-medium transition-colors"
-                            style="color:@(isActive ? "#38bdf8" : "#64748b");
-                                   background:@(isActive ? "#172033" : "transparent");
-                                   border:1px solid @(isActive ? "#334155" : "transparent")">
+                            style="color:@(isActive ? "#1ed760" : "#7c7c7c");
+                                   background:@(isActive ? "#181818" : "transparent");
+                                   border:1px solid @(isActive ? "#4d4d4d" : "transparent")">
                         @label
                     </button>
                 }
             </div>
 
-            <div class="w-px h-4" style="background:#334155"></div>
+            <div class="w-px h-4" style="background:#4d4d4d"></div>
 
             <select value="@_sessionScope"
                     @onchange="OnSessionChanged"
                     class="rounded px-2 py-1.5 text-xs font-mono"
-                    style="background:#0f172a;border:1px solid #334155;color:#e2e8f0">
+                    style="background:#1f1f1f;border:1px solid #4d4d4d;color:#ffffff">
                 <option value="">All Sessions</option>
                 @foreach (var (id, label) in SessionOptions)
                 {
@@ -58,13 +58,13 @@
     </div>
 
     @* ── CHART ── *@
-    <div class="rounded-lg p-4 flex-1 min-h-0 flex flex-col" style="background:#1e293b;border:1px solid #334155">
+    <div class="rounded-lg p-4 flex-1 min-h-0 flex flex-col" style="background:#181818;border:1px solid #4d4d4d">
         <div class="flex items-baseline justify-between mb-3 shrink-0">
             <div>
                 <div class="text-xs font-semibold text-slate-400 uppercase tracking-widest">@_model.Title</div>
                 <div class="text-xs text-slate-600 mt-0.5">@CurrentDef.Description · @RangeCaption</div>
             </div>
-            <div class="font-mono text-lg font-semibold mt-0.5" style="color:#38bdf8">@_model.Headline</div>
+            <div class="font-mono text-lg font-semibold mt-0.5" style="color:#1ed760">@_model.Headline</div>
         </div>
 
         @if (_model.Points.Count == 0)

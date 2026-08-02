@@ -54,7 +54,7 @@
 
 .ls-divider:hover,
 .ls-divider.dragging {
-  background: #334155;
+  background: var(--border-button);
 }
 
 .ls-divider::after {
@@ -66,7 +66,7 @@
   height: 28px;
   transform: translate(-50%, -50%);
   border-radius: 1px;
-  background: #475569;
+  background: var(--border-light);
 }
 
 /* Small uppercase label preceding a stat value in the per-turn / summary stat strips. */
@@ -74,7 +74,7 @@
   font-size: 10px;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: #64748b;
+  color: var(--text-muted);
   white-space: nowrap;
 }
 
@@ -86,7 +86,7 @@
 }
 
 .ls-tip:focus-visible {
-  outline: 2px solid #38bdf8;
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
   border-radius: 2px;
 }
@@ -100,10 +100,10 @@
   max-width: 280px;
   padding: 6px 8px;
   border-radius: 4px;
-  background: #1e293b;
-  border: 1px solid #475569;
-  color: #cbd5e1;
-  font-family: Inter, system-ui, sans-serif;
+  background: var(--surface-card);
+  border: 1px solid var(--border-light);
+  color: var(--text-bright-secondary);
+  font-family: var(--font-ds);
   font-size: 11px;
   line-height: 1.4;
   pointer-events: none;
@@ -134,22 +134,23 @@
 /* Square icon buttons in a card's action row (Governance > Providers). The box matches the
    Tailwind-styled Edit/Remove buttons beside them — a 14px glyph inside p-1.5 is already a 26x26
    square — so these rules only carry the semantic colors, which are outside the slate/red/emerald
-   utility palette and so need real :hover rules rather than inline style. Radius is `rounded` (4px)
-   per DESIGN.md §7: never a pill on a button. */
+   utility palette and so need real :hover rules rather than inline style. Radius stays `rounded`
+   (4px), deliberately NOT pill/circular: these are dense per-row actions, and pill/circular
+   geometry is reserved for explicit CTA buttons (see .btn-* below) - see DESIGN.md §4. */
 .ls-card-action {
-  color: #94a3b8;
+  color: var(--text-secondary);
   transition: color var(--dur-fast) var(--ease-standard),
               background-color var(--dur-fast) var(--ease-standard);
 }
 
-/* Stop — the app's single accent (sky-400), for the neutral "take it out of service" action. */
+/* Stop — the app's single accent (Dark Green), for the neutral "take it out of service" action. */
 .ls-card-action-stop {
-  color: #38bdf8;
+  color: var(--accent);
 }
 
 .ls-card-action-stop:hover {
-  color: #7dd3fc;
-  background-color: rgba(56, 189, 248, 0.1);
+  color: var(--accent-variant);
+  background-color: var(--accent-hover-fill);
 }
 
 /* Play — the same emerald the Free badge and Add Provider button use for "on". */
@@ -185,11 +186,260 @@
   --dur-default: 200ms;
   --dur-slow: 300ms;
   --dur-exit: 120ms;
+  --dur-entrance: 420ms;
 
   --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
   --ease-in-quart: cubic-bezier(0.5, 0, 0.75, 0);
+
+  /* -------------------------------------------------------------------------
+     Aspirational design tokens (docs/gui/aspirational-design.md §1-3, §6).
+     Neutral surfaces/text/accent below are the near-black ramp + Dark Green
+     accent that supersede the previous slate-900/sky-400 identity. Semantic
+     health colors (success/warning/critical) are unchanged - they already
+     matched the aspirational spec.
+     ------------------------------------------------------------------------- */
+  --surface-base: #121212;
+  --surface-card: #181818;
+  --surface-interactive: #1f1f1f;
+  --surface-elevated-a: #252525;
+  --surface-elevated-b: #272727;
+  --surface-inset: #0b1120;
+
+  --text-primary: #ffffff;
+  --text-secondary: #b3b3b3;
+  --text-bright-secondary: #cbcbcb;
+  --text-highest: #fdfdfd;
+  --text-muted: #7c7c7c;
+
+  --accent: #1ed760;
+  --accent-variant: #1db954;
+  --accent-hover-fill: rgba(30, 215, 96, 0.1);
+
+  --color-success: #10b981;
+  --color-success-text: #34d399;
+  --color-warning: #f59e0b;
+  --color-warning-text: #fbbf24;
+  --color-critical: #ef4444;
+  --color-critical-text: #f87171;
+
+  --border-button: #4d4d4d;
+  --border-light: #7c7c7c;
+
+  --radius-card: 8px;
+  --radius-control: 12px;
+  --radius-pill: 9999px;
+
+  --shadow-elevated: 0 8px 8px rgba(0, 0, 0, 0.3);
+  --shadow-dialog: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-lift: 0 4px 12px rgba(0, 0, 0, 0.3);
+
+  /* CircularSp (Circular by Lineto) is Spotify's proprietary font and cannot be bundled without a
+     license. This stack substitutes freely-available geometric sans faces that approximate its
+     proportions, falling back to the previous Inter/system stack so text never looks broken on a
+     machine with none of them installed. */
+  --font-ds: "Century Gothic", "Avenir Next", "Poppins", Inter, system-ui, sans-serif;
+}
+
+/* ---------------------------------------------------------------------------
+   Aspirational design system - color, typography, buttons, cards, elevation.
+   Re-points the compiled blob's hardcoded colors/fonts at the tokens above,
+   following the same override pattern used for the motion tokens: rules here
+   come after the blob in source order, so a same-specificity selector wins
+   without needing !important. Inline `style="background:#1e293b"` etc. in
+   individual .razor files are NOT touched by these overrides (inline styles
+   always win the cascade) - those are updated file-by-file to match.
+   --------------------------------------------------------------------------- */
+html, body, #root {
+  background-color: var(--surface-base);
+  color: var(--text-primary);
+  font-family: var(--font-ds);
+}
+
+.font-mono {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--surface-base);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-button);
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-light);
+}
+
+.bg-slate-700 {
+  background-color: var(--surface-elevated-a) !important;
+}
+
+.border-slate-600,
+.border-slate-700 {
+  border-color: var(--border-button) !important;
+}
+
+.border-slate-700\/50 {
+  border-color: rgba(77, 77, 77, 0.5) !important;
+}
+
+.text-slate-100,
+.text-slate-200 {
+  color: var(--text-primary) !important;
+}
+
+.text-slate-300 {
+  color: var(--text-bright-secondary) !important;
+}
+
+.text-slate-400,
+.text-slate-500 {
+  color: var(--text-secondary) !important;
+}
+
+.text-slate-600 {
+  color: var(--text-muted) !important;
+}
+
+.text-sky-400 {
+  color: var(--accent) !important;
+}
+
+.text-amber-400 {
+  color: var(--color-warning-text) !important;
+}
+
+.text-emerald-400 {
+  color: var(--color-success-text) !important;
+}
+
+.text-red-400 {
+  color: var(--color-critical-text) !important;
+}
+
+.hover\:border-slate-500:hover {
+  border-color: var(--border-light) !important;
+}
+
+.hover\:bg-slate-700:hover {
+  background-color: var(--surface-elevated-a) !important;
+}
+
+.hover\:text-slate-200:hover {
+  color: var(--text-primary) !important;
+}
+
+input[type="text"],
+input[type="number"] {
+  background: var(--surface-interactive);
+  border-color: var(--border-light);
+  color: var(--text-primary);
+}
+
+input[type="text"]:focus,
+input[type="number"]:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--surface-base), 0 0 0 4px var(--accent);
+}
+
+/* ---- Buttons: Primary / Secondary / Ghost / Circular Action (aspirational-design.md §4) ----
+   Reserved for explicit call-to-action buttons (save, confirm, cancel, add). Dense per-row icon
+   actions (.ls-card-action-*) keep their small square treatment - pill/circular geometry on a
+   26x26 icon button would fight "data density without claustrophobia", not serve it. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 44px;
+  padding: 12px 16px;
+  border-radius: var(--radius-pill);
+  font-weight: 700;
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 1.4px;
+  cursor: pointer;
+  border: none;
+  transition: background-color var(--dur-fast) var(--ease-standard),
+              box-shadow var(--dur-fast) var(--ease-standard),
+              transform var(--dur-instant) var(--ease-standard);
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.btn-primary {
+  background: var(--surface-interactive);
+  color: var(--accent);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: #292929;
+  box-shadow: var(--shadow-lift);
+}
+
+.btn-secondary {
+  background: transparent;
+  border: 1.5px solid var(--accent);
+  color: var(--accent);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background-color: var(--accent-hover-fill);
+}
+
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--border-light);
+  color: var(--text-primary);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.btn-critical {
+  background: var(--color-critical);
+  color: var(--surface-base);
+}
+
+.btn-critical:hover:not(:disabled) {
+  box-shadow: var(--shadow-lift);
+}
+
+.btn-circular {
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--surface-base);
+}
+
+.btn-circular:hover:not(:disabled) {
+  transform: scale(1.02);
+  box-shadow: var(--shadow-lift);
+}
+
+/* ---- Cards (aspirational-design.md §4, §6) ---- */
+.ds-card {
+  background: var(--surface-card);
+  border-radius: var(--radius-card);
+  transition: box-shadow var(--dur-fast) var(--ease-standard);
+}
+
+.ds-card:hover {
+  box-shadow: var(--shadow-elevated);
 }
 
 /* Re-point the compiled blob's hardcoded durations/curves at the tokens. Same values

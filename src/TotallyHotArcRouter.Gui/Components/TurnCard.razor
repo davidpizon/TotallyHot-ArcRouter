@@ -5,7 +5,7 @@
    expands the routing decision log and the request/response text. Metric tooltips are floating
    data-tip tooltips (wwwroot/js/tooltips.js). *@
 <div class="rounded"
-     style="background:@(AgentColor)10;border:1px solid #334155;border-left:3px solid @AgentColor">
+     style="background:@(AgentColor)10;border:1px solid #4d4d4d;border-left:3px solid @AgentColor">
     @* Header: turn number · request excerpt · agent chip · timestamp · expand toggle. The sub-spans
        here are informational only (no tabindex/aria-describedby of their own): nesting a focusable
        element inside a <button> is an ARIA anti-pattern, so screen-reader users instead get the
@@ -38,7 +38,7 @@
         <span class="flex items-baseline gap-1 ls-tip" tabindex="0" aria-describedby="ls-tooltip"
               data-tip="Routing ROI: cost reduction from routing this task to a cheaper model vs. the worst-case expensive model">
             <span class="ls-stat-label">ROI</span>
-            <span class="font-mono text-xs" style="color:@(Turn.RoutingRoi > 0 ? "#10b981" : "#64748b")">
+            <span class="font-mono text-xs" style="color:@(Turn.RoutingRoi > 0 ? "#10b981" : "#7c7c7c")">
                 @(Turn.RoutingRoi > 0 ? $"{Turn.RoutingRoi.ToString("F1", CultureInfo.InvariantCulture)}% ↓" : "—")
             </span>
         </span>
@@ -60,7 +60,7 @@
         <span class="flex items-baseline gap-1 ls-tip" tabindex="0" aria-describedby="ls-tooltip"
               data-tip="Cache hit rate: percentage of prompt tokens served from the provider's prompt cache instead of being processed from scratch">
             <span class="ls-stat-label">Cache</span>
-            <span class="font-mono text-xs" style="color:@(Turn.CacheHitRate > 0 ? "#10b981" : "#64748b")">
+            <span class="font-mono text-xs" style="color:@(Turn.CacheHitRate > 0 ? "#10b981" : "#7c7c7c")">
                 @(Turn.CacheHitRate > 0 ? $"{Turn.CacheHitRate.ToString("F0", CultureInfo.InvariantCulture)}%" : "—")
             </span>
         </span>
@@ -83,7 +83,7 @@
 
     @if (_expanded)
     {
-        <div class="px-2.5 pb-2.5 space-y-2" style="border-top:1px solid #33415580;padding-top:8px">
+        <div class="px-2.5 pb-2.5 space-y-2" style="border-top:1px solid #4d4d4d80;padding-top:8px">
             @* Routing decision log, color-coded by step status *@
             <div class="space-y-1.5">
                 <div class="text-xs font-semibold text-slate-400 uppercase tracking-widest">Routing Decision</div>
@@ -127,7 +127,7 @@
                 <div>
                     <div class="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1">Request</div>
                     <pre class="ls-payload rounded p-2 text-xs font-mono"
-                         style="background:#020617;color:#cbd5e1;white-space:pre-wrap;word-break:break-word">@Turn.RequestSummary</pre>
+                         style="background:#121212;color:#cbcbcb;white-space:pre-wrap;word-break:break-word">@Turn.RequestSummary</pre>
                 </div>
             }
             @if (Turn.ResponseSummary is not null)
@@ -135,7 +135,7 @@
                 <div>
                     <div class="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1">Response</div>
                     <pre class="ls-payload rounded p-2 text-xs font-mono"
-                         style="background:#020617;color:#cbd5e1;white-space:pre-wrap;word-break:break-word">@Turn.ResponseSummary</pre>
+                         style="background:#121212;color:#cbcbcb;white-space:pre-wrap;word-break:break-word">@Turn.ResponseSummary</pre>
                 </div>
             }
         </div>

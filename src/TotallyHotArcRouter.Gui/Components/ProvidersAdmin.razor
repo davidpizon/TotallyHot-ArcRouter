@@ -11,7 +11,7 @@
     }
     else if (!Store.IsReachable)
     {
-        <div class="rounded-lg p-4 space-y-2" style="background:#1e293b;border:1px solid #ef444444">
+        <div class="rounded-lg p-4 space-y-2" style="background:#181818;border:1px solid #ef444444">
             <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
                 <Icon Name="alert-triangle" Size="14" /> Proxy management API unreachable
             </div>
@@ -23,7 +23,7 @@
                 <div class="text-xs text-slate-500 font-mono">@Store.LastError</div>
             }
             <button @onclick="Reload"
-                    class="rounded px-3 py-1.5 text-xs font-medium border border-slate-600 text-slate-300 hover:bg-slate-700 transition-colors">
+                    class="btn btn-ghost">
                 Retry
             </button>
         </div>
@@ -33,7 +33,7 @@
         <div class="flex items-center justify-between mb-3">
             <span class="text-xs text-slate-500 uppercase tracking-widest">Configured Providers</span>
             <button @onclick="OpenAdd"
-                    class="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 transition-colors">
+                    class="btn btn-secondary flex items-center gap-1.5">
                 <Icon Name="plus" Size="13" /> Add Provider
             </button>
         </div>
@@ -51,13 +51,13 @@
                 @* A stopped provider dims its border and title, matching PriceSourcesAdmin's disabled
                    cards. The proxy's routing path skips a stopped provider on the very next request. *@
                 <div @key="provider.Key" class="rounded-lg p-3"
-                     style="background:#1e293b;border:1px solid @(provider.Enabled ? "#334155" : "#33415580")">
+                     style="background:#181818;border:1px solid @(provider.Enabled ? "#4d4d4d" : "#4d4d4d80")">
                     @* Header: key + endpoint + actions *@
                     <div class="flex items-start justify-between gap-2">
                         <div class="min-w-0">
                             <div class="flex items-center gap-2">
                                 <Icon Name="server" Size="14" />
-                                <span class="text-sm font-semibold" style="color:@(provider.Enabled ? "#e2e8f0" : "#64748b")">@provider.Key</span>
+                                <span class="text-sm font-semibold" style="color:@(provider.Enabled ? "#ffffff" : "#7c7c7c")">@provider.Key</span>
                             </div>
                             <div class="text-xs text-slate-500 mt-0.5 font-mono truncate">@provider.BaseUrl</div>
                         </div>
@@ -137,7 +137,7 @@
                                        deliberate stop, mirroring the provider-level "stopped vs. unhealthy"
                                        distinction ProxyMiddleware already logs separately. *@
                                     <div @key="model.ModelName" class="flex items-center justify-between text-xs">
-                                        <span class="font-mono" style="color:@(model.Enabled && model.PresentUpstream ? "#cbd5e1" : "#64748b")">@model.ModelName</span>
+                                        <span class="font-mono" style="color:@(model.Enabled && model.PresentUpstream ? "#cbcbcb" : "#7c7c7c")">@model.ModelName</span>
                                         <div class="flex items-center gap-2">
                                             @if (!model.PresentUpstream)
                                             {
@@ -200,14 +200,14 @@
                                        @oninput="e => _draftName[provider.Key] = AsString(e.Value)"
                                        placeholder="model name"
                                        class="rounded px-2 py-1 text-xs font-mono flex-1 min-w-0"
-                                       style="background:#0f172a;border:1px solid #334155;color:#e2e8f0" />
+                                       style="background:#1f1f1f;border:1px solid #4d4d4d;color:#ffffff" />
                                 <input type="text" value="@GetDraft(_draftId, provider.Key)"
                                        @oninput="e => _draftId[provider.Key] = AsString(e.Value)"
                                        placeholder="provider model id (optional)"
                                        class="rounded px-2 py-1 text-xs font-mono flex-1 min-w-0"
-                                       style="background:#0f172a;border:1px solid #334155;color:#e2e8f0" />
+                                       style="background:#1f1f1f;border:1px solid #4d4d4d;color:#ffffff" />
                                 <button @onclick="() => AddModel(provider.Key)"
-                                        class="rounded px-2 py-1 text-xs text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/10 transition-colors shrink-0">
+                                        class="rounded-full px-2 py-1 text-xs text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/10 transition-colors shrink-0">
                                     Add
                                 </button>
                             </div>
@@ -220,7 +220,7 @@
                            so there is no separate discovery-results panel to click through anymore. *@
                         @if (provider.EndpointCapabilities is { } scan)
                         {
-                            <div class="mt-2 rounded p-2" style="background:#0f172a;border:1px solid #334155">
+                            <div class="mt-2 rounded p-2" style="background:#121212;border:1px solid #4d4d4d">
                                 @if (!string.IsNullOrEmpty(scan.ScanError))
                                 {
                                     <div class="text-xs text-amber-400">Scan incomplete: @scan.ScanError</div>
@@ -261,7 +261,7 @@
                         <div class="flex items-center justify-between mb-1.5">
                             <span class="text-xs text-slate-500 uppercase tracking-wider">Monthly Budget</span>
                             <button @onclick="() => SaveBudget(provider.Key)"
-                                    class="rounded px-2 py-0.5 text-xs text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/10 transition-colors">
+                                    class="rounded-full px-2 py-0.5 text-xs text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/10 transition-colors">
                                 Save
                             </button>
                         </div>
@@ -272,12 +272,12 @@
                                    @oninput="e => _draftDollarCap[provider.Key] = AsString(e.Value)"
                                    placeholder="monthly $ cap (optional)"
                                    class="rounded px-2 py-1 text-xs font-mono flex-1 min-w-0"
-                                   style="background:#0f172a;border:1px solid #334155;color:#e2e8f0" />
+                                   style="background:#1f1f1f;border:1px solid #4d4d4d;color:#ffffff" />
                             <input type="text" value="@GetBudgetDraft(_draftTokenCap, provider.Key, provider.TokenCap?.ToString(CultureInfo.InvariantCulture))"
                                    @oninput="e => _draftTokenCap[provider.Key] = AsString(e.Value)"
                                    placeholder="monthly token cap (optional)"
                                    class="rounded px-2 py-1 text-xs font-mono flex-1 min-w-0"
-                                   style="background:#0f172a;border:1px solid #334155;color:#e2e8f0" />
+                                   style="background:#1f1f1f;border:1px solid #4d4d4d;color:#ffffff" />
                         </div>
 
                         @if (provider.DollarCap is null && provider.TokenCap is null)
