@@ -18,6 +18,7 @@ jobs:
   analyze:
     name: Analyze (csharp)
     runs-on: ubuntu-latest
+    permissions: {}
 
     steps:
       - name: Explain compatibility mode
