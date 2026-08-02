@@ -1,0 +1,13 @@
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat code coverage">
+        <Configuration>
+          <!-- Exclude generated sources from the 80% gate so coverage reflects maintained code only. -->
+          <ExcludeByFile>**/obj/**/Telemetry.cs,**/obj/**/TelemetryGrpc.cs,**/*.g.cs,**/*.g.i.cs,**/*AssemblyAttributes.cs</ExcludeByFile>
+          <SkipAutoProps>true</SkipAutoProps>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>
