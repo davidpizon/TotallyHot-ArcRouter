@@ -9,31 +9,31 @@
                 var isActive = _activeFilter == filter;
                 <button @onclick="() => _activeFilter = filter"
                         class="px-3 py-1.5 text-xs font-medium transition-colors"
-                        style="background:@(isActive ? "#38bdf8" : "#1e293b");
-                               color:@(isActive ? "#0f172a" : "#64748b");
-                               border-right:@(filter != "Year" ? "1px solid #334155" : "none")">
+                        style="background:@(isActive ? "#1ed760" : "#181818");
+                               color:@(isActive ? "#121212" : "#7c7c7c");
+                               border-right:@(filter != "Year" ? "1px solid #4d4d4d" : "none")">
                     @filter
                 </button>
             }
         </div>
         <div class="ml-auto flex items-center gap-2">
             <input type="text" placeholder="From" class="rounded px-2 py-1.5 text-xs font-mono w-24"
-                   style="background:#1e293b;border:1px solid #334155;color:#64748b" />
+                   style="background:#181818;border:1px solid #4d4d4d;color:#7c7c7c" />
             <span class="text-slate-600 text-xs">—</span>
             <input type="text" placeholder="To" class="rounded px-2 py-1.5 text-xs font-mono w-24"
-                   style="background:#1e293b;border:1px solid #334155;color:#64748b" />
+                   style="background:#181818;border:1px solid #4d4d4d;color:#7c7c7c" />
         </div>
     </div>
 
     @* Charts row *@
     <div class="flex gap-3 flex-1 min-h-0">
         @* Token histogram *@
-        <div class="flex-1 rounded-lg p-4 flex flex-col min-h-0" style="background:#1e293b;border:1px solid #334155">
+        <div class="flex-1 rounded-lg p-4 flex flex-col min-h-0" style="background:#181818;border:1px solid #4d4d4d">
             <div class="mb-3 shrink-0">
                 <div class="text-xs font-semibold text-slate-400 uppercase tracking-widest">Token Volume Histogram</div>
                 <div class="flex items-center gap-4 mt-1.5">
                     <span class="flex items-center gap-1.5 text-xs font-mono text-slate-500">
-                        <span class="w-2 h-2 rounded-sm" style="background:#38bdf8"></span> Prompt
+                        <span class="w-2 h-2 rounded-sm" style="background:#1ed760"></span> Prompt
                     </span>
                     <span class="flex items-center gap-1.5 text-xs font-mono text-slate-500">
                         <span class="w-2 h-2 rounded-sm" style="background:#10b981"></span> Completion
@@ -46,7 +46,7 @@
         </div>
 
         @* Model market share *@
-        <div class="rounded-lg p-4 flex flex-col min-h-0" style="background:#1e293b;border:1px solid #334155;width:42%">
+        <div class="rounded-lg p-4 flex flex-col min-h-0" style="background:#181818;border:1px solid #4d4d4d;width:42%">
             <div class="mb-2 shrink-0">
                 <div class="text-xs font-semibold text-slate-400 uppercase tracking-widest">Model Market Share</div>
                 <div class="text-xs text-slate-600 mt-0.5">By execution volume</div>
@@ -91,7 +91,7 @@
             TokenBuckets.Select(b => b.Slot).ToList(),
             6_000_000m,
             [
-                new DistributionSeries("Prompt", "#38bdf8", TokenBuckets.Select(b => b.Prompt).ToList()),
+                new DistributionSeries("Prompt", "#1ed760", TokenBuckets.Select(b => b.Prompt).ToList()),
                 new DistributionSeries("Completion", "#10b981", TokenBuckets.Select(b => b.Completion).ToList()),
             ]);
         _histogramJson = ChartJson.Serialize(histogram);

@@ -14,7 +14,8 @@ companion [`MOTION.md`](MOTION.md), which *is* prescriptive. For component-level
 
 - **Data density without claustrophobia** — `TurnCard` and `ConversationCard` pack a full stat strip
   (ROI, Cost, Tok P/C, Steps, Cache, TTFT, Ctx, Model) into a two-line card, but every stat gets
-  consistent `gap-*`/`px-*`/`py-*` spacing and a `.ls-stat-label` (10px, uppercase, muted `#64748b`)
+  consistent `gap-*`/`px-*`/`py-*` spacing and a `.ls-stat-label` (10px, uppercase, muted `#7c7c7c`,
+  was `#64748b`)
   so the strip scans instead of blurring together.
 - **Hierarchy through weight and color tier, not decoration** — text hierarchy comes from the
   `font-bold` / `font-semibold` / `font-medium` steps and the five-tier slate text-color ladder
@@ -25,9 +26,9 @@ companion [`MOTION.md`](MOTION.md), which *is* prescriptive. For component-level
   a card when it crosses a budget threshold; `.card-hover`/`.transition-colors` are 150ms
   `cubic-bezier(.4,0,.2,1)` — fast enough to register as feedback, not a performance. See
   [`MOTION.md`](MOTION.md) for the full duration/easing token set and entrance patterns.
-- **Trust through restraint** — one accent (`sky-400`) plus three semantic colors (`emerald`/`amber`/
-  `red`) on a slate-navy base is the entire palette. No additional brand hues; no gradients anywhere
-  in `app.css`.
+- **Trust through restraint** — one accent (Dark Green `#1ed760`, was `sky-400`) plus three semantic
+  colors (`emerald`/`amber`/`red`) on a near-black neutral base is the entire palette. No additional
+  brand hues; no gradients anywhere in `app.css`.
 - **Progressive disclosure** — `ConversationSummary` shows one pinned stat strip; clicking a `TurnCard`
   header expands the step-by-step routing-decision log and request/response payload. Cost Analytics
   shows one chart at a time behind a ranked metric-picker pill row, not seven charts at once.
@@ -36,29 +37,51 @@ companion [`MOTION.md`](MOTION.md), which *is* prescriptive. For component-level
 
 Dark theme only — there is no light mode and no theme toggle (`dashboard.md` §Visual theme).
 
+As of this re-skin (see `docs/gui/aspirational-design.md` §1), the app moved off the
+slate-900/sky-400 palette onto a near-black ramp with a Dark Green (`#1ed760`) accent. Class names
+in `app.css` are unchanged (e.g. `.text-slate-400` still exists as a selector) — only the hex value
+each class/token resolves to changed, so Razor markup did not need to reference new class names.
+
 | Role | Value | Tailwind class equivalent |
 | --- | --- | --- |
-| Page background | `#0f172a` | `bg-slate-900` (root `html,body,#root`) |
-| Card / header / nav surface | `#1e293b` | `bg-slate-800` |
-| Hover surface | `#263548` | `.card-hover:hover` |
-| Border (default) | `#334155` | `border-slate-700` |
-| Border (hover / emphasis) | `#475569` | `border-slate-600`, `hover:border-slate-500` |
-| Text — primary | `#e2e8f0` | `text-slate-200` |
-| Text — bright | `#f1f5f9` | `text-slate-100` |
-| Text — secondary | `#94a3b8` | `text-slate-400` |
-| Text — muted | `#64748b` | `text-slate-500` |
-| Text — faint | `#475569` | `text-slate-600` |
-| Accent (info / active / focus ring) | `#38bdf8` | `text-sky-400` |
-| Positive / savings | `#10b981` (fill), `#34d399` text | `text-emerald-400` |
-| Warning | `#f59e0b` (fill), `#fbbf24` text | `text-amber-400` |
-| Critical | `#ef4444` (fill), `#f87171` text | `text-red-400` |
-| Inset surface — recessed | `#172033` | ticker row, active metric-picker pill |
-| Inset surface — payload block | `#020617` | `TurnCard` request/response `<pre>` blocks |
-| Inset surface — console | `#0b1120` | `ConsoleTab` log surface |
+| Page background | `#121212` | `bg-slate-900` (root `html,body,#root`) — was `#0f172a` |
+| Card / header / nav surface | `#181818` | `bg-slate-800` — was `#1e293b` |
+| Hover surface | `#1f1f1f` | `.card-hover:hover` — was `#263548` |
+| Border (default) | `#4d4d4d` | `border-slate-700` — was `#334155` |
+| Border (hover / emphasis) | `#7c7c7c` | `border-slate-600`, `hover:border-slate-500` — was `#475569` |
+| Text — primary | `#ffffff` | `text-slate-200` — was `#e2e8f0` |
+| Text — bright | `#fdfdfd` | `text-slate-100` — was `#f1f5f9` |
+| Text — bright secondary | `#cbcbcb` | `text-slate-300` — was `#cbd5e1` |
+| Text — secondary | `#b3b3b3` | `text-slate-400` — was `#94a3b8` |
+| Text — muted | `#7c7c7c` | `text-slate-500` — was `#64748b` |
+| Text — faint | `#4d4d4d` | `text-slate-600` — was `#475569` |
+| Accent (info / active / focus ring) | `#1ed760` (Dark Green) | `text-sky-400` — was `#38bdf8` sky |
+| Accent variant (border/outline) | `#1db954` | secondary/outlined button border — new, no prior equivalent |
+| Positive / savings | `#10b981` (fill), `#34d399` text | `text-emerald-400` — **unchanged** |
+| Warning | `#f59e0b` (fill), `#fbbf24` text | `text-amber-400` — **unchanged** |
+| Critical | `#ef4444` (fill), `#f87171` text | `text-red-400` — **unchanged** |
+| Inset surface — recessed | `#1f1f1f` | ticker row, active metric-picker pill — was `#172033` |
+| Inset surface — payload block | `#121212` | `TurnCard` request/response `<pre>` blocks — was `#020617` |
+| Inset surface — console | `#121212` | `ConsoleTab` log surface — was `#0b1120` |
 
 Inset surfaces sit *below* the page background rather than above it — they mark a region as a
 well (raw data, logs) rather than a card. They are the inverse of elevation: no border-lightening,
-no shadow, just a darker fill.
+no shadow, just a darker fill. With the near-black ramp so compressed (`#121212`→`#272727`), inset
+wells now share the base/interactive surfaces rather than getting their own darker-than-base tint —
+there is no headroom below `#121212` (the palette's explicit floor; pure black `#000000` is
+disallowed per `aspirational-design.md`).
+
+Semantic colors (amber/red/emerald) and the 12-color agent-hash palette (`Utils/ColorUtils.cs`,
+deterministic FNV-1a hash of agent name) are **data encodings, not chrome**, and are unchanged by
+this re-skin even where a hash happens to land on the old accent hex — see "Data-encoding palettes"
+below.
+
+`.ls-card-action-stop` (Governance › Providers card action row) previously reused the accent
+(`#38bdf8` sky) specifically because it read as a neutral, non-semantic hue next to the emerald
+Play and red Remove actions. Now that the accent itself is green (`#1ed760`), reusing it there would
+visually collide with Play's emerald. Stop is now a neutral gray (`#7c7c7c`, hover `#ffffff`) instead
+of accent-colored — the one place in the app where "neutral action" and "the accent color" have
+deliberately diverged.
 
 ### Data-encoding palettes
 
@@ -70,9 +93,9 @@ specific metric can be found by color in a dense two-line strip, without reading
 
 | Stat | Color | | Stat | Color |
 | --- | --- | --- | --- | --- |
-| ROI, Cache | `#10b981` emerald (zero → `#64748b`) | | Steps | `#f59e0b` amber |
-| Cost, Model | `#38bdf8` sky (fallback model → amber) | | TTFT | `#fb7185` rose |
-| Tok P/C | `#a78bfa` violet | | Ctx | `#cbd5e1` slate-300 |
+| ROI, Cache | `#10b981` emerald (zero → `#7c7c7c`) | | Steps | `#f59e0b` amber |
+| Cost, Model | `#1ed760` accent green (fallback model → amber, was `#38bdf8` sky) | | TTFT | `#fb7185` rose |
+| Tok P/C | `#a78bfa` violet | | Ctx | `#cbcbcb` (was `#cbd5e1` slate-300) |
 
 Rose and violet appear **only** here. They are categorical labels, not brand colors — do not use
 them for chrome, borders, or status.
@@ -85,7 +108,7 @@ one shade lighter (`-300`) for contrast against that tint. The pattern is always
 | --- | --- | --- | --- |
 | Error banners, failed pulls | `#ef444411` | `#ef444444` | `#fca5a5` red-300 |
 | Routing step — Warn | `rgba(245,158,11,0.12)` | `#f59e0b` (left, 2px) | `#fcd34d` amber-300 |
-| Routing step — Info | `rgba(56,189,248,0.1)` | `#38bdf8` (left, 2px) | `#7dd3fc` sky-300 |
+| Routing step — Info | `rgba(30,215,96,0.1)` | `#1ed760` (left, 2px) | `#86efac` (was sky-300 `#7dd3fc`) |
 | Routing step — OK | `rgba(16,185,129,0.08)` | `#10b981` (left, 2px) | `#6ee7b7` emerald-300 |
 
 Fonts: **Inter** for all UI text, **JetBrains Mono** for every numeric/monospace value (token counts,
@@ -125,33 +148,36 @@ actually appear in `app.css`.
 
 - **Cards** (`ConversationCard`, `TurnCard`, ticker stat cards) — `bg-slate-800` surface,
   `border-slate-700` (1px), `rounded-lg` (8px, `.5rem`) corners, `.card-hover` on interactive cards
-  (`background-color` transition to `#263548` over 150ms). Agent identity and fallback state are
-  communicated by tinting the card's left border and background with the agent/alert color rather
-  than adding an icon.
+  (`background-color` transition to `#1f1f1f` over 150ms, was `#263548`). Agent identity and fallback
+  state are communicated by tinting the card's left border and background with the agent/alert color
+  rather than adding an icon.
 - **Badges / pills** — `rounded-full` (`.rounded-full`, pill shape) is used for status dots and small
   count/label chips (e.g. the agent-color dot, fallback `⚠` badge); larger containers use `rounded`
   (4px) or `rounded-lg` (8px), never a pill. The ranked metric-picker pill row in Cost Analytics
   follows the same `rounded-full` pattern.
-- **Status bars** — `.progress-bar-track` (`background:#1e3a5f`, `rounded` 2px, 6px tall) hosts the
-  OK/WARNING/CRITICAL utilization fill for provider budgets and price-source caps.
+- **Status bars** — `.progress-bar-track` (`background:#1f1f1f`, was `#1e3a5f`, `rounded` 2px, 6px
+  tall) hosts the OK/WARNING/CRITICAL utilization fill for provider budgets and price-source caps.
 - **Card action buttons** (the glyph row in a Governance › Providers card header) — a 26×26 square
   (`rounded p-1.5` around a 14px `Icon`), `rounded` 4px, never a pill, 150ms `transition-colors`.
   Edit stays on the slate ramp via Tailwind utilities (`slate-400`→`slate-200`); the semantic ones
-  live in `.ls-card-action-*` because their hexes are off the utility palette: Stop `#38bdf8` (the
-  one accent), Play `#10b981`, Remove `#dc2626`. Remove is the card's only destructive glyph — a
-  second, separate delete control is not the pattern — and it opens a type-to-confirm dialog
+  live in `.ls-card-action-*` because their hexes are off the utility palette: Stop `#7c7c7c` (neutral
+  gray — was the accent `#38bdf8` before accent turned green; kept distinct from Play's emerald, see
+  §2), Play `#10b981`, Remove `#dc2626`. Remove is the card's only destructive glyph — a second,
+  separate delete control is not the pattern — and it opens a type-to-confirm dialog
   (`RemoveProviderDialog`, built on the §4.1 shell) rather than acting on the click.
-- **Inputs** (Live Stream conversation search) — `background:#0f172a`, `border:1px solid #334155`,
-  `color:#e2e8f0`; on focus the border becomes the accent `#38bdf8` (150ms `border-color` transition).
-  No pill inputs — search/text inputs are square-cornered via the shared input rule, not `.ls-*`.
+- **Inputs** (Live Stream conversation search) — `background:#121212`, `border:1px solid #4d4d4d`,
+  `color:#ffffff`; on focus the border becomes the accent `#1ed760` (150ms `border-color` transition,
+  was `#38bdf8`). No pill inputs — search/text inputs are square-cornered via the shared input rule,
+  not `.ls-*`.
 - **Navigation** (5-tab bar: Live Stream / Cost Analytics / Model Distribution / Governance /
   Console) — `.tab-indicator` transitions all properties over 200ms `cubic-bezier(.4,0,.2,1)`; active
   vs. inactive is a text-color step (`slate-200`/`slate-100` vs. `slate-400`/`slate-500`), not a
   background fill.
 - **Tooltips** (`.ls-tooltip`, shared floating tooltip driven by `data-tip` + `tooltips.js`) —
-  `bg-slate-800`, `border:1px solid #475569`, `rounded` (4px), `box-shadow: 0 4px 12px rgba(0,0,0,0.5)`
-  — the one heavy shadow value in the whole stylesheet, reserved for floating/elevated UI (§6).
-  Focus-visible state: `outline: 2px solid #38bdf8; outline-offset: 2px`.
+  `bg-slate-800`, `border:1px solid #7c7c7c` (was `#475569`), `rounded` (4px),
+  `box-shadow: 0 4px 12px rgba(0,0,0,0.5)` — the one heavy shadow value in the whole stylesheet,
+  reserved for floating/elevated UI (§6). Focus-visible state:
+  `outline: 2px solid #1ed760; outline-offset: 2px` (was `#38bdf8`).
 - **Modals / windows** — same `bg-slate-800`/`border-slate-700` card treatment, elevated with the
   same `0 4px 12px rgba(0,0,0,0.5)` shadow as tooltips. **`SettingsModal.razor` ("System Settings")
   is the reference implementation every new window matches** — see §4.1.
@@ -169,7 +195,7 @@ The shell, verbatim:
 <div class="overlay-backdrop fixed inset-0 z-50 flex items-center justify-center"
      style="background-color:rgba(0,0,0,0.7);backdrop-filter:blur(4px)"
      @onclick="OnClose">
-    <div class="overlay-panel w-full max-w-md rounded-lg border border-slate-700" style="background:#1e293b"
+    <div class="overlay-panel w-full max-w-md rounded-lg border border-slate-700" style="background:#181818"
          @onclick:stopPropagation="true">
         <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
             <span class="text-sm font-semibold text-slate-200 tracking-wide uppercase">Window Title</span>
@@ -192,7 +218,7 @@ The load-bearing details:
 | --- | --- |
 | Backdrop | `.overlay-backdrop`, `rgba(0,0,0,0.7)` + `backdrop-filter:blur(4px)`, `z-50`, centers its panel |
 | Dismissal | Backdrop `@onclick` closes; panel carries `@onclick:stopPropagation="true"` so body clicks don't |
-| Panel | `.overlay-panel`, `max-w-md`, `rounded-lg`, `border-slate-700`, `background:#1e293b` |
+| Panel | `.overlay-panel`, `max-w-md`, `rounded-lg`, `border-slate-700`, `background:#181818` (was `#1e293b`) |
 | Header | `px-5 py-4`, `border-b border-slate-700`, title left / close `x` right |
 | Title | `text-sm font-semibold text-slate-200 tracking-wide uppercase` — **not** a large heading |
 | Close glyph | `<Icon Name="x" Size="16" />`, `slate-400`→`slate-200` on hover, 150ms `transition-colors`. **Requires an `aria-label`** — the button's only content is an SVG, so without one a screen reader announces an unnamed button |
@@ -218,7 +244,8 @@ the header, dismissal behavior, and close API identical regardless.
   panels (`wwwroot/js/split-pane.js`); left panel defaults to 35% width (`.ls-left{width:35%}`),
   clamped 20–65% while dragging. The divider itself (`.ls-divider`) is 8px wide with a 4px `rounded`
   hit target and a 2px `rounded` grip mark.
-- **Scrollbars**: thin (4px) custom scrollbar, `#334155` thumb on `#0f172a` track, `#475569` on hover.
+- **Scrollbars**: thin (4px) custom scrollbar, `#4d4d4d` thumb on `#121212` track, `#7c7c7c` on hover
+  (was `#334155`/`#0f172a`/`#475569`).
 
 ## 6. Elevation & Depth
 
@@ -228,9 +255,9 @@ above floating UI:
 
 | Level | Treatment | Use |
 | --- | --- | --- |
-| Base | `bg-slate-900` (`#0f172a`), no shadow | Page background |
-| Surface | `bg-slate-800` (`#1e293b`), 1px `border-slate-700`, no shadow | Cards, header, nav, panels |
-| Hover | Surface + `background-color:#263548` (150ms transition) | `.card-hover` interactive cards |
+| Base | `bg-slate-900` (`#121212`, was `#0f172a`), no shadow | Page background |
+| Surface | `bg-slate-800` (`#181818`, was `#1e293b`), 1px `border-slate-700`, no shadow | Cards, header, nav, panels |
+| Hover | Surface + `background-color:#1f1f1f` (150ms transition, was `#263548`) | `.card-hover` interactive cards |
 | Floating / elevated | Surface + `box-shadow: 0 4px 12px rgba(0,0,0,0.5)` | Tooltips (`.ls-tooltip`), Settings modal |
 | Dragging | Surface + `box-shadow: 0 12px 28px -6px rgba(0,0,0,.55)` + `transform: scale(1.02)` | The lifted card in `PriceSourcesAdmin`'s drag-to-rank list |
 
@@ -244,9 +271,9 @@ static elevation.
 - **Do** build every new window/modal on the System Settings shell (§4.1) — same backdrop, panel,
   header, close glyph, and `OnClose` callback. New chrome for a new window is the thing to avoid.
 - **Do** stay dark-only — no light-mode variant, no theme toggle.
-- **Do** keep *chrome* to one accent (`sky-400`) plus three semantic colors on slate neutrals — no
-  additional brand hues. The stat-strip categorical hues and the `-300` on-tint text tier (§2) are
-  data encodings and are the only sanctioned exceptions.
+- **Do** keep *chrome* to one accent (Dark Green `#1ed760`, was `sky-400`) plus three semantic colors
+  on near-black neutrals — no additional brand hues. The stat-strip categorical hues and the `-300`
+  on-tint text tier (§2) are data encodings and are the only sanctioned exceptions.
 - **Do** use `rounded-full` for status dots and small chips, `rounded`/`rounded-lg` for cards and
   containers — never a pill-shaped card or button.
 - **Don't** use gradients — none exist anywhere in `app.css`; solid fills and tinted borders carry

@@ -4,7 +4,7 @@ const TONE = {
   ok: { bg: "#10b9811a", text: "var(--status-ok-text)", border: "#10b98140" },
   warning: { bg: "var(--state-hover-amber)", text: "var(--status-warn-text)", border: "var(--border-warning)" },
   critical: { bg: "var(--state-hover-red)", text: "var(--status-critical-text)", border: "var(--border-critical)" },
-  info: { bg: "#38bdf81a", text: "var(--status-info-text)", border: "#38bdf840" },
+  info: { bg: "#1ed7601a", text: "var(--status-info-text)", border: "#1ed76040" },
   neutral: { bg: "var(--slate-700)", text: "var(--text-primary)", border: "var(--border-default)" },
 };
 

@@ -1,36 +1,51 @@
 /* ==========================================================================
    TotallyHotArcRouter — Color tokens
    Source of truth: src/TotallyHotArcRouter.Gui/wwwroot/css/app.css (compiled Tailwind
-   output of the dashboard's dark theme) + docs/TotallyHotArcRouter-gui-dashboard.md
-  "Visual theme" section.
+   output of the dashboard's dark theme) + docs/gui/DESIGN.md §2 "Visual Theme".
    Dark theme only — the product has no light mode / no theme toggle.
+
+   Re-skinned from the original slate-900/sky-400 theme to a near-black/Dark-Green
+   (#1ed760) theme. Variable NAMES below are unchanged (--slate-*, --sky-400, and
+   every semantic alias) even though most no longer describe their own value
+   (--slate-900 now holds #121212, not a slate hue) — this mirrors how app.css itself
+   was re-skinned (Tailwind class names like .bg-slate-800 kept, hex values
+   repointed), and it means the generated `_ds_bundle.js`/`_ds_manifest.json` (which
+   reference these names, not literal hexes) keep working without regeneration.
+   Read the trailing comment on each line for what a name now actually renders as.
    ========================================================================== */
 
 :root {
-  /* ---- Slate scale (base neutrals, exact Tailwind slate values used) ---- */
-  --slate-50:  #f8fafc;
-  --slate-100: #f1f5f9;
-  --slate-200: #e2e8f0;
-  --slate-300: #cbd5e1;
-  --slate-400: #94a3b8;
-  --slate-500: #64748b;
-  --slate-600: #475569;
-  --slate-700: #334155;
-  --slate-800: #1e293b;
-  --slate-900: #0f172a;
+  /* ---- "Slate" scale (name kept for compatibility; values are now the near-black ramp) ---- */
+  --slate-50:  #ffffff; /* was #f8fafc — now text-primary */
+  --slate-100: #fdfdfd; /* was #f1f5f9 — now text-heading / highest emphasis */
+  --slate-200: #ffffff; /* was #e2e8f0 — now text-primary */
+  --slate-300: #cbcbcb; /* was #cbd5e1 — now text-bright-secondary */
+  --slate-400: #b3b3b3; /* was #94a3b8 — now text-secondary */
+  --slate-500: #7c7c7c; /* was #64748b — now muted text / border-light */
+  --slate-600: #7c7c7c; /* was #475569 — now border-light / faint text */
+  --slate-700: #4d4d4d; /* was #334155 — now border-button (default border) */
+  --slate-800: #181818; /* was #1e293b — now surface-card */
+  --slate-900: #121212; /* was #0f172a — now surface-base (deepest, no pure #000000) */
 
-  /* ---- Status / accent hues (exact hex used across the dashboard) ---- */
-  --sky-400:     #38bdf8; /* accent / info / active nav */
+  /* ---- Accent (name kept; now Dark Green, was sky-400) ---- */
+  --sky-400:     #1ed760; /* accent — was #38bdf8. Functional only: buttons, active states, focus rings */
+  --accent-variant: #1db954; /* new: border/outline variant of the accent, no prior slate/sky equivalent */
+  --sky-300:     #86efac; /* lighter accent-hover tint on tinted surfaces — was #7dd3fc */
+
+  /* ---- Semantic hues (exact hex used across the dashboard) — unchanged by this re-skin ---- */
   --emerald-400: #34d399; /* positive text */
-  --emerald-500: #10b981; /* positive fill (savings, OK dot) */
+  --emerald-500: #10b981; /* positive fill (savings, OK dot, healthy) */
   --amber-400:   #fbbf24; /* warning text */
   --amber-500:   #f59e0b; /* warning fill / breach flash */
   --red-400:     #f87171; /* critical text */
   --red-500:     #ef4444; /* critical fill / breach flash */
+  --red-600:     #dc2626; /* remove/destructive action base (darker than critical fill) */
 
-  /* ---- Agent color palette (deterministic FNV-1a hash → color, Utils/ColorUtils.cs) ---- */
+  /* ---- Agent color palette (deterministic FNV-1a hash → color, Utils/ColorUtils.cs) ----
+     Data encoding, not chrome — unaffected by the re-skin even where a hash happens to land
+     on the OLD accent hex (agent-2). Never assigned by hand, always computed from the name. */
   --agent-1:  #10b981; /* emerald */
-  --agent-2:  #38bdf8; /* cyan */
+  --agent-2:  #38bdf8; /* cyan (coincides with the pre-re-skin accent hex — unrelated, unchanged) */
   --agent-3:  #818cf8; /* indigo */
   --agent-4:  #fb7185; /* rose */
   --agent-5:  #f59e0b; /* amber */
@@ -43,25 +58,30 @@
   --agent-12: #06b6d4; /* cyan-2 */
 
   /* ---- Semantic surface aliases ---- */
-  --surface-page:      var(--slate-900); /* #0f172a page background */
-  --surface-card:      var(--slate-800); /* #1e293b cards, header, nav, modals */
-  --surface-card-hover: #263548;         /* .card-hover:hover exact value */
+  --surface-page:      var(--slate-900); /* #121212 page background */
+  --surface-card:      var(--slate-800); /* #181818 cards, header, nav, modals */
+  --surface-card-hover: #1f1f1f;          /* .card-hover:hover exact value, was #263548 */
+  --surface-interactive: #1f1f1f;         /* button backgrounds, inputs (new alias) */
+  --surface-elevated-a: #252525;          /* secondary card surface (new alias) */
+  --surface-elevated-b: #272727;          /* alternate card surface (new alias) */
   --surface-inset:     var(--slate-900); /* inputs, progress track base */
-  --surface-track:     #1e3a5f;          /* .progress-bar-track background */
+  --surface-track:     #1f1f1f;           /* .progress-bar-track background, was #1e3a5f */
 
   /* ---- Semantic border aliases ---- */
-  --border-default: var(--slate-700);       /* #334155 */
-  --border-subtle:  #33415580;              /* slate-700/50 */
-  --border-strong:  var(--slate-600);       /* #475569 */
+  --border-default: var(--slate-700);       /* #4d4d4d */
+  --border-subtle:  #4d4d4d80;              /* border-default/50, was slate-700/50 */
+  --border-strong:  var(--slate-600);       /* #7c7c7c */
+  --border-button:  var(--slate-700);       /* #4d4d4d — subtle borders on dark (new alias) */
+  --border-light:   var(--slate-600);       /* #7c7c7c — outlined buttons, dividers (new alias) */
   --border-warning:  #f59e0b66;             /* amber-500/40 */
   --border-critical: #ef444466;             /* red-500/40 */
 
   /* ---- Semantic text aliases (descending emphasis) ---- */
-  --text-primary:   var(--slate-200); /* #e2e8f0 */
-  --text-secondary: var(--slate-400); /* #94a3b8 */
-  --text-tertiary:  var(--slate-500); /* #64748b */
-  --text-muted:     var(--slate-600); /* #475569 */
-  --text-heading:   var(--slate-100); /* #f1f5f9 */
+  --text-primary:   var(--slate-200); /* #ffffff */
+  --text-secondary: var(--slate-400); /* #b3b3b3 */
+  --text-tertiary:  var(--slate-500); /* #7c7c7c */
+  --text-muted:     var(--slate-600); /* #7c7c7c */
+  --text-heading:   var(--slate-100); /* #fdfdfd */
 
   /* ---- Semantic status aliases ---- */
   --status-ok-text:       var(--emerald-400);
@@ -73,9 +93,9 @@
   --status-info-text:     var(--sky-400);
 
   /* ---- Interaction state aliases ---- */
-  --state-hover-bg:    var(--slate-700);
+  --state-hover-bg:    #252525; /* was var(--slate-700) — now a step lighter than card, matches app.css */
   --state-hover-amber: #f59e0b1a; /* amber-500/10 */
   --state-hover-red:   #ef44441a; /* red-500/10 */
+  --state-hover-neutral: rgba(255, 255, 255, 0.08); /* new: neutral hover, e.g. the Stop action */
   --focus-ring:        var(--sky-400);
 }
-
