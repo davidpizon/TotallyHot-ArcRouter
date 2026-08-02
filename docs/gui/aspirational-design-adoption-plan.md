@@ -185,6 +185,21 @@ Measure real-world impact and refine without violating the principles.
 - Any exception to the principles must include written rationale and expiration date.
 - Documentation updates are mandatory for behavior changes that affect hierarchy, motion, or disclosure.
 
+## Documentation Update Strategy
+
+As the aspirational design is adopted through the phases, the design documentation in `docs/gui/` must be updated to reflect the new standards:
+
+- **DESIGN.md** — Update color, typography, components, and layout guidance to match the consolidated aspirational design
+- **MOTION.md** — Update motion triggers, timing, and easing to match the new semantic animation contract
+- **Any tab-specific design docs** — Align Live Stream, Cost Analytics, Governance, and Console documentation with unified component language and principles
+- **Update timeline:** 
+  - Phase 1: Begin documenting the new guidance
+  - Phase 2: Update DESIGN.md and MOTION.md with foundation changes
+  - Phase 3: Update tab-specific guidance as each workstream completes
+  - Phase 5: Finalize all docs for release
+
+The aspirational-design.md file serves as the **source of truth** during adoption. As each phase completes and designs ship, content from aspirational-design.md progressively replaces the previous guidance in DESIGN.md, MOTION.md, and related docs until the aspirational design **becomes the actual design standard**.
+
 ## Risks and Mitigations
 
 - Risk: Dense telemetry surfaces become harder to scan after compression tweaks.
