@@ -4,7 +4,7 @@
 <div class="overlay-backdrop fixed inset-0 z-50 flex items-center justify-center"
      style="background-color:rgba(0,0,0,0.7);backdrop-filter:blur(4px)"
      @onclick="OnCancel">
-    <div class="overlay-panel w-full max-w-md rounded-lg border border-slate-700" style="background:#1e293b"
+    <div class="overlay-panel w-full max-w-md rounded-lg border border-slate-700" style="background:#181818"
          @onclick:stopPropagation="true">
         <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
             <span class="text-sm font-semibold text-slate-200 tracking-wide uppercase">
@@ -25,7 +25,7 @@
                     <input type="text" value="@_key" @oninput="e => _key = AsString(e.Value)"
                            placeholder="e.g. ollama"
                            class="w-full rounded px-3 py-2 text-sm font-mono"
-                           style="background:#0f172a;border:1px solid #334155;color:#e2e8f0" />
+                           style="background:#121212;border:1px solid #4d4d4d;color:#ffffff" />
                 </div>
             }
 
@@ -34,7 +34,7 @@
                 <input type="text" value="@_baseUrl" @oninput="e => _baseUrl = AsString(e.Value)"
                        placeholder="https://api.example.com"
                        class="w-full rounded px-3 py-2 text-sm font-mono"
-                       style="background:#0f172a;border:1px solid #334155;color:#e2e8f0" />
+                       style="background:#121212;border:1px solid #4d4d4d;color:#ffffff" />
             </div>
 
             <div class="grid grid-cols-2 gap-2">
@@ -43,14 +43,14 @@
                     <input type="text" value="@_authHeaderName" @oninput="e => _authHeaderName = AsString(e.Value)"
                            placeholder="Authorization"
                            class="w-full rounded px-2 py-2 text-sm font-mono"
-                           style="background:#0f172a;border:1px solid #334155;color:#e2e8f0" />
+                           style="background:#121212;border:1px solid #4d4d4d;color:#ffffff" />
                 </div>
                 <div>
                     <div class="text-xs text-slate-500 mb-1">Scheme</div>
                     <input type="text" value="@_authHeaderScheme" @oninput="e => _authHeaderScheme = AsString(e.Value)"
                            placeholder="Bearer (blank for raw)"
                            class="w-full rounded px-2 py-2 text-sm font-mono"
-                           style="background:#0f172a;border:1px solid #334155;color:#e2e8f0" />
+                           style="background:#121212;border:1px solid #4d4d4d;color:#ffffff" />
                 </div>
             </div>
 
@@ -58,7 +58,7 @@
                 <div class="text-xs text-slate-500 mb-1">Credential</div>
                 <select value="@_mode" @onchange="OnModeChanged"
                         class="w-full rounded px-2 py-2 text-sm"
-                        style="background:#0f172a;border:1px solid #334155;color:#e2e8f0">
+                        style="background:#121212;border:1px solid #4d4d4d;color:#ffffff">
                     <option value="@CredentialMode.EnvVar">Environment variable</option>
                     <option value="@CredentialMode.Literal">Literal key</option>
                     <option value="@CredentialMode.None">None (local/unauthenticated)</option>
@@ -66,7 +66,7 @@
             </div>
 
             <div>
-                <label class="flex items-center gap-2 text-sm cursor-pointer" style="color:#e2e8f0">
+                <label class="flex items-center gap-2 text-sm cursor-pointer" style="color:#ffffff">
                     <input type="checkbox" checked="@_isFree" @onchange="e => _isFree = e.Value is true" />
                     <span>Free provider</span>
                 </label>
@@ -83,7 +83,7 @@
                     <input type="text" value="@_apiKeyEnvVar" @oninput="e => _apiKeyEnvVar = AsString(e.Value)"
                            placeholder="OPENAI_API_KEY"
                            class="w-full rounded px-3 py-2 text-sm font-mono"
-                           style="background:#0f172a;border:1px solid #334155;color:#e2e8f0" />
+                           style="background:#121212;border:1px solid #4d4d4d;color:#ffffff" />
                 </div>
             }
             else if (_mode == CredentialMode.Literal)
@@ -95,7 +95,7 @@
                     <input type="password" value="@_apiKey" @oninput="e => _apiKey = AsString(e.Value)"
                            placeholder="@(IsNew ? "sk-..." : (HasApiKey ? "•••••••••••• (saved)" : "none saved yet"))"
                            class="w-full rounded px-3 py-2 text-sm font-mono"
-                           style="background:#0f172a;border:1px solid #334155;color:#e2e8f0" />
+                           style="background:#121212;border:1px solid #4d4d4d;color:#ffffff" />
                     @* The stored secret is never sent back to the client, so the field is always blank on
                        edit. Confirm a key exists (until the user types a replacement) so a saved key is
                        visibly indicated rather than looking unset. *@
@@ -131,18 +131,18 @@
                                 <input type="text" value="@header.Name" @oninput="e => header.Name = AsString(e.Value)"
                                        placeholder="Header-Name"
                                        class="rounded px-2 py-1 text-xs font-mono flex-1 min-w-0"
-                                       style="background:#0f172a;border:1px solid #334155;color:#e2e8f0" />
+                                       style="background:#121212;border:1px solid #4d4d4d;color:#ffffff" />
                                 <select value="@(header.UseEnvVar ? "env" : "literal")"
                                         @onchange="e => SetHeaderSource(header, e)"
                                         class="rounded px-1 py-1 text-xs shrink-0"
-                                        style="background:#0f172a;border:1px solid #334155;color:#e2e8f0">
+                                        style="background:#121212;border:1px solid #4d4d4d;color:#ffffff">
                                     <option value="literal">Value</option>
                                     <option value="env">Env var</option>
                                 </select>
                                 <input type="@(header.UseEnvVar ? "text" : "password")" value="@header.Value" @oninput="e => header.Value = AsString(e.Value)"
                                        placeholder="@(header.UseEnvVar ? "ENV_VAR_NAME" : (header.HasStoredLiteralValue ? "•••••••• (saved, blank keeps it)" : "value"))"
                                        class="rounded px-2 py-1 text-xs font-mono flex-1 min-w-0"
-                                       style="background:#0f172a;border:1px solid #334155;color:#e2e8f0" />
+                                       style="background:#121212;border:1px solid #4d4d4d;color:#ffffff" />
                                 <button type="button" title="Remove header" @onclick="() => RemoveHeader(header)"
                                         class="text-red-400 hover:text-red-300 transition-colors shrink-0">
                                     <Icon Name="x" Size="12" />
@@ -168,8 +168,8 @@
                 <button @onclick="Save"
                         disabled="@(!CanSave)"
                         class="flex-1 rounded px-3 py-2 text-xs font-semibold transition-colors"
-                        style="background:@(CanSave ? "#10b981" : "#1e293b");color:@(CanSave ? "#0f172a" : "#475569");
-                               border:1px solid @(CanSave ? "transparent" : "#334155");cursor:@(CanSave ? "pointer" : "not-allowed")">
+                        style="background:@(CanSave ? "#10b981" : "#181818");color:@(CanSave ? "#121212" : "#7c7c7c");
+                               border:1px solid @(CanSave ? "transparent" : "#4d4d4d");cursor:@(CanSave ? "pointer" : "not-allowed")">
                     Save
                 </button>
             </div>

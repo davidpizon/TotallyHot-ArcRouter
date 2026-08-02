@@ -136,7 +136,7 @@ export function LiveStream() {
                       {t.log.map(([status, msg], i) => (
                         <div key={i} style={{
                           fontSize: 11, fontFamily: "var(--font-mono)", padding: "3px 6px", borderRadius: 4,
-                          background: status === "ok" ? "#10b9811a" : status === "warn" ? "var(--state-hover-amber)" : "#38bdf81a",
+                          background: status === "ok" ? "#10b9811a" : status === "warn" ? "var(--state-hover-amber)" : "#1ed7601a",
                           color: status === "ok" ? "var(--status-ok-text)" : status === "warn" ? "var(--status-warn-text)" : "var(--status-info-text)",
                         }}>{msg}</div>
                       ))}
