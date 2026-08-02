@@ -7,8 +7,8 @@ export function Modal({ open, title, onClose, children }) {
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(15,23,42,0.7)",
-        backdropFilter: "blur(2px)",
+        background: "rgba(0,0,0,0.7)",
+        backdropFilter: "blur(4px)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
