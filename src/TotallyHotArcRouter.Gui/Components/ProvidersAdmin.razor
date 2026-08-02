@@ -40,7 +40,7 @@
 
         @if (!string.IsNullOrEmpty(_opError))
         {
-            <div class="rounded px-3 py-2 mb-3 text-xs" style="background:#ef444411;border:1px solid #ef444444;color:#fca5a5">
+            <div class="rounded px-3 py-2 mb-3 text-xs ds-step-critical">
                 @_opError
             </div>
         }
@@ -107,8 +107,8 @@
                            than leaving it to be discovered inside the edit dialog. *@
                         @if (provider.IsFree)
                         {
-                            <span class="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider"
-                                  style="background:rgba(16,185,129,0.12);color:#34d399" title="Requests to this provider report a cost of $0.00">Free</span>
+                            <span class="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider ds-badge-success"
+                                  title="Requests to this provider report a cost of $0.00">Free</span>
                         }
                     </div>
 
@@ -199,13 +199,11 @@
                                 <input type="text" value="@GetDraft(_draftName, provider.Key)"
                                        @oninput="e => _draftName[provider.Key] = AsString(e.Value)"
                                        placeholder="model name"
-                                       class="rounded px-2 py-1 text-xs font-mono flex-1 min-w-0"
-                                       style="background:#1f1f1f;border:1px solid #4d4d4d;color:#ffffff" />
+                                       class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input" />
                                 <input type="text" value="@GetDraft(_draftId, provider.Key)"
                                        @oninput="e => _draftId[provider.Key] = AsString(e.Value)"
                                        placeholder="provider model id (optional)"
-                                       class="rounded px-2 py-1 text-xs font-mono flex-1 min-w-0"
-                                       style="background:#1f1f1f;border:1px solid #4d4d4d;color:#ffffff" />
+                                       class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input" />
                                 <button @onclick="() => AddModel(provider.Key)"
                                         class="rounded-full px-2 py-1 text-xs text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/10 transition-colors shrink-0">
                                     Add
@@ -235,19 +233,19 @@
                                     <div class="flex flex-wrap gap-1">
                                         @if (scan.OpenAiCompatible)
                                         {
-                                            <span class="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider" style="background:rgba(16,185,129,0.12);color:#34d399">OpenAI-compatible</span>
+                                            <span class="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider ds-badge-success">OpenAI-compatible</span>
                                         }
                                         @if (scan.LmStudioNative)
                                         {
-                                            <span class="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider" style="background:rgba(16,185,129,0.12);color:#34d399">LM Studio native</span>
+                                            <span class="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider ds-badge-success">LM Studio native</span>
                                         }
                                         @if (scan.OllamaNative)
                                         {
-                                            <span class="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider" style="background:rgba(16,185,129,0.12);color:#34d399">Ollama native</span>
+                                            <span class="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider ds-badge-success">Ollama native</span>
                                         }
                                         @if (scan.AnthropicCompatible)
                                         {
-                                            <span class="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider" style="background:rgba(16,185,129,0.12);color:#34d399">Anthropic-compatible</span>
+                                            <span class="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider ds-badge-success">Anthropic-compatible</span>
                                         }
                                     </div>
                                 }
@@ -271,13 +269,11 @@
                             <input type="text" value="@GetBudgetDraft(_draftDollarCap, provider.Key, provider.DollarCap?.ToString(CultureInfo.InvariantCulture))"
                                    @oninput="e => _draftDollarCap[provider.Key] = AsString(e.Value)"
                                    placeholder="monthly $ cap (optional)"
-                                   class="rounded px-2 py-1 text-xs font-mono flex-1 min-w-0"
-                                   style="background:#1f1f1f;border:1px solid #4d4d4d;color:#ffffff" />
+                                   class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input" />
                             <input type="text" value="@GetBudgetDraft(_draftTokenCap, provider.Key, provider.TokenCap?.ToString(CultureInfo.InvariantCulture))"
                                    @oninput="e => _draftTokenCap[provider.Key] = AsString(e.Value)"
                                    placeholder="monthly token cap (optional)"
-                                   class="rounded px-2 py-1 text-xs font-mono flex-1 min-w-0"
-                                   style="background:#1f1f1f;border:1px solid #4d4d4d;color:#ffffff" />
+                                   class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input" />
                         </div>
 
                         @if (provider.DollarCap is null && provider.TokenCap is null)

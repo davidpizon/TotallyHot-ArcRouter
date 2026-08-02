@@ -442,6 +442,92 @@ input[type="number"]:focus {
   box-shadow: var(--shadow-elevated);
 }
 
+/* ---- Form inputs — prefer this over inline `style="background:#1f1f1f;border:..."` ---- */
+.ds-input {
+  background: var(--surface-interactive);
+  border: 1px solid var(--border-button);
+  color: var(--text-primary);
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-family: inherit;
+  font-size: 0.875rem;
+  transition: border-color var(--dur-fast) var(--ease-standard);
+}
+
+.ds-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--surface-base), 0 0 0 4px var(--accent);
+}
+
+.ds-input::placeholder {
+  color: var(--text-muted);
+}
+
+.ds-input-secondary {
+  color: var(--text-secondary);
+}
+
+.ds-input-muted {
+  color: var(--text-muted);
+}
+
+/* ---- Tinted semantic surfaces (routing steps, badges, alerts) — prefer these over inline style lists ---- */
+.ds-step-success {
+  background: rgba(16, 185, 129, 0.08);
+  border-left: 2px solid #10b981;
+  color: #6ee7b7;
+}
+
+.ds-step-warning {
+  background: rgba(245, 158, 11, 0.12);
+  border-left: 2px solid #f59e0b;
+  color: #fcd34d;
+}
+
+.ds-step-info {
+  background: rgba(56, 189, 248, 0.1);
+  border-left: 2px solid #38bdf8;
+  color: #7dd3fc;
+}
+
+.ds-step-critical {
+  background: #ef444411;
+  border-left: 2px solid #ef4444;
+  color: #fca5a5;
+}
+
+/* ---- Tinted badge / pill backgrounds (for status indicators) ---- */
+.ds-badge-success {
+  background: rgba(16, 185, 129, 0.12);
+  color: #34d399;
+}
+
+.ds-badge-warning {
+  background: #f59e0b22;
+  color: #f59e0b;
+  border: 1px solid #f59e0b44;
+}
+
+.ds-badge-critical {
+  background: #ef444411;
+  border: 1px solid #ef444444;
+  color: #fca5a5;
+}
+
+/* ---- Static card surfaces (prefer over inline `background:#181818;border:1px solid #4d4d4d`) ---- */
+.ds-surface-card {
+  background: var(--surface-card);
+  border: 1px solid var(--border-button);
+  border-radius: var(--radius-card);
+}
+
+.ds-surface-elevated {
+  background: var(--surface-elevated-a);
+  border: 1px solid var(--border-button);
+  border-radius: var(--radius-card);
+}
+
 /* Re-point the compiled blob's hardcoded durations/curves at the tokens. Same values
    as before for .card-hover and the tab indicator; the only behavior change is that
    bare `ease` becomes the house standard curve. */

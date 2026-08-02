@@ -178,11 +178,11 @@
                                     border-top:1px solid @(outcome.Succeeded ? "#10b98122" : "#ef444422")">
                             @if (outcome.Succeeded)
                             {
-                                <span style="color:#10b981">✅ Last pull refreshed @outcome.PriceCount.ToString("N0", CultureInfo.InvariantCulture) prices.</span>
+                                <span class="text-emerald-400">✅ Last pull refreshed @outcome.PriceCount.ToString("N0", CultureInfo.InvariantCulture) prices.</span>
                             }
                             else
                             {
-                                <span style="color:#fca5a5">⚠️ Last pull failed: @outcome.Error</span>
+                                <span class="text-red-300">⚠️ Last pull failed: @outcome.Error</span>
                             }
                         </div>
                     }

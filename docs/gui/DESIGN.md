@@ -316,7 +316,28 @@ introduced; new floating UI should pick whichever tier matches its role rather t
 opacity. The drag-lift value is reserved for the card physically under the pointer and should not be
 reused for static elevation.
 
-## 7. Do's and Don'ts
+## 7. Inline Styles Policy
+
+**Principle:** Prefer CSS variables and classes over inline styles. Inline styles are permitted only when:
+1. **Dynamic/conditional values** — color or size changes based on runtime state (e.g., `style="color:@(isActive ? #fff : #999)"`)
+2. **Data-driven sizing** — dimensions from calculation or loop iteration (e.g., `style="width:@(item.Width)px"`)
+3. **Semantic data-encoding glyphs** — when a glyph must stay a specific color (e.g., sky-blue in the Info routing step) despite global class overrides for the same color in chrome (§2.2)
+
+**Antipattern — hardcoded static colors:** Every color like `#1f1f1f`, `#181818`, `#4d4d4d`, `#10b981`, `#f59e0b`, `#ef4444` should be a CSS variable or utility class, never hardcoded inline. 
+
+**Refactor path:** When adding a new component or touching existing markup:
+- Extract hardcoded color+style tuples to a new `.ds-*` class (or extend an existing one)
+- Use `var(--token-name)` in the class, not the hex, so theming changes propagate
+- Reserve inline `style=` only for the three cases above
+
+**Common patterns (prefer these classes over building inline styles):**
+- `.overlay-backdrop` — modal backdrop with `rgba(0,0,0,0.7)` + `blur(4px)` ✓ (already exists)
+- Semantic form inputs — use `.ds-input` (TBD) instead of hand-rolling `background: var(--surface-interactive); border: 1px solid var(--border-light)`
+- Tinted semantic surfaces (error/warning/success steps) — use `.ds-step-*` classes instead of inline color lists
+
+See §4.2's `.btn-*` classes and §4's `.overlay-backdrop` as the reference pattern — static styling belongs in CSS, dynamic behavior stays inline.
+
+## 8. Do's and Don'ts
 
 - **Do** build every new window/modal on the System Settings shell (§4.1) — same backdrop, panel,
   header, close glyph, and `OnClose` callback. New chrome for a new window is the thing to avoid.
@@ -330,8 +351,13 @@ reused for static elevation.
 - **Do** use `rounded-full`/`.btn-*` for status dots, small chips, and explicit CTA buttons (§4.2);
   use `rounded`/`rounded-lg` for cards, containers, and dense per-row actions — never a pill-shaped
   card, and never a pill on a dense repeated row action.
+- **Do** prefer CSS classes and variables over inline styles — extract static colors to `.ds-*` classes
+  (§7). Reserve `style=` for dynamic/conditional values, data-driven sizing, and semantic data-encoding
+  exceptions.
 - **Don't** use gradients — none exist anywhere in `app.css`; solid fills and tinted borders carry
   all color meaning.
+- **Don't** hardcode colors inline — use `var(--token-name)` in CSS classes instead, so theme changes
+  propagate without touching markup.
 - **Don't** introduce a third shadow opacity for elevated UI — reuse `--shadow-lift` (0.3 opacity) for
   floating/hover UI or `--shadow-dialog` (0.5 opacity) for modals (§6). The drag-lift shadow is the
   sole further exception and is reserved for drag state.
