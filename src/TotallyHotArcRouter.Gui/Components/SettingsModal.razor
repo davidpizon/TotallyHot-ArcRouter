@@ -25,14 +25,12 @@
             {
                 <div class="grid grid-cols-2 gap-3">
                     <button @onclick="@(() => StartAction("reset"))"
-                            class="btn btn-ghost flex items-center justify-center gap-2"
-                            style="border-color:#f59e0b;color:#f59e0b">
+                            class="btn btn-ghost-warning flex items-center justify-center gap-2">
                         <Icon Name="rotate-ccw" Size="14" />
                         Reset Stats
                     </button>
                     <button @onclick="@(() => StartAction("purge"))"
-                            class="btn btn-ghost flex items-center justify-center gap-2"
-                            style="border-color:#ef4444;color:#ef4444">
+                            class="btn btn-ghost-critical flex items-center justify-center gap-2">
                         <Icon Name="trash" Size="14" />
                         Clear History
                     </button>
@@ -41,8 +39,7 @@
             else
             {
                 @* Confirmation step: the action only enables once the confirmation word is typed exactly. *@
-                <div class="space-y-3 rounded border p-4"
-                     style="border-color:@(_activeAction == "reset" ? "#f59e0b44" : "#ef444444");background:#121212">
+                <div class="space-y-3 @(_activeAction == "reset" ? "ds-destructive-box-warning" : "ds-destructive-box-critical")">
                     <p class="text-xs text-slate-400 leading-5">
                         This action is <span class="text-red-400 font-semibold">irreversible</span>. Type
                         <span class="font-mono text-slate-200 bg-slate-700 px-1.5 py-0.5 rounded text-xs">@Required</span>

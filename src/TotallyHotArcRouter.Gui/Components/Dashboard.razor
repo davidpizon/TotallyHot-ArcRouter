@@ -3,9 +3,9 @@
 @inject LiveDataStore LiveDataStore
 @inject ProviderAdminStore ProviderStore
 
-<div class="flex flex-col h-screen overflow-hidden" style="background:#121212">
+<div class="flex flex-col h-screen overflow-hidden ds-surface-base">
     @* ── HEADER ── *@
-    <header style="background:#181818;border-bottom:1px solid #4d4d4d">
+    <header class="ds-toolbar">
         <div class="flex items-center justify-between px-4 py-2.5">
             @* Brand *@
             <div class="flex items-center gap-2">
@@ -19,28 +19,28 @@
                 @if (_breached.Count > 0 && _approaching.Count > 0)
                 {
                     <button @onclick="HandleAlertClick" class="flex items-center gap-2 hover:opacity-80 transition-opacity">
-                        <span class="font-semibold text-xs" style="color:#ef4444">🚨 @_breached.Count BREACHED</span>
+                        <span class="font-semibold text-xs text-red-400">🚨 @_breached.Count BREACHED</span>
                         <span class="text-slate-600">|</span>
-                        <span class="font-semibold text-xs" style="color:#f59e0b">⚠️ @_approaching.Count APPROACHING LIMIT</span>
+                        <span class="font-semibold text-xs text-amber-400">⚠️ @_approaching.Count APPROACHING LIMIT</span>
                     </button>
                 }
                 else if (_breached.Count > 0)
                 {
                     <button @onclick="HandleAlertClick" class="flex items-center gap-2 hover:opacity-80 transition-opacity">
-                        <span class="font-semibold text-xs" style="color:#ef4444">🚨 @_breached.Count PROVIDER BREACHED</span>
+                        <span class="font-semibold text-xs text-red-400">🚨 @_breached.Count PROVIDER BREACHED</span>
                     </button>
                 }
                 else if (_approaching.Count > 0)
                 {
                     <button @onclick="HandleAlertClick" class="flex items-center gap-2 hover:opacity-80 transition-opacity">
-                        <span class="font-semibold text-xs" style="color:#f59e0b">⚠️ @_approaching.Count PROVIDER APPROACHING LIMIT</span>
+                        <span class="font-semibold text-xs text-amber-400">⚠️ @_approaching.Count PROVIDER APPROACHING LIMIT</span>
                     </button>
                 }
                 else
                 {
                     <div class="flex items-center gap-2">
-                        <span class="pulse-dot w-1.5 h-1.5 rounded-full" style="background:#10b981"></span>
-                        <span class="text-xs font-medium" style="color:#10b981">System Status: OK</span>
+                        <span class="pulse-dot w-1.5 h-1.5 rounded-full text-emerald-400"></span>
+                        <span class="text-xs font-medium text-emerald-400">System Status: OK</span>
                     </div>
                 }
             </div>
@@ -56,41 +56,35 @@
         </div>
 
         @* Ticker row *@
-        <div class="flex items-center gap-6 px-4 py-1.5" style="border-top:1px solid #121212;background:#1f1f1f">
+        <div class="flex items-center gap-6 px-4 py-1.5" style="border-top:1px solid var(--surface-base);background:var(--surface-interactive)">
             <div class="flex items-center gap-2">
                 <span class="text-xs text-slate-500">Total Saved</span>
-                <span class="font-mono text-xs font-semibold" style="color:#10b981">$142.36</span>
+                <span class="font-mono text-xs font-semibold text-emerald-400">$142.36</span>
             </div>
-            <div class="w-px h-3" style="background:#4d4d4d"></div>
+            <div class="w-px h-3 ds-divider"></div>
             <div class="flex items-center gap-2">
                 <span class="text-xs text-slate-500">System Tokens</span>
                 <span class="font-mono text-xs font-semibold text-slate-200">12.4M</span>
             </div>
-            <div class="w-px h-3" style="background:#4d4d4d"></div>
+            <div class="w-px h-3 ds-divider"></div>
             <div class="flex items-center gap-2">
                 <span class="text-xs text-slate-500">Avg. Cost Reduction</span>
-                <span class="font-mono text-xs font-semibold" style="color:#10b981">74.20% ↓</span>
+                <span class="font-mono text-xs font-semibold text-emerald-400">74.20% ↓</span>
             </div>
             <div class="ml-auto flex items-center gap-1.5">
-                <span class="pulse-dot w-1.5 h-1.5 rounded-full" style="background:#10b981"></span>
+                <span class="pulse-dot w-1.5 h-1.5 rounded-full text-emerald-400"></span>
                 <span class="text-xs font-mono text-slate-600">LIVE</span>
             </div>
         </div>
     </header>
 
     @* ── TAB BAR ── *@
-    <nav class="flex items-end px-4 gap-0 shrink-0" style="background:#181818;border-bottom:1px solid #4d4d4d">
+    <nav class="flex items-end px-4 gap-0 shrink-0 ds-toolbar">
         @foreach (var (tab, icon, label) in Tabs)
         {
             var isActive = _activeTab == tab;
             <button @onclick="() => _activeTab = tab"
-                    class="tab-indicator relative flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium"
-                    style="color:@(isActive ? "#1ed760" : "#7c7c7c");
-                           background:@(isActive ? "#121212" : "transparent");
-                           border-top:1px solid @(isActive ? "#4d4d4d" : "transparent");
-                           border-left:1px solid @(isActive ? "#4d4d4d" : "transparent");
-                           border-right:1px solid @(isActive ? "#4d4d4d" : "transparent");
-                           border-bottom:1px solid @(isActive ? "#121212" : "transparent");
+                    class="tab-indicator tab-button @(isActive ? "active" : "inactive")"
                            border-radius:6px 6px 0 0;
                            margin-bottom:-1px">
                 <Icon Name="@icon" Size="13" />

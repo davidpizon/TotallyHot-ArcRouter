@@ -8,10 +8,7 @@
         {
             var isActive = _view == view;
             <button @onclick="() => _view = view"
-                    class="rounded px-3 py-1.5 text-xs font-medium transition-colors"
-                    style="background:@(isActive ? "#4d4d4d" : "transparent");
-                           color:@(isActive ? "#ffffff" : "#7c7c7c");
-                           border:1px solid @(isActive ? "#7c7c7c" : "#4d4d4d")">
+                    class="gov-tab @(isActive ? "active" : "inactive")">
                 @label
             </button>
         }
