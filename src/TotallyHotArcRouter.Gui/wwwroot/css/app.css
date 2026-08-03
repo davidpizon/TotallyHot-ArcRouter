@@ -961,7 +961,18 @@ input[type="number"] {
 }
 
 .overlay-panel {
+  display: flex;
+  flex-direction: column;
+  max-width: min(90vw, 700px);
+  min-width: min(100% - 2rem, 400px);
+  max-height: calc(100vh - 120px);
+  overflow: hidden;
   animation: overlay-panel-enter var(--dur-slow) var(--ease-out-quart);
+}
+
+.overlay-content {
+  overflow-y: auto;
+  flex: 1;
 }
 
 /* A row arriving in a list. Rows prepend (newest first), so the row settles downward
