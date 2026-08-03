@@ -18,6 +18,7 @@
     <StaticWebAssetsEnabled>false</StaticWebAssetsEnabled>
     <!-- Referencing the MAUI app pulls in its Windows packaging targets, which reject AnyCPU; pin a RID. -->
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <EnableMsixTooling>false</EnableMsixTooling>
     <WindowsPackageType>None</WindowsPackageType>
   </PropertyGroup>
