@@ -20,7 +20,7 @@ permissions:
 jobs:
   submit-nuget:
     name: submit-nuget
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,9 +35,8 @@ jobs:
             9.0.x
             10.0.x
 
-      # TotallyHotArcRouter.Gui targets net10.0-windows with <UseMaui>true/>, which causes the
-      # MAUI SDK to require all platform workloads (including maui-tizen) when restoring on Linux.
-      # Installing the full maui workload set satisfies that requirement.
+      # TotallyHotArcRouter.Gui targets net10.0-windows with <UseMaui>true/>, so this workflow
+      # runs on Windows and installs MAUI workloads before restore.
       - name: Install MAUI workloads
         run: dotnet workload install maui
 
@@ -45,10 +44,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.nuget/packages
-          key: Linux-nuget-${{ hashFiles('**/*.csproj', '**/*.props') }}
-          restore-keys: Linux-nuget-
+          key: Windows-nuget-${{ hashFiles('**/*.csproj', '**/*.props') }}
+          restore-keys: Windows-nuget-
 
       - name: Restore all projects
+        shell: bash
         run: |
           set -euo pipefail
           project_files=$(find . -type f \
