@@ -72,7 +72,7 @@
                 <span class="font-mono text-xs font-semibold text-emerald-400">74.20% ↓</span>
             </div>
             <div class="ml-auto flex items-center gap-1.5">
-                <span class="pulse-dot w-1.5 h-1.5 rounded-full text-emerald-400"></span>
+                <span class="pulse-dot w-1.5 h-1.5 rounded-full indicator-active"></span>
                 <span class="text-xs font-mono text-slate-600">LIVE</span>
             </div>
         </div>
@@ -85,8 +85,7 @@
             var isActive = _activeTab == tab;
             <button @onclick="() => _activeTab = tab"
                     class="tab-indicator tab-button @(isActive ? "active" : "inactive")"
-                           border-radius:6px 6px 0 0;
-                           margin-bottom:-1px">
+                    style="border-radius:6px 6px 0 0;margin-bottom:-1px">
                 <Icon Name="@icon" Size="13" />
                 @label
             </button>
