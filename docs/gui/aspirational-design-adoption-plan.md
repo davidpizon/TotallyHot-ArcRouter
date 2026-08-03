@@ -226,3 +226,13 @@ The aspirational-design.md file serves as the **source of truth** during adoptio
 Use this status line for each phase in weekly updates:
 
 - Phase X | Status: Not Started/In Progress/Blocked/Done | Owner | ETA | Gate Risks | Next 3 Actions
+
+## Current Status (this adoption pass)
+
+- Phase 0 | Status: Done (source-inspection only, no visual/screenshot evidence) | — | — | No rendered screenshots exist for this environment | See [`phase0-gap-matrix.md`](phase0-gap-matrix.md); capture real before/after screenshots on a Windows dev box
+- Phase 1 | Status: Done | — | — | — | Principle-first language and conflict resolution landed directly in DESIGN.md/MOTION.md rather than as a separate interim doc
+- Phase 2 | Status: Done | — | — | Compiled Tailwind blob at the top of `app.css` cannot be regenerated (no build pipeline) — recoloring relies on override rules + per-file inline-style edits, which is more fragile than a token-driven build | Consider adding a real Tailwind build step if further token churn is expected
+- Phase 3 | Status: Done (build/test-verified; not visually re-verified) | — | — | Conversion covered all 14 component files (shared shell + all 5 tabs); `dotnet build`/`dotnet test` both pass (0 warnings, 161/161 tests) — but no rendered screenshot exists to visually confirm the result matches intent pixel-for-pixel | Spot-check each of the 4+1 tabs visually on a Windows dev box
+- Phase 4 | Status: Done (motion was already largely conformant) | — | — | Value Tick pattern remains unimplemented (pre-existing gap, not introduced by this pass) | Wire Value Tick when per-stat previous-value tracking is added
+- Phase 5 | Status: Partial | — | — | Coverage/CI gate for the Gui project is not enforced in CI (pre-existing, Windows-only exclusion) | See [`phase5-conformance-checklist.md`](phase5-conformance-checklist.md); get explicit design/engineering sign-off
+- Phase 6 | Status: Not Started (cannot start — no release/usage exists yet) | — | — | — | See [`phase6-post-release-calibration.md`](phase6-post-release-calibration.md) template

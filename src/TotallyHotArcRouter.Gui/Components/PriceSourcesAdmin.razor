@@ -26,7 +26,7 @@
                 <div class="text-xs text-slate-500 font-mono">@Store.LastError</div>
             }
             <button @onclick="Reload"
-                    class="rounded px-3 py-1.5 text-xs font-medium border border-slate-600 text-slate-300 hover:bg-slate-700 transition-colors">
+                    class="btn btn-ghost">
                 Retry
             </button>
         </div>
@@ -46,10 +46,7 @@
                 }
                 <button @onclick="PullNow"
                         disabled="@Store.IsRefreshing"
-                        class="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium border transition-colors"
-                        style="border-color:@(Store.IsRefreshing ? "#4d4d4d80" : "#7c7c7c");
-                               color:@(Store.IsRefreshing ? "#7c7c7c" : "#cbcbcb");
-                               cursor:@(Store.IsRefreshing ? "not-allowed" : "pointer")">
+                        class="btn btn-secondary flex items-center gap-1.5">
                     <Icon Name="rotate-ccw" Size="13" />
                     @(Store.IsRefreshing ? "Pulling…" : "Pull Now")
                 </button>
@@ -181,11 +178,11 @@
                                     border-top:1px solid @(outcome.Succeeded ? "#10b98122" : "#ef444422")">
                             @if (outcome.Succeeded)
                             {
-                                <span style="color:#10b981">✅ Last pull refreshed @outcome.PriceCount.ToString("N0", CultureInfo.InvariantCulture) prices.</span>
+                                <span class="text-emerald-400">✅ Last pull refreshed @outcome.PriceCount.ToString("N0", CultureInfo.InvariantCulture) prices.</span>
                             }
                             else
                             {
-                                <span style="color:#fca5a5">⚠️ Last pull failed: @outcome.Error</span>
+                                <span class="text-red-300">⚠️ Last pull failed: @outcome.Error</span>
                             }
                         </div>
                     }

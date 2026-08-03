@@ -68,8 +68,8 @@ flowchart TD
 
 ### Conversation Cards (Scrollable)
 Each card is a button that selects the conversation. Styling:
-- **Unselected**: Dark background (#1e293b), slate border (#334155)
-- **Selected**: Highlighted background (#263548), cyan border (#38bdf8)
+- **Unselected**: Dark background (`--surface-card`, #181818), neutral border (`--border-button`, #4d4d4d)
+- **Selected**: Highlighted background (`--surface-elevated-a`, #252525), accent border (`--accent`, #1ed760 — updated from the old cyan/sky-400 accent as part of aspirational-design adoption, see [`DESIGN.md`](DESIGN.md) §2)
 - **Fallback warning**: Orange left border + warning badge if any turn in session had fallback routing
 
 **Card Content** (top to bottom):
@@ -284,7 +284,8 @@ Extend `MockData` class to include a few sample `Conversation` objects, each con
 
 ### Styling
 - Leverage existing Tailwind CSS + inline styles from current codebase
-- Maintain dark theme (#1e293b backgrounds, #334155 borders, #10b981/#38bdf8/#f59e0b accents)
+- Maintain dark theme (#181818 card backgrounds, #4d4d4d borders, #10b981/#1ed760/#f59e0b accents —
+  see [`DESIGN.md`](DESIGN.md) §2 for the full token table)
 - Add subtle animations on expand/collapse (smooth transition)
 
 ---
