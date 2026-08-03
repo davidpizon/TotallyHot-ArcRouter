@@ -358,6 +358,7 @@ input[type="number"]:focus {
   justify-content: center;
   gap: 0.5rem;
   min-height: 44px;
+  margin: 0.25rem;
   padding: 12px 16px;
   border-radius: var(--radius-pill);
   font-weight: 700;
