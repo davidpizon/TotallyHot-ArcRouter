@@ -153,7 +153,7 @@
                         </div>
                         <button @onclick="() => Toggle(source)"
                                 title="@(source.Enabled ? "Disable this source" : "Enable this source")"
-                                class="shrink-0 flex items-center gap-1.5 rounded px-2 py-1 text-xs font-semibold border transition-colors toggle-source @(source.Enabled ? "enabled" : "disabled")">
+                                class="shrink-0 flex items-center gap-1.5 rounded px-2 py-1 text-xs font-semibold border transition-colors @(source.Enabled ? "toggle-enabled" : "toggle-disabled")">
                             <span class="w-1.5 h-1.5 rounded-full @(source.Enabled ? "toggle-dot-enabled" : "toggle-dot-disabled")"></span>
                             @(source.Enabled ? "ENABLED" : "DISABLED")
                         </button>

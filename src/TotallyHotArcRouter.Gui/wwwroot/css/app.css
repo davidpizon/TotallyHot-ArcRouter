@@ -799,6 +799,11 @@ input[type="number"]:focus {
   border: none;
 }
 
+/* ---- Expanded section with top border ---- */
+.expanded-section-border {
+  border-top: 1px solid rgba(77, 77, 77, 0.5);
+}
+
 /* ---- Console viewport styling ---- */
 .ls-console-viewport {
   background: var(--surface-base);

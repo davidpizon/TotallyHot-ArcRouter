@@ -12,10 +12,10 @@
 
 <div class="flex flex-col h-full min-h-0">
     @* Toolbar *@
-    <div class="flex items-center justify-between px-3 py-2 shrink-0 ds-toolbar rounded-t-lg">
+    <div class="flex items-center justify-between px-3 py-2 shrink-0 ds-toolbar">
         <button @onclick="ToggleAutoScroll"
                 class="btn-toggle @(_autoScroll ? "active" : "")">
-            <span class="w-1.5 h-1.5 rounded-full @(_autoScroll ? "pulse-dot" : "")" style="background:@(_autoScroll ? "#10b981" : "#7c7c7c")"></span>
+            <span class="w-1.5 h-1.5 rounded-full @(_autoScroll ? "pulse-dot toggle-dot-enabled" : "toggle-dot-disabled")"></span>
             Auto-Scroll: @(_autoScroll ? "ON" : "OFF")
         </button>
 
