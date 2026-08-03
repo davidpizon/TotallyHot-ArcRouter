@@ -88,11 +88,10 @@
                    card beneath it - that card's @onpointerenter is what drives the live reflow. A short
                    transition animates only the lift (shadow/scale); the slot change itself is instant because
                    the list is re-keyed rather than transformed. *@
-                <div @key="source.Name" class="rounded-lg p-3 space-y-2.5 @(canDrag ? "drag-enabled" : "drag-disabled") @(isLifted ? "card-lifted" : "")"
+                <div @key="source.Name" class="rounded-lg p-3 space-y-2.5 @(canDrag ? "drag-enabled" : "drag-disabled") @(isLifted ? "card-lifted" : "") ds-surface-card-draggable"
                      @onpointerdown="e => OnPointerDown(source, e)"
                      @onpointerenter="e => OnPointerEnter(source, e)"
-                     style="background:#181818;border:1px solid @cardBorder;cursor:@cursor;
-                            transition:box-shadow .15s ease, transform .15s ease">
+                     style="border-color:@cardBorder;cursor:@cursor">
                     @* Header: rank controls + name + toggle *@
                     <div class="flex items-start justify-between gap-2">
                         <div class="flex items-start gap-2 min-w-0">
@@ -153,7 +152,7 @@
                         </div>
                         <button @onclick="() => Toggle(source)"
                                 title="@(source.Enabled ? "Disable this source" : "Enable this source")"
-                                class="shrink-0 flex items-center gap-1.5 rounded px-2 py-1 text-xs font-semibold border transition-colors toggle-source @(source.Enabled ? "enabled" : "disabled")">
+                                class="shrink-0 flex items-center gap-1.5 rounded px-2 py-1 text-xs font-semibold border transition-colors @(source.Enabled ? "toggle-enabled" : "toggle-disabled")">
                             <span class="w-1.5 h-1.5 rounded-full @(source.Enabled ? "toggle-dot-enabled" : "toggle-dot-disabled")"></span>
                             @(source.Enabled ? "ENABLED" : "DISABLED")
                         </button>

@@ -791,12 +791,19 @@ input[type="number"]:focus {
   border-left: 1px solid var(--border-button);
   border-right: 1px solid var(--border-button);
   border-bottom: 1px solid var(--surface-base);
+  border-radius: 6px 6px 0 0;
+  margin-bottom: -1px;
 }
 
 .tab-button.inactive {
   color: var(--text-muted);
   background: transparent;
   border: none;
+}
+
+/* ---- Expanded section with top border ---- */
+.expanded-section-border {
+  border-top: 1px solid rgba(77, 77, 77, 0.5);
 }
 
 /* ---- Console viewport styling ---- */
@@ -891,6 +898,14 @@ input[type="number"]:focus {
   background: var(--surface-card);
   border: 1px solid var(--border-button);
   border-radius: var(--radius-card);
+}
+
+/* ---- Draggable card variant (inherits surface-card, adds transition for drag lift) ---- */
+.ds-surface-card-draggable {
+  background: var(--surface-card);
+  border: 1px solid var(--border-button);
+  border-radius: var(--radius-card);
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
 }
 
 .ds-surface-elevated {
