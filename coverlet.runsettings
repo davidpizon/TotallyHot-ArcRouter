@@ -1,11 +1,24 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+  Referenced by .github/workflows/dotnet-ci.yml's "dotnet test" step (settings coverlet.runsettings)
+  and by AGENTS.md's 80% line coverage requirement. Excludes code that isn't meaningfully unit-testable
+  so the coverage bar reflects code this repo actually owns and tests:
+    - Generated gRPC/protobuf stubs (TotallyHot.ArcRouter.Telemetry.Contract, compiled from
+      src/Protos/telemetry.proto into both TotallyHotArcRouter and TotallyHotArcRouter.Gui.Telemetry).
+    - Test assemblies themselves (coverage of test code is not meaningful).
+    - Generated/designer files (Migrations, *.g.cs, *.designer.cs).
+  TotallyHotArcRouter.Gui/.Gui.Tests (net10.0-windows MAUI) are not covered here at all - the Linux CI
+  runner never builds/tests them (see dotnet-ci.yml's $PROJECTS comment); they're checked against the
+  same 80% bar locally on a Windows dev machine instead.
+-->
 <RunSettings>
   <DataCollectionRunSettings>
     <DataCollectors>
-      <DataCollector friendlyName="XPlat code coverage">
+      <DataCollector friendlyName="XPlat Code Coverage">
         <Configuration>
-          <!-- Exclude generated sources from the 80% gate so coverage reflects maintained code only. -->
-          <ExcludeByFile>**/obj/**/Telemetry.cs,**/obj/**/TelemetryGrpc.cs,**/*.g.cs,**/*.g.i.cs,**/*AssemblyAttributes.cs</ExcludeByFile>
-          <SkipAutoProps>true</SkipAutoProps>
+          <Format>cobertura</Format>
+          <ExcludeByFile>**/Migrations/*.cs;**/*.g.cs;**/*.designer.cs</ExcludeByFile>
+          <Exclude>[xunit.*]*,[*.Tests]*,[*]TotallyHot.ArcRouter.Telemetry.Contract.*</Exclude>
         </Configuration>
       </DataCollector>
     </DataCollectors>

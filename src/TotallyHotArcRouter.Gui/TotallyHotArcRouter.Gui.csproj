@@ -32,6 +32,16 @@
     <WindowsPackageType>None</WindowsPackageType>
   </PropertyGroup>
 
+  <PropertyGroup Condition="!$([MSBuild]::IsOSPlatform('Windows'))">
+    <!-- GitHub's Ubuntu-hosted NuGet dependency-submission job restores every discovered project file,
+         including this Windows-only MAUI app. Linux never builds this project in CI, but restore still
+         needs to evaluate it so the dependency snapshot can include its package graph. Disabling the MAUI
+         workload resolver avoids the unsupported maui-tizen probe on Linux, and EnableWindowsTargeting lets
+         restore read this net10.0-windows project cross-platform without affecting the normal Windows build. -->
+    <MSBuildEnableWorkloadResolver>false</MSBuildEnableWorkloadResolver>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
   <ItemGroup>
     <MauiIcon Include="Resources\AppIcon\appicon.svg" Color="#0f172a" />
   </ItemGroup>

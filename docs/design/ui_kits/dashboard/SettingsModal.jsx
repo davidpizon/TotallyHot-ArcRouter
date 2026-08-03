@@ -5,7 +5,7 @@ export function SettingsModal({ open, onClose }) {
   const [purgeWord, setPurgeWord] = React.useState("");
   if (!open) return null;
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.7)", backdropFilter: "blur(2px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--surface-card)", border: "1px solid var(--border-default)", borderRadius: 8, padding: 20, width: 380, maxWidth: "90vw" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <span style={{ fontSize: 15, fontWeight: 600, color: "var(--text-heading)" }}>Settings</span>

@@ -7,7 +7,7 @@
      @onclick="OnCancel">
     @* Escape is handled on the panel, not the input, so it works whichever control has focus - keydown
        bubbles up from every focusable descendant. Enter stays on the input alone (see below). *@
-    <div class="overlay-panel w-full max-w-md rounded-lg border border-slate-700" style="background:#121212"
+    <div class="overlay-panel w-full max-w-md rounded-lg border border-slate-700" style="background:#181818"
          tabindex="-1"
          @onkeydown="HandlePanelKeyDown"
          @onclick:stopPropagation="true">

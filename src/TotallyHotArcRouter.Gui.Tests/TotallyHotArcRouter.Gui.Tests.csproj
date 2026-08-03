@@ -23,6 +23,13 @@
     <WindowsPackageType>None</WindowsPackageType>
   </PropertyGroup>
 
+  <PropertyGroup Condition="!$([MSBuild]::IsOSPlatform('Windows'))">
+    <!-- This test project shares the GUI app's net10.0-windows TFM so it can reference the MAUI project
+         directly. The Linux dependency-submission restore only needs to evaluate that graph, not build it,
+         so opt into cross-platform Windows targeting on non-Windows hosts. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="bunit" Version="2.8.6" />
     <!-- bunit pulls in AngleSharp 1.4.0 transitively, which has a known moderate-severity mXSS
@@ -50,4 +57,3 @@
   </ItemGroup>
 
 </Project>
-

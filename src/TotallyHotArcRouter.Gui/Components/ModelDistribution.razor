@@ -31,7 +31,7 @@
                 <div class="text-xs font-semibold text-slate-400 uppercase tracking-widest">Token Volume Histogram</div>
                 <div class="flex items-center gap-4 mt-1.5">
                     <span class="flex items-center gap-1.5 text-xs font-mono text-slate-500">
-                        <span class="w-2 h-2 rounded-sm" style="background:#38bdf8"></span> Prompt
+                        <span class="w-2 h-2 rounded-sm" style="background:#1ed760"></span> Prompt
                     </span>
                     <span class="flex items-center gap-1.5 text-xs font-mono text-slate-500">
                         <span class="w-2 h-2 rounded-sm" style="background:#10b981"></span> Completion
@@ -89,7 +89,7 @@
             TokenBuckets.Select(b => b.Slot).ToList(),
             6_000_000m,
             [
-                new DistributionSeries("Prompt", "#38bdf8", TokenBuckets.Select(b => b.Prompt).ToList()),
+                new DistributionSeries("Prompt", "#1ed760", TokenBuckets.Select(b => b.Prompt).ToList()),
                 new DistributionSeries("Completion", "#10b981", TokenBuckets.Select(b => b.Completion).ToList()),
             ]);
         _histogramJson = ChartJson.Serialize(histogram);
