@@ -55,7 +55,7 @@
 
         @if (!string.IsNullOrEmpty(_opError))
         {
-            <div class="rounded px-3 py-2 mb-3 text-xs" style="background:#ef444411;border:1px solid #ef444444;color:#fca5a5">
+            <div class="mb-3 text-xs ds-alert-critical">
                 @_opError
             </div>
         }
@@ -88,13 +88,11 @@
                    card beneath it - that card's @onpointerenter is what drives the live reflow. A short
                    transition animates only the lift (shadow/scale); the slot change itself is instant because
                    the list is re-keyed rather than transformed. *@
-                <div @key="source.Name" class="rounded-lg p-3 space-y-2.5"
+                <div @key="source.Name" class="rounded-lg p-3 space-y-2.5 @(canDrag ? "drag-enabled" : "drag-disabled") @(isLifted ? "card-lifted" : "")"
                      @onpointerdown="e => OnPointerDown(source, e)"
                      @onpointerenter="e => OnPointerEnter(source, e)"
                      style="background:#181818;border:1px solid @cardBorder;cursor:@cursor;
-                            user-select:@(canDrag ? "none" : "auto");touch-action:@(canDrag ? "none" : "auto");
-                            transition:box-shadow .15s ease, transform .15s ease;
-                            @(isLifted ? "box-shadow:0 12px 28px -6px rgba(0,0,0,.55);transform:scale(1.02);position:relative;z-index:10;pointer-events:none;" : "")">
+                            transition:box-shadow .15s ease, transform .15s ease">
                     @* Header: rank controls + name + toggle *@
                     <div class="flex items-start justify-between gap-2">
                         <div class="flex items-start gap-2 min-w-0">
@@ -133,7 +131,7 @@
                             <div class="min-w-0">
                                 <div class="flex items-center gap-2">
                                     <Icon Name="database" Size="14" />
-                                    <span class="text-sm font-semibold" style="color:@(source.Enabled ? "#ffffff" : "#7c7c7c")">
+                                    <span class="text-sm font-semibold @(source.Enabled ? "state-enabled" : "state-disabled")">
                                         @source.Name
                                     </span>
                                     @if (canReorder)
@@ -155,12 +153,8 @@
                         </div>
                         <button @onclick="() => Toggle(source)"
                                 title="@(source.Enabled ? "Disable this source" : "Enable this source")"
-                                class="shrink-0 flex items-center gap-1.5 rounded px-2 py-1 text-xs font-semibold border transition-colors"
-                                style="background:@(source.Enabled ? "#10b98122" : "transparent");
-                                       border-color:@(source.Enabled ? "#10b98144" : "#7c7c7c");
-                                       color:@(source.Enabled ? "#10b981" : "#7c7c7c")">
-                            <span class="w-1.5 h-1.5 rounded-full"
-                                  style="background:@(source.Enabled ? "#10b981" : "#7c7c7c")"></span>
+                                class="shrink-0 flex items-center gap-1.5 rounded px-2 py-1 text-xs font-semibold border transition-colors toggle-source @(source.Enabled ? "enabled" : "disabled")">
+                            <span class="w-1.5 h-1.5 rounded-full @(source.Enabled ? "toggle-dot-enabled" : "toggle-dot-disabled")"></span>
                             @(source.Enabled ? "ENABLED" : "DISABLED")
                         </button>
                     </div>

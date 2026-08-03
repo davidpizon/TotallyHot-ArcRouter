@@ -294,6 +294,34 @@ the header, dismissal behavior, and close API identical regardless.
 - **Scrollbars**: thin (4px) custom scrollbar, `var(--border-button)` (`#4d4d4d`) thumb on
   `var(--surface-base)` (`#121212`) track, `var(--border-light)` (`#7c7c7c`) on hover.
 
+### 5.1 Available Tailwind Spacing Utilities
+
+**Important:** The compiled `app.css` only includes Tailwind utilities that were actually used in the codebase. Many common Tailwind classes are **NOT available**. Always check this list before using a spacing utility; if it's not listed here, create a CSS class instead (see §7).
+
+| Category | Available | NOT Available |
+| --- | --- | --- |
+| **Margin (all sides)** | `ml-auto` only | `m-0`, `m-1`, `m-2`, `m-3`, etc. |
+| **Margin (horizontal)** | None | All `mx-*` variants |
+| **Margin (vertical)** | None | All `my-*` variants |
+| **Margin (top)** | `mt-0.5`, `mt-1.5`, `mt-2` | `mt-1`, `mt-3`, `mt-4`, etc. |
+| **Margin (bottom)** | `mb-0.5`, `mb-1`, `mb-2`, `mb-3` | `mb-1.5`, `mb-4`, etc. |
+| **Margin (left/right)** | `ml-auto`, `pr-1`, `pr-3` | `ml-*`, `mr-*` (except `ml-auto`) |
+| **Padding (all sides)** | `p-2`, `p-3`, `p-4`, `p-5` | `p-0`, `p-1`, `p-6`, etc. |
+| **Padding (horizontal)** | `px-1.5`, `px-2`, `px-2.5`, `px-3`, `px-4`, `px-5` | `px-1`, `px-6`, etc. |
+| **Padding (vertical)** | `py-0.5`, `py-1.5`, `py-2`, `py-2.5`, `py-3`, `py-4` | `py-1`, `py-5`, etc. |
+| **Padding (top)** | `pt-1` | Most `pt-*` |
+| **Padding (bottom)** | `pb-3` | Most `pb-*` |
+| **Gap (flex/grid)** | `gap-0`, `gap-1`, `gap-1.5`, `gap-2`, `gap-2.5`, `gap-3`, `gap-4`, `gap-6` | `gap-5`, etc. |
+| **Space-y (flex column)** | `space-y-1`, `space-y-1.5`, `space-y-2`, `space-y-3`, `space-y-4` | `space-y-0`, `space-y-5`, etc. |
+
+**Pattern:** When you need a spacing utility not in this list (e.g., `m-1`, `p-1`, `pt-2`), create a CSS class in `app.css` instead — do NOT use the Tailwind utility hoping it will work. Example:
+
+```css
+.my-custom-spacing { margin: 0.25rem; }
+```
+
+Then use `class="my-custom-spacing"` in markup. See `.btn-small-action` (added for compact action buttons with margin) as a reference pattern.
+
 ## 6. Elevation & Depth
 
 Elevation is expressed sparingly, but the aspirational spec calls for heavier shadows than the
@@ -316,12 +344,45 @@ introduced; new floating UI should pick whichever tier matches its role rather t
 opacity. The drag-lift value is reserved for the card physically under the pointer and should not be
 reused for static elevation.
 
+## 7. Inline Styles Policy & Refactoring Status
+
+### Refactoring Status
+**In progress:** Removing all static inline styles from components. The following CSS classes have been added to support this:
+- `.ds-surface-base`, `.ds-surface-card-bordered`, `.ds-toolbar` — card and container styling
+- `.ds-divider`, `.ds-divider-subtle` — separator lines
+- `.ds-code-block` — code/payload block styling
+- `.tab-button` with `.active`/`.inactive` states — tab bar button styling
+- `.btn-state-active`, `.btn-state-inactive`, `.btn-metric-active`, `.btn-metric-inactive` — conditional button states
+
+Remaining work: Update components to use class binding (`class="@(isActive ? "active" : "inactive")"`) instead of conditional inline styles. See components: CostAnalytics, ConversationSummary, TurnCard, ConsoleTab, Governance, PriceSourcesAdmin.
+
 ## 7. Inline Styles Policy
 
-**Principle:** Prefer CSS variables and classes over inline styles. Inline styles are permitted only when:
-1. **Dynamic/conditional values** — color or size changes based on runtime state (e.g., `style="color:@(isActive ? #fff : #999)"`)
-2. **Data-driven sizing** — dimensions from calculation or loop iteration (e.g., `style="width:@(item.Width)px"`)
-3. **Semantic data-encoding glyphs** — when a glyph must stay a specific color (e.g., sky-blue in the Info routing step) despite global class overrides for the same color in chrome (§2.2)
+**Core Principle:** ALL styling belongs in CSS, not inline. Even conditional and animation styling must be in `.css` files via class binding or CSS variables—never `style="..."` attributes in markup.
+
+**Inline styles are NEVER permitted**, except for:
+1. **Data-driven values from the backend** — when a value comes from a database/API and changes per-item (e.g., `style="background:@(agent.Color)"`). Even then, consider CSS variables (`--agent-color: @(agent.Color)`) as the preferred path if the value is used in multiple rules.
+
+**Conditional and animation styling — use CSS classes, not inline conditionals:**
+- ✅ **DO:** `class="@(isActive ? "button-active" : "button-inactive")"` → Define `.button-active` and `.button-inactive` in `app.css`
+- ❌ **DON'T:** `style="background:@(isActive ? "#fff" : "#999)"`
+- ✅ **DO:** `class="overlay-backdrop"` with `style="background-color:rgba(0,0,0,0.7);backdrop-filter:blur(4px)"` in CSS
+- ❌ **DON'T:** Inline modal backdrop styling
+
+**Modal backdrop is a special case — it MUST be in CSS:**
+```css
+.overlay-backdrop {
+  background-color: rgba(0,0,0,0.7);
+  backdrop-filter: blur(4px);
+}
+```
+
+**Positioning and padding/margin are NEVER inline.** All layout, padding, margin, and positioning must use:
+- **Tailwind utility classes** — but ONLY those listed in §5.1. Do not assume a utility exists; check the table first. If not listed, create a CSS class instead.
+- **CSS classes** (`.ds-*`, `.btn-*`, `.ls-*`, `.btn-small-action`, etc.) for spacing not available in Tailwind
+- Never hardcoded `style="padding:..."`, `style="margin:..."`, or `style="position:..."` attributes
+
+**Why:** The compiled `app.css` uses tree-shaking and only includes Tailwind utilities that were actually used. Utilities like `m-1`, `p-1`, most `mt-*`, and most `mb-*` variants are not in the compiled output, so they won't work even if you use them. Always check §5.1 first; if the utility isn't listed, create a dedicated CSS class instead (reference: `.btn-small-action` for action buttons with margins).
 
 **Antipattern — hardcoded static colors:** Every color like `#1f1f1f`, `#181818`, `#4d4d4d`, `#10b981`, `#f59e0b`, `#ef4444` should be a CSS variable or utility class, never hardcoded inline. 
 

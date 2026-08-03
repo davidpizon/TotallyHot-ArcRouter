@@ -16,10 +16,7 @@
                 var isActive = _metric == metric;
                 <button @onclick="() => SelectMetric(metric)"
                         title="@def.Description"
-                        class="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium transition-colors"
-                        style="color:@(isActive ? "#121212" : "#b3b3b3");
-                               background:@(isActive ? "#1ed760" : "#121212");
-                               border:1px solid @(isActive ? "#1ed760" : "#4d4d4d")">
+                        class="metric-button @(isActive ? "active" : "inactive")">
                     @def.Label
                 </button>
             }
@@ -33,10 +30,7 @@
                     var r = range;
                     var isActive = _range == r;
                     <button @onclick="() => SelectRange(r)"
-                            class="rounded px-2.5 py-1 text-xs font-medium transition-colors"
-                            style="color:@(isActive ? "#1ed760" : "#7c7c7c");
-                                   background:@(isActive ? "#1f1f1f" : "transparent");
-                                   border:1px solid @(isActive ? "#4d4d4d" : "transparent")">
+                            class="metric-button @(isActive ? "active" : "inactive")">
                         @label
                     </button>
                 }
@@ -63,7 +57,7 @@
                 <div class="text-xs font-semibold text-slate-400 uppercase tracking-widest">@_model.Title</div>
                 <div class="text-xs text-slate-600 mt-0.5">@CurrentDef.Description · @RangeCaption</div>
             </div>
-            <div class="font-mono text-lg font-semibold mt-0.5" style="color:#1ed760">@_model.Headline</div>
+            <div class="font-mono text-lg font-semibold mt-0.5 text-accent">@_model.Headline</div>
         </div>
 
         @if (_model.Points.Count == 0)

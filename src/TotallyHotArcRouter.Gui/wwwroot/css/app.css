@@ -358,6 +358,7 @@ input[type="number"]:focus {
   justify-content: center;
   gap: 0.5rem;
   min-height: 44px;
+  margin: 0.25rem;
   padding: 12px 16px;
   border-radius: var(--radius-pill);
   font-weight: 700;
@@ -433,6 +434,246 @@ input[type="number"]:focus {
   box-shadow: var(--shadow-lift);
 }
 
+/* ---- Semantic button variants (for dynamic/conditional styling) ---- */
+.btn-ghost-warning {
+  background: transparent;
+  border: 1px solid #f59e0b;
+  color: #fbbf24;
+}
+
+.btn-ghost-warning:hover:not(:disabled) {
+  background-color: rgba(245, 158, 11, 0.1);
+  border-color: #f59e0b;
+}
+
+.btn-ghost-critical {
+  background: transparent;
+  border: 1px solid #ef4444;
+  color: #f87171;
+}
+
+.btn-ghost-critical:hover:not(:disabled) {
+  background-color: rgba(239, 68, 68, 0.1);
+  border-color: #ef4444;
+}
+
+/* ---- Toggle button variant (for state-dependent styling in toolbar) ---- */
+.btn-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  border-radius: 0.25rem;
+  padding: 0.375rem 0.625rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border: 1px solid var(--border-button);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-standard),
+              color var(--dur-fast) var(--ease-standard),
+              background-color var(--dur-fast) var(--ease-standard);
+}
+
+.btn-toggle.active {
+  border-color: var(--color-success);
+  background-color: rgba(16, 185, 129, 0.1);
+  color: var(--color-success);
+}
+
+.btn-toggle:hover:not(:disabled) {
+  border-color: var(--border-light);
+  color: var(--text-secondary);
+}
+
+.btn-toggle.active:hover:not(:disabled) {
+  border-color: var(--color-success);
+  background-color: rgba(16, 185, 129, 0.15);
+}
+
+/* ---- Small inline action buttons (Add, Save for compact controls) ---- */
+.btn-small-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 9999px;
+  padding: 0.5rem 0.5rem;
+  margin: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border: 1px solid #10b98144;
+  background: transparent;
+  color: #10b981;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-standard),
+              border-color var(--dur-fast) var(--ease-standard);
+}
+
+.btn-small-action:hover:not(:disabled) {
+  background-color: rgba(16, 185, 129, 0.1);
+  border-color: #10b98166;
+}
+
+/* ---- Conditional State Classes (replace inline style conditionals) ---- */
+
+/* 1. Metric/Data-Driven State Classes */
+.metric-positive {
+  color: var(--color-success);
+}
+
+.metric-neutral {
+  color: var(--text-muted);
+}
+
+.metric-fallback {
+  color: var(--color-warning);
+}
+
+.metric-accent {
+  color: var(--accent);
+}
+
+/* 2. Component State Classes */
+.state-enabled {
+  color: var(--text-primary);
+}
+
+.state-disabled {
+  color: var(--text-muted);
+}
+
+.state-enabled.subtle {
+  color: var(--text-bright-secondary);
+}
+
+.visibility-visible {
+  color: var(--text-bright-secondary);
+}
+
+.visibility-hidden {
+  color: var(--text-muted);
+}
+
+/* 3. Card Selection State Classes */
+.card-selected {
+  background: var(--surface-elevated-a);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-card);
+}
+
+.card-unselected {
+  background: var(--surface-card);
+  border: 1px solid var(--border-button);
+  border-radius: var(--radius-card);
+}
+
+.card-fallback {
+  border-left: 3px solid var(--color-warning);
+}
+
+.card-selected.card-fallback {
+  border-left-color: var(--color-warning);
+}
+
+/* 4. Toggle/Indicator State Classes */
+.indicator-active {
+  background: var(--color-success);
+}
+
+.indicator-inactive {
+  background: var(--text-muted);
+}
+
+.card-lifted {
+  box-shadow: 0 12px 28px -6px rgba(0, 0, 0, 0.55);
+  transform: scale(1.02);
+  position: relative;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.toggle-enabled {
+  background: rgba(16, 185, 129, 0.2);
+  border-color: rgba(16, 185, 129, 0.27);
+  color: var(--color-success);
+}
+
+.toggle-disabled {
+  background: transparent;
+  border-color: var(--text-muted);
+  color: var(--text-muted);
+}
+
+.toggle-dot-enabled {
+  background: var(--color-success);
+}
+
+.toggle-dot-disabled {
+  background: var(--text-muted);
+}
+
+/* 5. Drag/Reorder State Classes */
+.drag-enabled {
+  user-select: none;
+  touch-action: none;
+}
+
+.drag-disabled {
+  user-select: auto;
+  touch-action: auto;
+}
+
+/* 6. Border State Classes */
+.border-opaque {
+  border-color: var(--border-button);
+}
+
+.border-faded {
+  border-color: rgba(77, 77, 77, 0.5);
+}
+
+/* ---- Governance Tab Button State Classes ---- */
+.gov-tab {
+  position: relative;
+  padding: 0.375rem 0.75rem;
+  border-top: 1px solid transparent;
+  transition: all var(--dur-fast) var(--ease-standard);
+}
+
+.gov-tab.active {
+  background: var(--border-button);
+  color: var(--text-primary);
+  border-top-color: var(--border-button);
+}
+
+.gov-tab.inactive {
+  background: transparent;
+  color: var(--text-muted);
+  border-top-color: transparent;
+}
+
+/* ---- Metric Button State Classes ---- */
+.metric-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  border-radius: 0.625rem;
+  padding: 0.625rem 0.625rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  transition: all var(--dur-fast) var(--ease-standard);
+}
+
+.metric-button.active {
+  background: var(--accent);
+  color: var(--surface-base);
+}
+
+.metric-button.inactive {
+  background: var(--surface-base);
+  color: var(--text-secondary);
+}
+
 /* ---- Cards (aspirational-design.md §4, §6) ---- */
 .ds-card {
   background: var(--surface-card);
@@ -474,6 +715,103 @@ input[type="number"]:focus {
   color: var(--text-muted);
 }
 
+/* ---- Surface and card styling — prefer these over inline `background:...; border: ...` ---- */
+.ds-surface-base {
+  background: var(--surface-base);
+}
+
+.ds-surface-card-bordered {
+  background: var(--surface-card);
+  border: 1px solid var(--border-button);
+  border-radius: var(--radius-card);
+}
+
+.ds-toolbar {
+  background: var(--surface-card);
+  border-bottom: 1px solid var(--border-button);
+}
+
+.ds-divider {
+  background: var(--border-button);
+}
+
+.ds-divider-subtle {
+  background: rgba(77, 77, 77, 0.5);
+}
+
+/* ---- Code and payload block styling ---- */
+.ds-code-block {
+  background: var(--surface-base);
+  color: var(--text-bright-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-radius: 0.25rem;
+  padding: 0.5rem;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 0.75rem;
+}
+
+/* ---- Conditional button states (use class binding, not inline style) ---- */
+.btn-state-active {
+  background-color: #1f1f1f;
+  color: var(--accent);
+}
+
+.btn-state-inactive {
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.btn-metric-active {
+  background: var(--accent);
+  color: var(--surface-base);
+}
+
+.btn-metric-inactive {
+  background: var(--surface-base);
+  color: var(--text-secondary);
+}
+
+/* ---- Tab button states ---- */
+.tab-button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.625rem 1rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  transition: all var(--dur-fast) var(--ease-standard);
+}
+
+.tab-button.active {
+  color: var(--accent);
+  background: var(--surface-base);
+  border-top: 1px solid var(--border-button);
+  border-left: 1px solid var(--border-button);
+  border-right: 1px solid var(--border-button);
+  border-bottom: 1px solid var(--surface-base);
+}
+
+.tab-button.inactive {
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+}
+
+/* ---- Console viewport styling ---- */
+.ls-console-viewport {
+  background: var(--surface-base);
+  border: 1px solid var(--border-button);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  padding: 0.5rem 0.75rem;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-y: auto;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+}
+
 /* ---- Tinted semantic surfaces (routing steps, badges, alerts) — prefer these over inline style lists ---- */
 .ds-step-success {
   background: rgba(16, 185, 129, 0.08);
@@ -497,6 +835,37 @@ input[type="number"]:focus {
   background: #ef444411;
   border-left: 2px solid #ef4444;
   color: #fca5a5;
+}
+
+/* ---- Error/alert boxes — prefer these over inline `background:...; border: ...; color: ...` ---- */
+.ds-alert-critical {
+  background: #ef444411;
+  border: 1px solid #ef444444;
+  color: #fca5a5;
+  border-radius: 0.25rem;
+  padding: 0.75rem;
+}
+
+/* ---- Destructive action containers (for destructive confirmation dialogs) ---- */
+.ds-destructive-box {
+  border: 1px solid #ef444444;
+  background: #121212;
+  border-radius: 0.25rem;
+  padding: 1rem;
+}
+
+.ds-destructive-box-warning {
+  border: 1px solid #f59e0b44;
+  background: #121212;
+  border-radius: 0.25rem;
+  padding: 1rem;
+}
+
+.ds-destructive-box-critical {
+  border: 1px solid #ef444444;
+  background: #121212;
+  border-radius: 0.25rem;
+  padding: 1rem;
 }
 
 /* ---- Tinted badge / pill backgrounds (for status indicators) ---- */
