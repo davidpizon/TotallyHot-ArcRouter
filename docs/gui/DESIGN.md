@@ -242,7 +242,7 @@ The shell, verbatim:
 <div class="overlay-backdrop fixed inset-0 z-50 flex items-center justify-center"
      style="background-color:rgba(0,0,0,0.7);backdrop-filter:blur(4px)"
      @onclick="OnClose">
-    <div class="overlay-panel w-full max-w-md rounded-lg border border-slate-700" style="background:#121212"
+    <div class="overlay-panel w-full rounded-lg border border-slate-700" style="background:#121212"
          @onclick:stopPropagation="true">
         <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
             <span class="text-sm font-semibold text-slate-200 tracking-wide uppercase">Window Title</span>
@@ -252,7 +252,7 @@ The shell, verbatim:
                 <Icon Name="x" Size="16" />
             </button>
         </div>
-        <div class="p-5 space-y-4">
+        <div class="overlay-content p-5 space-y-4">
             @* body *@
         </div>
     </div>
@@ -265,18 +265,26 @@ The load-bearing details:
 | --- | --- |
 | Backdrop | `.overlay-backdrop`, `rgba(0,0,0,0.7)` + `backdrop-filter:blur(4px)`, `z-50`, centers its panel |
 | Dismissal | Backdrop `@onclick` closes; panel carries `@onclick:stopPropagation="true"` so body clicks don't |
-| Panel | `.overlay-panel`, `max-w-md`, `rounded-lg`, `border-slate-700` (→ `var(--border-button)`), `background:#121212` — the deepest surface (`--surface-base`), not the card surface, per `aspirational-design.md`'s modal treatment |
-| Header | `px-5 py-4`, `border-b border-slate-700`, title left / close `x` right |
+| Panel | `.overlay-panel`, `rounded-lg`, `border-slate-700` (→ `var(--border-button)`), `background:#121212` — the deepest surface (`--surface-base`), not the card surface. **Dynamic sizing via CSS**: max-width `min(90vw, 700px)`, min-width `min(100% - 2rem, 400px)`, max-height `calc(100vh - 120px)` to fit viewport; `display: flex; flex-direction: column` for layout |
+| Header | `px-5 py-4`, `border-b border-slate-700`, title left / close `x` right. **Always stays fixed** during content scroll |
 | Title | `text-sm font-semibold text-slate-200 tracking-wide uppercase` — **not** a large heading |
 | Close glyph | `<Icon Name="x" Size="16" />`, `slate-400`→`slate-200` on hover, 150ms `transition-colors`. **Requires an `aria-label`** — the button's only content is an SVG, so without one a screen reader announces an unnamed button |
-| Body | `p-5` with `space-y-3`/`space-y-4` between blocks. Primary/secondary/destructive action buttons in the body use `.btn-*` (§4.2), not ad hoc `rounded` + inline-color styling |
+| Content area | **Must wrap body in `.overlay-content`** for scrollable content: `<div class="overlay-content p-5 space-y-3/4">`. This enables vertical scrolling when content exceeds `max-height`, while keeping header and footer fixed |
+| Body | `p-5` with `space-y-3`/`space-y-4` between blocks. Primary/secondary/destructive action buttons in the body use `.btn-*` (§4.2), not ad hoc `rounded` + inline-color styling. **No horizontal overflow**: if fields risk wrapping, stack them vertically rather than shrinking |
 | Close API | A `[Parameter] public EventCallback OnClose` (or `OnCancel`) — the window never closes itself |
 
 `.overlay-backdrop`/`.overlay-panel` also supply the entrance animation for free (see
 [`MOTION.md`](MOTION.md) §Overlay Rise); a window that hand-rolls its backdrop loses it.
 
-Deviate only where the content genuinely demands it — a wider `max-w-*` for a table, say — and keep
-the header, dismissal behavior, and close API identical regardless.
+**Modal Content Sizing Requirements:**
+- Every modal **must dynamically adjust to fit its content** with no horizontal overflow. Use the `.overlay-content` wrapper on the body div to enable scrolling.
+- Modals grow to fit content up to `max-width: min(90vw, 700px)` and `max-height: calc(100vh - 120px)` — staying within the viewport with breathing room.
+- Only the content area scrolls vertically; the header bar (title + close button) and action buttons remain fixed and visible.
+- **Never use horizontal scroll** in modals. If fields risk wrapping, stack them vertically (e.g., custom headers in ProviderEditDialog).
+- Exception: If content genuinely requires more space (e.g., a data table), widen the panel via CSS override in `app.css`, not inline `max-w-*` — but scrolling behavior remains unchanged.
+
+Deviate only where the content genuinely demands it — a wider panel for a table, say — and keep
+the header, dismissal behavior, close API, and dynamic scrolling identical regardless.
 
 ## 5. Layout & Spacing
 
