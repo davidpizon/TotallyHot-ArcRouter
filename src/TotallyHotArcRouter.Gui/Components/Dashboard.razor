@@ -85,7 +85,6 @@
             var isActive = _activeTab == tab;
             <button @onclick="() => _activeTab = tab"
                     class="tab-indicator tab-button @(isActive ? "active" : "inactive")">
-                    class="tab-indicator tab-button @(isActive ? "active" : "inactive")">
                 <Icon Name="@icon" Size="13" />
                 @label
             </button>
