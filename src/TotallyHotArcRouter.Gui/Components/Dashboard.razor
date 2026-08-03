@@ -84,8 +84,7 @@
         {
             var isActive = _activeTab == tab;
             <button @onclick="() => _activeTab = tab"
-                    class="tab-indicator tab-button @(isActive ? "active" : "inactive")"
-                    style="border-radius:6px 6px 0 0;margin-bottom:-1px">
+                    class="tab-indicator tab-button @(isActive ? "active" : "inactive")">
                 <Icon Name="@icon" Size="13" />
                 @label
             </button>
