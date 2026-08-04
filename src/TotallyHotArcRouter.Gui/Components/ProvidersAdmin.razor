@@ -429,7 +429,7 @@
         _dialogHeaders = provider.Headers;
         _dialogIsFree = provider.IsFree;
         _dialogProviderType = "Other";
-        _dialogProviderName = string.Empty;
+        _dialogProviderName = provider.Name ?? string.Empty;
         _dialogError = null;
         _showDialog = true;
     }
@@ -450,7 +450,8 @@
             ApiKeyEnvVar: result.ApiKeyEnvVar,
             CredentialMode: result.CredentialMode,
             Headers: result.Headers,
-            IsFree: result.IsFree);
+            IsFree: result.IsFree,
+            ProviderName: result.ProviderName);
 
         try
         {

@@ -103,6 +103,12 @@ public sealed class ModelRoutingOptions
 public sealed record ProviderOptions
 {
     /// <summary>
+    /// Gets the user-friendly display name for this provider (e.g. <c>OpenAI API</c>), shown in the
+    /// Governance UI's provider card title. When null, the provider key is shown instead.
+    /// </summary>
+    public string? Name { get; init; }
+
+    /// <summary>
     /// Gets the absolute base URL of the provider's API - scheme + host, optionally with a path
     /// prefix the provider's API is actually mounted under (e.g. <c>https://api.openai.com</c>, or
     /// <c>http://localhost:11434/v1</c> for Ollama's OpenAI-compatible routes). Any path segment here
