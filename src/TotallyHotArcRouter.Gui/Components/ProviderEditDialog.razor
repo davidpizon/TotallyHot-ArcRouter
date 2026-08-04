@@ -1,6 +1,8 @@
 @* Add/edit-provider modal for the Governance tab's provider manager. Captures the endpoint, auth
    header shape, and a credential mode (literal key, env-var reference, or none). Mirrors
    SettingsModal's overlay/stop-propagation/EventCallback pattern. *@
+@using TotallyHot.ArcRouter.Gui.Admin
+
 <div class="overlay-backdrop fixed inset-0 z-50 flex items-center justify-center"
      style="background-color:rgba(0,0,0,0.7);backdrop-filter:blur(4px)"
      @onclick="OnCancel">
@@ -27,6 +29,23 @@
                            class="w-full px-3 py-2 text-sm font-mono ds-input" />
                 </div>
             }
+
+            <div>
+                <div class="text-xs text-slate-500 mb-1">Provider Name</div>
+                <input type="text" value="@_providerName" @oninput="e => _providerName = AsString(e.Value)"
+                       placeholder="e.g. My Anthropic Instance"
+                       class="w-full px-3 py-2 text-sm ds-input" />
+            </div>
+
+            <div>
+                <div class="text-xs text-slate-500 mb-1">Provider Type</div>
+                <select value="@_selectedProviderType.ToString()" @onchange="OnProviderTypeChanged"
+                        class="w-full px-2 py-2 text-sm ds-input">
+                    <option value="Other">Other</option>
+                    <option value="Anthropic">Anthropic</option>
+                    <option value="OpenAI">OpenAI</option>
+                </select>
+            </div>
 
             <div>
                 <div class="text-xs text-slate-500 mb-1">Base URL</div>
@@ -210,6 +229,12 @@
     /// <summary>Whether the existing provider is flagged as costing nothing.</summary>
     [Parameter] public bool IsFree { get; set; }
 
+    /// <summary>The provider's type (e.g. "Other", "Anthropic", "OpenAI"), or empty for backward compatibility.</summary>
+    [Parameter] public string ProviderType { get; set; } = string.Empty;
+
+    /// <summary>A user-friendly display name for the provider, distinct from the unique <see cref="Key"/>.</summary>
+    [Parameter] public string ProviderName { get; set; } = string.Empty;
+
     /// <summary>An error message to display (e.g. a validation failure returned by the proxy).</summary>
     [Parameter] public string? Error { get; set; }
 
@@ -227,6 +252,8 @@
     private string? _apiKeyEnvVar;
     private CredentialMode _mode = CredentialMode.EnvVar;
     private bool _isFree;
+    private string _providerName = string.Empty;
+    private ProviderType _selectedProviderType;
     private readonly List<HeaderRow> _headers = [];
 
     private bool CanSave =>
@@ -246,6 +273,10 @@
         _apiKeyEnvVar = ApiKeyEnvVar;
         _mode = HasApiKey ? CredentialMode.Literal : CredentialMode.EnvVar;
         _isFree = IsFree;
+        _providerName = ProviderName;
+        _selectedProviderType = Enum.TryParse<TotallyHot.ArcRouter.Gui.Admin.ProviderType>(ProviderType, out var providerType)
+            ? providerType
+            : TotallyHot.ArcRouter.Gui.Admin.ProviderType.Other;
 
         foreach (var header in Headers)
         {
@@ -272,6 +303,32 @@
         }
     }
 
+    private void OnProviderTypeChanged(ChangeEventArgs e)
+    {
+        if (Enum.TryParse<ProviderType>(AsString(e.Value), out var providerType))
+        {
+            _selectedProviderType = providerType;
+            ApplyProviderTemplate(providerType);
+        }
+    }
+
+    private void ApplyProviderTemplate(ProviderType providerType)
+    {
+        if (ProviderTemplates.Templates.TryGetValue(providerType, out var template))
+        {
+            _baseUrl = template.BaseUrl;
+            _authHeaderName = template.AuthHeaderName;
+            _authHeaderScheme = template.AuthHeaderScheme;
+
+            _mode = template.DefaultCredentialMode switch
+            {
+                ProviderCredentialModes.Literal => CredentialMode.Literal,
+                ProviderCredentialModes.EnvVar => CredentialMode.EnvVar,
+                _ => CredentialMode.None
+            };
+        }
+    }
+
     private void AddHeader() => _headers.Add(new HeaderRow());
 
     private void RemoveHeader(HeaderRow header) => _headers.Remove(header);
@@ -295,6 +352,8 @@
             ApiKeyEnvVar: _mode == CredentialMode.EnvVar ? _apiKeyEnvVar?.Trim() : null,
             CredentialMode: ToCredentialMode(_mode),
             Headers: BuildHeaders(),
+            ProviderType: _selectedProviderType.ToString(),
+            ProviderName: _providerName.Trim(),
             IsFree: _isFree);
 
         await OnSave.InvokeAsync(result);
@@ -332,6 +391,8 @@
     /// <param name="CredentialMode">The selected credential source (see <see cref="ProviderCredentialModes"/>).</param>
     /// <param name="Headers">The full set of custom headers as edited.</param>
     /// <param name="IsFree">Whether the provider is flagged as costing nothing.</param>
+    /// <param name="ProviderType">The selected provider type (e.g., <c>Other</c>, <c>Anthropic</c>, <c>OpenAI</c>).</param>
+    /// <param name="ProviderName">A user-friendly display name for the provider; distinct from the unique <paramref name="Key"/>.</param>
     public sealed record ProviderEditResult(
         string Key,
         string BaseUrl,
@@ -341,6 +402,8 @@
         string? ApiKeyEnvVar,
         string CredentialMode,
         IReadOnlyList<ProviderHeaderWriteModel> Headers,
+        string ProviderType,
+        string ProviderName,
         bool IsFree = false);
 
     /// <summary>A mutable editor row for one custom header. <see cref="Value"/> holds the literal value or,

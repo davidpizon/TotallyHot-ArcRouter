@@ -166,7 +166,7 @@ public sealed class ProviderEditDialogTests
             parameters.Add(p => p.OnSave, (ProviderEditDialog.ProviderEditResult r) => saved = r);
         });
 
-        cut.Find("select").Change(nameof(ProviderEditDialog.CredentialMode.None));
+        cut.FindAll("select")[1].Change(nameof(ProviderEditDialog.CredentialMode.None));
         FindSaveButton(cut).Click();
 
         saved.Should().NotBeNull();
@@ -187,7 +187,7 @@ public sealed class ProviderEditDialogTests
             parameters.Add(p => p.OnSave, (ProviderEditDialog.ProviderEditResult r) => saved = r);
         });
 
-        cut.Find("select").Change(nameof(ProviderEditDialog.CredentialMode.EnvVar));
+        cut.FindAll("select")[1].Change(nameof(ProviderEditDialog.CredentialMode.EnvVar));
         cut.Find("input[placeholder='OPENAI_API_KEY']").Input("MY_KEY");
         FindSaveButton(cut).Click();
 
