@@ -154,31 +154,6 @@ public sealed class ProvidersAdminLoadedTests
     }
 
     [Fact]
-    public void Shows_each_credential_state_distinctly()
-    {
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
-
-        var cut = RenderLoaded(ctx);
-
-        cut.Markup.Should().Contain("Literal key set");
-        cut.Markup.Should().Contain("OPENAI_API_KEY");
-        cut.Markup.Should().Contain("No credential");
-    }
-
-    [Fact]
-    public void Shows_the_free_badge_only_on_a_free_provider()
-    {
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
-
-        var cut = RenderLoaded(ctx);
-
-        // The flag is only seeded on a fresh install, so the card is where it has to be visible.
-        cut.FindAll("span").Count(s => s.TextContent.Trim() == "Free").Should().Be(1);
-    }
-
-    [Fact]
     public void Marks_a_model_the_last_scan_did_not_report_as_not_detected()
     {
         var transport = new StubTransport();
@@ -189,18 +164,6 @@ public sealed class ProvidersAdminLoadedTests
         // Distinct from a deliberately stopped model, which is why it gets its own label.
         cut.Markup.Should().Contain("not detected");
         cut.Markup.Should().Contain("claude-haiku");
-    }
-
-    [Fact]
-    public void Renders_endpoint_capability_badges_and_scan_errors()
-    {
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
-
-        var cut = RenderLoaded(ctx);
-
-        cut.Markup.Should().Contain("Anthropic-compatible");
-        cut.Markup.Should().Contain("Scan incomplete: timed out");
     }
 
     [Fact]

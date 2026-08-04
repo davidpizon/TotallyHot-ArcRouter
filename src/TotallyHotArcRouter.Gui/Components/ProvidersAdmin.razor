@@ -88,31 +88,6 @@
                         </div>
                     </div>
 
-                    @* Credential status *@
-                    <div class="flex items-center gap-1.5 mt-2 text-xs text-slate-400">
-                        <Icon Name="key" Size="12" />
-                        @if (provider.HasApiKey)
-                        {
-                            <span>Literal key set</span>
-                        }
-                        else if (!string.IsNullOrEmpty(provider.ApiKeyEnvVar))
-                        {
-                            <span>Env var <span class="font-mono text-slate-300">@provider.ApiKeyEnvVar</span></span>
-                        }
-                        else
-                        {
-                            <span class="text-slate-600">No credential</span>
-                        }
-                        @* The flag is only seeded from appsettings.json on a fresh install - once
-                           model-routing.json exists it owns provider config - so show it on the card rather
-                           than leaving it to be discovered inside the edit dialog. *@
-                        @if (provider.IsFree)
-                        {
-                            <span class="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider ds-badge-success"
-                                  title="Requests to this provider report a cost of $0.00">Free</span>
-                        }
-                    </div>
-
                     @* Models *@
                     <div class="mt-3 border-t border-slate-700/60 pt-2">
                         <div class="flex items-center justify-between mb-1.5">
@@ -209,47 +184,6 @@
                                         class="btn-small-action shrink-0">
                                     Add
                                 </button>
-                            </div>
-                        }
-
-                        @* Endpoint capability scan results - which API flavors the endpoint answers
-                           (docs/router/tool-call-normalization.md §3.3). Per-model dialect badges above
-                           reflect the same scan; this summarizes the endpoint itself. "Refresh from
-                           endpoint" also reconciles the Models list above directly (added/removed models),
-                           so there is no separate discovery-results panel to click through anymore. *@
-                        @if (provider.EndpointCapabilities is { } scan)
-                        {
-                            <div class="mt-2 rounded p-2" style="background:#121212;border:1px solid #4d4d4d">
-                                @if (!string.IsNullOrEmpty(scan.ScanError))
-                                {
-                                    <div class="text-xs text-amber-400">Scan incomplete: @scan.ScanError</div>
-                                }
-                                else if (!scan.OpenAiCompatible && !scan.LmStudioNative && !scan.OllamaNative && !scan.AnthropicCompatible)
-                                {
-                                    <div class="text-xs text-slate-500">Endpoint answered no known API flavor.</div>
-                                }
-                                else
-                                {
-                                    <div class="text-xs text-slate-500 mb-1">Endpoint flavors:</div>
-                                    <div class="flex flex-wrap gap-1">
-                                        @if (scan.OpenAiCompatible)
-                                        {
-                                            <span class="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider ds-badge-success">OpenAI-compatible</span>
-                                        }
-                                        @if (scan.LmStudioNative)
-                                        {
-                                            <span class="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider ds-badge-success">LM Studio native</span>
-                                        }
-                                        @if (scan.OllamaNative)
-                                        {
-                                            <span class="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider ds-badge-success">Ollama native</span>
-                                        }
-                                        @if (scan.AnthropicCompatible)
-                                        {
-                                            <span class="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider ds-badge-success">Anthropic-compatible</span>
-                                        }
-                                    </div>
-                                }
                             </div>
                         }
                     </div>

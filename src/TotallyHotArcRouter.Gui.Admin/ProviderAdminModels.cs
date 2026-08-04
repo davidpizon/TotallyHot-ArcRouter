@@ -10,8 +10,8 @@ namespace TotallyHot.ArcRouter.Gui.Admin;
 /// <param name="BaseUrl">The provider's absolute base URL.</param>
 /// <param name="AuthHeaderName">The header carrying the credential (e.g. <c>Authorization</c>).</param>
 /// <param name="AuthHeaderScheme">The scheme prefixed to the credential (e.g. <c>Bearer</c>; may be empty).</param>
-/// <param name="HasApiKey">Whether a literal API key is stored for this provider.</param>
-/// <param name="ApiKeyEnvVar">The environment variable name holding the key, if configured.</param>
+/// <param name="HasApiKey">Whether a literal API key is stored for this provider (used by the edit dialog only).</param>
+/// <param name="ApiKeyEnvVar">The environment variable name holding the key, if configured (used by the edit dialog only).</param>
 /// <param name="Models">The models configured to route to this provider.</param>
 /// <param name="Headers">The provider's configured custom headers (literal values are returned; secrets live in env vars).</param>
 /// <param name="IsFree">Whether this provider costs nothing (a local runtime, say), making its models' cost a known zero rather than unknown.</param>
@@ -22,11 +22,6 @@ namespace TotallyHot.ArcRouter.Gui.Admin;
 /// <param name="Enabled">
 /// Whether the operator has this provider switched on, driving the Stop/Play control in Governance &gt;
 /// Providers. Enforced immediately on the next request by the proxy's routing path, no restart needed.
-/// </param>
-/// <param name="EndpointCapabilities">
-/// Which API flavors this provider's endpoint answers, as last recorded by a
-/// <see cref="ProviderAdminClient.ScanCapabilitiesAsync"/> call, or <see langword="null"/> when the
-/// endpoint has never been scanned.
 /// </param>
 /// <param name="ProviderType">
 /// The name of the <see cref="Admin.ProviderType"/> member the operator selected for this provider, or
@@ -50,7 +45,6 @@ public sealed record ProviderAdminView(
     decimal DollarSpent = 0m,
     long TokensUsed = 0L,
     bool Enabled = true,
-    ProviderEndpointCapabilitiesView? EndpointCapabilities = null,
     string? ProviderType = null);
 
 /// <summary>A configured model as returned by the management API.</summary>

@@ -311,8 +311,6 @@ public sealed class ProviderAdminClientTests
         Assert.Equal("Observed", model.Confidence);
         Assert.False(model.Enabled);
         Assert.False(model.PresentUpstream);
-        Assert.NotNull(provider.EndpointCapabilities);
-        Assert.True(provider.EndpointCapabilities!.LmStudioNative);
     }
 
     [Fact]
@@ -327,7 +325,6 @@ public sealed class ProviderAdminClientTests
 
         var model = Assert.Single(provider.Models);
         Assert.Null(model.Dialect);
-        Assert.Null(provider.EndpointCapabilities);
         // Enabled/PresentUpstream are also omitted from this fixture - both default true, same
         // back-compat reasoning as ProviderAdminView.Enabled.
         Assert.True(model.Enabled);
