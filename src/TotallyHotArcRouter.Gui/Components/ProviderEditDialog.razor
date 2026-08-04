@@ -192,7 +192,7 @@
         None
     }
 
-    /// <summary>The provider key. Passed when editing an existing provider; ignored when adding a new one (auto-generated from <see cref="ProviderName"/>).</summary>
+    /// <summary>The provider key. Passed when editing an existing provider; ignored when adding a new one (auto-generated as a GUID).</summary>
     [Parameter] public string Key { get; set; } = string.Empty;
 
     /// <summary>Whether the dialog is adding a new provider (vs. editing an existing one).</summary>
@@ -334,7 +334,7 @@
         }
 
         var result = new ProviderEditResult(
-            Key: IsNew ? GenerateKeyFromName(_providerName) : Key,
+            Key: IsNew ? Guid.NewGuid().ToString() : Key,
             BaseUrl: _baseUrl.Trim(),
             AuthHeaderName: string.IsNullOrWhiteSpace(_authHeaderName) ? "Authorization" : _authHeaderName.Trim(),
             AuthHeaderScheme: _authHeaderScheme?.Trim() ?? string.Empty,
@@ -363,17 +363,6 @@
 
     private static string AsString(object? value) => (string?)value ?? string.Empty;
 
-    /// <summary>
-    /// Generates a provider key from a user-friendly name by converting to lowercase and replacing spaces with hyphens.
-    /// Example: "My Anthropic Instance" → "my-anthropic-instance"
-    /// </summary>
-    private static string GenerateKeyFromName(string name) =>
-        System.Text.RegularExpressions.Regex.Replace(
-            name.Trim().ToLowerInvariant(),
-            @"[^\w\-]+",
-            "-")
-        .Trim('-');
-
     /// <summary>Maps the selected mode to the wire value the proxy expects (see <see cref="ProviderCredentialModes"/>).</summary>
     private static string ToCredentialMode(CredentialMode mode) => mode switch
     {
@@ -383,7 +372,7 @@
     };
 
     /// <summary>The values captured by the dialog when the user saves.</summary>
-    /// <param name="Key">The provider key (auto-generated from <paramref name="ProviderName"/> when adding a new provider; derived by lowercasing and replacing spaces with hyphens).</param>
+    /// <param name="Key">The provider key (auto-generated as a GUID when adding a new provider).</param>
     /// <param name="BaseUrl">The provider base URL.</param>
     /// <param name="AuthHeaderName">The auth header name.</param>
     /// <param name="AuthHeaderScheme">The auth header scheme (may be empty).</param>
