@@ -36,6 +36,7 @@ public sealed class ProviderOptionsPreservationTests
     /// <summary>Every field set to a non-default value, so "was it carried?" is detectable for all of them.</summary>
     private static ProviderOptions FullyPopulated() => new()
     {
+        Name = "Example Provider",
         BaseUrl = "https://example.invalid",
         ApiKey = "literal-key",
         ApiKeyEnvVar = "KEY_ENV",

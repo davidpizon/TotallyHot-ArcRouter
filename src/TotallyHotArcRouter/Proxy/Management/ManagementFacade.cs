@@ -675,6 +675,7 @@ public sealed class ManagementFacade
 
                 return new ProviderView(
                     Key: kvp.Key,
+                    Name: kvp.Value.Name,
                     BaseUrl: kvp.Value.BaseUrl,
                     AuthHeaderName: kvp.Value.AuthHeaderName,
                     AuthHeaderScheme: kvp.Value.AuthHeaderScheme,
@@ -725,6 +726,7 @@ public sealed class ManagementFacade
 
         return baseline with
         {
+            Name = NormalizeNameField(request.ProviderName) ?? baseline.Name,
             BaseUrl = request.BaseUrl ?? baseline.BaseUrl,
             AuthHeaderName = request.AuthHeaderName ?? baseline.AuthHeaderName,
             // AuthHeaderScheme may legitimately be "" (e.g. Anthropic's x-api-key), so only a null request
@@ -757,6 +759,13 @@ public sealed class ManagementFacade
     /// </remarks>
     private static ProviderOptions WithEnabled(ProviderOptions source, bool enabled) =>
         source with { Enabled = enabled };
+
+    /// <summary>
+    /// Normalizes a provider display name by converting empty or whitespace-only strings to null,
+    /// so clearing the field in the UI results in a consistent null rather than an empty string.
+    /// </summary>
+    private static string? NormalizeNameField(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value;
 
     /// <summary>
     /// Resolves the (ApiKey, ApiKeyEnvVar) pair to store from the request's <c>CredentialMode</c>, so the
@@ -962,6 +971,7 @@ public static class HeaderValueSource
 
 /// <summary>A single provider as returned to a management caller, with credentials masked.</summary>
 /// <param name="Key">The provider key.</param>
+/// <param name="Name">The user-friendly display name for this provider; null when not set.</param>
 /// <param name="BaseUrl">The provider's absolute base URL.</param>
 /// <param name="AuthHeaderName">The header carrying the credential.</param>
 /// <param name="AuthHeaderScheme">The scheme prefixed to the credential (may be empty).</param>
@@ -987,6 +997,7 @@ public static class HeaderValueSource
 /// </param>
 public sealed record ProviderView(
     string Key,
+    string? Name,
     string BaseUrl,
     string AuthHeaderName,
     string AuthHeaderScheme,
@@ -1061,6 +1072,7 @@ public sealed record ProvidersResponse(IReadOnlyList<ProviderView> Providers);
 /// write can't silently un-free a provider.</param>
 /// <param name="Enabled">Whether the provider is switched on; null keeps the existing value, so a partial
 /// write can't silently restart a stopped provider.</param>
+/// <param name="ProviderName">The user-friendly display name for this provider; null keeps the existing value.</param>
 public sealed record ProviderWriteRequest(
     string? BaseUrl,
     string? AuthHeaderName,
@@ -1070,7 +1082,8 @@ public sealed record ProviderWriteRequest(
     string? CredentialMode = null,
     IReadOnlyList<HeaderWriteRequest>? Headers = null,
     bool? IsFree = null,
-    bool? Enabled = null);
+    bool? Enabled = null,
+    string? ProviderName = null);
 
 /// <summary>
 /// The body sent to switch a provider on or off (<c>PUT /admin/providers/{key}/enabled</c>). Unlike
