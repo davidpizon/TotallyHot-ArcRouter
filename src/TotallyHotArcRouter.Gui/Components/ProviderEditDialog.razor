@@ -20,16 +20,6 @@
         </div>
 
         <div class="overlay-content p-5 space-y-3">
-            @if (IsNew)
-            {
-                <div>
-                    <div class="text-xs text-slate-500 mb-1">Provider Key</div>
-                    <input type="text" value="@_key" @oninput="e => _key = AsString(e.Value)"
-                           placeholder="e.g. ollama"
-                           class="w-full px-3 py-2 text-sm font-mono ds-input" />
-                </div>
-            }
-
             <div>
                 <div class="text-xs text-slate-500 mb-1">Provider Name</div>
                 <input type="text" value="@_providerName" @oninput="e => _providerName = AsString(e.Value)"
@@ -202,7 +192,7 @@
         None
     }
 
-    /// <summary>The provider key. Only editable when <see cref="IsNew"/>.</summary>
+    /// <summary>The provider key. Passed when editing an existing provider; ignored when adding a new one (auto-generated from <see cref="ProviderName"/>).</summary>
     [Parameter] public string Key { get; set; } = string.Empty;
 
     /// <summary>Whether the dialog is adding a new provider (vs. editing an existing one).</summary>
@@ -257,7 +247,7 @@
     private readonly List<HeaderRow> _headers = [];
 
     private bool CanSave =>
-        (!IsNew || !string.IsNullOrWhiteSpace(_key)) && !string.IsNullOrWhiteSpace(_baseUrl);
+        !string.IsNullOrWhiteSpace(_baseUrl) && (!IsNew || !string.IsNullOrWhiteSpace(_providerName));
 
     // Seed the editable fields from the parameters exactly once, when the dialog opens. The dialog is
     // conditionally rendered (@if (_showDialog)) so a fresh instance — and thus a single OnInitialized —
@@ -344,7 +334,7 @@
         }
 
         var result = new ProviderEditResult(
-            Key: IsNew ? _key.Trim() : Key,
+            Key: IsNew ? GenerateKeyFromName(_providerName) : Key,
             BaseUrl: _baseUrl.Trim(),
             AuthHeaderName: string.IsNullOrWhiteSpace(_authHeaderName) ? "Authorization" : _authHeaderName.Trim(),
             AuthHeaderScheme: _authHeaderScheme?.Trim() ?? string.Empty,
@@ -373,6 +363,17 @@
 
     private static string AsString(object? value) => (string?)value ?? string.Empty;
 
+    /// <summary>
+    /// Generates a provider key from a user-friendly name by converting to lowercase and replacing spaces with hyphens.
+    /// Example: "My Anthropic Instance" → "my-anthropic-instance"
+    /// </summary>
+    private static string GenerateKeyFromName(string name) =>
+        System.Text.RegularExpressions.Regex.Replace(
+            name.Trim().ToLowerInvariant(),
+            @"[^\w\-]+",
+            "-")
+        .Trim('-');
+
     /// <summary>Maps the selected mode to the wire value the proxy expects (see <see cref="ProviderCredentialModes"/>).</summary>
     private static string ToCredentialMode(CredentialMode mode) => mode switch
     {
@@ -382,7 +383,7 @@
     };
 
     /// <summary>The values captured by the dialog when the user saves.</summary>
-    /// <param name="Key">The provider key.</param>
+    /// <param name="Key">The provider key (auto-generated from <paramref name="ProviderName"/> when adding a new provider; derived by lowercasing and replacing spaces with hyphens).</param>
     /// <param name="BaseUrl">The provider base URL.</param>
     /// <param name="AuthHeaderName">The auth header name.</param>
     /// <param name="AuthHeaderScheme">The auth header scheme (may be empty).</param>
