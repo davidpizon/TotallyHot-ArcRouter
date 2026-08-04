@@ -31,7 +31,7 @@ public sealed class ProviderAdminClientTests
         }
         """;
 
-    private static ProviderAdminClient CreateClient(StubHandler handler, string? token = null) =>
+    private static ProviderAdminClient CreateClient(HttpMessageHandler handler, string? token = null) =>
         new(new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5001/") }, token);
 
     [Fact]
@@ -361,6 +361,138 @@ public sealed class ProviderAdminClientTests
         Assert.Equal("s3cret", Assert.Single(values!));
     }
 
+    [Fact]
+    public async Task AdminToken_WhenNotConfigured_IsNotSent()
+    {
+        var handler = new StubHandler(_ => Json(ProvidersJson));
+        var client = CreateClient(handler);
+
+        await client.GetProvidersAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(handler.LastRequest!.Headers.Contains("X-Admin-Token"));
+    }
+
+    [Fact]
+    public async Task TransportFailure_ThrowsWithTheUnderlyingExceptionAsInnerException()
+    {
+        var handler = new ThrowingHandler(new HttpRequestException("connection refused"));
+        var client = CreateClient(handler);
+
+        var ex = await Assert.ThrowsAsync<ProviderAdminException>(
+            () => client.GetProvidersAsync(TestContext.Current.CancellationToken));
+
+        Assert.Contains("Could not reach the proxy management API", ex.Message, StringComparison.Ordinal);
+        Assert.IsType<HttpRequestException>(ex.InnerException);
+    }
+
+    [Fact]
+    public async Task MalformedJsonResponse_ThrowsWithTheParseError()
+    {
+        var handler = new StubHandler(_ => Json("{ not valid json"));
+        var client = CreateClient(handler);
+
+        var ex = await Assert.ThrowsAsync<ProviderAdminException>(
+            () => client.GetProvidersAsync(TestContext.Current.CancellationToken));
+
+        Assert.Contains("unreadable response", ex.Message, StringComparison.Ordinal);
+        Assert.NotNull(ex.InnerException);
+    }
+
+    [Fact]
+    public async Task NullJsonResponse_ThrowsAnEmptyResponseError()
+    {
+        var handler = new StubHandler(_ => Json("null"));
+        var client = CreateClient(handler);
+
+        var ex = await Assert.ThrowsAsync<ProviderAdminException>(
+            () => client.GetProvidersAsync(TestContext.Current.CancellationToken));
+
+        Assert.Contains("empty response", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ErrorResponse_WithNonJsonBody_FallsBackToRawBody()
+    {
+        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError)
+        {
+            Content = new StringContent("upstream is on fire", Encoding.UTF8, "text/plain")
+        });
+        var client = CreateClient(handler);
+
+        var ex = await Assert.ThrowsAsync<ProviderAdminException>(
+            () => client.GetProvidersAsync(TestContext.Current.CancellationToken));
+
+        Assert.Equal("upstream is on fire", ex.Message);
+    }
+
+    [Fact]
+    public async Task ErrorResponse_WithEmptyBody_FallsBackToTheStatusCode()
+    {
+        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound)
+        {
+            Content = new StringContent(string.Empty)
+        });
+        var client = CreateClient(handler);
+
+        var ex = await Assert.ThrowsAsync<ProviderAdminException>(
+            () => client.GetProvidersAsync(TestContext.Current.CancellationToken));
+
+        Assert.Equal("The proxy management API returned 404.", ex.Message);
+    }
+
+    [Fact]
+    public async Task UpsertProviderAsync_SerializesProviderName_OnTheWire()
+    {
+        var handler = new StubHandler(_ => Json(ProvidersJson));
+        var client = CreateClient(handler);
+
+        await client.UpsertProviderAsync(
+            "openai",
+            new ProviderWriteRequest(BaseUrl: null, AuthHeaderName: null, AuthHeaderScheme: null, ApiKey: null, ApiKeyEnvVar: null, ProviderName: "OpenAI API"),
+            TestContext.Current.CancellationToken);
+
+        Assert.Contains("\"providerName\":\"OpenAI API\"", handler.LastBody, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetProvidersAsync_DeserializesProviderName()
+    {
+        const string json = """
+            {
+              "providers": [
+                {
+                  "key": "openai",
+                  "name": "OpenAI API",
+                  "baseUrl": "https://api.openai.com",
+                  "authHeaderName": "Authorization",
+                  "authHeaderScheme": "Bearer",
+                  "hasApiKey": true,
+                  "apiKeyEnvVar": null,
+                  "models": [],
+                  "headers": []
+                }
+              ]
+            }
+            """;
+        var handler = new StubHandler(_ => Json(json));
+        var client = CreateClient(handler);
+
+        var provider = Assert.Single(await client.GetProvidersAsync(TestContext.Current.CancellationToken));
+
+        Assert.Equal("OpenAI API", provider.Name);
+    }
+
+    [Fact]
+    public async Task GetProvidersAsync_MissingName_DeserializesAsNull()
+    {
+        var handler = new StubHandler(_ => Json(ProvidersJson));
+        var client = CreateClient(handler);
+
+        var provider = Assert.Single(await client.GetProvidersAsync(TestContext.Current.CancellationToken));
+
+        Assert.Null(provider.Name);
+    }
+
     private static HttpResponseMessage Json(string body) =>
         new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
 
@@ -380,6 +512,17 @@ public sealed class ProviderAdminClientTests
             LastBody = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
             return _responder(request);
         }
+    }
+
+    /// <summary>A transport that always fails, standing in for a network-level failure (DNS, connection refused, etc.).</summary>
+    private sealed class ThrowingHandler : HttpMessageHandler
+    {
+        private readonly HttpRequestException _exception;
+
+        public ThrowingHandler(HttpRequestException exception) => _exception = exception;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            throw _exception;
     }
 }
 
