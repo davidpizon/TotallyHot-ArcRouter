@@ -6,6 +6,7 @@ namespace TotallyHot.ArcRouter.Gui.Admin;
 /// the <see cref="ApiKeyEnvVar"/> name.
 /// </summary>
 /// <param name="Key">The provider key (e.g. <c>openai</c>).</param>
+/// <param name="Name">The user-friendly display name for this provider (e.g. <c>OpenAI API</c>); displayed in the Governance UI.</param>
 /// <param name="BaseUrl">The provider's absolute base URL.</param>
 /// <param name="AuthHeaderName">The header carrying the credential (e.g. <c>Authorization</c>).</param>
 /// <param name="AuthHeaderScheme">The scheme prefixed to the credential (e.g. <c>Bearer</c>; may be empty).</param>
@@ -29,6 +30,7 @@ namespace TotallyHot.ArcRouter.Gui.Admin;
 /// </param>
 public sealed record ProviderAdminView(
     string Key,
+    string? Name,
     string BaseUrl,
     string AuthHeaderName,
     string AuthHeaderScheme,
@@ -170,6 +172,7 @@ public static class ProviderCredentialModes
 /// <param name="IsFree">Whether this provider costs nothing; null keeps the existing value.</param>
 /// <param name="Enabled">Whether the provider is switched on; null keeps the existing value. Prefer the
 /// dedicated <see cref="ProviderEnabledWriteRequest"/> route for a pure on/off toggle.</param>
+/// <param name="ProviderName">The user-friendly display name for this provider; null keeps the existing value.</param>
 public sealed record ProviderWriteRequest(
     string? BaseUrl,
     string? AuthHeaderName,
@@ -179,7 +182,8 @@ public sealed record ProviderWriteRequest(
     string? CredentialMode = null,
     IReadOnlyList<ProviderHeaderWriteModel>? Headers = null,
     bool? IsFree = null,
-    bool? Enabled = null);
+    bool? Enabled = null,
+    string? ProviderName = null);
 
 /// <summary>
 /// The body sent to switch a provider on or off (<c>PUT /admin/providers/{key}/enabled</c>). The dedicated
