@@ -37,9 +37,14 @@ public enum ProviderType
     OpenAI = 2,
 
     /// <summary>
-    /// Google's Gemini API. Authenticates with a raw key in <c>x-goog-api-key</c>; the alternative
-    /// <c>?key=</c> query-string form is deliberately not offered, since the header form is supported
-    /// everywhere and keeps the credential out of URLs and logs.
+    /// Google's Gemini API, reached through its OpenAI-compatible endpoint and so authenticated with
+    /// <c>Authorization: Bearer &lt;key&gt;</c> like every other member of that family.
+    /// <para>
+    /// Listed separately from <see cref="OpenAI"/> only because its base URL and environment-variable name
+    /// differ, and operators look for it by name. Gemini's <em>native</em> API instead takes a raw key in
+    /// <c>x-goog-api-key</c> (or a <c>?key=</c> query parameter), but neither is used here: the proxy
+    /// forwards OpenAI-shaped requests, which the native endpoint does not accept.
+    /// </para>
     /// </summary>
     GoogleGemini = 3,
 
