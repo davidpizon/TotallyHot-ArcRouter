@@ -340,5 +340,24 @@ public sealed class ProviderOptionsPreservationTests
         var updated = store.Snapshot.Options.Providers["bedrock"];
         Assert.Equal("New Provider Name", updated.Name);
     }
+
+    [Fact]
+    public async Task UpsertProvider_WithPaddedProviderName_TrimsWhitespace()
+    {
+        var store = StoreWith(FullyPopulated());
+        var facade = CreateFacade(store);
+
+        await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
+            BaseUrl: "https://changed.invalid",
+            AuthHeaderName: null,
+            AuthHeaderScheme: null,
+            ApiKey: null,
+            ApiKeyEnvVar: null,
+            ProviderName: "  New Provider Name  "),
+            TestContext.Current.CancellationToken);
+
+        var updated = store.Snapshot.Options.Providers["bedrock"];
+        Assert.Equal("New Provider Name", updated.Name);
+    }
 }
 

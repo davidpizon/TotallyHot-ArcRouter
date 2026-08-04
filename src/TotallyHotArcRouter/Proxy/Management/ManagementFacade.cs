@@ -763,11 +763,11 @@ public sealed class ManagementFacade
         source with { Enabled = enabled };
 
     /// <summary>
-    /// Normalizes a provider display name by converting empty or whitespace-only strings to null,
-    /// so clearing the field in the UI results in a consistent null rather than an empty string.
+    /// Normalizes a provider display name: empty or whitespace-only strings become null, so clearing the
+    /// field in the UI results in a consistent null rather than an empty string; any other value is trimmed.
     /// </summary>
     private static string? NormalizeNameField(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? null : value;
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     /// <summary>
     /// Resolves the (ApiKey, ApiKeyEnvVar) pair to store from the request's <c>CredentialMode</c>, so the
