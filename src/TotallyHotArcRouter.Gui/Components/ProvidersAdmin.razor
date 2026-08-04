@@ -428,7 +428,10 @@
         _dialogHasKey = provider.HasApiKey;
         _dialogHeaders = provider.Headers;
         _dialogIsFree = provider.IsFree;
-        _dialogProviderType = "Other";
+        // A provider stored before ProviderType existed has none; the dialog falls back to "Other" itself,
+        // but pass through what is stored so an Anthropic provider reopens as Anthropic rather than
+        // silently reverting to Other on every edit.
+        _dialogProviderType = provider.ProviderType ?? "Other";
         _dialogProviderName = provider.Name ?? string.Empty;
         _dialogError = null;
         _showDialog = true;
@@ -451,7 +454,8 @@
             CredentialMode: result.CredentialMode,
             Headers: result.Headers,
             IsFree: result.IsFree,
-            ProviderName: result.ProviderName);
+            ProviderName: result.ProviderName,
+            ProviderType: result.ProviderType);
 
         try
         {

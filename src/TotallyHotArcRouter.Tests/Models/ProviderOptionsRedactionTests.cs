@@ -32,6 +32,7 @@ public sealed class ProviderOptionsRedactionTests
     private static ProviderOptions FullyPopulated() => new()
     {
         BaseUrl = "https://api.example.invalid/v1",
+        ProviderType = "Anthropic",
         ApiKey = Secret,
         ApiKeyEnvVar = "EXAMPLE_API_KEY",
         AuthHeaderName = "x-api-key",

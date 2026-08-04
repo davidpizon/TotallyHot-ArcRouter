@@ -37,6 +37,7 @@ public sealed class ProviderOptionsPreservationTests
     private static ProviderOptions FullyPopulated() => new()
     {
         Name = "Example Provider",
+        ProviderType = "Anthropic",
         BaseUrl = "https://example.invalid",
         ApiKey = "literal-key",
         ApiKeyEnvVar = "KEY_ENV",
@@ -200,6 +201,34 @@ public sealed class ProviderOptionsPreservationTests
             TestContext.Current.CancellationToken);
 
         Assert.True(store.Snapshot.Options.Providers["bedrock"].EnableToolCallGuard);
+    }
+
+    [Fact]
+    public async Task UpsertProvider_PreservesProviderType()
+    {
+        // The editor's per-family defaults are only useful if the family survives an edit. A write that
+        // omits the type (any partial/legacy caller) must keep it rather than blanking it back to "Other".
+        var store = StoreWith(FullyPopulated());
+        var facade = CreateFacade(store);
+
+        await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
+            "https://changed.invalid", null, null, null, null),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("Anthropic", store.Snapshot.Options.Providers["bedrock"].ProviderType);
+    }
+
+    [Fact]
+    public async Task UpsertProvider_UpdatesProviderTypeWhenSupplied()
+    {
+        var store = StoreWith(FullyPopulated());
+        var facade = CreateFacade(store);
+
+        await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
+            "https://changed.invalid", null, null, null, null, ProviderType: "OpenAI"),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("OpenAI", store.Snapshot.Options.Providers["bedrock"].ProviderType);
     }
 
     [Fact]

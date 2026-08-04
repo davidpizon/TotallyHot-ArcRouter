@@ -29,14 +29,25 @@ public sealed class ProviderAdminStore
     /// <c>%LOCALAPPDATA%\TotallyHot.ArcRouter\management-token.txt</c> file the proxy generates (see
     /// <see cref="ManagementTokenReader"/>). The REST <c>/admin/*</c> API requires this token by default.
     /// </param>
+    /// <param name="transport">
+    /// The HTTP transport to send through; <see langword="null"/> (the default, and always the case in
+    /// production) uses the framework's own. This exists so tests can render the Governance tab against a
+    /// canned provider list: without it the store builds its own <see cref="HttpClient"/> and the only
+    /// reachable state in a test process is "connection refused", which leaves the entire loaded UI - the
+    /// provider cards, the dialogs, every mutation - unexercised. <see cref="ProviderAdminClient"/> already
+    /// takes its <see cref="HttpClient"/> from the caller for the same reason; this extends that seam the
+    /// one level up that <c>ProvidersAdmin</c> needs.
+    /// </param>
     public ProviderAdminStore(
         ILogger<ProviderAdminStore>? logger = null,
         string managementAddress = DefaultManagementAddress,
-        string? adminToken = null)
+        string? adminToken = null,
+        HttpMessageHandler? transport = null)
     {
         _logger = logger;
         var normalized = managementAddress.EndsWith('/') ? managementAddress : managementAddress + "/";
-        var httpClient = new HttpClient { BaseAddress = new Uri(normalized) };
+        var httpClient = transport is null ? new HttpClient() : new HttpClient(transport);
+        httpClient.BaseAddress = new Uri(normalized);
         _client = new ProviderAdminClient(httpClient, adminToken ?? ManagementTokenReader.TryRead());
     }
 

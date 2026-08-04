@@ -118,6 +118,20 @@ public sealed record ProviderOptions
     public string BaseUrl { get; init; } = string.Empty;
 
     /// <summary>
+    /// Gets the provider family this endpoint belongs to, as the name of a
+    /// <c>TotallyHot.ArcRouter.Gui.Admin.ProviderType</c> member (e.g. <c>Anthropic</c>, <c>OpenAI</c>,
+    /// <c>LocalRuntime</c>). Purely a record of what the operator selected in the provider editor, so that
+    /// reopening a provider restores the right type and its defaults - the routing and forwarding paths
+    /// never read it, and behavior is driven entirely by the concrete fields the type's template filled in.
+    /// <para>
+    /// Stored as a string rather than the enum because that type lives in the GUI assembly, which this
+    /// project deliberately does not reference. <see langword="null"/> for a provider configured before this
+    /// field existed or written by hand; the editor falls back to <c>Other</c> in that case.
+    /// </para>
+    /// </summary>
+    public string? ProviderType { get; init; }
+
+    /// <summary>
     /// Gets the name of the environment variable holding the API key used to authenticate with this provider.
     /// Used only when <see cref="ApiKey"/> is not set. Prefer this over <see cref="ApiKey"/> so secrets are not
     /// checked into configuration files.
@@ -252,6 +266,7 @@ public sealed record ProviderOptions
     private bool PrintMembers(StringBuilder builder)
     {
         builder.Append("BaseUrl = ").Append(BaseUrl);
+        builder.Append(", ProviderType = ").Append(ProviderType);
         builder.Append(", ApiKeyEnvVar = ").Append(ApiKeyEnvVar);
         builder.Append(", ApiKey = ").Append(Redacted(ApiKey));
         builder.Append(", AuthHeaderName = ").Append(AuthHeaderName);

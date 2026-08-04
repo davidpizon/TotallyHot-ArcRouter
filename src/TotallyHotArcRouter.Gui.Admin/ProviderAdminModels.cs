@@ -28,6 +28,12 @@ namespace TotallyHot.ArcRouter.Gui.Admin;
 /// <see cref="ProviderAdminClient.ScanCapabilitiesAsync"/> call, or <see langword="null"/> when the
 /// endpoint has never been scanned.
 /// </param>
+/// <param name="ProviderType">
+/// The name of the <see cref="Admin.ProviderType"/> member the operator selected for this provider, or
+/// <see langword="null"/> for one configured before the field existed (the editor then shows
+/// <see cref="Admin.ProviderType.Other"/>). Round-tripping this is what lets the editor reopen a provider
+/// with its own type - and therefore its own credential defaults - already selected.
+/// </param>
 public sealed record ProviderAdminView(
     string Key,
     string? Name,
@@ -44,7 +50,8 @@ public sealed record ProviderAdminView(
     decimal DollarSpent = 0m,
     long TokensUsed = 0L,
     bool Enabled = true,
-    ProviderEndpointCapabilitiesView? EndpointCapabilities = null);
+    ProviderEndpointCapabilitiesView? EndpointCapabilities = null,
+    string? ProviderType = null);
 
 /// <summary>A configured model as returned by the management API.</summary>
 /// <param name="ModelName">The client-facing model name.</param>
@@ -175,6 +182,8 @@ public static class ProviderCredentialModes
 /// <param name="ProviderName">The user-friendly display name for this provider. Null preserves the existing value.
 /// Any other value (including empty/whitespace) is normalized: empty/whitespace becomes null (an explicit clear);
 /// non-empty becomes the trimmed string.</param>
+/// <param name="ProviderType">The name of the <see cref="Admin.ProviderType"/> member selected in the
+/// editor. Null preserves the existing value, so a partial write can't silently reset a provider's type.</param>
 public sealed record ProviderWriteRequest(
     string? BaseUrl,
     string? AuthHeaderName,
@@ -185,7 +194,8 @@ public sealed record ProviderWriteRequest(
     IReadOnlyList<ProviderHeaderWriteModel>? Headers = null,
     bool? IsFree = null,
     bool? Enabled = null,
-    string? ProviderName = null);
+    string? ProviderName = null,
+    string? ProviderType = null);
 
 /// <summary>
 /// The body sent to switch a provider on or off (<c>PUT /admin/providers/{key}/enabled</c>). The dedicated
