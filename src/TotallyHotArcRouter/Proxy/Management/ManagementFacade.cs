@@ -726,7 +726,9 @@ public sealed class ManagementFacade
 
         return baseline with
         {
-            Name = NormalizeNameField(request.ProviderName) ?? baseline.Name,
+            // Name: null from the request preserves the existing value; any other value (including empty/whitespace)
+            // is normalized - empty/whitespace becomes null (explicitly cleared).
+            Name = request.ProviderName is null ? baseline.Name : NormalizeNameField(request.ProviderName),
             BaseUrl = request.BaseUrl ?? baseline.BaseUrl,
             AuthHeaderName = request.AuthHeaderName ?? baseline.AuthHeaderName,
             // AuthHeaderScheme may legitimately be "" (e.g. Anthropic's x-api-key), so only a null request
@@ -1072,7 +1074,9 @@ public sealed record ProvidersResponse(IReadOnlyList<ProviderView> Providers);
 /// write can't silently un-free a provider.</param>
 /// <param name="Enabled">Whether the provider is switched on; null keeps the existing value, so a partial
 /// write can't silently restart a stopped provider.</param>
-/// <param name="ProviderName">The user-friendly display name for this provider; null keeps the existing value.</param>
+/// <param name="ProviderName">The user-friendly display name for this provider. Null preserves the existing value.
+/// Any other value (including empty/whitespace) is normalized: empty/whitespace becomes null (an explicit clear);
+/// non-empty becomes the trimmed string.</param>
 public sealed record ProviderWriteRequest(
     string? BaseUrl,
     string? AuthHeaderName,
