@@ -66,5 +66,27 @@ public sealed class MockDataTests
         turn.Id.Should().NotBeNullOrEmpty();
         turn.RoutingSteps.Should().NotBeEmpty();
     }
+
+    [Fact]
+    public void RoutingEntry_record_equality_compares_all_fields()
+    {
+        var steps = new List<RoutingStep> { new(StepStatus.Ok, "Agent selected model") };
+        var a = new RoutingEntry("1", "session", "trace", "Agent", "gpt-4o-mini", false, 100, 50, 0.01m, 0.05m, 0.04m, 80m, "14:32:01", steps);
+        var b = new RoutingEntry("1", "session", "trace", "Agent", "gpt-4o-mini", false, 100, 50, 0.01m, 0.05m, 0.04m, 80m, "14:32:01", steps);
+        var differentModel = a with { Model = "gpt-4o" };
+
+        a.Should().Be(b);
+        a.Should().NotBe(differentModel);
+        a.ToString().Should().Contain("gpt-4o-mini");
+    }
+
+    [Fact]
+    public void Entries_expose_the_expected_shape()
+    {
+        var entry = MockData.Entries[0];
+
+        entry.Id.Should().NotBeNullOrEmpty();
+        entry.RoutingSteps.Should().NotBeEmpty();
+    }
 }
 

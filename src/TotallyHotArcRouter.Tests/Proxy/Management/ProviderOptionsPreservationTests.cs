@@ -36,7 +36,7 @@ public sealed class ProviderOptionsPreservationTests
     /// <summary>Every field set to a non-default value, so "was it carried?" is detectable for all of them.</summary>
     private static ProviderOptions FullyPopulated() => new()
     {
-        Name = "Test Provider",
+        Name = "Example Provider",
         BaseUrl = "https://example.invalid",
         ApiKey = "literal-key",
         ApiKeyEnvVar = "KEY_ENV",
@@ -261,6 +261,103 @@ public sealed class ProviderOptionsPreservationTests
         Assert.False(created.IsFree);
         Assert.False(created.EnableToolCallGuard);
         Assert.Empty(created.Headers);
+    }
+
+    // ----- Three-way name merge semantics: null/empty/value -----
+
+    [Fact]
+    public async Task UpsertProvider_WithNullProviderName_PreservesExistingName()
+    {
+        var store = StoreWith(FullyPopulated());
+        var facade = CreateFacade(store);
+
+        await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
+            BaseUrl: "https://changed.invalid",
+            AuthHeaderName: null,
+            AuthHeaderScheme: null,
+            ApiKey: null,
+            ApiKeyEnvVar: null,
+            ProviderName: null),
+            TestContext.Current.CancellationToken);
+
+        var updated = store.Snapshot.Options.Providers["bedrock"];
+        Assert.Equal("Example Provider", updated.Name);
+    }
+
+    [Fact]
+    public async Task UpsertProvider_WithEmptyProviderName_ClearsNameToNull()
+    {
+        var store = StoreWith(FullyPopulated());
+        var facade = CreateFacade(store);
+
+        await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
+            BaseUrl: "https://changed.invalid",
+            AuthHeaderName: null,
+            AuthHeaderScheme: null,
+            ApiKey: null,
+            ApiKeyEnvVar: null,
+            ProviderName: ""),
+            TestContext.Current.CancellationToken);
+
+        var updated = store.Snapshot.Options.Providers["bedrock"];
+        Assert.Null(updated.Name);
+    }
+
+    [Fact]
+    public async Task UpsertProvider_WithWhitespaceProviderName_ClearsNameToNull()
+    {
+        var store = StoreWith(FullyPopulated());
+        var facade = CreateFacade(store);
+
+        await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
+            BaseUrl: "https://changed.invalid",
+            AuthHeaderName: null,
+            AuthHeaderScheme: null,
+            ApiKey: null,
+            ApiKeyEnvVar: null,
+            ProviderName: "  \t\n  "),
+            TestContext.Current.CancellationToken);
+
+        var updated = store.Snapshot.Options.Providers["bedrock"];
+        Assert.Null(updated.Name);
+    }
+
+    [Fact]
+    public async Task UpsertProvider_WithValidProviderName_SetsName()
+    {
+        var store = StoreWith(FullyPopulated());
+        var facade = CreateFacade(store);
+
+        await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
+            BaseUrl: "https://changed.invalid",
+            AuthHeaderName: null,
+            AuthHeaderScheme: null,
+            ApiKey: null,
+            ApiKeyEnvVar: null,
+            ProviderName: "New Provider Name"),
+            TestContext.Current.CancellationToken);
+
+        var updated = store.Snapshot.Options.Providers["bedrock"];
+        Assert.Equal("New Provider Name", updated.Name);
+    }
+
+    [Fact]
+    public async Task UpsertProvider_WithPaddedProviderName_TrimsWhitespace()
+    {
+        var store = StoreWith(FullyPopulated());
+        var facade = CreateFacade(store);
+
+        await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
+            BaseUrl: "https://changed.invalid",
+            AuthHeaderName: null,
+            AuthHeaderScheme: null,
+            ApiKey: null,
+            ApiKeyEnvVar: null,
+            ProviderName: "  New Provider Name  "),
+            TestContext.Current.CancellationToken);
+
+        var updated = store.Snapshot.Options.Providers["bedrock"];
+        Assert.Equal("New Provider Name", updated.Name);
     }
 }
 

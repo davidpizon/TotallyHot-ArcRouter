@@ -172,7 +172,9 @@ public static class ProviderCredentialModes
 /// <param name="IsFree">Whether this provider costs nothing; null keeps the existing value.</param>
 /// <param name="Enabled">Whether the provider is switched on; null keeps the existing value. Prefer the
 /// dedicated <see cref="ProviderEnabledWriteRequest"/> route for a pure on/off toggle.</param>
-/// <param name="ProviderName">The user-friendly display name for this provider; null keeps the existing value.</param>
+/// <param name="ProviderName">The user-friendly display name for this provider. Null preserves the existing value.
+/// Any other value (including empty/whitespace) is normalized: empty/whitespace becomes null (an explicit clear);
+/// non-empty becomes the trimmed string.</param>
 public sealed record ProviderWriteRequest(
     string? BaseUrl,
     string? AuthHeaderName,
