@@ -37,6 +37,7 @@ public sealed class ProviderOptionsPreservationTests
     private static ProviderOptions FullyPopulated() => new()
     {
         Name = "Example Provider",
+        ProviderType = "Anthropic",
         BaseUrl = "https://example.invalid",
         ApiKey = "literal-key",
         ApiKeyEnvVar = "KEY_ENV",
@@ -200,6 +201,66 @@ public sealed class ProviderOptionsPreservationTests
             TestContext.Current.CancellationToken);
 
         Assert.True(store.Snapshot.Options.Providers["bedrock"].EnableToolCallGuard);
+    }
+
+    [Fact]
+    public async Task UpsertProvider_PreservesProviderType()
+    {
+        // The editor's per-family defaults are only useful if the family survives an edit. A write that
+        // omits the type (any partial/legacy caller) must keep it rather than blanking it back to "Other".
+        var store = StoreWith(FullyPopulated());
+        var facade = CreateFacade(store);
+
+        await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
+            "https://changed.invalid", null, null, null, null),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("Anthropic", store.Snapshot.Options.Providers["bedrock"].ProviderType);
+    }
+
+    [Fact]
+    public async Task UpsertProvider_UpdatesProviderTypeWhenSupplied()
+    {
+        var store = StoreWith(FullyPopulated());
+        var facade = CreateFacade(store);
+
+        await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
+            "https://changed.invalid", null, null, null, null, ProviderType: "OpenAI"),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("OpenAI", store.Snapshot.Options.Providers["bedrock"].ProviderType);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task UpsertProvider_TreatsABlankProviderTypeAsAnExplicitClear(string blank)
+    {
+        // Distinct from null (which preserves): a caller that sends a blank string means "no family", and
+        // storing the blank verbatim would leave a value that reads as "Other" in the editor anyway while
+        // sitting in model-routing.json as junk.
+        var store = StoreWith(FullyPopulated());
+        var facade = CreateFacade(store);
+
+        await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
+            "https://changed.invalid", null, null, null, null, ProviderType: blank),
+            TestContext.Current.CancellationToken);
+
+        Assert.Null(store.Snapshot.Options.Providers["bedrock"].ProviderType);
+    }
+
+    [Fact]
+    public async Task UpsertProvider_TrimsTheProviderType()
+    {
+        var store = StoreWith(FullyPopulated());
+        var facade = CreateFacade(store);
+
+        await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
+            "https://changed.invalid", null, null, null, null, ProviderType: "  OpenAI  "),
+            TestContext.Current.CancellationToken);
+
+        // Stored untrimmed, this would fail Enum.TryParse in the editor and silently show "Other".
+        Assert.Equal("OpenAI", store.Snapshot.Options.Providers["bedrock"].ProviderType);
     }
 
     [Fact]

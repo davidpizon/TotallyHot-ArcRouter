@@ -690,7 +690,8 @@ public sealed class ManagementFacade
                     DollarSpent: budget.DollarSpent,
                     TokensUsed: budget.TokensUsed,
                     Enabled: kvp.Value.Enabled,
-                    EndpointCapabilities: _capabilityStore?.GetProviderCapabilities(kvp.Key));
+                    EndpointCapabilities: _capabilityStore?.GetProviderCapabilities(kvp.Key),
+                    ProviderType: kvp.Value.ProviderType);
             })
             .OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -730,6 +731,11 @@ public sealed class ManagementFacade
             // is normalized - empty/whitespace becomes null (explicitly cleared).
             Name = request.ProviderName is null ? baseline.Name : NormalizeNameField(request.ProviderName),
             BaseUrl = request.BaseUrl ?? baseline.BaseUrl,
+            // Normalized on the same rule as Name: null preserves, anything else is trimmed, and
+            // empty/whitespace becomes null. Without this a caller sending "" or " " would persist it, and
+            // since a value that doesn't parse as a ProviderType member reads as "Other" in the editor
+            // anyway, the only thing storing it achieves is junk in model-routing.json.
+            ProviderType = request.ProviderType is null ? baseline.ProviderType : NormalizeNameField(request.ProviderType),
             AuthHeaderName = request.AuthHeaderName ?? baseline.AuthHeaderName,
             // AuthHeaderScheme may legitimately be "" (e.g. Anthropic's x-api-key), so only a null request
             // value falls back - an explicit empty string is honored.
@@ -997,6 +1003,11 @@ public static class HeaderValueSource
 /// §3.3), or <see langword="null"/> when no capability store is wired up or the endpoint has never been
 /// scanned.
 /// </param>
+/// <param name="ProviderType">
+/// The provider family the operator selected in the editor (see <see cref="ProviderOptions.ProviderType"/>),
+/// or <see langword="null"/> for a provider configured before the field existed. Returned so that reopening
+/// a provider restores the right type rather than defaulting to "Other".
+/// </param>
 public sealed record ProviderView(
     string Key,
     string? Name,
@@ -1013,7 +1024,8 @@ public sealed record ProviderView(
     decimal DollarSpent = 0m,
     long TokensUsed = 0L,
     bool Enabled = true,
-    ProviderEndpointCapabilities? EndpointCapabilities = null);
+    ProviderEndpointCapabilities? EndpointCapabilities = null,
+    string? ProviderType = null);
 
 /// <summary>A single configured model as returned to a management caller.</summary>
 /// <param name="ModelName">The client-facing model name.</param>
@@ -1077,6 +1089,10 @@ public sealed record ProvidersResponse(IReadOnlyList<ProviderView> Providers);
 /// <param name="ProviderName">The user-friendly display name for this provider. Null preserves the existing value.
 /// Any other value (including empty/whitespace) is normalized: empty/whitespace becomes null (an explicit clear);
 /// non-empty becomes the trimmed string.</param>
+/// <param name="ProviderType">The provider family selected in the editor (see
+/// <see cref="ProviderOptions.ProviderType"/>). Normalized exactly like <paramref name="ProviderName"/>:
+/// null keeps the existing value, so a partial write can't silently reset a provider's type; any other
+/// value is trimmed, and empty/whitespace becomes null (an explicit clear).</param>
 public sealed record ProviderWriteRequest(
     string? BaseUrl,
     string? AuthHeaderName,
@@ -1087,7 +1103,8 @@ public sealed record ProviderWriteRequest(
     IReadOnlyList<HeaderWriteRequest>? Headers = null,
     bool? IsFree = null,
     bool? Enabled = null,
-    string? ProviderName = null);
+    string? ProviderName = null,
+    string? ProviderType = null);
 
 /// <summary>
 /// The body sent to switch a provider on or off (<c>PUT /admin/providers/{key}/enabled</c>). Unlike

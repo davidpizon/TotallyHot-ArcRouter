@@ -64,13 +64,76 @@ flowchart LR
   unit-tested in CI. **`ProviderAdminStore`** (MAUI) is the thin singleton the UI binds to, mirroring
   `LiveDataStore`.
 
+## Provider types
+
+The edit dialog's **Provider Type** dropdown selects a provider *family*, which pre-fills the base URL,
+the authentication shape, and any header the API requires. Each entry is a family rather than a single
+vendor: everything that authenticates identically shares one entry and differs only in a base URL the
+operator edits.
+
+| Dropdown label | `ProviderType` | Requires auth | Auth Header | Suggested value |
+|---|---|---|---|---|
+| Anthropic | `Anthropic` | yes | `x-api-key` | `ANTHROPIC_API_KEY` |
+| OpenAI / Groq / DeepSeek | `OpenAI` | yes | `Authorization` | `Bearer {env:OPENAI_API_KEY}` |
+| Google Gemini | `GoogleGemini` | yes | `Authorization` | `Bearer {env:GEMINI_API_KEY}` |
+| Azure OpenAI | `AzureOpenAI` | yes | `api-key` | `AZURE_OPENAI_API_KEY` |
+| Cohere | `Cohere` | yes | `Authorization` | `Bearer {env:COHERE_API_KEY}` |
+| Ollama / LM Studio / llama.cpp | `LocalRuntime` | **no** | — | — |
+| AWS Bedrock | `Bedrock` | **no** (SigV4) | — | — |
+| Other | `Other` | yes | `Authorization` | — |
+
+The `OpenAI` entry covers every OpenAI-compatible endpoint — xAI, Together, OpenRouter, Mistral,
+Fireworks, Perplexity, vLLM — because they share the identical bearer-token shape. The Anthropic
+template also seeds the mandatory `anthropic-version: 2023-06-01` custom header, without which that API
+rejects every request.
+
+The selection is persisted on `ProviderOptions.ProviderType` (as the enum member's **name**) purely so
+that reopening a provider restores its type and defaults. Nothing in the routing or forwarding path
+reads it; behavior comes entirely from the concrete fields the template filled in.
+
 ## Credentials
 
-Each provider uses one of: a **literal key**, an **environment-variable reference**, or **none**
-(e.g. a local Ollama endpoint). The literal key is **never returned** by the API (`GET` reports only
-`hasApiKey` + the env-var name), so editing a provider without re-entering the key preserves the
-stored one. Literal keys entered in the UI are stored in plaintext in `model-routing.json` — acceptable
-for a localhost single-developer tool, but prefer the env-var reference to keep secrets out of files.
+A **Requires Authentication** checkbox gates a **Credentials** fieldset. Unticked, the provider sends no
+credential (a local runtime, or Bedrock where the AWS SDK signs each request itself). Ticked, the
+fieldset holds one or more rows of:
+
+| Field | Meaning |
+|---|---|
+| **Auth Header** | The header carrying the credential (`Authorization`, `x-api-key`, `api-key`, …). |
+| **Type** | `Literal value` (the credential itself) or `Environment variable` (a reference to one). |
+| **Value** | The literal credential, or an [auth value template](#auth-value-templates) naming the variable. |
+
+The **first** row is the provider's primary credential and maps onto `AuthHeaderName` /
+`AuthHeaderScheme` / `ApiKey` / `ApiKeyEnvVar`. **Additional** rows are stored as ordinary custom
+headers, which is what makes multi-header authentication (an Azure APIM subscription key alongside a
+token) expressible without a second storage shape. One consequence: only the first row supports a
+scheme prefix, since a custom header has no scheme field — the dialog rejects a prefixed value on any
+later row and says why.
+
+Literal keys are **never returned** by the API (`GET` reports only `hasApiKey` + the env-var name), so
+editing a provider without re-entering the key preserves the stored one — along with its scheme, so an
+untouched `Authorization: Bearer sk-…` provider does not silently re-save as a raw key. Literal keys
+entered in the UI are stored in plaintext in `model-routing.json` — acceptable for a localhost
+single-developer tool, but prefer the env-var reference to keep secrets out of files.
+
+### Auth value templates
+
+The single **Value** box replaced the old separate "Scheme" and "Env Var Name" fields. In
+`Environment variable` mode it accepts either a bare variable name or one `{env:NAME}` reference with an
+optional single-word prefix:
+
+| Typed value | Stored `AuthHeaderScheme` | Stored `ApiKeyEnvVar` | Sent upstream |
+|---|---|---|---|
+| `ANTHROPIC_API_KEY` | *(empty)* | `ANTHROPIC_API_KEY` | `x-api-key: <value>` |
+| `Bearer {env:OPENAI_API_KEY}` | `Bearer` | `OPENAI_API_KEY` | `Authorization: Bearer <value>` |
+
+This is a **presentation** concern only, handled by `AuthValueTemplate` in
+`TotallyHotArcRouter.Gui.Admin`. Nothing downstream ever sees a template: the dialog decomposes it into
+the scheme + variable pair the proxy already stores, and `ProviderCredentialResolver` re-joins them
+exactly as it always did. The router, the management API, and existing `model-routing.json` files are
+unaffected. Templates that cannot round-trip through that pair — more than one reference, text after the
+reference, or a multi-word prefix — are refused at save time with a stated reason rather than silently
+truncated.
 
 ## Free providers
 
@@ -104,10 +167,18 @@ extractable logic (the `ProviderAdminClient` and the store/resolver) is covered 
 (`TotallyHotArcRouter.Gui.Admin.Tests`, `ProviderConfigStoreTests`, `ProviderAdminEndpointsTests`).
 
 1. Start the proxy, then run the Gui. Open **Governance → Providers**.
-2. **Add** a provider (e.g. key `ollama`, base URL `http://localhost:11434/v1`, credential *None*).
+2. **Add** a provider with type *Ollama / LM Studio / llama.cpp*; confirm the base URL fills in,
+   **Requires Authentication** unticks with a hint, the Credentials fieldset greys out, and **Free
+   provider** ticks itself.
 3. **Add** a model under it (`llama3`), then confirm `GET http://localhost:5001/v1/models` lists it
    with no proxy restart.
 4. **Edit** a provider's base URL without re-entering its key; confirm the key is preserved.
+4b. Select type *Anthropic* on a new provider: confirm `x-api-key` fills in, the Value box shows a greyed
+   `ANTHROPIC_API_KEY` suggestion (placeholder, not a value), and `anthropic-version` is added under
+   Custom Headers. Save, close, and reopen — the type must still read **Anthropic**.
+4c. Select type *OpenAI / Groq / DeepSeek*, enter `Bearer {env:OPENAI_API_KEY}`, save, and inspect
+   `model-routing.json`: it must store `"AuthHeaderScheme": "Bearer"` and
+   `"ApiKeyEnvVar": "OPENAI_API_KEY"` — the template is decomposed, never persisted verbatim.
 5. **Refresh from endpoint** on a running provider; confirm a newly-available model appears
    automatically (stopped, greyed out — click Start to activate it), a dialect badge (e.g. `hermes`,
    `openai-native`) appears next to a model once the provider's endpoint exposes enough metadata to

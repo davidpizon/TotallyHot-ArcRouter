@@ -71,34 +71,106 @@ public sealed class ProviderAdminModelsTests
     }
 
     [Fact]
-    public void ProviderTemplates_Anthropic_UsesTheApiKeyHeader()
+    public void ProviderTemplates_Ordered_ListsEveryProviderTypeExactlyOnce()
+    {
+        // The editor renders its dropdown from Ordered, so a type missing here is a type the operator can
+        // never select - and one listed twice is a duplicated option.
+        Assert.Equal(
+            Enum.GetValues<ProviderType>().OrderBy(t => t).ToList(),
+            ProviderTemplates.Ordered.OrderBy(t => t).ToList());
+        Assert.Equal(ProviderTemplates.Ordered.Count, ProviderTemplates.Ordered.Distinct().Count());
+    }
+
+    [Fact]
+    public void ProviderTemplates_Ordered_PutsOtherLast()
+    {
+        Assert.Equal(ProviderType.Other, ProviderTemplates.Ordered[^1]);
+    }
+
+    [Fact]
+    public void ProviderTemplates_DisplayName_LabelsFamiliesRatherThanEnumNames()
+    {
+        Assert.Equal("OpenAI / Groq / DeepSeek", ProviderTemplates.DisplayName(ProviderType.OpenAI));
+        Assert.Equal("Ollama / LM Studio / llama.cpp", ProviderTemplates.DisplayName(ProviderType.LocalRuntime));
+        Assert.Equal("Anthropic", ProviderTemplates.DisplayName(ProviderType.Anthropic));
+    }
+
+    [Fact]
+    public void ProviderTemplates_Anthropic_UsesTheApiKeyHeaderAndSuppliesTheVersionHeader()
     {
         var template = ProviderTemplates.Templates[ProviderType.Anthropic];
 
         Assert.Equal("https://api.anthropic.com", template.BaseUrl);
+        Assert.True(template.RequiresAuth);
         Assert.Equal("x-api-key", template.AuthHeaderName);
-        Assert.Equal(string.Empty, template.AuthHeaderScheme);
-        Assert.Equal(ProviderCredentialModes.Literal, template.DefaultCredentialMode);
+        // A raw key, no scheme prefix - so the suggestion is a bare variable name.
+        Assert.Equal("ANTHROPIC_API_KEY", template.SuggestedEnvValue);
+        // Without anthropic-version every request 400s, which used to be the operator's problem to discover.
+        var header = Assert.Single(template.DefaultHeaders);
+        Assert.Equal("anthropic-version", header.Name);
+        Assert.Equal("2023-06-01", header.Value);
     }
 
     [Fact]
-    public void ProviderTemplates_OpenAI_UsesTheBearerScheme()
+    public void ProviderTemplates_OpenAI_SuggestsABearerValueTemplate()
     {
         var template = ProviderTemplates.Templates[ProviderType.OpenAI];
 
         Assert.Equal("https://api.openai.com/v1", template.BaseUrl);
+        Assert.True(template.RequiresAuth);
         Assert.Equal("Authorization", template.AuthHeaderName);
-        Assert.Equal("Bearer", template.AuthHeaderScheme);
-        Assert.Equal(ProviderCredentialModes.Literal, template.DefaultCredentialMode);
+        Assert.Equal("Bearer {env:OPENAI_API_KEY}", template.SuggestedEnvValue);
+        Assert.Empty(template.DefaultHeaders);
     }
 
     [Fact]
-    public void ProviderTemplates_Other_HasNoDefaultCredential()
+    public void ProviderTemplates_Other_RequiresACredential()
     {
         var template = ProviderTemplates.Templates[ProviderType.Other];
 
         Assert.Equal(string.Empty, template.BaseUrl);
-        Assert.Equal(ProviderCredentialModes.None, template.DefaultCredentialMode);
+        // "Other" now means an unknown *remote* API: every unauthenticated case has its own type.
+        Assert.True(template.RequiresAuth);
+        Assert.Equal("Authorization", template.AuthHeaderName);
+        Assert.Empty(template.SuggestedEnvValue);
+    }
+
+    [Theory]
+    [InlineData(ProviderType.LocalRuntime)]
+    [InlineData(ProviderType.Bedrock)]
+    public void ProviderTemplates_UnauthenticatedTypes_ExplainWhyTheyNeedNoCredential(ProviderType providerType)
+    {
+        var template = ProviderTemplates.Templates[providerType];
+
+        Assert.False(template.RequiresAuth);
+        Assert.Empty(template.SuggestedEnvValue);
+        // The absence of a credential is surprising enough to need saying, or an operator assumes it's a bug.
+        Assert.False(string.IsNullOrWhiteSpace(template.AuthHint));
+    }
+
+    [Fact]
+    public void ProviderTemplates_LocalRuntime_DefaultsToFree()
+    {
+        Assert.True(ProviderTemplates.Templates[ProviderType.LocalRuntime].DefaultsToFree);
+        Assert.False(ProviderTemplates.Templates[ProviderType.OpenAI].DefaultsToFree);
+    }
+
+    [Theory]
+    [InlineData(ProviderType.Anthropic)]
+    [InlineData(ProviderType.OpenAI)]
+    [InlineData(ProviderType.GoogleGemini)]
+    [InlineData(ProviderType.AzureOpenAI)]
+    [InlineData(ProviderType.Cohere)]
+    public void ProviderTemplates_AuthenticatedTypes_HaveAHeaderAndAParsableSuggestion(ProviderType providerType)
+    {
+        var template = ProviderTemplates.Templates[providerType];
+
+        Assert.True(template.RequiresAuth);
+        Assert.False(string.IsNullOrWhiteSpace(template.AuthHeaderName));
+        // A suggestion the editor's own parser rejects would be a placeholder the operator cannot copy.
+        Assert.True(
+            AuthValueTemplate.TryParse(template.SuggestedEnvValue, out _, out _, out var error),
+            $"{providerType}'s suggested value does not parse: {error}");
     }
 
     [Fact]
