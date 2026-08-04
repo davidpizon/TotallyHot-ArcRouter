@@ -10,9 +10,11 @@ namespace TotallyHot.ArcRouter.Gui.Admin;
 /// </para>
 /// </summary>
 /// <remarks>
-/// The numeric values are explicit and must not be renumbered: the selected member is persisted by
-/// <em>name</em> on <c>ProviderOptions.ProviderType</c>, and an unparseable name falls back to
-/// <see cref="Other"/>, so renaming a member silently downgrades every provider configured with it.
+/// The <em>names</em> are the compatibility surface, not the numbers: the selected member is persisted as
+/// a string on <c>ProviderOptions.ProviderType</c>, and a name that no longer parses falls back to
+/// <see cref="Other"/>. So renaming a member silently downgrades every provider already configured with
+/// it, while renumbering is harmless - nothing serializes the numeric value. The values are written
+/// explicitly only to keep them stable and reviewable, not because anything depends on them.
 /// </remarks>
 public enum ProviderType
 {

@@ -183,7 +183,9 @@ public static class ProviderCredentialModes
 /// Any other value (including empty/whitespace) is normalized: empty/whitespace becomes null (an explicit clear);
 /// non-empty becomes the trimmed string.</param>
 /// <param name="ProviderType">The name of the <see cref="Admin.ProviderType"/> member selected in the
-/// editor. Null preserves the existing value, so a partial write can't silently reset a provider's type.</param>
+/// editor. Normalized exactly like <paramref name="ProviderName"/>: null preserves the existing value, so a
+/// partial write can't silently reset a provider's type; any other value is trimmed, and empty/whitespace
+/// becomes null (an explicit clear).</param>
 public sealed record ProviderWriteRequest(
     string? BaseUrl,
     string? AuthHeaderName,

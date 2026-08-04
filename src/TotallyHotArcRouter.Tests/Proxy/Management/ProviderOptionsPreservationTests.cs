@@ -231,6 +231,38 @@ public sealed class ProviderOptionsPreservationTests
         Assert.Equal("OpenAI", store.Snapshot.Options.Providers["bedrock"].ProviderType);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task UpsertProvider_TreatsABlankProviderTypeAsAnExplicitClear(string blank)
+    {
+        // Distinct from null (which preserves): a caller that sends a blank string means "no family", and
+        // storing the blank verbatim would leave a value that reads as "Other" in the editor anyway while
+        // sitting in model-routing.json as junk.
+        var store = StoreWith(FullyPopulated());
+        var facade = CreateFacade(store);
+
+        await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
+            "https://changed.invalid", null, null, null, null, ProviderType: blank),
+            TestContext.Current.CancellationToken);
+
+        Assert.Null(store.Snapshot.Options.Providers["bedrock"].ProviderType);
+    }
+
+    [Fact]
+    public async Task UpsertProvider_TrimsTheProviderType()
+    {
+        var store = StoreWith(FullyPopulated());
+        var facade = CreateFacade(store);
+
+        await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
+            "https://changed.invalid", null, null, null, null, ProviderType: "  OpenAI  "),
+            TestContext.Current.CancellationToken);
+
+        // Stored untrimmed, this would fail Enum.TryParse in the editor and silently show "Other".
+        Assert.Equal("OpenAI", store.Snapshot.Options.Providers["bedrock"].ProviderType);
+    }
+
     [Fact]
     public async Task UpsertProvider_PreservesEveryAwsField()
     {
