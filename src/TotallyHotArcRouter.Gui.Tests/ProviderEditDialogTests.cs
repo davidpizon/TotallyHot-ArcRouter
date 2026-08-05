@@ -25,6 +25,15 @@ public sealed class ProviderEditDialogTests
     private const string OriginalBaseUrl = "https://api.anthropic.com";
     private const string EditedBaseUrl = "https://api.anthropic.com/edited";
 
+    /// <summary>A stored header the operator marked secret: the router withholds its value, so the view
+    /// carries the source alone.</summary>
+    private static readonly ProviderHeaderView LockedHeader =
+        new("X-Subscription-Key", HeaderValueSource.Literal, null, Value: null, Locked: true);
+
+    /// <summary>A stored header left unlocked - ordinary public configuration, returned in full.</summary>
+    private static readonly ProviderHeaderView UnlockedHeader =
+        new("anthropic-version", HeaderValueSource.Literal, null, Value: "2023-06-01", Locked: false);
+
     [Fact]
     public void Renders_the_real_provider_key_in_the_edit_title()
     {
@@ -525,7 +534,7 @@ public sealed class ProviderEditDialogTests
     }
 
     [Fact]
-    public void Existing_literal_header_shows_saved_indicator_and_round_trips_blank_to_preserve_it()
+    public void Existing_locked_header_hides_its_value_and_round_trips_blank_to_preserve_it()
     {
         using var ctx = new Bunit.BunitContext();
 
@@ -533,23 +542,175 @@ public sealed class ProviderEditDialogTests
         var cut = ctx.Render<ProviderEditDialog>(parameters =>
         {
             SeedEditParameters(parameters);
-            // The management API is write-only for header secrets: a GET never carries the literal value,
-            // only that one is set (HeaderValueSource.Literal).
-            parameters.Add(p => p.Headers, new[] { new ProviderHeaderView("anthropic-version", HeaderValueSource.Literal, null) });
+            // A locked header's literal value is never carried by a GET, only the fact that one is set.
+            parameters.Add(p => p.Headers, new[] { LockedHeader });
             parameters.Add(p => p.OnSave, (ProviderEditDialog.ProviderEditResult r) => saved = r);
         });
 
-        // The existing header is shown in the editor, with a "saved" placeholder rather than the value...
-        cut.Markup.Should().Contain("anthropic-version");
-        cut.Markup.Should().Contain("saved, blank keeps it");
+        // The existing header is shown in the editor, masked, with a "saved" placeholder rather than the
+        // value...
+        cut.Markup.Should().Contain("X-Subscription-Key");
+        var value = cut.Find("[data-testid='header-value-0']");
+        value.GetAttribute("type").Should().Be("password");
+        value.GetAttribute("value").Should().BeNullOrEmpty();
+        value.GetAttribute("placeholder").Should().Contain("saved, blank keeps it");
 
-        // ...and saving without re-entering it sends it blank - the server preserves the stored value.
+        // ...and saving without re-entering it sends it blank but still locked - which is what tells the
+        // server to preserve the stored value rather than clear it.
         FindSaveButton(cut).Click();
 
         var header = saved!.Headers.Should().ContainSingle().Subject;
-        header.Name.Should().Be("anthropic-version");
+        header.Name.Should().Be("X-Subscription-Key");
         header.Value.Should().BeNullOrEmpty();
         header.ValueEnvVar.Should().BeNull();
+        header.Locked.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Unlocked_header_value_is_shown_in_full_and_saved_as_typed()
+    {
+        using var ctx = new Bunit.BunitContext();
+
+        ProviderEditDialog.ProviderEditResult? saved = null;
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(parameters);
+            parameters.Add(p => p.Headers, new[] { UnlockedHeader });
+            parameters.Add(p => p.OnSave, (ProviderEditDialog.ProviderEditResult r) => saved = r);
+        });
+
+        // The point of the unlocked default: public configuration is readable and directly editable.
+        var value = cut.Find("[data-testid='header-value-0']");
+        value.GetAttribute("type").Should().Be("text");
+        value.GetAttribute("value").Should().Be("2023-06-01");
+
+        value.Input("2024-01-01");
+        FindSaveButton(cut).Click();
+
+        var header = saved!.Headers.Should().ContainSingle().Subject;
+        header.Value.Should().Be("2024-01-01");
+        header.Locked.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Locking_a_header_keeps_the_typed_value_in_one_click()
+    {
+        using var ctx = new Bunit.BunitContext();
+
+        ProviderEditDialog.ProviderEditResult? saved = null;
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(parameters);
+            parameters.Add(p => p.Headers, new[] { UnlockedHeader });
+            parameters.Add(p => p.OnSave, (ProviderEditDialog.ProviderEditResult r) => saved = r);
+        });
+
+        cut.Find("[data-testid='header-value-0-lock']").Click();
+
+        cut.Find("[data-testid='header-value-0']").GetAttribute("type").Should().Be("password");
+
+        FindSaveButton(cut).Click();
+
+        // Locking costs nothing: the value the operator could already see is sent along with the flag.
+        var header = saved!.Headers.Should().ContainSingle().Subject;
+        header.Value.Should().Be("2023-06-01");
+        header.Locked.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Unlocking_a_header_takes_two_clicks_and_clears_the_value()
+    {
+        using var ctx = new Bunit.BunitContext();
+
+        ProviderEditDialog.ProviderEditResult? saved = null;
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(parameters);
+            parameters.Add(p => p.Headers, new[] { LockedHeader });
+            parameters.Add(p => p.OnSave, (ProviderEditDialog.ProviderEditResult r) => saved = r);
+        });
+
+        // First click only arms the confirmation - the field is still locked.
+        cut.Find("[data-testid='header-value-0-lock']").Click();
+        cut.Find("[data-testid='header-value-0']").GetAttribute("type").Should().Be("password");
+
+        cut.Find("[data-testid='header-value-0-lock']").Click();
+        var value = cut.Find("[data-testid='header-value-0']");
+        value.GetAttribute("type").Should().Be("text");
+        value.GetAttribute("value").Should().BeNullOrEmpty();
+        // The saved-value placeholder must go too: there is nothing left for a blank field to preserve.
+        value.GetAttribute("placeholder").Should().NotContain("saved");
+
+        FindSaveButton(cut).Click();
+
+        // Blank under an explicit unlock is what tells the server to clear the stored secret.
+        var header = saved!.Headers.Should().ContainSingle().Subject;
+        header.Value.Should().BeNullOrEmpty();
+        header.Locked.Should().BeFalse();
+    }
+
+    [Fact]
+    public void An_env_var_header_has_no_padlock()
+    {
+        using var ctx = new Bunit.BunitContext();
+
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(parameters);
+            parameters.Add(p => p.Headers, new[] { new ProviderHeaderView("X-Secret", HeaderValueSource.EnvVar, "MY_SECRET_VAR") });
+        });
+
+        // An env-var header names a variable; the secret lives outside the config file, so there is
+        // nothing for a lock to withhold.
+        cut.FindAll("[data-testid='header-value-0-lock']").Should().BeEmpty();
+        cut.Find("[data-testid='header-value-0']").GetAttribute("value").Should().Be("MY_SECRET_VAR");
+    }
+
+    [Fact]
+    public void Switching_a_locked_header_to_an_env_var_drops_its_lock()
+    {
+        using var ctx = new Bunit.BunitContext();
+
+        ProviderEditDialog.ProviderEditResult? saved = null;
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(parameters);
+            parameters.Add(p => p.Headers, new[] { LockedHeader });
+            parameters.Add(p => p.OnSave, (ProviderEditDialog.ProviderEditResult r) => saved = r);
+        });
+
+        cut.Find("[data-testid='header-source-0']").Change("env");
+        cut.Find("[data-testid='header-value-0']").Input("MY_SECRET_VAR");
+        FindSaveButton(cut).Click();
+
+        var header = saved!.Headers.Should().ContainSingle().Subject;
+        header.ValueEnvVar.Should().Be("MY_SECRET_VAR");
+        header.Locked.Should().BeFalse();
+    }
+
+    [Fact]
+    public void A_second_credential_row_is_always_saved_locked()
+    {
+        using var ctx = new Bunit.BunitContext();
+
+        ProviderEditDialog.ProviderEditResult? saved = null;
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(parameters);
+            parameters.Add(p => p.OnSave, (ProviderEditDialog.ProviderEditResult r) => saved = r);
+        });
+
+        cut.Find("[data-testid='add-credential']").Click();
+        cut.Find("[data-testid='credential-header-1']").Input("X-Extra");
+        cut.Find("[data-testid='credential-type-1']").Change("literal");
+        cut.Find("[data-testid='credential-value-1']").Input("sk-extra");
+        FindSaveButton(cut).Click();
+
+        // Credential rows past the first are stored as custom headers. This dialog offers no way to read
+        // a stored credential back, so they are secrets by definition.
+        var header = saved!.Headers.Should().ContainSingle().Subject;
+        header.Name.Should().Be("X-Extra");
+        header.Locked.Should().BeTrue();
     }
 
     private static void SeedEditParameters(ComponentParameterCollectionBuilder<ProviderEditDialog> parameters) =>

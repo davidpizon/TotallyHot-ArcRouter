@@ -308,6 +308,21 @@ public sealed class ProviderHeader
 
     /// <summary>Gets the name of an environment variable holding the header value; used only when <see cref="Value"/> is empty.</summary>
     public string? ValueEnvVar { get; init; }
+
+    /// <summary>
+    /// Gets whether the literal <see cref="Value"/> is a secret that must never be read back by a
+    /// management client (see the GUI's secret field, <c>docs/gui/secret-field.md</c>). Locked values are
+    /// still sent upstream; they are only withheld from callers of the management API, which is what makes
+    /// unlocking destructive - there is no way to show a value that was never returned.
+    /// <para>
+    /// Defaults to <see langword="true"/> so that a header persisted before this flag existed - and whose
+    /// provenance is therefore unknown - stays hidden rather than becoming visible on upgrade. Known-public
+    /// values (the <c>appsettings.json</c> seed, the editor's provider templates) say <c>"Locked": false</c>
+    /// explicitly. Only meaningful for a literal value: an env-var-backed header stores <see langword="false"/>,
+    /// since its secret lives in the environment rather than in configuration.
+    /// </para>
+    /// </summary>
+    public bool Locked { get; init; } = true;
 }
 
 /// <summary>

@@ -1,0 +1,167 @@
+using TotallyHot.ArcRouter.Gui.Components;
+using Bunit;
+using FluentAssertions;
+
+namespace TotallyHot.ArcRouter.Gui.Tests;
+
+/// <summary>
+/// Component tests for <see cref="SecretField"/>. The behavior worth pinning down is the asymmetry
+/// between the two directions of the padlock: locking is one click and non-destructive, while unlocking
+/// takes a confirming second click and clears the value. That is not a UI flourish - a locked value is
+/// never returned to this process, so an unlocked field still showing one would be a field the operator
+/// cannot correct. See <c>docs/gui/secret-field.md</c>.
+/// </summary>
+public sealed class SecretFieldTests
+{
+    private const string TestId = "secret";
+
+    [Fact]
+    public void Unlocked_field_is_an_ordinary_readable_text_box()
+    {
+        using var ctx = new Bunit.BunitContext();
+
+        var cut = Render(ctx, "hello", locked: false);
+
+        var input = cut.Find($"[data-testid='{TestId}']");
+        input.GetAttribute("type").Should().Be("text");
+        input.GetAttribute("value").Should().Be("hello");
+        cut.Find($"[data-testid='{TestId}-lock']").GetAttribute("data-tip").Should().Be(SecretField.UnlockedTip);
+    }
+
+    [Fact]
+    public void Locked_field_masks_its_value()
+    {
+        using var ctx = new Bunit.BunitContext();
+
+        var cut = Render(ctx, "s3cret", locked: true);
+
+        cut.Find($"[data-testid='{TestId}']").GetAttribute("type").Should().Be("password");
+        cut.Find($"[data-testid='{TestId}-lock']").GetAttribute("data-tip").Should().Be(SecretField.LockedTip);
+    }
+
+    [Fact]
+    public void Typing_raises_ValueChanged()
+    {
+        using var ctx = new Bunit.BunitContext();
+
+        string? value = null;
+        var cut = Render(ctx, string.Empty, locked: false, onValueChanged: v => value = v);
+
+        cut.Find($"[data-testid='{TestId}']").Input("typed");
+
+        value.Should().Be("typed");
+    }
+
+    [Fact]
+    public void Locking_takes_one_click_and_keeps_the_value()
+    {
+        using var ctx = new Bunit.BunitContext();
+
+        bool? locked = null;
+        string? value = "hello";
+        var cut = Render(ctx, "hello", locked: false, onValueChanged: v => value = v, onLockedChanged: l => locked = l);
+
+        cut.Find($"[data-testid='{TestId}-lock']").Click();
+
+        locked.Should().BeTrue();
+        value.Should().Be("hello");
+    }
+
+    [Fact]
+    public void The_first_unlock_click_only_arms_a_confirmation()
+    {
+        using var ctx = new Bunit.BunitContext();
+
+        bool? locked = null;
+        string? value = null;
+        var cut = Render(ctx, "s3cret", locked: true, onValueChanged: v => value = v, onLockedChanged: l => locked = l);
+
+        cut.Find($"[data-testid='{TestId}-lock']").Click();
+
+        locked.Should().BeNull();
+        value.Should().BeNull();
+        // The warning appears before the destructive click, not after it.
+        cut.Find($"[data-testid='{TestId}-lock']").GetAttribute("data-tip").Should().Be(SecretField.ArmedTip);
+        cut.Find($"[data-testid='{TestId}']").GetAttribute("type").Should().Be("password");
+    }
+
+    [Fact]
+    public void The_second_unlock_click_clears_the_value_and_unlocks()
+    {
+        using var ctx = new Bunit.BunitContext();
+
+        bool? locked = null;
+        string? value = null;
+        var cut = Render(ctx, "s3cret", locked: true, onValueChanged: v => value = v, onLockedChanged: l => locked = l);
+
+        cut.Find($"[data-testid='{TestId}-lock']").Click();
+        cut.Find($"[data-testid='{TestId}-lock']").Click();
+
+        locked.Should().BeFalse();
+        value.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Losing_focus_disarms_a_pending_unlock()
+    {
+        using var ctx = new Bunit.BunitContext();
+
+        bool? locked = null;
+        var cut = Render(ctx, "s3cret", locked: true, onLockedChanged: l => locked = l);
+
+        cut.Find($"[data-testid='{TestId}-lock']").Click();
+        cut.Find($"[data-testid='{TestId}-lock']").Blur();
+
+        // A half-armed toggle must not be completed by a much later, unrelated click.
+        cut.Find($"[data-testid='{TestId}-lock']").GetAttribute("data-tip").Should().Be(SecretField.LockedTip);
+
+        cut.Find($"[data-testid='{TestId}-lock']").Click();
+        locked.Should().BeNull();
+    }
+
+    [Fact]
+    public void Disabled_field_disables_both_the_input_and_the_padlock()
+    {
+        using var ctx = new Bunit.BunitContext();
+
+        var cut = ctx.Render<SecretField>(p => p
+            .Add(x => x.Value, "hello")
+            .Add(x => x.TestId, TestId)
+            .Add(x => x.Disabled, true));
+
+        cut.Find($"[data-testid='{TestId}']").HasAttribute("disabled").Should().BeTrue();
+        cut.Find($"[data-testid='{TestId}-lock']").HasAttribute("disabled").Should().BeTrue();
+    }
+
+    [Fact]
+    public void Without_a_TestId_neither_element_carries_one()
+    {
+        using var ctx = new Bunit.BunitContext();
+
+        var cut = ctx.Render<SecretField>(p => p.Add(x => x.Value, "hello"));
+
+        cut.FindAll("[data-testid]").Should().BeEmpty();
+    }
+
+    private static IRenderedComponent<SecretField> Render(
+        Bunit.BunitContext ctx,
+        string value,
+        bool locked,
+        Action<string>? onValueChanged = null,
+        Action<bool>? onLockedChanged = null) =>
+        ctx.Render<SecretField>(p =>
+        {
+            p.Add(x => x.Value, value);
+            p.Add(x => x.Locked, locked);
+            p.Add(x => x.TestId, TestId);
+            if (onValueChanged is not null)
+            {
+                p.Add(x => x.ValueChanged, onValueChanged);
+            }
+
+            if (onLockedChanged is not null)
+            {
+                p.Add(x => x.LockedChanged, onLockedChanged);
+            }
+        });
+}

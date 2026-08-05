@@ -662,10 +662,19 @@ public sealed class ManagementFacade
                     .Select(h =>
                     {
                         var source = ClassifyHeaderSource(h);
+                        // The one place a stored literal header value can leave the application. A locked
+                        // header is a secret the operator chose to make unreadable, so its value is dropped
+                        // here rather than at any caller - see docs/gui/secret-field.md.
+                        var locked = source == HeaderValueSource.Literal && h.Locked;
                         // ValueEnvVar is only meaningful for an envVar-sourced header; a header with both
                         // fields somehow set (legacy/bad data) classifies as literal, and must not also
                         // surface the env-var name - that would violate HeaderView's documented contract.
-                        return new HeaderView(h.Name, source, source == HeaderValueSource.EnvVar ? h.ValueEnvVar : null);
+                        return new HeaderView(
+                            h.Name,
+                            source,
+                            source == HeaderValueSource.EnvVar ? h.ValueEnvVar : null,
+                            Value: source == HeaderValueSource.Literal && !locked ? h.Value : null,
+                            Locked: locked);
                     })
                     .ToList();
 
@@ -818,31 +827,58 @@ public sealed class ManagementFacade
     /// <summary>
     /// Resolves one incoming header write to the <see cref="ProviderHeader"/> to store: a non-blank
     /// <see cref="HeaderWriteRequest.Value"/> is a literal, a non-blank
-    /// <see cref="HeaderWriteRequest.ValueEnvVar"/> is an env-var reference, and - since no surface ever
-    /// returns a literal header value for a caller to resend - both blank preserves whatever value is
-    /// already stored under this header's name (mirroring <see cref="ResolveCredential"/>'s literal-mode
+    /// <see cref="HeaderWriteRequest.ValueEnvVar"/> is an env-var reference, and - since a locked header's
+    /// value is never returned for a caller to resend - both blank preserves whatever value is already
+    /// stored under this header's name (mirroring <see cref="ResolveCredential"/>'s literal-mode
     /// blank-preserves-existing rule). A header with no existing counterpart and both fields blank stores
     /// as <see cref="HeaderValueSource.None"/>.
+    /// <para>
+    /// <see cref="HeaderWriteRequest.Locked"/> travels with the header independently of its value, so an
+    /// operator can lock an already-stored secret without retyping it - and it is also what makes the
+    /// blank rule safe to relax: an <em>explicitly unlocked</em> blank write clears the stored value,
+    /// because the caller was shown that value in full and chose to empty the field. That is how the
+    /// editor's unlock destroys a secret. Null (the legacy shape) keeps the old preserve-on-blank
+    /// behavior in every case.
+    /// </para>
     /// </summary>
     private static ProviderHeader ResolveHeader(HeaderWriteRequest request, IReadOnlyList<ProviderHeader> existingHeaders)
     {
         var name = request.Name!.Trim();
 
+        // A caller that predates the flag stored every literal write-only, so its headers keep meaning
+        // "locked" rather than silently becoming readable.
+        var locked = request.Locked ?? true;
+
         if (!string.IsNullOrWhiteSpace(request.Value))
         {
-            return new ProviderHeader { Name = name, Value = request.Value, ValueEnvVar = null };
+            return new ProviderHeader { Name = name, Value = request.Value, ValueEnvVar = null, Locked = locked };
         }
 
+        // An env-var-backed header keeps its secret in the environment rather than in configuration, so
+        // there is nothing to withhold and it always stores unlocked.
         if (!string.IsNullOrWhiteSpace(request.ValueEnvVar))
         {
-            return new ProviderHeader { Name = name, Value = null, ValueEnvVar = request.ValueEnvVar.Trim() };
+            return new ProviderHeader { Name = name, Value = null, ValueEnvVar = request.ValueEnvVar.Trim(), Locked = false };
+        }
+
+        if (request.Locked is false)
+        {
+            return new ProviderHeader { Name = name, Value = null, ValueEnvVar = null, Locked = false };
         }
 
         // HTTP header names are case-insensitive, so "X-Foo" and "x-foo" must be treated as the same
         // header when looking up the value to preserve - otherwise a casing mismatch between what was
         // stored and what the caller resends silently drops the stored secret instead of keeping it.
         var existing = existingHeaders.FirstOrDefault(h => string.Equals(h.Name, name, StringComparison.OrdinalIgnoreCase));
-        return new ProviderHeader { Name = name, Value = existing?.Value, ValueEnvVar = existing?.ValueEnvVar };
+        return new ProviderHeader
+        {
+            Name = name,
+            Value = existing?.Value,
+            ValueEnvVar = existing?.ValueEnvVar,
+            // Only a literal can be a secret, so a preserved env-var (or valueless) header stores unlocked
+            // no matter what the caller asked for.
+            Locked = !string.IsNullOrWhiteSpace(existing?.Value) && locked
+        };
     }
 
     /// <summary>Runs a store mutation and maps it to a <see cref="ManagementResult{T}"/>, translating validation/argument failures into <see cref="ManagementErrorType.InvalidRequest"/>.</summary>
@@ -1057,14 +1093,19 @@ public sealed record ModelView(
     bool PresentUpstream = true);
 
 /// <summary>
-/// A single custom header as returned to a management caller. Write-only for secrets: a literal value is
-/// never returned - only whether one is set (<see cref="Source"/> is <see cref="HeaderValueSource.Literal"/>)
-/// and, for an env-var-backed header, the variable's name.
+/// A single custom header as returned to a management caller. A header carries a mix of public
+/// configuration and secrets, so readability is per-header: an unlocked literal is returned in
+/// <see cref="Value"/> so the operator can read and edit it, while a locked one is write-only and only
+/// its <see cref="Source"/> is reported. <see cref="ManagementFacade"/>'s projection is the single place
+/// that decides this - see <c>docs/gui/secret-field.md</c>.
 /// </summary>
 /// <param name="Name">The header name.</param>
 /// <param name="Source">One of <see cref="HeaderValueSource"/>: where this header's value comes from.</param>
 /// <param name="ValueEnvVar">The environment variable name holding the value, when <paramref name="Source"/> is <see cref="HeaderValueSource.EnvVar"/>.</param>
-public sealed record HeaderView(string Name, string Source, string? ValueEnvVar);
+/// <param name="Value">The literal value, but only for an unlocked literal header; null whenever
+/// <paramref name="Locked"/> is set or the value comes from elsewhere.</param>
+/// <param name="Locked">Whether this header's value is a secret withheld from management callers.</param>
+public sealed record HeaderView(string Name, string Source, string? ValueEnvVar, string? Value = null, bool Locked = false);
 
 /// <summary>The <c>GET /admin/providers</c> (and MCP <c>list_providers</c>) response envelope.</summary>
 /// <param name="Providers">All configured providers, ordered by key.</param>
@@ -1118,7 +1159,14 @@ public sealed record ProviderEnabledWriteRequest(bool Enabled);
 /// <param name="Name">The header name.</param>
 /// <param name="Value">A literal value; takes precedence over <paramref name="ValueEnvVar"/> when non-empty.</param>
 /// <param name="ValueEnvVar">The name of an environment variable holding the value, used when <paramref name="Value"/> is blank.</param>
-public sealed record HeaderWriteRequest(string? Name, string? Value, string? ValueEnvVar);
+/// <param name="Locked">Whether the literal value is a secret to withhold from future reads. Applies to the
+/// header whether or not <paramref name="Value"/> is resent, so a value can be locked without retyping it,
+/// and it also decides what a blank write means: <see langword="true"/> preserves the stored value (the
+/// caller was never shown it), while an explicit <see langword="false"/> clears it (the caller could see
+/// the field and left it empty - this is how the editor's unlock clears a secret). Null is the legacy
+/// shape, kept for callers that predate the flag: blank preserves, and a literal stores locked. Ignored
+/// for an env-var-backed header, which always stores unlocked.</param>
+public sealed record HeaderWriteRequest(string? Name, string? Value, string? ValueEnvVar, bool? Locked = null);
 
 /// <summary>The body for adding or editing a model under a provider.</summary>
 /// <param name="ProviderModelId">The upstream model identifier; defaults to the model name when blank.</param>

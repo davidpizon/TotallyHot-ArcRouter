@@ -53,10 +53,44 @@ public sealed class ProviderAdminModelsTests
         var a = new ProviderHeaderWriteModel("anthropic-version", "2023-06-01", null);
         var b = new ProviderHeaderWriteModel("anthropic-version", "2023-06-01", null);
         var differentValue = a with { Value = "2024-01-01" };
+        var locked = a with { Locked = true };
 
         Assert.Equal(a, b);
         Assert.NotEqual(a, differentValue);
+        Assert.NotEqual(a, locked);
         Assert.Contains("anthropic-version", a.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ProviderHeaderView_RoundTripsTheSecretFieldMembers()
+    {
+        var options = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+
+        var unlocked = System.Text.Json.JsonSerializer.Deserialize<ProviderHeaderView>(
+            """{"name":"anthropic-version","source":"literal","valueEnvVar":null,"value":"2023-06-01","locked":false}""",
+            options)!;
+        var locked = System.Text.Json.JsonSerializer.Deserialize<ProviderHeaderView>(
+            """{"name":"X-Subscription-Key","source":"literal","valueEnvVar":null,"value":null,"locked":true}""",
+            options)!;
+
+        Assert.Equal("2023-06-01", unlocked.Value);
+        Assert.False(unlocked.Locked);
+        // The router drops a locked value before it reaches the wire, so the view carries the flag alone.
+        Assert.Null(locked.Value);
+        Assert.True(locked.Locked);
+    }
+
+    [Fact]
+    public void ProviderHeaderWriteModel_OmitsTheLockFlagWhenItIsNull()
+    {
+        var options = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            new ProviderHeaderWriteModel("X-Test", "hello", null, Locked: false), options);
+
+        // An explicit false is what tells the server a blank value means "clear", so it must survive
+        // serialization rather than being treated as an absent default.
+        Assert.Contains("\"locked\":false", json, StringComparison.Ordinal);
     }
 
     [Fact]

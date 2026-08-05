@@ -7,7 +7,8 @@ This is the authoritative design-system reference for `TotallyHotArcRouter.Gui`.
 companion [`MOTION.md`](MOTION.md), which *is* prescriptive. For component-level specs, see
 [`cost-analytics-visualization-spec.md`](cost-analytics-visualization-spec.md),
 [`governance-model-cards.md`](governance-model-cards.md),
-[`provider-management.md`](provider-management.md), and
+[`provider-management.md`](provider-management.md),
+[`secret-field.md`](secret-field.md), and
 [`livestream-redesign-plan.md`](livestream-redesign-plan.md).
 
 > **Status: aspirational design adopted.** As of [`aspirational-design-adoption-plan.md`](aspirational-design-adoption-plan.md)
@@ -186,6 +187,12 @@ actually appear in `app.css`.
   (`#1f1f1f`), `border: 1px solid var(--border-light)`, `color: var(--text-primary)`; on focus the
   border becomes the accent `var(--accent)` with a green focus ring (150ms `border-color` transition).
   No pill inputs — search/text inputs are square-cornered via the shared input rule, not `.ls-*`.
+- **Secret fields** (`SecretField.razor`, the Custom Headers value boxes) — a shared input with a
+  padlock toggle inside its right edge (`.ds-secret-field` / `.ds-secret-toggle*`; hand-authored
+  because the compiled blob has no `right-*`/`pr-7` utilities, §5.1). Unlocked it is an ordinary text
+  box with a muted open padlock; locked it renders as a password box with a `--color-warning-text`
+  closed padlock; armed for unlock it turns `--color-critical-text`, matching every other destructive
+  control. Full contract, including why unlocking clears the value: [`secret-field.md`](secret-field.md).
 - **Navigation** (5-tab bar: Live Stream / Cost Analytics / Model Distribution / Governance /
   Console) — `.tab-indicator` transitions all properties over 200ms `cubic-bezier(.4,0,.2,1)`; active
   vs. inactive is a text-color step (white/`var(--accent)` vs. `var(--text-secondary)`), not a
