@@ -662,10 +662,14 @@ public sealed class ManagementFacade
                     .Select(h =>
                     {
                         var source = ClassifyHeaderSource(h);
-                        // ValueEnvVar is only meaningful for an envVar-sourced header; a header with both
-                        // fields somehow set (legacy/bad data) classifies as literal, and must not also
-                        // surface the env-var name - that would violate HeaderView's documented contract.
-                        return new HeaderView(h.Name, source, source == HeaderValueSource.EnvVar ? h.ValueEnvVar : null);
+                        // Return both the literal value (if literal-sourced) and the env-var name (if env-sourced).
+                        // Never both: a header with both fields somehow set (legacy/bad data) classifies as literal,
+                        // and must not also surface the env-var name - that would violate HeaderView's documented contract.
+                        return new HeaderView(
+                            h.Name,
+                            source,
+                            source == HeaderValueSource.Literal ? h.Value : null,
+                            source == HeaderValueSource.EnvVar ? h.ValueEnvVar : null);
                     })
                     .ToList();
 
@@ -1057,14 +1061,14 @@ public sealed record ModelView(
     bool PresentUpstream = true);
 
 /// <summary>
-/// A single custom header as returned to a management caller. Write-only for secrets: a literal value is
-/// never returned - only whether one is set (<see cref="Source"/> is <see cref="HeaderValueSource.Literal"/>)
-/// and, for an env-var-backed header, the variable's name.
+/// A single custom header as returned to a management caller. Literal values are returned since custom
+/// headers are not secrets (credentials remain write-only). For env-var-backed headers, the variable's name is returned.
 /// </summary>
 /// <param name="Name">The header name.</param>
 /// <param name="Source">One of <see cref="HeaderValueSource"/>: where this header's value comes from.</param>
+/// <param name="Value">The literal header value, when <paramref name="Source"/> is <see cref="HeaderValueSource.Literal"/>.</param>
 /// <param name="ValueEnvVar">The environment variable name holding the value, when <paramref name="Source"/> is <see cref="HeaderValueSource.EnvVar"/>.</param>
-public sealed record HeaderView(string Name, string Source, string? ValueEnvVar);
+public sealed record HeaderView(string Name, string Source, string? Value = null, string? ValueEnvVar = null);
 
 /// <summary>The <c>GET /admin/providers</c> (and MCP <c>list_providers</c>) response envelope.</summary>
 /// <param name="Providers">All configured providers, ordered by key.</param>

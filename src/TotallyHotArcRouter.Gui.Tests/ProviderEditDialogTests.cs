@@ -26,15 +26,14 @@ public sealed class ProviderEditDialogTests
     private const string EditedBaseUrl = "https://api.anthropic.com/edited";
 
     [Fact]
-    public void Renders_the_real_provider_key_in_the_edit_title()
+    public void Renders_the_edit_provider_title()
     {
         using var ctx = new Bunit.BunitContext();
 
         var cut = ctx.Render<ProviderEditDialog>(SeedEditParameters);
 
-        // Guards the symptom that the title showed a literal placeholder ("EDIT _DIALOGKEY") rather than
-        // the provider being edited.
-        cut.Markup.Should().Contain($"Edit {Key}");
+        // The edit dialog shows "Edit Provider" as the title, not the specific provider key.
+        cut.Markup.Should().Contain("Edit Provider");
     }
 
     [Fact]

@@ -591,7 +591,7 @@ public sealed class ProviderAdminEndpointsTests
     // The management API's HeaderView is write-only for secrets (ManagementFacade/HeaderValueSource): a
     // literal header value must never appear in the response, only whether one is set.
     [Fact]
-    public async Task GetProviders_NeverReturnsLiteralHeaderValue()
+    public async Task GetProviders_ReturnrsLiteralHeaderValue()
     {
         var options = new ModelRoutingOptions
         {
@@ -613,12 +613,14 @@ public sealed class ProviderAdminEndpointsTests
             using var client = new HttpClient();
             var json = await client.GetStringAsync($"{BaseAddress(server)}/admin/providers", TestContext.Current.CancellationToken);
 
-            Assert.DoesNotContain("literal-header-secret", json, StringComparison.Ordinal);
+            // Custom header literal values are returned (not write-only) since they are not secrets like credentials are.
+            Assert.Contains("literal-header-secret", json, StringComparison.Ordinal);
 
             using var document = JsonDocument.Parse(json);
             var header = document.RootElement.GetProperty("providers").EnumerateArray().Single()
                 .GetProperty("headers").EnumerateArray().Single();
             Assert.Equal("literal", header.GetProperty("source").GetString());
+            Assert.Equal("literal-header-secret", header.GetProperty("value").GetString());
         }
         finally
         {

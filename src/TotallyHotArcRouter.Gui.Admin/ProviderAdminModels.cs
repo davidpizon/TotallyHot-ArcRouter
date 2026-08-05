@@ -113,14 +113,15 @@ public static class HeaderValueSource
 }
 
 /// <summary>
-/// A custom HTTP header as returned by <c>GET /admin/providers</c>. Write-only for secrets: a literal
-/// value is never returned - only whether one is set (<see cref="Source"/> is <see cref="HeaderValueSource.Literal"/>)
-/// and, for an env-var-backed header, the variable's name.
+/// A custom HTTP header as returned by <c>GET /admin/providers</c>. Literal values are returned since
+/// custom headers are not secrets (credentials remain write-only via <see cref="ProviderAdminView.HasApiKey"/>
+/// and <see cref="ProviderAdminView.ApiKeyEnvVar"/>). For env-var-backed headers, the variable's name is returned.
 /// </summary>
 /// <param name="Name">The header name (e.g. <c>anthropic-version</c>).</param>
 /// <param name="Source">One of <see cref="HeaderValueSource"/>: where this header's value comes from.</param>
+/// <param name="Value">The literal header value, when <paramref name="Source"/> is <see cref="HeaderValueSource.Literal"/>.</param>
 /// <param name="ValueEnvVar">The environment variable name holding the value, when <paramref name="Source"/> is <see cref="HeaderValueSource.EnvVar"/>.</param>
-public sealed record ProviderHeaderView(string Name, string Source, string? ValueEnvVar);
+public sealed record ProviderHeaderView(string Name, string Source, string? Value = null, string? ValueEnvVar = null);
 
 /// <summary>
 /// A custom HTTP header to write for a provider (<c>PUT /admin/providers/{key}</c>). A blank

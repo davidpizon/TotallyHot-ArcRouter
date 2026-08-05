@@ -11,7 +11,7 @@
          @onclick:stopPropagation="true">
         <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
             <span class="text-sm font-semibold text-slate-200 tracking-wide uppercase">
-                @(IsNew ? "Add Provider" : $"Edit {Key}")
+                @(IsNew ? "Add Provider" : "Edit Provider")
             </span>
             <button @onclick="OnCancel"
                     aria-label="@(IsNew ? "Close add provider dialog" : $"Close edit dialog for provider {Key}")"
@@ -174,8 +174,8 @@
                                         <option value="literal">Value</option>
                                         <option value="env">Env var</option>
                                     </select>
-                                    <input type="@(header.UseEnvVar ? "text" : "password")" value="@header.Value" @oninput="e => header.Value = AsString(e.Value)"
-                                           placeholder="@(header.UseEnvVar ? "ENV_VAR_NAME" : (header.HasStoredLiteralValue ? "•••••••• (saved, blank keeps it)" : "value"))"
+                                    <input type="text" value="@header.Value" @oninput="e => header.Value = AsString(e.Value)"
+                                           placeholder="@(header.UseEnvVar ? "ENV_VAR_NAME" : (header.HasStoredLiteralValue ? "saved, blank keeps it" : "value"))"
                                            class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input" />
                                 </div>
                             </div>
@@ -316,12 +316,10 @@
             {
                 Name = header.Name,
                 UseEnvVar = useEnvVar,
-                // The literal value is never returned by the management API (write-only), so a literal
-                // header's row starts blank rather than pre-filled - HasStoredLiteralValue drives the
-                // "saved" placeholder below, and leaving the field blank on save preserves the stored
-                // value (mirrors the API key field's blank-keeps-existing behavior).
-                Value = useEnvVar ? (header.ValueEnvVar ?? string.Empty) : string.Empty,
-                HasStoredLiteralValue = header.Source == HeaderValueSource.Literal
+                // Literal values are now returned by the API, so display them. If blank, the "saved,
+                // blank keeps it" placeholder still applies and preserves the stored value on save.
+                Value = useEnvVar ? (header.ValueEnvVar ?? string.Empty) : (header.Value ?? string.Empty),
+                HasStoredLiteralValue = header.Source == HeaderValueSource.Literal && string.IsNullOrEmpty(header.Value)
             });
         }
     }
