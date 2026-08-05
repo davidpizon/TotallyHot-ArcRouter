@@ -579,8 +579,10 @@
         var rows = _headers.AsEnumerable();
 
         // Credentials past the first have no dedicated storage - they are ordinary headers that happen to
-        // carry a secret, which is exactly what ProviderHeader already models. They are locked by
-        // definition: this dialog offers no way to read a stored credential back.
+        // carry a secret, which is exactly what ProviderHeader already models. A literal one is locked by
+        // definition: this dialog offers no way to read a stored credential back. An env-var reference
+        // stores no secret in config, so it is always unlocked (Locked: false below, same as any other
+        // env-var header).
         if (_requiresAuth)
         {
             rows = rows.Concat(_credentials.Skip(1).Select(c => new HeaderRow
