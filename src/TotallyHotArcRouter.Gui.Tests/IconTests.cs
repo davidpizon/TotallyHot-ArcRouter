@@ -23,6 +23,8 @@ public sealed class IconTests
     [InlineData("plus")]
     [InlineData("key")]
     [InlineData("server")]
+    [InlineData("lock")]
+    [InlineData("unlock")]
     [InlineData("settings")]
     public void Renders_an_svg_for_every_known_glyph_name(string name)
     {

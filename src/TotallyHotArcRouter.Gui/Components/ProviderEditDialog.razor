@@ -155,11 +155,12 @@
                 else
                 {
                     <div class="space-y-2">
-                        @foreach (var header in _headers)
+                        @foreach (var (header, index) in _headers.Select((h, i) => (h, i)))
                         {
                             <div class="border border-slate-700/50 rounded p-2 space-y-1.5">
                                 <div class="flex items-center gap-1.5">
-                                    <input type="text" value="@header.Name" @oninput="e => header.Name = AsString(e.Value)"
+                                    <input type="text" data-testid="@($"header-name-{index}")"
+                                           value="@header.Name" @oninput="e => header.Name = AsString(e.Value)"
                                            placeholder="Header-Name"
                                            class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input" />
                                     <button type="button" title="Remove header" @onclick="() => RemoveHeader(header)"
@@ -168,15 +169,35 @@
                                     </button>
                                 </div>
                                 <div class="flex items-center gap-1.5">
-                                    <select value="@(header.UseEnvVar ? "env" : "literal")"
+                                    <select data-testid="@($"header-source-{index}")"
+                                            value="@(header.UseEnvVar ? "env" : "literal")"
                                             @onchange="e => SetHeaderSource(header, e)"
                                             class="px-1 py-1 text-xs shrink-0 ds-input">
                                         <option value="literal">Value</option>
                                         <option value="env">Env var</option>
                                     </select>
-                                    <input type="@(header.UseEnvVar ? "text" : "password")" value="@header.Value" @oninput="e => header.Value = AsString(e.Value)"
-                                           placeholder="@(header.UseEnvVar ? "ENV_VAR_NAME" : (header.HasStoredLiteralValue ? "•••••••• (saved, blank keeps it)" : "value"))"
-                                           class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input" />
+                                    @if (header.UseEnvVar)
+                                    {
+                                        @* An env-var header holds only a variable *name* - there is nothing
+                                           secret in the configuration to hide, so no padlock. *@
+                                        <input type="text" data-testid="@($"header-value-{index}")"
+                                               value="@header.Value" @oninput="e => header.Value = AsString(e.Value)"
+                                               placeholder="ENV_VAR_NAME"
+                                               class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input" />
+                                    }
+                                    else
+                                    {
+                                        @* A literal header value is a secret field: readable by default so
+                                           public configuration (anthropic-version, X-Title) can simply be
+                                           edited, lockable per header for the ones that carry a secret. *@
+                                        <SecretField Value="@header.Value"
+                                                     ValueChanged="value => header.Value = value"
+                                                     Locked="@header.Locked"
+                                                     LockedChanged="locked => SetHeaderLocked(header, locked)"
+                                                     Placeholder="@(header.Locked && header.HasStoredLiteralValue ? "•••••••• (saved, blank keeps it)" : "value")"
+                                                     TestId="@($"header-value-{index}")"
+                                                     Class="flex-1 min-w-0" />
+                                    }
                                 </div>
                             </div>
                         }
@@ -312,16 +333,18 @@
         foreach (var header in Headers)
         {
             var useEnvVar = header.Source == HeaderValueSource.EnvVar;
+            var isLiteral = header.Source == HeaderValueSource.Literal;
             _headers.Add(new HeaderRow
             {
                 Name = header.Name,
                 UseEnvVar = useEnvVar,
-                // The literal value is never returned by the management API (write-only), so a literal
-                // header's row starts blank rather than pre-filled - HasStoredLiteralValue drives the
+                Locked = isLiteral && header.Locked,
+                // An unlocked literal comes back in full and is shown as ordinary editable text. A locked
+                // one is never returned, so its row starts blank - HasStoredLiteralValue drives the
                 // "saved" placeholder below, and leaving the field blank on save preserves the stored
                 // value (mirrors the API key field's blank-keeps-existing behavior).
-                Value = useEnvVar ? (header.ValueEnvVar ?? string.Empty) : string.Empty,
-                HasStoredLiteralValue = header.Source == HeaderValueSource.Literal
+                Value = useEnvVar ? (header.ValueEnvVar ?? string.Empty) : (header.Value ?? string.Empty),
+                HasStoredLiteralValue = isLiteral && header.Locked
             });
         }
     }
@@ -382,8 +405,29 @@
 
     private void RemoveHeader(HeaderRow header) => _headers.Remove(header);
 
-    private static void SetHeaderSource(HeaderRow header, ChangeEventArgs e) =>
+    /// <summary>Switches a header between a literal value and an environment-variable reference. An env-var
+    /// header names a variable rather than holding a secret, so it can never be locked - switching to it
+    /// drops the lock rather than leaving a padlock the markup no longer renders.</summary>
+    private static void SetHeaderSource(HeaderRow header, ChangeEventArgs e)
+    {
         header.UseEnvVar = string.Equals(AsString(e.Value), "env", StringComparison.Ordinal);
+        if (header.UseEnvVar)
+        {
+            header.Locked = false;
+        }
+    }
+
+    /// <summary>Records a padlock toggle from the row's <see cref="SecretField"/>. Unlocking has already
+    /// cleared the value there, so the row also forgets that a stored value exists: after this save there
+    /// is nothing left for a blank field to preserve.</summary>
+    private static void SetHeaderLocked(HeaderRow header, bool locked)
+    {
+        header.Locked = locked;
+        if (!locked)
+        {
+            header.HasStoredLiteralValue = false;
+        }
+    }
 
     /// <summary>The greyed suggestion for a credential's value: the selected family's conventional
     /// environment variable (e.g. <c>ANTHROPIC_API_KEY</c>) for the primary env-var row, and the
@@ -527,30 +571,34 @@
 
     /// <summary>Projects the custom-header rows, plus any credential rows beyond the first, into wire models.
     /// Rows with a blank name are dropped and each value maps to a literal or env-var reference per its
-    /// selected source. A blank literal value is sent as-is (not resolved locally): the management API
-    /// preserves whatever is already stored under that header's name when both Value and ValueEnvVar are
-    /// blank.</summary>
+    /// selected source. A blank literal value is sent as-is (not resolved locally): under a locked row the
+    /// management API preserves whatever is already stored under that header's name, and under an unlocked
+    /// one it clears it - which is what carries a padlock unlock through to storage.</summary>
     private IReadOnlyList<ProviderHeaderWriteModel> BuildHeaders()
     {
         var rows = _headers.AsEnumerable();
 
         // Credentials past the first have no dedicated storage - they are ordinary headers that happen to
-        // carry a secret, which is exactly what ProviderHeader already models.
+        // carry a secret, which is exactly what ProviderHeader already models. A literal one is locked by
+        // definition: this dialog offers no way to read a stored credential back. An env-var reference
+        // stores no secret in config, so it is always unlocked (Locked: false below, same as any other
+        // env-var header).
         if (_requiresAuth)
         {
             rows = rows.Concat(_credentials.Skip(1).Select(c => new HeaderRow
             {
                 Name = c.HeaderName,
                 UseEnvVar = c.UseEnvVar,
-                Value = c.Value
+                Value = c.Value,
+                Locked = !c.UseEnvVar
             }));
         }
 
         return rows
             .Where(h => !string.IsNullOrWhiteSpace(h.Name))
             .Select(h => h.UseEnvVar
-                ? new ProviderHeaderWriteModel(h.Name.Trim(), null, h.Value.Trim())
-                : new ProviderHeaderWriteModel(h.Name.Trim(), h.Value, null))
+                ? new ProviderHeaderWriteModel(h.Name.Trim(), null, h.Value.Trim(), Locked: false)
+                : new ProviderHeaderWriteModel(h.Name.Trim(), h.Value, null, Locked: h.Locked))
             .ToList();
     }
 
@@ -607,7 +655,13 @@
         public bool UseEnvVar { get; set; }
         public string Value { get; set; } = string.Empty;
 
-        /// <summary>Whether this header already has a literal value stored (the value itself is never returned).</summary>
+        /// <summary>Whether this literal value is a secret: masked here and withheld by the router on the
+        /// next read. Defaults to false so a header added in this dialog starts as ordinary, readable
+        /// configuration; the operator locks the ones that turn out to carry a secret.</summary>
+        public bool Locked { get; set; }
+
+        /// <summary>Whether this header already has a stored literal value that was withheld from this
+        /// dialog (i.e. it arrived locked), which is what makes leaving the box blank mean "keep it".</summary>
         public bool HasStoredLiteralValue { get; set; }
     }
 }

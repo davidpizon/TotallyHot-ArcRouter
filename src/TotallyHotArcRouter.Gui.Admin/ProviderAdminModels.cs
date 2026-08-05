@@ -102,7 +102,8 @@ public sealed record ProviderEndpointCapabilitiesView(
 /// <summary>The credential source for a configured header, mirroring <see cref="ProviderCredentialModes"/>'s naming.</summary>
 public static class HeaderValueSource
 {
-    /// <summary>A literal value is stored (write-only: never returned by the management API, only this source marker is).</summary>
+    /// <summary>A literal value is stored. Returned by the management API only when the header is unlocked
+    /// (see <see cref="ProviderHeaderView.Locked"/>); a locked header reports this marker alone.</summary>
     public const string Literal = "literal";
 
     /// <summary>The value is read at request time from an environment variable (see <see cref="ProviderHeaderView.ValueEnvVar"/>).</summary>
@@ -113,26 +114,35 @@ public static class HeaderValueSource
 }
 
 /// <summary>
-/// A custom HTTP header as returned by <c>GET /admin/providers</c>. Write-only for secrets: a literal
-/// value is never returned - only whether one is set (<see cref="Source"/> is <see cref="HeaderValueSource.Literal"/>)
-/// and, for an env-var-backed header, the variable's name.
+/// A custom HTTP header as returned by <c>GET /admin/providers</c>. Because one provider's headers mix
+/// public configuration with secrets, readability is decided per header: an unlocked literal comes back in
+/// <see cref="Value"/> for the editor to show, while a locked one is write-only and reports only its
+/// <see cref="Source"/>. See <c>docs/gui/secret-field.md</c>.
 /// </summary>
 /// <param name="Name">The header name (e.g. <c>anthropic-version</c>).</param>
 /// <param name="Source">One of <see cref="HeaderValueSource"/>: where this header's value comes from.</param>
 /// <param name="ValueEnvVar">The environment variable name holding the value, when <paramref name="Source"/> is <see cref="HeaderValueSource.EnvVar"/>.</param>
-public sealed record ProviderHeaderView(string Name, string Source, string? ValueEnvVar);
+/// <param name="Value">The literal value of an unlocked literal header; null when <paramref name="Locked"/>
+/// is set or the value comes from anywhere else.</param>
+/// <param name="Locked">Whether this header's value is a secret the router withholds from this GUI.</param>
+public sealed record ProviderHeaderView(string Name, string Source, string? ValueEnvVar, string? Value = null, bool Locked = false);
 
 /// <summary>
 /// A custom HTTP header to write for a provider (<c>PUT /admin/providers/{key}</c>). A blank
 /// <see cref="Value"/> and blank <see cref="ValueEnvVar"/> together preserve whatever is already stored
-/// under this header's <see cref="Name"/> (the management API never returns a literal value for the
-/// caller to resend, so this mirrors <see cref="ProviderWriteRequest.ApiKey"/>'s literal-mode
-/// blank-preserves-existing rule).
+/// under this header's <see cref="Name"/> (a locked value is never returned for the caller to resend, so
+/// this mirrors <see cref="ProviderWriteRequest.ApiKey"/>'s literal-mode blank-preserves-existing rule).
 /// </summary>
 /// <param name="Name">The header name.</param>
 /// <param name="Value">A literal value; takes precedence over <paramref name="ValueEnvVar"/> when non-empty.</param>
 /// <param name="ValueEnvVar">The name of an environment variable holding the value, used when <paramref name="Value"/> is blank.</param>
-public sealed record ProviderHeaderWriteModel(string? Name, string? Value, string? ValueEnvVar);
+/// <param name="Locked">Whether the literal value is a secret to withhold from future reads. Travels with
+/// the header whether or not <paramref name="Value"/> is resent, so a stored secret can be locked without
+/// retyping it, and it qualifies the blank rule: blank under <see langword="true"/> preserves the stored
+/// value, while blank under an explicit <see langword="false"/> clears it (the editor's unlock). Null is
+/// the legacy shape - blank preserves, and a literal stores locked. Ignored for an env-var-backed
+/// header.</param>
+public sealed record ProviderHeaderWriteModel(string? Name, string? Value, string? ValueEnvVar, bool? Locked = null);
 
 /// <summary>The <c>GET /admin/providers</c> response envelope.</summary>
 /// <param name="Providers">All configured providers.</param>

@@ -135,6 +135,28 @@ unaffected. Templates that cannot round-trip through that pair — more than one
 reference, or a multi-word prefix — are refused at save time with a stated reason rather than silently
 truncated.
 
+## Custom headers
+
+Below the Credentials fieldset, **Custom Headers** holds the non-credential extras a provider's API
+requires (`anthropic-version`, `X-Title`, …), each a name plus a value sourced from either a literal or
+an environment variable. They are kept separate from Credentials because they are still needed when a
+provider requires no authentication at all.
+
+A literal value's box is a [**secret field**](secret-field.md): an ordinary readable text box with a
+padlock inside its right edge, **defaulting to unlocked**. Public configuration is therefore visible and
+directly editable, while a header that happens to carry a credential can be locked per header — at which
+point it masks to dots and the router stops returning its value to the GUI entirely. Unlocking clears
+the value, because a value that was never returned cannot be shown again; the padlock takes two clicks
+to unlock and says so first.
+
+Consequently a blank literal box means different things per header: under a locked padlock it preserves
+the stored value (the same blank-keeps-existing rule as the API key), and under an unlocked one it means
+the value is genuinely empty. Env-var-sourced headers show no padlock — they hold a variable name, not a
+secret. Credential rows past the first are stored as custom headers and are always written locked.
+
+Headers already in `model-routing.json` before the padlock existed load as **locked**, so nothing that
+was previously write-only becomes visible on upgrade.
+
 ## Free providers
 
 A provider can be marked **Free** (`ProviderOptions.IsFree`, a checkbox in the edit dialog, shown as a
@@ -179,6 +201,13 @@ extractable logic (the `ProviderAdminClient` and the store/resolver) is covered 
 4c. Select type *OpenAI / Groq / DeepSeek*, enter `Bearer {env:OPENAI_API_KEY}`, save, and inspect
    `model-routing.json`: it must store `"AuthHeaderScheme": "Bearer"` and
    `"ApiKeyEnvVar": "OPENAI_API_KEY"` — the template is decomposed, never persisted verbatim.
+4d. **Custom headers, locked and unlocked.** Add a header with a literal value and save; reopen and
+   confirm the value is shown in full (unlocked is the default). Click its padlock, save, reopen: the box
+   must now be blank and masked with the `••••••••` placeholder, and `model-routing.json` must carry
+   `"Locked": true` beside the value. Click the padlock again — the first click must only turn it red
+   with a warning tooltip, the second must clear the box — then save and confirm the value is gone from
+   `model-routing.json` rather than silently preserved. Finally confirm an existing `anthropic-version`
+   header still reads `2023-06-01` and switching a header to *Env var* removes its padlock.
 5. **Refresh from endpoint** on a running provider; confirm a newly-available model appears
    automatically (stopped, greyed out — click Start to activate it), a dialect badge (e.g. `hermes`,
    `openai-native`) appears next to a model once the provider's endpoint exposes enough metadata to

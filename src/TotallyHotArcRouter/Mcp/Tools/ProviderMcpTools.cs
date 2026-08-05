@@ -7,8 +7,9 @@ namespace TotallyHot.ArcRouter.Mcp.Tools;
 /// <summary>
 /// MCP tools for managing providers, model routes, and per-provider budgets. Every read and write goes
 /// through <see cref="ManagementFacade"/> - the same facade the hardened REST <c>/admin/*</c> API calls -
-/// so credentials are masked identically on both surfaces: a stored API key or custom-header value is
-/// never returned by any tool here, only whether one is set.
+/// so secrets are masked identically on both surfaces: a stored API key is never returned by any tool
+/// here, only whether one is set, and a custom header's value comes back only when the operator has left
+/// that header unlocked (see <see cref="HeaderView"/>).
 /// </summary>
 [McpServerToolType]
 public sealed class ProviderMcpTools
@@ -24,7 +25,7 @@ public sealed class ProviderMcpTools
 
     /// <summary>Lists every configured provider, masked, with its models and budget.</summary>
     [McpServerTool(Name = "list_providers")]
-    [Description("Lists every configured provider with its models, budget, and current-month spend. Credentials are masked: only whether an API key or header value is set is returned, never the literal value.")]
+    [Description("Lists every configured provider with its models, budget, and current-month spend. Credentials are masked: only whether an API key is set is returned, never the key itself. A custom header's value is returned only when that header is unlocked; a locked header reports its source alone.")]
     public ProvidersResponse ListProviders() => _facade.ListProviders();
 
     /// <summary>Adds or edits a provider.</summary>

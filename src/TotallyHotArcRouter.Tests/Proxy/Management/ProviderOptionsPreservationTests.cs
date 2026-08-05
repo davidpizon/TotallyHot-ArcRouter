@@ -174,8 +174,8 @@ public sealed class ProviderOptionsPreservationTests
             if (before is IReadOnlyList<ProviderHeader> beforeHeaders && after is IReadOnlyList<ProviderHeader> afterHeaders)
             {
                 Assert.Equal(
-                    beforeHeaders.Select(h => (h.Name, h.Value, h.ValueEnvVar)),
-                    afterHeaders.Select(h => (h.Name, h.Value, h.ValueEnvVar)));
+                    beforeHeaders.Select(h => (h.Name, h.Value, h.ValueEnvVar, h.Locked)),
+                    afterHeaders.Select(h => (h.Name, h.Value, h.ValueEnvVar, h.Locked)));
                 continue;
             }
 
