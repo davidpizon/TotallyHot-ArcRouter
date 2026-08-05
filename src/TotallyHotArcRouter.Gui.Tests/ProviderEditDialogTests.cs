@@ -618,7 +618,7 @@ public sealed class ProviderEditDialogTests
     }
 
     [Fact]
-    public void Unlocking_a_header_takes_two_clicks_and_clears_the_value()
+    public void Unlocking_a_header_confirms_via_dialog_and_clears_the_value()
     {
         using var ctx = new Bunit.BunitContext();
 
@@ -630,11 +630,11 @@ public sealed class ProviderEditDialogTests
             parameters.Add(p => p.OnSave, (ProviderEditDialog.ProviderEditResult r) => saved = r);
         });
 
-        // First click only arms the confirmation - the field is still locked.
+        // Clicking the padlock only opens the confirmation dialog - the field is still locked.
         cut.Find("[data-testid='header-value-0-lock']").Click();
         cut.Find("[data-testid='header-value-0']").GetAttribute("type").Should().Be("password");
 
-        cut.Find("[data-testid='header-value-0-lock']").Click();
+        cut.Find("[data-testid='header-value-0-continue']").Click();
         var value = cut.Find("[data-testid='header-value-0']");
         value.GetAttribute("type").Should().Be("text");
         value.GetAttribute("value").Should().BeNullOrEmpty();

@@ -755,6 +755,16 @@ input[type="number"]:focus {
   opacity: 0.5;
 }
 
+/* Unlocked: reads as its own safe state, not "disabled grey" - same tone used elsewhere for
+   saved/valid credentials (e.g. ProviderEditDialog "A key is saved" check). */
+.ds-secret-toggle-unlocked {
+  color: var(--color-success-text);
+}
+
+.ds-secret-toggle-unlocked:hover:not(:disabled) {
+  color: var(--color-success);
+}
+
 /* Locked: warning, not danger — the value is safe, just unreadable. */
 .ds-secret-toggle-locked {
   color: var(--color-warning-text);
@@ -762,13 +772,6 @@ input[type="number"]:focus {
 
 .ds-secret-toggle-locked:hover:not(:disabled) {
   color: var(--color-warning);
-}
-
-/* Armed: the next click destroys the stored value, so it borrows the critical color used by every
-   other destructive control. */
-.ds-secret-toggle-armed,
-.ds-secret-toggle-armed:hover:not(:disabled) {
-  color: var(--color-critical-text);
 }
 
 .ds-secret-toggle:focus-visible {

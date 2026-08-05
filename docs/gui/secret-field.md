@@ -28,24 +28,24 @@ who knows which is which — can make it. Two properties make it worth the extra
 | Aspect | Unlocked (default) | Locked |
 | --- | --- | --- |
 | Input type | `text` | `password` |
-| Padlock | open (`unlock` glyph), muted grey | closed (`lock` glyph), warning amber |
+| Padlock | open (`unlock` glyph), success green | closed (`lock` glyph), warning amber |
 | Value returned by the router | yes | **never** |
 | Blank value on save means | the value is empty — clear what is stored | keep whatever is stored |
-| Clicking the padlock | locks in one click; the value is kept | arms a confirmation; a second click clears the value and unlocks |
+| Clicking the padlock | locks in one click; the value is kept | opens a confirmation dialog; confirming clears the value and unlocks |
 
-Locking is one click because nothing is lost. Unlocking takes two because something is: the first click
-turns the padlock critical-red and swaps the tooltip to the warning; a second click clears the box and
-opens the padlock. Moving focus away from the padlock disarms it, so a half-armed toggle cannot be
-completed by a much later, unrelated click.
+Locking is one click because nothing is lost. Unlocking opens a confirmation dialog because something
+is: the dialog states the consequence and offers Cancel or Continue; nothing changes until Continue is
+clicked. The dialog is `UnlockSecretFieldDialog.razor`, a smaller sibling of `RemoveProviderDialog.razor`
+- Continue/Cancel only, no type-to-confirm, since the blast radius is a single field rather than a whole
+provider.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Unlocked: new field
     [*] --> Locked: loaded from a locked value
-    Unlocked --> Locked: click padlock<br/>(value kept)
-    Locked --> Armed: click padlock
-    Armed --> Locked: blur / focus lost
-    Armed --> Unlocked: click again<br/>(value cleared)
+    Unlocked --> Locked: click padlock (value kept)
+    Locked --> Locked: click padlock, opens confirm dialog<br/>Cancel/Escape/backdrop leaves unchanged
+    Locked --> Unlocked: click padlock, then Continue<br/>(value cleared)
 ```
 
 ### Tooltips
@@ -59,7 +59,6 @@ value" / "Unlock this value"); the tooltip is the description:
 | --- | --- |
 | Unlocked | *Lock this value. A locked value is shown as dots and is never sent back to this screen.* |
 | Locked | *Locked - this value cannot be read. Unlocking it will clear the value entirely.* |
-| Armed | *Click again to clear this value and unlock it.* |
 
 ## Component API
 

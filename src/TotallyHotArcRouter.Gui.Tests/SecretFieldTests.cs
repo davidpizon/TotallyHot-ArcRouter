@@ -7,9 +7,9 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 /// <summary>
 /// Component tests for <see cref="SecretField"/>. The behavior worth pinning down is the asymmetry
 /// between the two directions of the padlock: locking is one click and non-destructive, while unlocking
-/// takes a confirming second click and clears the value. That is not a UI flourish - a locked value is
-/// never returned to this process, so an unlocked field still showing one would be a field the operator
-/// cannot correct. See <c>docs/gui/secret-field.md</c>.
+/// opens a confirmation dialog and only clears the value once the user confirms. That is not a UI
+/// flourish - a locked value is never returned to this process, so an unlocked field still showing one
+/// would be a field the operator cannot correct. See <c>docs/gui/secret-field.md</c>.
 /// </summary>
 public sealed class SecretFieldTests
 {
@@ -68,7 +68,7 @@ public sealed class SecretFieldTests
     }
 
     [Fact]
-    public void The_first_unlock_click_only_arms_a_confirmation()
+    public void Clicking_a_locked_padlock_opens_a_confirmation_dialog()
     {
         using var ctx = new Bunit.BunitContext();
 
@@ -78,15 +78,33 @@ public sealed class SecretFieldTests
 
         cut.Find($"[data-testid='{TestId}-lock']").Click();
 
+        // Nothing changes yet - only the dialog appears.
         locked.Should().BeNull();
         value.Should().BeNull();
-        // The warning appears before the destructive click, not after it.
-        cut.Find($"[data-testid='{TestId}-lock']").GetAttribute("data-tip").Should().Be(SecretField.ArmedTip);
+        cut.Find($"[data-testid='{TestId}']").GetAttribute("type").Should().Be("password");
+        cut.Find($"[data-testid='{TestId}-continue']").Should().NotBeNull();
+    }
+
+    [Fact]
+    public void Cancelling_the_dialog_leaves_the_field_locked_and_unchanged()
+    {
+        using var ctx = new Bunit.BunitContext();
+
+        bool? locked = null;
+        string? value = null;
+        var cut = Render(ctx, "s3cret", locked: true, onValueChanged: v => value = v, onLockedChanged: l => locked = l);
+
+        cut.Find($"[data-testid='{TestId}-lock']").Click();
+        cut.Find($"[data-testid='{TestId}-cancel']").Click();
+
+        locked.Should().BeNull();
+        value.Should().BeNull();
+        cut.FindAll($"[data-testid='{TestId}-continue']").Should().BeEmpty();
         cut.Find($"[data-testid='{TestId}']").GetAttribute("type").Should().Be("password");
     }
 
     [Fact]
-    public void The_second_unlock_click_clears_the_value_and_unlocks()
+    public void Confirming_the_dialog_clears_the_value_and_unlocks()
     {
         using var ctx = new Bunit.BunitContext();
 
@@ -95,28 +113,11 @@ public sealed class SecretFieldTests
         var cut = Render(ctx, "s3cret", locked: true, onValueChanged: v => value = v, onLockedChanged: l => locked = l);
 
         cut.Find($"[data-testid='{TestId}-lock']").Click();
-        cut.Find($"[data-testid='{TestId}-lock']").Click();
+        cut.Find($"[data-testid='{TestId}-continue']").Click();
 
         locked.Should().BeFalse();
         value.Should().BeEmpty();
-    }
-
-    [Fact]
-    public void Losing_focus_disarms_a_pending_unlock()
-    {
-        using var ctx = new Bunit.BunitContext();
-
-        bool? locked = null;
-        var cut = Render(ctx, "s3cret", locked: true, onLockedChanged: l => locked = l);
-
-        cut.Find($"[data-testid='{TestId}-lock']").Click();
-        cut.Find($"[data-testid='{TestId}-lock']").Blur();
-
-        // A half-armed toggle must not be completed by a much later, unrelated click.
-        cut.Find($"[data-testid='{TestId}-lock']").GetAttribute("data-tip").Should().Be(SecretField.LockedTip);
-
-        cut.Find($"[data-testid='{TestId}-lock']").Click();
-        locked.Should().BeNull();
+        cut.FindAll($"[data-testid='{TestId}-continue']").Should().BeEmpty();
     }
 
     [Fact]
