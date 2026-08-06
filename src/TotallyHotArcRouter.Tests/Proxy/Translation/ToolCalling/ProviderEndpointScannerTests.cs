@@ -249,6 +249,24 @@ public sealed class ProviderEndpointScannerTests
         Assert.Contains("connection refused", result.ScanError);
     }
 
+    [Fact]
+    public async Task AMessagesProbeThatAnsweredButDidNotMatch_IsNamedInScanError_WhenNothingElseAnswered()
+    {
+        // A 404 with an unrelated body is not an exception, so it must not vanish from ScanError just
+        // because ProbeAnthropicMessagesAsync has no exception message to report.
+        var scanner = ScannerForMessagesProbe(
+            modelsBody: "<html>not a model list</html>",
+            messagesStatus: HttpStatusCode.NotFound,
+            messagesBody: OpenAiStyleErrorBody);
+
+        var result = await scanner.ScanAsync(
+            "dead", Provider("http://localhost:9/v1", probeAnthropicMessages: true), TestContext.Current.CancellationToken);
+
+        Assert.False(result.AnthropicCompatible);
+        Assert.Contains("/v1/messages", result.ScanError);
+        Assert.Contains("did not match the Anthropic Messages API shape", result.ScanError);
+    }
+
     // ----- json_schema support is inferred from the native flavors, never probed -----
 
     [Theory]

@@ -38,7 +38,7 @@ public sealed class ProviderEndpointScanner
     /// <see cref="ProbeAnthropicMessagesAsync"/> for why a small, static payload is the point.
     /// </summary>
     private const string AnthropicMessagesProbeBody =
-        """{"model":"arcrouter-capability-probe","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}""";
+        $$"""{"model":"{{AnthropicProbeModel}}","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}""";
 
     private readonly HttpClient _httpClient;
     private readonly IEnvironmentVariableProvider _environment;
@@ -227,7 +227,15 @@ public sealed class ProviderEndpointScanner
         {
             using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
             var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            return (ClassifyMessagesBody(response.IsSuccessStatusCode, body), null);
+            if (ClassifyMessagesBody(response.IsSuccessStatusCode, body))
+            {
+                return (true, null);
+            }
+
+            // Not an exception, but not a match either: the endpoint answered, just not with a body shaped
+            // like Anthropic's dialect. Recorded so an opted-in probe that found nothing still shows up in
+            // ScanError instead of silently vanishing when nothing else answers.
+            return (false, Explain($"{target} returned {(int)response.StatusCode} with a body that did not match the Anthropic Messages API shape.", rejectedHeaders));
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException)
         {
