@@ -1,7 +1,6 @@
 @* Add/edit-provider modal for the Governance tab's provider manager. Captures the endpoint, the provider
-   family, and how the provider authenticates - a "Requires Authentication" switch over a Credentials
-   fieldset of one or more (header, source, value) rows. Mirrors SettingsModal's
-   overlay/stop-propagation/EventCallback pattern. *@
+   family, and any custom headers (including authentication, expressed as an ordinary header such as
+   Authorization). Mirrors SettingsModal's overlay/stop-propagation/EventCallback pattern. *@
 @using TotallyHot.ArcRouter.Gui.Admin
 
 <div class="overlay-backdrop fixed inset-0 z-50 flex items-center justify-center"
@@ -51,83 +50,6 @@
 
             <div>
                 <label class="flex items-center gap-2 text-sm cursor-pointer text-slate-200">
-                    <input type="checkbox" data-testid="requires-auth" checked="@_requiresAuth" @onchange="OnRequiresAuthChanged" />
-                    <span>Requires Authentication</span>
-                </label>
-                @if (!_requiresAuth && ActiveTemplate.AuthHint is { Length: > 0 } hint)
-                {
-                    <div class="text-xs text-slate-500 mt-1">@hint</div>
-                }
-            </div>
-
-            @* Credentials: one row per authenticating header. One row covers every API in the catalog; more
-               than one exists for gateways that want both a token and a subscription/project header. *@
-            <fieldset class="border-t border-slate-700/60 pt-3" disabled="@(!_requiresAuth)">
-                <div class="flex items-center justify-between mb-1.5">
-                    <legend class="text-xs uppercase tracking-wider @(_requiresAuth ? "text-slate-500" : "text-slate-700")">
-                        Credentials
-                    </legend>
-                    <button type="button" data-testid="add-credential" @onclick="AddCredential"
-                            class="btn-small-action">
-                        <Icon Name="plus" Size="12" /> Add credential
-                    </button>
-                </div>
-                <div class="space-y-2 @(_requiresAuth ? "" : "opacity-40")">
-                    @for (var index = 0; index < _credentials.Count; index++)
-                    {
-                        var credential = _credentials[index];
-                        var isPrimary = index == 0;
-                        <div class="border border-slate-700/50 rounded p-2 space-y-1.5">
-                            <div>
-                                <div class="flex items-center justify-between mb-1">
-                                    <div class="text-xs text-slate-500">Auth Header</div>
-                                    @if (!isPrimary)
-                                    {
-                                        <button type="button" title="Remove credential" @onclick="() => RemoveCredential(credential)"
-                                                class="text-red-400 hover:text-red-300 transition-colors shrink-0 p-1">
-                                            <Icon Name="x" Size="12" />
-                                        </button>
-                                    }
-                                </div>
-                                <input type="text" data-testid="@($"credential-header-{index}")"
-                                       value="@credential.HeaderName" @oninput="e => credential.HeaderName = AsString(e.Value)"
-                                       placeholder="Authorization"
-                                       class="w-full px-2 py-2 text-sm font-mono ds-input" />
-                            </div>
-                            <div>
-                                <div class="text-xs text-slate-500 mb-1">Type</div>
-                                <select data-testid="@($"credential-type-{index}")"
-                                        value="@(credential.UseEnvVar ? "env" : "literal")"
-                                        @onchange="e => SetCredentialSource(credential, e)"
-                                        class="w-full px-2 py-2 text-sm ds-input">
-                                    <option value="literal">Literal value</option>
-                                    <option value="env">Environment variable</option>
-                                </select>
-                            </div>
-                            <div>
-                                <div class="text-xs text-slate-500 mb-1">Value</div>
-                                @* The stored secret is never returned to the client, so a literal value's box
-                                   is always blank on edit; the placeholder plus the indicator below say a key
-                                   exists, and leaving it blank preserves it. *@
-                                <input type="@(credential.UseEnvVar ? "text" : "password")"
-                                       data-testid="@($"credential-value-{index}")"
-                                       value="@credential.Value" @oninput="e => credential.Value = AsString(e.Value)"
-                                       placeholder="@ValuePlaceholder(credential, isPrimary)"
-                                       class="w-full px-2 py-2 text-sm font-mono ds-input" />
-                                @if (isPrimary && !IsNew && HasApiKey && !credential.UseEnvVar && string.IsNullOrEmpty(credential.Value))
-                                {
-                                    <div class="flex items-center gap-1 mt-1 text-xs text-emerald-400">
-                                        <Icon Name="check-circle" Size="12" /> A key is saved. Leave blank to keep it.
-                                    </div>
-                                }
-                            </div>
-                        </div>
-                    }
-                </div>
-            </fieldset>
-
-            <div>
-                <label class="flex items-center gap-2 text-sm cursor-pointer text-slate-200">
                     <input type="checkbox" data-testid="is-free" checked="@_isFree" @onchange="e => _isFree = e.Value is true" />
                     <span>Free provider</span>
                 </label>
@@ -137,9 +59,10 @@
                 </div>
             </div>
 
-            @* Custom headers: non-credential extras sent on every upstream request (e.g. anthropic-version).
-               Kept distinct from Credentials because they are still required when a provider needs no
-               authentication at all. *@
+            @* Custom headers: every header the provider needs, including authentication (e.g. add an
+               "Authorization" header here with a literal or env-var-sourced key). This replaces the old
+               dedicated Credentials fieldset - a header is a header, whether or not it happens to carry a
+               secret. *@
             <div class="border-t border-slate-700/60 pt-3">
                 <div class="flex items-center justify-between mb-1.5">
                     <div class="text-xs text-slate-500 uppercase tracking-wider">Custom Headers</div>
@@ -147,6 +70,9 @@
                             class="btn-small-action">
                         <Icon Name="plus" Size="12" /> Add header
                     </button>
+                </div>
+                <div class="text-xs text-slate-600 mb-1.5">
+                    Add an <span class="font-mono">Authorization</span> header here if this provider needs a key.
                 </div>
                 @if (_headers.Count == 0)
                 {
@@ -157,17 +83,22 @@
                     <div class="space-y-2">
                         @foreach (var (header, index) in _headers.Select((h, i) => (h, i)))
                         {
+                            var isDuplicate = IsDuplicateHeaderName(header);
                             <div class="border border-slate-700/50 rounded p-2 space-y-1.5">
                                 <div class="flex items-center gap-1.5">
                                     <input type="text" data-testid="@($"header-name-{index}")"
                                            value="@header.Name" @oninput="e => header.Name = AsString(e.Value)"
                                            placeholder="Header-Name"
-                                           class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input" />
+                                           class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input @(isDuplicate ? "border-red-500 text-red-400" : "")" />
                                     <button type="button" title="Remove header" @onclick="() => RemoveHeader(header)"
                                             class="text-red-400 hover:text-red-300 transition-colors shrink-0 p-1">
                                         <Icon Name="x" Size="12" />
                                     </button>
                                 </div>
+                                @if (isDuplicate)
+                                {
+                                    <div class="text-xs text-red-400" data-testid="@($"header-duplicate-{index}")">Duplicate header field</div>
+                                }
                                 <div class="flex items-center gap-1.5">
                                     <select data-testid="@($"header-source-{index}")"
                                             value="@(header.UseEnvVar ? "env" : "literal")"
@@ -237,18 +168,20 @@
     /// <summary>Initial base URL.</summary>
     [Parameter] public string BaseUrl { get; set; } = string.Empty;
 
-    /// <summary>Initial auth header name.</summary>
+    /// <summary>The provider's existing auth header name. This dialog no longer edits it directly - it is
+    /// carried through unchanged into <see cref="ProviderEditResult"/> on save.</summary>
     [Parameter] public string AuthHeaderName { get; set; } = "Authorization";
 
-    /// <summary>Initial auth header scheme. Composed with <see cref="ApiKeyEnvVar"/> into the credential
-    /// row's value template, and preserved verbatim when a stored literal key is kept unchanged.</summary>
+    /// <summary>Unused by this dialog (authentication is now expressed as a custom header); retained as a
+    /// parameter only because callers still supply it.</summary>
     [Parameter] public string AuthHeaderScheme { get; set; } = "Bearer";
 
-    /// <summary>Initial env-var name, when the existing provider references one.</summary>
+    /// <summary>Unused by this dialog (authentication is now expressed as a custom header); retained as a
+    /// parameter only because callers still supply it.</summary>
     [Parameter] public string? ApiKeyEnvVar { get; set; }
 
-    /// <summary>Whether the existing provider already has a literal key stored (selects the literal
-    /// credential source and enables the blank-keeps-existing behavior).</summary>
+    /// <summary>Unused by this dialog (authentication is now expressed as a custom header); retained as a
+    /// parameter only because callers still supply it.</summary>
     [Parameter] public bool HasApiKey { get; set; }
 
     /// <summary>The provider's existing custom headers, seeded into the editable rows.</summary>
@@ -275,28 +208,18 @@
 
     private string _key = string.Empty;
     private string _baseUrl = string.Empty;
-    private bool _requiresAuth = true;
     private bool _isFree;
     private string _providerName = string.Empty;
     private ProviderType _selectedProviderType;
-    private readonly List<CredentialRow> _credentials = [];
     private readonly List<HeaderRow> _headers = [];
 
-    // The scheme the provider was stored with. Load-bearing for the literal-credential case: the stored key
-    // is never returned, so a blank value box means "keep the key" - and the scheme must be kept with it, or
-    // an untouched `Authorization: Bearer sk-...` provider would silently re-save as a raw `sk-...`.
-    private string _storedAuthHeaderScheme = string.Empty;
-
-    private ProviderTemplates.ProviderTemplate ActiveTemplate =>
-        ProviderTemplates.Templates[_selectedProviderType];
-
     /// <summary>The proxy-reported error, or the local validation reason when the form is not yet valid.</summary>
-    private string? DisplayedError => string.IsNullOrEmpty(Error) ? CredentialValidationError : Error;
+    private string? DisplayedError => string.IsNullOrEmpty(Error) ? DuplicateHeaderError : Error;
 
     private bool CanSave =>
         !string.IsNullOrWhiteSpace(_baseUrl)
         && (!IsNew || !string.IsNullOrWhiteSpace(_providerName))
-        && CredentialValidationError is null;
+        && DuplicateHeaderError is null;
 
     // Seed the editable fields from the parameters exactly once, when the dialog opens. The dialog is
     // conditionally rendered (@if (_showDialog)) so a fresh instance — and thus a single OnInitialized —
@@ -307,28 +230,12 @@
     {
         _key = Key;
         _baseUrl = BaseUrl;
-        _storedAuthHeaderScheme = AuthHeaderScheme ?? string.Empty;
         _isFree = IsFree;
         _providerName = ProviderName;
         _selectedProviderType = Enum.TryParse<TotallyHot.ArcRouter.Gui.Admin.ProviderType>(ProviderType, out var providerType)
             && ProviderTemplates.Templates.ContainsKey(providerType)
                 ? providerType
                 : TotallyHot.ArcRouter.Gui.Admin.ProviderType.Other;
-
-        var hasEnvVar = !string.IsNullOrWhiteSpace(ApiKeyEnvVar);
-
-        // On edit, whether the provider authenticates is a fact about what is stored, not a template
-        // default - a provider deliberately saved with no credential must not come back with the box
-        // ticked. On add there is nothing stored, so the selected type decides.
-        _requiresAuth = IsNew ? ActiveTemplate.RequiresAuth : (HasApiKey || hasEnvVar);
-
-        _credentials.Add(new CredentialRow
-        {
-            HeaderName = string.IsNullOrWhiteSpace(AuthHeaderName) ? "Authorization" : AuthHeaderName,
-            UseEnvVar = !HasApiKey,
-            Value = HasApiKey ? string.Empty : AuthValueTemplate.Compose(_storedAuthHeaderScheme, ApiKeyEnvVar),
-            HasStoredSecret = HasApiKey
-        });
 
         foreach (var header in Headers)
         {
@@ -349,8 +256,6 @@
         }
     }
 
-    private void OnRequiresAuthChanged(ChangeEventArgs e) => _requiresAuth = e.Value is true;
-
     private void OnProviderTypeChanged(ChangeEventArgs e)
     {
         if (Enum.TryParse<ProviderType>(AsString(e.Value), out var providerType)
@@ -361,27 +266,15 @@
         }
     }
 
-    /// <summary>Overwrites the endpoint and authentication shape with the selected family's defaults, and
-    /// merges in any headers that family's API requires. Deliberately clobbers rather than merges the
-    /// endpoint fields: picking a type is a statement about what this provider *is*.</summary>
+    /// <summary>Overwrites the endpoint shape with the selected family's defaults, and merges in any headers
+    /// that family's API requires. Deliberately clobbers rather than merges the endpoint fields: picking a
+    /// type is a statement about what this provider *is*.</summary>
     private void ApplyProviderTemplate(ProviderType providerType)
     {
         var template = ProviderTemplates.Templates[providerType];
 
         _baseUrl = template.BaseUrl;
-        _requiresAuth = template.RequiresAuth;
         _isFree = template.DefaultsToFree;
-
-        if (template.RequiresAuth)
-        {
-            var primary = _credentials[0];
-            primary.HeaderName = template.AuthHeaderName;
-            primary.UseEnvVar = true;
-            // Left blank so the suggestion shows as placeholder text rather than a pre-filled value the
-            // operator might not notice is a guess. HasStoredSecret is untouched: a stored key still
-            // applies to the new header name, and blank must keep preserving it.
-            primary.Value = string.Empty;
-        }
 
         // Merge, never replace: a header the operator already entered under the same name wins, so
         // switching type twice doesn't reset a hand-tuned anthropic-version.
@@ -393,13 +286,6 @@
             }
         }
     }
-
-    private void AddCredential() => _credentials.Add(new CredentialRow());
-
-    private void RemoveCredential(CredentialRow credential) => _credentials.Remove(credential);
-
-    private static void SetCredentialSource(CredentialRow credential, ChangeEventArgs e) =>
-        credential.UseEnvVar = string.Equals(AsString(e.Value), "env", StringComparison.Ordinal);
 
     private void AddHeader() => _headers.Add(new HeaderRow());
 
@@ -429,87 +315,27 @@
         }
     }
 
-    /// <summary>The greyed suggestion for a credential's value: the selected family's conventional
-    /// environment variable (e.g. <c>ANTHROPIC_API_KEY</c>) for the primary env-var row, and the
-    /// saved-secret marker for a literal row that already has one stored.</summary>
-    private string ValuePlaceholder(CredentialRow credential, bool isPrimary)
+    /// <summary>Whether <paramref name="header"/>'s trimmed name case-insensitively collides with another
+    /// row's trimmed, non-blank name. Blank names never collide - they are dropped on save (see
+    /// <see cref="BuildHeaders"/>), not compared.</summary>
+    private bool IsDuplicateHeaderName(HeaderRow header)
     {
-        if (credential.UseEnvVar)
+        var name = header.Name.Trim();
+        if (name.Length == 0)
         {
-            return isPrimary && ActiveTemplate.SuggestedEnvValue is { Length: > 0 } suggestion
-                ? suggestion
-                : "ENV_VAR_NAME";
+            return false;
         }
 
-        if (credential.HasStoredSecret && !IsNew)
-        {
-            return "•••••••••••• (saved, blank keeps it)";
-        }
-
-        // A literal value is sent verbatim, so it must carry any scheme the API expects. Derive the hint
-        // from the family's own suggestion so OpenAI reads "Bearer sk-..." and Anthropic just "sk-...".
-        return ActiveTemplate.SuggestedEnvValue.Contains("{env:", StringComparison.Ordinal)
-            && AuthValueTemplate.TryParse(ActiveTemplate.SuggestedEnvValue, out var scheme, out _, out _)
-            && scheme.Length > 0
-                ? $"{scheme} sk-..."
-                : "sk-...";
+        return _headers.Count(h => string.Equals(h.Name.Trim(), name, StringComparison.OrdinalIgnoreCase)) > 1;
     }
 
     /// <summary>
-    /// Why the credentials as entered cannot be saved, or <see langword="null"/> when they can. Surfaced in
-    /// the error banner rather than only greying out Save, so a disabled button always has a stated reason.
+    /// Why the custom headers as entered cannot be saved, or <see langword="null"/> when they can. Surfaced
+    /// in the error banner rather than only greying out Save, so a disabled button always has a stated
+    /// reason.
     /// </summary>
-    private string? CredentialValidationError
-    {
-        get
-        {
-            if (!_requiresAuth)
-            {
-                return null;
-            }
-
-            if (_credentials.Count == 0)
-            {
-                return "Add a credential, or untick Requires Authentication.";
-            }
-
-            for (var index = 0; index < _credentials.Count; index++)
-            {
-                var credential = _credentials[index];
-
-                if (string.IsNullOrWhiteSpace(credential.HeaderName))
-                {
-                    return "Every credential needs an auth header name.";
-                }
-
-                if (credential.UseEnvVar)
-                {
-                    if (!AuthValueTemplate.TryParse(credential.Value, out var scheme, out _, out var error))
-                    {
-                        return error;
-                    }
-
-                    // Only the primary credential maps onto the provider's AuthHeaderScheme; additional ones
-                    // are stored as custom headers, which have no scheme field to hold a prefix.
-                    if (index > 0 && scheme.Length > 0)
-                    {
-                        return "Only the first credential supports a prefix like Bearer. Additional credentials must be a bare environment variable name, or use a literal value.";
-                    }
-                }
-                else if (string.IsNullOrWhiteSpace(credential.Value) && !(credential.HasStoredSecret && !IsNew))
-                {
-                    return $"Enter a value for the {credential.HeaderName.Trim()} credential.";
-                }
-            }
-
-            var duplicate = _credentials
-                .Select(c => c.HeaderName.Trim())
-                .GroupBy(name => name, StringComparer.OrdinalIgnoreCase)
-                .FirstOrDefault(g => g.Count() > 1);
-
-            return duplicate is null ? null : $"Two credentials both use the {duplicate.Key} header.";
-        }
-    }
+    private string? DuplicateHeaderError =>
+        _headers.Any(IsDuplicateHeaderName) ? "Duplicate header field" : null;
 
     private async Task Save()
     {
@@ -518,16 +344,16 @@
             return;
         }
 
-        var (credentialMode, authHeaderName, authHeaderScheme, apiKey, apiKeyEnvVar) = ResolvePrimaryCredential();
+        var authHeaderName = string.IsNullOrWhiteSpace(AuthHeaderName) ? "Authorization" : AuthHeaderName.Trim();
 
         var result = new ProviderEditResult(
             Key: IsNew ? Guid.NewGuid().ToString() : Key,
             BaseUrl: _baseUrl.Trim(),
             AuthHeaderName: authHeaderName,
-            AuthHeaderScheme: authHeaderScheme,
-            ApiKey: apiKey,
-            ApiKeyEnvVar: apiKeyEnvVar,
-            CredentialMode: credentialMode,
+            AuthHeaderScheme: string.Empty,
+            ApiKey: null,
+            ApiKeyEnvVar: null,
+            CredentialMode: ProviderCredentialModes.None,
             Headers: BuildHeaders(),
             ProviderType: _selectedProviderType.ToString(),
             ProviderName: _providerName.Trim(),
@@ -536,83 +362,33 @@
         await OnSave.InvokeAsync(result);
     }
 
-    /// <summary>
-    /// Decomposes the first credential row into the four fields the proxy stores. This is where the value
-    /// <em>template</em> stops being a thing: <c>Bearer {env:OPENAI_API_KEY}</c> becomes the scheme
-    /// <c>Bearer</c> plus the variable name <c>OPENAI_API_KEY</c>, which is exactly the pair
-    /// <c>ProviderCredentialResolver</c> already re-joins at request time.
-    /// </summary>
-    private (string Mode, string HeaderName, string Scheme, string? ApiKey, string? ApiKeyEnvVar) ResolvePrimaryCredential()
-    {
-        var primary = _credentials[0];
-        var headerName = string.IsNullOrWhiteSpace(primary.HeaderName) ? "Authorization" : primary.HeaderName.Trim();
-
-        if (!_requiresAuth)
-        {
-            // Keep the stored header name and scheme rather than resetting them: unticking the box clears the
-            // credential, and the provider's header shape should survive ticking it back on.
-            var retainedName = string.IsNullOrWhiteSpace(AuthHeaderName) ? "Authorization" : AuthHeaderName.Trim();
-            return (ProviderCredentialModes.None, retainedName, _storedAuthHeaderScheme, null, null);
-        }
-
-        if (primary.UseEnvVar)
-        {
-            AuthValueTemplate.TryParse(primary.Value, out var scheme, out var envVarName, out _);
-            return (ProviderCredentialModes.EnvVar, headerName, scheme, null, envVarName);
-        }
-
-        // A literal is sent verbatim, so the scheme it may already contain lives in the value and the stored
-        // scheme is cleared. The exception is the untouched-key case: blank means "keep what's stored", and
-        // the stored scheme has to be kept alongside it or the preserved key loses its prefix.
-        return string.IsNullOrWhiteSpace(primary.Value)
-            ? (ProviderCredentialModes.Literal, headerName, _storedAuthHeaderScheme, null, null)
-            : (ProviderCredentialModes.Literal, headerName, string.Empty, primary.Value, null);
-    }
-
-    /// <summary>Projects the custom-header rows, plus any credential rows beyond the first, into wire models.
-    /// Rows with a blank name are dropped and each value maps to a literal or env-var reference per its
-    /// selected source. A blank literal value is sent as-is (not resolved locally): under a locked row the
-    /// management API preserves whatever is already stored under that header's name, and under an unlocked
-    /// one it clears it - which is what carries a padlock unlock through to storage.</summary>
-    private IReadOnlyList<ProviderHeaderWriteModel> BuildHeaders()
-    {
-        var rows = _headers.AsEnumerable();
-
-        // Credentials past the first have no dedicated storage - they are ordinary headers that happen to
-        // carry a secret, which is exactly what ProviderHeader already models. A literal one is locked by
-        // definition: this dialog offers no way to read a stored credential back. An env-var reference
-        // stores no secret in config, so it is always unlocked (Locked: false below, same as any other
-        // env-var header).
-        if (_requiresAuth)
-        {
-            rows = rows.Concat(_credentials.Skip(1).Select(c => new HeaderRow
-            {
-                Name = c.HeaderName,
-                UseEnvVar = c.UseEnvVar,
-                Value = c.Value,
-                Locked = !c.UseEnvVar
-            }));
-        }
-
-        return rows
+    /// <summary>Projects the custom-header rows into wire models. Rows with a blank name are dropped and
+    /// each value maps to a literal or env-var reference per its selected source. A blank literal value is
+    /// sent as-is (not resolved locally): under a locked row the management API preserves whatever is
+    /// already stored under that header's name, and under an unlocked one it clears it - which is what
+    /// carries a padlock unlock through to storage.</summary>
+    private IReadOnlyList<ProviderHeaderWriteModel> BuildHeaders() =>
+        _headers
             .Where(h => !string.IsNullOrWhiteSpace(h.Name))
             .Select(h => h.UseEnvVar
                 ? new ProviderHeaderWriteModel(h.Name.Trim(), null, h.Value.Trim(), Locked: false)
                 : new ProviderHeaderWriteModel(h.Name.Trim(), h.Value, null, Locked: h.Locked))
             .ToList();
-    }
 
     private static string AsString(object? value) => (string?)value ?? string.Empty;
 
-    /// <summary>The values captured by the dialog when the user saves.</summary>
+    /// <summary>The values captured by the dialog when the user saves. Authentication is now expressed
+    /// purely as a custom header (see <see cref="Headers"/>): <see cref="CredentialMode"/> is always
+    /// <see cref="ProviderCredentialModes.None"/>, which clears any legacy stored <see cref="ApiKey"/>/
+    /// <see cref="ApiKeyEnvVar"/> on save.</summary>
     /// <param name="Key">The provider key (auto-generated as a GUID when adding a new provider).</param>
     /// <param name="BaseUrl">The provider base URL.</param>
-    /// <param name="AuthHeaderName">The auth header name.</param>
-    /// <param name="AuthHeaderScheme">The auth header scheme (may be empty), decomposed from the credential's value template.</param>
-    /// <param name="ApiKey">The literal key, or null when not using a literal key (blank keeps any existing key on edit).</param>
-    /// <param name="ApiKeyEnvVar">The env-var name, or null when not using an env var.</param>
-    /// <param name="CredentialMode">The selected credential source (see <see cref="ProviderCredentialModes"/>).</param>
-    /// <param name="Headers">The custom headers as edited, plus any credential rows beyond the first.</param>
+    /// <param name="AuthHeaderName">The auth header name, carried through unchanged from the provider's existing configuration.</param>
+    /// <param name="AuthHeaderScheme">Always empty; this dialog no longer authors a scheme.</param>
+    /// <param name="ApiKey">Always null; this dialog no longer authors a literal legacy credential.</param>
+    /// <param name="ApiKeyEnvVar">Always null; this dialog no longer authors a legacy credential env var.</param>
+    /// <param name="CredentialMode">Always <see cref="ProviderCredentialModes.None"/> (see <see cref="ProviderCredentialModes"/>).</param>
+    /// <param name="Headers">The custom headers as edited, including any header used for authentication.</param>
     /// <param name="IsFree">Whether the provider is flagged as costing nothing.</param>
     /// <param name="ProviderType">The selected provider family (a <see cref="TotallyHot.ArcRouter.Gui.Admin.ProviderType"/> member name).</param>
     /// <param name="ProviderName">A user-friendly display name for the provider; distinct from the unique <paramref name="Key"/>.</param>
@@ -628,24 +404,6 @@
         string ProviderType,
         string ProviderName,
         bool IsFree = false);
-
-    /// <summary>A mutable editor row for one authenticating header. <see cref="Value"/> holds a literal
-    /// credential or, when <see cref="UseEnvVar"/> is set, an <see cref="AuthValueTemplate"/> naming the
-    /// environment variable to read.</summary>
-    private sealed class CredentialRow
-    {
-        public string HeaderName { get; set; } = string.Empty;
-
-        /// <summary>Whether the value names an environment variable rather than being the credential itself.
-        /// Defaults to true: referencing a variable is the shape that keeps secrets out of configuration.</summary>
-        public bool UseEnvVar { get; set; } = true;
-
-        public string Value { get; set; } = string.Empty;
-
-        /// <summary>Whether a literal credential is already stored for this row (the value itself is never
-        /// returned), which is what makes leaving the box blank mean "keep it" rather than "clear it".</summary>
-        public bool HasStoredSecret { get; set; }
-    }
 
     /// <summary>A mutable editor row for one custom header. <see cref="Value"/> holds the literal value or,
     /// when <see cref="UseEnvVar"/> is set, the environment-variable name.</summary>
