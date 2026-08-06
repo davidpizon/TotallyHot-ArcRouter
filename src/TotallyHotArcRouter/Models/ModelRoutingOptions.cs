@@ -132,27 +132,11 @@ public sealed record ProviderOptions
     public string? ProviderType { get; init; }
 
     /// <summary>
-    /// Gets the name of the environment variable holding the API key used to authenticate with this provider.
-    /// Used only when <see cref="ApiKey"/> is not set. Prefer this over <see cref="ApiKey"/> so secrets are not
-    /// checked into configuration files.
-    /// </summary>
-    public string? ApiKeyEnvVar { get; init; }
-
-    /// <summary>
-    /// Gets the literal API key used to authenticate with this provider, when supplied directly in configuration.
-    /// Takes precedence over <see cref="ApiKeyEnvVar"/> when non-empty.
-    /// </summary>
-    public string? ApiKey { get; init; }
-
-    /// <summary>
-    /// Gets the name of the HTTP header used to carry the API key (e.g. <c>Authorization</c> or <c>x-api-key</c>).
+    /// Gets the name of the HTTP header identified as this provider's credential header (e.g.
+    /// <c>Authorization</c> or <c>x-api-key</c>). Authentication itself is expressed as an ordinary entry in
+    /// <see cref="Headers"/> - this only records which of those headers carries it, for display purposes.
     /// </summary>
     public string AuthHeaderName { get; init; } = "Authorization";
-
-    /// <summary>
-    /// Gets the scheme prefixed to the API key value in the auth header (e.g. <c>Bearer</c>). Empty means the raw key is used.
-    /// </summary>
-    public string AuthHeaderScheme { get; init; } = "Bearer";
 
     /// <summary>
     /// Gets additional static HTTP headers to send on every upstream request to this provider (both
@@ -274,9 +258,9 @@ public sealed record ProviderOptions
     /// property verbatim), following <see cref="TotallyHot.ArcRouter.Proxy.ResolvedModelRoute"/>'s precedent.
     /// <para>
     /// Load-bearing specifically because this type became a <c>record</c>. As a class its
-    /// <c>ToString()</c> was the type name and carried nothing; the synthesized one would print
-    /// <see cref="ApiKey"/> in plain text into any log line, exception message, or debugger view that
-    /// happens to include a <see cref="ProviderOptions"/>.
+    /// <c>ToString()</c> was the type name and carried nothing; the synthesized one would print each
+    /// <see cref="Headers"/> entry's literal value in plain text into any log line, exception message, or
+    /// debugger view that happens to include a <see cref="ProviderOptions"/>.
     /// </para>
     /// <para>
     /// The <c>*EnvVar</c> properties stay visible: they name where a secret lives rather than carrying one,
@@ -288,10 +272,7 @@ public sealed record ProviderOptions
     {
         builder.Append("BaseUrl = ").Append(BaseUrl);
         builder.Append(", ProviderType = ").Append(ProviderType);
-        builder.Append(", ApiKeyEnvVar = ").Append(ApiKeyEnvVar);
-        builder.Append(", ApiKey = ").Append(Redacted(ApiKey));
         builder.Append(", AuthHeaderName = ").Append(AuthHeaderName);
-        builder.Append(", AuthHeaderScheme = ").Append(AuthHeaderScheme);
         // Header names are shown and values are not, matching ResolvedModelRoute.ExtraHeaders. A
         // List<ProviderHeader> would print as its type name today rather than its contents, so this is
         // defensive rather than a live leak - but it stops one the moment ProviderHeader becomes a record
@@ -309,9 +290,6 @@ public sealed record ProviderOptions
         builder.Append(", AwsSessionTokenEnvVar = ").Append(AwsSessionTokenEnvVar);
         return true;
     }
-
-    /// <summary>Returns a safe placeholder for a secret value: "&lt;null&gt;" if absent, otherwise "&lt;redacted&gt;".</summary>
-    private static string Redacted(string? secret) => secret is null ? "<null>" : "<redacted>";
 }
 
 /// <summary>

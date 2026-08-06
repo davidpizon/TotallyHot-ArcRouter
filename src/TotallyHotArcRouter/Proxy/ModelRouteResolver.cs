@@ -62,8 +62,11 @@ public sealed record AvailableModel(string ModelName, string Provider);
 /// <param name="Provider">The provider key the model routes to.</param>
 /// <param name="ProviderModelId">The model identifier to send to the upstream provider.</param>
 /// <param name="UpstreamBaseUrl">The absolute base URL of the upstream provider.</param>
-/// <param name="AuthHeaderName">The HTTP header name used to carry the provider credential.</param>
-/// <param name="AuthHeaderValue">The resolved credential header value, or <see langword="null"/> if no API key is configured/available.</param>
+/// <param name="AuthHeaderName">
+/// The HTTP header name identified as this provider's credential header. The credential's actual value
+/// travels as an ordinary entry in <see cref="ExtraHeaders"/> - this only tells the forwarding path which
+/// client-sent header of the same name to drop, so the client cannot override or duplicate it.
+/// </param>
 /// <param name="ExtraHeaders">Resolved custom headers (name/value) to add to the forwarded request, from the provider's configured <see cref="ProviderOptions.Headers"/>.</param>
 /// <param name="IsFree">Whether this route's provider costs nothing (<see cref="ProviderOptions.IsFree"/>), making the request's cost a known zero rather than unknown.</param>
 /// <param name="AwsRegion">The AWS region for an Amazon Bedrock route (<see cref="ProviderOptions.AwsRegion"/>); <see langword="null"/> for every non-Bedrock provider.</param>
@@ -77,7 +80,6 @@ public sealed record ResolvedModelRoute(
     string ProviderModelId,
     Uri UpstreamBaseUrl,
     string AuthHeaderName,
-    string? AuthHeaderValue,
     IReadOnlyList<KeyValuePair<string, string>> ExtraHeaders,
     bool IsFree = false,
     string? AwsRegion = null,
@@ -89,13 +91,12 @@ public sealed record ResolvedModelRoute(
     /// <summary>
     /// Overrides the compiler-generated member printer (the pattern the record feature recognizes: a
     /// method named exactly <c>PrintMembers</c> with this signature replaces the default one, which
-    /// prints every property verbatim). Without this, <see cref="AuthHeaderValue"/>,
-    /// <see cref="AwsSecretAccessKey"/>, <see cref="AwsSessionToken"/>, and any secret carried in
-    /// <see cref="ExtraHeaders"/>' values would appear in this record's <c>ToString()</c> - and so in
-    /// any log line, exception message, or debugger view that happens to include a
-    /// <see cref="ResolvedModelRoute"/> - in plain text. <see cref="AwsAccessKeyId"/> is left visible:
-    /// it identifies but does not itself authenticate (same judgment call as
-    /// <c>BedrockRuntimeClientFactory.CredentialFingerprint</c>'s remarks).
+    /// prints every property verbatim). Without this, <see cref="AwsSecretAccessKey"/>,
+    /// <see cref="AwsSessionToken"/>, and any secret carried in <see cref="ExtraHeaders"/>' values would
+    /// appear in this record's <c>ToString()</c> - and so in any log line, exception message, or debugger
+    /// view that happens to include a <see cref="ResolvedModelRoute"/> - in plain text.
+    /// <see cref="AwsAccessKeyId"/> is left visible: it identifies but does not itself authenticate (same
+    /// judgment call as <c>BedrockRuntimeClientFactory.CredentialFingerprint</c>'s remarks).
     /// </summary>
     private bool PrintMembers(StringBuilder builder)
     {
@@ -104,7 +105,6 @@ public sealed record ResolvedModelRoute(
         builder.Append(", ProviderModelId = ").Append(ProviderModelId);
         builder.Append(", UpstreamBaseUrl = ").Append(UpstreamBaseUrl);
         builder.Append(", AuthHeaderName = ").Append(AuthHeaderName);
-        builder.Append(", AuthHeaderValue = ").Append(Redacted(AuthHeaderValue));
         builder.Append(", ExtraHeaders = [").Append(string.Join(", ", ExtraHeaders.Select(h => $"{h.Key}=<redacted>"))).Append(']');
         builder.Append(", IsFree = ").Append(IsFree);
         builder.Append(", AwsRegion = ").Append(AwsRegion);
@@ -211,7 +211,6 @@ public sealed class ModelRouteResolver : IModelRouteResolver
         }
 
         var (entry, provider) = match;
-        var authHeaderValue = ProviderCredentialResolver.BuildAuthHeaderValue(provider, _environment);
         var extraHeaders = ProviderCredentialResolver.ResolveExtraHeaders(provider, _environment);
         var (awsAccessKeyId, awsSecretAccessKey, awsSessionToken) = ProviderCredentialResolver.ResolveAwsCredentials(provider, _environment);
 
@@ -221,7 +220,6 @@ public sealed class ModelRouteResolver : IModelRouteResolver
             entry.ProviderModelId,
             new Uri(provider.BaseUrl, UriKind.Absolute),
             provider.AuthHeaderName,
-            authHeaderValue,
             extraHeaders,
             provider.IsFree,
             provider.AwsRegion,

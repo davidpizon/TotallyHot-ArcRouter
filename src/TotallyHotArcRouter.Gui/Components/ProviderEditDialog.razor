@@ -174,18 +174,6 @@
     /// <see cref="ResolveSavedAuthHeaderName"/>) - otherwise the selected type's documented auth header wins.</summary>
     [Parameter] public string AuthHeaderName { get; set; } = "Authorization";
 
-    /// <summary>Unused by this dialog (authentication is now expressed as a custom header); retained as a
-    /// parameter only because callers still supply it.</summary>
-    [Parameter] public string AuthHeaderScheme { get; set; } = "Bearer";
-
-    /// <summary>Unused by this dialog (authentication is now expressed as a custom header); retained as a
-    /// parameter only because callers still supply it.</summary>
-    [Parameter] public string? ApiKeyEnvVar { get; set; }
-
-    /// <summary>Unused by this dialog (authentication is now expressed as a custom header); retained as a
-    /// parameter only because callers still supply it.</summary>
-    [Parameter] public bool HasApiKey { get; set; }
-
     /// <summary>The provider's existing custom headers, seeded into the editable rows.</summary>
     [Parameter] public IReadOnlyList<ProviderHeaderView> Headers { get; set; } = [];
 
@@ -255,34 +243,6 @@
                 Value = useEnvVar ? (header.ValueEnvVar ?? string.Empty) : (header.Value ?? string.Empty),
                 HasStoredLiteralValue = isLiteral && header.Locked
             });
-        }
-
-        SeedLegacyCredentialHeader();
-    }
-
-    /// <summary>Migrates a provider's legacy credential (stored outside <see cref="Headers"/>, from before
-    /// authentication became an ordinary header) into an editable row, so that saving through this dialog -
-    /// which always clears the legacy fields - doesn't silently drop it. A no-op when <see cref="Headers"/>
-    /// already has a row under <see cref="AuthHeaderName"/>, since that row is the already-migrated
-    /// credential and takes precedence.</summary>
-    private void SeedLegacyCredentialHeader()
-    {
-        var authHeaderName = string.IsNullOrWhiteSpace(AuthHeaderName) ? "Authorization" : AuthHeaderName.Trim();
-        if (_headers.Any(h => string.Equals(h.Name, authHeaderName, StringComparison.OrdinalIgnoreCase)))
-        {
-            return;
-        }
-
-        if (!string.IsNullOrWhiteSpace(ApiKeyEnvVar))
-        {
-            _headers.Add(new HeaderRow { Name = authHeaderName, UseEnvVar = true, Value = ApiKeyEnvVar });
-        }
-        else if (HasApiKey)
-        {
-            // The literal key itself is never sent to this dialog (only the fact one is set), so the row
-            // starts blank and locked - same as any other stored-secret header - and BuildHeaders/
-            // ResolveHeader take it from there to preserve the actual value server-side.
-            _headers.Add(new HeaderRow { Name = authHeaderName, Locked = true, HasStoredLiteralValue = true });
         }
     }
 
@@ -388,10 +348,9 @@
             ? template.AuthHeaderName
             : "Authorization";
 
-    /// <summary>The <see cref="ProviderEditResult.AuthHeaderName"/> to save. Still meaningful under
-    /// <see cref="ProviderCredentialModes.None"/> (see the parameter doc on <see cref="ProviderEditResult"/>),
-    /// so it must track the header the operator actually authenticates with rather than a stale value from
-    /// before this dialog stopped letting them edit it directly: prefers the selected provider type's
+    /// <summary>The <see cref="ProviderEditResult.AuthHeaderName"/> to save. It must track the header the
+    /// operator actually authenticates with rather than a stale value from before this dialog stopped
+    /// letting them edit it directly: prefers the selected provider type's
     /// documented auth header (e.g. Anthropic's <c>x-api-key</c>, the same lookup as <see cref="AuthHeaderHint"/>),
     /// falling back to the existing <see cref="AuthHeaderName"/> parameter for types with no template entry.</summary>
     private string ResolveSavedAuthHeaderName() =>
@@ -413,10 +372,6 @@
             Key: IsNew ? Guid.NewGuid().ToString() : Key,
             BaseUrl: _baseUrl.Trim(),
             AuthHeaderName: authHeaderName,
-            AuthHeaderScheme: string.Empty,
-            ApiKey: null,
-            ApiKeyEnvVar: null,
-            CredentialMode: ProviderCredentialModes.None,
             Headers: BuildHeaders(),
             ProviderType: _selectedProviderType.ToString(),
             ProviderName: _providerName.Trim(),
@@ -440,22 +395,14 @@
 
     private static string AsString(object? value) => (string?)value ?? string.Empty;
 
-    /// <summary>The values captured by the dialog when the user saves. Authentication is now expressed
-    /// purely as a custom header (see <see cref="Headers"/>): <see cref="CredentialMode"/> is always
-    /// <see cref="ProviderCredentialModes.None"/>, which clears any legacy stored <see cref="ApiKey"/>/
-    /// <see cref="ApiKeyEnvVar"/> on save.</summary>
+    /// <summary>The values captured by the dialog when the user saves. Authentication is expressed purely
+    /// as a custom header (see <see cref="Headers"/>).</summary>
     /// <param name="Key">The provider key (auto-generated as a GUID when adding a new provider).</param>
     /// <param name="BaseUrl">The provider base URL.</param>
     /// <param name="AuthHeaderName">The auth header name, resolved by <see cref="ResolveSavedAuthHeaderName"/>
     /// from the selected provider type's template (falling back to the provider's existing configuration for
-    /// types with no template entry). Still meaningful under <see cref="ProviderCredentialModes.None"/>: the
-    /// proxy uses it to identify which forwarded header is "the" credential header (e.g. to avoid double-sending
-    /// it), and <see cref="SeedLegacyCredentialHeader"/> seeds a row under this same name so any pre-existing
-    /// credential survives as a custom header instead of being silently cleared.</param>
-    /// <param name="AuthHeaderScheme">Always empty; this dialog no longer authors a scheme.</param>
-    /// <param name="ApiKey">Always null; this dialog no longer authors a literal legacy credential.</param>
-    /// <param name="ApiKeyEnvVar">Always null; this dialog no longer authors a legacy credential env var.</param>
-    /// <param name="CredentialMode">Always <see cref="ProviderCredentialModes.None"/> (see <see cref="ProviderCredentialModes"/>).</param>
+    /// types with no template entry). The proxy uses it to identify which forwarded header is "the" credential
+    /// header, e.g. to avoid double-sending it.</param>
     /// <param name="Headers">The custom headers as edited, including any header used for authentication.</param>
     /// <param name="IsFree">Whether the provider is flagged as costing nothing.</param>
     /// <param name="ProviderType">The selected provider family (a <see cref="TotallyHot.ArcRouter.Gui.Admin.ProviderType"/> member name).</param>
@@ -464,10 +411,6 @@
         string Key,
         string BaseUrl,
         string AuthHeaderName,
-        string AuthHeaderScheme,
-        string? ApiKey,
-        string? ApiKeyEnvVar,
-        string CredentialMode,
         IReadOnlyList<ProviderHeaderWriteModel> Headers,
         string ProviderType,
         string ProviderName,

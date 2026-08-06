@@ -9,8 +9,12 @@ namespace TotallyHot.ArcRouter.Tests.Proxy;
 /// </summary>
 internal static class ModelRouteResolverTestFactory
 {
-    public const string ApiKeyEnvVar = "TEST_PROVIDER_API_KEY";
-
+    /// <summary>
+    /// Builds a resolver for a single model/provider. Authentication is expressed purely as a custom header
+    /// (matching production): when <paramref name="apiKey"/> is non-blank, it is composed with
+    /// <paramref name="authHeaderScheme"/> (scheme-prefixed, or raw when the scheme is empty) into a literal
+    /// header stored under <paramref name="authHeaderName"/> and merged ahead of <paramref name="headers"/>.
+    /// </summary>
     public static IModelRouteResolver Create(
         string modelName,
         string providerModelId,
@@ -19,12 +23,23 @@ internal static class ModelRouteResolverTestFactory
         string authHeaderScheme = "Bearer",
         string? apiKey = "test-api-key",
         string providerName = "test-provider",
-        string? literalApiKey = null,
         IReadOnlyList<ProviderHeader>? headers = null,
         bool isFree = false,
         string? awsRegion = null,
         bool enableToolCallGuard = false)
     {
+        List<ProviderHeader> allHeaders = [];
+        if (!string.IsNullOrWhiteSpace(apiKey))
+        {
+            var value = string.IsNullOrEmpty(authHeaderScheme) ? apiKey : $"{authHeaderScheme} {apiKey}";
+            allHeaders.Add(new ProviderHeader { Name = authHeaderName, Value = value });
+        }
+
+        if (headers is not null)
+        {
+            allHeaders.AddRange(headers);
+        }
+
         var options = new ModelRoutingOptions
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
@@ -32,11 +47,8 @@ internal static class ModelRouteResolverTestFactory
                 [providerName] = new ProviderOptions
                 {
                     BaseUrl = baseUrl,
-                    ApiKey = literalApiKey,
-                    ApiKeyEnvVar = ApiKeyEnvVar,
                     AuthHeaderName = authHeaderName,
-                    AuthHeaderScheme = authHeaderScheme,
-                    Headers = headers is null ? [] : [.. headers],
+                    Headers = allHeaders,
                     IsFree = isFree,
                     AwsRegion = awsRegion,
                     EnableToolCallGuard = enableToolCallGuard
@@ -48,10 +60,7 @@ internal static class ModelRouteResolverTestFactory
             ]
         };
 
-        var environment = new Mock<IEnvironmentVariableProvider>();
-        environment.Setup(e => e.GetVariable(ApiKeyEnvVar)).Returns(apiKey);
-
-        return new ModelRouteResolver(new InMemoryProviderConfigStore(options), environment.Object);
+        return new ModelRouteResolver(new InMemoryProviderConfigStore(options), Mock.Of<IEnvironmentVariableProvider>());
     }
 
     /// <summary>
@@ -59,8 +68,7 @@ internal static class ModelRouteResolverTestFactory
     /// <paramref name="models"/> BaseUrl so a test handler can route by host). With no static per-model
     /// fallback list anymore (see <c>docs/router/agent-resilience-strategies.md</c>'s Circuit Breaker,
     /// which replaced it), every model configured here is automatically a dynamic next-best candidate for
-    /// every other - callers don't need to declare backup relationships explicitly. Uses literal
-    /// per-provider API keys so no environment variables are needed.
+    /// every other - callers don't need to declare backup relationships explicitly.
     /// </summary>
     public static IModelRouteResolver CreateWithModels(
         params (string ModelName, string Provider, string ProviderModelId, string BaseUrl)[] models)
@@ -72,8 +80,7 @@ internal static class ModelRouteResolverTestFactory
             {
                 providers[model.Provider] = new ProviderOptions
                 {
-                    BaseUrl = model.BaseUrl,
-                    ApiKey = $"test-key-{model.Provider}"
+                    BaseUrl = model.BaseUrl
                 };
             }
         }

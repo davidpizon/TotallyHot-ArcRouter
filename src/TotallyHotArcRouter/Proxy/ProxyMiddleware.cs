@@ -469,14 +469,11 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             requestMessage.Content = new ByteArrayContent(forwardBody);
             requestMessage.Content.Headers.TryAddWithoutValidation("Content-Type", "application/json");
 
-            if (route.AuthHeaderValue is not null)
-            {
-                requestMessage.Headers.TryAddWithoutValidation(route.AuthHeaderName, route.AuthHeaderValue);
-            }
-
-            // Provider-configured custom headers (e.g. anthropic-version). Added only when the client didn't
-            // already send that header, so a client supplying its own value keeps it rather than having it
-            // clobbered or duplicated. Client headers were copied into requestMessage.Headers above.
+            // Provider-configured custom headers (e.g. anthropic-version, and whichever header carries
+            // authentication). Added only when the client didn't already send that header, so a client
+            // supplying its own value keeps it rather than having it clobbered or duplicated. Client headers
+            // were copied into requestMessage.Headers above - except the auth header, skipped there by name
+            // so it is always sourced from here instead.
             foreach (var (headerName, headerValue) in route.ExtraHeaders)
             {
                 if (!requestMessage.Headers.Contains(headerName))

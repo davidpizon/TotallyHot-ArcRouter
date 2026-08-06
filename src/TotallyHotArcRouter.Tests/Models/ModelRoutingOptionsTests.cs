@@ -105,21 +105,5 @@ public class ModelRoutingOptionsTests
         Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
     }
 
-    // Verifies that a literal ApiKey is a purely optional field with no validation requirements of its
-    // own: configuring it does not affect whether EnsureValid throws.
-    [Fact]
-    public void EnsureValid_DoesNotThrow_WhenProviderHasLiteralApiKeyConfigured()
-    {
-        var options = new ModelRoutingOptions
-        {
-            Providers = new Dictionary<string, ProviderOptions>
-            {
-                ["openai"] = new ProviderOptions { BaseUrl = "https://api.openai.com", ApiKey = "literal-key-value" }
-            },
-            ModelList = [new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "openai", ProviderModelId = "gpt-5.4" }]
-        };
-
-        options.EnsureValid();
-    }
 }
 

@@ -3,49 +3,13 @@ using TotallyHot.ArcRouter.Models;
 namespace TotallyHot.ArcRouter.Proxy;
 
 /// <summary>
-/// Resolves a provider's API key and the auth-header value to send upstream, from either a literal
-/// <see cref="ProviderOptions.ApiKey"/> or the environment variable named by
-/// <see cref="ProviderOptions.ApiKeyEnvVar"/>. Shared by <see cref="ModelRouteResolver"/> (per routed
-/// request) and the management API's model-discovery endpoint (per provider), so both compute
-/// credentials identically.
+/// Resolves a provider's custom headers - including authentication, expressed as an ordinary header - to
+/// concrete name/value pairs to send upstream. Shared by <see cref="ModelRouteResolver"/> (per routed
+/// request) and the management API's model-discovery endpoint (per provider), so both compute the
+/// forwarded headers identically.
 /// </summary>
 internal static class ProviderCredentialResolver
 {
-    /// <summary>
-    /// Resolves the raw API key for a provider, preferring a literal <see cref="ProviderOptions.ApiKey"/>
-    /// over the <see cref="ProviderOptions.ApiKeyEnvVar"/> environment-variable lookup. Returns
-    /// <see langword="null"/> when neither is configured/available.
-    /// </summary>
-    public static string? ResolveApiKey(ProviderOptions provider, IEnvironmentVariableProvider environment)
-    {
-        if (!string.IsNullOrWhiteSpace(provider.ApiKey))
-        {
-            return provider.ApiKey;
-        }
-
-        return string.IsNullOrWhiteSpace(provider.ApiKeyEnvVar)
-            ? null
-            : environment.GetVariable(provider.ApiKeyEnvVar);
-    }
-
-    /// <summary>
-    /// Builds the value for the provider's auth header (<see cref="ProviderOptions.AuthHeaderScheme"/>
-    /// prefixed to the key, or the raw key when the scheme is empty), or <see langword="null"/> when no
-    /// key is configured/available.
-    /// </summary>
-    public static string? BuildAuthHeaderValue(ProviderOptions provider, IEnvironmentVariableProvider environment)
-    {
-        var apiKey = ResolveApiKey(provider, environment);
-        if (apiKey is null)
-        {
-            return null;
-        }
-
-        return string.IsNullOrWhiteSpace(provider.AuthHeaderScheme)
-            ? apiKey
-            : $"{provider.AuthHeaderScheme} {apiKey}";
-    }
-
     /// <summary>
     /// Resolves a provider's custom <see cref="ProviderOptions.Headers"/> to concrete name/value pairs to
     /// send upstream, each value taken from the header's literal <see cref="ProviderHeader.Value"/> or, when
@@ -82,10 +46,10 @@ internal static class ProviderCredentialResolver
     }
 
     /// <summary>
-    /// Applies a provider's auth header and every resolvable custom header to an outbound probe request,
-    /// exactly as the forwarding path applies them - which is how a provider that needs an extra header to
-    /// answer at all (Anthropic's <c>anthropic-version</c>) reaches every probe with no provider-specific
-    /// code at the call site.
+    /// Applies every resolvable custom header - including whichever one carries authentication - to an
+    /// outbound probe request, exactly as the forwarding path applies them. Which is how a provider that
+    /// needs an extra header to answer at all (Anthropic's <c>anthropic-version</c>) reaches every probe
+    /// with no provider-specific code at the call site.
     /// </summary>
     /// <returns>
     /// The configured header names HTTP refused, or an empty list when all were accepted.
@@ -97,7 +61,7 @@ internal static class ProviderCredentialResolver
     /// failure say so. Only names are returned - the values may be secrets.
     /// </returns>
     /// <param name="request">The request to apply headers to.</param>
-    /// <param name="provider">The provider whose credentials and custom headers to apply.</param>
+    /// <param name="provider">The provider whose custom headers to apply.</param>
     /// <param name="environment">Accessor used to resolve env-var-sourced values.</param>
     public static IReadOnlyList<string> ApplyToRequest(
         HttpRequestMessage request,
@@ -105,13 +69,6 @@ internal static class ProviderCredentialResolver
         IEnvironmentVariableProvider environment)
     {
         List<string>? rejected = null;
-
-        var authHeaderValue = BuildAuthHeaderValue(provider, environment);
-        if (authHeaderValue is not null
-            && !request.Headers.TryAddWithoutValidation(provider.AuthHeaderName, authHeaderValue))
-        {
-            (rejected ??= []).Add(provider.AuthHeaderName);
-        }
 
         foreach (var (headerName, headerValue) in ResolveExtraHeaders(provider, environment))
         {

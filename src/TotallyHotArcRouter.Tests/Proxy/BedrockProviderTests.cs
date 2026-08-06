@@ -203,8 +203,8 @@ public class BedrockProviderTests
         {
             Providers = new Dictionary<string, TotallyHot.ArcRouter.Models.ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                [primaryProvider] = new TotallyHot.ArcRouter.Models.ProviderOptions { BaseUrl = "https://bedrock-runtime.us-east-1.amazonaws.com", ApiKey = "unused", AwsRegion = AwsRegion },
-                [backupProvider] = new TotallyHot.ArcRouter.Models.ProviderOptions { BaseUrl = "https://bedrock-runtime.us-east-1.amazonaws.com", ApiKey = "unused", AwsRegion = AwsRegion },
+                [primaryProvider] = new TotallyHot.ArcRouter.Models.ProviderOptions { BaseUrl = "https://bedrock-runtime.us-east-1.amazonaws.com", AwsRegion = AwsRegion },
+                [backupProvider] = new TotallyHot.ArcRouter.Models.ProviderOptions { BaseUrl = "https://bedrock-runtime.us-east-1.amazonaws.com", AwsRegion = AwsRegion },
             },
             ModelList =
             [
@@ -482,7 +482,7 @@ public class BedrockProviderTests
     [Fact]
     public void BedrockRuntimeClientFactory_MissingRegion_Throws()
     {
-        var route = new ResolvedModelRoute("m", "bedrock-anthropic", "anthropic.claude-3-5-sonnet-20241022-v2:0", new Uri("https://example.com"), "Authorization", null, []);
+        var route = new ResolvedModelRoute("m", "bedrock-anthropic", "anthropic.claude-3-5-sonnet-20241022-v2:0", new Uri("https://example.com"), "Authorization", []);
         var factory = new BedrockRuntimeClientFactory();
 
         Assert.Throws<InvalidOperationException>(() => factory.Create(route));

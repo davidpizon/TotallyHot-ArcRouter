@@ -7,9 +7,8 @@ namespace TotallyHot.ArcRouter.Mcp.Tools;
 /// <summary>
 /// MCP tools for managing providers, model routes, and per-provider budgets. Every read and write goes
 /// through <see cref="ManagementFacade"/> - the same facade the hardened REST <c>/admin/*</c> API calls -
-/// so secrets are masked identically on both surfaces: a stored API key is never returned by any tool
-/// here, only whether one is set, and a custom header's value comes back only when the operator has left
-/// that header unlocked (see <see cref="HeaderView"/>).
+/// so secrets are masked identically on both surfaces: a custom header's literal value comes back only
+/// when the operator has left that header unlocked (see <see cref="HeaderView"/>).
 /// </summary>
 [McpServerToolType]
 public sealed class ProviderMcpTools
@@ -25,12 +24,12 @@ public sealed class ProviderMcpTools
 
     /// <summary>Lists every configured provider, masked, with its models and budget.</summary>
     [McpServerTool(Name = "list_providers")]
-    [Description("Lists every configured provider with its models, budget, and current-month spend. Credentials are masked: only whether an API key is set is returned, never the key itself. A custom header's value is returned only when that header is unlocked; a locked header reports its source alone.")]
+    [Description("Lists every configured provider with its models, budget, and current-month spend. Credentials are masked: a custom header's value is returned only when that header is unlocked; a locked header reports its source alone.")]
     public ProvidersResponse ListProviders() => _facade.ListProviders();
 
     /// <summary>Adds or edits a provider.</summary>
     [McpServerTool(Name = "upsert_provider")]
-    [Description("Adds a new provider or edits an existing one. Credentials are write-only: set ApiKey/ApiKeyEnvVar and CredentialMode ('literal', 'envVar', or 'none') to change them, but they are never echoed back by any tool. A blank ApiKey under 'literal' mode preserves the currently stored key.")]
+    [Description("Adds a new provider or edits an existing one. Authentication is expressed as an ordinary entry in Headers (e.g. an 'Authorization' or 'x-api-key' header); a header's value is write-only and never echoed back by any tool. A blank literal header value preserves the currently stored value; set Locked to withhold it from future reads.")]
     public async Task<object> UpsertProviderAsync(
         [Description("The provider key, e.g. 'openai'.")] string key,
         [Description("The provider fields to write; non-credential fields fall back to the existing value when omitted.")] ProviderWriteRequest request,

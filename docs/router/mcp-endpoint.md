@@ -64,16 +64,15 @@ Both REST `/admin/*` and the MCP provider tools call the same `TotallyHotArcRout
 - the single place that projects, merges, and validates provider/model/budget state. This matters for two
 reasons:
 
-1. **One masking rule everywhere.** Credentials are write-only on both surfaces: a caller can set an API
-   key or a custom header's value, but no read - REST or MCP - ever returns the literal value. Only
-   `HasApiKey` (bool) and `ApiKeyEnvVar` (name) are returned for the API key; each header reports a
-   `source` (`literal` / `envVar` / `none`) and, for an env-var header, the variable's name - never the
-   literal value. This is stricter than the REST API's pre-existing behavior, which used to echo a
-   literal custom-header value back to the client (only the API key was masked).
-2. **One write rule everywhere.** Since no surface ever returns a literal secret, a caller can't resend
-   one it never received. Sending a blank value - for the API key (`CredentialMode: "literal"`) or for a
-   custom header (`Value` and `ValueEnvVar` both blank) - preserves whatever is already stored under that
-   name, rather than clearing it.
+1. **One masking rule everywhere.** Credentials are write-only on both surfaces, expressed purely as
+   custom headers: a caller can set a header's value, but no read - REST or MCP - ever returns a locked
+   header's literal value. Each header reports a `source` (`literal` / `envVar` / `none`) and, for an
+   env-var header, the variable's name - never the literal value of a locked one. This is stricter than
+   the REST API's pre-existing behavior, which used to echo a literal custom-header value back to the
+   client unconditionally.
+2. **One write rule everywhere.** Since no surface ever returns a locked header's literal value, a
+   caller can't resend one it never received. Sending a custom header with `Value` and `ValueEnvVar`
+   both blank preserves whatever is already stored under that name, rather than clearing it.
 
 ## Tool surface
 

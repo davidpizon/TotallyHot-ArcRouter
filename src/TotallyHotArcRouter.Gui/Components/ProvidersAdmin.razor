@@ -283,9 +283,6 @@
                         IsNew="@_dialogIsNew"
                         BaseUrl="@_dialogBaseUrl"
                         AuthHeaderName="@_dialogAuthName"
-                        AuthHeaderScheme="@_dialogAuthScheme"
-                        ApiKeyEnvVar="@_dialogEnvVar"
-                        HasApiKey="@_dialogHasKey"
                         Headers="@_dialogHeaders"
                         IsFree="@_dialogIsFree"
                         ProviderType="@_dialogProviderType"
@@ -322,9 +319,6 @@
     private string _dialogKey = string.Empty;
     private string _dialogBaseUrl = string.Empty;
     private string _dialogAuthName = "Authorization";
-    private string _dialogAuthScheme = "Bearer";
-    private string? _dialogEnvVar;
-    private bool _dialogHasKey;
     private IReadOnlyList<ProviderHeaderView> _dialogHeaders = [];
     private bool _dialogIsFree;
     private string _dialogProviderType = "Other";
@@ -353,9 +347,6 @@
         _dialogKey = string.Empty;
         _dialogBaseUrl = string.Empty;
         _dialogAuthName = "Authorization";
-        _dialogAuthScheme = "Bearer";
-        _dialogEnvVar = null;
-        _dialogHasKey = false;
         _dialogHeaders = [];
         _dialogIsFree = false;
         _dialogProviderType = "Other";
@@ -370,9 +361,6 @@
         _dialogKey = provider.Key;
         _dialogBaseUrl = provider.BaseUrl;
         _dialogAuthName = provider.AuthHeaderName;
-        _dialogAuthScheme = provider.AuthHeaderScheme;
-        _dialogEnvVar = provider.ApiKeyEnvVar;
-        _dialogHasKey = provider.HasApiKey;
         _dialogHeaders = provider.Headers;
         _dialogIsFree = provider.IsFree;
         // A provider stored before ProviderType existed has none; the dialog falls back to "Other" itself,
@@ -395,10 +383,6 @@
         var body = new ProviderWriteRequest(
             BaseUrl: result.BaseUrl,
             AuthHeaderName: result.AuthHeaderName,
-            AuthHeaderScheme: result.AuthHeaderScheme,
-            ApiKey: result.ApiKey,
-            ApiKeyEnvVar: result.ApiKeyEnvVar,
-            CredentialMode: result.CredentialMode,
             Headers: result.Headers,
             IsFree: result.IsFree,
             ProviderName: result.ProviderName,

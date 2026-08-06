@@ -109,14 +109,13 @@ request shape TotallyHotArcRouter forwards (`model`, `messages[].role/content`),
 shape (`choices[].message`, `usage.prompt_tokens`/`completion_tokens`), and streams via the same SSE
 framing (`data: {...}` chunks terminated by `data: [DONE]`). No API key is required.
 
-`ResolvedModelRoute.AuthHeaderValue` is already nullable and `ProxyMiddleware` already skips
-injecting an auth header when it's null (`ModelRouteResolver.TryResolve`: `ResolveApiKey` returns
-`null` when neither `ApiKey` nor `ApiKeyEnvVar` is configured for a provider) — so a no-auth local
-provider is already a fully-supported configuration shape today, not a gap.
+Authentication is an ordinary entry in `ProviderOptions.Headers`, so a provider with no such entry
+forwards no auth header at all — a no-auth local provider is already a fully-supported configuration
+shape today, not a gap.
 
 **What PR 1 did:**
 1. Added `ollama` to `ModelRoutingOptions:Providers` (`appsettings.json`), base URL
-   `http://localhost:11434/v1`, no `ApiKey`/`ApiKeyEnvVar`.
+   `http://localhost:11434/v1`, no auth header configured.
 2. Added an example `ModelRouting:ModelList` entry (`llama3`, `Provider: ollama`).
 3. Added `IPayloadTranslator` (`src/TotallyHotArcRouter/Proxy/Translation/IPayloadTranslator.cs`) as an
    interface only, not yet consumed by anything — the real seam PR 2/3/4 will implement against.
@@ -298,7 +297,7 @@ version the parity tests pin), scoped to the surface this pillar needs.
 
 **What PR 3 did:**
 1. Added the `gemini` provider to `appsettings.json` (`https://generativelanguage.googleapis.com`,
-   `ApiKeyEnvVar: GEMINI_API_KEY`, `AuthHeaderName: x-goog-api-key`, `AuthHeaderScheme: ""` — the raw
+   `AuthHeaderName: x-goog-api-key` with a `Headers` entry sourcing it from `GEMINI_API_KEY` — the raw
    key in the header, **not** the `?key=` query form, so the secret never lands in a URL), two
    `ModelList` entries (`gemini-2.5-pro`, `gemini-2.5-flash`), and both to
    `RouterConstants.SupportedModels`.

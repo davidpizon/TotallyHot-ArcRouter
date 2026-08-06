@@ -126,12 +126,10 @@ public sealed class ProviderEditDialogTests
     }
 
     [Fact]
-    public void Save_always_clears_the_legacy_credential_fields()
+    public void Save_falls_back_to_the_auth_header_name_parameter_when_the_provider_type_has_no_template()
     {
         using var ctx = new Bunit.BunitContext();
 
-        // Authentication is now expressed purely via Custom Headers; the dialog no longer has a way to
-        // author a legacy literal/env-var credential, so Save must always clear it (CredentialMode: None).
         ProviderEditDialog.ProviderEditResult? saved = null;
         var cut = ctx.Render<ProviderEditDialog>(parameters =>
         {
@@ -142,14 +140,10 @@ public sealed class ProviderEditDialogTests
         FindSaveButton(cut).Click();
 
         saved.Should().NotBeNull();
-        saved!.CredentialMode.Should().Be(ProviderCredentialModes.None);
-        saved.ApiKey.Should().BeNull();
-        saved.ApiKeyEnvVar.Should().BeNull();
-        saved.AuthHeaderScheme.Should().BeEmpty();
         // No ProviderType parameter is seeded, so the dialog falls back to Other, whose template names
         // "Authorization" - not the stale "x-api-key" the AuthHeaderName parameter was seeded with. See
         // Save_derives_auth_header_name_from_the_selected_provider_type for the templated case.
-        saved.AuthHeaderName.Should().Be("Authorization");
+        saved!.AuthHeaderName.Should().Be("Authorization");
     }
 
     [Fact]
@@ -176,87 +170,12 @@ public sealed class ProviderEditDialogTests
     }
 
     [Fact]
-    public void Save_migrates_a_legacy_api_key_into_a_custom_header()
-    {
-        using var ctx = new Bunit.BunitContext();
-
-        // Because Save always clears the legacy ApiKey/CredentialMode (see the test above), a provider
-        // that still had one stored under the old model would otherwise lose it silently the first time it
-        // was opened and saved through this dialog. The dialog must migrate it into a same-named custom
-        // header instead.
-        ProviderEditDialog.ProviderEditResult? saved = null;
-        var cut = ctx.Render<ProviderEditDialog>(parameters =>
-        {
-            SeedEditParameters(parameters, hasApiKey: true);
-            parameters.Add(p => p.OnSave, (ProviderEditDialog.ProviderEditResult r) => saved = r);
-        });
-
-        // The literal key is never sent to this dialog, so the migrated row shows as a locked, blank,
-        // "saved" placeholder - exactly like any other pre-existing locked header.
-        var value = cut.Find("[data-testid='header-value-0']");
-        value.GetAttribute("type").Should().Be("password");
-        value.GetAttribute("placeholder").Should().Contain("saved, blank keeps it");
-
-        FindSaveButton(cut).Click();
-
-        saved.Should().NotBeNull();
-        saved!.CredentialMode.Should().Be(ProviderCredentialModes.None);
-        saved.ApiKey.Should().BeNull();
-        var header = saved.Headers.Should().ContainSingle().Subject;
-        header.Name.Should().Be("x-api-key");
-        header.Locked.Should().BeTrue();
-        // Blank + locked tells the server to preserve whatever is already stored under this header's name
-        // (here, the legacy ApiKey) rather than clearing it - see ManagementFacade.ResolveHeader.
-        header.Value.Should().BeNullOrEmpty();
-    }
-
-    [Fact]
-    public void Save_migrates_a_legacy_env_var_credential_into_a_custom_header()
-    {
-        using var ctx = new Bunit.BunitContext();
-
-        ProviderEditDialog.ProviderEditResult? saved = null;
-        var cut = ctx.Render<ProviderEditDialog>(parameters =>
-        {
-            SeedEditParameters(parameters);
-            parameters.Add(p => p.ApiKeyEnvVar, "MY_API_KEY");
-            parameters.Add(p => p.OnSave, (ProviderEditDialog.ProviderEditResult r) => saved = r);
-        });
-
-        FindSaveButton(cut).Click();
-
-        saved.Should().NotBeNull();
-        var header = saved!.Headers.Should().ContainSingle().Subject;
-        header.Name.Should().Be("x-api-key");
-        header.ValueEnvVar.Should().Be("MY_API_KEY");
-        header.Value.Should().BeNull();
-    }
-
-    [Fact]
-    public void An_existing_custom_header_under_the_auth_header_name_is_not_duplicated_by_migration()
-    {
-        using var ctx = new Bunit.BunitContext();
-
-        // The provider already has its auth expressed as a custom header (the common, already-migrated
-        // case) - SeedLegacyCredentialHeader must leave it alone rather than adding a second row.
-        var existingAuthHeader = new ProviderHeaderView("x-api-key", HeaderValueSource.Literal, null, Value: "already-set", Locked: false);
-        var cut = ctx.Render<ProviderEditDialog>(parameters =>
-        {
-            SeedEditParameters(parameters, hasApiKey: true);
-            parameters.Add(p => p.Headers, new[] { existingAuthHeader });
-        });
-
-        cut.FindAll("[data-testid^='header-name-']").Should().ContainSingle();
-    }
-
-    [Fact]
     public void Selecting_anthropic_seeds_the_base_url_and_required_version_header()
     {
         using var ctx = new Bunit.BunitContext();
 
         var cut = ctx.Render<ProviderEditDialog>(parameters => parameters
-            .Add(p => p.IsNew, true)
-            .Add(p => p.HasApiKey, false));
+            .Add(p => p.IsNew, true));
 
         cut.Find("[data-testid='provider-type']").Change(nameof(ProviderType.Anthropic));
 
@@ -271,8 +190,7 @@ public sealed class ProviderEditDialogTests
         using var ctx = new Bunit.BunitContext();
 
         var cut = ctx.Render<ProviderEditDialog>(parameters => parameters
-            .Add(p => p.IsNew, true)
-            .Add(p => p.HasApiKey, false));
+            .Add(p => p.IsNew, true));
 
         cut.Find("[data-testid='provider-type']").Change(nameof(ProviderType.LocalRuntime));
 
@@ -575,19 +493,11 @@ public sealed class ProviderEditDialogTests
     }
 
     private static void SeedEditParameters(ComponentParameterCollectionBuilder<ProviderEditDialog> parameters) =>
-        SeedEditParameters(parameters, hasApiKey: false);
-
-    private static void SeedEditParameters(ComponentParameterCollectionBuilder<ProviderEditDialog> parameters, bool hasApiKey) =>
         parameters
             .Add(p => p.IsNew, false)
             .Add(p => p.Key, Key)
             .Add(p => p.BaseUrl, OriginalBaseUrl)
-            .Add(p => p.AuthHeaderName, "x-api-key")
-            .Add(p => p.AuthHeaderScheme, string.Empty)
-            // No legacy credential by default, so tests that don't care about it aren't tripped up by the
-            // legacy-credential-migration row that SeedLegacyCredentialHeader adds when HasApiKey is set
-            // (see Save_migrates_a_legacy_api_key_into_a_custom_header for that behavior specifically).
-            .Add(p => p.HasApiKey, hasApiKey);
+            .Add(p => p.AuthHeaderName, "x-api-key");
 
     private static AngleSharp.Dom.IElement FindSaveButton(IRenderedComponent<ProviderEditDialog> cut) =>
         cut.FindAll("button").First(b => b.TextContent.Trim() == "Save");

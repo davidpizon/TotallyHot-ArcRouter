@@ -25,9 +25,9 @@ dotnet build
 ## 2. Set provider API keys
 
 Providers are configured in `appsettings.json` under `ModelRouting:Providers`.
-Each provider declares an `ApiKeyEnvVar` — the name of the environment
-variable the proxy reads the key from at request time. Set only the
-variables for the providers you plan to use:
+Authentication is an ordinary entry in each provider's `Headers` list — a
+header whose value is read from an environment variable at request time. Set
+only the variables for the providers you plan to use:
 
 ```bash
 export OPENAI_API_KEY="<your-openai-key>"
@@ -41,9 +41,8 @@ export MINIMAX_API_KEY="<your-minimax-key>"
 If a provider's key is missing, requests to models routed to that provider
 are forwarded without an auth header.
 
-Alternatively, a provider can carry a literal `ApiKey` directly in
-`appsettings.json` instead of (or as a fallback source ahead of) an
-environment variable — see [Provider API keys](#provider-api-keys) below.
+See [Provider API keys](#provider-api-keys) below for the exact `Headers`
+shape, including how to compose a scheme prefix (e.g. `Bearer`).
 
 ## 3. Configure routing
 
@@ -75,15 +74,18 @@ To add a new provider, add an entry under `ModelRouting:Providers`:
 ```json
 "my-provider": {
   "BaseUrl": "https://api.my-provider.com",
-  "ApiKeyEnvVar": "MY_PROVIDER_API_KEY",
   "AuthHeaderName": "Authorization",
-  "AuthHeaderScheme": "Bearer"
+  "Headers": [
+    { "Name": "Authorization", "ValueEnvVar": "MY_PROVIDER_API_KEY" }
+  ]
 }
 ```
 
-Set `AuthHeaderScheme` to an empty string if the provider expects the raw
-key with no scheme prefix (see the `anthropic` entry, which uses
-`x-api-key` with no scheme).
+`AuthHeaderName` itself carries no credential — it only records which header
+is "the" auth header, so the proxy can strip a client-sent header of the
+same name before forwarding (see [Provider API keys](#provider-api-keys)
+below for how the header's actual value is composed, including a scheme
+prefix like `Bearer`).
 
 ### Provider base URLs
 
@@ -133,27 +135,36 @@ export Routing__DefaultModel="glm-5"
 
 ### Provider API keys
 
-Each provider resolves its API key in this order:
+Authentication is expressed purely as an entry in a provider's `Headers`
+list — there is no dedicated credential field. Each header resolves its
+value in this order:
 
-1. **`ApiKey`** — a literal key set directly on the provider entry. If
-   non-empty, it is used as-is and `ApiKeyEnvVar` is not consulted.
-2. **`ApiKeyEnvVar`** — the name of an environment variable read at request
-   time, used only when `ApiKey` is empty or unset.
+1. **`Value`** — a literal value set directly on the header. If non-empty,
+   it is used as-is and `ValueEnvVar` is not consulted.
+2. **`ValueEnvVar`** — the name of an environment variable read at request
+   time, used only when `Value` is empty or unset.
 3. Neither set (or the named environment variable isn't present) — the
-   request is forwarded to the provider with no auth header.
+   header is omitted from the forwarded request.
 
 ```json
 "my-provider": {
   "BaseUrl": "https://api.my-provider.com",
-  "ApiKey": "sk-my-literal-key",
-  "ApiKeyEnvVar": "MY_PROVIDER_API_KEY",
   "AuthHeaderName": "Authorization",
-  "AuthHeaderScheme": "Bearer"
+  "Headers": [
+    { "Name": "Authorization", "ValueEnvVar": "MY_PROVIDER_API_KEY" }
+  ]
 }
 ```
 
-Prefer `ApiKeyEnvVar` for anything checked into source control —
-`appsettings.json` is typically committed to git, so a literal `ApiKey`
+A scheme prefix (e.g. `Bearer`) is not composed for you — there is no
+separate scheme field, so `MY_PROVIDER_API_KEY` must hold the full header
+value (`Bearer sk-my-literal-key`) when the provider expects one. A provider
+whose key has no scheme (Anthropic's `x-api-key`, Gemini's
+`x-goog-api-key`) needs no such prefix; see the `anthropic` and `gemini`
+entries in `appsettings.json`.
+
+Prefer `ValueEnvVar` for anything checked into source control —
+`appsettings.json` is typically committed to git, so a literal `Value`
 belongs only in an untracked/local override file or a secret store, not in
 the tracked base config.
 

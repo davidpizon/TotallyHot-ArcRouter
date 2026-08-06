@@ -489,10 +489,12 @@ public sealed class ProviderEndpointScannerTests
         var provider = new ProviderOptions
         {
             BaseUrl = "https://api.anthropic.com",
-            ApiKey = "sk-test",
             AuthHeaderName = "x-api-key",
-            AuthHeaderScheme = string.Empty,
-            Headers = [new ProviderHeader { Name = "anthropic-version", Value = "2023-06-01" }],
+            Headers =
+            [
+                new ProviderHeader { Name = "x-api-key", Value = "sk-test" },
+                new ProviderHeader { Name = "anthropic-version", Value = "2023-06-01" }
+            ],
         };
 
         await scanner.ScanAsync("anthropic", provider, TestContext.Current.CancellationToken);
@@ -521,9 +523,11 @@ public sealed class ProviderEndpointScannerTests
         var provider = new ProviderOptions
         {
             BaseUrl = "https://example.invalid",
-            ApiKey = "sk-test",
-            AuthHeaderName = "not a valid header name",
-            Headers = [new ProviderHeader { Name = "also invalid", Value = "x" }],
+            Headers =
+            [
+                new ProviderHeader { Name = "not a valid header name", Value = "sk-test" },
+                new ProviderHeader { Name = "also invalid", Value = "x" }
+            ],
         };
 
         var result = await scanner.ScanAsync("broken-headers", provider, TestContext.Current.CancellationToken);
@@ -551,8 +555,7 @@ public sealed class ProviderEndpointScannerTests
         var provider = new ProviderOptions
         {
             BaseUrl = "https://example.invalid",
-            ApiKey = "sk-test",
-            AuthHeaderName = "not a valid header name",
+            Headers = [new ProviderHeader { Name = "not a valid header name", Value = "sk-test" }],
         };
 
         var result = await scanner.ScanAsync("broken-headers", provider, TestContext.Current.CancellationToken);

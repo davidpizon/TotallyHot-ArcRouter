@@ -57,8 +57,7 @@ public sealed class ProviderAdminStoreTests
     {
         var store = new ProviderAdminStore(managementAddress: UnreachableAddress);
         var body = new TotallyHot.ArcRouter.Gui.Admin.ProviderWriteRequest(
-            BaseUrl: "https://example.com", AuthHeaderName: "Authorization", AuthHeaderScheme: "Bearer",
-            ApiKey: null, ApiKeyEnvVar: null);
+            BaseUrl: "https://example.com", AuthHeaderName: "Authorization");
 
         var act = () => store.UpsertProviderAsync("test", body);
 

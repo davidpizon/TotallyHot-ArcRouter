@@ -11,15 +11,13 @@ namespace TotallyHot.ArcRouter.Tests.Proxy;
 public class ModelRouteResolverTests
 {
     [Fact]
-    public void TryResolve_KnownModel_ReturnsUpstreamRouteWithInjectedCredential()
+    public void TryResolve_KnownModel_ReturnsUpstreamRoute()
     {
         var resolver = ModelRouteResolverTestFactory.Create(
             modelName: "gpt-5.4",
             providerModelId: "gpt-5.4-2026-01",
             baseUrl: "https://api.openai.com",
-            authHeaderName: "Authorization",
-            authHeaderScheme: "Bearer",
-            apiKey: "sk-test-123");
+            authHeaderName: "Authorization");
 
         var resolved = resolver.TryResolve("gpt-5.4", out var route);
 
@@ -28,11 +26,10 @@ public class ModelRouteResolverTests
         Assert.Equal("gpt-5.4-2026-01", route.ProviderModelId);
         Assert.Equal("https://api.openai.com/", route.UpstreamBaseUrl.ToString());
         Assert.Equal("Authorization", route.AuthHeaderName);
-        Assert.Equal("Bearer sk-test-123", route.AuthHeaderValue);
     }
 
     [Fact]
-    public void ToString_RedactsAuthHeaderValueAndAwsSecrets_ButKeepsNonSecretFieldsVisible()
+    public void ToString_RedactsAwsSecrets_ButKeepsNonSecretFieldsVisible()
     {
         var route = new ResolvedModelRoute(
             ModelName: "claude-sonnet-bedrock",
@@ -40,7 +37,6 @@ public class ModelRouteResolverTests
             ProviderModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
             UpstreamBaseUrl: new Uri("https://bedrock-runtime.us-east-1.amazonaws.com"),
             AuthHeaderName: "Authorization",
-            AuthHeaderValue: "Bearer sk-super-secret-token",
             ExtraHeaders: [new KeyValuePair<string, string>("x-api-key", "another-secret-value")],
             AwsRegion: "us-east-1",
             AwsAccessKeyId: "AKIAEXAMPLE",
@@ -49,7 +45,6 @@ public class ModelRouteResolverTests
 
         var text = route.ToString();
 
-        Assert.DoesNotContain("sk-super-secret-token", text);
         Assert.DoesNotContain("another-secret-value", text);
         Assert.DoesNotContain("wJalrXUtnFEMI/EXAMPLESECRETKEY", text);
         Assert.DoesNotContain("FQoGZXIvYXdzEXAMPLESESSIONTOKEN", text);
@@ -71,12 +66,10 @@ public class ModelRouteResolverTests
             ProviderModelId: "gpt-5.4-2026-01",
             UpstreamBaseUrl: new Uri("https://api.openai.com"),
             AuthHeaderName: "Authorization",
-            AuthHeaderValue: null,
             ExtraHeaders: []);
 
         var text = route.ToString();
 
-        Assert.Contains("AuthHeaderValue = <null>", text);
         Assert.Contains("AwsSecretAccessKey = <null>", text);
         Assert.Contains("AwsSessionToken = <null>", text);
     }
@@ -167,38 +160,6 @@ public class ModelRouteResolverTests
     }
 
     [Fact]
-    public void TryResolve_MissingApiKeyEnvironmentVariable_ResolvesWithNullAuthHeaderValue()
-    {
-        var resolver = ModelRouteResolverTestFactory.Create(
-            modelName: "gpt-5.4",
-            providerModelId: "gpt-5.4",
-            baseUrl: "https://api.openai.com",
-            apiKey: null);
-
-        var resolved = resolver.TryResolve("gpt-5.4", out var route);
-
-        Assert.True(resolved);
-        Assert.Null(route!.AuthHeaderValue);
-    }
-
-    [Fact]
-    public void TryResolve_ProviderWithNoAuthScheme_UsesRawKeyAsHeaderValue()
-    {
-        var resolver = ModelRouteResolverTestFactory.Create(
-            modelName: "claude-opus-4.6",
-            providerModelId: "claude-opus-4-6",
-            baseUrl: "https://api.anthropic.com",
-            authHeaderName: "x-api-key",
-            authHeaderScheme: "",
-            apiKey: "anthropic-secret");
-
-        resolver.TryResolve("claude-opus-4.6", out var route);
-
-        Assert.Equal("x-api-key", route!.AuthHeaderName);
-        Assert.Equal("anthropic-secret", route.AuthHeaderValue);
-    }
-
-    [Fact]
     public void Constructor_ModelListReferencesUnknownProvider_ThrowsOptionsValidationException()
     {
         var options = new ModelRoutingOptions
@@ -217,80 +178,6 @@ public class ModelRouteResolverTests
         var resolver = ModelRouteResolverTestFactory.Empty();
 
         Assert.False(resolver.TryResolve("anything", out _));
-    }
-
-    // Verifies that a literal ApiKey configured directly on the provider is used over the ApiKeyEnvVar
-    // lookup, so operators can supply a key without setting a process environment variable.
-    [Fact]
-    public void TryResolve_LiteralApiKeyConfigured_UsesLiteralKeyInsteadOfEnvironmentVariable()
-    {
-        var resolver = ModelRouteResolverTestFactory.Create(
-            modelName: "gpt-5.4",
-            providerModelId: "gpt-5.4",
-            baseUrl: "https://api.openai.com",
-            authHeaderScheme: "Bearer",
-            apiKey: "env-value-should-not-be-used",
-            literalApiKey: "literal-value-from-appsettings");
-
-        resolver.TryResolve("gpt-5.4", out var route);
-
-        Assert.Equal("Bearer literal-value-from-appsettings", route!.AuthHeaderValue);
-    }
-
-    // Verifies that when no literal ApiKey is configured, resolution still falls back to the
-    // ApiKeyEnvVar-named environment variable, preserving pre-existing behavior.
-    [Fact]
-    public void TryResolve_NoLiteralApiKeyConfigured_FallsBackToEnvironmentVariable()
-    {
-        var resolver = ModelRouteResolverTestFactory.Create(
-            modelName: "gpt-5.4",
-            providerModelId: "gpt-5.4",
-            baseUrl: "https://api.openai.com",
-            authHeaderScheme: "Bearer",
-            apiKey: "env-value-should-be-used",
-            literalApiKey: null);
-
-        resolver.TryResolve("gpt-5.4", out var route);
-
-        Assert.Equal("Bearer env-value-should-be-used", route!.AuthHeaderValue);
-    }
-
-    // Verifies that a literal ApiKey consisting only of whitespace is treated as unset, so it does not
-    // shadow a valid ApiKeyEnvVar fallback with an empty credential.
-    [Theory]
-    [InlineData("")]
-    [InlineData("   ")]
-    public void TryResolve_WhitespaceOnlyLiteralApiKey_FallsBackToEnvironmentVariable(string literalApiKey)
-    {
-        var resolver = ModelRouteResolverTestFactory.Create(
-            modelName: "gpt-5.4",
-            providerModelId: "gpt-5.4",
-            baseUrl: "https://api.openai.com",
-            authHeaderScheme: "Bearer",
-            apiKey: "env-value-should-be-used",
-            literalApiKey: literalApiKey);
-
-        resolver.TryResolve("gpt-5.4", out var route);
-
-        Assert.Equal("Bearer env-value-should-be-used", route!.AuthHeaderValue);
-    }
-
-    // Verifies that when neither a literal ApiKey nor a resolvable ApiKeyEnvVar value is present,
-    // the route still resolves successfully but with no auth header value (forwarded unauthenticated).
-    [Fact]
-    public void TryResolve_NoLiteralApiKeyAndMissingEnvironmentVariable_ResolvesWithNullAuthHeaderValue()
-    {
-        var resolver = ModelRouteResolverTestFactory.Create(
-            modelName: "gpt-5.4",
-            providerModelId: "gpt-5.4",
-            baseUrl: "https://api.openai.com",
-            apiKey: null,
-            literalApiKey: null);
-
-        var resolved = resolver.TryResolve("gpt-5.4", out var route);
-
-        Assert.True(resolved);
-        Assert.Null(route!.AuthHeaderValue);
     }
 
     // Verifies that ListModels() surfaces every configured model with its provider key, in the same order
