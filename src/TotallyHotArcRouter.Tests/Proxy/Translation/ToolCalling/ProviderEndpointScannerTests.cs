@@ -24,6 +24,9 @@ public sealed class ProviderEndpointScannerTests
     private const string AnthropicBody = """{"data":[{"id":"claude-4","type":"model"}],"has_more":false,"first_id":"claude-4"}""";
     private const string LmStudioBody = """{"object":"list","data":[{"id":"qwen2.5-coder"}]}""";
     private const string OllamaTagsBody = """{"models":[{"name":"qwen2.5-coder:7b"}]}""";
+    private const string AnthropicMessageBody = """{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"hi"}]}""";
+    private const string AnthropicErrorBody = """{"type":"error","error":{"type":"not_found_error","message":"model: arcrouter-capability-probe"}}""";
+    private const string OpenAiStyleErrorBody = """{"error":{"message":"Unknown model","type":"invalid_request_error"}}""";
 
     /// <summary>Answers 200 for any URL whose path is in <paramref name="okPaths"/>, 404 otherwise.</summary>
     private static ProviderEndpointScanner ScannerFor(
@@ -44,7 +47,39 @@ public sealed class ProviderEndpointScannerTests
         return new ProviderEndpointScanner(new HttpClient(handler), Mock.Of<IEnvironmentVariableProvider>());
     }
 
-    private static ProviderOptions Provider(string baseUrl) => new() { BaseUrl = baseUrl };
+    /// <summary>
+    /// Answers <c>GET /v1/models</c> with <paramref name="modelsBody"/> and <c>POST /v1/messages</c> with
+    /// <paramref name="messagesStatus"/>/<paramref name="messagesBody"/>, everything else 404 - the fixture
+    /// the opt-in messages-probe tests build on.
+    /// </summary>
+    private static ProviderEndpointScanner ScannerForMessagesProbe(
+        string modelsBody,
+        HttpStatusCode messagesStatus,
+        string messagesBody,
+        List<HttpRequestMessage>? recordedRequests = null)
+    {
+        var handler = new DelegatingHandlerStub(request =>
+        {
+            recordedRequests?.Add(request);
+
+            if (request.Method == HttpMethod.Get && request.RequestUri!.ToString().EndsWith("/v1/models", StringComparison.OrdinalIgnoreCase))
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(modelsBody) });
+            }
+
+            if (request.Method == HttpMethod.Post && request.RequestUri!.ToString().EndsWith("/v1/messages", StringComparison.OrdinalIgnoreCase))
+            {
+                return Task.FromResult(new HttpResponseMessage(messagesStatus) { Content = new StringContent(messagesBody) });
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        });
+
+        return new ProviderEndpointScanner(new HttpClient(handler), Mock.Of<IEnvironmentVariableProvider>());
+    }
+
+    private static ProviderOptions Provider(string baseUrl, bool probeAnthropicMessages = false) =>
+        new() { BaseUrl = baseUrl, ProbeAnthropicMessages = probeAnthropicMessages };
 
     // ----- Each flavor detected -----
 
@@ -89,6 +124,129 @@ public sealed class ProviderEndpointScannerTests
         Assert.True(result.OpenAiCompatible);
         Assert.True(result.LmStudioNative);
         Assert.False(result.OllamaNative);
+    }
+
+    // ----- Opt-in Anthropic /v1/messages probe -----
+
+    [Fact]
+    public async Task TheMessagesProbe_IsNotSentByDefault()
+    {
+        // ProbeAnthropicMessages defaults to false - the whole point of the opt-in gate.
+        var requests = new List<HttpRequestMessage>();
+        var scanner = ScannerForMessagesProbe(OpenAiBody, HttpStatusCode.OK, AnthropicMessageBody, requests);
+
+        var result = await scanner.ScanAsync("lmstudio", Provider("http://localhost:1234/v1"), TestContext.Current.CancellationToken);
+
+        Assert.False(result.AnthropicCompatible);
+        Assert.DoesNotContain(requests, r => r.Method == HttpMethod.Post);
+    }
+
+    [Fact]
+    public async Task TheMessagesProbe_DetectsCompatibility_WhenOptedInAndTheModelListDidNot()
+    {
+        // LM Studio's /v1/models is plain OpenAI shape, but it separately answers /v1/messages.
+        var scanner = ScannerForMessagesProbe(OpenAiBody, HttpStatusCode.OK, AnthropicMessageBody);
+
+        var result = await scanner.ScanAsync(
+            "lmstudio", Provider("http://localhost:1234/v1", probeAnthropicMessages: true), TestContext.Current.CancellationToken);
+
+        Assert.True(result.OpenAiCompatible);
+        Assert.True(result.AnthropicCompatible);
+    }
+
+    [Fact]
+    public async Task TheMessagesProbe_DetectsCompatibility_ViaAnAnthropicShapedErrorEnvelope()
+    {
+        // The sentinel model id never exists on a real deployment - a well-formed Anthropic error response
+        // still proves the endpoint speaks the dialect, the expected outcome for almost every real probe.
+        var scanner = ScannerForMessagesProbe(OpenAiBody, HttpStatusCode.NotFound, AnthropicErrorBody);
+
+        var result = await scanner.ScanAsync(
+            "lmstudio", Provider("http://localhost:1234/v1", probeAnthropicMessages: true), TestContext.Current.CancellationToken);
+
+        Assert.True(result.AnthropicCompatible);
+    }
+
+    [Fact]
+    public async Task TheMessagesProbe_DoesNotTreatAGenericErrorAsAnthropicCompatible()
+    {
+        // A plain OpenAI-style error body (no top-level "type":"error" envelope) must not be mistaken for
+        // Anthropic's own error shape - most 404s for an unrecognized route will look like this or worse.
+        var scanner = ScannerForMessagesProbe(OpenAiBody, HttpStatusCode.NotFound, OpenAiStyleErrorBody);
+
+        var result = await scanner.ScanAsync(
+            "openai", Provider("https://api.openai.com", probeAnthropicMessages: true), TestContext.Current.CancellationToken);
+
+        Assert.False(result.AnthropicCompatible);
+    }
+
+    [Fact]
+    public async Task TheMessagesProbe_IsSkipped_WhenTheModelListAlreadyProvedAnthropicCompatibility()
+    {
+        // Opting in must never double a network call the scan would have made anyway.
+        var requests = new List<HttpRequestMessage>();
+        var scanner = ScannerForMessagesProbe(AnthropicBody, HttpStatusCode.OK, AnthropicMessageBody, requests);
+
+        var result = await scanner.ScanAsync(
+            "anthropic", Provider("https://api.anthropic.com", probeAnthropicMessages: true), TestContext.Current.CancellationToken);
+
+        Assert.True(result.AnthropicCompatible);
+        Assert.DoesNotContain(requests, r => r.Method == HttpMethod.Post);
+    }
+
+    [Fact]
+    public async Task TheMessagesProbe_SendsTheSentinelModelIdAndAOneTokenBudget_NotARealModel()
+    {
+        HttpRequestMessage? captured = null;
+        string? capturedContent = null;
+        var handler = new DelegatingHandlerStub(async request =>
+        {
+            if (request.Method == HttpMethod.Post)
+            {
+                captured = request;
+                capturedContent = await request.Content!.ReadAsStringAsync();
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound) { Content = new StringContent(OpenAiBody) };
+        });
+        var scanner = new ProviderEndpointScanner(new HttpClient(handler), Mock.Of<IEnvironmentVariableProvider>());
+
+        await scanner.ScanAsync(
+            "lmstudio", Provider("http://localhost:1234/v1", probeAnthropicMessages: true), TestContext.Current.CancellationToken);
+
+        Assert.NotNull(captured);
+        Assert.Contains("arcrouter-capability-probe", capturedContent);
+        Assert.Contains("\"max_tokens\":1", capturedContent);
+    }
+
+    [Fact]
+    public async Task TheMessagesProbe_TargetsMessages_NotModels()
+    {
+        var urls = new List<string>();
+        var handler = new DelegatingHandlerStub(request =>
+        {
+            urls.Add(request.RequestUri!.ToString());
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        });
+        var scanner = new ProviderEndpointScanner(new HttpClient(handler), Mock.Of<IEnvironmentVariableProvider>());
+
+        await scanner.ScanAsync(
+            "lmstudio", Provider("http://localhost:1234/v1", probeAnthropicMessages: true), TestContext.Current.CancellationToken);
+
+        Assert.Contains("http://localhost:1234/v1/messages", urls);
+    }
+
+    [Fact]
+    public async Task AnUnreachableEndpoint_WithMessagesProbingEnabled_StillRecordsAResultRatherThanThrowing()
+    {
+        var handler = new DelegatingHandlerStub(_ => throw new HttpRequestException("connection refused"));
+        var scanner = new ProviderEndpointScanner(new HttpClient(handler), Mock.Of<IEnvironmentVariableProvider>());
+
+        var result = await scanner.ScanAsync(
+            "dead", Provider("http://localhost:9/v1", probeAnthropicMessages: true), TestContext.Current.CancellationToken);
+
+        Assert.False(result.AnthropicCompatible);
+        Assert.Contains("connection refused", result.ScanError);
     }
 
     // ----- json_schema support is inferred from the native flavors, never probed -----

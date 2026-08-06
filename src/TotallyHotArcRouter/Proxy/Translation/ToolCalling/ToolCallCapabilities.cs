@@ -16,7 +16,13 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// <param name="OpenAiCompatible">Whether <c>GET {base}/v1/models</c> answered - the only flavor routing uses.</param>
 /// <param name="LmStudioNative">Whether LM Studio's native <c>GET {base}/api/v0/models</c> answered.</param>
 /// <param name="OllamaNative">Whether Ollama's native <c>GET {base}/api/tags</c> answered, implying <c>/api/show</c> is available for template reads.</param>
-/// <param name="AnthropicCompatible">Whether the endpoint accepted an Anthropic-shaped probe.</param>
+/// <param name="AnthropicCompatible">
+/// Whether the endpoint answered an Anthropic-shaped probe: primarily <c>GET {base}/v1/models</c>'s
+/// pagination markers, and additionally a <c>POST {base}/v1/messages</c> probe when
+/// <see cref="TotallyHot.ArcRouter.Models.ProviderOptions.ProbeAnthropicMessages"/> opts in and the model
+/// list alone did not already say yes - the case of a local runtime that lists models in plain OpenAI
+/// shape but separately answers the Anthropic dialect too.
+/// </param>
 /// <param name="JsonSchemaResponseFormat">
 /// Whether this endpoint honors <c>response_format: {"type": "json_schema", ...}</c> by actually
 /// constraining generation, which is what makes
