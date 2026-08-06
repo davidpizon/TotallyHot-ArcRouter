@@ -120,6 +120,12 @@ Consequently a blank literal box means different things per header: under a lock
 the stored value, and under an unlocked one it means the value is genuinely empty. Env-var-sourced
 headers show no padlock — they hold a variable name, not a secret.
 
+One exception to "defaulting to unlocked": on save, the literal header whose name matches the provider's
+`AuthHeaderName` (the credential header) is always stored locked, regardless of its padlock state in the
+dialog. This is why a freshly added `Authorization` or `x-api-key` row shows unlocked while you're
+editing it, but its value has disappeared the next time you reopen the dialog — that row is the
+credential, and it is never left readable back through the management API.
+
 Headers already in `model-routing.json` before the padlock existed load as **locked**, so nothing that
 was previously write-only becomes visible on upgrade.
 
