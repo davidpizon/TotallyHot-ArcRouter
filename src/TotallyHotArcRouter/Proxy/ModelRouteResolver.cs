@@ -68,6 +68,15 @@ public sealed record AvailableModel(string ModelName, string Provider);
 /// client-sent header of the same name to drop, so the client cannot override or duplicate it.
 /// </param>
 /// <param name="ExtraHeaders">Resolved custom headers (name/value) to add to the forwarded request, from the provider's configured <see cref="ProviderOptions.Headers"/>.</param>
+/// <param name="AuthHeaderConfigured">
+/// Whether the provider's configuration declares a header named <paramref name="AuthHeaderName"/> in
+/// <see cref="ProviderOptions.Headers"/> - regardless of whether that header's value actually resolved into
+/// <paramref name="ExtraHeaders"/> this request (e.g. its <see cref="ProviderHeader.ValueEnvVar"/> is
+/// currently unset). The forwarding path strips a client-sent header of this name only when this is
+/// <see langword="true"/>, so a missing env var can never turn into "the provider forgot to send its own
+/// credential, so the client's is let through instead" - it should fail closed (no credential reaches the
+/// upstream) rather than let the client supply one the operator didn't intend to accept.
+/// </param>
 /// <param name="IsFree">Whether this route's provider costs nothing (<see cref="ProviderOptions.IsFree"/>), making the request's cost a known zero rather than unknown.</param>
 /// <param name="AwsRegion">The AWS region for an Amazon Bedrock route (<see cref="ProviderOptions.AwsRegion"/>); <see langword="null"/> for every non-Bedrock provider.</param>
 /// <param name="AwsAccessKeyId">An explicit AWS access key id override for a Bedrock route, resolved from <see cref="ProviderOptions.AwsAccessKeyIdEnvVar"/>; <see langword="null"/> when not configured, meaning the Bedrock Runtime SDK client should use its own default AWS credential chain instead.</param>
@@ -81,6 +90,7 @@ public sealed record ResolvedModelRoute(
     Uri UpstreamBaseUrl,
     string AuthHeaderName,
     IReadOnlyList<KeyValuePair<string, string>> ExtraHeaders,
+    bool AuthHeaderConfigured = false,
     bool IsFree = false,
     string? AwsRegion = null,
     string? AwsAccessKeyId = null,
@@ -106,6 +116,7 @@ public sealed record ResolvedModelRoute(
         builder.Append(", UpstreamBaseUrl = ").Append(UpstreamBaseUrl);
         builder.Append(", AuthHeaderName = ").Append(AuthHeaderName);
         builder.Append(", ExtraHeaders = [").Append(string.Join(", ", ExtraHeaders.Select(h => $"{h.Key}=<redacted>"))).Append(']');
+        builder.Append(", AuthHeaderConfigured = ").Append(AuthHeaderConfigured);
         builder.Append(", IsFree = ").Append(IsFree);
         builder.Append(", AwsRegion = ").Append(AwsRegion);
         builder.Append(", AwsAccessKeyId = ").Append(AwsAccessKeyId);
@@ -212,6 +223,8 @@ public sealed class ModelRouteResolver : IModelRouteResolver
 
         var (entry, provider) = match;
         var extraHeaders = ProviderCredentialResolver.ResolveExtraHeaders(provider, _environment);
+        var authHeaderConfigured = provider.Headers.Any(h =>
+            !string.IsNullOrWhiteSpace(h.Name) && string.Equals(h.Name.Trim(), provider.AuthHeaderName, StringComparison.OrdinalIgnoreCase));
         var (awsAccessKeyId, awsSecretAccessKey, awsSessionToken) = ProviderCredentialResolver.ResolveAwsCredentials(provider, _environment);
 
         route = new ResolvedModelRoute(
@@ -221,6 +234,7 @@ public sealed class ModelRouteResolver : IModelRouteResolver
             new Uri(provider.BaseUrl, UriKind.Absolute),
             provider.AuthHeaderName,
             extraHeaders,
+            authHeaderConfigured,
             provider.IsFree,
             provider.AwsRegion,
             awsAccessKeyId,

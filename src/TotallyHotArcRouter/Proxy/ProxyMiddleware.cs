@@ -455,10 +455,14 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 context.Request.Headers.TryGetValue("Connection", out var requestConnectionValues) ? requestConnectionValues : default);
 
             // A client header matching the provider's configured auth header name is only skipped here when
-            // the provider actually re-injects one below (via ExtraHeaders) - otherwise an unauthenticated
-            // provider (e.g. a free local runtime with no auth header entry) would silently drop a client's
-            // own header of that name with nothing forwarded in its place.
-            var providerSuppliesAuthHeader = route.ExtraHeaders.Any(h => string.Equals(h.Key, route.AuthHeaderName, StringComparison.OrdinalIgnoreCase));
+            // the provider's configuration actually declares one (route.AuthHeaderConfigured) - otherwise an
+            // unauthenticated provider (e.g. a free local runtime with no auth header entry) would silently
+            // drop a client's own header of that name with nothing forwarded in its place. This is deliberately
+            // based on configuration intent rather than whether the header resolved into route.ExtraHeaders
+            // *this request* - a provider whose credential env var is temporarily unset must still have the
+            // client's own header stripped (failing closed with no credential forwarded), not let the client's
+            // header through as a stand-in for the operator-configured one.
+            var providerSuppliesAuthHeader = route.AuthHeaderConfigured;
 
             foreach (var header in context.Request.Headers)
             {

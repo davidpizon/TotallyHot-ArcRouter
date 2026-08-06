@@ -376,7 +376,7 @@
             Key: IsNew ? Guid.NewGuid().ToString() : Key,
             BaseUrl: _baseUrl.Trim(),
             AuthHeaderName: authHeaderName,
-            Headers: BuildHeaders(),
+            Headers: BuildHeaders(authHeaderName),
             ProviderType: _selectedProviderType.ToString(),
             ProviderName: _providerName.Trim(),
             IsFree: _isFree);
@@ -388,13 +388,21 @@
     /// each value maps to a literal or env-var reference per its selected source. A blank literal value is
     /// sent as-is (not resolved locally): under a locked row the management API preserves whatever is
     /// already stored under that header's name, and under an unlocked one it clears it - which is what
-    /// carries a padlock unlock through to storage.</summary>
-    private IReadOnlyList<ProviderHeaderWriteModel> BuildHeaders() =>
+    /// carries a padlock unlock through to storage. The literal header whose name matches
+    /// <paramref name="authHeaderName"/> is always saved locked, regardless of the row's padlock state: it's
+    /// the provider's credential, and an operator forgetting to lock that one specific row (the row an
+    /// unrelated "Add header" click starts unlocked) must not leave the secret readable back through the
+    /// management API on every future load of this dialog.</summary>
+    private IReadOnlyList<ProviderHeaderWriteModel> BuildHeaders(string authHeaderName) =>
         _headers
             .Where(h => !string.IsNullOrWhiteSpace(h.Name))
             .Select(h => h.UseEnvVar
                 ? new ProviderHeaderWriteModel(h.Name.Trim(), null, h.Value.Trim(), Locked: false)
-                : new ProviderHeaderWriteModel(h.Name.Trim(), h.Value, null, Locked: h.Locked))
+                : new ProviderHeaderWriteModel(
+                    h.Name.Trim(),
+                    h.Value,
+                    null,
+                    Locked: h.Locked || string.Equals(h.Name.Trim(), authHeaderName, StringComparison.OrdinalIgnoreCase)))
             .ToList();
 
     private static string AsString(object? value) => (string?)value ?? string.Empty;

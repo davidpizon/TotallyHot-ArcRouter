@@ -400,6 +400,39 @@ public sealed class ProviderEditDialogTests
     }
 
     [Fact]
+    public void A_header_named_after_the_auth_header_is_always_saved_locked()
+    {
+        using var ctx = new Bunit.BunitContext();
+
+        // Regression test: AddHeader() starts a new row unlocked by default (correct for ordinary public
+        // configuration like anthropic-version), but the credential-carrying header must never be
+        // persisted readable just because the operator forgot to click its padlock - the management API
+        // echoes an unlocked literal value back on every future read of this dialog.
+        ProviderEditDialog.ProviderEditResult? saved = null;
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(parameters);
+            parameters.Add(p => p.OnSave, (ProviderEditDialog.ProviderEditResult r) => saved = r);
+        });
+
+        // With no ProviderType parameter set, the dialog falls back to the "Other" template, whose
+        // documented auth header is "Authorization" (see ResolveSavedAuthHeaderName / ProviderTemplates).
+        cut.Find("[data-testid='add-header']").Click();
+        cut.Find("[data-testid='header-name-0']").Input("Authorization");
+        cut.Find("[data-testid='header-value-0']").Input("super-secret-key");
+
+        // The row's own padlock was never touched - it is still showing unlocked.
+        cut.Find("[data-testid='header-value-0']").GetAttribute("type").Should().Be("text");
+
+        FindSaveButton(cut).Click();
+
+        var header = saved!.Headers.Should().ContainSingle().Subject;
+        header.Name.Should().Be("Authorization");
+        header.Value.Should().Be("super-secret-key");
+        header.Locked.Should().BeTrue();
+    }
+
+    [Fact]
     public void An_env_var_header_has_no_padlock()
     {
         using var ctx = new Bunit.BunitContext();
