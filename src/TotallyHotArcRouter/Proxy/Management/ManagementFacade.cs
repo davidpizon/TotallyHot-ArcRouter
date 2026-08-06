@@ -11,10 +11,9 @@ namespace TotallyHot.ArcRouter.Proxy.Management;
 /// REST <c>/admin/*</c> API (<see cref="ProviderAdminEndpoints"/>) and the MCP provider tools
 /// (<c>TotallyHot.ArcRouter.Mcp.Tools.ProviderMcpTools</c>). Every read this facade returns is a masked
 /// projection: a literal API key or a literal custom-header value is never present in anything it hands
-/// back, on either surface - <see cref="ProviderView.HasApiKey"/>/<see cref="ProviderView.ApiKeyEnvVar"/>
-/// and <see cref="HeaderView.Source"/>/<see cref="HeaderView.ValueEnvVar"/> are the only credential-shaped
-/// information exposed. Every write accepts the same "blank preserves what's already stored" rule for
-/// both the API key and each custom header's value, since a caller can never have received the literal
+/// back, on either surface - <see cref="HeaderView.Source"/>/<see cref="HeaderView.ValueEnvVar"/> are the
+/// only credential-shaped information exposed. Every write accepts the same "blank preserves what's
+/// already stored" rule for each custom header's value, since a caller can never have received the literal
 /// value to resend it in the first place.
 /// </summary>
 public sealed class ManagementFacade
@@ -687,10 +686,6 @@ public sealed class ManagementFacade
                     Name: kvp.Value.Name,
                     BaseUrl: kvp.Value.BaseUrl,
                     AuthHeaderName: kvp.Value.AuthHeaderName,
-                    AuthHeaderScheme: kvp.Value.AuthHeaderScheme,
-                    // Never echo the literal key back to any caller; only whether one is set.
-                    HasApiKey: !string.IsNullOrWhiteSpace(kvp.Value.ApiKey),
-                    ApiKeyEnvVar: kvp.Value.ApiKeyEnvVar,
                     Models: models,
                     Headers: headers,
                     IsFree: kvp.Value.IsFree,
@@ -716,14 +711,11 @@ public sealed class ManagementFacade
 
     /// <summary>
     /// Builds the <see cref="ProviderOptions"/> to store from an incoming write request, merged over any
-    /// existing provider. Non-credential fields fall back to the existing value when omitted, then to
-    /// sensible defaults; credentials are resolved by <see cref="ResolveCredential"/> from the request's
-    /// credential mode, and each custom header by <see cref="ResolveHeader"/>.
+    /// existing provider. Fields fall back to the existing value when omitted, then to sensible defaults;
+    /// each custom header is resolved by <see cref="ResolveHeader"/>.
     /// </summary>
     private static ProviderOptions MergeProvider(ProviderWriteRequest request, ProviderOptions? existing)
     {
-        var (apiKey, apiKeyEnvVar) = ResolveCredential(request, existing);
-
         // A `with` over the existing provider (or a default one when adding), rather than a hand-listed
         // rebuild. Only the fields this request can actually change are named below; everything else -
         // EnableToolCallGuard, the four Aws* fields, and anything added to ProviderOptions later - carries
@@ -731,7 +723,7 @@ public sealed class ManagementFacade
         // was resetting exactly those fields on every edit (docs/router/backlog.md item 1).
         //
         // `new ProviderOptions()`'s own defaults reproduce the old terminal fallbacks exactly: BaseUrl "",
-        // AuthHeaderName "Authorization", AuthHeaderScheme "Bearer", IsFree false, Enabled true, Headers [].
+        // AuthHeaderName "Authorization", IsFree false, Enabled true, Headers [].
         var baseline = existing ?? new ProviderOptions();
 
         return baseline with
@@ -746,11 +738,6 @@ public sealed class ManagementFacade
             // anyway, the only thing storing it achieves is junk in model-routing.json.
             ProviderType = request.ProviderType is null ? baseline.ProviderType : NormalizeNameField(request.ProviderType),
             AuthHeaderName = request.AuthHeaderName ?? baseline.AuthHeaderName,
-            // AuthHeaderScheme may legitimately be "" (e.g. Anthropic's x-api-key), so only a null request
-            // value falls back - an explicit empty string is honored.
-            AuthHeaderScheme = request.AuthHeaderScheme ?? baseline.AuthHeaderScheme,
-            ApiKey = apiKey,
-            ApiKeyEnvVar = apiKeyEnvVar,
             // The caller always sends the full header set (a null list means "keep existing", e.g. a
             // legacy/partial caller); a provided list replaces it wholesale, one header at a time through
             // ResolveHeader so a blank value preserves what's already stored under that name.
@@ -785,53 +772,11 @@ public sealed class ManagementFacade
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     /// <summary>
-    /// Resolves the (ApiKey, ApiKeyEnvVar) pair to store from the request's <c>CredentialMode</c>, so the
-    /// caller can switch between credential sources or clear them - not just add to what's already there:
-    /// <list type="bullet">
-    /// <item><c>literal</c>: keep the literal key (a blank one preserves the stored secret, which no
-    /// surface ever hands back for the caller to resend), and drop any env-var reference.</item>
-    /// <item><c>envVar</c>: use the env-var name and drop any literal key.</item>
-    /// <item><c>none</c>: clear both.</item>
-    /// <item>null/unknown (legacy callers): each field independently falls back to the existing value when
-    /// blank, preserving the original edit-without-resending-the-key behavior.</item>
-    /// </list>
-    /// Mode strings mirror <c>TotallyHot.ArcRouter.Gui.Admin.ProviderCredentialModes</c> / <see cref="HeaderValueSource"/>
-    /// (compared case-insensitively).
-    /// </summary>
-    private static (string? ApiKey, string? ApiKeyEnvVar) ResolveCredential(ProviderWriteRequest request, ProviderOptions? existing)
-    {
-        static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
-
-        var mode = request.CredentialMode?.Trim() ?? string.Empty;
-
-        if (mode.Equals("literal", StringComparison.OrdinalIgnoreCase))
-        {
-            return (NullIfBlank(request.ApiKey) ?? existing?.ApiKey, null);
-        }
-
-        if (mode.Equals("envVar", StringComparison.OrdinalIgnoreCase))
-        {
-            return (null, NullIfBlank(request.ApiKeyEnvVar));
-        }
-
-        if (mode.Equals("none", StringComparison.OrdinalIgnoreCase))
-        {
-            return (null, null);
-        }
-
-        return (
-            string.IsNullOrWhiteSpace(request.ApiKey) ? existing?.ApiKey : request.ApiKey,
-            string.IsNullOrWhiteSpace(request.ApiKeyEnvVar) ? existing?.ApiKeyEnvVar : request.ApiKeyEnvVar);
-    }
-
-    /// <summary>
     /// Resolves one incoming header write to the <see cref="ProviderHeader"/> to store: a non-blank
     /// <see cref="HeaderWriteRequest.Value"/> is a literal, a non-blank
     /// <see cref="HeaderWriteRequest.ValueEnvVar"/> is an env-var reference, and - since a locked header's
     /// value is never returned for a caller to resend - both blank preserves whatever value is already
-    /// stored under this header's name (mirroring <see cref="ResolveCredential"/>'s literal-mode
-    /// blank-preserves-existing rule). A header with no existing counterpart and both fields blank stores
-    /// as <see cref="HeaderValueSource.None"/>.
+    /// stored under this header's name, and otherwise stores as <see cref="HeaderValueSource.None"/>.
     /// <para>
     /// <see cref="HeaderWriteRequest.Locked"/> travels with the header independently of its value, so an
     /// operator can lock an already-stored secret without retyping it - and it is also what makes the
@@ -870,14 +815,16 @@ public sealed class ManagementFacade
         // header when looking up the value to preserve - otherwise a casing mismatch between what was
         // stored and what the caller resends silently drops the stored secret instead of keeping it.
         var existing = existingHeaders.FirstOrDefault(h => string.Equals(h.Name, name, StringComparison.OrdinalIgnoreCase));
+        var preservedValue = existing?.Value;
+
         return new ProviderHeader
         {
             Name = name,
-            Value = existing?.Value,
+            Value = preservedValue,
             ValueEnvVar = existing?.ValueEnvVar,
             // Only a literal can be a secret, so a preserved env-var (or valueless) header stores unlocked
             // no matter what the caller asked for.
-            Locked = !string.IsNullOrWhiteSpace(existing?.Value) && locked
+            Locked = !string.IsNullOrWhiteSpace(preservedValue) && locked
         };
     }
 
@@ -1000,7 +947,7 @@ public readonly record struct ManagementResult<T>(bool Success, T? Value, Manage
     public static ManagementResult<T> Fail(ManagementErrorType errorType, string message) => new(false, default, errorType, message);
 }
 
-/// <summary>The credential source for a stored custom header, mirrored in <c>TotallyHot.ArcRouter.Gui.Admin.ProviderCredentialModes</c>' naming.</summary>
+/// <summary>The credential source for a stored custom header, mirrored in <c>TotallyHot.ArcRouter.Gui.Admin.HeaderValueSource</c>'s naming.</summary>
 public static class HeaderValueSource
 {
     /// <summary>A literal value is stored (never returned by any surface; only this source marker is).</summary>
@@ -1018,9 +965,6 @@ public static class HeaderValueSource
 /// <param name="Name">The user-friendly display name for this provider; null when not set.</param>
 /// <param name="BaseUrl">The provider's absolute base URL.</param>
 /// <param name="AuthHeaderName">The header carrying the credential.</param>
-/// <param name="AuthHeaderScheme">The scheme prefixed to the credential (may be empty).</param>
-/// <param name="HasApiKey">Whether a literal API key is stored (the key value itself is never returned).</param>
-/// <param name="ApiKeyEnvVar">The name of the environment variable holding the key, if configured.</param>
 /// <param name="Models">The models configured to route to this provider.</param>
 /// <param name="Headers">The provider's configured custom headers, masked (see <see cref="HeaderView"/>).</param>
 /// <param name="IsFree">Whether this provider costs nothing, making its models' cost a known zero rather than unknown.</param>
@@ -1049,9 +993,6 @@ public sealed record ProviderView(
     string? Name,
     string BaseUrl,
     string AuthHeaderName,
-    string AuthHeaderScheme,
-    bool HasApiKey,
-    string? ApiKeyEnvVar,
     IReadOnlyList<ModelView> Models,
     IReadOnlyList<HeaderView> Headers,
     bool IsFree = false,
@@ -1111,16 +1052,10 @@ public sealed record HeaderView(string Name, string Source, string? ValueEnvVar,
 /// <param name="Providers">All configured providers, ordered by key.</param>
 public sealed record ProvidersResponse(IReadOnlyList<ProviderView> Providers);
 
-/// <summary>The body for adding or editing a provider. Non-credential fields fall back to the existing
-/// value when omitted; credentials are governed by <paramref name="CredentialMode"/> (see
-/// <see cref="ManagementFacade"/>'s credential resolution).</summary>
+/// <summary>The body for adding or editing a provider. Fields fall back to the existing value when
+/// omitted. Authentication is expressed purely via <paramref name="Headers"/>.</summary>
 /// <param name="BaseUrl">The provider's absolute base URL.</param>
 /// <param name="AuthHeaderName">The header carrying the credential.</param>
-/// <param name="AuthHeaderScheme">The scheme prefixed to the credential (empty for a raw key).</param>
-/// <param name="ApiKey">A literal API key; blank under the literal mode preserves any existing stored key.</param>
-/// <param name="ApiKeyEnvVar">The name of an environment variable holding the key.</param>
-/// <param name="CredentialMode"><c>literal</c>, <c>envVar</c>, <c>none</c>, or null for legacy
-/// fall-back-on-blank behavior.</param>
 /// <param name="Headers">The full set of custom headers to store (replaces the existing set, one header at
 /// a time via the blank-preserves-existing rule); null keeps the existing headers (legacy callers).</param>
 /// <param name="IsFree">Whether this provider costs nothing; null keeps the existing value, so a partial
@@ -1137,10 +1072,6 @@ public sealed record ProvidersResponse(IReadOnlyList<ProviderView> Providers);
 public sealed record ProviderWriteRequest(
     string? BaseUrl,
     string? AuthHeaderName,
-    string? AuthHeaderScheme,
-    string? ApiKey,
-    string? ApiKeyEnvVar,
-    string? CredentialMode = null,
     IReadOnlyList<HeaderWriteRequest>? Headers = null,
     bool? IsFree = null,
     bool? Enabled = null,

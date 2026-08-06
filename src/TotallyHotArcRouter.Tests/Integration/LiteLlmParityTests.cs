@@ -241,12 +241,12 @@ public class LiteLlmParityTests
                 {
                     // Port 9 (discard) on loopback: nothing listens, so the forward is refused immediately.
                     BaseUrl = "http://127.0.0.1:9",
-                    ApiKey = "unused-primary-key"
+                    Headers = [new TotallyHot.ArcRouter.Models.ProviderHeader { Name = "Authorization", Value = "Bearer unused-primary-key" }]
                 },
                 ["live-backup"] = new TotallyHot.ArcRouter.Models.ProviderOptions
                 {
                     BaseUrl = SidecarBaseUrl,
-                    ApiKey = SidecarMasterKey
+                    Headers = [new TotallyHot.ArcRouter.Models.ProviderHeader { Name = "Authorization", Value = $"Bearer {SidecarMasterKey}" }]
                 }
             },
             ModelList =

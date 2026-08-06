@@ -111,8 +111,7 @@ public class ProxyMiddlewareModelEnabledTests
             {
                 providers[model.Provider] = new ProviderOptions
                 {
-                    BaseUrl = model.BaseUrl,
-                    ApiKey = $"test-key-{model.Provider}"
+                    BaseUrl = model.BaseUrl
                 };
             }
         }

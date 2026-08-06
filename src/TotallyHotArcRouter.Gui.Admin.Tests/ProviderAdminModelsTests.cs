@@ -13,8 +13,8 @@ public sealed class ProviderAdminModelsTests
         var models = new List<ModelAdminView> { new("gpt-5.4", "gpt-5.4") };
         var headers = new List<ProviderHeaderView> { new("Authorization", HeaderValueSource.Literal, null) };
 
-        var a = new ProviderAdminView("openai", "OpenAI API", "https://api.openai.com", "Authorization", "Bearer", true, null, models, headers);
-        var b = new ProviderAdminView("openai", "OpenAI API", "https://api.openai.com", "Authorization", "Bearer", true, null, models, headers);
+        var a = new ProviderAdminView("openai", "OpenAI API", "https://api.openai.com", "Authorization", models, headers);
+        var b = new ProviderAdminView("openai", "OpenAI API", "https://api.openai.com", "Authorization", models, headers);
         var differentName = a with { Name = "Something Else" };
 
         Assert.Equal(a, b);

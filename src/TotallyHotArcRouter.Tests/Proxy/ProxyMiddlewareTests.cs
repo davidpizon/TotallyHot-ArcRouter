@@ -134,6 +134,96 @@ public class ProxyMiddlewareTests
     }
 
     [Fact]
+    public async Task InvokeAsync_ProviderAuthHeaderConfiguredButUnresolved_StripsClientsHeaderAndForwardsNoCredential()
+    {
+        // Regression test: a provider whose configuration declares an auth header (here, sourced from an
+        // env var that happens to be unset at request time) must still have a client-sent header of that
+        // same name stripped. Before route.AuthHeaderConfigured existed, whether the client's header was
+        // stripped depended on whether the provider's own header happened to resolve this request - so a
+        // missing env var would let a client-supplied credential slip through unmodified instead of the
+        // request failing closed with no credential at all. Uses a non-"Authorization" header name because
+        // "Authorization" itself is unconditionally stripped by AlwaysSkippedRequestHeaders regardless of
+        // this logic - the conditional only matters for a provider like this one.
+        var loggerMock = new Mock<ILogger<ProxyMiddleware>>();
+        var resolver = ModelRouteResolverTestFactory.Create(
+            modelName: "claude-sonnet-5",
+            providerModelId: "claude-sonnet-5",
+            baseUrl: "https://api.anthropic.com",
+            authHeaderName: "x-api-key",
+            apiKey: null,
+            headers: [new ProviderHeader { Name = "x-api-key", ValueEnvVar = "PROXY_MIDDLEWARE_TESTS_UNSET_VAR" }]);
+        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+
+        var handler = new DelegatingHandlerStub(request =>
+        {
+            Assert.False(request.Headers.Contains("x-api-key"));
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{}", Encoding.UTF8, "application/json")
+            });
+        });
+
+        var middleware = new ProxyMiddleware(loggerMock.Object, interceptor, new HttpClient(handler));
+
+        var context = new DefaultHttpContext();
+        context.Request.Method = HttpMethods.Post;
+        context.Request.Scheme = "https";
+        context.Request.Host = new HostString("127.0.0.1:5001");
+        context.Request.Path = "/v1/messages";
+        context.Request.Headers["x-api-key"] = "client-supplied-token";
+        var requestBody = Encoding.UTF8.GetBytes("""{"model":"claude-sonnet-5"}""");
+        context.Request.Body = new MemoryStream(requestBody);
+        context.Request.ContentLength = requestBody.Length;
+        context.Response.Body = new MemoryStream();
+
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ProviderWithNoAuthHeaderConfigured_ForwardsTheClientsHeaderUnmodified()
+    {
+        // Regression test: an unauthenticated provider (e.g. a free local runtime) declares no header
+        // matching AuthHeaderName at all, so route.AuthHeaderConfigured is false and a client's own header
+        // of that name must pass through untouched rather than being dropped with nothing to replace it.
+        var loggerMock = new Mock<ILogger<ProxyMiddleware>>();
+        var resolver = ModelRouteResolverTestFactory.Create(
+            modelName: "local-model",
+            providerModelId: "local-model",
+            baseUrl: "http://localhost:11434",
+            authHeaderName: "x-api-key",
+            apiKey: null);
+        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+
+        var handler = new DelegatingHandlerStub(request =>
+        {
+            Assert.Equal("client-supplied-token", request.Headers.GetValues("x-api-key").Single());
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{}", Encoding.UTF8, "application/json")
+            });
+        });
+
+        var middleware = new ProxyMiddleware(loggerMock.Object, interceptor, new HttpClient(handler));
+
+        var context = new DefaultHttpContext();
+        context.Request.Method = HttpMethods.Post;
+        context.Request.Scheme = "https";
+        context.Request.Host = new HostString("127.0.0.1:5001");
+        context.Request.Path = "/chat";
+        context.Request.Headers["x-api-key"] = "client-supplied-token";
+        var requestBody = Encoding.UTF8.GetBytes("""{"model":"local-model"}""");
+        context.Request.Body = new MemoryStream(requestBody);
+        context.Request.ContentLength = requestBody.Length;
+        context.Response.Body = new MemoryStream();
+
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+    }
+
+    [Fact]
     public async Task InvokeAsync_DoesNotForwardToTheProxysOwnAddress_EvenWhenRequestHostMatchesIt()
     {
         // Regression test: the forwarding target must come from the resolved upstream route, never from

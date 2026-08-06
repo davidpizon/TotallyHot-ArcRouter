@@ -1,17 +1,14 @@
 namespace TotallyHot.ArcRouter.Gui.Admin;
 
 /// <summary>
-/// A provider as returned by the proxy's <c>GET /admin/providers</c> endpoint. Credentials are masked:
-/// the literal API key is never sent to the client, only <see cref="HasApiKey"/> and, if configured,
-/// the <see cref="ApiKeyEnvVar"/> name.
+/// A provider as returned by the proxy's <c>GET /admin/providers</c> endpoint. Authentication is expressed
+/// purely via <see cref="Headers"/>, which masks credentials the same way every other header does (see
+/// <see cref="ProviderHeaderView"/>).
 /// </summary>
 /// <param name="Key">The provider key (e.g. <c>openai</c>).</param>
 /// <param name="Name">The user-friendly display name for this provider (e.g. <c>OpenAI API</c>); displayed in the Governance UI.</param>
 /// <param name="BaseUrl">The provider's absolute base URL.</param>
 /// <param name="AuthHeaderName">The header carrying the credential (e.g. <c>Authorization</c>).</param>
-/// <param name="AuthHeaderScheme">The scheme prefixed to the credential (e.g. <c>Bearer</c>; may be empty).</param>
-/// <param name="HasApiKey">Whether a literal API key is stored for this provider (used by the edit dialog only).</param>
-/// <param name="ApiKeyEnvVar">The environment variable name holding the key, if configured (used by the edit dialog only).</param>
 /// <param name="Models">The models configured to route to this provider.</param>
 /// <param name="Headers">The provider's configured custom headers (literal values are returned; secrets live in env vars).</param>
 /// <param name="IsFree">Whether this provider costs nothing (a local runtime, say), making its models' cost a known zero rather than unknown.</param>
@@ -40,9 +37,6 @@ public sealed record ProviderAdminView(
     string? Name,
     string BaseUrl,
     string AuthHeaderName,
-    string AuthHeaderScheme,
-    bool HasApiKey,
-    string? ApiKeyEnvVar,
     IReadOnlyList<ModelAdminView> Models,
     IReadOnlyList<ProviderHeaderView> Headers,
     bool IsFree = false,
@@ -106,7 +100,7 @@ public sealed record ProviderEndpointCapabilitiesView(
     DateTimeOffset ScannedAtUtc,
     string? ScanError = null);
 
-/// <summary>The credential source for a configured header, mirroring <see cref="ProviderCredentialModes"/>'s naming.</summary>
+/// <summary>The credential source for a configured header.</summary>
 public static class HeaderValueSource
 {
     /// <summary>A literal value is stored. Returned by the management API only when the header is unlocked
@@ -137,8 +131,7 @@ public sealed record ProviderHeaderView(string Name, string Source, string? Valu
 /// <summary>
 /// A custom HTTP header to write for a provider (<c>PUT /admin/providers/{key}</c>). A blank
 /// <see cref="Value"/> and blank <see cref="ValueEnvVar"/> together preserve whatever is already stored
-/// under this header's <see cref="Name"/> (a locked value is never returned for the caller to resend, so
-/// this mirrors <see cref="ProviderWriteRequest.ApiKey"/>'s literal-mode blank-preserves-existing rule).
+/// under this header's <see cref="Name"/>, since a locked value is never returned for the caller to resend.
 /// </summary>
 /// <param name="Name">The header name.</param>
 /// <param name="Value">A literal value; takes precedence over <paramref name="ValueEnvVar"/> when non-empty.</param>
@@ -155,36 +148,12 @@ public sealed record ProviderHeaderWriteModel(string? Name, string? Value, strin
 /// <param name="Providers">All configured providers.</param>
 public sealed record ProvidersSnapshot(IReadOnlyList<ProviderAdminView> Providers);
 
-/// <summary>The credential source a <see cref="ProviderWriteRequest"/> selects for a provider.</summary>
-public static class ProviderCredentialModes
-{
-    /// <summary>Store a literal key. A blank <see cref="ProviderWriteRequest.ApiKey"/> keeps the existing one.</summary>
-    public const string Literal = "literal";
-
-    /// <summary>Reference an environment variable (<see cref="ProviderWriteRequest.ApiKeyEnvVar"/>) holding the key.</summary>
-    public const string EnvVar = "envVar";
-
-    /// <summary>No credential (e.g. a local, unauthenticated endpoint). Clears any stored key and env-var name.</summary>
-    public const string None = "none";
-}
-
 /// <summary>
-/// The body sent to add or edit a provider. Non-credential fields (<see cref="BaseUrl"/>,
-/// <see cref="AuthHeaderName"/>, <see cref="AuthHeaderScheme"/>) fall back to the existing provider's value
-/// when null. Credentials are driven by <see cref="CredentialMode"/> so the caller can switch between key
-/// sources or clear them: only a blank literal <see cref="ApiKey"/> under <see cref="ProviderCredentialModes.Literal"/>
-/// preserves the stored secret (which the GUI never receives and so cannot resend). When
-/// <see cref="CredentialMode"/> is null, both credential fields independently fall back on blank (legacy behavior).
+/// The body sent to add or edit a provider. Fields fall back to the existing provider's value when null.
+/// Authentication is expressed purely via <see cref="Headers"/>.
 /// </summary>
 /// <param name="BaseUrl">The provider's absolute base URL.</param>
 /// <param name="AuthHeaderName">The header carrying the credential.</param>
-/// <param name="AuthHeaderScheme">The scheme prefixed to the credential (empty for a raw key).</param>
-/// <param name="ApiKey">A literal API key; blank under the literal mode preserves any existing stored key.</param>
-/// <param name="ApiKeyEnvVar">The name of an environment variable holding the key.</param>
-/// <param name="CredentialMode">
-/// One of <see cref="ProviderCredentialModes"/> selecting the credential source, or null for legacy
-/// fall-back-on-blank behavior.
-/// </param>
 /// <param name="Headers">The full set of custom headers to store (replaces the existing set, one header at
 /// a time via <see cref="ProviderHeaderWriteModel"/>'s blank-preserves-existing rule); null keeps them.</param>
 /// <param name="IsFree">Whether this provider costs nothing; null keeps the existing value.</param>
@@ -200,10 +169,6 @@ public static class ProviderCredentialModes
 public sealed record ProviderWriteRequest(
     string? BaseUrl,
     string? AuthHeaderName,
-    string? AuthHeaderScheme,
-    string? ApiKey,
-    string? ApiKeyEnvVar,
-    string? CredentialMode = null,
     IReadOnlyList<ProviderHeaderWriteModel>? Headers = null,
     bool? IsFree = null,
     bool? Enabled = null,

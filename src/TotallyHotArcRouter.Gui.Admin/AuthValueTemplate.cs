@@ -12,13 +12,15 @@ namespace TotallyHot.ArcRouter.Gui.Admin;
 /// prefixed bearer token in <c>Authorization</c>.
 /// </para>
 /// <para>
-/// This is deliberately a <em>presentation</em> concern, not a storage format. Nothing downstream ever sees
-/// a template: <see cref="TryParse"/> decomposes it into the <c>AuthHeaderScheme</c> + <c>ApiKeyEnvVar</c>
-/// pair the proxy already stores and already knows how to join, and <see cref="Compose"/> rebuilds the
-/// template for display when the editor reopens. Keeping the split here means the router, the management
-/// API, and existing <c>model-routing.json</c> files are entirely unaffected by the new UI.
+/// This is deliberately a <em>presentation</em> concern, not a storage format: <see cref="TryParse"/>
+/// decomposes it into a scheme prefix and an environment-variable name, and <see cref="Compose"/> rebuilds
+/// the template for display from that pair.
 /// </para>
 /// </summary>
+/// <remarks>
+/// Unused since the provider editor's authentication UI was replaced by an ordinary custom-header row (see
+/// <c>ProviderEditDialog</c>) - kept only alongside its own tests pending a decision on whether to delete it.
+/// </remarks>
 public static class AuthValueTemplate
 {
     private const string EnvOpen = "{env:";
@@ -34,9 +36,7 @@ public static class AuthValueTemplate
     /// </param>
     /// <param name="scheme">
     /// On success, the literal prefix with its trailing whitespace removed (<c>Bearer</c>), or the empty
-    /// string when the template is a bare reference. This is exactly what
-    /// <c>ProviderCredentialResolver.BuildAuthHeaderValue</c> re-joins with a single space, so an empty
-    /// scheme sends the raw key.
+    /// string when the template is a bare reference.
     /// </param>
     /// <param name="envVarName">On success, the environment-variable name to read at request time.</param>
     /// <param name="error">On failure, a message naming what is wrong, suitable for display in the editor.</param>

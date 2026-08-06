@@ -18,7 +18,7 @@ public sealed class ProviderMcpToolsTests
     {
         Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
         {
-            ["openai"] = new ProviderOptions { BaseUrl = "https://api.openai.com", ApiKey = "sk-secret", AuthHeaderName = "Authorization" }
+            ["openai"] = new ProviderOptions { BaseUrl = "https://api.openai.com", AuthHeaderName = "Authorization" }
         },
         ModelList = [new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "openai", ProviderModelId = "gpt-5.4" }]
     };
@@ -31,24 +31,13 @@ public sealed class ProviderMcpToolsTests
     }
 
     [Fact]
-    public void ListProviders_NeverReturnsLiteralApiKey()
-    {
-        var tools = CreateTools(out _);
-
-        var response = tools.ListProviders();
-
-        var provider = Assert.Single(response.Providers);
-        Assert.True(provider.HasApiKey);
-    }
-
-    [Fact]
     public async Task UpsertProviderAsync_ValidEdit_UpdatesStoreAndReturnsProvidersResponse()
     {
         var tools = CreateTools(out var store);
 
         var result = await tools.UpsertProviderAsync(
             "openai",
-            new ProviderWriteRequest(BaseUrl: "https://api.openai.com/v2", AuthHeaderName: null, AuthHeaderScheme: null, ApiKey: null, ApiKeyEnvVar: null),
+            new ProviderWriteRequest(BaseUrl: "https://api.openai.com/v2", AuthHeaderName: null),
             TestContext.Current.CancellationToken);
 
         Assert.IsType<ProvidersResponse>(result);

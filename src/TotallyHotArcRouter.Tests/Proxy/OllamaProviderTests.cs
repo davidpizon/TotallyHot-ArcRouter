@@ -50,7 +50,7 @@ public class OllamaProviderTests
             // InvokeAsync_PassthroughProviderWithVersionedBaseUrl_DoesNotForwardTheVersionSegmentTwice.
             Assert.Equal("http://localhost:11434/v1/chat/completions", request.RequestUri!.ToString());
 
-            // No ApiKey/ApiKeyEnvVar configured for "ollama" - no Authorization header should ever be injected.
+            // No auth header configured for "ollama" - no Authorization header should ever be injected.
             Assert.False(request.Headers.Contains("Authorization"));
 
             var body = await request.Content!.ReadAsStringAsync();

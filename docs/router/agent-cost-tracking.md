@@ -312,7 +312,7 @@ public interface IProviderCostReconciler
 - **`OpenAiCostReconciler`**: `GET https://api.openai.com/v1/organization/costs`, with
   `start_time`/`end_time` (Unix seconds, the requested day) and `bucket_width=1d` (the only value
   currently supported). Requires an **Admin API key** - a different, more privileged credential than
-  the per-provider inference key already configured via `ModelRouting:Providers:openai:ApiKeyEnvVar`
+  the per-provider inference key already configured via the `openai` provider's `Headers`
   (generated separately, at https://platform.openai.com/settings/organization/admin-keys).
 - **`AnthropicCostReconciler`**: `GET https://api.anthropic.com/v1/organizations/cost_report`, with
   `starting_at`/`ending_at` and optional `group_by[]`. Also requires a separate **Admin API key**.
@@ -374,8 +374,8 @@ reason: filesystem ACLs restrict the database (which will contain real cost/toke
 transitively whatever `provider_cost_reconciliation` reveals about actual spend) to the same OS user
 running the proxy, without inventing a new access-control mechanism.
 
-`AdminApiKeyEnvVar` follows the existing `ApiKeyEnvVar` naming convention from
-`ModelRouting:Providers`, but is a **separate** environment variable from the inference key - an
+`AdminApiKeyEnvVar` follows the `ValueEnvVar` naming convention already used by a provider's `Headers`
+entries, but is a **separate** environment variable from the inference key - an
 Admin API key is a distinct, more privileged credential class (org-wide read access to
 usage/billing) that should not be the same secret already deployed for routing traffic, and should
 not be required for the feature's core (per-request estimate + ledger) to work.

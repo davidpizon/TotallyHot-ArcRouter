@@ -10,9 +10,9 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Management;
 
 /// <summary>
 /// Covers <see cref="ManagementFacade"/>: the shared security boundary behind both REST <c>/admin/*</c>
-/// and the MCP provider tools. These tests are the critical guarantee - a literal API key or custom-header
-/// value must never appear in anything the facade returns, and a blank write must preserve whatever secret
-/// is already stored, on both the API key and header paths alike.
+/// and the MCP provider tools. These tests are the critical guarantee - a custom-header value must never
+/// appear in anything the facade returns, and a blank write must preserve whatever secret is already
+/// stored.
 /// </summary>
 public sealed class ManagementFacadeTests
 {
@@ -23,7 +23,6 @@ public sealed class ManagementFacadeTests
             ["openai"] = new ProviderOptions
             {
                 BaseUrl = "https://api.openai.com",
-                ApiKey = "sk-secret",
                 AuthHeaderName = "Authorization",
                 Headers = [new ProviderHeader { Name = "X-Literal", Value = "literal-secret" }]
             }
@@ -33,20 +32,6 @@ public sealed class ManagementFacadeTests
 
     private static ManagementFacade CreateFacade(IProviderConfigStore? store = null, ProviderBudgetStore? budgetStore = null) =>
         new(store ?? new InMemoryProviderConfigStore(SeedOptions()), Mock.Of<IEnvironmentVariableProvider>(), new HttpClient(), budgetStore);
-
-    [Fact]
-    public void ListProviders_NeverReturnsLiteralApiKey()
-    {
-        var facade = CreateFacade();
-
-        var response = facade.ListProviders();
-
-        var provider = Assert.Single(response.Providers);
-        Assert.True(provider.HasApiKey);
-        Assert.Null(provider.ApiKeyEnvVar);
-        // No property on ProviderView carries the literal key - HasApiKey/ApiKeyEnvVar are the only
-        // credential-shaped fields, and neither is the secret itself.
-    }
 
     [Fact]
     public void ListProviders_NeverReturnsALockedHeaderValue()
@@ -161,38 +146,16 @@ public sealed class ManagementFacadeTests
     }
 
     [Fact]
-    public async Task UpsertProviderAsync_LiteralModeBlankKey_PreservesExistingKeyButNeverReturnsIt()
-    {
-        var store = new InMemoryProviderConfigStore(SeedOptions());
-        var facade = CreateFacade(store);
-
-        var result = await facade.UpsertProviderAsync(
-            "openai",
-            new ProviderWriteRequest(BaseUrl: "https://api.openai.com/v2", AuthHeaderName: null, AuthHeaderScheme: null, ApiKey: null, ApiKeyEnvVar: null, CredentialMode: "literal"),
-            TestContext.Current.CancellationToken);
-
-        Assert.True(result.Success);
-        // The store still has the original secret (edit-without-resending-the-key worked)...
-        Assert.Equal("sk-secret", store.Snapshot.Options.Providers["openai"].ApiKey);
-        // ...but the facade's own response never carries it, anywhere.
-        Assert.True(result.Value!.Providers.Single().HasApiKey);
-    }
-
-    [Fact]
     public async Task UpsertProviderAsync_HeaderBothBlank_PreservesExistingLiteralHeaderValue()
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());
         var facade = CreateFacade(store);
 
         // The caller can't have received "literal-secret" from any prior read (write-only), so sending it
-        // back blank must mean "keep what's there", exactly like the API key's literal-mode blank rule.
+        // back blank must mean "keep what's there".
         var request = new ProviderWriteRequest(
             BaseUrl: "https://api.openai.com",
             AuthHeaderName: null,
-            AuthHeaderScheme: null,
-            ApiKey: null,
-            ApiKeyEnvVar: null,
-            CredentialMode: "literal",
             Headers: [new HeaderWriteRequest(Name: "X-Literal", Value: null, ValueEnvVar: null)]);
 
         var result = await facade.UpsertProviderAsync("openai", request, TestContext.Current.CancellationToken);
@@ -214,9 +177,6 @@ public sealed class ManagementFacadeTests
         var request = new ProviderWriteRequest(
             BaseUrl: "https://api.openai.com",
             AuthHeaderName: null,
-            AuthHeaderScheme: null,
-            ApiKey: null,
-            ApiKeyEnvVar: null,
             Headers: [new HeaderWriteRequest(Name: "x-literal", Value: null, ValueEnvVar: null)]);
 
         var result = await facade.UpsertProviderAsync("openai", request, TestContext.Current.CancellationToken);
@@ -235,9 +195,6 @@ public sealed class ManagementFacadeTests
         var request = new ProviderWriteRequest(
             BaseUrl: "https://api.openai.com",
             AuthHeaderName: null,
-            AuthHeaderScheme: null,
-            ApiKey: null,
-            ApiKeyEnvVar: null,
             Headers: [new HeaderWriteRequest(Name: "X-Literal", Value: "new-secret", ValueEnvVar: null)]);
 
         await facade.UpsertProviderAsync("openai", request, TestContext.Current.CancellationToken);
@@ -255,9 +212,6 @@ public sealed class ManagementFacadeTests
         var request = new ProviderWriteRequest(
             BaseUrl: "https://api.openai.com",
             AuthHeaderName: null,
-            AuthHeaderScheme: null,
-            ApiKey: null,
-            ApiKeyEnvVar: null,
             Headers: [new HeaderWriteRequest(Name: "X-Literal", Value: null, ValueEnvVar: null, Locked: true)]);
 
         await facade.UpsertProviderAsync("openai", request, TestContext.Current.CancellationToken);
@@ -278,9 +232,6 @@ public sealed class ManagementFacadeTests
         var request = new ProviderWriteRequest(
             BaseUrl: "https://api.openai.com",
             AuthHeaderName: null,
-            AuthHeaderScheme: null,
-            ApiKey: null,
-            ApiKeyEnvVar: null,
             Headers: [new HeaderWriteRequest(Name: "X-Literal", Value: null, ValueEnvVar: null, Locked: false)]);
 
         await facade.UpsertProviderAsync("openai", request, TestContext.Current.CancellationToken);
@@ -309,9 +260,6 @@ public sealed class ManagementFacadeTests
         var request = new ProviderWriteRequest(
             BaseUrl: "https://api.openai.com",
             AuthHeaderName: null,
-            AuthHeaderScheme: null,
-            ApiKey: null,
-            ApiKeyEnvVar: null,
             Headers: [new HeaderWriteRequest(Name: "X-Literal", Value: null, ValueEnvVar: null, Locked: true)]);
 
         await facade.UpsertProviderAsync("openai", request, TestContext.Current.CancellationToken);
@@ -332,9 +280,6 @@ public sealed class ManagementFacadeTests
         var request = new ProviderWriteRequest(
             BaseUrl: "https://api.openai.com",
             AuthHeaderName: null,
-            AuthHeaderScheme: null,
-            ApiKey: null,
-            ApiKeyEnvVar: null,
             Headers:
             [
                 new HeaderWriteRequest(Name: "X-Literal", Value: null, ValueEnvVar: null),
@@ -358,9 +303,6 @@ public sealed class ManagementFacadeTests
         var request = new ProviderWriteRequest(
             BaseUrl: "https://api.openai.com",
             AuthHeaderName: null,
-            AuthHeaderScheme: null,
-            ApiKey: null,
-            ApiKeyEnvVar: null,
             Headers: [new HeaderWriteRequest(Name: "X-Literal", Value: null, ValueEnvVar: "SOME_VAR", Locked: true)]);
 
         await facade.UpsertProviderAsync("openai", request, TestContext.Current.CancellationToken);
@@ -377,9 +319,6 @@ public sealed class ManagementFacadeTests
         var request = new ProviderWriteRequest(
             BaseUrl: "https://api.openai.com",
             AuthHeaderName: null,
-            AuthHeaderScheme: null,
-            ApiKey: null,
-            ApiKeyEnvVar: null,
             Headers: [new HeaderWriteRequest(Name: "X-Literal", Value: null, ValueEnvVar: "SOME_VAR")]);
 
         await facade.UpsertProviderAsync("openai", request, TestContext.Current.CancellationToken);
@@ -387,22 +326,6 @@ public sealed class ManagementFacadeTests
         var stored = store.Snapshot.Options.Providers["openai"].Headers.Single();
         Assert.Null(stored.Value);
         Assert.Equal("SOME_VAR", stored.ValueEnvVar);
-    }
-
-    [Fact]
-    public async Task UpsertProviderAsync_CredentialModeNone_ClearsApiKeyAndEnvVar()
-    {
-        var store = new InMemoryProviderConfigStore(SeedOptions());
-        var facade = CreateFacade(store);
-
-        await facade.UpsertProviderAsync(
-            "openai",
-            new ProviderWriteRequest(BaseUrl: "https://api.openai.com", AuthHeaderName: null, AuthHeaderScheme: null, ApiKey: null, ApiKeyEnvVar: null, CredentialMode: "none"),
-            TestContext.Current.CancellationToken);
-
-        var stored = store.Snapshot.Options.Providers["openai"];
-        Assert.Null(stored.ApiKey);
-        Assert.Null(stored.ApiKeyEnvVar);
     }
 
     [Fact]

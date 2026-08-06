@@ -8,8 +8,8 @@ namespace TotallyHot.ArcRouter.Tests.Models;
 ///
 /// <para>
 /// As a class its <c>ToString()</c> was the type name and carried nothing. The synthesized record printer
-/// prints every property verbatim, so without the type's <c>PrintMembers</c> override
-/// <see cref="ProviderOptions.ApiKey"/> would appear in plain text in any log line, exception message, or
+/// prints every property verbatim, so without the type's <c>PrintMembers</c> override a secret stored in
+/// <see cref="ProviderOptions.Headers"/> would appear in plain text in any log line, exception message, or
 /// debugger view that happened to include a provider. Nothing logs one today, which is exactly why this
 /// needs a test rather than a comment - the leak would arrive with whichever future log statement first
 /// interpolates a provider, far from the change that made it possible.
@@ -33,10 +33,7 @@ public sealed class ProviderOptionsRedactionTests
     {
         BaseUrl = "https://api.example.invalid/v1",
         ProviderType = "Anthropic",
-        ApiKey = Secret,
-        ApiKeyEnvVar = "EXAMPLE_API_KEY",
         AuthHeaderName = "x-api-key",
-        AuthHeaderScheme = string.Empty,
         Headers = [new ProviderHeader { Name = "anthropic-version", Value = Secret }],
         IsFree = true,
         Enabled = false,
@@ -65,7 +62,7 @@ public sealed class ProviderOptionsRedactionTests
         var rendered = FullyPopulated().ToString();
 
         Assert.Contains("https://api.example.invalid/v1", rendered, StringComparison.Ordinal);
-        Assert.Contains("EXAMPLE_API_KEY", rendered, StringComparison.Ordinal);
+        Assert.Contains("x-api-key", rendered, StringComparison.Ordinal);
         Assert.Contains("AWS_SECRET_ACCESS_KEY", rendered, StringComparison.Ordinal);
         Assert.Contains("anthropic-version", rendered, StringComparison.Ordinal);
     }

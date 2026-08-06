@@ -39,10 +39,7 @@ public sealed class ProviderOptionsPreservationTests
         Name = "Example Provider",
         ProviderType = "Anthropic",
         BaseUrl = "https://example.invalid",
-        ApiKey = "literal-key",
-        ApiKeyEnvVar = "KEY_ENV",
         AuthHeaderName = "x-api-key",
-        AuthHeaderScheme = "Token",
         Headers = [new ProviderHeader { Name = "anthropic-version", Value = "2023-06-01" }],
         IsFree = true,
         Enabled = false,
@@ -118,10 +115,7 @@ public sealed class ProviderOptionsPreservationTests
         // A minimal edit: change only the base URL. Everything else must survive untouched.
         await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
             BaseUrl: "https://changed.invalid",
-            AuthHeaderName: null,
-            AuthHeaderScheme: null,
-            ApiKey: null,
-            ApiKeyEnvVar: null),
+            AuthHeaderName: null),
             TestContext.Current.CancellationToken);
 
         var updated = store.Snapshot.Options.Providers["bedrock"];
@@ -198,7 +192,7 @@ public sealed class ProviderOptionsPreservationTests
         var facade = CreateFacade(store);
 
         await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
-            "https://changed.invalid", null, null, null, null),
+            "https://changed.invalid", null),
             TestContext.Current.CancellationToken);
 
         Assert.True(store.Snapshot.Options.Providers["bedrock"].EnableToolCallGuard);
@@ -213,7 +207,7 @@ public sealed class ProviderOptionsPreservationTests
         var facade = CreateFacade(store);
 
         await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
-            "https://changed.invalid", null, null, null, null),
+            "https://changed.invalid", null),
             TestContext.Current.CancellationToken);
 
         Assert.Equal("Anthropic", store.Snapshot.Options.Providers["bedrock"].ProviderType);
@@ -226,7 +220,7 @@ public sealed class ProviderOptionsPreservationTests
         var facade = CreateFacade(store);
 
         await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
-            "https://changed.invalid", null, null, null, null, ProviderType: "OpenAI"),
+            "https://changed.invalid", null, ProviderType: "OpenAI"),
             TestContext.Current.CancellationToken);
 
         Assert.Equal("OpenAI", store.Snapshot.Options.Providers["bedrock"].ProviderType);
@@ -244,7 +238,7 @@ public sealed class ProviderOptionsPreservationTests
         var facade = CreateFacade(store);
 
         await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
-            "https://changed.invalid", null, null, null, null, ProviderType: blank),
+            "https://changed.invalid", null, ProviderType: blank),
             TestContext.Current.CancellationToken);
 
         Assert.Null(store.Snapshot.Options.Providers["bedrock"].ProviderType);
@@ -257,7 +251,7 @@ public sealed class ProviderOptionsPreservationTests
         var facade = CreateFacade(store);
 
         await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
-            "https://changed.invalid", null, null, null, null, ProviderType: "  OpenAI  "),
+            "https://changed.invalid", null, ProviderType: "  OpenAI  "),
             TestContext.Current.CancellationToken);
 
         // Stored untrimmed, this would fail Enum.TryParse in the editor and silently show "Other".
@@ -273,7 +267,7 @@ public sealed class ProviderOptionsPreservationTests
         var facade = CreateFacade(store);
 
         await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
-            "https://changed.invalid", null, null, null, null),
+            "https://changed.invalid", null),
             TestContext.Current.CancellationToken);
 
         var updated = store.Snapshot.Options.Providers["bedrock"];
@@ -309,16 +303,12 @@ public sealed class ProviderOptionsPreservationTests
 
         await facade.UpsertProviderAsync("fresh", new ProviderWriteRequest(
             BaseUrl: "https://fresh.invalid",
-            AuthHeaderName: null,
-            AuthHeaderScheme: null,
-            ApiKey: null,
-            ApiKeyEnvVar: null),
+            AuthHeaderName: null),
             TestContext.Current.CancellationToken);
 
         var created = store.Snapshot.Options.Providers["fresh"];
         Assert.Equal("https://fresh.invalid", created.BaseUrl);
         Assert.Equal("Authorization", created.AuthHeaderName);
-        Assert.Equal("Bearer", created.AuthHeaderScheme);
         Assert.True(created.Enabled);
         Assert.False(created.IsFree);
         Assert.False(created.EnableToolCallGuard);
@@ -336,9 +326,6 @@ public sealed class ProviderOptionsPreservationTests
         await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
             BaseUrl: "https://changed.invalid",
             AuthHeaderName: null,
-            AuthHeaderScheme: null,
-            ApiKey: null,
-            ApiKeyEnvVar: null,
             ProviderName: null),
             TestContext.Current.CancellationToken);
 
@@ -355,9 +342,6 @@ public sealed class ProviderOptionsPreservationTests
         await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
             BaseUrl: "https://changed.invalid",
             AuthHeaderName: null,
-            AuthHeaderScheme: null,
-            ApiKey: null,
-            ApiKeyEnvVar: null,
             ProviderName: ""),
             TestContext.Current.CancellationToken);
 
@@ -374,9 +358,6 @@ public sealed class ProviderOptionsPreservationTests
         await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
             BaseUrl: "https://changed.invalid",
             AuthHeaderName: null,
-            AuthHeaderScheme: null,
-            ApiKey: null,
-            ApiKeyEnvVar: null,
             ProviderName: "  \t\n  "),
             TestContext.Current.CancellationToken);
 
@@ -393,9 +374,6 @@ public sealed class ProviderOptionsPreservationTests
         await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
             BaseUrl: "https://changed.invalid",
             AuthHeaderName: null,
-            AuthHeaderScheme: null,
-            ApiKey: null,
-            ApiKeyEnvVar: null,
             ProviderName: "New Provider Name"),
             TestContext.Current.CancellationToken);
 
@@ -412,9 +390,6 @@ public sealed class ProviderOptionsPreservationTests
         await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
             BaseUrl: "https://changed.invalid",
             AuthHeaderName: null,
-            AuthHeaderScheme: null,
-            ApiKey: null,
-            ApiKeyEnvVar: null,
             ProviderName: "  New Provider Name  "),
             TestContext.Current.CancellationToken);
 

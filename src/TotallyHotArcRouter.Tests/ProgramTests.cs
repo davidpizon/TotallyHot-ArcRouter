@@ -127,7 +127,6 @@ namespace TotallyHot.ArcRouter.Tests
                 {
                     ["ModelRouting:Providers:openai:BaseUrl"] = "https://api.openai.com",
                     ["ModelRouting:Providers:openai:AuthHeaderName"] = "Authorization",
-                    ["ModelRouting:Providers:openai:AuthHeaderScheme"] = "Bearer",
                     ["ModelRouting:ModelList:0:ModelName"] = "gpt-5.4",
                     ["ModelRouting:ModelList:0:Provider"] = "openai",
                     ["ModelRouting:ModelList:0:ProviderModelId"] = "gpt-5.4-test",

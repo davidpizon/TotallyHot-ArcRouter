@@ -23,7 +23,7 @@ public sealed class ProviderAdminEndpointsTests
     {
         Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
         {
-            ["openai"] = new ProviderOptions { BaseUrl = "https://api.openai.com", ApiKey = "sk-secret", AuthHeaderName = "Authorization" }
+            ["openai"] = new ProviderOptions { BaseUrl = "https://api.openai.com", AuthHeaderName = "Authorization" }
         },
         ModelList = [new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "openai", ProviderModelId = "gpt-5.4" }]
     };
@@ -55,7 +55,7 @@ public sealed class ProviderAdminEndpointsTests
         server.Addresses.Single(a => a.StartsWith("http://", StringComparison.Ordinal)).TrimEnd('/');
 
     [Fact]
-    public async Task GetProviders_ReturnsProvidersWithModels_AndMasksApiKey()
+    public async Task GetProviders_ReturnsProvidersWithModels()
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());
         using var server = BuildServer(store);
@@ -70,9 +70,6 @@ public sealed class ProviderAdminEndpointsTests
 
             Assert.Equal("openai", provider.GetProperty("key").GetString());
             Assert.Equal("https://api.openai.com", provider.GetProperty("baseUrl").GetString());
-            Assert.True(provider.GetProperty("hasApiKey").GetBoolean());
-            // The literal key must never appear anywhere in the response payload.
-            Assert.DoesNotContain("sk-secret", json, StringComparison.Ordinal);
             Assert.Equal("gpt-5.4", provider.GetProperty("models").EnumerateArray().Single().GetProperty("modelName").GetString());
         }
         finally
@@ -94,7 +91,7 @@ public sealed class ProviderAdminEndpointsTests
 
             var putProvider = await client.PutAsync(
                 $"{baseAddress}/admin/providers/ollama",
-                JsonBody(new { baseUrl = "http://localhost:11434/v1", authHeaderName = "Authorization", authHeaderScheme = "Bearer" }),
+                JsonBody(new { baseUrl = "http://localhost:11434/v1", authHeaderName = "Authorization" }),
                 TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.OK, putProvider.StatusCode);
 
@@ -109,33 +106,6 @@ public sealed class ProviderAdminEndpointsTests
             using var document = JsonDocument.Parse(models);
             var ids = document.RootElement.GetProperty("data").EnumerateArray().Select(e => e.GetProperty("id").GetString()).ToList();
             Assert.Contains("llama3", ids);
-        }
-        finally
-        {
-            await server.StopAsync(TestContext.Current.CancellationToken);
-        }
-    }
-
-    [Fact]
-    public async Task PutProvider_EditWithoutApiKey_PreservesExistingKey()
-    {
-        var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store);
-        await server.StartAsync(TestContext.Current.CancellationToken);
-        try
-        {
-            using var client = new HttpClient();
-
-            // Edit only the BaseUrl; omit apiKey entirely (the GUI never resends the masked secret).
-            var response = await client.PutAsync(
-                $"{BaseAddress(server)}/admin/providers/openai",
-                JsonBody(new { baseUrl = "https://api.openai.com/v2" }),
-                TestContext.Current.CancellationToken);
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-            var stored = store.Snapshot.Options.Providers["openai"];
-            Assert.Equal("https://api.openai.com/v2", stored.BaseUrl);
-            Assert.Equal("sk-secret", stored.ApiKey);
         }
         finally
         {
@@ -200,89 +170,6 @@ public sealed class ProviderAdminEndpointsTests
             var stored = store.Snapshot.Options.Providers["openai"];
             Assert.Equal("https://api.openai.com/v2", stored.BaseUrl);
             Assert.True(stored.IsFree);
-        }
-        finally
-        {
-            await server.StopAsync(TestContext.Current.CancellationToken);
-        }
-    }
-
-    // Switching an existing literal-key provider to env-var mode must clear the stored key, not leave both
-    // credentials set (the "Save doesn't change the credential" bug).
-    [Fact]
-    public async Task PutProvider_SwitchToEnvVarMode_ClearsLiteralKey()
-    {
-        var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store);
-        await server.StartAsync(TestContext.Current.CancellationToken);
-        try
-        {
-            using var client = new HttpClient();
-
-            var response = await client.PutAsync(
-                $"{BaseAddress(server)}/admin/providers/openai",
-                JsonBody(new { baseUrl = "https://api.openai.com", apiKeyEnvVar = "OPENAI_API_KEY", credentialMode = "envVar" }),
-                TestContext.Current.CancellationToken);
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-            var stored = store.Snapshot.Options.Providers["openai"];
-            Assert.Null(stored.ApiKey);
-            Assert.Equal("OPENAI_API_KEY", stored.ApiKeyEnvVar);
-        }
-        finally
-        {
-            await server.StopAsync(TestContext.Current.CancellationToken);
-        }
-    }
-
-    // Selecting the "none" credential mode must clear both the literal key and any env-var reference.
-    [Fact]
-    public async Task PutProvider_NoneMode_ClearsAllCredentials()
-    {
-        var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store);
-        await server.StartAsync(TestContext.Current.CancellationToken);
-        try
-        {
-            using var client = new HttpClient();
-
-            var response = await client.PutAsync(
-                $"{BaseAddress(server)}/admin/providers/openai",
-                JsonBody(new { baseUrl = "https://api.openai.com", credentialMode = "none" }),
-                TestContext.Current.CancellationToken);
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-            var stored = store.Snapshot.Options.Providers["openai"];
-            Assert.Null(stored.ApiKey);
-            Assert.Null(stored.ApiKeyEnvVar);
-        }
-        finally
-        {
-            await server.StopAsync(TestContext.Current.CancellationToken);
-        }
-    }
-
-    // Under the literal mode, a blank key still preserves the stored secret (the GUI never receives it to
-    // resend) - the same guarantee the legacy no-mode edit gives, but asserted with the mode present.
-    [Fact]
-    public async Task PutProvider_LiteralModeBlankKey_PreservesExistingKey()
-    {
-        var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store);
-        await server.StartAsync(TestContext.Current.CancellationToken);
-        try
-        {
-            using var client = new HttpClient();
-
-            var response = await client.PutAsync(
-                $"{BaseAddress(server)}/admin/providers/openai",
-                JsonBody(new { baseUrl = "https://api.openai.com/v3", apiKey = (string?)null, credentialMode = "literal" }),
-                TestContext.Current.CancellationToken);
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-            var stored = store.Snapshot.Options.Providers["openai"];
-            Assert.Equal("https://api.openai.com/v3", stored.BaseUrl);
-            Assert.Equal("sk-secret", stored.ApiKey);
         }
         finally
         {
@@ -469,10 +356,12 @@ public sealed class ProviderAdminEndpointsTests
                 ["anthropic"] = new ProviderOptions
                 {
                     BaseUrl = "https://api.anthropic.com",
-                    ApiKey = "sk-ant-test",
                     AuthHeaderName = "x-api-key",
-                    AuthHeaderScheme = string.Empty,
-                    Headers = [new ProviderHeader { Name = "anthropic-version", Value = "2023-06-01" }]
+                    Headers =
+                    [
+                        new ProviderHeader { Name = "x-api-key", Value = "sk-ant-test" },
+                        new ProviderHeader { Name = "anthropic-version", Value = "2023-06-01" }
+                    ]
                 }
             },
             ModelList = []
@@ -713,9 +602,7 @@ public sealed class ProviderAdminEndpointsTests
                 ["bedrock"] = new ProviderOptions
                 {
                     BaseUrl = "https://bedrock-runtime.us-east-1.amazonaws.com",
-                    ApiKey = "sk-secret",
                     AuthHeaderName = "Authorization",
-                    AuthHeaderScheme = "Bearer",
                     IsFree = true,
                     Headers = [new ProviderHeader { Name = "anthropic-version", Value = "2023-06-01" }],
                     AwsRegion = "us-east-1",
@@ -743,8 +630,6 @@ public sealed class ProviderAdminEndpointsTests
             var stored = store.Snapshot.Options.Providers["bedrock"];
             Assert.False(stored.Enabled);
             Assert.Equal("https://bedrock-runtime.us-east-1.amazonaws.com", stored.BaseUrl);
-            Assert.Equal("sk-secret", stored.ApiKey);
-            Assert.Equal("Bearer", stored.AuthHeaderScheme);
             Assert.True(stored.IsFree);
             Assert.Equal("anthropic-version", Assert.Single(stored.Headers).Name);
             Assert.Equal("us-east-1", stored.AwsRegion);

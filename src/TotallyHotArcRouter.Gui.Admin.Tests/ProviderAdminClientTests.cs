@@ -17,9 +17,6 @@ public sealed class ProviderAdminClientTests
               "key": "openai",
               "baseUrl": "https://api.openai.com",
               "authHeaderName": "Authorization",
-              "authHeaderScheme": "Bearer",
-              "hasApiKey": true,
-              "apiKeyEnvVar": "OPENAI_API_KEY",
               "models": [ { "modelName": "gpt-5.4", "providerModelId": "gpt-5.4" } ],
               "headers": [ { "name": "anthropic-version", "value": "2023-06-01", "valueEnvVar": null } ],
               "dollarCap": 500.0,
@@ -44,8 +41,6 @@ public sealed class ProviderAdminClientTests
 
         var provider = Assert.Single(providers);
         Assert.Equal("openai", provider.Key);
-        Assert.True(provider.HasApiKey);
-        Assert.Equal("OPENAI_API_KEY", provider.ApiKeyEnvVar);
         Assert.Equal("gpt-5.4", Assert.Single(provider.Models).ModelName);
         Assert.Equal(HttpMethod.Get, handler.LastRequest!.Method);
         Assert.Equal("http://localhost:5001/admin/providers", handler.LastRequest.RequestUri!.ToString());
@@ -59,7 +54,7 @@ public sealed class ProviderAdminClientTests
 
         await client.UpsertProviderAsync(
             "ollama",
-            new ProviderWriteRequest(BaseUrl: "http://localhost:11434/v1", AuthHeaderName: "Authorization", AuthHeaderScheme: "Bearer", ApiKey: null, ApiKeyEnvVar: null),
+            new ProviderWriteRequest(BaseUrl: "http://localhost:11434/v1", AuthHeaderName: "Authorization"),
             TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpMethod.Put, handler.LastRequest!.Method);
@@ -77,7 +72,7 @@ public sealed class ProviderAdminClientTests
 
         await client.UpsertProviderAsync(
             "ollama",
-            new ProviderWriteRequest(BaseUrl: "http://localhost:11434/v1", AuthHeaderName: "Authorization", AuthHeaderScheme: "Bearer", ApiKey: null, ApiKeyEnvVar: null, IsFree: true),
+            new ProviderWriteRequest(BaseUrl: "http://localhost:11434/v1", AuthHeaderName: "Authorization", IsFree: true),
             TestContext.Current.CancellationToken);
 
         Assert.Contains("\"isFree\":true", handler.LastBody, StringComparison.Ordinal);
@@ -283,9 +278,6 @@ public sealed class ProviderAdminClientTests
                   "key": "lmstudio",
                   "baseUrl": "http://localhost:1234/v1",
                   "authHeaderName": "Authorization",
-                  "authHeaderScheme": "Bearer",
-                  "hasApiKey": false,
-                  "apiKeyEnvVar": null,
                   "models": [ { "modelName": "qwen2.5-coder", "providerModelId": "qwen2.5-coder", "dialect": "hermes", "confidence": "Observed", "enabled": false, "presentUpstream": false } ],
                   "headers": [],
                   "endpointCapabilities": {
@@ -445,7 +437,7 @@ public sealed class ProviderAdminClientTests
 
         await client.UpsertProviderAsync(
             "openai",
-            new ProviderWriteRequest(BaseUrl: null, AuthHeaderName: null, AuthHeaderScheme: null, ApiKey: null, ApiKeyEnvVar: null, ProviderName: "OpenAI API"),
+            new ProviderWriteRequest(BaseUrl: null, AuthHeaderName: null, ProviderName: "OpenAI API"),
             TestContext.Current.CancellationToken);
 
         Assert.Contains("\"providerName\":\"OpenAI API\"", handler.LastBody, StringComparison.Ordinal);
@@ -462,9 +454,6 @@ public sealed class ProviderAdminClientTests
                   "name": "OpenAI API",
                   "baseUrl": "https://api.openai.com",
                   "authHeaderName": "Authorization",
-                  "authHeaderScheme": "Bearer",
-                  "hasApiKey": true,
-                  "apiKeyEnvVar": null,
                   "models": [],
                   "headers": []
                 }

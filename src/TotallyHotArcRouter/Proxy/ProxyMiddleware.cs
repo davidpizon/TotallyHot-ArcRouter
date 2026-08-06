@@ -454,11 +454,21 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             var requestHopByHopHeaders = GetHopByHopHeaderNames(
                 context.Request.Headers.TryGetValue("Connection", out var requestConnectionValues) ? requestConnectionValues : default);
 
+            // A client header matching the provider's configured auth header name is only skipped here when
+            // the provider's configuration actually declares one (route.AuthHeaderConfigured) - otherwise an
+            // unauthenticated provider (e.g. a free local runtime with no auth header entry) would silently
+            // drop a client's own header of that name with nothing forwarded in its place. This is deliberately
+            // based on configuration intent rather than whether the header resolved into route.ExtraHeaders
+            // *this request* - a provider whose credential env var is temporarily unset must still have the
+            // client's own header stripped (failing closed with no credential forwarded), not let the client's
+            // header through as a stand-in for the operator-configured one.
+            var providerSuppliesAuthHeader = route.AuthHeaderConfigured;
+
             foreach (var header in context.Request.Headers)
             {
                 if (AlwaysSkippedRequestHeaders.Contains(header.Key, StringComparer.OrdinalIgnoreCase) ||
                     requestHopByHopHeaders.Contains(header.Key) ||
-                    string.Equals(header.Key, route.AuthHeaderName, StringComparison.OrdinalIgnoreCase))
+                    (providerSuppliesAuthHeader && string.Equals(header.Key, route.AuthHeaderName, StringComparison.OrdinalIgnoreCase)))
                 {
                     continue;
                 }
@@ -469,14 +479,13 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             requestMessage.Content = new ByteArrayContent(forwardBody);
             requestMessage.Content.Headers.TryAddWithoutValidation("Content-Type", "application/json");
 
-            if (route.AuthHeaderValue is not null)
-            {
-                requestMessage.Headers.TryAddWithoutValidation(route.AuthHeaderName, route.AuthHeaderValue);
-            }
-
-            // Provider-configured custom headers (e.g. anthropic-version). Added only when the client didn't
-            // already send that header, so a client supplying its own value keeps it rather than having it
-            // clobbered or duplicated. Client headers were copied into requestMessage.Headers above.
+            // Provider-configured custom headers (e.g. anthropic-version, and whichever header carries
+            // authentication). Added only when the client didn't already send that header, so a client
+            // supplying its own value keeps it rather than having it clobbered or duplicated. Client headers
+            // were copied into requestMessage.Headers above - except the auth header, which was skipped there
+            // by name (and thus sourced from here instead) only when the provider actually has one configured
+            // (route.AuthHeaderConfigured); for a provider with no auth header configured, the client's own
+            // header of that name was left in place and nothing here touches it.
             foreach (var (headerName, headerValue) in route.ExtraHeaders)
             {
                 if (!requestMessage.Headers.Contains(headerName))
