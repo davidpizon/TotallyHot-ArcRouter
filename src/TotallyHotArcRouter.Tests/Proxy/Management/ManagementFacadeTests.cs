@@ -291,6 +291,84 @@ public sealed class ManagementFacadeTests
     }
 
     [Fact]
+    public async Task UpsertProviderAsync_MigratingLegacyApiKeyIntoASameNamedHeader_PreservesItLocked()
+    {
+        var store = new InMemoryProviderConfigStore(SeedOptions());
+        var facade = CreateFacade(store);
+
+        // This is what ProviderEditDialog now always sends for a provider that still had the pre-custom-
+        // headers legacy ApiKey: CredentialMode "none" (clearing it) plus a same-named, blank, locked
+        // header row - which must migrate the legacy secret into that header rather than losing it.
+        var request = new ProviderWriteRequest(
+            BaseUrl: "https://api.openai.com",
+            AuthHeaderName: "Authorization",
+            AuthHeaderScheme: string.Empty,
+            ApiKey: null,
+            ApiKeyEnvVar: null,
+            CredentialMode: "none",
+            Headers: [new HeaderWriteRequest(Name: "Authorization", Value: null, ValueEnvVar: null, Locked: true)]);
+
+        var result = await facade.UpsertProviderAsync("openai", request, TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success);
+        Assert.Null(store.Snapshot.Options.Providers["openai"].ApiKey);
+        var stored = store.Snapshot.Options.Providers["openai"].Headers.Single(h => h.Name == "Authorization");
+        Assert.Equal("sk-secret", stored.Value);
+        Assert.True(stored.Locked);
+    }
+
+    [Fact]
+    public async Task UpsertProviderAsync_MigratingLegacyApiKey_NeverStoresItAsAnUnlockedLiteral()
+    {
+        var store = new InMemoryProviderConfigStore(SeedOptions());
+        var facade = CreateFacade(store);
+
+        // A caller could not have read the legacy ApiKey from any prior response, so a migration write must
+        // never be able to turn it into an unlocked (readable) literal in one step - Locked forces true for
+        // the migrated value regardless of what the request's Locked flag says.
+        var request = new ProviderWriteRequest(
+            BaseUrl: "https://api.openai.com",
+            AuthHeaderName: "Authorization",
+            AuthHeaderScheme: string.Empty,
+            ApiKey: null,
+            ApiKeyEnvVar: null,
+            CredentialMode: "none",
+            Headers: [new HeaderWriteRequest(Name: "Authorization", Value: null, ValueEnvVar: null, Locked: false)]);
+
+        await facade.UpsertProviderAsync("openai", request, TestContext.Current.CancellationToken);
+
+        var stored = store.Snapshot.Options.Providers["openai"].Headers.SingleOrDefault(h => h.Name == "Authorization");
+        // Locked: false with a blank value is the "explicitly clear it" write (see
+        // UpsertProviderAsync_ExplicitlyUnlockedHeaderBlank_ClearsTheStoredValue) - it must not be
+        // reinterpreted as "migrate and expose" just because a legacy secret happens to share the name.
+        Assert.True(stored is null || stored.Value is null);
+    }
+
+    [Fact]
+    public async Task UpsertProviderAsync_HeaderAlreadyExistsUnderTheAuthHeaderName_IsNotOverwrittenByLegacyMigration()
+    {
+        var store = new InMemoryProviderConfigStore(SeedOptions());
+        var facade = CreateFacade(store);
+
+        // The provider's auth was already migrated to a custom header by an earlier save - a fresh legacy
+        // ApiKey fallback must never clobber it.
+        var request = new ProviderWriteRequest(
+            BaseUrl: "https://api.openai.com",
+            AuthHeaderName: "Authorization",
+            AuthHeaderScheme: string.Empty,
+            ApiKey: null,
+            ApiKeyEnvVar: null,
+            CredentialMode: "none",
+            Headers: [new HeaderWriteRequest(Name: "X-Literal", Value: null, ValueEnvVar: null, Locked: true)]);
+
+        await facade.UpsertProviderAsync("openai", request, TestContext.Current.CancellationToken);
+
+        var stored = store.Snapshot.Options.Providers["openai"].Headers.Single(h => h.Name == "X-Literal");
+        Assert.Equal("literal-secret", stored.Value);
+        Assert.True(stored.Locked);
+    }
+
+    [Fact]
     public async Task UpsertProviderAsync_LockingAnExistingHeader_DoesNotRequireResendingTheValue()
     {
         var store = new InMemoryProviderConfigStore(new ModelRoutingOptions

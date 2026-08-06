@@ -881,12 +881,9 @@ public sealed class ManagementFacade
         // header when looking up the value to preserve - otherwise a casing mismatch between what was
         // stored and what the caller resends silently drops the stored secret instead of keeping it.
         var existing = existingHeaders.FirstOrDefault(h => string.Equals(h.Name, name, StringComparison.OrdinalIgnoreCase));
-        var preservedValue = existing?.Value;
-        if (preservedValue is null && existing is null && !string.IsNullOrWhiteSpace(legacyApiKey)
-            && string.Equals(name, legacyAuthHeaderName, StringComparison.OrdinalIgnoreCase))
-        {
-            preservedValue = legacyApiKey;
-        }
+        var usedLegacySecret = existing is null && !string.IsNullOrWhiteSpace(legacyApiKey)
+            && string.Equals(name, legacyAuthHeaderName, StringComparison.OrdinalIgnoreCase);
+        var preservedValue = existing?.Value ?? (usedLegacySecret ? legacyApiKey : null);
 
         return new ProviderHeader
         {
@@ -894,8 +891,12 @@ public sealed class ManagementFacade
             Value = preservedValue,
             ValueEnvVar = existing?.ValueEnvVar,
             // Only a literal can be a secret, so a preserved env-var (or valueless) header stores unlocked
-            // no matter what the caller asked for.
-            Locked = !string.IsNullOrWhiteSpace(preservedValue) && locked
+            // no matter what the caller asked for. A migrated legacy secret always stores locked regardless
+            // of the caller's Locked flag - tracked via usedLegacySecret rather than inferred from
+            // reachability, so this can't be silently reopened by a future change to the early-return above
+            // - the caller was never shown this value, so a single write must not be able to make it
+            // readable.
+            Locked = usedLegacySecret || (!string.IsNullOrWhiteSpace(preservedValue) && locked)
         };
     }
 
