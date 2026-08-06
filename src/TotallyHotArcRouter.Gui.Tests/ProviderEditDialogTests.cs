@@ -148,8 +148,33 @@ public sealed class ProviderEditDialogTests
         saved.ApiKey.Should().BeNull();
         saved.ApiKeyEnvVar.Should().BeNull();
         saved.AuthHeaderScheme.Should().BeEmpty();
-        // The auth header name is still carried through unchanged, even though this dialog no longer edits it.
-        saved.AuthHeaderName.Should().Be("x-api-key");
+        // No ProviderType parameter is seeded, so the dialog falls back to Other, whose template names
+        // "Authorization" - not the stale "x-api-key" the AuthHeaderName parameter was seeded with. See
+        // Save_derives_auth_header_name_from_the_selected_provider_type for the templated case.
+        saved.AuthHeaderName.Should().Be("Authorization");
+    }
+
+    [Fact]
+    public void Save_derives_auth_header_name_from_the_selected_provider_type()
+    {
+        using var ctx = new Bunit.BunitContext();
+
+        // AuthHeaderName must track the header the operator actually authenticates with, not a value left
+        // over from before this dialog stopped letting them edit it directly - so switching provider type to
+        // one with a documented auth header (Anthropic's x-api-key) must override whatever the AuthHeaderName
+        // parameter (or, absent a selected type, its template) would otherwise have produced.
+        ProviderEditDialog.ProviderEditResult? saved = null;
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(parameters);
+            parameters.Add(p => p.OnSave, (ProviderEditDialog.ProviderEditResult r) => saved = r);
+        });
+
+        cut.Find("[data-testid='provider-type']").Change(nameof(ProviderType.Anthropic));
+        FindSaveButton(cut).Click();
+
+        saved.Should().NotBeNull();
+        saved!.AuthHeaderName.Should().Be("x-api-key");
     }
 
     [Fact]
