@@ -482,8 +482,10 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // Provider-configured custom headers (e.g. anthropic-version, and whichever header carries
             // authentication). Added only when the client didn't already send that header, so a client
             // supplying its own value keeps it rather than having it clobbered or duplicated. Client headers
-            // were copied into requestMessage.Headers above - except the auth header, skipped there by name
-            // so it is always sourced from here instead.
+            // were copied into requestMessage.Headers above - except the auth header, which was skipped there
+            // by name (and thus sourced from here instead) only when the provider actually has one configured
+            // (route.AuthHeaderConfigured); for a provider with no auth header configured, the client's own
+            // header of that name was left in place and nothing here touches it.
             foreach (var (headerName, headerValue) in route.ExtraHeaders)
             {
                 if (!requestMessage.Headers.Contains(headerName))
