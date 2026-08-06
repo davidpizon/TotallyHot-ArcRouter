@@ -59,6 +59,34 @@ channel. `signalr-hub-security.md`'s section 2 (shared secret/token) is still th
 design for this, needing translation from a SignalR `AccessTokenProvider` to a gRPC interceptor/call
 credential, per that doc's own status banner.
 
+### 3. Anthropic Reported Usage section (per-provider card, enterprise accounts)
+
+Governance > Providers cards have no way to show Anthropic's own authoritative usage/cost
+numbers — the existing "Monthly Budget" section
+([`ProvidersAdmin.razor`](../../src/TotallyHotArcRouter.Gui/Components/ProvidersAdmin.razor))
+renders bar charts, but they're driven entirely by the proxy's own internal request tally
+(`ProviderBudgetStore`), not by Anthropic. The proposed feature:
+
+- **What**: a new "Anthropic Reported Usage" section on a provider card, shown only when
+  `ProviderType == Anthropic` *and* the provider is flagged as an enterprise Anthropic account — a
+  concept that doesn't exist yet and needs to be designed (likely a new field on
+  `ProviderAdminView`/`ProviderWriteRequest`, alongside `ProviderTemplates.cs`'s existing per-type
+  metadata).
+- **Data source**: Anthropic's [Usage & Cost Admin
+  API](https://platform.claude.com/docs/en/manage-claude/usage-cost-api) — token usage and cost
+  reports over a trailing 30-day window, fetched automatically whenever the card loads.
+- **Blocking prerequisite**: the Usage/Cost API requires an org-level **Admin API key**, distinct
+  from the per-provider `x-api-key` credential a provider already stores for completions
+  ([`ProviderTemplates.cs`](../../src/TotallyHotArcRouter.Gui.Admin/ProviderTemplates.cs)). There's
+  no sourcing mechanism for this key today (env var convention vs. a dedicated provider-editor field
+  is still an open choice) — this is the actual reason the feature isn't buildable yet, not just the
+  enterprise-account flag.
+- **Display**: bar charts, reusing the existing `EChart`/`ChartJson` pattern from the Monthly Budget
+  section, plus a visible "fetched at" timestamp — Anthropic's reported numbers are only trustworthy
+  as of the moment they were pulled. This is additive, not a replacement: Anthropic's API has no
+  endpoint to read back a spend *limit*, so it can't drive the existing local $/token cap-utilization
+  bars, which stay exactly as they are.
+
 ## Recently completed
 
 ### ✅ Cost Analytics bespoke per-metric charts + whole-app move to Apache ECharts
