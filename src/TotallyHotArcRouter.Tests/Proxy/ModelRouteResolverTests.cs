@@ -29,6 +29,47 @@ public class ModelRouteResolverTests
     }
 
     [Fact]
+    public void TryResolve_EnvVarHeader_ResolvesValueFromEnvironment()
+    {
+        var environment = new Mock<IEnvironmentVariableProvider>();
+        environment.Setup(e => e.GetVariable("MY_PROVIDER_API_KEY")).Returns("Bearer resolved-from-env");
+
+        var resolver = ModelRouteResolverTestFactory.Create(
+            modelName: "gpt-5.4",
+            providerModelId: "gpt-5.4-2026-01",
+            baseUrl: "https://api.openai.com",
+            authHeaderName: "Authorization",
+            apiKey: null,
+            headers: [new ProviderHeader { Name = "Authorization", ValueEnvVar = "MY_PROVIDER_API_KEY" }],
+            environment: environment.Object);
+
+        var resolved = resolver.TryResolve("gpt-5.4", out var route);
+
+        Assert.True(resolved);
+        var header = Assert.Single(route!.ExtraHeaders);
+        Assert.Equal("Authorization", header.Key);
+        Assert.Equal("Bearer resolved-from-env", header.Value);
+    }
+
+    [Fact]
+    public void TryResolve_EnvVarHeaderMissingFromEnvironment_OmitsTheHeader()
+    {
+        var resolver = ModelRouteResolverTestFactory.Create(
+            modelName: "gpt-5.4",
+            providerModelId: "gpt-5.4-2026-01",
+            baseUrl: "https://api.openai.com",
+            authHeaderName: "Authorization",
+            apiKey: null,
+            headers: [new ProviderHeader { Name = "Authorization", ValueEnvVar = "UNSET_PROVIDER_API_KEY" }],
+            environment: Mock.Of<IEnvironmentVariableProvider>());
+
+        var resolved = resolver.TryResolve("gpt-5.4", out var route);
+
+        Assert.True(resolved);
+        Assert.Empty(route!.ExtraHeaders);
+    }
+
+    [Fact]
     public void ToString_RedactsAwsSecrets_ButKeepsNonSecretFieldsVisible()
     {
         var route = new ResolvedModelRoute(

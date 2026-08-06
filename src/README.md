@@ -30,12 +30,17 @@ header whose value is read from an environment variable at request time. Set
 only the variables for the providers you plan to use:
 
 ```bash
-export OPENAI_API_KEY="<your-openai-key>"
+# OpenAI, Qwen, GLM, Kimi, and MiniMax send auth as "Authorization: Bearer <key>" - since
+# there is no separate scheme field (see below), the "Bearer " prefix must be part of the
+# variable's value itself.
+export OPENAI_API_KEY="Bearer <your-openai-key>"
+export QWEN_API_KEY="Bearer <your-alibaba-key>"
+export GLM_API_KEY="Bearer <your-zhipu-key>"
+export KIMI_API_KEY="Bearer <your-moonshot-key>"
+export MINIMAX_API_KEY="Bearer <your-minimax-key>"
+
+# Anthropic sends its raw key with no scheme prefix.
 export ANTHROPIC_API_KEY="<your-anthropic-key>"
-export QWEN_API_KEY="<your-alibaba-key>"
-export GLM_API_KEY="<your-zhipu-key>"
-export KIMI_API_KEY="<your-moonshot-key>"
-export MINIMAX_API_KEY="<your-minimax-key>"
 ```
 
 If a provider's key is missing, requests to models routed to that provider

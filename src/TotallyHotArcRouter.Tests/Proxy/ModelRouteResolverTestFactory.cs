@@ -26,7 +26,8 @@ internal static class ModelRouteResolverTestFactory
         IReadOnlyList<ProviderHeader>? headers = null,
         bool isFree = false,
         string? awsRegion = null,
-        bool enableToolCallGuard = false)
+        bool enableToolCallGuard = false,
+        IEnvironmentVariableProvider? environment = null)
     {
         List<ProviderHeader> allHeaders = [];
         if (!string.IsNullOrWhiteSpace(apiKey))
@@ -60,7 +61,7 @@ internal static class ModelRouteResolverTestFactory
             ]
         };
 
-        return new ModelRouteResolver(new InMemoryProviderConfigStore(options), Mock.Of<IEnvironmentVariableProvider>());
+        return new ModelRouteResolver(new InMemoryProviderConfigStore(options), environment ?? Mock.Of<IEnvironmentVariableProvider>());
     }
 
     /// <summary>

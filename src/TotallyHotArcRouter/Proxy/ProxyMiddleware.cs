@@ -454,11 +454,17 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             var requestHopByHopHeaders = GetHopByHopHeaderNames(
                 context.Request.Headers.TryGetValue("Connection", out var requestConnectionValues) ? requestConnectionValues : default);
 
+            // A client header matching the provider's configured auth header name is only skipped here when
+            // the provider actually re-injects one below (via ExtraHeaders) - otherwise an unauthenticated
+            // provider (e.g. a free local runtime with no auth header entry) would silently drop a client's
+            // own header of that name with nothing forwarded in its place.
+            var providerSuppliesAuthHeader = route.ExtraHeaders.Any(h => string.Equals(h.Key, route.AuthHeaderName, StringComparison.OrdinalIgnoreCase));
+
             foreach (var header in context.Request.Headers)
             {
                 if (AlwaysSkippedRequestHeaders.Contains(header.Key, StringComparer.OrdinalIgnoreCase) ||
                     requestHopByHopHeaders.Contains(header.Key) ||
-                    string.Equals(header.Key, route.AuthHeaderName, StringComparison.OrdinalIgnoreCase))
+                    (providerSuppliesAuthHeader && string.Equals(header.Key, route.AuthHeaderName, StringComparison.OrdinalIgnoreCase)))
                 {
                     continue;
                 }
