@@ -140,10 +140,13 @@ public sealed class ProviderEditDialogTests
         FindSaveButton(cut).Click();
 
         saved.Should().NotBeNull();
-        // No ProviderType parameter is seeded, so the dialog falls back to Other, whose template names
-        // "Authorization" - not the stale "x-api-key" the AuthHeaderName parameter was seeded with. See
-        // Save_derives_auth_header_name_from_the_selected_provider_type for the templated case.
-        saved!.AuthHeaderName.Should().Be("Authorization");
+        // No ProviderType parameter is seeded, so the dialog falls back to Other - which every provider
+        // configured before the ProviderType field existed also falls back to. Other's own template says
+        // "Authorization", but that must not override an already-configured non-default header (the
+        // "x-api-key" the AuthHeaderName parameter was seeded with here): Other isn't an authoritative
+        // choice the operator actually made. See Save_derives_auth_header_name_from_the_selected_provider_type
+        // for the case where they do pick a templated type.
+        saved!.AuthHeaderName.Should().Be("x-api-key");
     }
 
     [Fact]
@@ -415,10 +418,11 @@ public sealed class ProviderEditDialogTests
             parameters.Add(p => p.OnSave, (ProviderEditDialog.ProviderEditResult r) => saved = r);
         });
 
-        // With no ProviderType parameter set, the dialog falls back to the "Other" template, whose
-        // documented auth header is "Authorization" (see ResolveSavedAuthHeaderName / ProviderTemplates).
+        // With no ProviderType parameter set, the dialog falls back to Other - not an authoritative
+        // template choice, so ResolveSavedAuthHeaderName preserves the seeded AuthHeaderName ("x-api-key")
+        // rather than overwriting it with Other's own "Authorization".
         cut.Find("[data-testid='add-header']").Click();
-        cut.Find("[data-testid='header-name-0']").Input("Authorization");
+        cut.Find("[data-testid='header-name-0']").Input("x-api-key");
         cut.Find("[data-testid='header-value-0']").Input("super-secret-key");
 
         // The row's own padlock was never touched - it is still showing unlocked.
@@ -427,7 +431,7 @@ public sealed class ProviderEditDialogTests
         FindSaveButton(cut).Click();
 
         var header = saved!.Headers.Should().ContainSingle().Subject;
-        header.Name.Should().Be("Authorization");
+        header.Name.Should().Be("x-api-key");
         header.Value.Should().Be("super-secret-key");
         header.Locked.Should().BeTrue();
     }

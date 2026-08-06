@@ -342,25 +342,45 @@
         }
     }
 
+    /// <summary>Looks up the selected provider type's documented auth header (e.g. Anthropic's
+    /// <c>x-api-key</c>), the source both <see cref="AuthHeaderHint"/> and
+    /// <see cref="ResolveSavedAuthHeaderName"/> defer to when it's authoritative. <see cref="ProviderType.Other"/>
+    /// is deliberately excluded even though it has a template entry: it's the type every provider configured
+    /// before this field existed falls back to, so treating its "Authorization" as authoritative would
+    /// silently overwrite an already-working non-default header name (e.g. "x-api-key") the moment such a
+    /// provider is saved through this dialog without the operator touching provider type at all.</summary>
+    private bool TryGetTemplateAuthHeaderName([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? authHeaderName)
+    {
+        if (_selectedProviderType != TotallyHot.ArcRouter.Gui.Admin.ProviderType.Other
+            && ProviderTemplates.Templates.TryGetValue(_selectedProviderType, out var template)
+            && !string.IsNullOrWhiteSpace(template.AuthHeaderName))
+        {
+            authHeaderName = template.AuthHeaderName;
+            return true;
+        }
+
+        authHeaderName = null;
+        return false;
+    }
+
     /// <summary>The auth header name to show in the "add a header" hint: the selected provider type's
-    /// documented auth header when known (e.g. Anthropic's <c>x-api-key</c>), falling back to
-    /// <c>Authorization</c> for types with no template entry. Keeps the hint from steering an operator
-    /// toward the wrong header name for providers that don't use <c>Authorization</c>.</summary>
+    /// documented auth header when known, falling back to the provider's existing
+    /// <see cref="AuthHeaderName"/> (and then <c>Authorization</c>) otherwise. Keeps the hint from steering
+    /// an operator toward the wrong header name for providers that don't use <c>Authorization</c>.</summary>
     private string AuthHeaderHint =>
-        ProviderTemplates.Templates.TryGetValue(_selectedProviderType, out var template)
-            && !string.IsNullOrWhiteSpace(template.AuthHeaderName)
-            ? template.AuthHeaderName
-            : "Authorization";
+        TryGetTemplateAuthHeaderName(out var templateAuthHeaderName)
+            ? templateAuthHeaderName
+            : string.IsNullOrWhiteSpace(AuthHeaderName) ? "Authorization" : AuthHeaderName.Trim();
 
     /// <summary>The <see cref="ProviderEditResult.AuthHeaderName"/> to save. It must track the header the
     /// operator actually authenticates with rather than a stale value from before this dialog stopped
-    /// letting them edit it directly: prefers the selected provider type's
-    /// documented auth header (e.g. Anthropic's <c>x-api-key</c>, the same lookup as <see cref="AuthHeaderHint"/>),
-    /// falling back to the existing <see cref="AuthHeaderName"/> parameter for types with no template entry.</summary>
+    /// letting them edit it directly: prefers the selected provider type's documented auth header (the same
+    /// lookup as <see cref="AuthHeaderHint"/>), falling back to the existing <see cref="AuthHeaderName"/>
+    /// parameter for types with no authoritative template entry - which keeps an already-configured
+    /// provider's non-default header (e.g. "x-api-key") intact across saves that don't change its type.</summary>
     private string ResolveSavedAuthHeaderName() =>
-        ProviderTemplates.Templates.TryGetValue(_selectedProviderType, out var template)
-            && !string.IsNullOrWhiteSpace(template.AuthHeaderName)
-            ? template.AuthHeaderName
+        TryGetTemplateAuthHeaderName(out var templateAuthHeaderName)
+            ? templateAuthHeaderName
             : string.IsNullOrWhiteSpace(AuthHeaderName) ? "Authorization" : AuthHeaderName.Trim();
 
     private async Task Save()
