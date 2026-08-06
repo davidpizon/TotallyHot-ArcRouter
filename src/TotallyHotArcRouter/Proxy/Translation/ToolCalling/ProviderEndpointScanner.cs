@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using TotallyHot.ArcRouter.Models;
 
@@ -24,6 +25,21 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// </summary>
 public sealed class ProviderEndpointScanner
 {
+    /// <summary>
+    /// A model id no real deployment will recognize, sent in the opt-in <c>/v1/messages</c> probe. Chosen
+    /// so the probe's own request can never accidentally name a model that actually exists and gets
+    /// generated against - see <see cref="ProbeAnthropicMessagesAsync"/>.
+    /// </summary>
+    private const string AnthropicProbeModel = "arcrouter-capability-probe";
+
+    /// <summary>
+    /// The opt-in <c>/v1/messages</c> probe's request body: the sentinel model id above, a one-token budget,
+    /// and the shortest well-formed user message. Fixed and literal because it never varies - see
+    /// <see cref="ProbeAnthropicMessagesAsync"/> for why a small, static payload is the point.
+    /// </summary>
+    private const string AnthropicMessagesProbeBody =
+        $$"""{"model":"{{AnthropicProbeModel}}","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}""";
+
     private readonly HttpClient _httpClient;
     private readonly IEnvironmentVariableProvider _environment;
 
@@ -85,6 +101,17 @@ public sealed class ProviderEndpointScanner
 
         var (openAiCompatible, anthropicCompatible, unrecognizedBody) = ClassifyModelsBody(openAiProbe);
 
+        // Opt-in only, and only when the model list didn't already answer the question - see
+        // ProviderOptions.ProbeAnthropicMessages and ProbeAnthropicMessagesAsync for why this probe is not
+        // unconditional like the three GET probes above.
+        string? messagesProbeError = null;
+        if (!anthropicCompatible && provider.ProbeAnthropicMessages)
+        {
+            var messagesProbe = await ProbeAnthropicMessagesAsync(provider, cancellationToken).ConfigureAwait(false);
+            anthropicCompatible = messagesProbe.Compatible;
+            messagesProbeError = messagesProbe.Error;
+        }
+
         var anyAnswered = openAiCompatible || anthropicCompatible || lmStudioProbe.Succeeded || ollamaProbe.Succeeded;
 
         // A 2xx whose body is not a model list is the most confusing failure mode to debug, and the one the
@@ -109,7 +136,7 @@ public sealed class ProviderEndpointScanner
             // every normal cloud provider look broken.
             ScanError: anyAnswered
                 ? null
-                : SummarizeFailure(openAiFailure, lmStudioProbe.Error, ollamaProbe.Error));
+                : SummarizeFailure(openAiFailure, lmStudioProbe.Error, ollamaProbe.Error, messagesProbeError));
     }
 
     /// <summary>
@@ -156,6 +183,101 @@ public sealed class ProviderEndpointScanner
             // A 200 whose body is not JSON is not a model list, whatever it is - most often a captive
             // portal, a reverse proxy error page, or an SSO redirect landing page.
             return (false, false, "The models endpoint returned a success status but the body was not valid JSON.");
+        }
+    }
+
+    /// <summary>
+    /// The opt-in probe for Anthropic Messages API support that <c>GET /v1/models</c> cannot see: a local
+    /// runtime whose model list answers in plain OpenAI shape but that separately understands
+    /// <c>POST /v1/messages</c> too (e.g. a recent LM Studio build).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Only called when <see cref="ProviderOptions.ProbeAnthropicMessages"/> is set - see that property's
+    /// docs for why this probe, unlike every GET above, defaults to off. The sentinel
+    /// <see cref="AnthropicProbeModel"/> id and one-token budget keep it lightweight even when a
+    /// misconfigured or unusually permissive endpoint does resolve it: at worst, one real token generates.
+    /// </para>
+    /// <para>
+    /// Classified by response shape rather than status code, the same approach <see cref="ClassifyModelsBody"/>
+    /// uses: the sentinel model does not exist on a real deployment, so the expected outcome is a rejection,
+    /// and only a rejection shaped like Anthropic's own error envelope
+    /// (<c>{"type":"error","error":{"type":...}}</c>) - or, on a passthrough that resolves the id anyway, an
+    /// actual message response (<c>{"type":"message",...}</c>) - counts as compatible. Any other shape,
+    /// including a generic 404 or an OpenAI-style error body, means the endpoint does not speak this dialect.
+    /// </para>
+    /// </remarks>
+    private async Task<(bool Compatible, string? Error)> ProbeAnthropicMessagesAsync(
+        ProviderOptions provider, CancellationToken cancellationToken)
+    {
+        var url = ProviderUrlBuilder.BuildMessagesUrl(provider.BaseUrl);
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var target))
+        {
+            return (false, $"Invalid probe URL '{url}'.");
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, target)
+        {
+            Content = new StringContent(AnthropicMessagesProbeBody, Encoding.UTF8, "application/json"),
+        };
+
+        var rejectedHeaders = ProviderCredentialResolver.ApplyToRequest(request, provider, _environment);
+
+        try
+        {
+            using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            if (ClassifyMessagesBody(response.IsSuccessStatusCode, body))
+            {
+                return (true, null);
+            }
+
+            // Not an exception, but not a match either: the endpoint answered, just not with a body shaped
+            // like Anthropic's dialect. Recorded so an opted-in probe that found nothing still shows up in
+            // ScanError instead of silently vanishing when nothing else answers.
+            return (false, Explain($"{target} returned {(int)response.StatusCode} with a body that did not match the Anthropic Messages API shape.", rejectedHeaders));
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException)
+        {
+            return (false, Explain($"{target}: {ex.Message}", rejectedHeaders));
+        }
+    }
+
+    /// <summary>
+    /// Decides whether a <c>/v1/messages</c> response proves the endpoint speaks the Anthropic dialect - see
+    /// <see cref="ProbeAnthropicMessagesAsync"/>'s remarks for why both a success and an Anthropic-shaped
+    /// error count, and a generic error does not.
+    /// </summary>
+    private static bool ClassifyMessagesBody(bool succeeded, string? body)
+    {
+        if (string.IsNullOrEmpty(body))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            if (succeeded)
+            {
+                return document.RootElement.TryGetProperty("type", out var messageType)
+                    && messageType.ValueEquals("message");
+            }
+
+            return document.RootElement.TryGetProperty("type", out var errorType)
+                && errorType.ValueEquals("error")
+                && document.RootElement.TryGetProperty("error", out var errorObject)
+                && errorObject.ValueKind == JsonValueKind.Object
+                && errorObject.TryGetProperty("type", out _);
+        }
+        catch (JsonException)
+        {
+            return false;
         }
     }
 

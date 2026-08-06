@@ -213,6 +213,27 @@ public sealed record ProviderOptions
     public bool EnableToolCallGuard { get; init; }
 
     /// <summary>
+    /// Gets whether the endpoint-capability scan may additionally probe <c>POST {base}/v1/messages</c> with
+    /// a synthetic, unrecognized model id to detect Anthropic Messages API support that <c>GET /v1/models</c>
+    /// alone cannot see - the case of a local runtime (e.g. LM Studio) that lists its models in plain
+    /// OpenAI shape but separately answers the Anthropic dialect too.
+    /// <para>
+    /// Defaults to <see langword="false"/>. Unlike every other probe
+    /// <c>TotallyHot.ArcRouter.Proxy.Translation.ToolCalling.ProviderEndpointScanner</c> issues, a POST reaches
+    /// request-handling code on the far end, and some servers may still engage a model even for an id they
+    /// don't recognize - the same JIT-load concern
+    /// <c>TotallyHot.ArcRouter.Proxy.Translation.ToolCalling.ProviderEndpointCapabilities.JsonSchemaResponseFormat</c>'s
+    /// docs describe for why that flag is inferred rather than probed. An operator enables this only for an
+    /// endpoint they trust to receive it - a local development server, not a production account.
+    /// </para>
+    /// <para>
+    /// The probe only fires when <c>GET /v1/models</c> did not already classify the endpoint as
+    /// Anthropic-compatible, so opting in never adds a network call the scan would have made anyway.
+    /// </para>
+    /// </summary>
+    public bool ProbeAnthropicMessages { get; init; }
+
+    /// <summary>
     /// Gets the AWS region for an Amazon Bedrock provider (e.g. <c>us-east-1</c>), passed to
     /// <c>RegionEndpoint.GetBySystemName</c> when constructing the Bedrock Runtime SDK client (PLAN.md
     /// TODO 4's "Unified API Translation" pillar, Bedrock slice - see
@@ -281,6 +302,7 @@ public sealed record ProviderOptions
         builder.Append(", IsFree = ").Append(IsFree);
         builder.Append(", Enabled = ").Append(Enabled);
         builder.Append(", EnableToolCallGuard = ").Append(EnableToolCallGuard);
+        builder.Append(", ProbeAnthropicMessages = ").Append(ProbeAnthropicMessages);
         builder.Append(", AwsRegion = ").Append(AwsRegion);
         builder.Append(", AwsAccessKeyIdEnvVar = ").Append(AwsAccessKeyIdEnvVar);
         builder.Append(", AwsSecretAccessKeyEnvVar = ").Append(AwsSecretAccessKeyEnvVar);

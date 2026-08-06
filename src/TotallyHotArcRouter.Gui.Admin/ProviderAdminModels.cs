@@ -29,6 +29,12 @@ namespace TotallyHot.ArcRouter.Gui.Admin;
 /// <see cref="Admin.ProviderType.Other"/>). Round-tripping this is what lets the editor reopen a provider
 /// with its own type - and therefore its own credential defaults - already selected.
 /// </param>
+/// <param name="EndpointCapabilities">
+/// Which API flavors this provider's endpoint last answered to, as recorded by the proxy's own capability
+/// scan (see <see cref="ProviderEndpointCapabilitiesView"/>), or <see langword="null"/> when the endpoint
+/// has never been scanned. Drives the API badges shown next to the provider name in Governance &gt;
+/// Providers.
+/// </param>
 public sealed record ProviderAdminView(
     string Key,
     string? Name,
@@ -45,7 +51,8 @@ public sealed record ProviderAdminView(
     decimal DollarSpent = 0m,
     long TokensUsed = 0L,
     bool Enabled = true,
-    string? ProviderType = null);
+    string? ProviderType = null,
+    ProviderEndpointCapabilitiesView? EndpointCapabilities = null);
 
 /// <summary>A configured model as returned by the management API.</summary>
 /// <param name="ModelName">The client-facing model name.</param>

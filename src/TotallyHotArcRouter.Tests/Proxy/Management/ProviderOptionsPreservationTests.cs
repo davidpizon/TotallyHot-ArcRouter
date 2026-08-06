@@ -47,6 +47,7 @@ public sealed class ProviderOptionsPreservationTests
         IsFree = true,
         Enabled = false,
         EnableToolCallGuard = true,
+        ProbeAnthropicMessages = true,
         AwsRegion = "us-east-1",
         AwsAccessKeyIdEnvVar = "AWS_ID",
         AwsSecretAccessKeyEnvVar = "AWS_SECRET",

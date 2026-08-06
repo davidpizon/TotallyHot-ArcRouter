@@ -36,6 +36,20 @@ internal static class ProviderUrlBuilder
     }
 
     /// <summary>
+    /// Builds the Anthropic Messages API URL for a provider base URL, using the same version-segment rule
+    /// as <see cref="BuildModelsUrl"/> (a base ending in <c>/v1</c>, or containing <c>/v1beta</c> anywhere,
+    /// gets <c>/messages</c> appended; anything else gets <c>/v1/messages</c>).
+    /// </summary>
+    /// <param name="baseUrl">The provider's configured base URL.</param>
+    public static string BuildMessagesUrl(string baseUrl)
+    {
+        var trimmed = baseUrl.TrimEnd('/');
+        var hasVersionSegment = trimmed.EndsWith("/v1", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Contains("/v1beta", StringComparison.OrdinalIgnoreCase);
+        return hasVersionSegment ? $"{trimmed}/messages" : $"{trimmed}/v1/messages";
+    }
+
+    /// <summary>
     /// Strips a trailing OpenAI-compatibility version segment so a native-API probe hits the host root.
     /// </summary>
     /// <remarks>

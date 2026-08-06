@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Net;
 using System.Text;
 using TotallyHot.ArcRouter.Gui.Admin;
@@ -154,6 +155,22 @@ public sealed class ProvidersAdminLoadedTests
     }
 
     [Fact]
+    public void Shows_a_badge_per_detected_api_and_none_when_never_scanned_or_all_false()
+    {
+        var transport = new StubTransport();
+        using var ctx = NewContext(transport);
+
+        var cut = RenderLoaded(ctx);
+
+        var badgeLabels = cut.FindAll(".ds-badge-success").Select(b => b.TextContent.Trim()).ToList();
+
+        // anthropic's scan reported anthropicCompatible: true -> its one badge.
+        badgeLabels.Should().ContainSingle().Which.Should().Be("Anthropic");
+        // ollama's endpointCapabilities is null (never scanned), and openai's scan completed with every
+        // flag false - neither contributes a badge despite openai having a (failed) scan on record.
+    }
+
+    [Fact]
     public void Marks_a_model_the_last_scan_did_not_report_as_not_detected()
     {
         var transport = new StubTransport();
@@ -240,7 +257,7 @@ public sealed class ProvidersAdminLoadedTests
         using var ctx = NewContext(transport);
         var cut = RenderLoaded(ctx);
 
-        cut.FindAll("button").First(b => b.TextContent.Contains("Refresh from endpoint", StringComparison.Ordinal)).Click();
+        cut.Find("button[aria-label='Refresh provider anthropic']").Click();
 
         cut.WaitForAssertion(() => transport.Requests.Should().Contain(r =>
             r.Path.EndsWith("admin/providers/anthropic/refresh-from-endpoint", StringComparison.Ordinal)));
