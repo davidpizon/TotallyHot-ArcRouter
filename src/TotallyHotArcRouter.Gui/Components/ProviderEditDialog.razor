@@ -66,13 +66,13 @@
             <div class="border-t border-slate-700/60 pt-3">
                 <div class="flex items-center justify-between mb-1.5">
                     <div class="text-xs text-slate-500 uppercase tracking-wider">Custom Headers</div>
-                    <button type="button" @onclick="AddHeader"
+                    <button type="button" data-testid="add-header" @onclick="AddHeader"
                             class="btn-small-action">
                         <Icon Name="plus" Size="12" /> Add header
                     </button>
                 </div>
                 <div class="text-xs text-slate-600 mb-1.5">
-                    Add an <span class="font-mono">Authorization</span> header here if this provider needs a key.
+                    Add this provider's authentication header here (e.g. <span class="font-mono">@AuthHeaderHint</span>) if it needs a key.
                 </div>
                 @if (_headers.Count == 0)
                 {
@@ -80,10 +80,11 @@
                 }
                 else
                 {
+                    var duplicateNameCounts = BuildHeaderNameCounts();
                     <div class="space-y-2">
                         @foreach (var (header, index) in _headers.Select((h, i) => (h, i)))
                         {
-                            var isDuplicate = IsDuplicateHeaderName(header);
+                            var isDuplicate = IsDuplicateHeaderName(header, duplicateNameCounts);
                             <div class="border border-slate-700/50 rounded p-2 space-y-1.5">
                                 <div class="flex items-center gap-1.5">
                                     <input type="text" data-testid="@($"header-name-{index}")"
@@ -254,6 +255,34 @@
                 HasStoredLiteralValue = isLiteral && header.Locked
             });
         }
+
+        SeedLegacyCredentialHeader();
+    }
+
+    /// <summary>Migrates a provider's legacy credential (stored outside <see cref="Headers"/>, from before
+    /// authentication became an ordinary header) into an editable row, so that saving through this dialog -
+    /// which always clears the legacy fields - doesn't silently drop it. A no-op when <see cref="Headers"/>
+    /// already has a row under <see cref="AuthHeaderName"/>, since that row is the already-migrated
+    /// credential and takes precedence.</summary>
+    private void SeedLegacyCredentialHeader()
+    {
+        var authHeaderName = string.IsNullOrWhiteSpace(AuthHeaderName) ? "Authorization" : AuthHeaderName.Trim();
+        if (_headers.Any(h => string.Equals(h.Name, authHeaderName, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(ApiKeyEnvVar))
+        {
+            _headers.Add(new HeaderRow { Name = authHeaderName, UseEnvVar = true, Value = ApiKeyEnvVar });
+        }
+        else if (HasApiKey)
+        {
+            // The literal key itself is never sent to this dialog (only the fact one is set), so the row
+            // starts blank and locked - same as any other stored-secret header - and BuildHeaders/
+            // ResolveHeader take it from there to preserve the actual value server-side.
+            _headers.Add(new HeaderRow { Name = authHeaderName, Locked = true, HasStoredLiteralValue = true });
+        }
     }
 
     private void OnProviderTypeChanged(ChangeEventArgs e)
@@ -315,18 +344,23 @@
         }
     }
 
+    /// <summary>Counts how many rows share each trimmed, case-insensitively-normalized, non-blank name.
+    /// Computed once per check rather than per row, so duplicate detection across all rows is O(n) instead
+    /// of the O(n^2) that repeated per-row scans would cost.</summary>
+    private Dictionary<string, int> BuildHeaderNameCounts() =>
+        _headers
+            .Select(h => h.Name.Trim())
+            .Where(name => name.Length > 0)
+            .GroupBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
+
     /// <summary>Whether <paramref name="header"/>'s trimmed name case-insensitively collides with another
-    /// row's trimmed, non-blank name. Blank names never collide - they are dropped on save (see
-    /// <see cref="BuildHeaders"/>), not compared.</summary>
-    private bool IsDuplicateHeaderName(HeaderRow header)
+    /// row's trimmed, non-blank name, per the counts from <see cref="BuildHeaderNameCounts"/>. Blank names
+    /// never collide - they are dropped on save (see <see cref="BuildHeaders"/>), not compared.</summary>
+    private static bool IsDuplicateHeaderName(HeaderRow header, IReadOnlyDictionary<string, int> nameCounts)
     {
         var name = header.Name.Trim();
-        if (name.Length == 0)
-        {
-            return false;
-        }
-
-        return _headers.Count(h => string.Equals(h.Name.Trim(), name, StringComparison.OrdinalIgnoreCase)) > 1;
+        return name.Length > 0 && nameCounts.TryGetValue(name, out var count) && count > 1;
     }
 
     /// <summary>
@@ -334,8 +368,24 @@
     /// in the error banner rather than only greying out Save, so a disabled button always has a stated
     /// reason.
     /// </summary>
-    private string? DuplicateHeaderError =>
-        _headers.Any(IsDuplicateHeaderName) ? "Duplicate header field" : null;
+    private string? DuplicateHeaderError
+    {
+        get
+        {
+            var nameCounts = BuildHeaderNameCounts();
+            return _headers.Any(h => IsDuplicateHeaderName(h, nameCounts)) ? "Duplicate header field" : null;
+        }
+    }
+
+    /// <summary>The auth header name to show in the "add a header" hint: the selected provider type's
+    /// documented auth header when known (e.g. Anthropic's <c>x-api-key</c>), falling back to
+    /// <c>Authorization</c> for types with no template entry. Keeps the hint from steering an operator
+    /// toward the wrong header name for providers that don't use <c>Authorization</c>.</summary>
+    private string AuthHeaderHint =>
+        ProviderTemplates.Templates.TryGetValue(_selectedProviderType, out var template)
+            && !string.IsNullOrWhiteSpace(template.AuthHeaderName)
+            ? template.AuthHeaderName
+            : "Authorization";
 
     private async Task Save()
     {
@@ -383,7 +433,11 @@
     /// <see cref="ApiKeyEnvVar"/> on save.</summary>
     /// <param name="Key">The provider key (auto-generated as a GUID when adding a new provider).</param>
     /// <param name="BaseUrl">The provider base URL.</param>
-    /// <param name="AuthHeaderName">The auth header name, carried through unchanged from the provider's existing configuration.</param>
+    /// <param name="AuthHeaderName">The auth header name, carried through unchanged from the provider's existing
+    /// configuration. Still meaningful under <see cref="ProviderCredentialModes.None"/>: the proxy uses it to
+    /// identify which forwarded header is "the" credential header (e.g. to avoid double-sending it), and
+    /// <see cref="SeedLegacyCredentialHeader"/> seeds a row under this same name so any pre-existing credential
+    /// survives as a custom header instead of being silently cleared.</param>
     /// <param name="AuthHeaderScheme">Always empty; this dialog no longer authors a scheme.</param>
     /// <param name="ApiKey">Always null; this dialog no longer authors a literal legacy credential.</param>
     /// <param name="ApiKeyEnvVar">Always null; this dialog no longer authors a legacy credential env var.</param>

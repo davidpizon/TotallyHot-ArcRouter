@@ -753,12 +753,16 @@ public sealed class ManagementFacade
             ApiKeyEnvVar = apiKeyEnvVar,
             // The caller always sends the full header set (a null list means "keep existing", e.g. a
             // legacy/partial caller); a provided list replaces it wholesale, one header at a time through
-            // ResolveHeader so a blank value preserves what's already stored under that name.
+            // ResolveHeader so a blank value preserves what's already stored under that name. Also passes
+            // the pre-merge legacy credential (baseline.AuthHeaderName/ApiKey) so a caller migrating that
+            // credential into a same-named header - as the GUI's ProviderEditDialog now always does, since
+            // it always sends CredentialMode "none" - preserves the actual secret rather than storing an
+            // empty locked header.
             Headers = request.Headers is null
                 ? baseline.Headers
                 : request.Headers
                     .Where(h => !string.IsNullOrWhiteSpace(h.Name))
-                    .Select(h => ResolveHeader(h, baseline.Headers))
+                    .Select(h => ResolveHeader(h, baseline.Headers, baseline.AuthHeaderName, baseline.ApiKey))
                     .ToList(),
             IsFree = request.IsFree ?? baseline.IsFree,
             Enabled = request.Enabled ?? baseline.Enabled,
@@ -830,8 +834,11 @@ public sealed class ManagementFacade
     /// <see cref="HeaderWriteRequest.ValueEnvVar"/> is an env-var reference, and - since a locked header's
     /// value is never returned for a caller to resend - both blank preserves whatever value is already
     /// stored under this header's name (mirroring <see cref="ResolveCredential"/>'s literal-mode
-    /// blank-preserves-existing rule). A header with no existing counterpart and both fields blank stores
-    /// as <see cref="HeaderValueSource.None"/>.
+    /// blank-preserves-existing rule). A header with no existing counterpart and both fields blank falls
+    /// back to <paramref name="legacyApiKey"/> when the header's name matches
+    /// <paramref name="legacyAuthHeaderName"/> - this is what lets a caller migrate a provider's old,
+    /// pre-custom-headers credential into a same-named header without ever seeing its literal value - and
+    /// otherwise stores as <see cref="HeaderValueSource.None"/>.
     /// <para>
     /// <see cref="HeaderWriteRequest.Locked"/> travels with the header independently of its value, so an
     /// operator can lock an already-stored secret without retyping it - and it is also what makes the
@@ -841,7 +848,11 @@ public sealed class ManagementFacade
     /// behavior in every case.
     /// </para>
     /// </summary>
-    private static ProviderHeader ResolveHeader(HeaderWriteRequest request, IReadOnlyList<ProviderHeader> existingHeaders)
+    private static ProviderHeader ResolveHeader(
+        HeaderWriteRequest request,
+        IReadOnlyList<ProviderHeader> existingHeaders,
+        string? legacyAuthHeaderName,
+        string? legacyApiKey)
     {
         var name = request.Name!.Trim();
 
@@ -870,14 +881,21 @@ public sealed class ManagementFacade
         // header when looking up the value to preserve - otherwise a casing mismatch between what was
         // stored and what the caller resends silently drops the stored secret instead of keeping it.
         var existing = existingHeaders.FirstOrDefault(h => string.Equals(h.Name, name, StringComparison.OrdinalIgnoreCase));
+        var preservedValue = existing?.Value;
+        if (preservedValue is null && existing is null && !string.IsNullOrWhiteSpace(legacyApiKey)
+            && string.Equals(name, legacyAuthHeaderName, StringComparison.OrdinalIgnoreCase))
+        {
+            preservedValue = legacyApiKey;
+        }
+
         return new ProviderHeader
         {
             Name = name,
-            Value = existing?.Value,
+            Value = preservedValue,
             ValueEnvVar = existing?.ValueEnvVar,
             // Only a literal can be a secret, so a preserved env-var (or valueless) header stores unlocked
             // no matter what the caller asked for.
-            Locked = !string.IsNullOrWhiteSpace(existing?.Value) && locked
+            Locked = !string.IsNullOrWhiteSpace(preservedValue) && locked
         };
     }
 
