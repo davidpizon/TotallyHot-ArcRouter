@@ -450,9 +450,11 @@ public sealed class ProviderEditDialogTests
         cut.Find("[data-testid='header-name-0']").Input("Authorization");
         cut.Find("[data-testid='header-name-1']").Input("Authorization");
 
-        cut.Find("[data-testid='header-duplicate-0']").TextContent.Should().Be("Duplicate header field");
-        cut.Find("[data-testid='header-duplicate-1']").TextContent.Should().Be("Duplicate header field");
-        cut.Find("[data-testid='dialog-error']").TextContent.Should().Contain("Duplicate header field");
+        cut.Find("[data-testid='header-duplicate-0']").TextContent.Should().Be("Duplicate header name: Authorization");
+        cut.Find("[data-testid='header-duplicate-1']").TextContent.Should().Be("Duplicate header name: Authorization");
+        cut.Find("[data-testid='dialog-error']").TextContent.Should().Contain("Duplicate header name: Authorization");
+        cut.Find("[data-testid='header-name-0']").GetAttribute("aria-invalid").Should().Be("true");
+        cut.Find("[data-testid='header-name-0']").GetAttribute("aria-describedby").Should().Be("header-duplicate-0");
         FindSaveButton(cut).HasAttribute("disabled").Should().BeTrue();
     }
 
@@ -468,7 +470,7 @@ public sealed class ProviderEditDialogTests
         cut.Find("[data-testid='header-name-0']").Input("Authorization");
         cut.Find("[data-testid='header-name-1']").Input("authorization");
 
-        cut.Find("[data-testid='dialog-error']").TextContent.Should().Contain("Duplicate header field");
+        cut.Find("[data-testid='dialog-error']").TextContent.Should().Contain("Duplicate header name:");
         FindSaveButton(cut).HasAttribute("disabled").Should().BeTrue();
     }
 

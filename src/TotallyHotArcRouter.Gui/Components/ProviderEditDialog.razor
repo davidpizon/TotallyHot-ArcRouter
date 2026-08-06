@@ -85,11 +85,14 @@
                         @foreach (var (header, index) in _headers.Select((h, i) => (h, i)))
                         {
                             var isDuplicate = IsDuplicateHeaderName(header, duplicateNameCounts);
+                            var duplicateId = $"header-duplicate-{index}";
                             <div class="border border-slate-700/50 rounded p-2 space-y-1.5">
                                 <div class="flex items-center gap-1.5">
                                     <input type="text" data-testid="@($"header-name-{index}")"
                                            value="@header.Name" @oninput="e => header.Name = AsString(e.Value)"
                                            placeholder="Header-Name"
+                                           aria-invalid="@(isDuplicate ? "true" : "false")"
+                                           aria-describedby="@(isDuplicate ? duplicateId : null)"
                                            class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input @(isDuplicate ? "border-red-500 text-red-400" : "")" />
                                     <button type="button" title="Remove header" @onclick="() => RemoveHeader(header)"
                                             class="text-red-400 hover:text-red-300 transition-colors shrink-0 p-1">
@@ -98,7 +101,7 @@
                                 </div>
                                 @if (isDuplicate)
                                 {
-                                    <div class="text-xs text-red-400" data-testid="@($"header-duplicate-{index}")">Duplicate header field</div>
+                                    <div id="@duplicateId" class="text-xs text-red-400" data-testid="@($"header-duplicate-{index}")">Duplicate header name: @header.Name.Trim()</div>
                                 }
                                 <div class="flex items-center gap-1.5">
                                     <select data-testid="@($"header-source-{index}")"
@@ -334,7 +337,8 @@
         get
         {
             var nameCounts = BuildHeaderNameCounts();
-            return _headers.Any(h => IsDuplicateHeaderName(h, nameCounts)) ? "Duplicate header field" : null;
+            var duplicateName = nameCounts.FirstOrDefault(kv => kv.Value > 1).Key;
+            return duplicateName is null ? null : $"Duplicate header name: {duplicateName}";
         }
     }
 
