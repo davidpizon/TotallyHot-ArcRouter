@@ -224,7 +224,7 @@ public sealed class ModelRouteResolver : IModelRouteResolver
         var (entry, provider) = match;
         var extraHeaders = ProviderCredentialResolver.ResolveExtraHeaders(provider, _environment);
         var authHeaderConfigured = provider.Headers.Any(h =>
-            !string.IsNullOrWhiteSpace(h.Name) && string.Equals(h.Name.Trim(), provider.AuthHeaderName, StringComparison.OrdinalIgnoreCase));
+            !string.IsNullOrWhiteSpace(h.Name) && string.Equals(h.Name.Trim(), provider.AuthHeaderName.Trim(), StringComparison.OrdinalIgnoreCase));
         var (awsAccessKeyId, awsSecretAccessKey, awsSessionToken) = ProviderCredentialResolver.ResolveAwsCredentials(provider, _environment);
 
         route = new ResolvedModelRoute(

@@ -70,6 +70,28 @@ public class ModelRouteResolverTests
     }
 
     [Fact]
+    public void TryResolve_AuthHeaderNameHasSurroundingWhitespace_StillMatchesConfiguredHeader()
+    {
+        // Regression test: ManagementFacade.MergeProvider stores AuthHeaderName verbatim (no trim), so a
+        // provider persisted with e.g. " x-api-key " must still be recognized as having that header
+        // configured - otherwise ProxyMiddleware's client-header-stripping decision (route.AuthHeaderConfigured)
+        // would wrongly conclude no auth header is configured and let a client-sent "x-api-key" pass through
+        // unstripped, alongside (or instead of) the provider's own.
+        var resolver = ModelRouteResolverTestFactory.Create(
+            modelName: "claude-sonnet-5",
+            providerModelId: "claude-sonnet-5",
+            baseUrl: "https://api.anthropic.com",
+            authHeaderName: " x-api-key ",
+            apiKey: null,
+            headers: [new ProviderHeader { Name = "x-api-key", Value = "real-anthropic-key" }]);
+
+        var resolved = resolver.TryResolve("claude-sonnet-5", out var route);
+
+        Assert.True(resolved);
+        Assert.True(route!.AuthHeaderConfigured);
+    }
+
+    [Fact]
     public void ToString_RedactsAwsSecrets_ButKeepsNonSecretFieldsVisible()
     {
         var route = new ResolvedModelRoute(
