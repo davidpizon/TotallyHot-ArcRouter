@@ -34,15 +34,13 @@ public sealed class ProviderEditDialogTests
         new("anthropic-version", HeaderValueSource.Literal, null, Value: "2023-06-01", Locked: false);
 
     [Fact]
-    public void Renders_the_real_provider_key_in_the_edit_title()
+    public void Renders_a_static_title_when_editing()
     {
         using var ctx = new Bunit.BunitContext();
 
         var cut = ctx.Render<ProviderEditDialog>(SeedEditParameters);
 
-        // Guards the symptom that the title showed a literal placeholder ("EDIT _DIALOGKEY") rather than
-        // the provider being edited.
-        cut.Markup.Should().Contain($"Edit {Key}");
+        cut.Markup.Should().Contain("Edit Provider");
     }
 
     [Fact]

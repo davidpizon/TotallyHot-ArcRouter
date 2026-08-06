@@ -10,7 +10,7 @@
          @onclick:stopPropagation="true">
         <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
             <span class="text-sm font-semibold text-slate-200 tracking-wide uppercase">
-                @(IsNew ? "Add Provider" : $"Edit {Key}")
+                @(IsNew ? "Add Provider" : "Edit Provider")
             </span>
             <button @onclick="OnCancel"
                     aria-label="@(IsNew ? "Close add provider dialog" : $"Close edit dialog for provider {Key}")"
