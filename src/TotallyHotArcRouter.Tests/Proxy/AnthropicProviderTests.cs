@@ -333,6 +333,158 @@ public class AnthropicProviderTests
     }
 
     [Fact]
+    public void TranslateResponse_UsageWithCacheTokens_EnrichesToInclusivePromptTokensWithDetails()
+    {
+        // docs/router/openai-format-usage-accuracy-plan.md §5.1: prompt_tokens becomes the inclusive
+        // total (input + cache_creation + cache_read), with prompt_tokens_details.cached_tokens broken
+        // out and the raw Anthropic components riding along as extension fields.
+        var translator = new AnthropicPayloadTranslator();
+        const string anthropicResponse = """
+            {
+              "id": "msg_07",
+              "model": "claude-sonnet-5",
+              "content": [ { "type": "text", "text": "hi" } ],
+              "stop_reason": "end_turn",
+              "usage": { "input_tokens": 50, "output_tokens": 10, "cache_creation_input_tokens": 30, "cache_read_input_tokens": 200 }
+            }
+            """;
+
+        var translated = translator.TranslateResponse(Encoding.UTF8.GetBytes(anthropicResponse));
+        using var json = JsonDocument.Parse(translated);
+        var usage = json.RootElement.GetProperty("usage");
+
+        Assert.Equal(280, usage.GetProperty("prompt_tokens").GetInt32());
+        Assert.Equal(10, usage.GetProperty("completion_tokens").GetInt32());
+        Assert.Equal(290, usage.GetProperty("total_tokens").GetInt32());
+        Assert.Equal(200, usage.GetProperty("prompt_tokens_details").GetProperty("cached_tokens").GetInt32());
+        Assert.Equal(30, usage.GetProperty("cache_creation_input_tokens").GetInt32());
+        Assert.Equal(200, usage.GetProperty("cache_read_input_tokens").GetInt32());
+    }
+
+    [Fact]
+    public void TranslateResponse_UsageWithoutCacheTokens_EmitsLegacyTwoFieldShape()
+    {
+        var translator = new AnthropicPayloadTranslator();
+        const string anthropicResponse = """
+            {
+              "id": "msg_08",
+              "model": "claude-sonnet-5",
+              "content": [ { "type": "text", "text": "hi" } ],
+              "stop_reason": "end_turn",
+              "usage": { "input_tokens": 8, "output_tokens": 4 }
+            }
+            """;
+
+        var translated = translator.TranslateResponse(Encoding.UTF8.GetBytes(anthropicResponse));
+        using var json = JsonDocument.Parse(translated);
+        var usage = json.RootElement.GetProperty("usage");
+
+        Assert.Equal(8, usage.GetProperty("prompt_tokens").GetInt32());
+        Assert.Equal(4, usage.GetProperty("completion_tokens").GetInt32());
+        Assert.Equal(12, usage.GetProperty("total_tokens").GetInt32());
+        Assert.False(usage.TryGetProperty("prompt_tokens_details", out _));
+        Assert.False(usage.TryGetProperty("cache_creation_input_tokens", out _));
+        Assert.False(usage.TryGetProperty("cache_read_input_tokens", out _));
+    }
+
+    [Fact]
+    public async Task Streaming_UsageWithCacheTokens_EnrichesTerminalChunkUsage()
+    {
+        const string anthropicSse =
+            "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_09\",\"model\":\"claude-sonnet-5\",\"usage\":{\"input_tokens\":50,\"cache_creation_input_tokens\":30,\"cache_read_input_tokens\":200}}}\n\n" +
+            "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n" +
+            "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\n" +
+            "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n" +
+            "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":10}}\n\n" +
+            "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
+
+        var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(anthropicSse, Encoding.UTF8, "text/event-stream"),
+        }));
+
+        var middleware = BuildMiddleware(handler);
+        var context = BuildContext("/v1/chat/completions", """
+            {"model":"claude-sonnet-5","messages":[{"role":"user","content":"hi"}],"stream":true}
+            """);
+
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        var body = ReadResponse(context);
+        var lastData = body.Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
+            .Where(l => l.StartsWith("data: ", StringComparison.Ordinal) && l != "data: [DONE]")
+            .Select(l => l["data: ".Length..])
+            .Last();
+        using var lastChunk = JsonDocument.Parse(lastData);
+        var usage = lastChunk.RootElement.GetProperty("usage");
+
+        Assert.Equal(280, usage.GetProperty("prompt_tokens").GetInt32());
+        Assert.Equal(10, usage.GetProperty("completion_tokens").GetInt32());
+        Assert.Equal(200, usage.GetProperty("prompt_tokens_details").GetProperty("cached_tokens").GetInt32());
+        Assert.Equal(30, usage.GetProperty("cache_creation_input_tokens").GetInt32());
+    }
+
+    [Fact]
+    public async Task NonStreaming_TranslatedAnthropicResponseWithCacheTokens_LedgerRecordsCacheTokensViaNativeTap()
+    {
+        // docs/router/openai-format-usage-accuracy-plan.md §4: telemetry for a translated Anthropic
+        // response reads cache tokens from the native tap - asserted here via the values that reach
+        // IBudgetEnforcer.RecordUsageAsync, the ledger write telemetry feeds.
+        var handler = new DelegatingHandlerStub(_ =>
+        {
+            const string anthropicResponse = """
+                {
+                  "id": "msg_10",
+                  "model": "claude-sonnet-5",
+                  "content": [ { "type": "text", "text": "hi" } ],
+                  "stop_reason": "end_turn",
+                  "usage": { "input_tokens": 50, "output_tokens": 10, "cache_creation_input_tokens": 30, "cache_read_input_tokens": 200 }
+                }
+                """;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(anthropicResponse, Encoding.UTF8, "application/json"),
+            });
+        });
+
+        var budgetStore = new Mock<TotallyHot.ArcRouter.PriceCatalog.IBudgetEnforcer>();
+        int? capturedCacheCreation = null;
+        int? capturedCacheRead = null;
+        budgetStore
+            .Setup(b => b.RecordUsageAsync(
+                It.IsAny<string>(), It.IsAny<decimal?>(), It.IsAny<int?>(), It.IsAny<int?>(),
+                It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Callback<string, decimal?, int?, int?, int?, int?, DateTimeOffset, CancellationToken>(
+                (_, _, _, _, cacheCreation, cacheRead, _, _) =>
+                {
+                    capturedCacheCreation = cacheCreation;
+                    capturedCacheRead = cacheRead;
+                })
+            .Returns(Task.CompletedTask);
+
+        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), AnthropicResolver());
+        var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["anthropic"] = new AnthropicPayloadTranslator(),
+        };
+        var middleware = new ProxyMiddleware(
+            Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor,
+            new HttpClient(handler),
+            translators: translators,
+            budgetStore: budgetStore.Object);
+
+        var context = BuildContext("/v1/chat/completions", """
+            {"model":"claude-sonnet-5","messages":[{"role":"user","content":"hi"}]}
+            """);
+
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        Assert.Equal(30, capturedCacheCreation);
+        Assert.Equal(200, capturedCacheRead);
+    }
+
+    [Fact]
     public void TranslateRequest_ThinkingBlocksOnAssistantMessage_RoundTripsFirstInContent()
     {
         // A client resending a prior assistant turn (LiteLLM's reasoning_content/thinking_blocks

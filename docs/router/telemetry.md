@@ -148,6 +148,37 @@ Both parsers handle streaming and non-streaming responses:
 rate for either cache dimension when the price catalog has no published rate for it - a deliberate
 conservative overestimate (see `ModelPrice`'s remarks) rather than a guessed discount multiplier.
 
+**`UsageInfo` is always additive** (Anthropic's own convention: cache tokens are separate from
+`PromptTokens`, summed by `TotalInputTokens`). OpenAI's shape is instead **inclusive**
+(`usage.prompt_tokens_details.cached_tokens` is a subset of `usage.prompt_tokens`), so
+`OpenAiUsageParser` normalizes it at parse time - the one place this normalization happens
+(`docs/router/openai-format-usage-accuracy-plan.md` §1.1/§6.1):
+
+```text
+CacheReadTokens     = cached_tokens                               (0 when absent)
+CacheCreationTokens = cache_creation_input_tokens                 (0 when absent; extension field)
+PromptTokens        = max(0, prompt_tokens − CacheReadTokens − CacheCreationTokens)
+```
+
+`cache_creation_input_tokens` only ever appears on an *enriched* translated-Anthropic body (see below);
+a real OpenAI response has no cache-write concept and never sets it.
+
+**Native telemetry tap for translated Anthropic traffic** (`openai-format-usage-accuracy-plan.md` §4):
+when an OpenAI-format client is routed to Anthropic, `ProxyMiddleware` translates the request/response
+through `AnthropicPayloadTranslator`/`AnthropicStreamTranslator` so the client sees OpenAI's shape. Usage
+extraction does **not** depend on that translation being lossless: `UsageExtractor.SupportsNativeShape`
+gates a second, capped capture of the pre-translation native Anthropic bytes (`CapturedResponse.NativeBytes`
+in `ProxyMiddleware`), and `PublishTelemetryAsync` prefers those bytes (parsed under `route.Provider`,
+i.e. `AnthropicUsageParser`) over the translated ones whenever they were captured. Today only Anthropic
+has a registered native parser, so this only affects Anthropic-routed traffic; a provider with no native
+parser (Gemini) keeps parsing the translated bytes exactly as before. The client-visible translated
+response is *also* enriched (`AnthropicPayloadTranslator.BuildEnrichedUsage`, shared by the non-streaming
+`TranslateUsage` and the streaming terminal chunk) so a client reading the OpenAI-shaped `usage` field
+directly sees the same cache-aware numbers the ledger records - `prompt_tokens` becomes the inclusive
+total, with `prompt_tokens_details.cached_tokens` broken out and the raw Anthropic components riding
+along as `cache_creation_input_tokens`/`cache_read_input_tokens` extension fields (LiteLLM's convention).
+A cache-free response is unaffected: both paths emit exactly today's legacy two-field-plus-total shape.
+
 To extract usage without disrupting true streaming pass-through timing, `ProxyMiddleware` no longer
 does a plain `Content.CopyToAsync(Response.Body)`. Instead `CopyAndCaptureAsync` loops
 `ReadAsync`/`WriteAsync` manually, writing every chunk to the client immediately (same timing as

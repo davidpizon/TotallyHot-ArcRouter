@@ -421,13 +421,10 @@ public sealed class AnthropicStreamTranslator : IStreamTranslator
         {
             var inputTokens = _usage["input_tokens"]?.GetValue<int>() ?? 0;
             var outputTokens = _usage["output_tokens"]?.GetValue<int>() ?? 0;
+            var cacheCreationTokens = _usage["cache_creation_input_tokens"]?.GetValue<int>();
+            var cacheReadTokens = _usage["cache_read_input_tokens"]?.GetValue<int>();
 
-            chunk["usage"] = new JsonObject
-            {
-                ["prompt_tokens"] = inputTokens,
-                ["completion_tokens"] = outputTokens,
-                ["total_tokens"] = inputTokens + outputTokens,
-            };
+            chunk["usage"] = AnthropicPayloadTranslator.BuildEnrichedUsage(inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens);
         }
 
         var json = JsonSerializer.Serialize(chunk, SerializerOptions);

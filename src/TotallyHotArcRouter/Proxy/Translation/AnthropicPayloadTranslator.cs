@@ -521,18 +521,56 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
         };
     }
 
-    /// <summary>Maps Anthropic's <c>input_tokens</c>/<c>output_tokens</c> usage fields to OpenAI's <c>prompt_tokens</c>/<c>completion_tokens</c>/<c>total_tokens</c> shape.</summary>
+    /// <summary>Maps a non-streaming response's native Anthropic <c>usage</c> object to the enriched OpenAI shape via <see cref="BuildEnrichedUsage"/>.</summary>
     private static JsonObject TranslateUsage(JsonObject usage)
     {
-        var promptTokens = usage["input_tokens"]?.GetValue<int>() ?? 0;
-        var completionTokens = usage["output_tokens"]?.GetValue<int>() ?? 0;
+        var inputTokens = usage["input_tokens"]?.GetValue<int>() ?? 0;
+        var outputTokens = usage["output_tokens"]?.GetValue<int>() ?? 0;
+        var cacheCreationTokens = usage["cache_creation_input_tokens"]?.GetValue<int>();
+        var cacheReadTokens = usage["cache_read_input_tokens"]?.GetValue<int>();
 
-        return new JsonObject
+        return BuildEnrichedUsage(inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens);
+    }
+
+    /// <summary>
+    /// Builds an OpenAI-shaped <c>usage</c> object from Anthropic's additive usage components
+    /// (<c>docs/router/openai-format-usage-accuracy-plan.md</c> §5.1), applying OpenAI's <b>inclusive</b>
+    /// semantics (decision 2): <c>prompt_tokens</c> becomes the true total
+    /// (<paramref name="inputTokens"/> + cache creation + cache read), with
+    /// <c>prompt_tokens_details.cached_tokens</c> broken out and the raw Anthropic components riding along
+    /// as extension fields (LiteLLM's convention), so nothing is lost. When neither cache field is
+    /// present, this emits exactly today's legacy two-field-plus-total shape - byte-compatible with
+    /// cache-free requests and older Anthropic responses. Shared by <see cref="TranslateUsage"/> (the
+    /// non-streaming path) and <see cref="AnthropicStreamTranslator"/>'s terminal chunk, so the two paths
+    /// can never disagree on the formula.
+    /// </summary>
+    internal static JsonObject BuildEnrichedUsage(int inputTokens, int outputTokens, int? cacheCreationTokens, int? cacheReadTokens)
+    {
+        var promptTokens = inputTokens + (cacheCreationTokens ?? 0) + (cacheReadTokens ?? 0);
+
+        var result = new JsonObject
         {
             ["prompt_tokens"] = promptTokens,
-            ["completion_tokens"] = completionTokens,
-            ["total_tokens"] = promptTokens + completionTokens,
+            ["completion_tokens"] = outputTokens,
+            ["total_tokens"] = promptTokens + outputTokens,
         };
+
+        if (cacheCreationTokens is not null || cacheReadTokens is not null)
+        {
+            result["prompt_tokens_details"] = new JsonObject { ["cached_tokens"] = cacheReadTokens ?? 0 };
+
+            if (cacheCreationTokens is not null)
+            {
+                result["cache_creation_input_tokens"] = cacheCreationTokens.Value;
+            }
+
+            if (cacheReadTokens is not null)
+            {
+                result["cache_read_input_tokens"] = cacheReadTokens.Value;
+            }
+        }
+
+        return result;
     }
 
     /// <summary>Maps an Anthropic <c>stop_reason</c> to OpenAI's <c>finish_reason</c>, mirroring LiteLLM's Anthropic finish-reason mapping. A turn carrying any tool_use block always reports "tool_calls", matching OpenAI's own convention regardless of the raw stop_reason.</summary>

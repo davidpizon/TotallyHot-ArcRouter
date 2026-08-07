@@ -1,7 +1,13 @@
 namespace TotallyHot.ArcRouter.Telemetry;
 
 /// <summary>
-/// Token usage for one completed request, as reported by the upstream provider.
+/// Token usage for one completed request, as reported by the upstream provider. This shape is always
+/// <b>additive</b> (Anthropic's own convention: <see cref="CacheCreationTokens"/>/<see cref="CacheReadTokens"/>
+/// are separate from <see cref="PromptTokens"/>, summed by <see cref="TotalInputTokens"/>) - a provider with
+/// <b>inclusive</b> cache semantics instead (OpenAI's <c>prompt_tokens_details.cached_tokens</c> is a subset
+/// of <c>prompt_tokens</c>) is normalized to this additive model at parse time, the one place that
+/// normalization happens (see <c>OpenAiUsageParser.TryExtractFromUsageContainer</c>,
+/// <c>docs/router/openai-format-usage-accuracy-plan.md</c> §1.1/§6.1).
 /// </summary>
 /// <param name="PromptTokens">
 /// Prompt/input tokens billed at the standard input rate. For a cache-aware provider (Anthropic), this is

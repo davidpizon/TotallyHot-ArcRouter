@@ -29,6 +29,42 @@ public class RateLimitHeaderCaptureTests
     }
 
     [Fact]
+    public async Task CaptureAsync_CapturesOpenAiXRateLimitHeaders()
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+        var capture = new RateLimitHeaderCapture(repository);
+
+        var headers = BuildHeaders(
+            ("x-ratelimit-limit-requests", "5000"),
+            ("x-ratelimit-remaining-tokens", "159975"),
+            ("content-type", "application/json"));
+
+        await capture.CaptureAsync("openai", headers, Ct);
+
+        var (snapshot, observedAt) = repository.GetRateLimitSnapshot("openai");
+        Assert.Equal(2, snapshot.Count);
+        Assert.NotNull(observedAt);
+    }
+
+    [Fact]
+    public async Task CaptureAsync_BothAnthropicAndOpenAiFamiliesCapturedWhenBothAppear()
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+        var capture = new RateLimitHeaderCapture(repository);
+
+        var headers = BuildHeaders(
+            ("anthropic-ratelimit-tokens-remaining", "1000"),
+            ("x-ratelimit-remaining-tokens", "2000"));
+
+        await capture.CaptureAsync("mixed-provider", headers, Ct);
+
+        var (snapshot, _) = repository.GetRateLimitSnapshot("mixed-provider");
+        Assert.Equal(2, snapshot.Count);
+    }
+
+    [Fact]
     public async Task CaptureAsync_IgnoresHeadersWithoutThePrefix()
     {
         using var temp = new TempDatabase();

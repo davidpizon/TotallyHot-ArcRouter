@@ -99,6 +99,16 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
+    /// The result of capturing a translated response for telemetry: the OpenAI-shaped bytes actually sent
+    /// to the client, and - only for a provider <see cref="UsageExtractor.SupportsNativeShape"/> recognizes
+    /// - a second, capped copy of the pre-translation native bytes, immune to translation lossiness
+    /// (<c>docs/router/openai-format-usage-accuracy-plan.md</c> §4). <see cref="NativeBytes"/> is
+    /// <see langword="null"/> for a pass-through (no translator ran, so the client bytes already are native)
+    /// or an unsupported translated provider (e.g. Gemini).
+    /// </summary>
+    private readonly record struct CapturedResponse(byte[] ClientShapeBytes, byte[]? NativeBytes);
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="ProxyMiddleware"/> class.
     /// </summary>
     /// <param name="logger">Logger instance.</param>
@@ -689,6 +699,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 }
 
                 byte[] capturedResponseBytes;
+                byte[]? nativeResponseBytes = null;
                 if (preReadErrorBody is not null && geminiEmbeddedErrorMessage is not null)
                 {
                     // A Gemini 400 that reached here (either it wasn't the UNAUTHENTICATED case, or it was
@@ -728,12 +739,18 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                     using var upstreamBody = await responseMessage.Content.ReadAsStreamAsync(context.RequestAborted);
                     try
                     {
-                        capturedResponseBytes = translator switch
+                        if (translator is null)
                         {
-                            null => await CopyAndCaptureAsync(upstreamBody, context.Response.Body, MaxCapturedResponseBytes, context.RequestAborted),
-                            not null when isStreaming => await TranslateAndCaptureStreamAsync(translator, upstreamBody, context.Response.Body, MaxCapturedResponseBytes, context.RequestAborted),
-                            _ => await TranslateAndCaptureBufferedAsync(translator, upstreamBody, context.Response.Body, MaxCapturedResponseBytes, context.RequestAborted),
-                        };
+                            capturedResponseBytes = await CopyAndCaptureAsync(upstreamBody, context.Response.Body, MaxCapturedResponseBytes, context.RequestAborted);
+                        }
+                        else
+                        {
+                            var captured = isStreaming
+                                ? await TranslateAndCaptureStreamAsync(translator, upstreamBody, context.Response.Body, MaxCapturedResponseBytes, context.RequestAborted)
+                                : await TranslateAndCaptureBufferedAsync(translator, upstreamBody, context.Response.Body, MaxCapturedResponseBytes, context.RequestAborted);
+                            capturedResponseBytes = captured.ClientShapeBytes;
+                            nativeResponseBytes = captured.NativeBytes;
+                        }
                     }
                     catch (Exception ex) when (!context.Response.HasStarted && IsStreamAbort(ex))
                     {
@@ -769,7 +786,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                     // ResponseTextExtractor pick the right parser per request instead of assuming one shape per
                     // provider, which broke once "anthropic" became dual-mode.
                     var telemetryShapeProvider = translator is not null ? "openai" : route.Provider;
-                    await PublishTelemetryAsync(context, route, requestedModelName, isFallback, telemetryShapeProvider, rewrittenBody, capturedResponseBytes, isStreaming, latencyToHeadersMs, totalDurationMs, statusCode, context.RequestAborted);
+                    await PublishTelemetryAsync(context, route, requestedModelName, isFallback, telemetryShapeProvider, rewrittenBody, capturedResponseBytes, nativeResponseBytes, isStreaming, latencyToHeadersMs, totalDurationMs, statusCode, context.RequestAborted);
                 }
                 catch (Exception ex)
                 {
@@ -1051,7 +1068,11 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
         try
         {
-            await PublishTelemetryAsync(context, route, requestedModelName, isFallback, "openai", rewrittenBody, capturedResponseBytes, isStreamingRequest, latencyToHeadersMs, totalDurationMs, StatusCodes.Status200OK, context.RequestAborted);
+            // Bedrock's native tap is out of scope (docs/router/openai-format-usage-accuracy-plan.md §4.2):
+            // its streaming chunks aren't SSE-framed, so the same capture approach doesn't apply. Always
+            // null here - telemetry falls back to parsing the translated "openai"-shaped bytes, unchanged
+            // from before this plan.
+            await PublishTelemetryAsync(context, route, requestedModelName, isFallback, "openai", rewrittenBody, capturedResponseBytes, nativeResponseBytes: null, isStreamingRequest, latencyToHeadersMs, totalDurationMs, StatusCodes.Status200OK, context.RequestAborted);
         }
         catch (Exception ex)
         {
@@ -1149,6 +1170,15 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// <summary>
     /// Resolves the request's session and turn number, extracts usage and cost from the captured response,
     /// and publishes a telemetry record for the completed proxy call.
+    ///
+    /// <para>
+    /// <c>nativeResponseBytes</c> is a captured pre-translation copy of the upstream response, when one was
+    /// taken (see <see cref="CapturedResponse"/> and <c>docs/router/openai-format-usage-accuracy-plan.md</c>
+    /// §4). When non-null and non-empty, usage and response-text extraction read from these bytes under
+    /// <c>route</c>'s own provider key instead of from <c>capturedResponseBytes</c> under
+    /// <c>telemetryShapeProvider</c> - the native shape is immune to translation lossiness (e.g. dropped
+    /// Anthropic cache-token fields), so it is always preferred when available.
+    /// </para>
     /// </summary>
     private async Task PublishTelemetryAsync(
         HttpContext context,
@@ -1158,6 +1188,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         string telemetryShapeProvider,
         byte[] rewrittenRequestBody,
         byte[] capturedResponseBytes,
+        byte[]? nativeResponseBytes,
         bool isStreaming,
         long latencyToHeadersMs,
         long totalDurationMs,
@@ -1221,7 +1252,16 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         int? cacheReadTokens = null;
         decimal? estimatedCostUsd = null;
 
-        if (_usageExtractor.TryExtractUsage(telemetryShapeProvider, isStreaming, capturedResponseBytes, out var usage))
+        // Telemetry stops depending on translation fidelity: when a native (pre-translation) capture was
+        // taken, it is parsed under the provider's own key instead of the translated bytes under
+        // telemetryShapeProvider - the native shape carries fields (e.g. Anthropic cache tokens) that
+        // TranslateResponse/EmitChunk currently drop on the way to the OpenAI-shaped client response (see
+        // docs/router/openai-format-usage-accuracy-plan.md §1).
+        var (usageShapeProvider, usageShapeBytes) = nativeResponseBytes is { Length: > 0 }
+            ? (route.Provider, nativeResponseBytes)
+            : (telemetryShapeProvider, capturedResponseBytes);
+
+        if (_usageExtractor.TryExtractUsage(usageShapeProvider, isStreaming, usageShapeBytes, out var usage))
         {
             promptTokens = usage.PromptTokens;
             completionTokens = usage.CompletionTokens;
@@ -1274,7 +1314,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         }
 
         var requestSummary = TextTruncator.Truncate(RequestTextExtractor.ExtractNewestUserMessage(requestBody));
-        var responseSummary = _responseTextExtractor.TryExtractText(telemetryShapeProvider, isStreaming, capturedResponseBytes, out var responseText)
+        var responseSummary = _responseTextExtractor.TryExtractText(usageShapeProvider, isStreaming, usageShapeBytes, out var responseText)
             ? TextTruncator.Truncate(responseText)
             : null;
 
@@ -1366,20 +1406,30 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
     /// <summary>
     /// Reads the entire native (non-streaming) upstream body, runs it through the translator into
-    /// OpenAI's shape, writes the translated bytes to the client, and returns them (capped) for
-    /// telemetry - so both the client and the usage/cost parsers see one OpenAI-shaped body.
+    /// OpenAI's shape, writes the translated bytes to the client, and returns both the translated bytes
+    /// (capped, for the client-shape parsers) and - for a provider <see cref="UsageExtractor.SupportsNativeShape"/>
+    /// recognizes - a second capped copy of the pre-translation native body, for the native telemetry tap
+    /// (<c>docs/router/openai-format-usage-accuracy-plan.md</c> §4.1). The native body was already fully
+    /// materialized in memory to call <see cref="IPayloadTranslator.TranslateResponse"/>, so capturing it
+    /// costs nothing extra beyond the capped copy.
     /// </summary>
-    private async Task<byte[]> TranslateAndCaptureBufferedAsync(IPayloadTranslator translator, Stream source, Stream destination, int captureCap, CancellationToken cancellationToken)
+    private async Task<CapturedResponse> TranslateAndCaptureBufferedAsync(IPayloadTranslator translator, Stream source, Stream destination, int captureCap, CancellationToken cancellationToken)
     {
         try
         {
             using var upstream = new MemoryStream();
             await source.CopyToAsync(upstream, cancellationToken);
+            var nativeBytes = upstream.ToArray();
 
-            var translated = translator.TranslateResponse(upstream.ToArray());
+            var translated = translator.TranslateResponse(nativeBytes);
             await destination.WriteAsync(translated, cancellationToken);
 
-            return translated.Length <= captureCap ? translated : translated[..captureCap];
+            var clientShapeBytes = translated.Length <= captureCap ? translated : translated[..captureCap];
+            byte[]? capturedNativeBytes = UsageExtractor.SupportsNativeShape(translator.Provider)
+                ? (nativeBytes.Length <= captureCap ? nativeBytes : nativeBytes[..captureCap])
+                : null;
+
+            return new CapturedResponse(clientShapeBytes, capturedNativeBytes);
         }
         catch (Exception ex) when (IsStreamAbort(ex) && cancellationToken.IsCancellationRequested)
         {
@@ -1391,22 +1441,28 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // distinction for the SendAsync case) is deliberately left to propagate, so the caller can still
             // turn it into a real 502 instead of silently committing a 200 with an empty body.
             _logger.LogWarning(ex, "Buffered response to the client was interrupted by a client disconnect; the forward was terminated early.");
-            return [];
+            return new CapturedResponse([], null);
         }
     }
 
     /// <summary>
     /// Streams the native SSE upstream through a per-request <see cref="IStreamTranslator"/>, writing
     /// each translated OpenAI-shaped chunk to the client as it is produced and capturing up to
-    /// <paramref name="captureCap"/> bytes of the translated stream for telemetry. An embedded provider
-    /// error throws <see cref="GeminiStreamException"/> mid-stream (mirroring LiteLLM): the forward is
-    /// then terminated - the client sees a truncated stream with no <c>[DONE]</c>, since a 200 OK and
-    /// earlier chunks have already been committed to the wire and the status can no longer change.
+    /// <paramref name="captureCap"/> bytes of the translated stream for telemetry - plus, for a provider
+    /// <see cref="UsageExtractor.SupportsNativeShape"/> recognizes, a second capped accumulation of the raw
+    /// upstream SSE bytes (before they enter the stream translator), for the native telemetry tap
+    /// (<c>docs/router/openai-format-usage-accuracy-plan.md</c> §4.1) - the one genuinely new buffer this
+    /// plan adds, capped like every other capture here. An embedded provider error throws
+    /// <see cref="GeminiStreamException"/> mid-stream (mirroring LiteLLM): the forward is then terminated -
+    /// the client sees a truncated stream with no <c>[DONE]</c>, since a 200 OK and earlier chunks have
+    /// already been committed to the wire and the status can no longer change.
     /// </summary>
-    private async Task<byte[]> TranslateAndCaptureStreamAsync(IPayloadTranslator translator, Stream source, Stream destination, int captureCap, CancellationToken cancellationToken)
+    private async Task<CapturedResponse> TranslateAndCaptureStreamAsync(IPayloadTranslator translator, Stream source, Stream destination, int captureCap, CancellationToken cancellationToken)
     {
         var streamTranslator = translator.CreateStreamTranslator();
+        var captureNativeBytes = UsageExtractor.SupportsNativeShape(translator.Provider);
         using var capture = new MemoryStream();
+        using var nativeCapture = captureNativeBytes ? new MemoryStream() : null;
         var buffer = ArrayPool<byte>.Shared.Rent(81920);
 
         async Task EmitAsync(byte[] translated)
@@ -1431,6 +1487,15 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             int bytesRead;
             while ((bytesRead = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)) > 0)
             {
+                if (nativeCapture is not null)
+                {
+                    var remainingNativeCapacity = captureCap - (int)nativeCapture.Length;
+                    if (remainingNativeCapacity > 0)
+                    {
+                        await nativeCapture.WriteAsync(buffer.AsMemory(0, Math.Min(bytesRead, remainingNativeCapacity)), cancellationToken);
+                    }
+                }
+
                 await EmitAsync(streamTranslator.Push(buffer.AsSpan(0, bytesRead)));
             }
 
@@ -1453,7 +1518,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             ArrayPool<byte>.Shared.Return(buffer);
         }
 
-        return capture.ToArray();
+        return new CapturedResponse(capture.ToArray(), nativeCapture?.ToArray());
     }
 
     /// <summary>

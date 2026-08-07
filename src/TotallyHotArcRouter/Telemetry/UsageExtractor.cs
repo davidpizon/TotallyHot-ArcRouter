@@ -25,6 +25,19 @@ public interface IUsageExtractor
 /// <inheritdoc cref="IUsageExtractor" />
 public sealed class UsageExtractor : IUsageExtractor
 {
+    /// <summary>
+    /// Reports whether <paramref name="provider"/> has a registered parser for its own <b>native</b>
+    /// response shape (as opposed to only being reachable via a translated OpenAI-shaped body). Used by
+    /// <c>ProxyMiddleware</c> to decide whether it is worth capturing a second, pre-translation copy of a
+    /// translated provider's response for a native telemetry tap
+    /// (<c>docs/router/openai-format-usage-accuracy-plan.md</c> §4) - capturing native bytes for a provider
+    /// with no native parser would just be wasted memory. A single source of truth here, rather than a
+    /// duplicated string check in the middleware, is what keeps the two from drifting apart.
+    /// </summary>
+    /// <param name="provider">The provider key (e.g. <c>"anthropic"</c>), case-insensitive.</param>
+    public static bool SupportsNativeShape(string provider) =>
+        string.Equals(provider, "anthropic", StringComparison.OrdinalIgnoreCase);
+
     /// <inheritdoc />
     public bool TryExtractUsage(string provider, bool isStreaming, ReadOnlyMemory<byte> bufferedResponseBody, out UsageInfo usage)
     {

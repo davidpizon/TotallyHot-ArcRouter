@@ -120,4 +120,83 @@ public class RateLimitSnapshotParserTests
         Assert.Null(view.RepresentativeClaim);
         Assert.Empty(view.RawHeaders);
     }
+
+    [Fact]
+    public void Parse_OpenAiFamily_PopulatesRequestsAndTokensDimensions()
+    {
+        var rows = new[]
+        {
+            new RateLimitHeaderRow("x-ratelimit-limit-requests", "5000"),
+            new RateLimitHeaderRow("x-ratelimit-remaining-requests", "4999"),
+            new RateLimitHeaderRow("x-ratelimit-reset-requests", "6ms"),
+            new RateLimitHeaderRow("x-ratelimit-limit-tokens", "160000"),
+            new RateLimitHeaderRow("x-ratelimit-remaining-tokens", "159975"),
+            new RateLimitHeaderRow("x-ratelimit-reset-tokens", "6m0s"),
+        };
+        var observedAt = DateTimeOffset.Parse("2026-03-01T12:00:00Z");
+
+        var view = RateLimitSnapshotParser.Parse(rows, observedAt);
+
+        Assert.Equal(2, view.StandardDimensions.Count);
+        var requests = view.StandardDimensions["requests"];
+        Assert.Equal(5000, requests.Limit);
+        Assert.Equal(4999, requests.Remaining);
+        Assert.Equal(observedAt + TimeSpan.FromMilliseconds(6), requests.ResetAt);
+
+        var tokens = view.StandardDimensions["tokens"];
+        Assert.Equal(160000, tokens.Limit);
+        Assert.Equal(159975, tokens.Remaining);
+        Assert.Equal(observedAt + TimeSpan.FromMinutes(6), tokens.ResetAt);
+    }
+
+    [Theory]
+    [InlineData("1s", 1)]
+    [InlineData("23h", 23 * 3600)]
+    [InlineData("6m0s", 6 * 60)]
+    [InlineData("1h2m3s", 3600 + 120 + 3)]
+    public void Parse_OpenAiResetHeader_ParsesCompoundGoDurations(string durationText, double expectedSeconds)
+    {
+        var observedAt = DateTimeOffset.Parse("2026-03-01T00:00:00Z");
+        var rows = new[] { new RateLimitHeaderRow("x-ratelimit-reset-tokens", durationText) };
+
+        var view = RateLimitSnapshotParser.Parse(rows, observedAt);
+
+        Assert.Equal(observedAt + TimeSpan.FromSeconds(expectedSeconds), view.StandardDimensions["tokens"].ResetAt);
+    }
+
+    [Fact]
+    public void Parse_OpenAiResetHeader_MalformedDuration_SurfacesAsNullResetAt()
+    {
+        var rows = new[] { new RateLimitHeaderRow("x-ratelimit-reset-tokens", "not-a-duration") };
+
+        var view = RateLimitSnapshotParser.Parse(rows, DateTimeOffset.UtcNow);
+
+        Assert.Null(view.StandardDimensions["tokens"].ResetAt);
+        Assert.Equal("not-a-duration", view.RawHeaders["x-ratelimit-reset-tokens"]);
+    }
+
+    [Fact]
+    public void Parse_OpenAiResetHeader_NoObservedAtSupplied_ResetAtStaysNull()
+    {
+        var rows = new[] { new RateLimitHeaderRow("x-ratelimit-reset-tokens", "6m0s") };
+
+        var view = RateLimitSnapshotParser.Parse(rows);
+
+        Assert.Null(view.StandardDimensions["tokens"].ResetAt);
+    }
+
+    [Fact]
+    public void Parse_MixedAnthropicAndOpenAiHeaders_BothFamiliesCoexistInStandardDimensions()
+    {
+        var rows = new[]
+        {
+            new RateLimitHeaderRow("anthropic-ratelimit-input-tokens-remaining", "150000"),
+            new RateLimitHeaderRow("x-ratelimit-remaining-tokens", "159975"),
+        };
+
+        var view = RateLimitSnapshotParser.Parse(rows);
+
+        Assert.Equal(150000, view.StandardDimensions["input-tokens"].Remaining);
+        Assert.Equal(159975, view.StandardDimensions["tokens"].Remaining);
+    }
 }

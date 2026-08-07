@@ -255,6 +255,11 @@ states; both timestamps rendered from backend values, never the GUI clock.
 
 ## 7. Multi-provider future (out of scope, kept cheap)
 
+> **Follow-up:** [`openai-format-usage-accuracy-plan.md`](openai-format-usage-accuracy-plan.md)
+> picks this section up — it closes the translated-path gap (OpenAI-format clients routed to
+> Anthropic lose the cache fields this plan added) and delivers the OpenAI `x-ratelimit-*` /
+> `cached_tokens` parity sketched below.
+
 - `provider_rate_limit_*` tables are keyed by provider and store verbatim header names — OpenAI's
   `x-ratelimit-limit-requests`/`-remaining-tokens` etc. land in the same tables with a second
   capture prefix and a second parser branch.

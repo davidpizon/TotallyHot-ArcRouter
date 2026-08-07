@@ -471,18 +471,21 @@ public sealed class ProvidersAdminLoadedTests
     }
 
     [Fact]
-    public void Anthropic_Usage_card_renders_only_for_Anthropic_typed_providers()
+    public void Usage_card_renders_for_Anthropic_and_OpenAi_typed_providers_but_not_LocalRuntime()
     {
+        // docs/router/openai-format-usage-accuracy-plan.md §6.2 generalizes this card beyond Anthropic:
+        // it now renders (titled by the provider's own type) for both Anthropic- and OpenAI-typed
+        // providers, but ollama (LocalRuntime) still must not render the section.
         var transport = new StubTransport();
         using var ctx = NewContext(transport);
 
         var cut = RenderLoaded(ctx);
 
         cut.Markup.Should().Contain("Anthropic Usage");
-        // Only one card - ollama (LocalRuntime) and openai (OpenAI) must not render the section.
-        cut.FindAll(".rounded-lg").Should().NotBeEmpty();
-        cut.Markup.Should().Contain("Estimated from intercepted traffic");
         cut.Markup.Should().Contain("Reported by Anthropic");
+        cut.Markup.Should().Contain("OpenAI Usage");
+        cut.Markup.Should().Contain("Reported by OpenAI");
+        cut.Markup.Should().Contain("Estimated from intercepted traffic");
     }
 
     [Fact]

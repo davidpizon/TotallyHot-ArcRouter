@@ -732,7 +732,7 @@ public sealed class ManagementFacade
             return null;
         }
 
-        return new ProviderRateLimitView(RateLimitSnapshotParser.Parse(headers), observedAt);
+        return new ProviderRateLimitView(RateLimitSnapshotParser.Parse(headers, observedAt), observedAt);
     }
 
     /// <summary>Classifies a stored header's <see cref="HeaderValueSource"/> from which of its fields is set.</summary>

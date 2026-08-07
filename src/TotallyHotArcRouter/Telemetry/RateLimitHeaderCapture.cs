@@ -5,18 +5,19 @@ using TotallyHot.ArcRouter.PriceCatalog;
 namespace TotallyHot.ArcRouter.Telemetry;
 
 /// <summary>
-/// Captures every upstream response header whose name starts with <c>anthropic-ratelimit-</c>
-/// (case-insensitive) and persists it verbatim, mirroring <see cref="IUsageExtractor"/>'s
+/// Captures every upstream response header whose name starts with <c>anthropic-ratelimit-</c> or
+/// <c>x-ratelimit-</c> (case-insensitive) and persists it verbatim, mirroring <see cref="IUsageExtractor"/>'s
 /// provider-dispatch design. Prefix capture, not a hardcoded header name list, is what makes this generic
-/// over both the standard (<c>x-api-key</c>) and subscription-OAuth-unified header families without any
-/// per-account configuration - and is what will let a future OpenAI-<c>x-ratelimit-*</c> capture share this
-/// same seam with just a second prefix.
+/// over Anthropic's standard (<c>x-api-key</c>) and subscription-OAuth-unified header families, and
+/// OpenAI's <c>x-ratelimit-*</c> family (<c>docs/router/openai-format-usage-accuracy-plan.md</c> §6.2),
+/// without any per-account or per-provider configuration.
 /// </summary>
 public interface IRateLimitHeaderCapture
 {
     /// <summary>
-    /// Captures <paramref name="headers"/>'s <c>anthropic-ratelimit-*</c> entries for <paramref name="providerKey"/>.
-    /// Best-effort: never throws, and never delays or fails a request that already succeeded upstream.
+    /// Captures <paramref name="headers"/>'s <c>anthropic-ratelimit-*</c>/<c>x-ratelimit-*</c> entries for
+    /// <paramref name="providerKey"/>. Best-effort: never throws, and never delays or fails a request that
+    /// already succeeded upstream.
     /// </summary>
     /// <param name="providerKey">The provider key the response came from.</param>
     /// <param name="headers">The upstream response's headers.</param>
@@ -27,7 +28,7 @@ public interface IRateLimitHeaderCapture
 /// <inheritdoc cref="IRateLimitHeaderCapture" />
 public sealed class RateLimitHeaderCapture : IRateLimitHeaderCapture
 {
-    private const string HeaderPrefix = "anthropic-ratelimit-";
+    private static readonly string[] HeaderPrefixes = ["anthropic-ratelimit-", "x-ratelimit-"];
 
     private readonly PriceCatalogRepository _repository;
     private readonly ILogger<RateLimitHeaderCapture>? _logger;
@@ -53,7 +54,7 @@ public sealed class RateLimitHeaderCapture : IRateLimitHeaderCapture
         var matched = new List<RateLimitHeaderRow>();
         foreach (var header in headers)
         {
-            if (!header.Key.StartsWith(HeaderPrefix, StringComparison.OrdinalIgnoreCase))
+            if (!Array.Exists(HeaderPrefixes, prefix => header.Key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
             {
                 continue;
             }
