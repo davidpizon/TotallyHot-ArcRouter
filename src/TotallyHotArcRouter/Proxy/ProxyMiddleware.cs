@@ -1260,11 +1260,23 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         // telemetryShapeProvider - the native shape carries fields (e.g. Anthropic cache tokens) that
         // TranslateResponse/EmitChunk currently drop on the way to the OpenAI-shaped client response (see
         // docs/router/openai-format-usage-accuracy-plan.md §1).
-        var (usageShapeProvider, usageShapeBytes) = nativeResponseBytes is { Length: > 0 }
+        var usedNativeBytes = nativeResponseBytes is { Length: > 0 };
+        var (usageShapeProvider, usageShapeBytes) = usedNativeBytes
             ? (route.Provider, nativeResponseBytes)
             : (telemetryShapeProvider, capturedResponseBytes);
 
         var usageExtracted = _usageExtractor.TryExtractUsage(usageShapeProvider, isStreaming, usageShapeBytes, out var usage);
+        if (!usageExtracted && usedNativeBytes)
+        {
+            // The native capture and the translated/client-shape capture are independently truncated at
+            // MaxCapturedResponseBytes (see CopyAndCaptureAsync), so a large response can cut the native
+            // bytes off before the usage block - often the last thing to arrive in a streamed response -
+            // while the other capture still has it. Falling back recovers usage/cost for budget enforcement
+            // and the spend ledger instead of recording nothing purely because the preferred capture was
+            // the one that got cut off.
+            usageExtracted = _usageExtractor.TryExtractUsage(telemetryShapeProvider, isStreaming, capturedResponseBytes, out usage);
+        }
+
         if (usageExtracted)
         {
             promptTokens = usage.PromptTokens;
