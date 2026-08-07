@@ -1273,8 +1273,15 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // bytes off before the usage block - often the last thing to arrive in a streamed response -
             // while the other capture still has it. Falling back recovers usage/cost for budget enforcement
             // and the spend ledger instead of recording nothing purely because the preferred capture was
-            // the one that got cut off.
+            // the one that got cut off. usageShapeProvider/usageShapeBytes are reassigned too (not just the
+            // local usage result), so the response-text extraction below - which reuses the same pair -
+            // benefits from the same fallback instead of independently failing against the truncated bytes.
             usageExtracted = _usageExtractor.TryExtractUsage(telemetryShapeProvider, isStreaming, capturedResponseBytes, out usage);
+            if (usageExtracted)
+            {
+                usageShapeProvider = telemetryShapeProvider;
+                usageShapeBytes = capturedResponseBytes;
+            }
         }
 
         if (usageExtracted)

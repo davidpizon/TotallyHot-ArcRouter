@@ -93,7 +93,7 @@ public sealed class RateLimitHeaderCapture : IRateLimitHeaderCapture, IDisposabl
             }
 
             var value = string.Join(", ", header.Value);
-            matched.Add(new RateLimitHeaderRow(header.Key, value));
+            matched.Add(new RateLimitHeaderRow(header.Key.ToLowerInvariant(), value));
         }
 
         if (matched.Count == 0)
