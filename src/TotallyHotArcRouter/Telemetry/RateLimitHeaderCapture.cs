@@ -1,4 +1,5 @@
 using System.Net.Http.Headers;
+using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using TotallyHot.ArcRouter.PriceCatalog;
 
@@ -16,8 +17,10 @@ public interface IRateLimitHeaderCapture
 {
     /// <summary>
     /// Captures <paramref name="headers"/>'s <c>anthropic-ratelimit-*</c>/<c>x-ratelimit-*</c> entries for
-    /// <paramref name="providerKey"/>. Best-effort: never throws, and the returned task completes without
-    /// waiting for the SQLite write, so callers on the request path are never delayed by a slow disk.
+    /// <paramref name="providerKey"/>. Best-effort: never throws. Enqueueing never blocks the caller, so a
+    /// caller that doesn't await the returned task (as <see cref="TotallyHot.ArcRouter.Proxy.ProxyMiddleware"/>
+    /// doesn't, on the request path) is never delayed by the SQLite write; a caller that does await it sees
+    /// the write actually complete.
     /// </summary>
     /// <param name="providerKey">The provider key the response came from.</param>
     /// <param name="headers">The upstream response's headers.</param>
@@ -26,21 +29,35 @@ public interface IRateLimitHeaderCapture
 }
 
 /// <inheritdoc cref="IRateLimitHeaderCapture" />
-public sealed class RateLimitHeaderCapture : IRateLimitHeaderCapture
+public sealed class RateLimitHeaderCapture : IRateLimitHeaderCapture, IDisposable
 {
     private static readonly string[] HeaderPrefixes = ["anthropic-ratelimit-", "x-ratelimit-"];
 
     private readonly PriceCatalogRepository _repository;
     private readonly ILogger<RateLimitHeaderCapture>? _logger;
+    private readonly Channel<CaptureItem> _channel;
+    private readonly Task _consumerLoop;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="RateLimitHeaderCapture"/> class.
+    /// Initializes a new instance of the <see cref="RateLimitHeaderCapture"/> class and starts its single
+    /// background consumer.
     /// </summary>
     public RateLimitHeaderCapture(PriceCatalogRepository repository, ILogger<RateLimitHeaderCapture>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(repository);
         _repository = repository;
         _logger = logger;
+
+        _channel = Channel.CreateUnbounded<CaptureItem>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = false,
+        });
+
+        // One dedicated long-lived task processes every capture serially. This is the only Task.Run this
+        // class ever performs (started once here, not once per response) - the request path only ever
+        // enqueues, so it can't spawn thread-pool churn under load the way a Task.Run-per-call version did.
+        _consumerLoop = Task.Run(ConsumeAsync);
     }
 
     /// <inheritdoc />
@@ -68,25 +85,54 @@ public sealed class RateLimitHeaderCapture : IRateLimitHeaderCapture
             return Task.CompletedTask;
         }
 
-        var observedAt = DateTimeOffset.UtcNow;
+        // The returned task completes when the background consumer actually finishes the write, not when
+        // it's merely enqueued - so a caller that awaits it (the test suite) observes the persisted row,
+        // while ProxyMiddleware's fire-and-forget call on the request path never waits on it.
+        // RunContinuationsAsynchronously keeps an awaiting caller's continuation off the single consumer
+        // thread, so one slow caller can't stall the queue behind it.
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!_channel.Writer.TryWrite(new CaptureItem(providerKey, matched, DateTimeOffset.UtcNow, completion)))
+        {
+            // The channel is only ever completed by Dispose, so this means the capture is shutting down -
+            // best-effort, so this is a silent no-op rather than a throw.
+            completion.TrySetResult();
+        }
 
-        // The repository call is a synchronous SQLite write. Task.Run moves it off the caller's async
-        // continuation onto the thread pool, and the exception handling lives inside the queued work so a
-        // storage hiccup is logged here rather than becoming an unobserved task exception - the caller is
-        // free to not await the returned task without losing error handling.
-        return Task.Run(() =>
+        return completion.Task;
+    }
+
+    /// <summary>Drains <see cref="_channel"/> for the lifetime of this instance, writing one capture at a time.</summary>
+    private async Task ConsumeAsync()
+    {
+        await foreach (var item in _channel.Reader.ReadAllAsync().ConfigureAwait(false))
         {
             try
             {
-                _repository.UpsertRateLimitHeaders(providerKey, matched, observedAt);
+                _repository.UpsertRateLimitHeaders(item.ProviderKey, item.Headers, item.ObservedAtUtc);
             }
             catch (Exception ex)
             {
                 // Best-effort: a storage hiccup here must never fail a request that already succeeded upstream.
-                _logger?.LogWarning(ex, "Failed to capture rate-limit headers for provider {Provider}.", SanitizeForLog(providerKey));
+                _logger?.LogWarning(ex, "Failed to capture rate-limit headers for provider {Provider}.", SanitizeForLog(item.ProviderKey));
             }
-        }, cancellationToken);
+            finally
+            {
+                // Never TrySetException: the contract is "never throws" even for a caller that awaits the
+                // returned task, and the failure above (if any) was already logged and swallowed.
+                item.Completion.TrySetResult();
+            }
+        }
     }
+
+    /// <summary>Stops accepting new captures. Already-queued items are left for the consumer loop to drain.</summary>
+    public void Dispose() => _channel.Writer.TryComplete();
+
+    /// <summary>One provider's matched headers, queued for the background consumer to persist.</summary>
+    private readonly record struct CaptureItem(
+        string ProviderKey,
+        IReadOnlyList<RateLimitHeaderRow> Headers,
+        DateTimeOffset ObservedAtUtc,
+        TaskCompletionSource Completion);
 
     /// <summary>Strips CR/LF from a client-controlled provider key so it cannot forge additional log lines.</summary>
     private static string SanitizeForLog(string value) =>

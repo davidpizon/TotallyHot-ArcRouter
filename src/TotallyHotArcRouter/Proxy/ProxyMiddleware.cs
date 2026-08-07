@@ -544,10 +544,11 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
             // Headers precede the body for both streaming and buffered responses, so capture happens here
             // rather than after the usage-parsing pass below (which needs the fully captured body first).
-            // Best-effort and self-guarding (see IRateLimitHeaderCapture's contract): the SQLite write runs
-            // on the thread pool, and deliberately not awaited here so that write can never delay emitting
-            // the response already back from upstream. Errors are caught and logged inside the capture
-            // implementation itself, so there is nothing for an unobserved-task-exception handler to catch.
+            // Best-effort and self-guarding (see IRateLimitHeaderCapture's contract): the call only enqueues
+            // onto the capture's own background consumer and returns immediately, and is deliberately not
+            // awaited here so the SQLite write it eventually does can never delay emitting the response
+            // already back from upstream. Errors are caught and logged inside the capture implementation
+            // itself, so there is nothing for an unobserved-task-exception handler to catch.
             _ = _rateLimitCapture.CaptureAsync(route.Provider, responseMessage.Headers, CancellationToken.None);
 
             // Gemini reports an invalid/expired API key as a 400 (the key travels as a "key=" query
@@ -1263,7 +1264,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             ? (route.Provider, nativeResponseBytes)
             : (telemetryShapeProvider, capturedResponseBytes);
 
-        if (_usageExtractor.TryExtractUsage(usageShapeProvider, isStreaming, usageShapeBytes, out var usage))
+        var usageExtracted = _usageExtractor.TryExtractUsage(usageShapeProvider, isStreaming, usageShapeBytes, out var usage);
+        if (usageExtracted)
         {
             promptTokens = usage.PromptTokens;
             completionTokens = usage.CompletionTokens;
@@ -1301,8 +1303,10 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         // Attribute this request's usage to the provider that actually served it (route.Provider is the
         // post-failover, post-budget-skip winner), so per-provider monthly spend and the Governance budget
         // bars stay accurate. Best-effort and self-guarding, exactly like the spend tracker above - same
-        // CancellationToken.None reasoning applies.
-        if (_budgetStore is not null)
+        // CancellationToken.None reasoning applies. Gated on usageExtracted (unlike the spend tracker
+        // above): a zero-usage row here would advance LastUsageAtUtc and make the admin UI report a
+        // misleading "last recorded" time for a provider whose response simply carried no usage block.
+        if (_budgetStore is not null && usageExtracted)
         {
             await _budgetStore.RecordUsageAsync(
                 route.Provider,
