@@ -13,7 +13,7 @@ using Moq;
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
 /// <summary>
-/// Coverage for PLAN.md TODO 4's "Unified API Translation" pillar, Gemini slice
+/// Coverage for the Gemini slice of unified API translation
 /// (<c>docs/router/unified-api-translation.md</c> §4.3): unlike Ollama (which is already OpenAI-shaped
 /// and needs no translator), Gemini's native <c>generateContent</c> API differs in URL, auth, and
 /// payload shape, so <see cref="GeminiPayloadTranslator"/> rewrites the request into Gemini's shape on

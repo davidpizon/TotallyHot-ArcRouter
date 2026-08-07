@@ -5,7 +5,7 @@ using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Tests.Telemetry;
 
-/// <summary>Covers <see cref="SpendTracker"/>: PLAN.md's "Basic Token/Cost Tracking" parity pillar.</summary>
+/// <summary>Covers <see cref="SpendTracker"/>: the basic token/cost tracking parity pillar.</summary>
 public class SpendTrackerTests : IDisposable
 {
     private readonly string _logFilePath = Path.Combine(Path.GetTempPath(), $"spend-tracker-tests-{Guid.NewGuid():N}.jsonl");

@@ -5,11 +5,10 @@ using Microsoft.Extensions.Options;
 namespace TotallyHot.ArcRouter.Telemetry;
 
 /// <summary>
-/// Tracks a personal-scale running spend total across the process lifetime (PLAN.md's "Basic
-/// Token/Cost Tracking" parity pillar) - not a team/org billing system, just enough for a single
-/// developer to see what they've spent. Every recorded request's running total is logged (visible as
-/// terminal output through the configured Serilog Console sink) and appended to a local JSON Lines
-/// file, satisfying PLAN.md's "terminal output or a simple local file log" wording with both.
+/// Tracks a personal-scale running spend total across the process lifetime - not a team/org billing
+/// system, just enough for a single developer to see what they've spent. Every recorded request's
+/// running total is logged (visible as terminal output through the configured Serilog Console sink)
+/// and appended to a local JSON Lines file, giving both a terminal view and a simple local file log.
 /// </summary>
 public interface ISpendTracker
 {

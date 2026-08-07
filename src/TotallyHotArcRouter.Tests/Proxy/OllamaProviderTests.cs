@@ -10,7 +10,7 @@ using Moq;
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
 /// <summary>
-/// Regression coverage for PLAN.md TODO 4's "Unified API Translation" pillar, Ollama slice (see
+/// Regression coverage for the Ollama slice of unified API translation (see
 /// <c>docs/router/unified-api-translation.md</c> §4.1): confirms the proxy's *existing* pass-through
 /// forwarding already round-trips correctly against Ollama's own OpenAI-compatible endpoint shape
 /// (verified against Ollama's docs, not assumed), with zero

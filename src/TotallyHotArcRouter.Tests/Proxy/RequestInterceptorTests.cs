@@ -301,7 +301,7 @@ public class RequestInterceptorTests
         Assert.Equal(resolver.ListModels(), models);
     }
 
-    // PLAN.md "Local Proxy CLI" parity pillar: an invalid --model CLI value must fail at startup
+    // Local Proxy CLI: an invalid --model CLI value must fail at startup
     // (constructor time), not silently on the first request.
     [Fact]
     public void Constructor_ForcedModelNotConfigured_ThrowsInvalidOperationException()

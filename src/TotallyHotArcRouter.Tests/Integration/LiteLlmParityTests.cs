@@ -12,16 +12,16 @@ using Moq;
 namespace TotallyHot.ArcRouter.Tests.Integration;
 
 /// <summary>
-/// PLAN.md TODO 3: parity tests that drive TotallyHot.ArcRouter's real proxy against the real
-/// <c>litellm-sidecar/</c> (TODO 1) and compare behavior, scoped to the four release-gate pillars
-/// listed in PLAN.md's "Practical Hybrid Goal" section (unified API translation, local proxy CLI,
-/// cost tracking, local fallbacks). The sidecar is dev/test-only scaffolding that nothing starts
+/// Parity tests that drive TotallyHot.ArcRouter's real proxy against the real
+/// <c>litellm-sidecar/</c> and compare behavior, scoped to the four release-gate pillars of an
+/// earlier parity workstream (unified API translation, local proxy CLI, cost tracking, local
+/// fallbacks). The sidecar is dev/test-only scaffolding that nothing starts
 /// automatically (see litellm-sidecar/README.md) - every test here skips itself via
 /// <see cref="Assert.SkipUnless"/> when it isn't reachable at <see cref="SidecarBaseUrl"/>, rather
 /// than failing, since "sidecar not running" is an expected, non-broken state in CI and on most
 /// contributors' machines.
 ///
-/// All four pillars are now built (PLAN.md TODO 4) and covered by real parity tests here: unified API
+/// All four pillars are now built and covered by real parity tests here: unified API
 /// translation passthrough, basic token/cost tracking, the Local Proxy CLI single-model override, and -
 /// originally the Simple Local Fallbacks work, since superseded by the Circuit Breaker
 /// (docs/router/agent-resilience-strategies.md) - a live outage cascade

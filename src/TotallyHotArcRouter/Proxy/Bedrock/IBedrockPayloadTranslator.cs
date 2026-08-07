@@ -3,8 +3,8 @@ using TotallyHot.ArcRouter.Proxy.Translation;
 namespace TotallyHot.ArcRouter.Proxy.Bedrock;
 
 /// <summary>
-/// Marks an <see cref="IPayloadTranslator"/> that targets an Amazon Bedrock model family (PLAN.md
-/// TODO 4's "Unified API Translation" pillar, Bedrock slice - see
+/// Marks an <see cref="IPayloadTranslator"/> that targets an Amazon Bedrock model family (the
+/// Bedrock slice of unified API translation - see
 /// <c>docs/router/unified-api-translation.md</c> §4.2). Bedrock is invoked through the AWS SDK
 /// (<c>IAmazonBedrockRuntime</c>), not a forwarded <c>HttpRequestMessage</c> - the SDK computes the
 /// endpoint, performs SigV4 signing, and (for streaming) decodes AWS's binary event-stream framing

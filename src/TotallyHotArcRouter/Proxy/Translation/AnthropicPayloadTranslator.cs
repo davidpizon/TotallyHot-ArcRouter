@@ -8,7 +8,7 @@ namespace TotallyHot.ArcRouter.Proxy.Translation;
 
 /// <summary>
 /// Translates OpenAI-shaped chat-completion payloads to/from Anthropic's native Messages API shape
-/// (PLAN.md TODO 4's "Unified API Translation" pillar, Anthropic retrofit,
+/// (the Anthropic retrofit of unified API translation,
 /// <c>docs/router/unified-api-translation.md</c> §4.4). Field mappings mirror LiteLLM's Anthropic
 /// transformation (the parity reference used throughout this pillar), scoped to the surface this
 /// pillar needs: text messages, function/tool calling, extended-thinking round-tripping, and the

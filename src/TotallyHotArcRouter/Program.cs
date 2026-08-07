@@ -65,7 +65,7 @@ public static class Program
             {
                 services.AddTotallyHotArcRouter();
 
-                // PLAN.md "Local Proxy CLI" pillar: registered even when null (normal multi-model
+                // Local Proxy CLI single-model override: registered even when null (normal multi-model
                 // routing) so RequestInterceptor's optional constructor parameter always has an explicit
                 // value to reason about rather than depending on DI's "unregistered optional service"
                 // fallback.
@@ -83,7 +83,7 @@ public static class Program
     }
 
     /// <summary>
-    /// Extracts PLAN.md "Local Proxy CLI" pillar's <c>--model &lt;name&gt;</c> flag from
+    /// Extracts the Local Proxy CLI's <c>--model &lt;name&gt;</c> flag from
     /// <paramref name="args"/> (mirroring LiteLLM's <c>litellm --model provider/name</c> single-model
     /// serving invocation), returning the forced model name (if present) and the remaining arguments
     /// with the flag and its value removed. Stripping it out matters: <see cref="Host.CreateDefaultBuilder(string[])"/>

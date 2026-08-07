@@ -12,7 +12,10 @@ actually does today. Originally sourced from explicit statements in [`dashboard.
 
 Live Stream and Cost Analytics' Token Compounding chart now read live data (see "Recently
 completed" below and [`../router/telemetry.md`](../router/telemetry.md)); everything else still
-reads `MockData` because no telemetry source exists for it yet:
+reads `MockData` because no telemetry source exists for it yet. Most of the items below (cache hit
+rate, Model Distribution, the header ticker, functional time filters) are scheduled with concrete
+data sources in
+[`../router/token-tracking-implementation-plan.md`](../router/token-tracking-implementation-plan.md):
 
 - **Cost Analytics — real values behind the metric explorer.** The tab is now a metric explorer
   (see "Recently completed" below) that renders live turns merged with a mock history corpus. Four of

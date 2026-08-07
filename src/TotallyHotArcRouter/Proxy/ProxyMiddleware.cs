@@ -121,9 +121,9 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// <param name="responseTextExtractor">Optional response-text extractor; defaults to <see cref="ResponseTextExtractor"/>.</param>
     /// <param name="telemetryPublisher">Optional telemetry publisher; defaults to a fresh <see cref="TelemetryPublisher"/> backed by a private, unshared <see cref="TelemetryBroadcaster"/> (a safe no-op, since nothing is ever registered to receive from it).</param>
     /// <param name="sandboxIngress">Optional sandbox ingress façade; when supplied, completed responses are enqueued for off-path execution-grounded scoring. Best-effort and non-blocking; defaults to <see langword="null"/> (disabled).</param>
-    /// <param name="spendTracker">Optional running-spend tracker (PLAN.md's "Basic Token/Cost Tracking" pillar); defaults to <see cref="NullSpendTracker"/> (a safe no-op) so existing callers/tests that don't need it are unaffected.</param>
-    /// <param name="priceLookup">Optional catalog price lookup (PLAN.md's "Basic Token/Cost Tracking" pillar, cost half); when supplied, a paid route's per-request cost is estimated from the auto-refreshed price catalog. Defaults to <see langword="null"/> (disabled), leaving paid-model cost unknown as before.</param>
-    /// <param name="translators">Optional per-provider payload translators (PLAN.md's "Unified API Translation" pillar), keyed by provider name. A provider present here has its request/response/stream translated to and from OpenAI's shape (Gemini and Bedrock providers always; Anthropic when <see cref="IPayloadTranslator.ShouldTranslate"/> allows it for the request); a provider absent here, or whose translator vetoes this request, is forwarded byte-for-byte, exactly as before. Defaults to an empty map (all providers pass through unchanged).</param>
+    /// <param name="spendTracker">Optional running-spend tracker; defaults to <see cref="NullSpendTracker"/> (a safe no-op) so existing callers/tests that don't need it are unaffected.</param>
+    /// <param name="priceLookup">Optional catalog price lookup (docs/router/model-price-catalog.md); when supplied, a paid route's per-request cost is estimated from the auto-refreshed price catalog. Defaults to <see langword="null"/> (disabled), leaving paid-model cost unknown as before.</param>
+    /// <param name="translators">Optional per-provider payload translators (docs/router/unified-api-translation.md), keyed by provider name. A provider present here has its request/response/stream translated to and from OpenAI's shape (Gemini and Bedrock providers always; Anthropic when <see cref="IPayloadTranslator.ShouldTranslate"/> allows it for the request); a provider absent here, or whose translator vetoes this request, is forwarded byte-for-byte, exactly as before. Defaults to an empty map (all providers pass through unchanged).</param>
     /// <param name="bedrockClientFactory">Optional factory for the Amazon Bedrock Runtime SDK client used by any translator implementing <see cref="IBedrockPayloadTranslator"/>. In the real app this is always supplied via DI (a shared singleton the container owns and disposes); when omitted (direct construction outside DI, e.g. a caller that never touches the Bedrock path), this instance builds and owns its own <see cref="BedrockRuntimeClientFactory"/> and disposes it in <see cref="Dispose"/>. Overridable for tests, which substitute a fake <c>IAmazonBedrockRuntime</c> so no live AWS call is made.</param>
     /// <param name="budgetStore">Optional per-provider monthly budget store (Governance &gt; Providers). When supplied, a provider whose cap is exhausted is skipped for the request, an all-breached request is rejected with 402, and each served request's usage is recorded against the serving provider. Defaults to <see langword="null"/> (no budgets enforced or recorded), so existing callers/tests are unaffected.</param>
     /// <param name="circuitBreaker">Optional per-upstream-target circuit breaker (<c>docs/router/agent-resilience-strategies.md</c>). Must be the <em>same</em> instance given to the <see cref="RequestInterceptor"/> this middleware wraps (see <c>ServiceCollectionExtensions</c>'s DI wiring) - this class is what records the successes/failures <see cref="RequestInterceptor"/> reads back when ranking candidates. Defaults to a fresh, always-CLOSED instance when omitted, which is behaviorally inert (existing callers/tests unaffected) but decoupled from any interceptor-side instance, so circuit state recorded here would never be seen there.</param>
@@ -239,8 +239,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             return;
         }
 
-        // Try the requested model first, then each configured fallback in order (PLAN.md's "Simple Local
-        // Fallbacks" pillar). A candidate is retried against the next one only on a genuine upstream
+        // Try the requested model first, then each configured fallback in order. A candidate is
+        // retried against the next one only on a genuine upstream
         // *outage* - connection failure, timeout, or 5xx - never on a client-fault status (400/401/403/
         // 422), which a backup would reject identically. 429 is a special case: retried only when the next
         // backup is a *different* provider (a separate quota/rate-limit pool), since a same-provider backup
@@ -1245,8 +1245,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
         // The client's requested model (which may differ from route.ModelName when a fallback served the
         // request); isFallback tells the dashboard the primary was bypassed. See the failover loop in
-        // InvokeAsync. This is the infrastructure-outage cascade (PLAN.md "Simple Local Fallbacks"), not
-        // the paper's Verifier-driven semantic re-routing.
+        // InvokeAsync. This is the infrastructure-outage cascade, not the paper's Verifier-driven
+        // semantic re-routing.
         var requestedModel = requestedModelName;
 
         int? promptTokens = null;

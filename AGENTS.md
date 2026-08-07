@@ -9,7 +9,7 @@ This repository contains the TotallyHot Arc Router project.
 ## Start Here
 - Read `README.md` first for the current project overview, quick start, demos, and repository layout.
 - Read `docs/HANDBOOK.md` for maintainer guidance and extended notes.
-- Use `PLAN.md` for the current C# migration roadmap.
+- Use `src/PLAN.md` for the current C# migration roadmap.
 
 ## Working Rules
 - Keep changes minimal and scoped to the user request.
@@ -87,7 +87,7 @@ Requires Windows Developer Mode and `git config core.symlinks true`.
 ## Key References
 - `README.md`
 - `docs/HANDBOOK.md`
-- `PLAN.md`
+- `src/PLAN.md`
 - `data/README.md`
 - `docs/gui/DESIGN.md` — GUI design system (colors, typography, components, the window/modal shell)
 - `docs/gui/MOTION.md` — GUI motion system (durations, easing, entrance/exit patterns)

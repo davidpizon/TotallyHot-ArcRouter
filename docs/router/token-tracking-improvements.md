@@ -1,7 +1,8 @@
 # Token Tracking: Improvements Adapted from Open-Source Usage Trackers
 
 > **Status: Analysis and proposal — nothing here is implemented.** This document surveys seven
-> external open-source token/cost trackers, compares each technique against TotallyHotArcRouter's
+> external open-source token/cost trackers (plus two on-path proxy peers, LiteLLM and Helicone — see
+> §3), compares each technique against TotallyHotArcRouter's
 > *current, on-disk* token-tracking implementation, and proposes concrete changes. Every "current
 > behavior" claim below was read from source in this repository at the time of writing and cites the
 > file and line. Every "proposed" block is a sketch, not shipped code.
@@ -10,7 +11,10 @@
 > [`agent-cost-tracking.md`](agent-cost-tracking.md), [`model-price-catalog.md`](model-price-catalog.md),
 > [`d3-alias-resolution.md`](d3-alias-resolution.md), or [`telemetry.md`](telemetry.md), the conflict is
 > called out explicitly under a **⚠ Conflicts with** heading and the tradeoff is argued rather than
-> glossed over. Adopting or rejecting those is a maintainer decision.
+> glossed over. The maintainer has since **adopted** the recommended position on all three contested
+> findings (§5.5, §5.7, §5.11) — the conflicting docs carry superseding-decision notes — and the
+> phase-by-phase execution of everything below, including the GUI rendering work in §5.15, lives in
+> [`token-tracking-implementation-plan.md`](token-tracking-implementation-plan.md).
 
 ---
 
@@ -71,7 +75,7 @@ flowchart LR
 | Model identity | [`ConfigModelIdentityResolver.cs:64`](../../src/TotallyHotArcRouter/PriceCatalog/ModelIdentityResolver.cs#L64) | **Exact match only.** Provider name equal (case-insensitive) + model id equal after stripping the source's own `provider/` prefix. |
 | Running spend | [`SpendTracker.cs:68`](../../src/TotallyHotArcRouter/Telemetry/SpendTracker.cs#L68) | Process-lifetime in-memory totals + append-only `spend_log.jsonl`. **Nothing reads the file back.** |
 | Budget enforcement | [`ProviderBudgetStore.cs`](../../src/TotallyHotArcRouter/PriceCatalog/ProviderBudgetStore.cs) | Per-provider caps, `YYYY-MM` UTC calendar-month window, auto-reset on rollover. Persisted. |
-| Rate-limit headers | [`RateLimitHeaderCapture.cs:80`](../../src/TotallyHotArcRouter/Telemetry/RateLimitHeaderCapture.cs#L80) | Captures every `anthropic-ratelimit-*` / `x-ratelimit-*` header as an opaque `(name, value)` string row. **Never parsed.** |
+| Rate-limit headers | [`RateLimitHeaderCapture.cs:80`](../../src/TotallyHotArcRouter/Telemetry/RateLimitHeaderCapture.cs#L80), [`RateLimitSnapshotParser.cs`](../../src/TotallyHotArcRouter/PriceCatalog/RateLimitSnapshotParser.cs) | Captured verbatim (snapshot + minute-bucketed 30-day history), parsed into a typed `RateLimitSnapshotView`, and shown on the Providers card via `GET /admin/providers`. **Displayed but never interpreted**: no burn-rate projection, no history charts, no staleness state. |
 | Turn counting | [`ConversationTurnTracker.cs:26`](../../src/TotallyHotArcRouter/Telemetry/ConversationTurnTracker.cs#L26) | `ConcurrentDictionary<string,int>`, no eviction, resets on process restart. |
 | Broadcast shape | [`RoutingTelemetryEvent.cs`](../../src/TotallyHotArcRouter/Telemetry/RoutingTelemetryEvent.cs), [`telemetry.proto:161`](../../src/Protos/telemetry.proto#L161) | Carries `PromptTokens`, `CompletionTokens`, `EstimatedCostUsd`. **No cache fields.** |
 | GUI consumption | [`LiveDataStore.cs:50`](../../src/TotallyHotArcRouter.Gui/Services/LiveDataStore.cs#L50), [`LiveConversationMapper.cs:69`](../../src/TotallyHotArcRouter.Gui/Services/LiveConversationMapper.cs#L69) | In-memory `List<RoutingTelemetryEventDto>`, populated only while connected. `CacheHitRate` hardcoded to `0m`. |
@@ -102,6 +106,33 @@ Also noted from the topic page but not analyzed in depth: `xops-labs/llm-usage-e
 Prometheus exporter — closest-language prior art for §5.12), `nujovich/hermes-telemetry` (23★, budget
 *enforcement* as a plugin), `vladar107/claudescope` (14★).
 
+### On-path prior art: the two projects that share Arc Router's vantage point
+
+The seven surveyed projects are (with the partial exception of `cccost`) all off-path, which is why §1
+frames their capture techniques as not worth adopting. Two large open-source projects **are** on-path
+proxies, and they validate this document's retention/rollup findings from the same seat Arc Router sits
+in:
+
+- **[BerriAI/litellm](https://github.com/BerriAI/litellm)** (LLM gateway, 50k+★). Its proxy persists a
+  per-request **`SpendLogs` table** in PostgreSQL — precisely the durable ledger §5.2 proposes — and
+  builds budget enforcement per key/user/team/org **with daily and monthly resets** on top of it,
+  validating §5.10's multi-window budget shape. Notably it also ships a `disable_spend_logs` switch
+  because the ledger's write volume is a real operational cost — the same reason §5.2 keeps the ledger
+  write best-effort and off the hot path. Arc Router already consumes LiteLLM's price data
+  ([`model-price-catalog.md`](model-price-catalog.md)); this is its *proxy's* storage design, a separate
+  thing worth studying in its own right.
+- **[Helicone](https://github.com/Helicone/helicone)** (proxy-first observability, Apache-2.0). Logs
+  every request's tokens/cost/error at the proxy and answers analytics queries from **pre-aggregated
+  ClickHouse rollups**, not raw rows — the same raw-ledger-plus-rollup split §5.2/§5.3 propose, proven at
+  ~10⁹-request scale. For providers it can't see through its gateway it falls back to an open-source
+  **cost repository covering 300+ models** plus best-effort model detection — prior art for §5.7's
+  position that a labeled approximation beats a blank. (Helicone entered maintenance mode after its
+  March 2026 acquisition, which makes it a design reference rather than a dependency candidate.)
+
+The lesson from both: an on-path proxy that persists per-request rows and pre-aggregates them is the
+*normal, proven* architecture in this space — Arc Router's missing ledger is the anomaly, not the
+proposal.
+
 ---
 
 ## 4. Findings at a glance
@@ -116,12 +147,13 @@ Prometheus exporter — closest-language prior art for §5.12), `nujovich/hermes
 | [5.6](#56-cost-confidence-is-not-modeled--four-different-unknowns-collapse-into-null) | Cost confidence not modeled | P1 | S | No — it *strengthens* the no-fabricated-cost principle |
 | [5.7](#57-model-identity-resolution-is-exact-match-or-nothing) | Model identity resolution is exact-or-nothing | P1 | M | **Yes** — `d3-alias-resolution.md`'s "deliberately exact" rule |
 | [5.8](#58-no-reconciliation-against-provider-reported-billing) | No reconciliation vs. provider-reported billing | P2 | L | No — implements `agent-cost-tracking.md` §3.5 |
-| [5.9](#59-rate-limit-headers-are-captured-as-opaque-strings) | Rate-limit headers captured as opaque strings | P2 | M | Partial — reject openusage's *probing*, adopt its *projection* |
+| [5.9](#59-rate-limit-snapshots-are-displayed-but-never-interpreted) | Rate-limit snapshots displayed but never interpreted | P2 | M | Partial — reject openusage's *probing*, adopt its *projection* |
 | [5.10](#510-budget-windows-are-calendar-month-only) | Budget windows are calendar-month only | P2 | M | No |
 | [5.11](#511-a-truncated-capture-loses-usage-silently) | Truncated capture loses usage silently | P2 | M | **Yes** — `UsageExtractor`'s "single-shot is simpler and lower-risk" |
 | [5.12](#512-no-export-surface) | No export surface (CSV/JSON/OTel) | P2 | M | No |
 | [5.13](#513-spend_logjsonl-is-unversioned-unbounded-and-unread) | `spend_log.jsonl` unversioned, unbounded, unread | P3 | S | No |
 | [5.14](#514-reasoning-tokens-and-web-search-requests-are-not-modeled) | Reasoning tokens / web-search not modeled | P3 | S | No |
+| [5.15](#515-the-durable-data-has-no-gui-surface) | The durable data has no GUI surface | P1 | L | No — it closes the GUI docs' own backlog items |
 
 ---
 
@@ -197,7 +229,8 @@ public static decimal CacheHitRate(int promptTokens, int cacheCreationTokens, in
 **Files touched.** `Telemetry/RoutingTelemetryEvent.cs`, `Protos/telemetry.proto`,
 `Telemetry/TelemetryGrpcService.cs`, `Proxy/ProxyMiddleware.cs:1365`,
 `Gui.Telemetry/` DTO + aggregation, `Gui/Services/LiveConversationMapper.cs:69`, plus the stale remarks
-block at `LiveConversationMapper.cs:21-22` and the "real-vs-defaulted" table in `docs/gui/dashboard.md`.
+block at `LiveConversationMapper.cs:21-22` and the real-vs-defaulted field table in
+[`telemetry.md`](telemetry.md#gui-consumption) (which `docs/gui/dashboard.md` links to).
 
 **Why P0.** Smallest change with the largest visible effect: it lights up a dashboard tile that is
 currently, and misleadingly, always zero, using data the proxy already has in hand.
@@ -753,13 +786,34 @@ this reason: it is high-value but only for a subset of deployments.
 
 ---
 
-### 5.9 Rate-limit headers are captured as opaque strings
+### 5.9 Rate-limit snapshots are displayed but never interpreted
 
-**Current behavior.** `RateLimitHeaderCapture` is well-engineered as *plumbing* — bounded channel, single
-consumer, non-blocking `TryWrite`, drain-on-dispose. But it stores `(lowercased header name, joined value)`
-string pairs and stops there. Nothing parses `anthropic-ratelimit-input-tokens-remaining`,
-`anthropic-ratelimit-input-tokens-limit`, or `anthropic-ratelimit-input-tokens-reset` into a typed
-snapshot; nothing projects when the bucket will empty; nothing surfaces it in the GUI.
+> **Correction (2026-08-07).** An earlier revision of this finding claimed the captured headers were
+> "never parsed" and never reached the GUI. That was stale: the typed-parse and display layers shipped
+> with [`anthropic-reported-usage-plan.md`](anthropic-reported-usage-plan.md) Phases 2–3. The finding
+> below is re-scoped to what is actually still missing.
+
+**Current behavior.** `RateLimitHeaderCapture` is well-engineered *plumbing* — bounded channel, single
+consumer, non-blocking `TryWrite`, drain-on-dispose — persisting verbatim rows into a per-provider
+snapshot table plus a minute-bucketed, 30-day-pruned history table.
+[`RateLimitSnapshotParser`](../../src/TotallyHotArcRouter/PriceCatalog/RateLimitSnapshotParser.cs) then
+projects those rows into a typed `RateLimitSnapshotView` — Anthropic's standard dimension trios, the
+unified 5-hour/weekly windows, and OpenAI's reversed-order `x-ratelimit-*` family including its Go-style
+relative reset durations — and `ManagementFacade` exposes it as `ProviderRateLimitView` (snapshot +
+`ObservedAtUtc`) on `GET /admin/providers`, which `ProvidersAdmin.razor` renders as the provider card's
+"Reported by Anthropic" block with an "As of" footer.
+
+What is still missing is every layer of *interpretation* on top of that faithful display:
+
+- **No burn-rate projection.** The card says "340,000 input tokens remaining"; nothing computes "at your
+  current rate, that empties in 19 minutes" — the form of the answer an operator can act on.
+- **The history table is write-only.** `provider_rate_limit_history` exists precisely so trend charts
+  could be added "as a pure GUI change" (the plan's own words), and nothing reads it.
+- **Staleness is a timestamp, not a state.** The "As of" footer is honest, but the reader must do the
+  mental arithmetic; there is no fresh/stale threshold and no visual signal when the snapshot is old.
+- **Snapshot data only moves when the Providers card loads.** It rides the `GET /admin/providers` pull,
+  not the live telemetry stream, so nothing else in the GUI (status banner, a future usage panel) can
+  react to approaching exhaustion in real time.
 
 **What the sources do.**
 
@@ -772,42 +826,33 @@ snapshot; nothing projects when the bucket will empty; nothing surfaces it in th
 - **TokenTracker** keeps **last-good caching** so a provider that momentarily stops reporting shows its
   last known state rather than blanking to zero.
 
-**Proposed.** Parse into a typed snapshot; project; cache last-good.
+**Proposed.** Interpretation only — the capture, parse, and display layers exist and stay as they are.
 
 ```csharp
 /// <summary>
-/// One provider's parsed rate-limit state at a point in time, derived from the raw headers
-/// <see cref="RateLimitHeaderCapture"/> already persists. Separated from the raw rows because the raw rows
-/// are a faithful archive (and must stay one, since header names change without notice) while this is an
-/// interpretation that can be revised without losing the underlying evidence.
+/// Projects when a rate-limit dimension will be exhausted at the recently-observed consumption rate, from
+/// two observations of the same (provider, dimension) - e.g. successive <c>provider_rate_limit_history</c>
+/// minute buckets, or the previous and current snapshot. Adapted from openusage's burn-rate projection,
+/// which answers the question an operator actually has - "how long do I have" - rather than the one the
+/// headers answer directly. Returns <see langword="null"/> when consumption is flat or negative (the
+/// bucket refilled between observations), when either observation lacks <c>Remaining</c>, or when the
+/// projected exhaustion falls after the dimension's reset instant - in that last case the bucket refills
+/// before it empties, so there is nothing to warn about.
 /// </summary>
-/// <param name="ProviderKey">The provider these limits apply to.</param>
-/// <param name="Dimension">Which bucket: requests, input tokens, or output tokens.</param>
-/// <param name="Limit">The bucket's ceiling, or <see langword="null"/> when the provider didn't report one.</param>
-/// <param name="Remaining">Headroom left in the bucket, or <see langword="null"/>.</param>
-/// <param name="ResetsAtUtc">When the bucket refills, or <see langword="null"/>.</param>
-/// <param name="ObservedAtUtc">When these values were seen. Required for burn-rate arithmetic.</param>
-public readonly record struct RateLimitSnapshot(
-    string ProviderKey,
-    RateLimitDimension Dimension,
-    long? Limit,
-    long? Remaining,
-    DateTimeOffset? ResetsAtUtc,
-    DateTimeOffset ObservedAtUtc);
+public static DateTimeOffset? ProjectExhaustion(
+    RateLimitDimensionView earlier, DateTimeOffset earlierObservedAtUtc,
+    RateLimitDimensionView later, DateTimeOffset laterObservedAtUtc)
 ```
 
-```csharp
-/// <summary>
-/// Projects when a rate-limit bucket will be exhausted at the recently-observed consumption rate, from two
-/// snapshots of the same (provider, dimension). Adapted from openusage's burn-rate projection, which
-/// answers the question an operator actually has - "how long do I have" - rather than the one the headers
-/// answer directly. Returns <see langword="null"/> when consumption is flat or negative (the bucket refilled
-/// between observations), when either snapshot lacks <c>Remaining</c>, or when the projected exhaustion
-/// falls after <c>ResetsAtUtc</c> - in that last case the bucket refills before it empties, so there is
-/// nothing to warn about.
-/// </summary>
-public static DateTimeOffset? ProjectExhaustion(RateLimitSnapshot earlier, RateLimitSnapshot later)
-```
+Three companion pieces, all reads over data that already exists:
+
+1. **History trend charts** on the provider card, reading `provider_rate_limit_history` — the "pure GUI
+   change" the anthropic plan explicitly deferred and provisioned for.
+2. **A staleness state** derived from `ObservedAtUtc` (fresh under a threshold, stale over it) so a frozen
+   snapshot *reads* as stale instead of as current.
+3. **Optionally, a rate-limit oneof case on the telemetry stream**, so exhaustion warnings can reach the
+   GUI's status banner without waiting for a Providers-card load. This is additive to the existing
+   `GET /admin/providers` path, not a replacement.
 
 **⚠ Conflicts with — partially.** openusage obtains this data by **actively probing**: "probes rate limit
 headers via test API calls." Arc Router must **not** adopt that. Synthetic upstream calls cost money, consume
@@ -819,9 +864,11 @@ risk besides.
 
 **Adopt from TokenTracker: last-good caching.** A response that carries no rate-limit headers must leave
 the previous snapshot standing, not overwrite it with nulls. Today's `CaptureAsync` already returns early
-when `matched.Count == 0`, which happens to give the right behavior for the raw rows — preserve that
-property explicitly when the typed layer is added, and record `ObservedAtUtc` staleness in the GUI so a
-frozen snapshot reads as stale rather than as current.
+when `matched.Count == 0`, and the snapshot table upserts per header name, so the implemented layers
+already have this property — it just isn't stated as a contract anywhere. Pin it with a test (a
+header-free response leaves the prior snapshot intact) so a future refactor can't silently regress it,
+and pair it with the staleness state above so a preserved-but-old snapshot reads as stale rather than as
+current.
 
 ---
 
@@ -1017,6 +1064,44 @@ catalog rather than as work to schedule.
 
 ---
 
+### 5.15 The durable data has no GUI surface
+
+**Current behavior.** The GUI's own documentation is candid that most of the dashboard still renders
+`MockData` because "no telemetry source exists for it yet" ([`../gui/backlog.md`](../gui/backlog.md)
+item 1). Concretely, once §5.1–§5.10 exist, every one of these gaps has a real data source waiting for a
+surface:
+
+| GUI surface (existing tab) | Today | Lights up from |
+|---|---|---|
+| Live Stream turn cards' **Cache** stat; Cost Analytics **Cache Hit** metric | Hardcoded `0` for live turns | §5.1 (cache tokens on the wire) |
+| Cost Analytics history beyond the current session; any chart that survives a GUI restart | Evaporates with the process | §5.2 ledger + §5.3 rollups, queried via a new proxy surface |
+| **Model Distribution** tab (token volume by day, model share) + its cosmetic-only time filters | Entirely `MockData`; filters don't filter | §5.3 rollups (`P1D` buckets by provider/model) |
+| Header **ticker** (Total Saved / System Tokens / Avg. Cost Reduction) | Three hardcoded numbers | §5.2/§5.3 aggregates |
+| Spend totals anywhere cost is summed | Silently omit unpriced requests | §5.6 (`UnpricedRequests` + confidence chips: "≥ $4.10, 3 unpriced") |
+| Providers card rate-limit block | Faithful snapshot, no interpretation | §5.9 (burn-rate projection, history trends, staleness state) |
+| Governance budget bars | Monthly window only | §5.10 (5-hour/weekly/monthly windows per cap) |
+| Governance per-model pricing/spend cards | Proposed, blocked on a ledger ([`../gui/governance-model-cards.md`](../gui/governance-model-cards.md)) | §5.2 ledger + a date-range query surface |
+
+**The architectural constraint that shapes all of it.** The GUI only ever talks to the proxy
+([`telemetry.md`](telemetry.md#gui-consumption)) — it must never open `agent_telemetry.db` directly, even
+though it trivially could. So rendering rollups requires a **new proxy-served query surface**, not just
+mapper changes: the natural fit is `/admin/usage/*` REST endpoints behind the existing
+`ManagementAccessToken` (the same auth and client pattern `ProviderAdminStore` already uses), which §5.12's
+export endpoint can then share rather than duplicating.
+
+**What the sources do.** Every surveyed tracker treats presentation as the product: claude-usage-tracker's
+hourly heat-map and "most expensive session" callouts, openusage's burn-rate dashboard, token-monitor's
+multi-window quota widget, TokenTracker's shared local snapshot read by dashboard, menu bar, and widgets
+alike. Arc Router uniquely has the *better* data and the *lesser* display.
+
+**Proposed.** Not sketched here — the full tab-by-tab rendering plan (which existing components change,
+which queries back them, in what order) is
+[`token-tracking-implementation-plan.md`](token-tracking-implementation-plan.md)'s Phases 2–4. This
+finding exists so the presentation gap is ranked alongside the data gaps rather than treated as an
+afterthought: it is P1 because §5.1–§5.3 are only *visible* to an operator through it.
+
+---
+
 ## 6. Proposed sequencing
 
 ```mermaid
@@ -1028,12 +1113,13 @@ flowchart TD
     P1C["§5.5 Persistent turn tracker<br/>+ TTL eviction"]
     P1D["§5.3 Rollups + pinned<br/>bucket timezone"]
     P1E["§5.7 Resolution ladder<br/>+ operator overrides"]
-    P2A["§5.9 Typed rate-limit<br/>snapshot + burn rate"]
+    P2A["§5.9 Burn-rate projection<br/>+ history trends"]
     P2B["§5.10 BudgetWindow<br/>5h / weekly / monthly"]
     P2C["§5.12 CSV/JSON export<br/>+ OTel meter"]
     P2D["§5.11 Incremental usage<br/>scanner + failure counter"]
     P2E["§5.8 Admin API<br/>reconciliation"]
     P3["§5.13 Retire spend_log.jsonl<br/>§5.14 ReasoningTokens"]
+    GUI["§5.15 GUI surfaces<br/>usage · limits · rollups"]
 
     P0A --> P0B
     P0B --> P1A
@@ -1047,6 +1133,9 @@ flowchart TD
     P1B --> P2E
     P0B --> P2D
     P1E --> P3
+    P0A --> GUI
+    P1D --> GUI
+    P2A --> GUI
 ```
 
 **Phase 1 — make the data survive (§5.1, §5.2, §5.4).** Widen the event, add the ledger, key it
@@ -1062,6 +1151,12 @@ budget windows, and exports. This is the phase an operator actually notices.
 
 **Phase 4 — close the loop (§5.8, §5.11, §5.13, §5.14).** Reconciliation against real billing, truncation
 recovery, cleanup.
+
+**GUI rendering (§5.15) is not a fifth phase** — it is interleaved: each data change lands together with
+the surface that shows it (cache tokens with the cache tile, rollups with Model Distribution, burn rate
+with the provider card), so no phase ships invisible work. The interleaved, tab-by-tab breakdown is
+[`token-tracking-implementation-plan.md`](token-tracking-implementation-plan.md), which is the
+authoritative execution order; the four phases above remain the dependency logic behind it.
 
 Per the repository's phase-completion rules in `AGENTS.md`, each phase must end with zero warnings, all
 tests passing, and ≥80% coverage. §5.2 and §5.7 in particular add branches (the `null`/unknown paths and
@@ -1097,6 +1192,11 @@ Primary repositories analyzed:
 - [honeycombio/anthropic-usage-receiver](https://github.com/honeycombio/anthropic-usage-receiver) — OTel receiver over Anthropic's Admin API ([`scraper.go`](https://github.com/honeycombio/anthropic-usage-receiver/blob/main/anthropicusagereceiver/scraper.go), [`internal/client/client.go`](https://github.com/honeycombio/anthropic-usage-receiver/blob/main/anthropicusagereceiver/internal/client/client.go), [`internal/client/retry.go`](https://github.com/honeycombio/anthropic-usage-receiver/blob/main/anthropicusagereceiver/internal/client/retry.go))
 - [github.com/topics/ai-cost-tracking](https://github.com/topics/ai-cost-tracking?o=asc&s=updated) — 18 repositories, of which [janekbaraniewski/openusage](https://github.com/janekbaraniewski/openusage) and [luoyuctl/agenttrace](https://github.com/luoyuctl/agenttrace) were analyzed in depth
 
+On-path prior art (see §3):
+
+- [BerriAI/litellm](https://github.com/BerriAI/litellm) — LLM gateway; per-request `SpendLogs` + per-key/team/org budgets with daily/monthly resets ([spend-tracking docs](https://docs.litellm.ai/docs/proxy/cost_tracking), [budgets docs](https://docs.litellm.ai/docs/proxy/users), [DB schema](https://docs.litellm.ai/docs/proxy/db_info))
+- [Helicone/helicone](https://github.com/Helicone/helicone) — proxy-first observability; per-request logging with ClickHouse rollups and an open cost repository ([cost-tracking docs](https://docs.helicone.ai/guides/cookbooks/cost-tracking))
+
 Related internal documents:
 
 - [`telemetry.md`](telemetry.md) — what is captured per request today
@@ -1105,3 +1205,5 @@ Related internal documents:
 - [`d3-alias-resolution.md`](d3-alias-resolution.md) — the exact-match rule §5.7 challenges
 - [`pricing-seed-removal.md`](pricing-seed-removal.md) — why fabricated costs are refused; §5.6 extends this to aggregates
 - [`openai-format-usage-accuracy-plan.md`](openai-format-usage-accuracy-plan.md) — inclusive-vs-additive cache normalization, the same trap §5.14 flags for reasoning tokens
+- [`anthropic-reported-usage-plan.md`](anthropic-reported-usage-plan.md) — the implemented rate-limit capture/parse/display layers §5.9 builds on
+- [`token-tracking-implementation-plan.md`](token-tracking-implementation-plan.md) — the phase-by-phase execution plan for every adopted finding, including §5.15's GUI surfaces

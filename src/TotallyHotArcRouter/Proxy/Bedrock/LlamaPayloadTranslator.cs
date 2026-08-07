@@ -7,8 +7,8 @@ using Microsoft.AspNetCore.Http;
 namespace TotallyHot.ArcRouter.Proxy.Bedrock;
 
 /// <summary>
-/// Translates OpenAI-shaped chat-completion payloads to/from Meta Llama's shape on Bedrock (PLAN.md
-/// TODO 4's "Unified API Translation" pillar, Bedrock slice -
+/// Translates OpenAI-shaped chat-completion payloads to/from Meta Llama's shape on Bedrock (the
+/// Bedrock slice of unified API translation -
 /// <c>docs/router/unified-api-translation.md</c> §4.2). Llama's <c>InvokeModel</c> API takes a single
 /// <c>prompt</c> string, not a structured message array - so OpenAI's <c>messages</c> are folded into
 /// Meta's own documented Llama 3 chat template (<c>&lt;|begin_of_text|&gt;</c> /

@@ -25,7 +25,7 @@ namespace TotallyHot.ArcRouter.Tests
             Assert.NotNull(host);
         }
 
-        // PLAN.md "Local Proxy CLI" pillar: `TotallyHot.ArcRouter --model <name>` should register the forced
+        // Local Proxy CLI: `TotallyHot.ArcRouter --model <name>` should register the forced
         // model name for RequestInterceptor to pick up (see RequestInterceptorTests' single-model-serving
         // coverage) - this test confirms Program.cs's CLI parsing actually reaches DI, black-box, via the
         // same public CreateHostBuilder API the other tests in this file already use.

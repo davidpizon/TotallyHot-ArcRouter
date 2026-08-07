@@ -723,8 +723,8 @@ public class ProxyMiddlewareTests
             Times.Once);
     }
 
-    // PLAN.md's "Basic Token/Cost Tracking" parity pillar: every completed request - not just ones
-    // with a known cost - must reach the spend tracker so its running request count stays accurate.
+    // Every completed request - not just ones with a known cost - must reach the spend tracker so
+    // its running request count stays accurate.
     [Fact]
     public async Task InvokeAsync_SuccessfulNonStreamingOpenAiResponse_RecordsSpendViaSpendTracker()
     {

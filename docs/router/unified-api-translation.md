@@ -1,4 +1,4 @@
-# Unified API Translation (PLAN.md TODO 4)
+# Unified API Translation
 
 > **Status: all four providers implemented - Ollama (§4.1), Google Gemini (§4.3), the Anthropic
 > retrofit (§4.4), and AWS Bedrock (§4.2).** This document originally recorded the scope, sequencing,
@@ -6,15 +6,18 @@
 > been updated to reflect what was actually built (including a real pre-existing bug found and fixed in
 > §4.1, the interface additions Gemini forced in §4.3, the request-shape-detection design §4.4 left
 > open, and the SDK-based architecture §4.2 landed on after its originally-planned hand-rolled SigV4
-> signing turned out to be the wrong call). See [PLAN.md](../../PLAN.md)'s TODO 4 for how this pillar
-> fits into the overall parity workstream - Unified API Translation itself is now fully closed.
+> signing turned out to be the wrong call). This was one pillar of an earlier, broader parity
+> workstream (unified API translation, local proxy CLI, simple local fallbacks, basic token/cost
+> tracking) tracked at the time in an earlier, fuller revision of [`src/PLAN.md`](../../src/PLAN.md);
+> that revision's pillar/TODO breakdown is not reproduced in the current, trimmed
+> `src/PLAN.md`, which tracks only unfinished work. Unified API Translation itself is fully closed.
 
 ## 1. Purpose
 
-PLAN.md's "Practical Hybrid Goal" section defines this pillar as: *"normalize request/response
-payloads to the OpenAI format so the same client code can call Anthropic, AWS Bedrock, or local
-Ollama interchangeably."* Google Gemini was added to scope during planning for this document (see
-§4.3) — it is not named in PLAN.md's original pillar text but is now part of this plan.
+This pillar's original goal: *"normalize request/response payloads to the OpenAI format so the same
+client code can call Anthropic, AWS Bedrock, or local Ollama interchangeably."* Google Gemini was
+added to scope during planning for this document (see §4.3) — it was not part of that original
+goal's text but is now part of this plan.
 
 ### 1.1 Current state — verified against the code, not assumed
 
@@ -124,7 +127,7 @@ shape today, not a gap.
    fixture responses — both a non-streaming JSON body and an SSE stream — confirming the *existing*
    pass-through forwarding path round-trips correctly end-to-end with zero `IPayloadTranslator`
    involvement. A regression test proving no translator is needed, not a test of new translation logic.
-5. Updated PLAN.md's TODO 4 "Unified API Translation" gap entry.
+5. Closed out the "Unified API Translation" gap entry this pillar tracked at the time.
 
 **Implementation notes — a real bug found while wiring this up, not anticipated when this plan was
 first written:**
@@ -289,7 +292,7 @@ against this codebase's own assumptions about what that decoder does.
 
 ### 4.3 Google Gemini (PR 3 — implemented)
 
-Added to scope during planning (not in PLAN.md's original pillar wording). This is the **first
+Added to scope during planning (not in this pillar's original wording, above). This is the **first
 provider that needed a real `IPayloadTranslator`** — Ollama (§4.1) turned out not to. Google AI Studio
 (`generativelanguage.googleapis.com`), not Vertex AI. Field mappings mirror LiteLLM's pinned
 `vertex_ai/gemini` transformation (read directly out of the running parity sidecar container, the same
@@ -461,8 +464,8 @@ erroring — but faithful translation of them is future work.
 > `ProviderOptions.EnableToolCallGuard` survives one release as a forced-on override and is removed in
 > Phase 6.
 
-Not part of the original four-pillar scope above (that was closed 2026-07-23, see PLAN.md TODO 4) —
-this is a small, separately-motivated addition prompted by a real production incident: VS Code Copilot
+Not part of the original four-pillar scope above (that was closed 2026-07-23) — this is a small,
+separately-motivated addition prompted by a real production incident: VS Code Copilot
 Chat, routed through a local LM Studio-served `qwen2.5.1-coder-7b-instruct`, showed "Sorry, no response
 was returned" whenever the request carried `tools`/`tool_choice`.
 
@@ -536,10 +539,10 @@ test through the real `ProxyMiddleware` proving the opt-in flag actually selects
   chunk accumulates, finish-only chunk still emits (see §4.3). Future providers' stream translators
   should follow the same reference rather than re-deciding.
 
-## 6. Non-goals (unchanged from PLAN.md)
+## 6. Non-goals
 
 This pillar does not add virtual keys, admin UI, per-team budgets, SSO, Redis caching, or audit logs
-— TotallyHotArcRouter remains a single-developer tool per PLAN.md's existing Non-Goals section. Adding
+— TotallyHotArcRouter remains a single-developer tool, not a multi-tenant platform. Adding
 Gemini support is a scope addition agreed during planning, not a signal that this pillar is
 expanding toward general-purpose multi-tenant LLM-gateway territory.
 

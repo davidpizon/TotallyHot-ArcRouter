@@ -1,21 +1,27 @@
 # Model Price Catalog: Multi-Aggregator Ingestion, Resolution, and Runtime Cache
 
-> **Status: Phases 1–3 implemented, including multi-source; Phase 4 is still design.** The SQLite
-> dependency, the six catalog tables, the LiteLLM and OpenRouter clients, the priority-ordered upsert
-> gate, the ingestion worker, and the startup health checks all exist in `src/TotallyHotArcRouter/PriceCatalog/`.
-> So does the Governance → Price Sources panel, which owns the D6 toggle, can pull on demand, and can
-> reorder the two sources' rank. **Phase 4 does not exist**: there is no `ConcurrentDictionary` cache, no
-> `IModelPriceCatalog`, no `GetBestPriceForModel`/`GetFreshPriceForRouting`, and no staging table or hash
-> diff. Nothing consumes catalog prices for routing yet — `PriceCatalogRepository.GetFreshPrice` is
-> written and tested but has no caller. Sections still describing unbuilt work are marked inline.
+> **Status: Phases 1–3 implemented, including multi-source; Phase 4's full design is unbuilt, but a
+> thin runtime consumer now exists.** The SQLite dependency, the six catalog tables, the LiteLLM and
+> OpenRouter clients, the priority-ordered upsert gate, the ingestion worker, and the startup health
+> checks all exist in `src/TotallyHotArcRouter/PriceCatalog/`. So does the Governance → Price Sources
+> panel, which owns the D6 toggle, can pull on demand, and can reorder the two sources' rank.
+> **Phase 4 as designed does not exist** — no `ConcurrentDictionary` cache, no `IModelPriceCatalog`,
+> no `GetBestPriceForModel`/`GetFreshPriceForRouting`, no staging table or hash diff. However, an
+> earlier revision's claim that "`GetFreshPrice` has no caller" is stale (corrected 2026-08-07): since
+> [`d3-alias-resolution.md`](d3-alias-resolution.md)'s Slices 1–3 shipped, `ProxyMiddleware` resolves
+> a per-request cost through `IModelPriceLookup` → `PriceCatalogModelPriceLookup` →
+> `PriceCatalogRepository.GetFreshPrice` (with the D1 24-hour freshness floor) — a direct SQLite read
+> per request rather than Phase 4's in-memory cache, which remains the designed end state. Sections
+> still describing unbuilt work are marked inline.
 >
-> **There is no price data today, and that is deliberate.** The hand-maintained `Pricing` section in
+> **There is no hand-maintained price data, and that is deliberate.** The `Pricing` section in
 > `appsettings.json` that used to supply placeholder rates has been **deleted**, not fenced off — its
 > own `_comment` admitted the values were *"Illustrative placeholder values, not verified against
 > current provider price sheets,"* and a fabricated cost is indistinguishable from a real one at the
-> point someone reads it. Until this catalog lands, `EstimatedCostUsd` is `0` for a provider flagged
-> free (`ProviderOptions.IsFree` — a known zero, not a guess) and `null` for everything else. See
-> [`telemetry.md`](telemetry.md#pricing).
+> point someone reads it. Every price now flows from the ingested catalog (both sources live and
+> seeded — see "Current scope" below): `EstimatedCostUsd` is `0` for a provider flagged free
+> (`ProviderOptions.IsFree` — a known zero, not a guess), a catalog-priced estimate when a fresh
+> resolved price exists, and `null` for everything else. See [`telemetry.md`](telemetry.md#pricing).
 >
 > Two consequences for whoever builds this: the fallback layer that earlier drafts of this doc kept
 > designing around **no longer exists**, and "unknown" is now the system's honest, load-bearing default
@@ -60,7 +66,7 @@ this one wins.
 >    scraping. See [Phase 2](#phase-2-ingestion--aggregator-normalization).
 
 > **Phase numbering is local to this document.** "Phase 1–4" below are the catalog's own build stages;
-> they are unrelated to [`../../PLAN.md`](../../PLAN.md)'s Phase 0–8 migration numbering.
+> they are unrelated to [`../../src/PLAN.md`](../../src/PLAN.md)'s phase numbering.
 
 ## The three consumers
 
@@ -543,9 +549,11 @@ Table and column naming stays `snake_case`, matching the SQL already established
   [D1](#d1-auto-selection-requires-a-price-fetched-within-the-last-24-hours)'s 24h freshness floor
   reads on every routing decision, which makes it load-bearing rather than informational.
 
-**Retention.** `source_raw_payload` on every row is unbounded growth on a local file — the same concern
-`PLAN.md` already tracks for router memory ("Memory Growth"). Keep the raw payload for the **current**
-row per (model, provider, source) only; history lives in the price-change record, not a payload archive.
+**Retention.** `source_raw_payload` on every row is unbounded growth on a local file — the same
+unbounded-local-store concern this project has run into elsewhere (see
+[`memory-persistence.md`](memory-persistence.md)'s handling of `RouterMemory`'s own growth). Keep the
+raw payload for the **current** row per (model, provider, source) only; history lives in the
+price-change record, not a payload archive.
 
 ## Phase 2: Ingestion & aggregator normalization
 

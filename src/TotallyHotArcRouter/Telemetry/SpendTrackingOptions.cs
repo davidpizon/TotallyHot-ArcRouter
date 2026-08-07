@@ -1,8 +1,8 @@
 namespace TotallyHot.ArcRouter.Telemetry;
 
 /// <summary>
-/// Configuration for the personal-scale running spend total (PLAN.md's "Basic Token/Cost Tracking"
-/// parity pillar), bound from the <c>SpendTracking</c> section.
+/// Configuration for the personal-scale running spend total, bound from the <c>SpendTracking</c>
+/// section.
 /// </summary>
 public sealed class SpendTrackingOptions
 {
