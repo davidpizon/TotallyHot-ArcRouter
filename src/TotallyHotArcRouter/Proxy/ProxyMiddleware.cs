@@ -1378,6 +1378,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             TotalDurationMs: totalDurationMs,
             StatusCode: statusCode,
             TimestampUtc: DateTimeOffset.UtcNow,
+            CacheCreationTokens: cacheCreationTokens,
+            CacheReadTokens: cacheReadTokens,
             RequestSummary: requestSummary,
             ResponseSummary: responseSummary,
             CorrelationId: correlationId);

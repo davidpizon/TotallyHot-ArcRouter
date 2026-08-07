@@ -49,7 +49,7 @@ GUI surface, so no phase completes invisible work (§5.15's requirement).
 
 ---
 
-## Phase 1 — Cache tokens on the wire, and a real cache-hit tile (§5.1)
+## Phase 1 — Cache tokens on the wire, and a real cache-hit tile (§5.1) — **Implemented**
 
 The smallest change with the largest visible effect: the proxy already extracts, prices, and
 budget-charges all four token dimensions; this phase stops dropping two of them at the

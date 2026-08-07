@@ -29,6 +29,14 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// <param name="TotalDurationMs">Milliseconds from sending the upstream request to the response body finishing.</param>
 /// <param name="StatusCode">The upstream response's HTTP status code.</param>
 /// <param name="TimestampUtc">When the request was routed.</param>
+/// <param name="CacheCreationTokens">
+/// Input tokens written to a new prompt cache entry (<see cref="UsageInfo.CacheCreationTokens"/>), or
+/// <see langword="null"/> if usage couldn't be determined.
+/// </param>
+/// <param name="CacheReadTokens">
+/// Input tokens served from an existing prompt cache entry (<see cref="UsageInfo.CacheReadTokens"/>), or
+/// <see langword="null"/> if usage couldn't be determined.
+/// </param>
 /// <param name="RequestSummary">
 /// The newest user message's text (see <see cref="RequestTextExtractor"/>), truncated to
 /// <see cref="TextTruncator.DefaultMaxLength"/> characters, or <see langword="null"/> if there was no
@@ -60,6 +68,8 @@ public sealed record RoutingTelemetryEvent(
     long TotalDurationMs,
     int StatusCode,
     DateTimeOffset TimestampUtc,
+    int? CacheCreationTokens = null,
+    int? CacheReadTokens = null,
     string? RequestSummary = null,
     string? ResponseSummary = null,
     string? CorrelationId = null);

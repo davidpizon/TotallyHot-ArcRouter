@@ -109,11 +109,48 @@ public sealed class LiveConversationMapperTests
         // Documented honest defaults - no live-data source exists for these yet.
         mappedTurn.RoutingRoi.Should().Be(0m);
         mappedTurn.ToolExecutionSteps.Should().Be(0);
-        mappedTurn.CacheHitRate.Should().Be(0m);
         mappedTurn.ContextBufferPercent.Should().Be(0m);
+
+        // No cache tokens on this turn, so the real derived rate is 0 too.
+        mappedTurn.CacheHitRate.Should().Be(0m);
 
         mappedTurn.RoutingSteps.Should().ContainSingle()
             .Which.Message.Should().Be("Route Confirmed: gpt-4o-mini");
+    }
+
+    [Fact]
+    public void ToModel_derives_cache_hit_rate_from_the_turns_cache_token_counts()
+    {
+        var turn = new LiveConversationTurn(
+            SessionId: "s1",
+            TurnNumber: 1,
+            Agent: "claude-sonnet-5",
+            Model: "claude-sonnet-5",
+            PromptTokens: 100,
+            CompletionTokens: 20,
+            EstimatedCostUsd: 0.02m,
+            IsFallback: false,
+            LatencyToHeadersMs: 200,
+            TimestampUtc: DateTimeOffset.UtcNow,
+            CacheCreationTokens: 400,
+            CacheReadTokens: 500);
+
+        var conversation = new LiveConversation(
+            SessionId: "s1",
+            IsSessionSynthesized: false,
+            FirstTimestampUtc: turn.TimestampUtc,
+            LastTimestampUtc: turn.TimestampUtc,
+            TotalCost: turn.EstimatedCostUsd,
+            TotalPromptTokens: turn.PromptTokens,
+            TotalCompletionTokens: turn.CompletionTokens,
+            HasFallbackTurns: false,
+            Turns: [turn]);
+
+        var model = LiveConversationMapper.ToModel(conversation);
+        var mappedTurn = model.Turns.Should().ContainSingle().Subject;
+
+        // 500 read out of (100 prompt + 400 creation + 500 read) = 1000 total input tokens.
+        mappedTurn.CacheHitRate.Should().Be(50m);
     }
 
     [Fact]

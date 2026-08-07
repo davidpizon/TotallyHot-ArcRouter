@@ -24,7 +24,9 @@ public class ConversationAggregatorTests
         int statusCode = 200,
         DateTimeOffset? timestampUtc = null,
         string? requestSummary = null,
-        string? responseSummary = null)
+        string? responseSummary = null,
+        int? cacheCreationTokens = null,
+        int? cacheReadTokens = null)
     {
         return new RoutingTelemetryEventDto(
             SessionId: sessionId,
@@ -42,6 +44,8 @@ public class ConversationAggregatorTests
             TotalDurationMs: totalDurationMs,
             StatusCode: statusCode,
             TimestampUtc: timestampUtc ?? BaseTime.AddMinutes(turnNumber),
+            CacheCreationTokens: cacheCreationTokens,
+            CacheReadTokens: cacheReadTokens,
             RequestSummary: requestSummary,
             ResponseSummary: responseSummary);
     }
@@ -228,6 +232,40 @@ public class ConversationAggregatorTests
         var turn = Assert.Single(result[0].Turns);
         Assert.Equal("claude-sonnet-5", turn.Agent);
         Assert.Equal("claude-sonnet-5", turn.Model);
+    }
+
+    [Fact]
+    public void Aggregate_NullCacheTokenFields_TreatedAsZeroInTotalsAndTurns()
+    {
+        var events = new[]
+        {
+            CreateEvent(sessionId: "session-1", turnNumber: 1, cacheCreationTokens: null, cacheReadTokens: null),
+        };
+
+        var result = ConversationAggregator.Aggregate(events);
+
+        var conversation = Assert.Single(result);
+        Assert.Equal(0, conversation.TotalCacheCreationTokens);
+        Assert.Equal(0, conversation.TotalCacheReadTokens);
+        var turn = Assert.Single(conversation.Turns);
+        Assert.Equal(0, turn.CacheCreationTokens);
+        Assert.Equal(0, turn.CacheReadTokens);
+    }
+
+    [Fact]
+    public void Aggregate_CacheTokenFields_SummedAcrossTurns()
+    {
+        var events = new[]
+        {
+            CreateEvent(sessionId: "session-1", turnNumber: 1, cacheCreationTokens: 30, cacheReadTokens: 500),
+            CreateEvent(sessionId: "session-1", turnNumber: 2, cacheCreationTokens: 10, cacheReadTokens: 200),
+        };
+
+        var result = ConversationAggregator.Aggregate(events);
+
+        var conversation = Assert.Single(result);
+        Assert.Equal(40, conversation.TotalCacheCreationTokens);
+        Assert.Equal(700, conversation.TotalCacheReadTokens);
     }
 }
 

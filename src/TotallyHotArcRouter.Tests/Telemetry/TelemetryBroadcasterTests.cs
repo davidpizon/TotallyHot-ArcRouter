@@ -14,7 +14,9 @@ public class TelemetryBroadcasterTests
         int? completionTokens = 20,
         decimal? estimatedCostUsd = 0.001m,
         string? requestSummary = "What's the weather?",
-        string? responseSummary = "It's sunny.") => new(
+        string? responseSummary = "It's sunny.",
+        int? cacheCreationTokens = 30,
+        int? cacheReadTokens = 500) => new(
         SessionId: "sess-1",
         TurnNumber: 3,
         IsSessionSynthesized: false,
@@ -30,6 +32,8 @@ public class TelemetryBroadcasterTests
         TotalDurationMs: 800,
         StatusCode: 200,
         TimestampUtc: new DateTimeOffset(2026, 7, 9, 15, 0, 0, TimeSpan.Zero),
+        CacheCreationTokens: cacheCreationTokens,
+        CacheReadTokens: cacheReadTokens,
         RequestSummary: requestSummary,
         ResponseSummary: responseSummary);
 
@@ -98,6 +102,10 @@ public class TelemetryBroadcasterTests
         Assert.Equal(telemetryEvent.PromptTokens, wire.PromptTokens);
         Assert.True(wire.HasCompletionTokens);
         Assert.Equal(telemetryEvent.CompletionTokens, wire.CompletionTokens);
+        Assert.True(wire.HasCacheCreationTokens);
+        Assert.Equal(telemetryEvent.CacheCreationTokens, wire.CacheCreationTokens);
+        Assert.True(wire.HasCacheReadTokens);
+        Assert.Equal(telemetryEvent.CacheReadTokens, wire.CacheReadTokens);
         Assert.True(wire.HasEstimatedCostUsd);
         Assert.Equal(telemetryEvent.EstimatedCostUsd, decimal.Parse(wire.EstimatedCostUsd, CultureInfo.InvariantCulture));
         Assert.Equal(telemetryEvent.IsStreaming, wire.IsStreaming);
@@ -123,13 +131,17 @@ public class TelemetryBroadcasterTests
             completionTokens: null,
             estimatedCostUsd: null,
             requestSummary: null,
-            responseSummary: null));
+            responseSummary: null,
+            cacheCreationTokens: null,
+            cacheReadTokens: null));
 
         var envelope = await ReadOneAsync(channel.Reader);
         var wire = envelope.RoutingTelemetry;
 
         Assert.False(wire.HasPromptTokens);
         Assert.False(wire.HasCompletionTokens);
+        Assert.False(wire.HasCacheCreationTokens);
+        Assert.False(wire.HasCacheReadTokens);
         Assert.False(wire.HasEstimatedCostUsd);
         Assert.False(wire.HasRequestSummary);
         Assert.False(wire.HasResponseSummary);

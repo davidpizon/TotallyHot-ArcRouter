@@ -172,6 +172,8 @@ message RoutingTelemetryEvent {
   google.protobuf.Timestamp timestamp_utc = 15;
   optional string request_summary = 16;
   optional string response_summary = 17;
+  optional int32 cache_creation_tokens = 18;
+  optional int32 cache_read_tokens = 19;
 }
 
 message LogLineEvent {

@@ -18,12 +18,15 @@ data sources in
 [`../router/token-tracking-implementation-plan.md`](../router/token-tracking-implementation-plan.md):
 
 - **Cost Analytics — real values behind the metric explorer.** The tab is now a metric explorer
-  (see "Recently completed" below) that renders live turns merged with a mock history corpus. Four of
-  its seven metrics still have **no live source** and are populated by mock history only: Routing ROI
-  (needs a "worst case" baseline cost that `ModelRouteResolver` doesn't compute today — the same gap
-  that keeps per-turn `RoutingRoi` at 0), Tool Steps, Cache Hit Rate, and Context Buffer. Wiring
-  these means adding the corresponding fields to `RoutingTelemetryEvent`/the proto and the mapper
-  chain (see the field table in `../router/telemetry.md`).
+  (see "Recently completed" below) that renders live turns merged with a mock history corpus. Cache
+  Hit Rate is now live for real turns (`RoutingTelemetryEvent.CacheCreationTokens`/`CacheReadTokens`
+  → `LiveConversationMapper` → `CostChartBuilder.CacheHitRate`, see `../router/telemetry.md`); the
+  mock history corpus underneath it is still mock. Three of the seven metrics still have **no live
+  source** and are populated by mock history only: Routing ROI (needs a "worst case" baseline cost
+  that `ModelRouteResolver` doesn't compute today — the same gap that keeps per-turn `RoutingRoi` at
+  0), Tool Steps, and Context Buffer. Wiring these means adding the corresponding fields to
+  `RoutingTelemetryEvent`/the proto and the mapper chain (see the field table in
+  `../router/telemetry.md`).
 - **Model Distribution** — real `TokenBucket`/`ModelShare` data. The Day/Month/3-Month/6-Month/Year
   time-range filter bar and the From/To date inputs are currently **cosmetic only** — they don't
   refilter the charts — and only become meaningful once there's real time-series data to filter.
@@ -181,7 +184,7 @@ token usage (streaming and non-streaming), and estimated cost, and pushes each r
 forwarded — no polling. `TotallyHotArcRouter.Gui`'s `Services/LiveDataStore.cs` consumes this live, and the
 Live Stream tab plus Cost Analytics' Token Compounding chart now render real conversations instead of
 `MockData`. Full pipeline, field-by-field data provenance, and what's still honestly defaulted
-(Routing ROI, Tool Steps, Cache Hit Rate, Context Buffer) vs. real (Time to First Token,
+(Routing ROI, Tool Steps, Context Buffer) vs. real (Time to First Token, Cache Hit Rate,
 Request/Response text) is in [`../router/telemetry.md`](../router/telemetry.md). This closes out both
 former "Open" headline items (live wiring and real-time push) in one implementation, since server
 push (originally SignalR, now gRPC - see the item above) was the chosen transport from the start

@@ -487,6 +487,20 @@ public static class CostChartBuilder
     /// <summary>Formats an integer value with thousands separators.</summary>
     private static string Int(long value) => value.ToString("N0", Inv);
 
+    /// <summary>
+    /// Computes a turn's prompt-cache hit rate (0-100): the percentage of its full input that was
+    /// served from the prompt cache rather than processed from scratch. The denominator is the
+    /// additive total (<paramref name="promptTokens"/> + <paramref name="cacheCreationTokens"/> +
+    /// <paramref name="cacheReadTokens"/> - see <c>UsageInfo.TotalInputTokens</c>), not just
+    /// <paramref name="promptTokens"/> alone: the provider's own <c>input_tokens</c> excludes cached
+    /// tokens, so dividing by it can exceed 100%. Returns 0 for a turn with no input tokens at all.
+    /// </summary>
+    public static decimal CacheHitRate(int promptTokens, int cacheCreationTokens, int cacheReadTokens)
+    {
+        var totalInputTokens = promptTokens + cacheCreationTokens + cacheReadTokens;
+        return totalInputTokens <= 0 ? 0m : Round(cacheReadTokens / (decimal)totalInputTokens * 100m, 1);
+    }
+
     /// <summary>Formats a token count using K/M abbreviations for large values.</summary>
     private static string Tokens(long value) => value >= 1_000_000
         ? (value / 1_000_000m).ToString("F1", Inv) + "M"

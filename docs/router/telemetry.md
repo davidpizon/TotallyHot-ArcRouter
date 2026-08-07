@@ -384,12 +384,19 @@ to **honest, explicit defaults rather than fabricated values**:
 |---|---|---|
 | `RoutingRoi` | `0` | No "worst case" baseline cost is computed for live requests |
 | `ToolExecutionSteps` | `0` | The proxy doesn't introspect tool calls within a turn |
-| `CacheHitRate` | `0` | Prompt-cache usage isn't parsed from provider responses |
 | `ContextBufferPercent` | `0` | No per-model context-window-size configuration exists |
 
 `RequestSummary`/`ResponseSummary` are **not** in this table - they're real, mapped straight through
 from `LiveConversationTurn.RequestSummary`/`ResponseSummary` (see "Request/response text extraction"
 above), null only when there's genuinely nothing extractable for that turn.
+
+`CacheHitRate` is **also not** in this table anymore: `RoutingTelemetryEvent` now carries
+`CacheCreationTokens`/`CacheReadTokens` (parsed the same way as `PromptTokens`/`CompletionTokens`,
+see the table above) through the wire contract, `LiveConversationTurn`, and
+`RoutingTelemetryEventDto`. `LiveConversationMapper` derives `CacheHitRate` from them via
+`CostChartBuilder.CacheHitRate(prompt, cacheCreation, cacheRead)`, dividing by the additive total
+(`prompt + cacheCreation + cacheRead`) rather than by `prompt` alone - dividing by the provider's own
+`input_tokens` (which excludes cached tokens) could otherwise push the rate over 100%.
 
 `ConversationTurn.TimeToFirstTokenMs` **is** real — it's `LatencyToHeadersMs` from the event. The
 Razor components already render these defaults gracefully (e.g. `TurnCard.razor` shows "—" for a

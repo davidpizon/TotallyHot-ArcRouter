@@ -27,6 +27,8 @@ public sealed record RoutingTelemetryEventDto(
     long TotalDurationMs,
     int StatusCode,
     DateTimeOffset TimestampUtc,
+    int? CacheCreationTokens = null,
+    int? CacheReadTokens = null,
     string? RequestSummary = null,
     string? ResponseSummary = null);
 

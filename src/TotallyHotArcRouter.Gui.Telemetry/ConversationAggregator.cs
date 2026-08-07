@@ -12,6 +12,8 @@ public sealed record LiveConversationTurn(
     bool IsFallback,
     long LatencyToHeadersMs,
     DateTimeOffset TimestampUtc,
+    int CacheCreationTokens = 0,
+    int CacheReadTokens = 0,
     string? RequestSummary = null,
     string? ResponseSummary = null);
 
@@ -25,7 +27,9 @@ public sealed record LiveConversation(
     int TotalPromptTokens,
     int TotalCompletionTokens,
     bool HasFallbackTurns,
-    IReadOnlyList<LiveConversationTurn> Turns);
+    IReadOnlyList<LiveConversationTurn> Turns,
+    int TotalCacheCreationTokens = 0,
+    int TotalCacheReadTokens = 0);
 
 /// <summary>
 /// Groups a flat stream of <see cref="RoutingTelemetryEventDto"/>s into conversations, mirroring the
@@ -34,10 +38,12 @@ public sealed record LiveConversation(
 /// Pure and stateless: callers own how/when to re-run it as new events arrive (e.g. re-aggregate the
 /// full accumulated event list on every new event - see the "Verification limitation" and
 /// "Known gaps" notes on this feature in docs/gui/dashboard.md for why several
-/// <c>ConversationTurn</c> fields - RoutingRoi, ToolExecutionSteps, CacheHitRate,
+/// <c>ConversationTurn</c> fields - RoutingRoi, ToolExecutionSteps,
 /// ContextBufferPercent, RoutingSteps - have no live-data source yet and are left at safe defaults by
 /// the Gui-side mapping layer, not by this aggregator. RequestSummary/ResponseSummary are real: they
 /// pass straight through from <see cref="RoutingTelemetryEventDto"/>, already truncated server-side.
+/// CacheHitRate is also real now: the Gui-side mapping layer derives it from
+/// <see cref="LiveConversationTurn.CacheCreationTokens"/>/<see cref="LiveConversationTurn.CacheReadTokens"/>.
 /// </summary>
 public static class ConversationAggregator
 {
@@ -75,6 +81,8 @@ public static class ConversationAggregator
                 IsFallback: e.IsFallback,
                 LatencyToHeadersMs: e.LatencyToHeadersMs,
                 TimestampUtc: e.TimestampUtc,
+                CacheCreationTokens: e.CacheCreationTokens ?? 0,
+                CacheReadTokens: e.CacheReadTokens ?? 0,
                 RequestSummary: e.RequestSummary,
                 ResponseSummary: e.ResponseSummary))
             .ToList();
@@ -88,7 +96,9 @@ public static class ConversationAggregator
             TotalPromptTokens: turns.Sum(t => t.PromptTokens),
             TotalCompletionTokens: turns.Sum(t => t.CompletionTokens),
             HasFallbackTurns: turns.Any(t => t.IsFallback),
-            Turns: turns);
+            Turns: turns,
+            TotalCacheCreationTokens: turns.Sum(t => t.CacheCreationTokens),
+            TotalCacheReadTokens: turns.Sum(t => t.CacheReadTokens));
     }
 }
 

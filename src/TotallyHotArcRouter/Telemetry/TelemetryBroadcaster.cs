@@ -135,6 +135,16 @@ public sealed class TelemetryBroadcaster
             wire.CompletionTokens = completionTokens;
         }
 
+        if (e.CacheCreationTokens is int cacheCreationTokens)
+        {
+            wire.CacheCreationTokens = cacheCreationTokens;
+        }
+
+        if (e.CacheReadTokens is int cacheReadTokens)
+        {
+            wire.CacheReadTokens = cacheReadTokens;
+        }
+
         if (e.EstimatedCostUsd is decimal estimatedCostUsd)
         {
             // Decimal-as-string, not double: see "Decimal encoding" in docs/router/grpc-migration.md.

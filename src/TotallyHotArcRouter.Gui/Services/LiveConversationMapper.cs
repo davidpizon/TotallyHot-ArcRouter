@@ -1,3 +1,4 @@
+using TotallyHot.ArcRouter.Gui.Charts;
 using TotallyHot.ArcRouter.Gui.Models;
 using TotallyHot.ArcRouter.Gui.Telemetry;
 
@@ -18,8 +19,6 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 /// requests (defaults to 0).</item>
 /// <item><see cref="ConversationTurn.ToolExecutionSteps"/> - the proxy does not introspect tool calls
 /// within a turn (defaults to 0).</item>
-/// <item><see cref="ConversationTurn.CacheHitRate"/> - prompt-cache usage is not parsed from provider
-/// responses (defaults to 0).</item>
 /// <item><see cref="ConversationTurn.ContextBufferPercent"/> - no per-model context-window-size
 /// configuration exists (defaults to 0).</item>
 /// </list>
@@ -32,7 +31,11 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 /// receiving response headers. <see cref="ConversationTurn.TimestampUtc"/> IS real too: it is
 /// <see cref="LiveConversationTurn.TimestampUtc"/> passed straight through (the display-only
 /// <see cref="ConversationTurn.Timestamp"/> string is derived from it), and is what the Cost Analytics
-/// tab buckets turns by on its time axis. See docs/gui/dashboard.md for the full real-vs-defaulted breakdown.
+/// tab buckets turns by on its time axis. <see cref="ConversationTurn.CacheHitRate"/> IS real too: it is
+/// derived from <see cref="LiveConversationTurn.PromptTokens"/>,
+/// <see cref="LiveConversationTurn.CacheCreationTokens"/>, and
+/// <see cref="LiveConversationTurn.CacheReadTokens"/> via <see cref="CostChartBuilder.CacheHitRate"/>.
+/// See docs/gui/dashboard.md for the full real-vs-defaulted breakdown.
 /// </remarks>
 public static class LiveConversationMapper
 {
@@ -66,7 +69,7 @@ public static class LiveConversationMapper
             RoutingRoi: 0m,
             TotalCost: turn.EstimatedCostUsd,
             ToolExecutionSteps: 0,
-            CacheHitRate: 0m,
+            CacheHitRate: CostChartBuilder.CacheHitRate(turn.PromptTokens, turn.CacheCreationTokens, turn.CacheReadTokens),
             TimeToFirstTokenMs: (int)Math.Clamp(turn.LatencyToHeadersMs, 0, int.MaxValue),
             ContextBufferPercent: 0m,
             Timestamp: FormatTimestamp(turn.TimestampUtc),
