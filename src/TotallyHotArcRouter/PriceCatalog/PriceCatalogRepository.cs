@@ -383,9 +383,12 @@ public sealed class PriceCatalogRepository
     /// creating the period row on first use. The cost is accumulated as a true decimal via read-modify-write
     /// inside a transaction (not SQL float arithmetic) so a month of small per-request costs doesn't drift.
     /// Cache token columns accumulate via SQL <c>+</c>, like <paramref name="promptTokens"/>/
-    /// <paramref name="completionTokens"/>. <paramref name="usageAtUtc"/> overwrites the stored
-    /// <c>last_usage_at</c> unconditionally - it is always the instant of the request just recorded, which is
-    /// always the most recent.
+    /// <paramref name="completionTokens"/>. <paramref name="usageAtUtc"/> only ever advances the stored
+    /// <c>last_usage_at</c> (a SQL <c>MAX</c> against the existing value) rather than overwriting it
+    /// unconditionally, so an out-of-order call - concurrent requests completing in a different order than
+    /// they're recorded, a clock adjustment, delayed telemetry - can't move it backwards. Relies on
+    /// <see cref="TimestampFormat"/> being fixed-width, so lexicographic <c>TEXT</c> comparison agrees with
+    /// chronological order.
     /// </summary>
     public void AddProviderSpend(
         string providerKey,
@@ -430,7 +433,7 @@ public sealed class PriceCatalogRepository
                     completion_tokens     = completion_tokens + excluded.completion_tokens,
                     cache_creation_tokens = cache_creation_tokens + excluded.cache_creation_tokens,
                     cache_read_tokens     = cache_read_tokens + excluded.cache_read_tokens,
-                    last_usage_at         = excluded.last_usage_at;
+                    last_usage_at         = MAX(COALESCE(last_usage_at, ''), excluded.last_usage_at);
                 """;
             upsert.Parameters.AddWithValue("$key", providerKey);
             upsert.Parameters.AddWithValue("$period", period);

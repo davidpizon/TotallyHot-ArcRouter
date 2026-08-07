@@ -228,7 +228,12 @@ public sealed class ProviderBudgetStore : IBudgetEnforcer, IDisposable
                             DollarSpent = current.DollarSpent + cost,
                             TokensUsed = current.TokensUsed + prompt + completion + cacheTokens,
                             CacheTokensUsed = current.CacheTokensUsed + cacheTokens,
-                            LastUsageAtUtc = usageAtUtc,
+                            // Same monotonic-advance rule as AddProviderSpend's SQL MAX, so the in-memory
+                            // snapshot this fast-path updates can't disagree with the database it mirrors
+                            // when two requests for the same provider complete out of order.
+                            LastUsageAtUtc = current.LastUsageAtUtc is { } existing && existing > usageAtUtc
+                                ? existing
+                                : usageAtUtc,
                         },
                     };
                     _snapshot = next;

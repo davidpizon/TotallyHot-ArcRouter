@@ -17,14 +17,16 @@ public interface IRateLimitHeaderCapture
 {
     /// <summary>
     /// Captures <paramref name="headers"/>'s <c>anthropic-ratelimit-*</c>/<c>x-ratelimit-*</c> entries for
-    /// <paramref name="providerKey"/>. Best-effort: never throws. Enqueueing never blocks the caller, so a
-    /// caller that doesn't await the returned task (as <see cref="TotallyHot.ArcRouter.Proxy.ProxyMiddleware"/>
-    /// doesn't, on the request path) is never delayed by the SQLite write; a caller that does await it sees
-    /// the write actually complete.
+    /// <paramref name="providerKey"/>. Best-effort: the capture itself never throws (a storage failure is
+    /// logged and swallowed) and never blocks the caller, so a caller that doesn't await the returned task
+    /// (as <see cref="TotallyHot.ArcRouter.Proxy.ProxyMiddleware"/> doesn't, on the request path) is never
+    /// delayed by the SQLite write; a caller that does await it sees the write actually complete, or observes
+    /// <paramref name="cancellationToken"/> by throwing <see cref="OperationCanceledException"/> if it's
+    /// canceled first - that only stops the caller's wait, not the queued write itself.
     /// </summary>
     /// <param name="providerKey">The provider key the response came from.</param>
     /// <param name="headers">The upstream response's headers.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels waiting on the returned task; does not cancel the capture itself.</param>
     Task CaptureAsync(string providerKey, HttpResponseHeaders headers, CancellationToken cancellationToken = default);
 }
 
@@ -32,6 +34,10 @@ public interface IRateLimitHeaderCapture
 public sealed class RateLimitHeaderCapture : IRateLimitHeaderCapture, IDisposable
 {
     private static readonly string[] HeaderPrefixes = ["anthropic-ratelimit-", "x-ratelimit-"];
+
+    // Generous relative to normal traffic (one entry per response with matching headers): the queue only
+    // approaches this under sustained backlog, which is exactly the condition the bound exists to cap.
+    private const int QueueCapacity = 1024;
 
     private readonly PriceCatalogRepository _repository;
     private readonly ILogger<RateLimitHeaderCapture>? _logger;
@@ -48,7 +54,12 @@ public sealed class RateLimitHeaderCapture : IRateLimitHeaderCapture, IDisposabl
         _repository = repository;
         _logger = logger;
 
-        _channel = Channel.CreateUnbounded<CaptureItem>(new UnboundedChannelOptions
+        // Bounded, not unbounded: if the SQLite write path ever falls behind a request path that can
+        // enqueue far faster than one consumer can drain, an unbounded queue grows without limit and can
+        // OOM the process. Wait (the default FullMode) makes TryWrite fail fast instead of blocking when
+        // full, so CaptureAsync below can drop the capture - losing one best-effort telemetry entry costs
+        // far less than the alternative.
+        _channel = Channel.CreateBounded<CaptureItem>(new BoundedChannelOptions(QueueCapacity)
         {
             SingleReader = true,
             SingleWriter = false,
@@ -93,12 +104,14 @@ public sealed class RateLimitHeaderCapture : IRateLimitHeaderCapture, IDisposabl
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         if (!_channel.Writer.TryWrite(new CaptureItem(providerKey, matched, DateTimeOffset.UtcNow, completion)))
         {
-            // The channel is only ever completed by Dispose, so this means the capture is shutting down -
-            // best-effort, so this is a silent no-op rather than a throw.
+            // Either the queue is full (a sustained backlog - see QueueCapacity) or the channel is
+            // completed (shutting down). Both are best-effort drops, not throws: nothing was queued, so
+            // nothing will ever complete this TCS from ConsumeAsync - complete it here instead.
+            _logger?.LogDebug("Rate-limit header capture queue is full or closed; dropping capture for provider {Provider}.", SanitizeForLog(providerKey));
             completion.TrySetResult();
         }
 
-        return completion.Task;
+        return completion.Task.WaitAsync(cancellationToken);
     }
 
     /// <summary>Drains <see cref="_channel"/> for the lifetime of this instance, writing one capture at a time.</summary>
