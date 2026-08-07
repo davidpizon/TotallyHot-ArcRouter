@@ -7,7 +7,7 @@ namespace TotallyHot.ArcRouter.Proxy.Bedrock;
 
 /// <summary>
 /// Translates OpenAI-shaped chat-completion payloads to/from Anthropic Claude's shape as hosted on
-/// Amazon Bedrock (PLAN.md TODO 4's "Unified API Translation" pillar, Bedrock slice -
+/// Amazon Bedrock (the Bedrock slice of unified API translation -
 /// <c>docs/router/unified-api-translation.md</c> §4.2). Bedrock's Claude <c>InvokeModel</c> body is
 /// nearly identical to native Anthropic's Messages API (verified against AWS's own documentation) - the
 /// model id moves from the body to the AWS SDK's <c>ModelId</c> parameter, and

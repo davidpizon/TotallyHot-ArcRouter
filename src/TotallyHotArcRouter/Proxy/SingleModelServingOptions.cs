@@ -1,7 +1,7 @@
 namespace TotallyHot.ArcRouter.Proxy;
 
 /// <summary>
-/// Runtime (not appsettings-bound) configuration for PLAN.md's "Local Proxy CLI" parity pillar: when
+/// Runtime (not appsettings-bound) configuration for the Local Proxy CLI: when
 /// <see cref="ForcedModelName"/> is set (via the <c>--model &lt;name&gt;</c> command-line flag - see
 /// <c>Program.CreateHostBuilder</c>), every request is routed to that one already-configured model
 /// (a <c>ModelRouting:ModelList[].ModelName</c> entry) regardless of what <c>model</c> field the client

@@ -2,8 +2,8 @@
 
 > **Status: Circuit Breaker (pattern 1) IMPLEMENTED 2026-07-25; Leaky Bucket (pattern 2) not yet built.**
 > `ModelRouteEntry.Fallbacks` — the static, hand-configured per-model backup list that
-> `RequestInterceptor.ResolveModelRouteAsync` / `ProxyMiddleware.InvokeAsync` used to implement (PLAN.md's
-> "Simple Local Fallbacks" pillar, closed 2026-07-23) — **has been removed** and replaced by the Circuit
+> `RequestInterceptor.ResolveModelRouteAsync` / `ProxyMiddleware.InvokeAsync` used to implement (the
+> "Simple Local Fallbacks" parity goal, closed 2026-07-23) — **has been removed** and replaced by the Circuit
 > Breaker below: there is no hardcoded fallback list anymore. A target agent (keyed per concrete upstream -
 > provider + base URL + provider model id, `TotallyHotArcRouter.Proxy.CircuitBreakerTargetKey`, not per
 > client-facing model name) is tracked by `TotallyHotArcRouter.Proxy.CircuitBreaker`; when one trips OPEN, the

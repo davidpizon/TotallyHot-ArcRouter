@@ -74,7 +74,7 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddSingleton<IUsageExtractor, UsageExtractor>();
             services.AddSingleton<IResponseTextExtractor, ResponseTextExtractor>();
 
-            // Per-provider payload translators (PLAN.md's "Unified API Translation" pillar). Each
+            // Per-provider payload translators (see docs/router/unified-api-translation.md). Each
             // provider whose native API shape differs from OpenAI's registers one IPayloadTranslator;
             // the provider-keyed map below is what ProxyMiddleware consults. A provider with no
             // translator here is forwarded byte-for-byte, unchanged. Gemini and the three Bedrock
@@ -102,9 +102,8 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddSingleton<ToolCallNormalizerFactory>();
             services.AddSingleton<IBedrockRuntimeClientFactory, BedrockRuntimeClientFactory>();
 
-            // Personal-scale running spend total (PLAN.md's "Basic Token/Cost Tracking" parity
-            // pillar) - terminal output via the injected ILogger, plus a local JSON Lines file. See
-            // SpendTracker's remarks.
+            // Personal-scale running spend total - terminal output via the injected ILogger, plus a
+            // local JSON Lines file. See SpendTracker's remarks.
             services.AddOptions<SpendTrackingOptions>()
                 .Configure<IConfiguration>((options, configuration) =>
                     configuration.GetSection(SpendTrackingOptions.SectionName).Bind(options));
@@ -138,7 +137,7 @@ namespace TotallyHot.ArcRouter.Hosting
             // ModelName. Registered so the container injects it into PriceCatalogRepository's optional param.
             services.AddSingleton<IModelIdentityResolver, ConfigModelIdentityResolver>();
             services.AddSingleton<PriceCatalogRepository>();
-            // Request-path price lookup (PLAN.md "Basic Token/Cost Tracking", cost half): ProxyMiddleware
+            // Request-path price lookup (docs/router/model-price-catalog.md): ProxyMiddleware
             // estimates each paid request's cost from the catalog through this seam. Registered so the
             // container injects it into ProxyMiddleware's optional priceLookup constructor parameter.
             services.AddSingleton<IModelPriceLookup, PriceCatalogModelPriceLookup>();

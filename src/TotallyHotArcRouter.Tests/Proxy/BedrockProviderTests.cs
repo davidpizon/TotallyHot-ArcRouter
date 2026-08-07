@@ -15,7 +15,7 @@ using Moq;
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
 /// <summary>
-/// Coverage for PLAN.md TODO 4's "Unified API Translation" pillar, AWS Bedrock slice
+/// Coverage for the AWS Bedrock slice of unified API translation
 /// (<c>docs/router/unified-api-translation.md</c> §4.2). Unlike every other translated provider,
 /// Bedrock is invoked through the AWS SDK (<see cref="IAmazonBedrockRuntime"/>) rather than a forwarded
 /// <c>HttpRequestMessage</c> - the SDK handles SigV4 signing and endpoint resolution itself. These

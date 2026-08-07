@@ -12,7 +12,7 @@ using Moq;
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
 /// <summary>
-/// Coverage for PLAN.md TODO 4's "Unified API Translation" pillar, Anthropic retrofit
+/// Coverage for the Anthropic retrofit of unified API translation
 /// (<c>docs/router/unified-api-translation.md</c> §4.4): unlike every other translated provider,
 /// "anthropic" is dual-mode - real Claude Code production traffic already speaks Anthropic's native
 /// Messages API directly and must keep passing through unchanged, while a client sending an

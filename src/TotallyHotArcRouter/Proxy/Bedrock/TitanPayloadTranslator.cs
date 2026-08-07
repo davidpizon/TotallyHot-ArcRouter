@@ -8,7 +8,7 @@ namespace TotallyHot.ArcRouter.Proxy.Bedrock;
 
 /// <summary>
 /// Translates OpenAI-shaped chat-completion payloads to/from Amazon Titan Text's shape on Bedrock
-/// (PLAN.md TODO 4's "Unified API Translation" pillar, Bedrock slice -
+/// (the Bedrock slice of unified API translation -
 /// <c>docs/router/unified-api-translation.md</c> §4.2). Titan Text's <c>InvokeModel</c> API has no
 /// structured multi-turn message concept at all - a single <c>inputText</c> string and an optional
 /// <c>textGenerationConfig</c> - so, per AWS's own documented convention

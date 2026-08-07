@@ -8,7 +8,7 @@ namespace TotallyHot.ArcRouter.Proxy.Translation;
 /// <summary>
 /// Translates OpenAI-shaped chat-completion payloads to/from Google Gemini's native
 /// <c>generateContent</c> shape (Google AI Studio, <c>generativelanguage.googleapis.com</c> - not
-/// Vertex AI). PLAN.md TODO 4's "Unified API Translation" pillar, Gemini slice
+/// Vertex AI). The Gemini slice of unified API translation
 /// (<c>docs/router/unified-api-translation.md</c> §4.3). Field mappings mirror LiteLLM's pinned
 /// <c>vertex_ai/gemini</c> transformation (the parity reference), scoped to the surface this pillar
 /// needs: text messages, function/tool calling, and the common generation parameters.

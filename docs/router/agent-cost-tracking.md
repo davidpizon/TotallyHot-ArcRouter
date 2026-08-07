@@ -1,13 +1,22 @@
 # Agent Cost Tracking: Persistent Ledger, Auto-Refreshed Pricing, and Provider Reconciliation
 
-> **Status: Proposed — not yet implemented.** No SQLite dependency, no `model_prices`/`usage_ledger`
-> tables, and no provider cost/usage API client exist anywhere in `src/TotallyHotArcRouter/` today. Nor is
-> there any price data: as described in [`telemetry.md`](telemetry.md#pricing), the hand-maintained
-> `Pricing` section that used to supply placeholder rates has been deleted, so `EstimatedCostUsd` is
-> `0` for a free provider (`ProviderOptions.IsFree`) and `null` for everything else. That number is
-> broadcast once over gRPC (SignalR at the time this doc was written - see
-> [`grpc-migration.md`](grpc-migration.md)) and never persisted anywhere. Everything below is a
-> proposed design, not current behavior, until this banner is removed.
+> **Status: partially superseded — pricing shipped elsewhere, the ledger and reconciliation remain
+> unbuilt.** This banner previously claimed no SQLite dependency and no price data existed; both
+> claims are stale (corrected 2026-08-07). What exists today in `src/TotallyHotArcRouter/PriceCatalog/`:
+> the SQLite database (`agent_telemetry.db`, `Microsoft.Data.Sqlite`), the multi-source price catalog
+> of [`model-price-catalog.md`](model-price-catalog.md) with live LiteLLM/OpenRouter feeds, the
+> per-request cost path (`ProxyMiddleware` → `IModelPriceLookup` → `PriceCatalogRepository.GetFreshPrice`,
+> resolved via [`d3-alias-resolution.md`](d3-alias-resolution.md)), per-provider monthly spend rows
+> (`provider_spend`) with budget enforcement (`ProviderBudgetStore`), and rate-limit header
+> snapshots/history ([`anthropic-reported-usage-plan.md`](anthropic-reported-usage-plan.md)). What
+> **still does not exist** — and remains this document's live scope — is the per-request
+> **`usage_ledger`** and the **provider cost reconciliation** service (§3.4/§3.5): no per-request row
+> is persisted anywhere, and nothing calls any provider's billing API. For the ledger, the schema in
+> §2 below has been superseded by the richer design in
+> [`token-tracking-improvements.md`](token-tracking-improvements.md) §5.2 (dedup key, cache-token
+> columns, cost confidence, decimal-as-TEXT cost); §3.5's reconciliation disciplines are extended by
+> that doc's §5.8. Execution order for both lives in
+> [`token-tracking-implementation-plan.md`](token-tracking-implementation-plan.md).
 
 ## Why this exists
 
@@ -104,6 +113,15 @@ timer.
 ---
 
 ## 2. Database schema
+
+> **Superseded for the ledger table.** The `usage_ledger` shape below predates the cache-aware usage
+> model and the idempotency requirement. The current, adopted schema is
+> [`token-tracking-improvements.md`](token-tracking-improvements.md) §5.2 — it adds `dedup_key` (with
+> a unique index; see §5.4 there), both cache-token columns, `cost_confidence`, streaming/status
+> metadata, and stores cost as an invariant-culture decimal **TEXT** rather than this sketch's `REAL`
+> (SQLite has no decimal type; float drift in a money column budget enforcement reads is the reason).
+> `provider_cost_reconciliation` below remains current. This section is kept for the design rationale
+> that still applies (immutability, no prompt/response text, persisting already-computed values).
 
 Adapted from the reference blueprint's SQLite schema, with two changes: `agent_id` is renamed
 `model_identifier` throughout (this codebase has no "agent" concept separate from "which model was
@@ -408,11 +426,11 @@ to add per-model pricing/spend cards to the Governance tab.
 
 ## 6. Known limitations
 
-- **New dependency.** `Microsoft.Data.Sqlite` is not used anywhere in this codebase today (the
-  closest existing precedent, `Router/JsonRouterMemoryStore.cs`, persists to a plain JSON file). A
-  queryable, indexed, growing usage ledger with time-window aggregation is a much better fit for SQL
-  than hand-rolled JSON scanning, which is why this design still recommends it over following the
-  JSON-file convention.
+- **~~New dependency~~ — resolved.** When this was written, `Microsoft.Data.Sqlite` was not used
+  anywhere in the codebase. The price catalog has since introduced it (`agent_telemetry.db`, owned by
+  `src/TotallyHotArcRouter/PriceCatalog/`), so the ledger adds a table to an existing database rather
+  than a dependency to the project — the original argument for SQL over hand-rolled JSON scanning
+  stands, and its cost has already been paid.
 - **Estimates and provider-reported reality will legitimately diverge.** Cached-token discounts,
   promotional credits, negotiated enterprise pricing, and simple placeholder-price staleness (before
   the catalog auto-refresh existed, or for a model no aggregator reports) can all cause the

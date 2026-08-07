@@ -51,7 +51,7 @@ namespace TotallyHot.ArcRouter.Proxy
         /// <param name="logger">The logger.</param>
         /// <param name="modelRouteResolver">The known-model allowlist/resolver.</param>
         /// <param name="singleModelServingOptions">
-        /// Optional PLAN.md "Local Proxy CLI" single-model override (see <see cref="SingleModelServingOptions"/>).
+        /// Optional Local Proxy CLI single-model override (see <see cref="SingleModelServingOptions"/>).
         /// When its <see cref="SingleModelServingOptions.ForcedModelName"/> is set, it must already be one of
         /// <paramref name="modelRouteResolver"/>'s configured models - checked eagerly here so an invalid
         /// <c>--model</c> CLI value fails at startup, not on the first request.
@@ -204,7 +204,7 @@ namespace TotallyHot.ArcRouter.Proxy
                 return ModelRouteResolutionResult.Failure("Request body must include a non-empty 'model' field.");
             }
 
-            // PLAN.md "Local Proxy CLI" pillar: single-model serving ignores whatever model the client
+            // Local Proxy CLI: single-model serving ignores whatever model the client
             // asked for and always routes to the one CLI-forced model (already confirmed configured in
             // the constructor), mirroring LiteLLM's "litellm --model provider/name" behavior.
             if (_forcedModelName is not null)

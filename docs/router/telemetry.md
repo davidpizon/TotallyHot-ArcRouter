@@ -35,7 +35,7 @@ request, after the response has already been fully forwarded to the client:
 | `RequestedModel`, `ResolvedModel`, `Provider` | From the existing `ModelRouteResolver` resolution already computed for routing |
 | `IsFallback` | Hardcoded `false` — `ModelRouteResolver` has no fallback-routing concept today, unlike the GUI's mock data which simulates one |
 | `PromptTokens`, `CompletionTokens` | `UsageExtractor`, parsed from the captured response body (see below); `null` if extraction fails or the provider is unrecognized |
-| `EstimatedCostUsd` | `0` when the route's provider is free (`ProviderOptions.IsFree`); otherwise `null` — no price data source exists until the catalog lands, so a paid model has no cost estimate rather than a fabricated one. Also `null` if usage wasn't extracted. See [Pricing](#pricing) |
+| `EstimatedCostUsd` | `0` when the route's provider is free (`ProviderOptions.IsFree`); a real catalog-priced estimate when the price catalog holds a fresh (≤24h) resolved price for `(route.ModelName, route.Provider)` (`PriceCatalogModelPriceLookup` → `ModelPrice.EstimateCost`, cache-aware); otherwise `null` — an unresolved or stale price yields no cost estimate rather than a fabricated one. Also `null` if usage wasn't extracted. See [Pricing](#pricing) |
 | `IsStreaming` | Whether the upstream response's `Content-Type` was `text/event-stream` |
 | `LatencyToHeadersMs` | Time from sending the upstream request to receiving response headers |
 | `TotalDurationMs` | Time from sending the upstream request to finishing forwarding the full body |
@@ -66,6 +66,15 @@ lives on only in this .NET resolver.)
 
 `ConversationTurnTracker` is a `ConcurrentDictionary<string, int>` counting turns per session,
 process-lifetime only (not persisted, resets on restart).
+
+> **Superseding decision (2026-08-07):** the "no persistence beyond the process" model for turn
+> tracking has been deliberately abandoned as part of adopting
+> [`token-tracking-improvements.md`](token-tracking-improvements.md) §5.5 — once a durable per-request
+> ledger exists (§5.2 there), a turn counter that restarts at 1 after a proxy restart corrupts every
+> durable `(sessionId, turnNumber)` ordering built on it. The replacement (ledger-seeded high-water
+> mark + TTL eviction) is scheduled in
+> [`token-tracking-implementation-plan.md`](token-tracking-implementation-plan.md); until that phase
+> lands, the paragraph above still describes actual behavior.
 
 **Client integration note:** plain OpenAI-compatible clients hitting `/v1/chat/completions` (as
 opposed to Claude Code CLI or another client that already follows one of `SessionIdResolver`'s
@@ -140,8 +149,8 @@ Both parsers handle streaming and non-streaming responses:
 |---|---|
 | `PromptTokens` | Standard input tokens. For Anthropic, this is `input_tokens` - tokens **after** the last cache breakpoint, not the request's full input. |
 | `CompletionTokens` | Output tokens. |
-| `CacheCreationTokens` | Anthropic-only today: input tokens written to a new prompt cache entry. `0` for every other provider/parser. |
-| `CacheReadTokens` | Anthropic-only today: input tokens served from an existing cache entry. `0` for every other provider/parser. |
+| `CacheCreationTokens` | Input tokens written to a new prompt cache entry. Parsed natively from Anthropic responses; on OpenAI-shaped bodies it appears only via the `cache_creation_input_tokens` extension field an enriched translated-Anthropic response carries (see the normalization block below). `0` when absent. |
+| `CacheReadTokens` | Input tokens served from an existing cache entry. Parsed natively from Anthropic responses, and normalized out of OpenAI's inclusive `prompt_tokens_details.cached_tokens` by `OpenAiUsageParser` (see below). `0` when absent. |
 | `TotalInputTokens` (computed) | `PromptTokens + CacheCreationTokens + CacheReadTokens` - the true total input size a request carried. This is the *only* place this formula is defined; nothing else should re-derive it. |
 
 `ModelPrice.EstimateCost(UsageInfo)` prices all four components, falling back to the standard input
@@ -215,17 +224,23 @@ extractor and both response parsers) concatenates only `type: "text"` parts, ski
 
 ### Pricing
 
-**There is no price table.** TotallyHotArcRouter used to carry a hand-maintained `Pricing` section in
-`appsettings.json` whose own comment admitted the numbers were illustrative placeholders; it was
-deleted rather than maintained. A fabricated cost is indistinguishable from a real one at the point
-someone reads it, which makes it worse than no cost at all.
+**There is no hand-maintained price table — prices come from the auto-refreshed catalog.**
+TotallyHotArcRouter used to carry a hand-maintained `Pricing` section in `appsettings.json` whose own
+comment admitted the numbers were illustrative placeholders; it was deleted rather than maintained
+(see [`pricing-seed-removal.md`](pricing-seed-removal.md)). A fabricated cost is indistinguishable from
+a real one at the point someone reads it, which makes it worse than no cost at all. The replacement —
+the multi-source SQLite catalog in [`model-price-catalog.md`](model-price-catalog.md), fed by LiteLLM
+and OpenRouter and resolved onto configured model names by
+[`d3-alias-resolution.md`](d3-alias-resolution.md)'s exact auto-match — is now live and wired into this
+pipeline via `PriceCatalogModelPriceLookup` (a 24-hour freshness floor; stale is treated as unknown).
 
-So `EstimatedCostUsd` today is exactly one of two things:
+So `EstimatedCostUsd` today is exactly one of three things:
 
 | Value | When |
 |---|---|
 | `0` | The resolved route's provider is flagged free (`ProviderOptions.IsFree`) — a *known* price of zero |
-| `null` | Everything else: no price data source exists yet, or usage couldn't be extracted |
+| a positive estimate | The catalog holds a fresh (≤24h) price resolved to `(route.ModelName, route.Provider)`; `ModelPrice.EstimateCost` prices all four token dimensions (cache rates fall back to the standard input rate when unpublished — a documented conservative overestimate) |
+| `null` | Everything else: no fresh resolved price for this model, or usage couldn't be extracted |
 
 `ProviderOptions.IsFree` marks a provider that genuinely costs nothing — a local Ollama runtime, say.
 That is a fact about the deployment rather than an estimate, which is why it's allowed to produce a
@@ -235,16 +250,17 @@ config, so an existing install must tick the box). Zero and unknown are differen
 keeps them apart: `ModelPrice.Free.EstimateCost(...)` produces the zero, and everything else declines
 to guess.
 
-Real per-model prices arrive with the auto-refreshed catalog in
-[`model-price-catalog.md`](model-price-catalog.md), which will feed `ModelPrice.EstimateCost` — the one
-cost formula — rather than growing a parallel one.
-
-`EstimatedCostUsd` is always a **local estimate** — token counts × a price. Nothing in
-this repo queries a provider's own billing/usage API for real, provider-reported spend, and nothing
-persists usage/cost history beyond the single live gRPC stream (it's gone once no dashboard is
-listening). See [`agent-cost-tracking.md`](agent-cost-tracking.md) for a proposed (not yet
-implemented) design covering all three: an auto-refreshed pricing catalog, a persistent SQLite usage
-ledger, and periodic reconciliation against OpenAI's/Anthropic's real cost-reporting APIs.
+`EstimatedCostUsd` is always a **local estimate** — token counts × a catalog price. Nothing in this
+repo queries a provider's own billing API for real, provider-reported spend. What *is* persisted today
+is aggregate, not per-request: per-provider monthly spend rows (`provider_spend`, backing the
+Governance budget bars — see [`anthropic-reported-usage-plan.md`](anthropic-reported-usage-plan.md)),
+the append-only `spend_log.jsonl` (written by `SpendTracker`, read by nothing), and per-provider
+rate-limit header snapshots/history. A **per-request** usage ledger still doesn't exist — each
+`RoutingTelemetryEvent` is broadcast once and gone when no dashboard is listening. See
+[`agent-cost-tracking.md`](agent-cost-tracking.md) for the original ledger/reconciliation design and
+[`token-tracking-improvements.md`](token-tracking-improvements.md) §5.2/§5.8 (executed by
+[`token-tracking-implementation-plan.md`](token-tracking-implementation-plan.md)) for the adopted,
+current version of it.
 
 ## Transport: gRPC
 

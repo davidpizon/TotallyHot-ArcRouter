@@ -55,6 +55,17 @@ has to supply that mapping. The chosen approach is a **hybrid**:
 the exact failure the whole price subsystem exists to prevent. An aggregator entry that doesn't match
 exactly (after the defined normalizations) is left unmapped, not approximately mapped.
 
+> **Superseding decision (2026-08-07): "exact" is being widened to a ranked, labeled ladder.** The
+> maintainer has adopted [`token-tracking-improvements.md`](token-tracking-improvements.md) §5.7: an
+> ordered resolution ladder (operator override → exact → snapshot-suffix stripped → version normalized
+> → provider alias) in which **every rung below Exact marks the resulting price
+> `CostConfidence.CatalogApproximate`** and aggregates report their approximate/unpriced fraction.
+> This preserves what the rule above actually protects against — a wrong price that *reads as* a right
+> one — by disclosure rather than by refusal, and it still bans fuzzy matching outright (tokscale's
+> word-boundary rung is explicitly not adopted). Slice 4's operator override below becomes the
+> ladder's top rung. The paragraph above remains the shipped behavior until that work lands; see
+> [`token-tracking-implementation-plan.md`](token-tracking-implementation-plan.md) for sequencing.
+
 ### Resolution happens at ingest, not at read
 
 D3 resolves aggregator naming onto the internal id **at ingest** (on the 4–12h poll), via `model_aliases`,
@@ -173,5 +184,5 @@ larger GUI effort tracked as its own TODO. No new dependency, no schema change.
 
 - [`model-price-catalog.md`](model-price-catalog.md) — the canonical catalog plan; D3 and D7 are the
   decisions this implements.
-- [`../../PLAN.md`](../../PLAN.md) — the price-catalog reference entry, which tracks D3 as the remaining
-  open item for the "Basic Token/Cost Tracking" pillar's coverage.
+- [`../../src/PLAN.md`](../../src/PLAN.md) — the price-catalog reference entry, which tracks D3 as the
+  remaining open item for the "Basic Token/Cost Tracking" pillar's coverage.

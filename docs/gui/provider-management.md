@@ -195,7 +195,8 @@ extractable logic (the `ProviderAdminClient` and the store/resolver) is covered 
 
 ## Non-goals
 
-Virtual keys, per-*team* budgets, SSO, and audit logs remain out of scope (PLAN.md Non-Goals).
+Virtual keys, per-*team* budgets, SSO, and audit logs remain out of scope — this stays a
+single-developer tool, not a multi-tenant platform.
 Per-*provider* monthly budget caps are now implemented (persisted, enforced, with real current-month
 spend) as part of this Providers sub-view.
 

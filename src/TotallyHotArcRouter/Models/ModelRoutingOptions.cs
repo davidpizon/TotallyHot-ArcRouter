@@ -219,8 +219,8 @@ public sealed record ProviderOptions
 
     /// <summary>
     /// Gets the AWS region for an Amazon Bedrock provider (e.g. <c>us-east-1</c>), passed to
-    /// <c>RegionEndpoint.GetBySystemName</c> when constructing the Bedrock Runtime SDK client (PLAN.md
-    /// TODO 4's "Unified API Translation" pillar, Bedrock slice - see
+    /// <c>RegionEndpoint.GetBySystemName</c> when constructing the Bedrock Runtime SDK client (the
+    /// Bedrock slice of unified API translation - see
     /// <c>docs/router/unified-api-translation.md</c> §4.2). Unused for every non-Bedrock provider, which
     /// leave it <see langword="null"/>. Unlike every other provider's single static
     /// <see cref="AuthHeaderName"/>-carried credential, Bedrock is invoked through the AWS SDK rather

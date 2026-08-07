@@ -4,8 +4,8 @@ namespace TotallyHot.ArcRouter.Proxy.Translation;
 
 /// <summary>
 /// Translates one provider's native request/response payload shape to/from the OpenAI-compatible
-/// shape TotallyHot.ArcRouter's proxy speaks by default (PLAN.md TODO 4's "Unified API Translation" pillar -
-/// see <c>docs/router/unified-api-translation.md</c> for the full plan). A provider with no registered
+/// shape TotallyHot.ArcRouter's proxy speaks by default (see
+/// <c>docs/router/unified-api-translation.md</c> for the full plan). A provider with no registered
 /// translator (openai, ollama today) is forwarded unchanged, exactly as <see cref="ProxyMiddleware"/>
 /// already does; this interface is consulted only for providers whose native shape actually differs
 /// from OpenAI's.
