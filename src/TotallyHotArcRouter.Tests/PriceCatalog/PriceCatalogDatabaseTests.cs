@@ -45,6 +45,20 @@ public class PriceCatalogDatabaseTests
     }
 
     [Fact]
+    public void EnsureCreated_CreatesUsageLedgerTableWithUniqueDedupIndex()
+    {
+        using var temp = new TempDatabase();
+        temp.Database.EnsureCreated();
+
+        Assert.Contains("usage_ledger", ReadTableNames(temp.Database));
+
+        using var connection = temp.Database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM pragma_index_list('usage_ledger') WHERE name = 'ix_usage_ledger_dedup_key' AND \"unique\" = 1;";
+        Assert.Equal(1, Convert.ToInt32(command.ExecuteScalar()));
+    }
+
+    [Fact]
     public void EnsureCreated_SeedsBothKnownSourcesEnabled()
     {
         using var temp = new TempDatabase();

@@ -70,7 +70,11 @@ namespace TotallyHot.ArcRouter.Hosting
             // singleton is responsible for).
             services.AddSingleton<ISessionIdResolver, SessionIdResolver>();
             services.AddSingleton<IConversationContinuityMatcher, MessageHistoryContinuityMatcher>();
-            services.AddSingleton<IConversationTurnTracker, ConversationTurnTracker>();
+            // Persistent (ledger-seeded) turn tracker (docs/router/token-tracking-implementation-plan.md
+            // Phase 2, §5.5) replaces the process-lifetime-only ConversationTurnTracker as the app's default:
+            // a session's turn number now survives a proxy restart. ConversationTurnTracker itself remains in
+            // the codebase for tests and any no-ledger direct construction of ProxyMiddleware.
+            services.AddSingleton<IConversationTurnTracker, PersistentConversationTurnTracker>();
             services.AddSingleton<IUsageExtractor, UsageExtractor>();
             services.AddSingleton<IResponseTextExtractor, ResponseTextExtractor>();
 
@@ -156,6 +160,11 @@ namespace TotallyHot.ArcRouter.Hosting
             // §5) into the same price-catalog database. Injected into ProxyMiddleware's optional
             // rateLimitCapture constructor parameter.
             services.AddSingleton<IRateLimitHeaderCapture, RateLimitHeaderCapture>();
+            // The durable usage ledger (docs/router/token-tracking-implementation-plan.md Phase 2), sharing
+            // agent_telemetry.db with the rest of the price catalog. Injected into ProxyMiddleware's optional
+            // usageLedger constructor parameter and into PersistentConversationTurnTracker above (registered
+            // earlier in this method only because DI resolution order is independent of registration order).
+            services.AddSingleton<IUsageLedger, UsageLedger>();
             // Per-(provider, model) tool-call dialect capabilities (docs/router/tool-call-normalization.md
             // Phase 1). Shares agent_telemetry.db with the price catalog, so it has the same
             // empty-until-schema-ready lifecycle as the two stores above: StartupHealthCheckHostedService

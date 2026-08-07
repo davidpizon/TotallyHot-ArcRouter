@@ -25,6 +25,14 @@ public sealed class StorageOptions
     /// </summary>
     public string DatabasePath { get; init; } = @"%LOCALAPPDATA%\TotallyHot.ArcRouter\agent_telemetry.db";
 
+    /// <summary>
+    /// Gets the number of days a <c>usage_ledger</c> row is retained before the startup health check's
+    /// retention sweep deletes it, keyed on the row's <c>occurred_at_utc</c>. Defaults to 370 - a year plus
+    /// slack, matching the token-monitor plan's bounded-archive discipline (long enough for annual
+    /// spend/usage comparisons, bounded so the table doesn't grow forever on a long-lived install).
+    /// </summary>
+    public int UsageLedgerRetentionDays { get; init; } = 370;
+
     // The default's leading token. On non-Windows hosts (the project's Docker default is Linux)
     // LOCALAPPDATA is typically unset, so Environment.ExpandEnvironmentVariables leaves it literal.
     private const string LocalAppDataToken = "%LOCALAPPDATA%";

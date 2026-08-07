@@ -92,7 +92,7 @@ Cache stat end-to-end.
 
 ---
 
-## Phase 2 — The durable ledger: `usage_ledger`, dedup key, persistent turns (§5.2, §5.4, §5.5)
+## Phase 2 — The durable ledger: `usage_ledger`, dedup key, persistent turns (§5.2, §5.4, §5.5) — **Implemented**
 
 History stops evaporating. These three land together because the ledger without a dedup key
 double-counts on the first restart, and a durable `(sessionId, turnNumber)` key is corrupt without a

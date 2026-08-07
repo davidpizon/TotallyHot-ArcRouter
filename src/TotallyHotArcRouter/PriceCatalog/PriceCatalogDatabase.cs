@@ -406,6 +406,36 @@ public sealed class PriceCatalogDatabase
             detected_at_utc   TEXT    NOT NULL,
             PRIMARY KEY(provider_key, model_name)
         );
+
+        -- The durable usage ledger (docs/router/token-tracking-implementation-plan.md Phase 2, §5.2):
+        -- every priced/unpriced request's usage, surviving process restarts (unlike the in-memory-only
+        -- telemetry stream). dedup_key is either the upstream provider's own request id (preferred) or a
+        -- composite hash over the request's identity, so replaying an already-recorded request (a restart
+        -- racing an in-flight write, a retried publish) is a no-op via INSERT ... ON CONFLICT DO NOTHING
+        -- rather than a double count. estimated_cost_usd is TEXT (decimal-as-string), matching every other
+        -- money column in this database - see UsageLedger. cost_confidence is written "Unknown" until
+        -- Phase 3's confidence enum lands.
+        CREATE TABLE IF NOT EXISTS usage_ledger (
+            entry_id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            dedup_key             TEXT    NOT NULL,
+            session_id            TEXT    NOT NULL,
+            turn_number           INTEGER NOT NULL,
+            provider              TEXT    NOT NULL,
+            requested_model       TEXT    NOT NULL,
+            resolved_model        TEXT    NOT NULL,
+            prompt_tokens         INTEGER,
+            completion_tokens     INTEGER,
+            cache_creation_tokens INTEGER,
+            cache_read_tokens     INTEGER,
+            estimated_cost_usd    TEXT,
+            cost_confidence       TEXT    NOT NULL,
+            occurred_at_utc       TEXT    NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS ix_usage_ledger_dedup_key ON usage_ledger (dedup_key);
+        CREATE INDEX IF NOT EXISTS ix_usage_ledger_occurred_at ON usage_ledger (occurred_at_utc);
+        CREATE INDEX IF NOT EXISTS ix_usage_ledger_provider_model_time
+            ON usage_ledger (provider, requested_model, occurred_at_utc);
         """;
 }
 
