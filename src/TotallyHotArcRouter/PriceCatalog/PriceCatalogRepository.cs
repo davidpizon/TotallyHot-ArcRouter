@@ -745,9 +745,9 @@ public sealed class PriceCatalogRepository
     }
 
     /// <summary>
-    /// Returns a provider's latest captured rate-limit header snapshot, along with the most recent
-    /// <c>observed_at</c> among its rows. Returns an empty header list and a <see langword="null"/> instant
-    /// when no header has ever been captured for this provider.
+    /// Returns a provider's latest captured rate-limit header snapshot, along with the shared
+    /// <c>observed_at</c> of the capture that produced it. Returns an empty header list and a
+    /// <see langword="null"/> instant when no header has ever been captured for this provider.
     /// </summary>
     public (IReadOnlyList<RateLimitHeaderRow> Headers, DateTimeOffset? ObservedAtUtc) GetRateLimitSnapshot(string providerKey)
     {
@@ -762,16 +762,39 @@ public sealed class PriceCatalogRepository
             """;
         command.Parameters.AddWithValue("$key", providerKey);
 
-        var rows = new List<RateLimitHeaderRow>();
+        // Every header captured together in one UpsertRateLimitHeaders call shares the same observed_at.
+        // A header the provider stops sending keeps its old observed_at forever (nothing upserts it again),
+        // so buffering every row first and filtering to only the latest observed_at - rather than returning
+        // every row regardless of age - keeps the returned snapshot to headers from a single coherent
+        // capture instead of mixing in a stale one. That matters for headers like OpenAI's
+        // x-ratelimit-reset-*, a duration relative to the response that produced it, not to whatever the
+        // newest unrelated header happens to be.
+        var buffered = new List<(string Name, string Value, DateTimeOffset ObservedAt)>();
         DateTimeOffset? latest = null;
-        using var reader = command.ExecuteReader();
-        while (reader.Read())
+        using (var reader = command.ExecuteReader())
         {
-            rows.Add(new RateLimitHeaderRow(reader.GetString(0), reader.GetString(1)));
-            var observedAt = ParseTimestamp(reader.GetString(2));
-            if (latest is null || observedAt > latest)
+            while (reader.Read())
             {
-                latest = observedAt;
+                var observedAt = ParseTimestamp(reader.GetString(2));
+                buffered.Add((reader.GetString(0), reader.GetString(1), observedAt));
+                if (latest is null || observedAt > latest)
+                {
+                    latest = observedAt;
+                }
+            }
+        }
+
+        if (latest is null)
+        {
+            return ([], null);
+        }
+
+        var rows = new List<RateLimitHeaderRow>();
+        foreach (var row in buffered)
+        {
+            if (row.ObservedAt == latest)
+            {
+                rows.Add(new RateLimitHeaderRow(row.Name, row.Value));
             }
         }
 

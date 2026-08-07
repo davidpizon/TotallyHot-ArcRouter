@@ -38,14 +38,17 @@ public sealed record RateLimitWindowView(string? Status, long? Remaining, DateTi
 /// headers, produced by <see cref="RateLimitSnapshotParser.Parse"/>. Multiple families can be populated at
 /// once (a provider proxying both standard-key and subscription-OAuth Anthropic traffic sees both of
 /// Anthropic's own families; an OpenAI provider's headers land in <see cref="StandardDimensions"/>
-/// alongside Anthropic's, keyed by the same dimension names since providers don't mix families in
-/// practice), and <see cref="RawHeaders"/> always carries every captured header verbatim so nothing this
-/// parser doesn't specifically recognize is dropped.
+/// alongside Anthropic's), and <see cref="RawHeaders"/> always carries every captured header verbatim so
+/// nothing this parser doesn't specifically recognize is dropped.
 /// </summary>
 /// <param name="StandardDimensions">
 /// Standard-family dimensions keyed by name: Anthropic's <c>requests</c>, <c>input-tokens</c>,
 /// <c>output-tokens</c>, <c>tokens</c>; or OpenAI's <c>requests</c>, <c>tokens</c>. A dimension is present
-/// only when at least one of its three headers was captured.
+/// only when at least one of its three headers was captured. Anthropic and OpenAI share dimension names
+/// that overlap (<c>requests</c>, <c>tokens</c>); on the rare capture where both families are present for
+/// one provider, OpenAI's entry is keyed <c>x-ratelimit-{dimension}</c> instead so it doesn't overwrite
+/// Anthropic's - a real provider is normally one family or the other, so this only matters for a mixed
+/// capture.
 /// </param>
 /// <param name="UnifiedStatus">The unified family's top-level <c>anthropic-ratelimit-unified-status</c>, or <see langword="null"/> if absent.</param>
 /// <param name="UnifiedResetAt">The unified family's top-level <c>anthropic-ratelimit-unified-reset</c>, or <see langword="null"/> if absent/unparsable.</param>
@@ -140,7 +143,14 @@ public static class RateLimitSnapshotParser
                 continue;
             }
 
-            standard[dimension] = new RateLimitDimensionView(
+            // Disambiguate only on collision: a real provider is Anthropic-shaped or OpenAI-shaped, never
+            // both, so this loop's dimension names normally land in fresh dict slots. But the capture layer
+            // doesn't itself prevent both families from appearing for one provider key, and silently
+            // overwriting the Anthropic loop's entry above would lose that data rather than merely being
+            // redundant with it.
+            var key = standard.ContainsKey(dimension) ? $"{OpenAiPrefix}{dimension}" : dimension;
+
+            standard[key] = new RateLimitDimensionView(
                 ReadLong(raw, limitHeader),
                 ReadLong(raw, remainingHeader),
                 ReadGoDurationResetDate(raw, resetHeader, observedAtUtc));
