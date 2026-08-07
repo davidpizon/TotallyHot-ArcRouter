@@ -39,6 +39,10 @@ public sealed class RateLimitHeaderCapture : IRateLimitHeaderCapture, IDisposabl
     // approaches this under sustained backlog, which is exactly the condition the bound exists to cap.
     private const int QueueCapacity = 1024;
 
+    // Upper bound on how long Dispose blocks the shutdown path draining the consumer loop. Best-effort: if
+    // a queue's worth of writes hasn't drained in this long, shutdown proceeds anyway rather than hanging.
+    private static readonly TimeSpan DisposeDrainTimeout = TimeSpan.FromSeconds(5);
+
     private readonly PriceCatalogRepository _repository;
     private readonly ILogger<RateLimitHeaderCapture>? _logger;
     private readonly Channel<CaptureItem> _channel;
@@ -138,8 +142,23 @@ public sealed class RateLimitHeaderCapture : IRateLimitHeaderCapture, IDisposabl
         }
     }
 
-    /// <summary>Stops accepting new captures. Already-queued items are left for the consumer loop to drain.</summary>
-    public void Dispose() => _channel.Writer.TryComplete();
+    /// <summary>
+    /// Stops accepting new captures and waits (briefly) for the consumer loop to drain whatever was already
+    /// queued, so a normal shutdown of this singleton doesn't silently drop the last captured headers.
+    /// </summary>
+    public void Dispose()
+    {
+        _channel.Writer.TryComplete();
+        try
+        {
+            _consumerLoop.Wait(DisposeDrainTimeout);
+        }
+        catch (AggregateException)
+        {
+            // ConsumeAsync catches every exception around its own work, so this can only wrap a cancellation
+            // of the wait itself - nothing actionable, and Dispose must not throw.
+        }
+    }
 
     /// <summary>One provider's matched headers, queued for the background consumer to persist.</summary>
     private readonly record struct CaptureItem(

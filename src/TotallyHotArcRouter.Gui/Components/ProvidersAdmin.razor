@@ -3,6 +3,7 @@
    injected ProviderAdminStore. *@
 @implements IDisposable
 @inject ProviderAdminStore Store
+@using System.Linq
 @using TotallyHot.ArcRouter.Gui.Admin
 
 <div class="h-full overflow-y-auto pr-1">
@@ -297,11 +298,11 @@
                                 <div class="text-[10px] text-slate-600 uppercase tracking-wider mb-1">Reported by @provider.ProviderType</div>
                                 @if (provider.RateLimit is { } rateLimit)
                                 {
-                                    @foreach (var (dimensionName, dimension) in rateLimit.Snapshot.StandardDimensions)
+                                    @foreach (var (dimensionName, dimension) in rateLimit.Snapshot.StandardDimensions.OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
                                     {
                                         <div class="text-xs font-mono text-slate-400">@FormatDimension(dimensionName, dimension)</div>
                                     }
-                                    @foreach (var (windowName, window) in rateLimit.Snapshot.UnifiedWindows)
+                                    @foreach (var (windowName, window) in rateLimit.Snapshot.UnifiedWindows.OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
                                     {
                                         <div class="text-xs font-mono text-slate-400">@FormatWindow(windowName, window)</div>
                                     }

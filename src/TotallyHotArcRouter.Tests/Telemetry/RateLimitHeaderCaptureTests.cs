@@ -124,7 +124,10 @@ public class RateLimitHeaderCaptureTests
 
     private static HttpResponseHeaders BuildHeaders(params (string Name, string Value)[] entries)
     {
-        using var response = new HttpResponseMessage();
+        // Not disposed: HttpResponseHeaders is owned by its HttpResponseMessage, so disposing here before
+        // returning would hand callers a headers collection whose parent is already gone. The message has
+        // no content and holds no unmanaged resources, so leaving it undisposed is harmless in a test.
+        var response = new HttpResponseMessage();
         foreach (var (name, value) in entries)
         {
             response.Headers.TryAddWithoutValidation(name, value);
