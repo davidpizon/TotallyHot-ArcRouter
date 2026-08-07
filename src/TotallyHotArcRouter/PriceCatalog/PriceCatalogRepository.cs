@@ -674,8 +674,9 @@ public sealed class PriceCatalogRepository
     /// Upserts one provider's captured <c>anthropic-ratelimit-*</c> response headers into the latest-value
     /// snapshot, and records at most one row per (provider, minute bucket, header) into the history table -
     /// a second capture within the same minute for a header already recorded this minute is a no-op there,
-    /// so steady traffic doesn't grow history once per request. A no-op when <paramref name="headers"/> is
-    /// empty. Also prunes history rows older than 30 days.
+    /// enforced atomically by a unique index plus <c>INSERT ... ON CONFLICT DO NOTHING</c> so concurrent
+    /// captures can't race past a check-then-insert and both land a row. A no-op when
+    /// <paramref name="headers"/> is empty. Also prunes history rows older than 30 days.
     /// </summary>
     public void UpsertRateLimitHeaders(string providerKey, IReadOnlyList<RateLimitHeaderRow> headers, DateTimeOffset observedAtUtc)
     {
@@ -713,30 +714,13 @@ public sealed class PriceCatalogRepository
                 snapshot.ExecuteNonQuery();
             }
 
-            using (var exists = connection.CreateCommand())
-            {
-                exists.Transaction = transaction;
-                exists.CommandText = """
-                    SELECT 1 FROM provider_rate_limit_history
-                    WHERE provider_key = $key AND minute_bucket = $bucket AND header_name = $name
-                    LIMIT 1;
-                    """;
-                exists.Parameters.AddWithValue("$key", providerKey);
-                exists.Parameters.AddWithValue("$bucket", minuteBucket);
-                exists.Parameters.AddWithValue("$name", header.HeaderName.ToLowerInvariant());
-
-                if (exists.ExecuteScalar() is not null)
-                {
-                    continue;
-                }
-            }
-
             using (var insert = connection.CreateCommand())
             {
                 insert.Transaction = transaction;
                 insert.CommandText = """
                     INSERT INTO provider_rate_limit_history (provider_key, minute_bucket, header_name, header_value)
-                    VALUES ($key, $bucket, $name, $value);
+                    VALUES ($key, $bucket, $name, $value)
+                    ON CONFLICT(provider_key, minute_bucket, header_name) DO NOTHING;
                     """;
                 insert.Parameters.AddWithValue("$key", providerKey);
                 insert.Parameters.AddWithValue("$bucket", minuteBucket);

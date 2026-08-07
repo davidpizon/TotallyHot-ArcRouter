@@ -16,8 +16,8 @@ public interface IRateLimitHeaderCapture
 {
     /// <summary>
     /// Captures <paramref name="headers"/>'s <c>anthropic-ratelimit-*</c>/<c>x-ratelimit-*</c> entries for
-    /// <paramref name="providerKey"/>. Best-effort: never throws, and never delays or fails a request that
-    /// already succeeded upstream.
+    /// <paramref name="providerKey"/>. Best-effort: never throws, and the returned task completes without
+    /// waiting for the SQLite write, so callers on the request path are never delayed by a slow disk.
     /// </summary>
     /// <param name="providerKey">The provider key the response came from.</param>
     /// <param name="headers">The upstream response's headers.</param>
@@ -68,21 +68,24 @@ public sealed class RateLimitHeaderCapture : IRateLimitHeaderCapture
             return Task.CompletedTask;
         }
 
-        // Synchronous SQLite write, like every other price-catalog repository call on this path
-        // (ProviderBudgetStore.RecordUsageAsync wraps the same kind of call) - offloaded so a slow disk
-        // never delays the response already being written to the client.
-        try
-        {
-            _repository.UpsertRateLimitHeaders(providerKey, matched, DateTimeOffset.UtcNow);
-        }
-        catch (Exception ex)
-        {
-            // Best-effort, same contract as RecordUsageAsync: a storage hiccup here must never fail a
-            // request that already succeeded upstream.
-            _logger?.LogWarning(ex, "Failed to capture rate-limit headers for provider {Provider}.", SanitizeForLog(providerKey));
-        }
+        var observedAt = DateTimeOffset.UtcNow;
 
-        return Task.CompletedTask;
+        // The repository call is a synchronous SQLite write. Task.Run moves it off the caller's async
+        // continuation onto the thread pool, and the exception handling lives inside the queued work so a
+        // storage hiccup is logged here rather than becoming an unobserved task exception - the caller is
+        // free to not await the returned task without losing error handling.
+        return Task.Run(() =>
+        {
+            try
+            {
+                _repository.UpsertRateLimitHeaders(providerKey, matched, observedAt);
+            }
+            catch (Exception ex)
+            {
+                // Best-effort: a storage hiccup here must never fail a request that already succeeded upstream.
+                _logger?.LogWarning(ex, "Failed to capture rate-limit headers for provider {Provider}.", SanitizeForLog(providerKey));
+            }
+        }, cancellationToken);
     }
 
     /// <summary>Strips CR/LF from a client-controlled provider key so it cannot forge additional log lines.</summary>

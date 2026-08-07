@@ -390,6 +390,12 @@ public sealed class PriceCatalogDatabase
             header_value  TEXT NOT NULL
         );
 
+        -- Backs the dedupe in UpsertRateLimitHeaders with a single atomic `INSERT OR IGNORE` instead of a
+        -- check-then-insert, so concurrent captures for the same (provider, minute, header) can't both
+        -- observe "no row" and both insert.
+        CREATE UNIQUE INDEX IF NOT EXISTS ix_provider_rate_limit_history_dedupe
+            ON provider_rate_limit_history (provider_key, minute_bucket, header_name);
+
         CREATE TABLE IF NOT EXISTS model_tool_capabilities (
             provider_key      TEXT    NOT NULL COLLATE NOCASE,
             model_name        TEXT    NOT NULL COLLATE NOCASE,

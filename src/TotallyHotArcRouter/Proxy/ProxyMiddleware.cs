@@ -544,9 +544,11 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
             // Headers precede the body for both streaming and buffered responses, so capture happens here
             // rather than after the usage-parsing pass below (which needs the fully captured body first).
-            // Best-effort and self-guarding (see IRateLimitHeaderCapture's contract) - never able to fail or
-            // delay a request that already has response headers back from upstream.
-            await _rateLimitCapture.CaptureAsync(route.Provider, responseMessage.Headers, CancellationToken.None).ConfigureAwait(false);
+            // Best-effort and self-guarding (see IRateLimitHeaderCapture's contract): the SQLite write runs
+            // on the thread pool, and deliberately not awaited here so that write can never delay emitting
+            // the response already back from upstream. Errors are caught and logged inside the capture
+            // implementation itself, so there is nothing for an unobserved-task-exception handler to catch.
+            _ = _rateLimitCapture.CaptureAsync(route.Provider, responseMessage.Headers, CancellationToken.None);
 
             // Gemini reports an invalid/expired API key as a 400 (the key travels as a "key=" query
             // parameter, not an Authorization header, so Google's gateway treats it as a malformed
