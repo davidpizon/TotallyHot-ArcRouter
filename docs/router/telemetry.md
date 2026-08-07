@@ -129,7 +129,24 @@ Both parsers handle streaming and non-streaming responses:
   on a streaming OpenAI response is an expected, common case, not a bug).
 - **Anthropic**: `usage.input_tokens`/`usage.output_tokens` from the non-streaming body, or the
   `message_start` event's `message.usage.input_tokens` (fixed) combined with the *last*
-  `message_delta` event's `usage.output_tokens` (cumulative) when streaming.
+  `message_delta` event's `usage.output_tokens` (cumulative) when streaming. Also reads
+  `cache_creation_input_tokens`/`cache_read_input_tokens` when present (absent on older responses ⇒
+  0, never a parse failure); the final `message_delta`'s cache fields win over `message_start`'s when
+  both are present, since a newer API version's cumulative delta is the final value.
+
+**Usage-field provenance** (`UsageInfo`, `docs/router/anthropic-reported-usage-plan.md` Phase 1):
+
+| Field | Meaning |
+|---|---|
+| `PromptTokens` | Standard input tokens. For Anthropic, this is `input_tokens` - tokens **after** the last cache breakpoint, not the request's full input. |
+| `CompletionTokens` | Output tokens. |
+| `CacheCreationTokens` | Anthropic-only today: input tokens written to a new prompt cache entry. `0` for every other provider/parser. |
+| `CacheReadTokens` | Anthropic-only today: input tokens served from an existing cache entry. `0` for every other provider/parser. |
+| `TotalInputTokens` (computed) | `PromptTokens + CacheCreationTokens + CacheReadTokens` - the true total input size a request carried. This is the *only* place this formula is defined; nothing else should re-derive it. |
+
+`ModelPrice.EstimateCost(UsageInfo)` prices all four components, falling back to the standard input
+rate for either cache dimension when the price catalog has no published rate for it - a deliberate
+conservative overestimate (see `ModelPrice`'s remarks) rather than a guessed discount multiplier.
 
 To extract usage without disrupting true streaming pass-through timing, `ProxyMiddleware` no longer
 does a plain `Content.CopyToAsync(Response.Body)`. Instead `CopyAndCaptureAsync` loops

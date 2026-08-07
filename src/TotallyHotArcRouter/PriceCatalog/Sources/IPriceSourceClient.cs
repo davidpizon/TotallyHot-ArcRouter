@@ -31,6 +31,12 @@ public interface IPriceSourceClient
 /// <param name="CachedInputPrice">USD per 1M cached (repeated-context) input tokens, or <see langword="null"/> where caching is not offered.</param>
 /// <param name="BatchInputPrice">USD per 1M input tokens at batch/off-peak rates, or <see langword="null"/> where batch is not offered.</param>
 /// <param name="BatchOutputPrice">USD per 1M output tokens at batch/off-peak rates, or <see langword="null"/> where batch is not offered.</param>
+/// <param name="CacheWriteInputPrice">
+/// USD per 1M input tokens spent writing a new prompt cache entry, or <see langword="null"/> if the source
+/// doesn't publish a cache-write rate for this model. Distinct from <paramref name="CachedInputPrice"/>
+/// (the discounted rate for a cache <em>read</em>): a cache write is typically priced at a premium over
+/// standard input (e.g. Anthropic's 5-minute cache write is 1.25x input), not a discount.
+/// </param>
 public sealed record NormalizedPrice(
     string ModelIdentifier,
     string Provider,
@@ -38,5 +44,6 @@ public sealed record NormalizedPrice(
     decimal? StandardOutputPrice,
     decimal? CachedInputPrice,
     decimal? BatchInputPrice,
-    decimal? BatchOutputPrice);
+    decimal? BatchOutputPrice,
+    decimal? CacheWriteInputPrice = null);
 

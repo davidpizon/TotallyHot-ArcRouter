@@ -379,6 +379,203 @@ public class PriceCatalogRepositoryTests
         public ResolvedModelIdentity? Resolve(string aggregatorModelId, string aggregatorProvider) => identity;
     }
 
+    [Fact]
+    public void GetFreshPrice_RoundTripsCacheReadAndCacheWriteRates()
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+
+        repository.UpsertPrices(
+            "litellm",
+            0,
+            new[]
+            {
+                new NormalizedPrice(
+                    "claude-opus", "anthropic",
+                    StandardInputPrice: 15.00m, StandardOutputPrice: 75.00m,
+                    CachedInputPrice: 1.50m, BatchInputPrice: null, BatchOutputPrice: null,
+                    CacheWriteInputPrice: 18.75m),
+            },
+            DateTimeOffset.UtcNow);
+
+        var price = repository.GetFreshPrice(new ModelKey("claude-opus", "anthropic"), TimeSpan.FromHours(24));
+
+        Assert.NotNull(price);
+        Assert.Equal(1.50m, price!.CacheReadPerMillionTokens);
+        Assert.Equal(18.75m, price.CacheWritePerMillionTokens);
+    }
+
+    [Fact]
+    public void GetFreshPrice_NoCacheRatesPublished_CacheFieldsAreNull()
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+
+        repository.UpsertPrices("litellm", 0, new[] { Price("gpt-4o", "openai", 2.50m, 10.00m) }, DateTimeOffset.UtcNow);
+
+        var price = repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24));
+
+        Assert.NotNull(price);
+        Assert.Null(price!.CacheReadPerMillionTokens);
+        Assert.Null(price.CacheWritePerMillionTokens);
+    }
+
+    [Fact]
+    public void AddProviderSpend_RepeatedCalls_AccumulatesCacheTokensAndAdvancesLastUsageAt()
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+        var firstUsageAt = new DateTimeOffset(2026, 3, 1, 0, 0, 0, TimeSpan.Zero);
+        var secondUsageAt = firstUsageAt.AddHours(1);
+
+        repository.AddProviderSpend("anthropic", "2026-03", 1m, 10, 5, cacheCreationTokens: 100, cacheReadTokens: 200, firstUsageAt);
+        repository.AddProviderSpend("anthropic", "2026-03", 2m, 20, 10, cacheCreationTokens: 50, cacheReadTokens: 25, secondUsageAt);
+
+        var row = Assert.Single(repository.GetProviderSpend("2026-03"));
+        Assert.Equal(150L, row.CacheCreationTokens);
+        Assert.Equal(225L, row.CacheReadTokens);
+        Assert.Equal(secondUsageAt, row.LastUsageAtUtc);
+    }
+
+    [Fact]
+    public void UpsertRateLimitHeaders_EmptyList_IsNoOp()
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+
+        repository.UpsertRateLimitHeaders("anthropic", [], DateTimeOffset.UtcNow);
+
+        var (headers, observedAt) = repository.GetRateLimitSnapshot("anthropic");
+        Assert.Empty(headers);
+        Assert.Null(observedAt);
+    }
+
+    [Fact]
+    public void UpsertRateLimitHeaders_UpsertsLatestValuePerHeader()
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+        var first = new DateTimeOffset(2026, 3, 1, 12, 0, 0, TimeSpan.Zero);
+        var second = first.AddMinutes(1);
+
+        repository.UpsertRateLimitHeaders(
+            "anthropic",
+            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
+            first);
+        repository.UpsertRateLimitHeaders(
+            "anthropic",
+            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "500")],
+            second);
+
+        var (headers, observedAt) = repository.GetRateLimitSnapshot("anthropic");
+        var row = Assert.Single(headers);
+        Assert.Equal("500", row.HeaderValue);
+        Assert.Equal(second, observedAt);
+    }
+
+    [Fact]
+    public void UpsertRateLimitHeaders_HeaderNameIsLowercased()
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+
+        repository.UpsertRateLimitHeaders(
+            "anthropic",
+            [new RateLimitHeaderRow("Anthropic-Ratelimit-Requests-Limit", "50")],
+            DateTimeOffset.UtcNow);
+
+        var (headers, _) = repository.GetRateLimitSnapshot("anthropic");
+        Assert.Equal("anthropic-ratelimit-requests-limit", Assert.Single(headers).HeaderName);
+    }
+
+    [Fact]
+    public void GetRateLimitSnapshot_UnknownProvider_ReturnsEmptyAndNullObservedAt()
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+
+        var (headers, observedAt) = repository.GetRateLimitSnapshot("does-not-exist");
+
+        Assert.Empty(headers);
+        Assert.Null(observedAt);
+    }
+
+    [Fact]
+    public void UpsertRateLimitHeaders_History_DedupesWithinTheSameMinuteBucket()
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+        var database = temp.Database;
+        var timestamp = new DateTimeOffset(2026, 3, 1, 12, 0, 30, TimeSpan.Zero);
+        var laterSameMinute = timestamp.AddSeconds(20);
+
+        repository.UpsertRateLimitHeaders(
+            "anthropic",
+            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
+            timestamp);
+        repository.UpsertRateLimitHeaders(
+            "anthropic",
+            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "999")],
+            laterSameMinute);
+
+        Assert.Equal(1, CountHistoryRows(database, "anthropic"));
+    }
+
+    [Fact]
+    public void UpsertRateLimitHeaders_History_AddsARowForANewMinuteBucket()
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+        var database = temp.Database;
+        var first = new DateTimeOffset(2026, 3, 1, 12, 0, 0, TimeSpan.Zero);
+        var nextMinute = first.AddMinutes(1);
+
+        repository.UpsertRateLimitHeaders(
+            "anthropic",
+            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
+            first);
+        repository.UpsertRateLimitHeaders(
+            "anthropic",
+            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "999")],
+            nextMinute);
+
+        Assert.Equal(2, CountHistoryRows(database, "anthropic"));
+    }
+
+    [Fact]
+    public void UpsertRateLimitHeaders_History_PrunesRowsOlderThan30Days()
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+        var database = temp.Database;
+        var old = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var recent = old.AddDays(31);
+
+        repository.UpsertRateLimitHeaders(
+            "anthropic",
+            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
+            old);
+        Assert.Equal(1, CountHistoryRows(database, "anthropic"));
+
+        // The write itself carries the pruning: a capture more than 30 days after the old row is what
+        // triggers its removal, not a background job.
+        repository.UpsertRateLimitHeaders(
+            "anthropic",
+            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "999")],
+            recent);
+
+        Assert.Equal(1, CountHistoryRows(database, "anthropic"));
+    }
+
+    private static int CountHistoryRows(PriceCatalogDatabase database, string providerKey)
+    {
+        using var connection = database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM provider_rate_limit_history WHERE provider_key = $key;";
+        command.Parameters.AddWithValue("$key", providerKey);
+        return Convert.ToInt32(command.ExecuteScalar());
+    }
+
     private static NormalizedPrice Price(string model, string provider, decimal input, decimal output) =>
         new(model, provider, input, output, CachedInputPrice: null, BatchInputPrice: null, BatchOutputPrice: null);
 }

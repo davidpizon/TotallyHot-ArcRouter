@@ -43,6 +43,7 @@ public sealed class ManagementFacade
     private readonly ProviderBudgetStore? _budgetStore;
     private readonly ProviderEndpointScanner? _endpointScanner;
     private readonly ToolCallCapabilityStore? _capabilityStore;
+    private readonly PriceCatalogRepository? _priceCatalogRepository;
 
     // Constructed here rather than injected, unlike the endpoint scanner beside it. The resolver's only
     // dependencies are the HTTP client and environment accessor this facade already holds, so injecting it
@@ -70,13 +71,20 @@ public sealed class ManagementFacade
     /// Optional store the scan results are persisted to. Null has the same effect as a null scanner - both
     /// are needed for a scan to be meaningful.
     /// </param>
+    /// <param name="priceCatalogRepository">
+    /// Optional price-catalog repository, read for each Anthropic provider's captured
+    /// <c>anthropic-ratelimit-*</c> header snapshot (<c>docs/router/anthropic-reported-usage-plan.md</c> §5).
+    /// When null, every provider's <see cref="ProviderView.RateLimit"/> is <see langword="null"/> - "no
+    /// rate-limit data observed yet", identical to a repository with no captured headers for that provider.
+    /// </param>
     public ManagementFacade(
         IProviderConfigStore store,
         IEnvironmentVariableProvider environment,
         HttpClient httpClient,
         ProviderBudgetStore? budgetStore = null,
         ProviderEndpointScanner? endpointScanner = null,
-        ToolCallCapabilityStore? capabilityStore = null)
+        ToolCallCapabilityStore? capabilityStore = null,
+        PriceCatalogRepository? priceCatalogRepository = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(environment);
@@ -88,6 +96,7 @@ public sealed class ManagementFacade
         _budgetStore = budgetStore;
         _endpointScanner = endpointScanner;
         _capabilityStore = capabilityStore;
+        _priceCatalogRepository = priceCatalogRepository;
         _dialectResolver = new ModelDialectResolver(httpClient, environment);
     }
 
@@ -695,12 +704,35 @@ public sealed class ManagementFacade
                     TokensUsed: budget.TokensUsed,
                     Enabled: kvp.Value.Enabled,
                     EndpointCapabilities: _capabilityStore?.GetProviderCapabilities(kvp.Key),
-                    ProviderType: kvp.Value.ProviderType);
+                    ProviderType: kvp.Value.ProviderType,
+                    UsageLastRecordedAtUtc: budget.LastUsageAtUtc,
+                    RateLimit: BuildRateLimitView(kvp.Key));
             })
             .OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         return new ProvidersResponse(providers);
+    }
+
+    /// <summary>
+    /// Builds a provider's typed rate-limit snapshot view from its captured headers, or <see langword="null"/>
+    /// when no repository is wired up or no header has ever been captured for this provider - both read as
+    /// "no rate-limit data observed yet" to the caller.
+    /// </summary>
+    private ProviderRateLimitView? BuildRateLimitView(string providerKey)
+    {
+        if (_priceCatalogRepository is null)
+        {
+            return null;
+        }
+
+        var (headers, observedAtUtc) = _priceCatalogRepository.GetRateLimitSnapshot(providerKey);
+        if (headers.Count == 0 || observedAtUtc is not { } observedAt)
+        {
+            return null;
+        }
+
+        return new ProviderRateLimitView(RateLimitSnapshotParser.Parse(headers), observedAt);
     }
 
     /// <summary>Classifies a stored header's <see cref="HeaderValueSource"/> from which of its fields is set.</summary>
@@ -988,6 +1020,16 @@ public static class HeaderValueSource
 /// or <see langword="null"/> for a provider configured before the field existed. Returned so that reopening
 /// a provider restores the right type rather than defaulting to "Other".
 /// </param>
+/// <param name="UsageLastRecordedAtUtc">
+/// The UTC instant the most recent request's usage was recorded against this provider (the same instant
+/// backing <see cref="DollarSpent"/>/<see cref="TokensUsed"/>), or <see langword="null"/> if no usage has
+/// been recorded this month yet. Backs the Governance card's "estimated from intercepted traffic" footer.
+/// </param>
+/// <param name="RateLimit">
+/// This provider's most recently captured <c>anthropic-ratelimit-*</c> response headers
+/// (<c>docs/router/anthropic-reported-usage-plan.md</c> §5), or <see langword="null"/> when no repository
+/// is wired up or no such header has ever been captured for this provider.
+/// </param>
 public sealed record ProviderView(
     string Key,
     string? Name,
@@ -1002,7 +1044,19 @@ public sealed record ProviderView(
     long TokensUsed = 0L,
     bool Enabled = true,
     ProviderEndpointCapabilities? EndpointCapabilities = null,
-    string? ProviderType = null);
+    string? ProviderType = null,
+    DateTimeOffset? UsageLastRecordedAtUtc = null,
+    ProviderRateLimitView? RateLimit = null);
+
+/// <summary>
+/// A provider's most recently captured rate-limit header snapshot, as returned to a management caller.
+/// </summary>
+/// <param name="Snapshot">The typed projection of the captured headers.</param>
+/// <param name="ObservedAtUtc">
+/// The UTC instant the most recent header in <see cref="Snapshot"/> was captured. Server-reported numbers
+/// are trustworthy only as of this instant - the GUI's "As of" footer.
+/// </param>
+public sealed record ProviderRateLimitView(RateLimitSnapshotView Snapshot, DateTimeOffset ObservedAtUtc);
 
 /// <summary>A single configured model as returned to a management caller.</summary>
 /// <param name="ModelName">The client-facing model name.</param>

@@ -1,6 +1,6 @@
 # Accurate Provider Usage & Budget Tracking — Anthropic (non-enterprise) first
 
-> **Status: revised plan, not yet implemented.** Supersedes the earlier "Anthropic Reported Usage
+> **Status: implemented (Phases 1-3 complete).** Supersedes the earlier "Anthropic Reported Usage
 > card" draft (which only added a `last_usage_at` timestamp and a relabeled GUI section) and revises
 > [`../gui/backlog.md`](../gui/backlog.md) item #3's blocked enterprise-only approach. Other
 > providers (OpenAI `x-ratelimit-*`, Gemini, …) follow as a future feature; the storage and seams

@@ -125,7 +125,8 @@ public sealed class OpenRouterPriceSourceClient : IPriceSourceClient
                 StandardOutputPrice: standardOutput,
                 CachedInputPrice: ReadPerMillion(pricing, "input_cache_read"),
                 BatchInputPrice: null,
-                BatchOutputPrice: null));
+                BatchOutputPrice: null,
+                CacheWriteInputPrice: ReadPerMillion(pricing, "input_cache_write")));
         }
 
         if (skipped > 0)

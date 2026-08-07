@@ -84,6 +84,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     private readonly IReadOnlyDictionary<string, IPayloadTranslator> _translators;
     private readonly IBedrockRuntimeClientFactory _bedrockClientFactory;
     private readonly PriceCatalog.IBudgetEnforcer? _budgetStore;
+    private readonly IRateLimitHeaderCapture _rateLimitCapture;
     private readonly ICircuitBreaker _circuitBreaker;
     private readonly ToolCallNormalizerFactory _toolCallNormalizerFactory;
 
@@ -117,6 +118,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// <param name="budgetStore">Optional per-provider monthly budget store (Governance &gt; Providers). When supplied, a provider whose cap is exhausted is skipped for the request, an all-breached request is rejected with 402, and each served request's usage is recorded against the serving provider. Defaults to <see langword="null"/> (no budgets enforced or recorded), so existing callers/tests are unaffected.</param>
     /// <param name="circuitBreaker">Optional per-upstream-target circuit breaker (<c>docs/router/agent-resilience-strategies.md</c>). Must be the <em>same</em> instance given to the <see cref="RequestInterceptor"/> this middleware wraps (see <c>ServiceCollectionExtensions</c>'s DI wiring) - this class is what records the successes/failures <see cref="RequestInterceptor"/> reads back when ranking candidates. Defaults to a fresh, always-CLOSED instance when omitted, which is behaviorally inert (existing callers/tests unaffected) but decoupled from any interceptor-side instance, so circuit state recorded here would never be seen there.</param>
     /// <param name="toolCallNormalizerFactory">Optional per-request tool-call normalization (<c>docs/router/tool-call-normalization.md</c> Phase 4), consulted for any candidate with no other translator registered: it decides from the (provider, model) capability row and whether the request carried <c>tools</c> whether the response needs a dialect scan at all, and rewrites a dialect-framed tool call into a real <c>tool_calls</c> shape. Replaces the provider-wide echo guard of <c>unified-api-translation.md</c> §4.5. In the real app this is always supplied via DI (a shared singleton reading the capability store); when omitted (direct construction outside DI), this instance builds a store-less one - so a tools-carrying request is still normalized with the union of dialects, but nothing is classified or persisted, mirroring <paramref name="circuitBreaker"/>'s "behaviorally inert when defaulted" pattern.</param>
+    /// <param name="rateLimitCapture">Optional capture for upstream <c>anthropic-ratelimit-*</c> response headers (<c>docs/router/anthropic-reported-usage-plan.md</c> §5), invoked as soon as each attempt's response headers arrive. Defaults to a no-op, so existing callers/tests are unaffected.</param>
     public ProxyMiddleware(
         ILogger<ProxyMiddleware> logger,
         RequestInterceptor interceptor,
@@ -134,7 +136,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         IBedrockRuntimeClientFactory? bedrockClientFactory = null,
         PriceCatalog.IBudgetEnforcer? budgetStore = null,
         ICircuitBreaker? circuitBreaker = null,
-        ToolCallNormalizerFactory? toolCallNormalizerFactory = null)
+        ToolCallNormalizerFactory? toolCallNormalizerFactory = null,
+        IRateLimitHeaderCapture? rateLimitCapture = null)
     {
         _logger = logger;
         _interceptor = interceptor;
@@ -154,6 +157,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         _priceLookup = priceLookup;
         _translators = translators ?? NoTranslators;
         _budgetStore = budgetStore;
+        _rateLimitCapture = rateLimitCapture ?? NullRateLimitHeaderCapture.Instance;
         _circuitBreaker = circuitBreaker ?? new CircuitBreaker();
         _toolCallNormalizerFactory = toolCallNormalizerFactory ?? new ToolCallNormalizerFactory();
 
@@ -527,6 +531,12 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
             var latencyToHeadersMs = stopwatch.ElapsedMilliseconds;
             var statusCode = (int)responseMessage.StatusCode;
+
+            // Headers precede the body for both streaming and buffered responses, so capture happens here
+            // rather than after the usage-parsing pass below (which needs the fully captured body first).
+            // Best-effort and self-guarding (see IRateLimitHeaderCapture's contract) - never able to fail or
+            // delay a request that already has response headers back from upstream.
+            await _rateLimitCapture.CaptureAsync(route.Provider, responseMessage.Headers, CancellationToken.None).ConfigureAwait(false);
 
             // Gemini reports an invalid/expired API key as a 400 (the key travels as a "key=" query
             // parameter, not an Authorization header, so Google's gateway treats it as a malformed
@@ -1207,12 +1217,16 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
         int? promptTokens = null;
         int? completionTokens = null;
+        int? cacheCreationTokens = null;
+        int? cacheReadTokens = null;
         decimal? estimatedCostUsd = null;
 
         if (_usageExtractor.TryExtractUsage(telemetryShapeProvider, isStreaming, capturedResponseBytes, out var usage))
         {
             promptTokens = usage.PromptTokens;
             completionTokens = usage.CompletionTokens;
+            cacheCreationTokens = usage.CacheCreationTokens;
+            cacheReadTokens = usage.CacheReadTokens;
 
             // A free provider (a local Ollama runtime, say) has a *known* price of zero. A paid model's
             // price comes from the auto-refreshed price catalog (docs/router/model-price-catalog.md) via
@@ -1225,11 +1239,11 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // resolved price for simply yields null here, the safe "unknown" outcome.
             if (route.IsFree)
             {
-                estimatedCostUsd = ModelPrice.Free.EstimateCost(usage.PromptTokens, usage.CompletionTokens);
+                estimatedCostUsd = ModelPrice.Free.EstimateCost(usage);
             }
             else if (_priceLookup?.TryGetPrice(new ModelKey(ModelName: route.ModelName, Provider: route.Provider)) is { } price)
             {
-                estimatedCostUsd = price.EstimateCost(usage.PromptTokens, usage.CompletionTokens);
+                estimatedCostUsd = price.EstimateCost(usage);
             }
         }
 
@@ -1248,7 +1262,15 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         // CancellationToken.None reasoning applies.
         if (_budgetStore is not null)
         {
-            await _budgetStore.RecordUsageAsync(route.Provider, estimatedCostUsd, promptTokens, completionTokens, CancellationToken.None).ConfigureAwait(false);
+            await _budgetStore.RecordUsageAsync(
+                route.Provider,
+                estimatedCostUsd,
+                promptTokens,
+                completionTokens,
+                cacheCreationTokens,
+                cacheReadTokens,
+                DateTimeOffset.UtcNow,
+                CancellationToken.None).ConfigureAwait(false);
         }
 
         var requestSummary = TextTruncator.Truncate(RequestTextExtractor.ExtractNewestUserMessage(requestBody));

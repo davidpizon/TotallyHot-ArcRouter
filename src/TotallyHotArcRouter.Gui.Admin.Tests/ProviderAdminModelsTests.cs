@@ -94,6 +94,52 @@ public sealed class ProviderAdminModelsTests
     }
 
     [Fact]
+    public void ProviderAdminView_RoundTripsUsageLastRecordedAtUtcAndRateLimit()
+    {
+        var options = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        var view = new ProviderAdminView(
+            "anthropic",
+            "Anthropic Prod",
+            "https://api.anthropic.com",
+            "x-api-key",
+            [],
+            [],
+            UsageLastRecordedAtUtc: DateTimeOffset.Parse("2026-03-01T08:00:00Z", System.Globalization.CultureInfo.InvariantCulture),
+            RateLimit: new ProviderRateLimitAdminView(
+                new RateLimitSnapshotAdminView(
+                    new Dictionary<string, RateLimitDimensionAdminView>
+                    {
+                        ["tokens"] = new(200000, 158000, DateTimeOffset.Parse("2026-03-01T13:00:00Z", System.Globalization.CultureInfo.InvariantCulture)),
+                    },
+                    "allowed",
+                    null,
+                    new Dictionary<string, RateLimitWindowAdminView> { ["5h"] = new("allowed", null, null) },
+                    "org-123",
+                    new Dictionary<string, string> { ["anthropic-ratelimit-tokens-remaining"] = "158000" }),
+                DateTimeOffset.Parse("2026-03-01T12:00:00Z", System.Globalization.CultureInfo.InvariantCulture)));
+
+        var json = System.Text.Json.JsonSerializer.Serialize(view, options);
+        var roundTripped = System.Text.Json.JsonSerializer.Deserialize<ProviderAdminView>(json, options)!;
+
+        Assert.Equal(view.UsageLastRecordedAtUtc, roundTripped.UsageLastRecordedAtUtc);
+        Assert.NotNull(roundTripped.RateLimit);
+        Assert.Equal(view.RateLimit!.ObservedAtUtc, roundTripped.RateLimit!.ObservedAtUtc);
+        Assert.Equal(200000, roundTripped.RateLimit.Snapshot.StandardDimensions["tokens"].Limit);
+        Assert.Equal("allowed", roundTripped.RateLimit.Snapshot.UnifiedWindows["5h"].Status);
+        Assert.Equal("org-123", roundTripped.RateLimit.Snapshot.RepresentativeClaim);
+        Assert.Equal("158000", roundTripped.RateLimit.Snapshot.RawHeaders["anthropic-ratelimit-tokens-remaining"]);
+    }
+
+    [Fact]
+    public void ProviderAdminView_UsageLastRecordedAtUtcAndRateLimit_DefaultToNull()
+    {
+        var view = new ProviderAdminView("openai", "OpenAI API", "https://api.openai.com", "Authorization", [], []);
+
+        Assert.Null(view.UsageLastRecordedAtUtc);
+        Assert.Null(view.RateLimit);
+    }
+
+    [Fact]
     public void ProviderTemplates_HasATemplateForEveryProviderType()
     {
         foreach (var providerType in Enum.GetValues<ProviderType>())

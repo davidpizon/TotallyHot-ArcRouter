@@ -3,7 +3,32 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// <summary>
 /// Token usage for one completed request, as reported by the upstream provider.
 /// </summary>
-/// <param name="PromptTokens">Prompt/input tokens.</param>
+/// <param name="PromptTokens">
+/// Prompt/input tokens billed at the standard input rate. For a cache-aware provider (Anthropic), this is
+/// tokens <em>after</em> the last cache breakpoint, not the request's full input - see
+/// <see cref="TotalInputTokens"/> for the true total.
+/// </param>
 /// <param name="CompletionTokens">Completion/output tokens.</param>
-public readonly record struct UsageInfo(int PromptTokens, int CompletionTokens);
-
+/// <param name="CacheCreationTokens">
+/// Input tokens written to a new prompt cache entry (Anthropic's <c>cache_creation_input_tokens</c>).
+/// Defaults to 0, which is also the correct value for a provider that has no concept of prompt caching, so
+/// every existing call site and parser compiles unchanged.
+/// </param>
+/// <param name="CacheReadTokens">
+/// Input tokens served from an existing prompt cache entry (Anthropic's <c>cache_read_input_tokens</c>).
+/// Defaults to 0 for the same reason as <see cref="CacheCreationTokens"/>.
+/// </param>
+public readonly record struct UsageInfo(
+    int PromptTokens,
+    int CompletionTokens,
+    int CacheCreationTokens = 0,
+    int CacheReadTokens = 0)
+{
+    /// <summary>
+    /// Gets the true total input token count: <see cref="PromptTokens"/> plus <see cref="CacheCreationTokens"/>
+    /// plus <see cref="CacheReadTokens"/>. This is the only place this formula is defined - Anthropic's
+    /// <c>input_tokens</c> field counts only tokens after the last cache breakpoint, so summing the three
+    /// components is required to get the full input size a request actually carried.
+    /// </summary>
+    public int TotalInputTokens => PromptTokens + CacheCreationTokens + CacheReadTokens;
+}

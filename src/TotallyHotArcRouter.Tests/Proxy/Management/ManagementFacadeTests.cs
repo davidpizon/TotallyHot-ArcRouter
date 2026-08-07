@@ -30,8 +30,16 @@ public sealed class ManagementFacadeTests
         ModelList = [new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "openai", ProviderModelId = "gpt-5.4" }]
     };
 
-    private static ManagementFacade CreateFacade(IProviderConfigStore? store = null, ProviderBudgetStore? budgetStore = null) =>
-        new(store ?? new InMemoryProviderConfigStore(SeedOptions()), Mock.Of<IEnvironmentVariableProvider>(), new HttpClient(), budgetStore);
+    private static ManagementFacade CreateFacade(
+        IProviderConfigStore? store = null,
+        ProviderBudgetStore? budgetStore = null,
+        PriceCatalogRepository? priceCatalogRepository = null) =>
+        new(
+            store ?? new InMemoryProviderConfigStore(SeedOptions()),
+            Mock.Of<IEnvironmentVariableProvider>(),
+            new HttpClient(),
+            budgetStore,
+            priceCatalogRepository: priceCatalogRepository);
 
     [Fact]
     public void ListProviders_NeverReturnsALockedHeaderValue()
@@ -411,6 +419,71 @@ public sealed class ManagementFacadeTests
         var provider = result.Value!.Providers.Single();
         Assert.Equal(500m, provider.DollarCap);
         Assert.Equal(1_000_000L, provider.TokenCap);
+    }
+
+    [Fact]
+    public void ListProviders_NoPriceCatalogRepository_RateLimitIsNull()
+    {
+        var facade = CreateFacade(priceCatalogRepository: null);
+
+        var provider = facade.ListProviders().Providers.Single();
+
+        Assert.Null(provider.RateLimit);
+    }
+
+    [Fact]
+    public void ListProviders_NoHeadersCapturedYet_RateLimitIsNull()
+    {
+        using var temp = new TempDatabase();
+        var facade = CreateFacade(priceCatalogRepository: temp.CreateRepository());
+
+        var provider = facade.ListProviders().Providers.Single();
+
+        Assert.Null(provider.RateLimit);
+    }
+
+    [Fact]
+    public void ListProviders_HeadersCaptured_PopulatesRateLimitSnapshotAndObservedAt()
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+        var observedAt = new DateTimeOffset(2026, 3, 1, 12, 0, 0, TimeSpan.Zero);
+        repository.UpsertRateLimitHeaders(
+            "openai",
+            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
+            observedAt);
+        var facade = CreateFacade(priceCatalogRepository: repository);
+
+        var provider = facade.ListProviders().Providers.Single();
+
+        Assert.NotNull(provider.RateLimit);
+        Assert.Equal(observedAt, provider.RateLimit!.ObservedAtUtc);
+        Assert.Equal(1000, provider.RateLimit.Snapshot.StandardDimensions["tokens"].Remaining);
+    }
+
+    [Fact]
+    public void ListProviders_NoUsageRecorded_UsageLastRecordedAtUtcIsNull()
+    {
+        using var temp = new TempDatabase();
+        var facade = CreateFacade(budgetStore: temp.CreateBudgetStore());
+
+        var provider = facade.ListProviders().Providers.Single();
+
+        Assert.Null(provider.UsageLastRecordedAtUtc);
+    }
+
+    [Fact]
+    public async Task ListProviders_UsageRecorded_UsageLastRecordedAtUtcReflectsIt()
+    {
+        using var temp = new TempDatabase();
+        var budgetStore = temp.CreateBudgetStore();
+        var usageAt = new DateTimeOffset(2026, 3, 1, 8, 0, 0, TimeSpan.Zero);
+        await budgetStore.RecordUsageAsync("openai", 1m, 10, 5, null, null, usageAt, TestContext.Current.CancellationToken);
+        var facade = CreateFacade(budgetStore: budgetStore);
+
+        var provider = facade.ListProviders().Providers.Single();
+
+        Assert.Equal(usageAt, provider.UsageLastRecordedAtUtc);
     }
 }
 

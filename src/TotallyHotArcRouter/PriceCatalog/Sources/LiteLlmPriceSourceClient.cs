@@ -120,7 +120,8 @@ public sealed class LiteLlmPriceSourceClient : IPriceSourceClient
                 StandardOutputPrice: standardOutput,
                 CachedInputPrice: ReadPerMillion(model, "cache_read_input_token_cost"),
                 BatchInputPrice: ReadPerMillion(model, "input_cost_per_token_batches"),
-                BatchOutputPrice: ReadPerMillion(model, "output_cost_per_token_batches")));
+                BatchOutputPrice: ReadPerMillion(model, "output_cost_per_token_batches"),
+                CacheWriteInputPrice: ReadPerMillion(model, "cache_creation_input_token_cost")));
         }
 
         if (skipped > 0)

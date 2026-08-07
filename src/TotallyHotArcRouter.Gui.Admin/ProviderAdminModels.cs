@@ -32,6 +32,16 @@ namespace TotallyHot.ArcRouter.Gui.Admin;
 /// has never been scanned. Drives the API badges shown next to the provider name in Governance &gt;
 /// Providers.
 /// </param>
+/// <param name="UsageLastRecordedAtUtc">
+/// The UTC instant the most recent request's usage was recorded against this provider, or
+/// <see langword="null"/> if no usage has been recorded this month yet. Backs the Anthropic Usage card's
+/// "estimated from intercepted traffic" footer.
+/// </param>
+/// <param name="RateLimit">
+/// This provider's most recently captured Anthropic <c>anthropic-ratelimit-*</c> response headers, or
+/// <see langword="null"/> when none have been captured yet. Backs the Anthropic Usage card's "reported by
+/// Anthropic" section.
+/// </param>
 public sealed record ProviderAdminView(
     string Key,
     string? Name,
@@ -46,7 +56,49 @@ public sealed record ProviderAdminView(
     long TokensUsed = 0L,
     bool Enabled = true,
     string? ProviderType = null,
-    ProviderEndpointCapabilitiesView? EndpointCapabilities = null);
+    ProviderEndpointCapabilitiesView? EndpointCapabilities = null,
+    DateTimeOffset? UsageLastRecordedAtUtc = null,
+    ProviderRateLimitAdminView? RateLimit = null);
+
+/// <summary>
+/// A standard-family rate-limit dimension (<c>requests</c>, <c>input-tokens</c>, <c>output-tokens</c>, or
+/// <c>tokens</c>), mirroring the proxy's <c>RateLimitDimensionView</c>.
+/// </summary>
+/// <param name="Limit">The dimension's configured cap, or <see langword="null"/> if unknown.</param>
+/// <param name="Remaining">What's left before the cap, or <see langword="null"/> if unknown. Anthropic rounds this to the nearest thousand.</param>
+/// <param name="ResetAt">When the dimension resets, or <see langword="null"/> if unknown.</param>
+public sealed record RateLimitDimensionAdminView(long? Limit, long? Remaining, DateTimeOffset? ResetAt);
+
+/// <summary>
+/// One unified-family time window (e.g. <c>5h</c>), mirroring the proxy's <c>RateLimitWindowView</c>.
+/// </summary>
+/// <param name="Status">The window's raw status string, or <see langword="null"/> if unknown.</param>
+/// <param name="Remaining">What's left in the window, or <see langword="null"/> if unknown.</param>
+/// <param name="ResetAt">When the window resets, or <see langword="null"/> if unknown.</param>
+public sealed record RateLimitWindowAdminView(string? Status, long? Remaining, DateTimeOffset? ResetAt);
+
+/// <summary>
+/// The typed projection of one provider's captured Anthropic rate-limit headers, mirroring the proxy's
+/// <c>RateLimitSnapshotView</c>.
+/// </summary>
+/// <param name="StandardDimensions">Standard-family dimensions keyed by name (<c>requests</c>, <c>input-tokens</c>, <c>output-tokens</c>, <c>tokens</c>).</param>
+/// <param name="UnifiedStatus">The unified family's top-level status, or <see langword="null"/> if absent.</param>
+/// <param name="UnifiedResetAt">The unified family's top-level reset time, or <see langword="null"/> if absent.</param>
+/// <param name="UnifiedWindows">Unified-family time windows (e.g. <c>5h</c>) keyed by window name.</param>
+/// <param name="RepresentativeClaim">The unified family's representative-claim value, or <see langword="null"/> if absent.</param>
+/// <param name="RawHeaders">Every captured header, verbatim, keyed by lowercase name.</param>
+public sealed record RateLimitSnapshotAdminView(
+    IReadOnlyDictionary<string, RateLimitDimensionAdminView> StandardDimensions,
+    string? UnifiedStatus,
+    DateTimeOffset? UnifiedResetAt,
+    IReadOnlyDictionary<string, RateLimitWindowAdminView> UnifiedWindows,
+    string? RepresentativeClaim,
+    IReadOnlyDictionary<string, string> RawHeaders);
+
+/// <summary>A provider's most recently captured rate-limit header snapshot, mirroring the proxy's <c>ProviderRateLimitView</c>.</summary>
+/// <param name="Snapshot">The typed projection of the captured headers.</param>
+/// <param name="ObservedAtUtc">The UTC instant the most recent header in <see cref="Snapshot"/> was captured.</param>
+public sealed record ProviderRateLimitAdminView(RateLimitSnapshotAdminView Snapshot, DateTimeOffset ObservedAtUtc);
 
 /// <summary>A configured model as returned by the management API.</summary>
 /// <param name="ModelName">The client-facing model name.</param>
