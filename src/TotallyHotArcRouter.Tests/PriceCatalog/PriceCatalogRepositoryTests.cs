@@ -428,8 +428,8 @@ public class PriceCatalogRepositoryTests
         var firstUsageAt = new DateTimeOffset(2026, 3, 1, 0, 0, 0, TimeSpan.Zero);
         var secondUsageAt = firstUsageAt.AddHours(1);
 
-        repository.AddProviderSpend("anthropic", "2026-03", 1m, 10, 5, cacheCreationTokens: 100, cacheReadTokens: 200, firstUsageAt);
-        repository.AddProviderSpend("anthropic", "2026-03", 2m, 20, 10, cacheCreationTokens: 50, cacheReadTokens: 25, secondUsageAt);
+        repository.AddProviderSpend("anthropic", "2026-03", 1m, 10, 5, cacheCreationTokens: 100, cacheReadTokens: 200, usageAtUtc: firstUsageAt);
+        repository.AddProviderSpend("anthropic", "2026-03", 2m, 20, 10, cacheCreationTokens: 50, cacheReadTokens: 25, usageAtUtc: secondUsageAt);
 
         var row = Assert.Single(repository.GetProviderSpend("2026-03"));
         Assert.Equal(150L, row.CacheCreationTokens);

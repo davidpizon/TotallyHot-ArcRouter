@@ -92,8 +92,8 @@ public class ProviderBudgetStoreTests
         using var temp = new TempDatabase();
         var store = temp.CreateBudgetStore();
 
-        await store.RecordUsageAsync("openai", costUsd: 1.50m, promptTokens: 100, completionTokens: 40, cacheCreationTokens: null, cacheReadTokens: null, FixedUsageAt, Ct);
-        await store.RecordUsageAsync("openai", costUsd: 0.25m, promptTokens: 10, completionTokens: 5, cacheCreationTokens: null, cacheReadTokens: null, FixedUsageAt, Ct);
+        await store.RecordUsageAsync("openai", costUsd: 1.50m, promptTokens: 100, completionTokens: 40, cacheCreationTokens: null, cacheReadTokens: null, usageAtUtc: FixedUsageAt, cancellationToken: Ct);
+        await store.RecordUsageAsync("openai", costUsd: 0.25m, promptTokens: 10, completionTokens: 5, cacheCreationTokens: null, cacheReadTokens: null, usageAtUtc: FixedUsageAt, cancellationToken: Ct);
 
         var status = store.GetStatus("openai");
         Assert.Equal(1.75m, status.DollarSpent);
@@ -106,7 +106,7 @@ public class ProviderBudgetStoreTests
         using var temp = new TempDatabase();
         var store = temp.CreateBudgetStore();
 
-        await store.RecordUsageAsync("openai", costUsd: null, promptTokens: null, completionTokens: null, cacheCreationTokens: null, cacheReadTokens: null, FixedUsageAt, Ct);
+        await store.RecordUsageAsync("openai", costUsd: null, promptTokens: null, completionTokens: null, cacheCreationTokens: null, cacheReadTokens: null, usageAtUtc: FixedUsageAt, cancellationToken: Ct);
 
         var status = store.GetStatus("openai");
         Assert.Equal(0m, status.DollarSpent);
@@ -120,10 +120,10 @@ public class ProviderBudgetStoreTests
         var repository = temp.CreateRepository();
 
         // Write spend directly into a prior period; the store only ever reads the current month.
-        repository.AddProviderSpend("openai", "2000-01", 999m, 1_000, 1_000, cacheCreationTokens: 0, cacheReadTokens: 0, FixedUsageAt);
+        repository.AddProviderSpend("openai", "2000-01", 999m, 1_000, 1_000, cacheCreationTokens: 0, cacheReadTokens: 0, usageAtUtc: FixedUsageAt);
 
         var store = temp.CreateBudgetStore(repository);
-        await store.RecordUsageAsync("openai", costUsd: 2m, promptTokens: 3, completionTokens: 4, cacheCreationTokens: null, cacheReadTokens: null, FixedUsageAt, Ct);
+        await store.RecordUsageAsync("openai", costUsd: 2m, promptTokens: 3, completionTokens: 4, cacheCreationTokens: null, cacheReadTokens: null, usageAtUtc: FixedUsageAt, cancellationToken: Ct);
 
         var status = store.GetStatus("openai");
         Assert.Equal(2m, status.DollarSpent);
@@ -138,7 +138,7 @@ public class ProviderBudgetStoreTests
         store.SetBudget("openai", dollarCap: 10m, tokenCap: null);
 
         Assert.False(store.IsBreached("openai"));
-        await store.RecordUsageAsync("openai", costUsd: 10m, promptTokens: 0, completionTokens: 0, cacheCreationTokens: null, cacheReadTokens: null, FixedUsageAt, Ct);
+        await store.RecordUsageAsync("openai", costUsd: 10m, promptTokens: 0, completionTokens: 0, cacheCreationTokens: null, cacheReadTokens: null, usageAtUtc: FixedUsageAt, cancellationToken: Ct);
 
         Assert.True(store.IsBreached("openai"));
     }
@@ -151,7 +151,7 @@ public class ProviderBudgetStoreTests
         var store = temp.CreateBudgetStore();
         store.SetBudget("ollama", dollarCap: null, tokenCap: 100L);
 
-        await store.RecordUsageAsync("ollama", costUsd: 0m, promptTokens: 60, completionTokens: 45, cacheCreationTokens: null, cacheReadTokens: null, FixedUsageAt, Ct);
+        await store.RecordUsageAsync("ollama", costUsd: 0m, promptTokens: 60, completionTokens: 45, cacheCreationTokens: null, cacheReadTokens: null, usageAtUtc: FixedUsageAt, cancellationToken: Ct);
 
         Assert.True(store.IsBreached("ollama"));
     }
@@ -163,7 +163,7 @@ public class ProviderBudgetStoreTests
         var store = temp.CreateBudgetStore();
         store.SetBudget("openai", dollarCap: 100m, tokenCap: 1_000L);
 
-        await store.RecordUsageAsync("openai", costUsd: 99.99m, promptTokens: 500, completionTokens: 499, cacheCreationTokens: null, cacheReadTokens: null, FixedUsageAt, Ct);
+        await store.RecordUsageAsync("openai", costUsd: 99.99m, promptTokens: 500, completionTokens: 499, cacheCreationTokens: null, cacheReadTokens: null, usageAtUtc: FixedUsageAt, cancellationToken: Ct);
 
         Assert.False(store.IsBreached("openai"));
     }
@@ -177,7 +177,7 @@ public class ProviderBudgetStoreTests
         var store = temp.CreateBudgetStore();
         store.SetBudget("openai", dollarCap: null, tokenCap: 100L);
 
-        await store.RecordUsageAsync("openai", costUsd: 0m, promptTokens: 0, completionTokens: 0, cacheCreationTokens: 60, cacheReadTokens: 45, FixedUsageAt, Ct);
+        await store.RecordUsageAsync("openai", costUsd: 0m, promptTokens: 0, completionTokens: 0, cacheCreationTokens: 60, cacheReadTokens: 45, usageAtUtc: FixedUsageAt, cancellationToken: Ct);
 
         var status = store.GetStatus("openai");
         Assert.Equal(105L, status.TokensUsed);
@@ -191,8 +191,8 @@ public class ProviderBudgetStoreTests
         using var temp = new TempDatabase();
         var store = temp.CreateBudgetStore();
 
-        await store.RecordUsageAsync("openai", costUsd: 1m, promptTokens: 10, completionTokens: 5, cacheCreationTokens: 200, cacheReadTokens: 300, FixedUsageAt, Ct);
-        await store.RecordUsageAsync("openai", costUsd: 1m, promptTokens: 10, completionTokens: 5, cacheCreationTokens: 20, cacheReadTokens: 30, FixedUsageAt, Ct);
+        await store.RecordUsageAsync("openai", costUsd: 1m, promptTokens: 10, completionTokens: 5, cacheCreationTokens: 200, cacheReadTokens: 300, usageAtUtc: FixedUsageAt, cancellationToken: Ct);
+        await store.RecordUsageAsync("openai", costUsd: 1m, promptTokens: 10, completionTokens: 5, cacheCreationTokens: 20, cacheReadTokens: 30, usageAtUtc: FixedUsageAt, cancellationToken: Ct);
 
         var status = store.GetStatus("openai");
         Assert.Equal(550L, status.CacheTokensUsed);
@@ -207,10 +207,10 @@ public class ProviderBudgetStoreTests
         var firstUsageAt = FixedUsageAt;
         var secondUsageAt = FixedUsageAt.AddMinutes(5);
 
-        await store.RecordUsageAsync("openai", costUsd: 1m, promptTokens: 1, completionTokens: 1, cacheCreationTokens: null, cacheReadTokens: null, firstUsageAt, Ct);
+        await store.RecordUsageAsync("openai", costUsd: 1m, promptTokens: 1, completionTokens: 1, cacheCreationTokens: null, cacheReadTokens: null, usageAtUtc: firstUsageAt, cancellationToken: Ct);
         Assert.Equal(firstUsageAt, store.GetStatus("openai").LastUsageAtUtc);
 
-        await store.RecordUsageAsync("openai", costUsd: 1m, promptTokens: 1, completionTokens: 1, cacheCreationTokens: null, cacheReadTokens: null, secondUsageAt, Ct);
+        await store.RecordUsageAsync("openai", costUsd: 1m, promptTokens: 1, completionTokens: 1, cacheCreationTokens: null, cacheReadTokens: null, usageAtUtc: secondUsageAt, cancellationToken: Ct);
         Assert.Equal(secondUsageAt, store.GetStatus("openai").LastUsageAtUtc);
     }
 
@@ -221,7 +221,7 @@ public class ProviderBudgetStoreTests
         var repository = temp.CreateRepository();
         var store = temp.CreateBudgetStore(repository);
 
-        await store.RecordUsageAsync("openai", costUsd: 1m, promptTokens: 1, completionTokens: 1, cacheCreationTokens: null, cacheReadTokens: null, FixedUsageAt, Ct);
+        await store.RecordUsageAsync("openai", costUsd: 1m, promptTokens: 1, completionTokens: 1, cacheCreationTokens: null, cacheReadTokens: null, usageAtUtc: FixedUsageAt, cancellationToken: Ct);
 
         var reopened = temp.CreateBudgetStore(repository);
         Assert.Equal(FixedUsageAt, reopened.GetStatus("openai").LastUsageAtUtc);

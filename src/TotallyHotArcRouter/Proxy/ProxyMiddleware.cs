@@ -1260,10 +1260,25 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         // telemetryShapeProvider - the native shape carries fields (e.g. Anthropic cache tokens) that
         // TranslateResponse/EmitChunk currently drop on the way to the OpenAI-shaped client response (see
         // docs/router/openai-format-usage-accuracy-plan.md §1).
-        var usedNativeBytes = nativeResponseBytes is { Length: > 0 };
-        var (usageShapeProvider, usageShapeBytes) = usedNativeBytes
-            ? (route.Provider, nativeResponseBytes)
-            : (telemetryShapeProvider, capturedResponseBytes);
+        // Explicit typed locals plus a plain if/else, rather than a ternary/tuple-deconstruction one-liner,
+        // so usageShapeBytes's static type is byte[] (not the byte[]? a ternary over nativeResponseBytes
+        // would otherwise infer) - the `is { Length: > 0 }` pattern below already proves it non-null on the
+        // branch that assigns it.
+        string usageShapeProvider;
+        byte[] usageShapeBytes;
+        bool usedNativeBytes;
+        if (nativeResponseBytes is { Length: > 0 } nonEmptyNativeBytes)
+        {
+            usedNativeBytes = true;
+            usageShapeProvider = route.Provider;
+            usageShapeBytes = nonEmptyNativeBytes;
+        }
+        else
+        {
+            usedNativeBytes = false;
+            usageShapeProvider = telemetryShapeProvider;
+            usageShapeBytes = capturedResponseBytes;
+        }
 
         var usageExtracted = _usageExtractor.TryExtractUsage(usageShapeProvider, isStreaming, usageShapeBytes, out var usage);
         if (!usageExtracted && usedNativeBytes)
