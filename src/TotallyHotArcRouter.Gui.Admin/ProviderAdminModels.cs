@@ -260,6 +260,31 @@ public sealed record ModelEnabledWriteRequest(bool Enabled);
 public sealed record ModelToolDialectWriteRequest(string? Dialect);
 
 /// <summary>
+/// One operator-authored price override, as returned by <c>GET /admin/price-overrides</c> - the §5.7
+/// resolution ladder's top rung. Backs the Governance price-overrides pane.
+/// </summary>
+/// <param name="SourceName">The aggregator source this override applies to (e.g. <c>LiteLLM</c>).</param>
+/// <param name="AggregatorModelKey">The source's own model key this override matches, verbatim.</param>
+/// <param name="ModelName">The client-facing <c>ModelName</c> the override resolves to.</param>
+public sealed record PriceOverrideView(string SourceName, string AggregatorModelKey, string ModelName);
+
+/// <summary>The body for adding or replacing a price override (<c>PUT /admin/price-overrides</c>).</summary>
+/// <param name="SourceName">The aggregator source this override applies to.</param>
+/// <param name="AggregatorModelKey">The source's own model key this override matches, verbatim.</param>
+/// <param name="ModelName">The client-facing <c>ModelName</c> to resolve to; must already be configured.</param>
+public sealed record PriceOverrideWriteRequest(string SourceName, string AggregatorModelKey, string ModelName);
+
+/// <summary>
+/// One configured model's current price-resolution state, as returned by <c>GET /admin/price-resolution</c>.
+/// Backs the Governance price-overrides pane's read-only diagnosis view.
+/// </summary>
+/// <param name="ModelName">The client-facing <c>ModelName</c>.</param>
+/// <param name="Provider">The configured provider serving this model.</param>
+/// <param name="Resolved">Whether the catalog currently holds a fresh price for this model.</param>
+/// <param name="IsApproximate">Whether the resolved price was matched via a ladder rung below Exact/OperatorOverride.</param>
+public sealed record PriceResolutionDiagnosisView(string ModelName, string Provider, bool Resolved, bool IsApproximate);
+
+/// <summary>
 /// The tool-call dialect names the Governance UI offers for an operator override.
 /// </summary>
 /// <remarks>

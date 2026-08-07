@@ -105,6 +105,13 @@ internal sealed class TempDatabase : IDisposable
         return new UsageLedger(Database, NullLogger<UsageLedger>.Instance);
     }
 
+    /// <summary>Creates the schema and returns a <see cref="ModelAliasOverrideStore"/> over it.</summary>
+    public ModelAliasOverrideStore CreateOverrideStore()
+    {
+        Database.EnsureCreated();
+        return new ModelAliasOverrideStore(Database);
+    }
+
     public void Dispose()
     {
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();

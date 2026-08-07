@@ -15,9 +15,27 @@ public sealed record LiveConversationTurn(
     int CacheCreationTokens = 0,
     int CacheReadTokens = 0,
     string? RequestSummary = null,
-    string? ResponseSummary = null);
+    string? ResponseSummary = null,
+    string? CostConfidence = null);
 
 /// <summary>A conversation (session) reconstructed from the live telemetry stream.</summary>
+/// <param name="SessionId">The session id every turn in <paramref name="Turns"/> shares.</param>
+/// <param name="IsSessionSynthesized">Whether the session id was synthesized rather than resolved from an explicit client-sent id.</param>
+/// <param name="FirstTimestampUtc">The first turn's timestamp.</param>
+/// <param name="LastTimestampUtc">The most recent turn's timestamp.</param>
+/// <param name="TotalCost">The sum of every turn's known cost - see <paramref name="UnpricedTurns"/> for what this excludes.</param>
+/// <param name="TotalPromptTokens">The sum of every turn's prompt tokens.</param>
+/// <param name="TotalCompletionTokens">The sum of every turn's completion tokens.</param>
+/// <param name="HasFallbackTurns">Whether any turn in <paramref name="Turns"/> was served by fallback routing.</param>
+/// <param name="Turns">This conversation's turns, in chronological order.</param>
+/// <param name="TotalCacheCreationTokens">The sum of every turn's cache-creation tokens.</param>
+/// <param name="TotalCacheReadTokens">The sum of every turn's cache-read tokens.</param>
+/// <param name="UnpricedTurns">
+/// How many turns in <paramref name="Turns"/> had no cost at all (a null <c>EstimatedCostUsd</c> - see
+/// <see cref="RoutingTelemetryEventDto.EstimatedCostUsd"/>), and so contributed nothing to
+/// <paramref name="TotalCost"/>: a non-zero value here means <paramref name="TotalCost"/> is a floor, not
+/// a total (§5.6, <c>docs/router/token-tracking-improvements.md</c>).
+/// </param>
 public sealed record LiveConversation(
     string SessionId,
     bool IsSessionSynthesized,
@@ -29,7 +47,8 @@ public sealed record LiveConversation(
     bool HasFallbackTurns,
     IReadOnlyList<LiveConversationTurn> Turns,
     int TotalCacheCreationTokens = 0,
-    int TotalCacheReadTokens = 0);
+    int TotalCacheReadTokens = 0,
+    int UnpricedTurns = 0);
 
 /// <summary>
 /// Groups a flat stream of <see cref="RoutingTelemetryEventDto"/>s into conversations, mirroring the
@@ -84,7 +103,8 @@ public static class ConversationAggregator
                 CacheCreationTokens: e.CacheCreationTokens ?? 0,
                 CacheReadTokens: e.CacheReadTokens ?? 0,
                 RequestSummary: e.RequestSummary,
-                ResponseSummary: e.ResponseSummary))
+                ResponseSummary: e.ResponseSummary,
+                CostConfidence: e.CostConfidence))
             .ToList();
 
         return new LiveConversation(
@@ -98,7 +118,8 @@ public static class ConversationAggregator
             HasFallbackTurns: turns.Any(t => t.IsFallback),
             Turns: turns,
             TotalCacheCreationTokens: turns.Sum(t => t.CacheCreationTokens),
-            TotalCacheReadTokens: turns.Sum(t => t.CacheReadTokens));
+            TotalCacheReadTokens: turns.Sum(t => t.CacheReadTokens),
+            UnpricedTurns: orderedEvents.Count(e => e.EstimatedCostUsd is null));
     }
 }
 

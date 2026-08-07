@@ -3,11 +3,10 @@
    the same safeguard GitHub uses for deleting a repository. Follows SettingsModal's shell
    (docs/gui/DESIGN.md 4.1) and its "Destructive Actions Zone" body treatment. *@
 <div class="overlay-backdrop fixed inset-0 z-50 flex items-center justify-center"
-     style="background-color:rgba(0,0,0,0.7);backdrop-filter:blur(4px)"
      @onclick="OnCancel">
     @* Escape is handled on the panel, not the input, so it works whichever control has focus - keydown
        bubbles up from every focusable descendant. Enter stays on the input alone (see below). *@
-    <div class="overlay-panel w-full max-w-md rounded-lg border border-slate-700" style="background:#181818"
+    <div class="overlay-panel w-full max-w-md rounded-lg border border-slate-700"
          tabindex="-1"
          @onkeydown="HandlePanelKeyDown"
          @onclick:stopPropagation="true">

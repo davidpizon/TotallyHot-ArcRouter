@@ -881,6 +881,153 @@ public class ProxyMiddlewareTests
             Times.Once);
     }
 
+    // §5.6: the published telemetry event's CostConfidence must match how the cost was actually arrived
+    // at, across every branch PublishTelemetryAsync computes it from.
+    [Fact]
+    public async Task InvokeAsync_FreeProvider_ReportsExactCostConfidence()
+    {
+        var resolver = ModelRouteResolverTestFactory.Create(
+            modelName: "llama3", providerModelId: "llama3", baseUrl: "http://localhost:11434/v1",
+            providerName: "ollama", isFree: true);
+        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """{"id":"c1","choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}""",
+                Encoding.UTF8, "application/json"),
+        }));
+        var telemetryPublisherMock = new Mock<ITelemetryPublisher>();
+        var middleware = new ProxyMiddleware(
+            Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler),
+            telemetryPublisher: telemetryPublisherMock.Object);
+
+        var context = NewJsonPostContext("""{"model":"llama3"}""");
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        telemetryPublisherMock.Verify(
+            p => p.PublishAsync(It.Is<RoutingTelemetryEvent>(e => e.CostConfidence == CostConfidence.Exact), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_PaidProviderWithFullCatalogPrice_ReportsCatalogCostConfidence()
+    {
+        var resolver = ModelRouteResolverTestFactory.Create(
+            modelName: "gpt-5.4", providerModelId: "gpt-5.4-2026-01", baseUrl: "https://example.com", providerName: "openai");
+        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """{"id":"c1","choices":[],"usage":{"prompt_tokens":42,"completion_tokens":7,"total_tokens":49}}""",
+                Encoding.UTF8, "application/json"),
+        }));
+        var priceLookup = new Mock<IModelPriceLookup>();
+        priceLookup.Setup(l => l.TryGetPrice(new ModelKey("gpt-5.4", "openai"))).Returns(new ModelPrice(2m, 6m));
+        var telemetryPublisherMock = new Mock<ITelemetryPublisher>();
+        var middleware = new ProxyMiddleware(
+            Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler),
+            telemetryPublisher: telemetryPublisherMock.Object, priceLookup: priceLookup.Object);
+
+        var context = NewJsonPostContext("""{"model":"gpt-5.4"}""");
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        telemetryPublisherMock.Verify(
+            p => p.PublishAsync(It.Is<RoutingTelemetryEvent>(e => e.CostConfidence == CostConfidence.Catalog), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_PaidProviderWithUnpublishedCacheRate_ReportsCatalogApproximateCostConfidence()
+    {
+        var resolver = ModelRouteResolverTestFactory.Create(
+            modelName: "gpt-5.4", providerModelId: "gpt-5.4-2026-01", baseUrl: "https://example.com", providerName: "openai");
+        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """{"id":"c1","choices":[],"usage":{"prompt_tokens":42,"completion_tokens":7,"total_tokens":49,"prompt_tokens_details":{"cached_tokens":10}}}""",
+                Encoding.UTF8, "application/json"),
+        }));
+        // No cache rates published, but the response carries cached tokens - EstimateCost falls back to
+        // the standard input rate for them, which must be reported as an approximate, not exact, cost.
+        var priceLookup = new Mock<IModelPriceLookup>();
+        priceLookup.Setup(l => l.TryGetPrice(new ModelKey("gpt-5.4", "openai"))).Returns(new ModelPrice(2m, 6m));
+        var telemetryPublisherMock = new Mock<ITelemetryPublisher>();
+        var middleware = new ProxyMiddleware(
+            Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler),
+            telemetryPublisher: telemetryPublisherMock.Object, priceLookup: priceLookup.Object);
+
+        var context = NewJsonPostContext("""{"model":"gpt-5.4"}""");
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        telemetryPublisherMock.Verify(
+            p => p.PublishAsync(It.Is<RoutingTelemetryEvent>(e => e.CostConfidence == CostConfidence.CatalogApproximate), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_PaidProviderWithNoCatalogPrice_ReportsUnknownCostConfidence()
+    {
+        var resolver = ModelRouteResolverTestFactory.Create(
+            modelName: "gpt-5.4", providerModelId: "gpt-5.4-2026-01", baseUrl: "https://example.com", providerName: "openai");
+        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """{"id":"c1","choices":[],"usage":{"prompt_tokens":42,"completion_tokens":7,"total_tokens":49}}""",
+                Encoding.UTF8, "application/json"),
+        }));
+        var telemetryPublisherMock = new Mock<ITelemetryPublisher>();
+        var middleware = new ProxyMiddleware(
+            Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler),
+            telemetryPublisher: telemetryPublisherMock.Object);
+
+        var context = NewJsonPostContext("""{"model":"gpt-5.4"}""");
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        telemetryPublisherMock.Verify(
+            p => p.PublishAsync(It.Is<RoutingTelemetryEvent>(e => e.CostConfidence == CostConfidence.Unknown), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_NoUsageExtracted_ReportsNoUsageCostConfidence()
+    {
+        var resolver = ModelRouteResolverTestFactory.Create(
+            modelName: "gpt-5.4", providerModelId: "gpt-5.4-2026-01", baseUrl: "https://example.com", providerName: "openai");
+        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"id":"c1","choices":[]}""", Encoding.UTF8, "application/json"),
+        }));
+        var telemetryPublisherMock = new Mock<ITelemetryPublisher>();
+        var middleware = new ProxyMiddleware(
+            Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler),
+            telemetryPublisher: telemetryPublisherMock.Object);
+
+        var context = NewJsonPostContext("""{"model":"gpt-5.4"}""");
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        telemetryPublisherMock.Verify(
+            p => p.PublishAsync(It.Is<RoutingTelemetryEvent>(e => e.CostConfidence == CostConfidence.NoUsage), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    /// <summary>Builds a minimal POST context with the given JSON request body, for the CostConfidence tests above.</summary>
+    private static DefaultHttpContext NewJsonPostContext(string jsonBody)
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Method = HttpMethods.Post;
+        context.Request.Scheme = "https";
+        context.Request.Host = new HostString("127.0.0.1:5001");
+        context.Request.Path = "/chat";
+        var requestBody = Encoding.UTF8.GetBytes(jsonBody);
+        context.Request.Body = new MemoryStream(requestBody);
+        context.Request.ContentLength = requestBody.Length;
+        context.Response.Body = new MemoryStream();
+        return context;
+    }
+
     // A client-supplied session id is logged (LogDebug "Resolved session {SessionId}...") but is
     // otherwise attacker-controlled, arbitrary text - a value containing CR/LF must not be able to
     // forge extra-looking lines in a text log sink (CodeQL: "Log entries created from user input").

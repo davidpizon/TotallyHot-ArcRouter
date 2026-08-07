@@ -6,9 +6,8 @@
         <span class="text-xs font-semibold text-slate-200 ls-truncate">@Conversation.Title</span>
         @if (Conversation.HasFallbackTurns)
         {
-            <span class="shrink-0 rounded px-1.5 py-0.5 text-xs font-semibold ls-tip" tabindex="0" aria-describedby="ls-tooltip"
-                  data-tip="One or more turns in this conversation used fallback routing"
-                  style="background:#f59e0b22;color:#f59e0b;border:1px solid #f59e0b44">⚠ Fallback</span>
+            <span class="ds-badge-warning shrink-0 rounded px-1.5 py-0.5 text-xs font-semibold ls-tip" tabindex="0" aria-describedby="ls-tooltip"
+                  data-tip="One or more turns in this conversation used fallback routing">⚠ Fallback</span>
         }
         <span class="ml-auto text-xs font-mono text-slate-500 shrink-0 ls-tip" tabindex="0" aria-describedby="ls-tooltip"
               data-tip="Session ID, followed by the timestamps of the first and last turn">
@@ -19,9 +18,15 @@
     @* Aggregate stat strip *@
     <div class="flex flex-wrap items-baseline" style="gap:2px 14px">
         <span class="flex items-baseline gap-1 ls-tip" tabindex="0" aria-describedby="ls-tooltip"
-              data-tip="Sum of all LLM API costs for this conversation">
+              data-tip="@TotalCostTip">
             <span class="ls-stat-label">Total Cost</span>
-            <span class="font-mono text-xs" style="color:#10b981">$@Conversation.TotalCost.ToString("F6", CultureInfo.InvariantCulture)</span>
+            <span class="font-mono text-xs metric-positive">
+                @(Conversation.UnpricedTurns > 0 ? "≥ " : "")$@Conversation.TotalCost.ToString("F6", CultureInfo.InvariantCulture)
+            </span>
+            @if (Conversation.UnpricedTurns > 0)
+            {
+                <span class="ds-badge-warning shrink-0 rounded px-1 py-0.5 text-xs font-semibold">@Conversation.UnpricedTurns unpriced</span>
+            }
         </span>
         <span class="flex items-baseline gap-1 ls-tip" tabindex="0" aria-describedby="ls-tooltip"
               data-tip="Cumulative prompt + completion tokens sent to the LLM across all turns">
@@ -31,7 +36,7 @@
         <span class="flex items-baseline gap-1 ls-tip" tabindex="0" aria-describedby="ls-tooltip"
               data-tip="Average cost reduction percentage across all turns in this conversation">
             <span class="ls-stat-label">Avg ROI</span>
-            <span class="font-mono text-xs" style="color:@(AvgRoi > 0 ? "#10b981" : "#7c7c7c")">
+            <span class="font-mono text-xs @(AvgRoi > 0 ? "metric-positive" : "metric-neutral")">
                 @(AvgRoi > 0 ? $"{AvgRoi.ToString("F1", CultureInfo.InvariantCulture)}% ↓" : "—")
             </span>
         </span>
@@ -46,7 +51,7 @@
                   data-tip="Total tokens per turn across this conversation - watch it climb turn over turn (the hockey stick curve)">
                 <span class="ls-stat-label">Trend</span>
                 <svg width="@SparklineWidth" height="@SparklineHeight" viewBox="0 0 @SparklineWidth @SparklineHeight" aria-hidden="true">
-                    <polyline points="@SparklinePoints" fill="none" stroke="#1ed760" stroke-width="1.5" />
+                    <polyline points="@SparklinePoints" fill="none" class="sparkline-line" stroke-width="1.5" />
                 </svg>
             </span>
         }
@@ -59,6 +64,12 @@
     public Conversation Conversation { get; set; } = null!;
 
     private decimal AvgRoi => Conversation.Turns.Count == 0 ? 0m : Conversation.Turns.Average(t => t.RoutingRoi);
+
+    // §5.6: a non-zero UnpricedTurns means the total is a floor, not a complete sum - the tooltip
+    // discloses that explicitly rather than letting "$4.10" read as a confident total.
+    private string TotalCostTip => Conversation.UnpricedTurns > 0
+        ? $"Sum of all priced LLM API costs for this conversation. {Conversation.UnpricedTurns} turn(s) had no known cost and are not included - the true total is at least this much."
+        : "Sum of all LLM API costs for this conversation";
 
     private const double SparklineWidth = 48;
     private const double SparklineHeight = 16;

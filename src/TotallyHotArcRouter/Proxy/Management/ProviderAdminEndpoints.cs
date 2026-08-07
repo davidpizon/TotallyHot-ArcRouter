@@ -120,6 +120,21 @@ public static class ProviderAdminEndpoints
             return ToResult(result);
         });
 
+        // The §5.7 resolution ladder's operator-override rung (docs/router/token-tracking-implementation-plan.md
+        // Phase 3): runtime-editable, no restart required. GET lists every configured override for the
+        // Governance price-overrides pane's read-only diagnosis view; PUT adds/replaces one; DELETE removes one.
+        group.MapGet("/price-overrides", () => ToResult(facade.ListPriceOverrides()));
+
+        // The pane's read-only diagnosis view: per configured model, whether a price resolves today and
+        // via an exact or approximate match - what tells an operator which models actually need an override.
+        group.MapGet("/price-resolution", () => ToResult(facade.GetPriceResolutionDiagnosis()));
+
+        group.MapPut("/price-overrides", (PriceOverrideWriteRequest request) =>
+            ToResult(facade.SetPriceOverride(request)));
+
+        group.MapDelete("/price-overrides", (string sourceName, string aggregatorModelKey) =>
+            ToResult(facade.RemovePriceOverride(sourceName, aggregatorModelKey)));
+
         return endpoints;
     }
 

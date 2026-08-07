@@ -58,6 +58,29 @@ public class SpendTrackerTests : IDisposable
         Assert.Equal(100L, summary.TotalPromptTokens);
         Assert.Equal(20L, summary.TotalCompletionTokens);
         Assert.Equal(0.0015m, summary.TotalCostUsd);
+        Assert.Equal(1, summary.UnpricedRequests);
+    }
+
+    [Fact]
+    public async Task RecordAsync_NullCost_CountsAsUnpriced_NotAsZero()
+    {
+        using var tracker = CreateTracker();
+
+        var summary = await tracker.RecordAsync("unsupported-provider-model", 100, 20, null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, summary.RequestCount);
+        Assert.Equal(1, summary.UnpricedRequests);
+        Assert.Equal(0m, summary.TotalCostUsd);
+    }
+
+    [Fact]
+    public async Task RecordAsync_KnownCost_DoesNotIncrementUnpricedRequests()
+    {
+        using var tracker = CreateTracker();
+
+        var summary = await tracker.RecordAsync("gpt-5.4", 10, 5, 0.0001m, TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, summary.UnpricedRequests);
     }
 
     [Fact]

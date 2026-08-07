@@ -53,7 +53,8 @@ public static class LiveConversationMapper
             TotalPromptTokens: conversation.TotalPromptTokens,
             TotalCompletionTokens: conversation.TotalCompletionTokens,
             HasFallbackTurns: conversation.HasFallbackTurns,
-            Turns: conversation.Turns.Select(ToModel).ToList());
+            Turns: conversation.Turns.Select(ToModel).ToList(),
+            UnpricedTurns: conversation.UnpricedTurns);
     }
 
     /// <summary>Maps one <see cref="LiveConversationTurn"/> onto the dashboard's <see cref="ConversationTurn"/> view model.</summary>
@@ -77,7 +78,8 @@ public static class LiveConversationMapper
             RequestSummary: turn.RequestSummary,
             ResponseSummary: turn.ResponseSummary,
             IsFallback: turn.IsFallback,
-            TimestampUtc: turn.TimestampUtc);
+            TimestampUtc: turn.TimestampUtc,
+            CostConfidence: turn.CostConfidence);
     }
 
     /// <summary>Builds the display routing steps for a turn, flagging fallback routing and naming the confirmed model.</summary>

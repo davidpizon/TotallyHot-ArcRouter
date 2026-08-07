@@ -14,7 +14,7 @@
     }
     else if (!Store.IsReachable)
     {
-        <div class="rounded-lg p-4 space-y-2" style="background:#181818;border:1px solid #ef444444">
+        <div class="rounded-lg p-4 space-y-2 ds-surface-card-critical">
             <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
                 <Icon Name="alert-triangle" Size="14" /> Router unreachable
             </div>
@@ -72,12 +72,11 @@
                 var index = i;
                 var source = sources[index];
                 var outcome = LastOutcomeFor(source.Name);
-                var borderColor = source.Enabled ? "#4d4d4d" : "#4d4d4d80";
                 var canReorder = sources.Count > 1;
 
                 var canDrag = canReorder && !Store.IsRefreshing;
                 var isLifted = _dragActive && _dragName == source.Name;
-                var cardBorder = isLifted ? "#1ed760" : borderColor;
+                var borderClass = isLifted ? "ds-source-border-lifted" : (source.Enabled ? "" : "ds-source-border-dim");
                 var cursor = isLifted ? "grabbing" : (canDrag ? "grab" : "default");
 
                 @* Keep Razor comments outside the tag: written between attributes they are emitted as literal
@@ -88,10 +87,10 @@
                    card beneath it - that card's @onpointerenter is what drives the live reflow. A short
                    transition animates only the lift (shadow/scale); the slot change itself is instant because
                    the list is re-keyed rather than transformed. *@
-                <div @key="source.Name" class="rounded-lg p-3 space-y-2.5 @(canDrag ? "drag-enabled" : "drag-disabled") @(isLifted ? "card-lifted" : "") ds-surface-card-draggable"
+                <div @key="source.Name" class="rounded-lg p-3 space-y-2.5 @(canDrag ? "drag-enabled" : "drag-disabled") @(isLifted ? "card-lifted" : "") ds-surface-card-draggable @borderClass"
                      @onpointerdown="e => OnPointerDown(source, e)"
                      @onpointerenter="e => OnPointerEnter(source, e)"
-                     style="border-color:@cardBorder;cursor:@cursor">
+                     style="cursor:@cursor">
                     @* Header: rank controls + name + toggle *@
                     <div class="flex items-start justify-between gap-2">
                         <div class="flex items-start gap-2 min-w-0">
@@ -166,9 +165,7 @@
 
                     @if (outcome is not null)
                     {
-                        <div class="rounded px-2 py-1.5 text-xs"
-                             style="background:@(outcome.Succeeded ? "#10b98111" : "#ef444411");
-                                    border-top:1px solid @(outcome.Succeeded ? "#10b98122" : "#ef444422")">
+                        <div class="rounded px-2 py-1.5 text-xs @(outcome.Succeeded ? "ds-outcome-success" : "ds-outcome-critical")">
                             @if (outcome.Succeeded)
                             {
                                 <span class="text-emerald-400">✅ Last pull refreshed @outcome.PriceCount.ToString("N0", CultureInfo.InvariantCulture) prices.</span>

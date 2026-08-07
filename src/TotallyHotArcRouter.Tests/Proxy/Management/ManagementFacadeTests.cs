@@ -33,13 +33,15 @@ public sealed class ManagementFacadeTests
     private static ManagementFacade CreateFacade(
         IProviderConfigStore? store = null,
         ProviderBudgetStore? budgetStore = null,
-        PriceCatalogRepository? priceCatalogRepository = null) =>
+        PriceCatalogRepository? priceCatalogRepository = null,
+        ModelAliasOverrideStore? overrideStore = null) =>
         new(
             store ?? new InMemoryProviderConfigStore(SeedOptions()),
             Mock.Of<IEnvironmentVariableProvider>(),
             new HttpClient(),
             budgetStore,
-            priceCatalogRepository: priceCatalogRepository);
+            priceCatalogRepository: priceCatalogRepository,
+            overrideStore: overrideStore);
 
     [Fact]
     public void ListProviders_NeverReturnsALockedHeaderValue()
@@ -404,6 +406,123 @@ public sealed class ManagementFacadeTests
 
         Assert.False(result.Success);
         Assert.Equal(ManagementErrorType.NotFound, result.ErrorType);
+    }
+
+    [Fact]
+    public void GetPriceResolutionDiagnosis_NoRepository_ReturnsUnavailable()
+    {
+        var facade = CreateFacade(priceCatalogRepository: null);
+
+        var result = facade.GetPriceResolutionDiagnosis();
+
+        Assert.False(result.Success);
+        Assert.Equal(ManagementErrorType.Unavailable, result.ErrorType);
+    }
+
+    [Fact]
+    public void GetPriceResolutionDiagnosis_UnresolvedModel_ReportsUnresolved()
+    {
+        using var temp = new TempDatabase();
+        var facade = CreateFacade(priceCatalogRepository: temp.CreateRepository());
+
+        var result = facade.GetPriceResolutionDiagnosis();
+
+        Assert.True(result.Success);
+        var row = Assert.Single(result.Value!);
+        Assert.Equal("gpt-5.4", row.ModelName);
+        Assert.False(row.Resolved);
+        Assert.False(row.IsApproximate);
+    }
+
+    [Fact]
+    public void GetPriceResolutionDiagnosis_ExactMatch_ReportsResolvedNotApproximate()
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+        var price = new TotallyHot.ArcRouter.PriceCatalog.Sources.NormalizedPrice(
+            ModelIdentifier: "gpt-5.4", Provider: "openai", StandardInputPrice: 2m, StandardOutputPrice: 6m,
+            CachedInputPrice: null, BatchInputPrice: null, BatchOutputPrice: null);
+        repository.UpsertPrices("litellm", 0, [price], DateTimeOffset.UtcNow);
+        var facade = CreateFacade(priceCatalogRepository: repository);
+
+        var row = Assert.Single(facade.GetPriceResolutionDiagnosis().Value!);
+
+        Assert.True(row.Resolved);
+        Assert.False(row.IsApproximate);
+    }
+
+    [Fact]
+    public void ListPriceOverrides_NoOverrideStore_ReturnsUnavailable()
+    {
+        var facade = CreateFacade(overrideStore: null);
+
+        var result = facade.ListPriceOverrides();
+
+        Assert.False(result.Success);
+        Assert.Equal(ManagementErrorType.Unavailable, result.ErrorType);
+    }
+
+    [Fact]
+    public void SetPriceOverride_UnconfiguredModel_ReturnsInvalidRequest()
+    {
+        using var temp = new TempDatabase();
+        var facade = CreateFacade(overrideStore: temp.CreateOverrideStore());
+
+        var result = facade.SetPriceOverride(new PriceOverrideWriteRequest("LiteLLM", "big-pickle", "not-configured"));
+
+        Assert.False(result.Success);
+        Assert.Equal(ManagementErrorType.InvalidRequest, result.ErrorType);
+    }
+
+    [Fact]
+    public void SetPriceOverride_MissingField_ReturnsInvalidRequest()
+    {
+        using var temp = new TempDatabase();
+        var facade = CreateFacade(overrideStore: temp.CreateOverrideStore());
+
+        var result = facade.SetPriceOverride(new PriceOverrideWriteRequest("", "big-pickle", "gpt-5.4"));
+
+        Assert.False(result.Success);
+        Assert.Equal(ManagementErrorType.InvalidRequest, result.ErrorType);
+    }
+
+    [Fact]
+    public void SetPriceOverride_ConfiguredModel_PersistsAndListsIt()
+    {
+        using var temp = new TempDatabase();
+        var facade = CreateFacade(overrideStore: temp.CreateOverrideStore());
+
+        var result = facade.SetPriceOverride(new PriceOverrideWriteRequest("LiteLLM", "big-pickle", "gpt-5.4"));
+
+        Assert.True(result.Success);
+        var o = Assert.Single(result.Value!);
+        Assert.Equal(new ModelAliasOverride("LiteLLM", "big-pickle", "gpt-5.4"), o);
+        Assert.Equal(o, Assert.Single(facade.ListPriceOverrides().Value!));
+    }
+
+    [Fact]
+    public void RemovePriceOverride_NoMatch_ReturnsNotFound()
+    {
+        using var temp = new TempDatabase();
+        var facade = CreateFacade(overrideStore: temp.CreateOverrideStore());
+
+        var result = facade.RemovePriceOverride("LiteLLM", "big-pickle");
+
+        Assert.False(result.Success);
+        Assert.Equal(ManagementErrorType.NotFound, result.ErrorType);
+    }
+
+    [Fact]
+    public void RemovePriceOverride_Existing_RemovesIt()
+    {
+        using var temp = new TempDatabase();
+        var facade = CreateFacade(overrideStore: temp.CreateOverrideStore());
+        facade.SetPriceOverride(new PriceOverrideWriteRequest("LiteLLM", "big-pickle", "gpt-5.4"));
+
+        var result = facade.RemovePriceOverride("LiteLLM", "big-pickle");
+
+        Assert.True(result.Success);
+        Assert.Empty(result.Value!);
     }
 
     [Fact]

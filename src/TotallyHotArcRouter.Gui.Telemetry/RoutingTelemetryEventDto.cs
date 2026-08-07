@@ -30,5 +30,6 @@ public sealed record RoutingTelemetryEventDto(
     int? CacheCreationTokens = null,
     int? CacheReadTokens = null,
     string? RequestSummary = null,
-    string? ResponseSummary = null);
+    string? ResponseSummary = null,
+    string? CostConfidence = null);
 

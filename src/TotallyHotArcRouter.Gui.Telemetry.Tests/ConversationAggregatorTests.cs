@@ -26,7 +26,8 @@ public class ConversationAggregatorTests
         string? requestSummary = null,
         string? responseSummary = null,
         int? cacheCreationTokens = null,
-        int? cacheReadTokens = null)
+        int? cacheReadTokens = null,
+        string? costConfidence = null)
     {
         return new RoutingTelemetryEventDto(
             SessionId: sessionId,
@@ -47,7 +48,8 @@ public class ConversationAggregatorTests
             CacheCreationTokens: cacheCreationTokens,
             CacheReadTokens: cacheReadTokens,
             RequestSummary: requestSummary,
-            ResponseSummary: responseSummary);
+            ResponseSummary: responseSummary,
+            CostConfidence: costConfidence);
     }
 
     [Fact]
@@ -266,6 +268,44 @@ public class ConversationAggregatorTests
         var conversation = Assert.Single(result);
         Assert.Equal(40, conversation.TotalCacheCreationTokens);
         Assert.Equal(700, conversation.TotalCacheReadTokens);
+    }
+
+    [Fact]
+    public void Aggregate_NoUnpricedTurns_UnpricedTurnsIsZero()
+    {
+        var events = new[] { CreateEvent(sessionId: "session-1", turnNumber: 1, estimatedCostUsd: 0.01m) };
+
+        var result = ConversationAggregator.Aggregate(events);
+
+        Assert.Equal(0, result[0].UnpricedTurns);
+    }
+
+    [Fact]
+    public void Aggregate_SomeTurnsWithNullCost_CountsThemAsUnpriced_WithoutTaintingPricedTurns()
+    {
+        var events = new[]
+        {
+            CreateEvent(sessionId: "session-1", turnNumber: 1, estimatedCostUsd: 0.01m),
+            CreateEvent(sessionId: "session-1", turnNumber: 2, estimatedCostUsd: null),
+            CreateEvent(sessionId: "session-1", turnNumber: 3, estimatedCostUsd: null),
+        };
+
+        var result = ConversationAggregator.Aggregate(events);
+
+        var conversation = Assert.Single(result);
+        Assert.Equal(2, conversation.UnpricedTurns);
+        Assert.Equal(0.01m, conversation.TotalCost);
+    }
+
+    [Fact]
+    public void Aggregate_CostConfidence_PassesThroughToTurn()
+    {
+        var events = new[] { CreateEvent(sessionId: "session-1", turnNumber: 1, costConfidence: "CatalogApproximate") };
+
+        var result = ConversationAggregator.Aggregate(events);
+
+        var turn = Assert.Single(result[0].Turns);
+        Assert.Equal("CatalogApproximate", turn.CostConfidence);
     }
 }
 

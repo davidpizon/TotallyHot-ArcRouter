@@ -5,7 +5,7 @@
    expands the routing decision log and the request/response text. Metric tooltips are floating
    data-tip tooltips (wwwroot/js/tooltips.js). *@
 <div class="rounded"
-     style="background:@(AgentColor)10;border:1px solid #4d4d4d;border-left:3px solid @AgentColor">
+     style="background:@(AgentColor)10;border:1px solid var(--border-button);border-left:3px solid @AgentColor">
     @* Header: turn number · request excerpt · agent chip · timestamp · expand toggle. The sub-spans
        here are informational only (no tabindex/aria-describedby of their own): nesting a focusable
        element inside a <button> is an ARIA anti-pattern, so screen-reader users instead get the
@@ -22,9 +22,8 @@
               style="background:@(AgentColor)22;color:@AgentColor;border:1px solid @(AgentColor)44">@Turn.Agent</span>
         @if (Turn.IsFallback)
         {
-            <span class="shrink-0 rounded px-1.5 py-0.5 text-xs font-semibold ls-tip"
-                  data-tip="This turn was served by fallback routing"
-                  style="background:#f59e0b22;color:#f59e0b;border:1px solid #f59e0b44">⚠</span>
+            <span class="ds-badge-warning shrink-0 rounded px-1.5 py-0.5 text-xs font-semibold ls-tip"
+                  data-tip="This turn was served by fallback routing">⚠</span>
         }
         <span class="text-xs font-mono text-slate-600 shrink-0">@Turn.Timestamp</span>
         <span class="text-xs text-slate-500 shrink-0" aria-hidden="true">@(_expanded ? "▴" : "▾")</span>
@@ -43,19 +42,23 @@
             </span>
         </span>
         <span class="flex items-baseline gap-1 ls-tip" tabindex="0" aria-describedby="ls-tooltip"
-              data-tip="Total turn cost: prompt token cost + completion token cost for this turn">
+              data-tip="@CostTip">
             <span class="ls-stat-label">Cost</span>
-            <span class="font-mono text-xs" style="color:#1ed760">$@Turn.TotalCost.ToString("F6", CultureInfo.InvariantCulture)</span>
+            <span class="font-mono text-xs metric-accent">$@Turn.TotalCost.ToString("F6", CultureInfo.InvariantCulture)</span>
+            @if (IsApproximateCost)
+            {
+                <span aria-hidden="true" class="metric-fallback">≈</span>
+            }
         </span>
         <span class="flex items-baseline gap-1 ls-tip" tabindex="0" aria-describedby="ls-tooltip"
               data-tip="Token volume: prompt tokens sent to the LLM / completion tokens generated. Watch prompt tokens compound turn-over-turn (the hockey stick curve).">
             <span class="ls-stat-label">Tok P/C</span>
-            <span class="font-mono text-xs" style="color:#a78bfa">@Turn.PromptTokens.ToString("N0", CultureInfo.InvariantCulture)<span class="text-slate-600">/</span>@Turn.CompletionTokens.ToString("N0", CultureInfo.InvariantCulture)</span>
+            <span class="font-mono text-xs stat-color-tokens">@Turn.PromptTokens.ToString("N0", CultureInfo.InvariantCulture)<span class="text-slate-600">/</span>@Turn.CompletionTokens.ToString("N0", CultureInfo.InvariantCulture)</span>
         </span>
         <span class="flex items-baseline gap-1 ls-tip" tabindex="0" aria-describedby="ls-tooltip"
               data-tip="Tool execution steps: number of tool invocations/API calls within this turn's multi-step workflow">
             <span class="ls-stat-label">Steps</span>
-            <span class="font-mono text-xs" style="color:#f59e0b">@Turn.ToolExecutionSteps</span>
+            <span class="font-mono text-xs metric-fallback">@Turn.ToolExecutionSteps</span>
         </span>
         <span class="flex items-baseline gap-1 ls-tip" tabindex="0" aria-describedby="ls-tooltip"
               data-tip="Cache hit rate: percentage of prompt tokens served from the provider's prompt cache instead of being processed from scratch">
@@ -67,7 +70,7 @@
         <span class="flex items-baseline gap-1 ls-tip" tabindex="0" aria-describedby="ls-tooltip"
               data-tip="Time to first token: time elapsed from the routing decision to the first token received from the LLM">
             <span class="ls-stat-label">TTFT</span>
-            <span class="font-mono text-xs" style="color:#fb7185">@Turn.TimeToFirstTokenMs ms</span>
+            <span class="font-mono text-xs stat-color-ttft">@Turn.TimeToFirstTokenMs ms</span>
         </span>
         <span class="flex items-baseline gap-1 ls-tip" tabindex="0" aria-describedby="ls-tooltip"
               data-tip="Context buffer: current session context size relative to the model's maximum context window">
@@ -97,24 +100,24 @@
                     @switch (step.Status)
                     {
                         case StepStatus.Warn:
-                            <div class="disclosure-enter flex items-start gap-2 rounded px-2 py-1.5 text-xs font-mono"
-                                 style="--i:@i;background:rgba(245,158,11,0.12);border-left:2px solid #f59e0b">
-                                <Icon Name="alert-triangle" Size="11" Class="mt-0.5 shrink-0" Style="color:#f59e0b" />
-                                <span style="color:#fcd34d">@step.Message</span>
+                            <div class="disclosure-enter flex items-start gap-2 rounded px-2 py-1.5 text-xs font-mono ds-step-warning"
+                                 style="--i:@i">
+                                <Icon Name="alert-triangle" Size="11" Class="mt-0.5 shrink-0" />
+                                <span>@step.Message</span>
                             </div>
                             break;
                         case StepStatus.Info:
-                            <div class="disclosure-enter flex items-start gap-2 rounded px-2 py-1.5 text-xs font-mono"
-                                 style="--i:@i;background:rgba(56,189,248,0.1);border-left:2px solid #38bdf8">
-                                <span class="mt-0.5" style="color:#38bdf8">➔</span>
-                                <span style="color:#7dd3fc">@step.Message</span>
+                            <div class="disclosure-enter flex items-start gap-2 rounded px-2 py-1.5 text-xs font-mono ds-step-info"
+                                 style="--i:@i">
+                                <span class="mt-0.5">➔</span>
+                                <span>@step.Message</span>
                             </div>
                             break;
                         default:
-                            <div class="disclosure-enter flex items-start gap-2 rounded px-2 py-1.5 text-xs font-mono"
-                                 style="--i:@i;background:rgba(16,185,129,0.08);border-left:2px solid #10b981">
-                                <Icon Name="check-circle" Size="11" Class="mt-0.5 shrink-0" Style="color:#10b981" />
-                                <span style="color:#6ee7b7">@step.Message</span>
+                            <div class="disclosure-enter flex items-start gap-2 rounded px-2 py-1.5 text-xs font-mono ds-step-success"
+                                 style="--i:@i">
+                                <Icon Name="check-circle" Size="11" Class="mt-0.5 shrink-0" />
+                                <span>@step.Message</span>
                             </div>
                             break;
                     }
@@ -126,16 +129,14 @@
             {
                 <div>
                     <div class="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1">Request</div>
-                    <pre class="ls-payload rounded p-2 text-xs font-mono"
-                         style="background:#121212;color:#cbcbcb;white-space:pre-wrap;word-break:break-word">@Turn.RequestSummary</pre>
+                    <pre class="ls-payload rounded p-2 text-xs font-mono ds-code-block">@Turn.RequestSummary</pre>
                 </div>
             }
             @if (Turn.ResponseSummary is not null)
             {
                 <div>
                     <div class="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1">Response</div>
-                    <pre class="ls-payload rounded p-2 text-xs font-mono"
-                         style="background:#121212;color:#cbcbcb;white-space:pre-wrap;word-break:break-word">@Turn.ResponseSummary</pre>
+                    <pre class="ls-payload rounded p-2 text-xs font-mono ds-code-block">@Turn.ResponseSummary</pre>
                 </div>
             }
         </div>
@@ -154,6 +155,18 @@
     private bool _expanded;
 
     private string AgentColor => ColorUtils.GetColorForAgent(Turn.Agent);
+
+    // §5.6: distinguishes an exact cost from a disclosed estimate (a resolution-ladder rung below Exact,
+    // or a cache dimension that fell back to the standard input rate) without needing a chip per turn.
+    private bool IsApproximateCost => Turn.CostConfidence is "CatalogApproximate";
+
+    private string CostTip => Turn.CostConfidence switch
+    {
+        "NoUsage" => "Total turn cost: usage could not be extracted for this turn, so cost is unknown (shown as $0).",
+        "Unknown" => "Total turn cost: no fresh catalog price for this model, so cost is unknown (shown as $0).",
+        "CatalogApproximate" => "Total turn cost: an approximate estimate - a cache rate or model match fell back to a conservative default. See docs/router/token-tracking-improvements.md §5.6/§5.7.",
+        _ => "Total turn cost: prompt token cost + completion token cost for this turn",
+    };
 
     // Screen-reader equivalent of the header's visible sub-spans (see the accessibility note in the
     // markup above for why those spans aren't independently focusable).

@@ -123,7 +123,12 @@ namespace TotallyHot.ArcRouter.Proxy
         /// (<c>docs/router/anthropic-reported-usage-plan.md</c> §5). Defaults to <see langword="null"/>, in
         /// which case every provider reports no rate-limit data.
         /// </param>
-        public ProxyServer(ILogger<ProxyServer> logger, ProxyMiddleware proxyMiddleware, int port = 5001, TelemetryBroadcaster? telemetryBroadcaster = null, int grpcPort = DefaultGrpcPort, IProviderConfigStore? providerConfigStore = null, IEnvironmentVariableProvider? environment = null, HttpClient? managementHttpClient = null, string? managementToken = null, PriceSourceToggleStore? priceSourceToggleStore = null, PriceCatalogIngestionService? priceCatalogIngestionService = null, PriceCatalogOptions? priceCatalogOptions = null, ProviderBudgetStore? providerBudgetStore = null, ProviderEndpointScanner? endpointScanner = null, ToolCallCapabilityStore? toolCallCapabilityStore = null, PriceCatalogRepository? priceCatalogRepository = null)
+        /// <param name="modelAliasOverrideStore">
+        /// Optional operator price-override store, passed to the management facade so
+        /// <c>PUT/DELETE /admin/price-overrides</c> (§5.7) is available. Defaults to <see langword="null"/>,
+        /// in which case those endpoints answer <see cref="Management.ManagementErrorType.Unavailable"/>.
+        /// </param>
+        public ProxyServer(ILogger<ProxyServer> logger, ProxyMiddleware proxyMiddleware, int port = 5001, TelemetryBroadcaster? telemetryBroadcaster = null, int grpcPort = DefaultGrpcPort, IProviderConfigStore? providerConfigStore = null, IEnvironmentVariableProvider? environment = null, HttpClient? managementHttpClient = null, string? managementToken = null, PriceSourceToggleStore? priceSourceToggleStore = null, PriceCatalogIngestionService? priceCatalogIngestionService = null, PriceCatalogOptions? priceCatalogOptions = null, ProviderBudgetStore? providerBudgetStore = null, ProviderEndpointScanner? endpointScanner = null, ToolCallCapabilityStore? toolCallCapabilityStore = null, PriceCatalogRepository? priceCatalogRepository = null, ModelAliasOverrideStore? modelAliasOverrideStore = null)
         {
             ArgumentNullException.ThrowIfNull(logger);
             ArgumentNullException.ThrowIfNull(proxyMiddleware);
@@ -252,7 +257,8 @@ namespace TotallyHot.ArcRouter.Proxy
                                     providerBudgetStore,
                                     endpointScanner,
                                     toolCallCapabilityStore,
-                                    priceCatalogRepository);
+                                    priceCatalogRepository,
+                                    modelAliasOverrideStore);
                                 endpoints.MapProviderAdminEndpoints(facade, managementToken);
                             }
                         });

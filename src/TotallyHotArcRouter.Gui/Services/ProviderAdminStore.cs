@@ -54,6 +54,20 @@ public sealed class ProviderAdminStore
     /// <summary>The providers currently known, refreshed after each load or successful edit.</summary>
     public IReadOnlyList<ProviderAdminView> Providers { get; private set; } = [];
 
+    /// <summary>
+    /// The configured price overrides (§5.7's operator-override rung), refreshed after each load or
+    /// successful edit via <see cref="LoadPriceOverridesAsync"/>. Empty until that is called at least
+    /// once - the Governance price-overrides pane loads it independently of <see cref="Providers"/> since
+    /// it is a separate sub-view.
+    /// </summary>
+    public IReadOnlyList<PriceOverrideView> PriceOverrides { get; private set; } = [];
+
+    /// <summary>
+    /// Every configured model's current price-resolution state, refreshed by <see cref="LoadPriceOverridesAsync"/>
+    /// alongside <see cref="PriceOverrides"/> - the pane's read-only diagnosis view.
+    /// </summary>
+    public IReadOnlyList<PriceResolutionDiagnosisView> PriceResolutionDiagnosis { get; private set; } = [];
+
     /// <summary>Whether a load has completed at least once (so the UI can distinguish "loading" from "empty").</summary>
     public bool IsLoaded { get; private set; }
 
@@ -172,6 +186,54 @@ public sealed class ProviderAdminStore
         Providers = await mutation();
         IsReachable = true;
         IsLoaded = true;
+        LastError = null;
+        Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// Loads the price-override list. Same reachability-tolerant shape as <see cref="LoadAsync"/>, kept
+    /// separate since the price-overrides pane is a distinct Governance sub-view that shouldn't force a
+    /// provider reload (or vice versa).
+    /// </summary>
+    public async Task LoadPriceOverridesAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            PriceOverrides = await _client.GetPriceOverridesAsync(cancellationToken);
+            PriceResolutionDiagnosis = await _client.GetPriceResolutionDiagnosisAsync(cancellationToken);
+            IsReachable = true;
+            LastError = null;
+        }
+        catch (ProviderAdminException ex)
+        {
+            IsReachable = false;
+            LastError = ex.Message;
+            _logger?.LogWarning(ex, "Failed to load price overrides from the management API.");
+        }
+        finally
+        {
+            Changed?.Invoke();
+        }
+    }
+
+    /// <summary>Adds or replaces a price override, then publishes the updated override list.</summary>
+    /// <exception cref="ProviderAdminException">The edit was rejected (e.g. an unconfigured model) or the request failed.</exception>
+    public Task SetPriceOverrideAsync(PriceOverrideWriteRequest body, CancellationToken cancellationToken = default) =>
+        MutatePriceOverridesAsync(() => _client.SetPriceOverrideAsync(body, cancellationToken));
+
+    /// <summary>Removes a price override, then publishes the updated override list.</summary>
+    /// <exception cref="ProviderAdminException">No override matched, or the request failed.</exception>
+    public Task RemovePriceOverrideAsync(string sourceName, string aggregatorModelKey, CancellationToken cancellationToken = default) =>
+        MutatePriceOverridesAsync(() => _client.RemovePriceOverrideAsync(sourceName, aggregatorModelKey, cancellationToken));
+
+    private async Task MutatePriceOverridesAsync(Func<Task<IReadOnlyList<PriceOverrideView>>> mutation)
+    {
+        PriceOverrides = await mutation();
+        // An override can change whether a model resolves (or whether the resolved price is approximate),
+        // so the diagnosis view has to be refreshed alongside the override list itself, not just on the
+        // next explicit LoadPriceOverridesAsync call.
+        PriceResolutionDiagnosis = await _client.GetPriceResolutionDiagnosisAsync();
+        IsReachable = true;
         LastError = null;
         Changed?.Invoke();
     }

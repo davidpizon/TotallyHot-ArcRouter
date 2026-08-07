@@ -44,6 +44,7 @@ public sealed class ManagementFacade
     private readonly ProviderEndpointScanner? _endpointScanner;
     private readonly ToolCallCapabilityStore? _capabilityStore;
     private readonly PriceCatalogRepository? _priceCatalogRepository;
+    private readonly ModelAliasOverrideStore? _overrideStore;
 
     // Constructed here rather than injected, unlike the endpoint scanner beside it. The resolver's only
     // dependencies are the HTTP client and environment accessor this facade already holds, so injecting it
@@ -77,6 +78,10 @@ public sealed class ManagementFacade
     /// When null, every provider's <see cref="ProviderView.RateLimit"/> is <see langword="null"/> - "no
     /// rate-limit data observed yet", identical to a repository with no captured headers for that provider.
     /// </param>
+    /// <param name="overrideStore">
+    /// Optional operator price-override store backing <c>PUT/DELETE /admin/price-overrides</c> (§5.7). When
+    /// null, override reads/writes answer <see cref="ManagementErrorType.Unavailable"/>.
+    /// </param>
     public ManagementFacade(
         IProviderConfigStore store,
         IEnvironmentVariableProvider environment,
@@ -84,7 +89,8 @@ public sealed class ManagementFacade
         ProviderBudgetStore? budgetStore = null,
         ProviderEndpointScanner? endpointScanner = null,
         ToolCallCapabilityStore? capabilityStore = null,
-        PriceCatalogRepository? priceCatalogRepository = null)
+        PriceCatalogRepository? priceCatalogRepository = null,
+        ModelAliasOverrideStore? overrideStore = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(environment);
@@ -97,6 +103,7 @@ public sealed class ManagementFacade
         _endpointScanner = endpointScanner;
         _capabilityStore = capabilityStore;
         _priceCatalogRepository = priceCatalogRepository;
+        _overrideStore = overrideStore;
         _dialectResolver = new ModelDialectResolver(httpClient, environment);
     }
 
@@ -505,6 +512,113 @@ public sealed class ManagementFacade
             // A persistence failure (e.g. the SQLite write) shouldn't leak storage detail to the caller.
             return ManagementResult<ProvidersResponse>.Fail(ManagementErrorType.Internal, "Failed to save the provider budget.");
         }
+    }
+
+    // Mirrors PriceCatalogModelPriceLookup.FreshnessFloor: the same "fresh enough to act on" definition
+    // the request path and the startup health check already use. Duplicated rather than shared because
+    // that constant is private to a request-path type this diagnosis view has no other reason to depend on.
+    private static readonly TimeSpan PriceFreshnessFloor = TimeSpan.FromHours(24);
+
+    /// <summary>
+    /// For every configured <c>ModelRouting:ModelList</c> entry, reports whether the catalog currently
+    /// resolves a fresh price for it and, if so, whether that price is an approximate match (§5.7's ladder,
+    /// below <see cref="ResolutionRung.Exact"/>/<see cref="ResolutionRung.OperatorOverride"/>). The
+    /// Governance price-overrides pane's read-only diagnosis view: this is what tells an operator *which*
+    /// models actually need an override, before they add one.
+    /// </summary>
+    public ManagementResult<IReadOnlyList<PriceResolutionDiagnosisView>> GetPriceResolutionDiagnosis()
+    {
+        if (_priceCatalogRepository is null)
+        {
+            return ManagementResult<IReadOnlyList<PriceResolutionDiagnosisView>>.Fail(
+                ManagementErrorType.Unavailable, "The price catalog is not available.");
+        }
+
+        var rows = _store.Snapshot.Options.ModelList
+            .Select(entry =>
+            {
+                var price = _priceCatalogRepository.GetFreshPrice(new ModelKey(entry.ModelName, entry.Provider), PriceFreshnessFloor);
+                return new PriceResolutionDiagnosisView(entry.ModelName, entry.Provider, price is not null, price?.IsApproximateMatch ?? false);
+            })
+            .OrderBy(r => r.ModelName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return ManagementResult<IReadOnlyList<PriceResolutionDiagnosisView>>.Ok(rows);
+    }
+
+    /// <summary>
+    /// Lists every configured price override (§5.7's <see cref="ResolutionRung.OperatorOverride"/> rung),
+    /// backing the Governance price-overrides pane's read-only diagnosis view.
+    /// </summary>
+    public ManagementResult<IReadOnlyList<ModelAliasOverride>> ListPriceOverrides()
+    {
+        if (_overrideStore is null)
+        {
+            return ManagementResult<IReadOnlyList<ModelAliasOverride>>.Fail(
+                ManagementErrorType.Unavailable, "Price overrides are not available.");
+        }
+
+        return ManagementResult<IReadOnlyList<ModelAliasOverride>>.Ok(_overrideStore.GetAll());
+    }
+
+    /// <summary>
+    /// Adds or replaces an operator price override. <paramref name="request"/>'s <c>ModelName</c> must name
+    /// a currently configured <c>ModelRouting:ModelList</c> entry - an override pointing at a model that
+    /// doesn't exist could never resolve to a usable <c>ResolvedModelIdentity</c>, so it is rejected up
+    /// front rather than silently stored and always missing at resolve time.
+    /// </summary>
+    public ManagementResult<IReadOnlyList<ModelAliasOverride>> SetPriceOverride(PriceOverrideWriteRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (_overrideStore is null)
+        {
+            return ManagementResult<IReadOnlyList<ModelAliasOverride>>.Fail(
+                ManagementErrorType.Unavailable, "Price overrides are not available.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.SourceName) ||
+            string.IsNullOrWhiteSpace(request.AggregatorModelKey) ||
+            string.IsNullOrWhiteSpace(request.ModelName))
+        {
+            return ManagementResult<IReadOnlyList<ModelAliasOverride>>.Fail(
+                ManagementErrorType.InvalidRequest, "SourceName, AggregatorModelKey, and ModelName are all required.");
+        }
+
+        if (!_store.Snapshot.Options.ModelList.Any(m => string.Equals(m.ModelName, request.ModelName, StringComparison.OrdinalIgnoreCase)))
+        {
+            return ManagementResult<IReadOnlyList<ModelAliasOverride>>.Fail(
+                ManagementErrorType.InvalidRequest, $"Model '{request.ModelName}' is not configured.");
+        }
+
+        try
+        {
+            _overrideStore.Upsert(request.SourceName, request.AggregatorModelKey, request.ModelName);
+            return ManagementResult<IReadOnlyList<ModelAliasOverride>>.Ok(_overrideStore.GetAll());
+        }
+        catch (Exception)
+        {
+            return ManagementResult<IReadOnlyList<ModelAliasOverride>>.Fail(
+                ManagementErrorType.Internal, "Failed to save the price override.");
+        }
+    }
+
+    /// <summary>Removes an operator price override. A no-op mapping (nothing removed) is rejected as 404-shaped.</summary>
+    public ManagementResult<IReadOnlyList<ModelAliasOverride>> RemovePriceOverride(string sourceName, string aggregatorModelKey)
+    {
+        if (_overrideStore is null)
+        {
+            return ManagementResult<IReadOnlyList<ModelAliasOverride>>.Fail(
+                ManagementErrorType.Unavailable, "Price overrides are not available.");
+        }
+
+        if (!_overrideStore.Remove(sourceName, aggregatorModelKey))
+        {
+            return ManagementResult<IReadOnlyList<ModelAliasOverride>>.Fail(
+                ManagementErrorType.NotFound, $"No override found for source '{sourceName}' / key '{aggregatorModelKey}'.");
+        }
+
+        return ManagementResult<IReadOnlyList<ModelAliasOverride>>.Ok(_overrideStore.GetAll());
     }
 
     /// <summary>
@@ -1184,6 +1298,28 @@ public sealed record ModelToolDialectWriteRequest(string? Dialect);
 /// <param name="DollarCap">The monthly USD cap, or null for no dollar budget.</param>
 /// <param name="TokenCap">The monthly total-token cap, or null for no token budget.</param>
 public sealed record ProviderBudgetWriteRequest(decimal? DollarCap, long? TokenCap);
+
+/// <summary>
+/// The body for adding or replacing an operator price override (§5.7's <see cref="ResolutionRung.OperatorOverride"/> rung).
+/// </summary>
+/// <param name="SourceName">The aggregator source this override applies to (e.g. <c>LiteLLM</c>).</param>
+/// <param name="AggregatorModelKey">The source's own model key this override matches, verbatim.</param>
+/// <param name="ModelName">The client-facing <c>ModelRouting:ModelList[].ModelName</c> to resolve to; must already be configured.</param>
+public sealed record PriceOverrideWriteRequest(string SourceName, string AggregatorModelKey, string ModelName);
+
+/// <summary>
+/// One configured model's current price-resolution state, as returned by
+/// <see cref="ManagementFacade.GetPriceResolutionDiagnosis"/>. Backs the Governance price-overrides pane's
+/// read-only diagnosis view.
+/// </summary>
+/// <param name="ModelName">The client-facing <c>ModelRouting:ModelList[].ModelName</c>.</param>
+/// <param name="Provider">The configured provider serving this model.</param>
+/// <param name="Resolved">Whether the catalog currently holds a fresh price for this (model, provider) cell.</param>
+/// <param name="IsApproximate">
+/// Whether the resolved price (when <paramref name="Resolved"/>) was matched via a resolution-ladder rung
+/// below <c>Exact</c>/<c>OperatorOverride</c> - a disclosed estimate rather than an exact match.
+/// </param>
+public sealed record PriceResolutionDiagnosisView(string ModelName, string Provider, bool Resolved, bool IsApproximate);
 
 /// <summary>The result of a model-discovery call.</summary>
 /// <param name="Supported">Whether the provider answered an OpenAI-shaped model list.</param>

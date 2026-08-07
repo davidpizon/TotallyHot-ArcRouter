@@ -37,6 +37,7 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// Input tokens served from an existing prompt cache entry (<see cref="UsageInfo.CacheReadTokens"/>), or
 /// <see langword="null"/> if usage couldn't be determined.
 /// </param>
+/// <param name="CostConfidence">How <paramref name="EstimatedCostUsd"/> was arrived at; see <see cref="Telemetry.CostConfidence"/> (§5.6).</param>
 /// <param name="RequestSummary">
 /// The newest user message's text (see <see cref="RequestTextExtractor"/>), truncated to
 /// <see cref="TextTruncator.DefaultMaxLength"/> characters, or <see langword="null"/> if there was no
@@ -70,6 +71,7 @@ public sealed record RoutingTelemetryEvent(
     DateTimeOffset TimestampUtc,
     int? CacheCreationTokens = null,
     int? CacheReadTokens = null,
+    CostConfidence CostConfidence = CostConfidence.Unknown,
     string? RequestSummary = null,
     string? ResponseSummary = null,
     string? CorrelationId = null);

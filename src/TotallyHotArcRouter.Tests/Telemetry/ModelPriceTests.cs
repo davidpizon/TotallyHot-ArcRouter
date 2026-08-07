@@ -83,5 +83,48 @@ public class ModelPriceTests
 
         Assert.Equal(0m, cost);
     }
+
+    [Fact]
+    public void EstimateCost_OutFlag_FullCacheRates_ReportsNoFallback()
+    {
+        var price = new ModelPrice(3.00m, 15.00m, CacheReadPerMillionTokens: 0.30m, CacheWritePerMillionTokens: 3.75m);
+        var usage = new UsageInfo(PromptTokens: 0, CompletionTokens: 0, CacheCreationTokens: 1_000_000, CacheReadTokens: 1_000_000);
+
+        price.EstimateCost(usage, out var usedFallback);
+
+        Assert.False(usedFallback);
+    }
+
+    [Fact]
+    public void EstimateCost_OutFlag_MissingCacheRatesWithNonzeroCacheTokens_ReportsFallback()
+    {
+        var price = new ModelPrice(3.00m, 15.00m);
+        var usage = new UsageInfo(PromptTokens: 0, CompletionTokens: 0, CacheCreationTokens: 1_000, CacheReadTokens: 0);
+
+        price.EstimateCost(usage, out var usedFallback);
+
+        Assert.True(usedFallback);
+    }
+
+    [Fact]
+    public void EstimateCost_OutFlag_MissingCacheRatesButZeroCacheTokens_ReportsNoFallback()
+    {
+        // No cache dimension was actually rated, so nothing "fell back" - a cache rate that's merely
+        // unpublished must not taint an otherwise-exact price when the request used no cache at all.
+        var price = new ModelPrice(3.00m, 15.00m);
+        var usage = new UsageInfo(PromptTokens: 1_000_000, CompletionTokens: 1_000_000, CacheCreationTokens: 0, CacheReadTokens: 0);
+
+        price.EstimateCost(usage, out var usedFallback);
+
+        Assert.False(usedFallback);
+    }
+
+    [Fact]
+    public void IsApproximateMatch_DefaultsToFalse()
+    {
+        var price = new ModelPrice(3.00m, 15.00m);
+
+        Assert.False(price.IsApproximateMatch);
+    }
 }
 

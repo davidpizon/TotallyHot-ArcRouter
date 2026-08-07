@@ -70,9 +70,26 @@ public sealed record ConversationTurn(
     // Used by the Cost Analytics tab to bucket turns onto a time axis. Optional/defaulted so the
     // hand-written mock turns below and any older call sites keep compiling; live turns get the real
     // value from LiveConversationMapper.
-    DateTimeOffset TimestampUtc = default);
+    DateTimeOffset TimestampUtc = default,
+    // How TotalCost was arrived at (a Telemetry.CostConfidence name, e.g. "Catalog", "Unknown"), or null
+    // for a mock turn with no confidence concept. Backs the turn card's cost-stat confidence indicator
+    // (docs/router/token-tracking-implementation-plan.md Phase 3, §5.6).
+    string? CostConfidence = null);
 
 /// <summary>A conversation (session) whose turns are shown in the Live Stream tab.</summary>
+/// <param name="Id">The session id.</param>
+/// <param name="Title">The card's display title (marks untracked/synthesized sessions distinctly).</param>
+/// <param name="FirstTimestamp">The first turn's display timestamp.</param>
+/// <param name="LastTimestamp">The most recent turn's display timestamp.</param>
+/// <param name="TotalCost">The sum of every turn's known cost.</param>
+/// <param name="TotalPromptTokens">The sum of every turn's prompt tokens.</param>
+/// <param name="TotalCompletionTokens">The sum of every turn's completion tokens.</param>
+/// <param name="HasFallbackTurns">Whether any turn was served by fallback routing.</param>
+/// <param name="Turns">This conversation's turns, in chronological order.</param>
+/// <param name="UnpricedTurns">
+/// How many of <paramref name="Turns"/> had no cost at all, and so contributed nothing to
+/// <paramref name="TotalCost"/> - a non-zero value means the total is a floor, not a complete sum (§5.6).
+/// </param>
 public sealed record Conversation(
     string Id,
     string Title,
@@ -82,7 +99,8 @@ public sealed record Conversation(
     int TotalPromptTokens,
     int TotalCompletionTokens,
     bool HasFallbackTurns,
-    IReadOnlyList<ConversationTurn> Turns);
+    IReadOnlyList<ConversationTurn> Turns,
+    int UnpricedTurns = 0);
 
 /// <summary>
 /// Hard-coded mock data for the dashboard. The dashboard is not yet wired up to the live TotallyHot.ArcRouter

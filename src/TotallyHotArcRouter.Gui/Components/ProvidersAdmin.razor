@@ -13,7 +13,7 @@
     }
     else if (!Store.IsReachable)
     {
-        <div class="rounded-lg p-4 space-y-2" style="background:#181818;border:1px solid #ef444444">
+        <div class="rounded-lg p-4 space-y-2 ds-surface-card-critical">
             <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
                 <Icon Name="alert-triangle" Size="14" /> Proxy management API unreachable
             </div>
@@ -52,14 +52,13 @@
             {
                 @* A stopped provider dims its border and title, matching PriceSourcesAdmin's disabled
                    cards. The proxy's routing path skips a stopped provider on the very next request. *@
-                <div @key="provider.Key" class="rounded-lg p-3"
-                     style="background:#181818;border:1px solid @(provider.Enabled ? "#4d4d4d" : "#4d4d4d80")">
+                <div @key="provider.Key" class="rounded-lg p-3 @(provider.Enabled ? "ds-surface-card-bordered" : "ds-surface-card-bordered-dim")">
                     @* Header: key + endpoint + actions *@
                     <div class="flex items-start justify-between gap-2">
                         <div class="min-w-0">
                             <div class="flex items-center gap-2 flex-wrap">
                                 <Icon Name="server" Size="14" />
-                                <span class="text-sm font-semibold" style="color:@(provider.Enabled ? "#ffffff" : "#7c7c7c")">@(string.IsNullOrWhiteSpace(provider.Name) ? provider.Key : provider.Name)</span>
+                                <span class="text-sm font-semibold @(provider.Enabled ? "state-enabled" : "state-disabled")">@(string.IsNullOrWhiteSpace(provider.Name) ? provider.Key : provider.Name)</span>
                                 @* One pill per API flavor the last endpoint scan detected. Absent entirely
                                    until "Refresh" has run at least once (EndpointCapabilities is null until
                                    then), distinguishing "never scanned" from "scanned, nothing detected". *@
@@ -127,7 +126,7 @@
                                        deliberate stop, mirroring the provider-level "stopped vs. unhealthy"
                                        distinction ProxyMiddleware already logs separately. *@
                                     <div @key="model.ModelName" class="flex items-center justify-between text-xs">
-                                        <span class="font-mono" style="color:@(model.Enabled && model.PresentUpstream ? "#cbcbcb" : "#7c7c7c")">@model.ModelName</span>
+                                        <span class="font-mono @(model.Enabled && model.PresentUpstream ? "state-enabled subtle" : "state-disabled")">@model.ModelName</span>
                                         <div class="flex items-center gap-2">
                                             @if (!model.PresentUpstream)
                                             {

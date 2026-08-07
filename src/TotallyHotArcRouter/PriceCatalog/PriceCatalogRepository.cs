@@ -120,9 +120,10 @@ public sealed class PriceCatalogRepository
             // priority gate below and lets the runtime cost lookup resolve on ModelName. A miss falls back to
             // the source's own keys verbatim: an unmatched model is left unresolved, never mis-mapped. See
             // docs/router/d3-alias-resolution.md.
-            var identity = _identityResolver?.Resolve(price.ModelIdentifier, price.Provider);
-            var providerName = identity?.Provider ?? price.Provider;
-            var modelIdentifier = identity?.ModelName ?? price.ModelIdentifier;
+            var resolution = _identityResolver?.Resolve(sourceName, price.ModelIdentifier, price.Provider);
+            var providerName = resolution?.Identity.Provider ?? price.Provider;
+            var modelIdentifier = resolution?.Identity.ModelName ?? price.ModelIdentifier;
+            var isApproximate = resolution?.IsApproximate ?? false;
 
             var providerId = GetOrCreateProviderId(connection, transaction, providerName);
             var modelId = GetOrCreateModelId(connection, transaction, modelIdentifier);
@@ -132,7 +133,7 @@ public sealed class PriceCatalogRepository
             // priority gate below rejects the price row - a losing source's naming of a model is still a fact
             // worth keeping, and the alias table has no priority concept of its own.
             UpsertAlias(connection, transaction, sourceId, modelId, price.ModelIdentifier);
-            written += UpsertPriceRow(connection, transaction, modelId, providerId, sourceId, price, timestamp);
+            written += UpsertPriceRow(connection, transaction, modelId, providerId, sourceId, price, timestamp, isApproximate);
         }
 
         transaction.Commit();
@@ -475,7 +476,7 @@ public sealed class PriceCatalogRepository
         using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT mp.standard_input_price, mp.standard_output_price,
-                   mp.cached_input_price, mp.cache_write_input_price
+                   mp.cached_input_price, mp.cache_write_input_price, mp.is_approximate
             FROM model_prices mp
             JOIN models            m ON m.model_id    = mp.model_id
             JOIN providers         p ON p.provider_id = mp.provider_id
@@ -499,7 +500,8 @@ public sealed class PriceCatalogRepository
             reader.GetDecimal(0),
             reader.GetDecimal(1),
             reader.IsDBNull(2) ? null : reader.GetDecimal(2),
-            reader.IsDBNull(3) ? null : reader.GetDecimal(3));
+            reader.IsDBNull(3) ? null : reader.GetDecimal(3),
+            reader.GetInt32(4) != 0);
     }
 
     /// <summary>
@@ -621,7 +623,8 @@ public sealed class PriceCatalogRepository
         int providerId,
         int sourceId,
         NormalizedPrice price,
-        string timestamp)
+        string timestamp,
+        bool isApproximate)
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -638,11 +641,11 @@ public sealed class PriceCatalogRepository
             INSERT INTO model_prices (
                 model_id, provider_id, aggregator_source_id,
                 standard_input_price, standard_output_price, cached_input_price, cache_write_input_price,
-                batch_input_price, batch_output_price, last_updated_utc)
+                batch_input_price, batch_output_price, last_updated_utc, is_approximate)
             VALUES (
                 $model, $provider, $source,
                 $stdIn, $stdOut, $cachedIn, $cacheWrite,
-                $batchIn, $batchOut, $updated)
+                $batchIn, $batchOut, $updated, $approximate)
             ON CONFLICT(model_id, provider_id) DO UPDATE SET
                 aggregator_source_id    = excluded.aggregator_source_id,
                 standard_input_price    = excluded.standard_input_price,
@@ -651,7 +654,8 @@ public sealed class PriceCatalogRepository
                 cache_write_input_price = excluded.cache_write_input_price,
                 batch_input_price       = excluded.batch_input_price,
                 batch_output_price      = excluded.batch_output_price,
-                last_updated_utc        = excluded.last_updated_utc
+                last_updated_utc        = excluded.last_updated_utc,
+                is_approximate          = excluded.is_approximate
             WHERE (SELECT priority_score FROM aggregator_sources WHERE source_id = excluded.aggregator_source_id)
                   >= (SELECT priority_score FROM aggregator_sources WHERE source_id = model_prices.aggregator_source_id);
             """;
@@ -665,6 +669,7 @@ public sealed class PriceCatalogRepository
         command.Parameters.AddWithValue("$batchIn", (object?)price.BatchInputPrice ?? DBNull.Value);
         command.Parameters.AddWithValue("$batchOut", (object?)price.BatchOutputPrice ?? DBNull.Value);
         command.Parameters.AddWithValue("$updated", timestamp);
+        command.Parameters.AddWithValue("$approximate", isApproximate ? 1 : 0);
         return command.ExecuteNonQuery();
     }
 

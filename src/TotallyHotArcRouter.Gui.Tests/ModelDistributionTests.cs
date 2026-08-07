@@ -62,9 +62,10 @@ public sealed class ModelDistributionTests
 
         cut.FindAll("button").First(b => b.TextContent.Trim() == "Year").Click();
 
-        // Active state flips the button's background to the highlight color; the year button should now
-        // carry it instead of month. Re-query after the click since the render replaces the node.
-        cut.FindAll("button").First(b => b.TextContent.Trim() == "Year").GetAttribute("style").Should().Contain("#1ed760");
+        // Active state flips the button's background to the highlight color via the .active class; the
+        // year button should now carry it instead of month. Re-query after the click since the render
+        // replaces the node.
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Year").GetAttribute("class").Should().Contain("active");
     }
 
     [Fact]

@@ -136,9 +136,14 @@ namespace TotallyHot.ArcRouter.Hosting
                 .Configure<IConfiguration>((options, configuration) =>
                     configuration.GetSection(PriceCatalogOptions.SectionName).Bind(options));
             services.AddSingleton<PriceCatalogDatabase>();
-            // D3 alias resolver (docs/router/d3-alias-resolution.md): maps each source's own model/provider
-            // naming onto the configured router identity at ingest, so cost resolves on the client-facing
-            // ModelName. Registered so the container injects it into PriceCatalogRepository's optional param.
+            // Operator price-override store (docs/router/token-tracking-implementation-plan.md Phase 3 §5.7):
+            // the resolution ladder's top rung. Registered before the resolver so the container injects it
+            // into ConfigModelIdentityResolver's optional overrideStore parameter.
+            services.AddSingleton<ModelAliasOverrideStore>();
+            // D3/§5.7 alias resolver (docs/router/d3-alias-resolution.md, docs/router/token-tracking-improvements.md
+            // §5.7): maps each source's own model/provider naming onto the configured router identity at
+            // ingest via the resolution ladder, so cost resolves on the client-facing ModelName. Registered
+            // so the container injects it into PriceCatalogRepository's optional param.
             services.AddSingleton<IModelIdentityResolver, ConfigModelIdentityResolver>();
             services.AddSingleton<PriceCatalogRepository>();
             // Request-path price lookup (docs/router/model-price-catalog.md): ProxyMiddleware
@@ -236,7 +241,8 @@ namespace TotallyHot.ArcRouter.Hosting
                     // its own container, so the REST facade it builds cannot resolve these from this one.
                     endpointScanner: sp.GetRequiredService<ProviderEndpointScanner>(),
                     toolCallCapabilityStore: sp.GetRequiredService<ToolCallCapabilityStore>(),
-                    priceCatalogRepository: sp.GetRequiredService<PriceCatalogRepository>());
+                    priceCatalogRepository: sp.GetRequiredService<PriceCatalogRepository>(),
+                    modelAliasOverrideStore: sp.GetRequiredService<ModelAliasOverrideStore>());
             });
 
             return services;

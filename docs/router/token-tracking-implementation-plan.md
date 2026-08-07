@@ -140,7 +140,7 @@ duplicate ledger rows, (b) the resumed session's next turn number continues rath
 
 ---
 
-## Phase 3 — Honest costs: confidence, coverage, and the resolution ladder (§5.6, §5.7)
+## Phase 3 — Honest costs: confidence, coverage, and the resolution ladder (§5.6, §5.7) — **Implemented**
 
 The "unknown ≠ zero" discipline the codebase holds at the type level, extended to aggregates and to
 model-identity resolution.

@@ -1,0 +1,172 @@
+@* Governance > Price Overrides pane: the §5.7 resolution ladder's top rung. Read-only diagnosis of which
+   (source, aggregator model key) pairs the operator has mapped onto a configured model, plus add/remove.
+   Talks to the proxy's /admin/price-overrides REST API via the injected ProviderAdminStore - the same
+   store ProvidersAdmin uses, so both panes share one reachability/error shape.
+   docs/router/token-tracking-implementation-plan.md Phase 3, §5.7. *@
+@implements IDisposable
+@inject ProviderAdminStore Store
+@using TotallyHot.ArcRouter.Gui.Admin
+
+<div class="h-full overflow-y-auto pr-1">
+    @if (!Store.IsLoaded)
+    {
+        <div class="text-sm text-slate-500 p-4">Loading price overrides…</div>
+    }
+    else if (!Store.IsReachable)
+    {
+        <div class="rounded-lg p-4 space-y-2 ds-surface-card-critical">
+            <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
+                <Icon Name="alert-triangle" Size="14" /> Router unreachable
+            </div>
+            <div class="text-xs text-slate-400">
+                Could not reach <span class="font-mono">@ProviderAdminStore.DefaultManagementAddress</span>. Is the proxy running?
+            </div>
+            @if (!string.IsNullOrEmpty(Store.LastError))
+            {
+                <div class="text-xs text-slate-500 font-mono">@Store.LastError</div>
+            }
+            <button @onclick="Reload" class="btn btn-ghost">Retry</button>
+        </div>
+    }
+    else
+    {
+        <div class="mb-3">
+            <span class="text-xs text-slate-500 uppercase tracking-widest">Operator Price Overrides</span>
+            <div class="text-xs text-slate-500 mt-1">
+                The catalog's resolution ladder tries an exact match, then progressively looser automatic
+                rungs (a stripped snapshot suffix, a normalized version/tier suffix, a cross-provider model
+                match), before giving up. An override here wins over all of that - use it when the ladder
+                still can't map an aggregator's naming onto one of your configured models.
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_opError))
+        {
+            <div class="mb-3 text-xs ds-alert-critical">@_opError</div>
+        }
+
+        @* Read-only diagnosis: which configured models actually need an override. *@
+        @if (Store.PriceResolutionDiagnosis.Count > 0)
+        {
+            <div class="rounded-lg p-3 mb-3 ds-surface-card-bordered">
+                <div class="text-xs text-slate-500 uppercase tracking-widest mb-2">Resolution Diagnosis</div>
+                <div class="space-y-1">
+                    @foreach (var d in Store.PriceResolutionDiagnosis)
+                    {
+                        <div class="flex items-center justify-between gap-2 text-xs font-mono">
+                            <span class="text-slate-300">@d.ModelName <span class="text-slate-600">(@d.Provider)</span></span>
+                            <span class="@DiagnosisClass(d)">@DiagnosisLabel(d)</span>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        @* Add form *@
+        <div class="rounded-lg p-3 space-y-2 mb-3 ds-surface-card-bordered">
+            <div class="grid gap-2" style="grid-template-columns:1fr 1fr 1fr auto">
+                <input @bind="_newSourceName" placeholder="Source (e.g. LiteLLM)" class="px-2 py-1.5 text-xs ds-input" />
+                <input @bind="_newAggregatorModelKey" placeholder="Aggregator model key (e.g. big-pickle)" class="px-2 py-1.5 text-xs font-mono ds-input" />
+                <select @bind="_newModelName" class="px-2 py-1.5 text-xs ds-input">
+                    <option value="">Select configured model…</option>
+                    @foreach (var modelName in ConfiguredModelNames)
+                    {
+                        <option value="@modelName">@modelName</option>
+                    }
+                </select>
+                <button @onclick="Add" disabled="@(!CanAdd)" class="btn btn-secondary">Add</button>
+            </div>
+        </div>
+
+        @if (Store.PriceOverrides.Count == 0)
+        {
+            <div class="text-xs text-slate-500 p-4">No price overrides are configured.</div>
+        }
+        else
+        {
+            <div class="space-y-2">
+                @foreach (var o in Store.PriceOverrides)
+                {
+                    <div @key="@($"{o.SourceName}|{o.AggregatorModelKey}")"
+                         class="rounded-lg p-3 flex items-center justify-between gap-2 ds-surface-card-bordered">
+                        <div class="min-w-0 text-xs font-mono">
+                            <span class="text-slate-400">@o.SourceName</span>
+                            <span class="text-slate-600">/</span>
+                            <span class="text-slate-200">@o.AggregatorModelKey</span>
+                            <span class="text-slate-600 mx-1">→</span>
+                            <span class="text-emerald-400">@o.ModelName</span>
+                        </div>
+                        <button @onclick="() => Remove(o)" title="Remove this override" class="btn btn-ghost shrink-0">
+                            <Icon Name="trash-2" Size="13" />
+                        </button>
+                    </div>
+                }
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private string? _opError;
+    private string _newSourceName = string.Empty;
+    private string _newAggregatorModelKey = string.Empty;
+    private string _newModelName = string.Empty;
+
+    private static string DiagnosisLabel(PriceResolutionDiagnosisView d) =>
+        !d.Resolved ? "Unresolved" : d.IsApproximate ? "Approximate" : "Exact";
+
+    private static string DiagnosisClass(PriceResolutionDiagnosisView d) =>
+        !d.Resolved ? "metric-critical" : d.IsApproximate ? "metric-fallback" : "metric-positive";
+
+    private bool CanAdd =>
+        !string.IsNullOrWhiteSpace(_newSourceName) &&
+        !string.IsNullOrWhiteSpace(_newAggregatorModelKey) &&
+        !string.IsNullOrWhiteSpace(_newModelName);
+
+    // Every currently configured model name, across every provider - the only values an override can
+    // legally resolve to (SetPriceOverride rejects anything else).
+    private IEnumerable<string> ConfiguredModelNames =>
+        Store.Providers.SelectMany(p => p.Models).Select(m => m.ModelName).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(m => m, StringComparer.OrdinalIgnoreCase);
+
+    protected override async Task OnInitializedAsync()
+    {
+        Store.Changed += OnStoreChanged;
+        await Store.LoadAsync();
+        await Store.LoadPriceOverridesAsync();
+    }
+
+    private void OnStoreChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Store.Changed -= OnStoreChanged;
+
+    private Task Reload() => RunAsync(async () =>
+    {
+        await Store.LoadAsync();
+        await Store.LoadPriceOverridesAsync();
+    });
+
+    private Task Add() => RunAsync(async () =>
+    {
+        await Store.SetPriceOverrideAsync(new PriceOverrideWriteRequest(_newSourceName, _newAggregatorModelKey, _newModelName));
+        _newSourceName = string.Empty;
+        _newAggregatorModelKey = string.Empty;
+        _newModelName = string.Empty;
+    });
+
+    private Task Remove(PriceOverrideView o) =>
+        RunAsync(() => Store.RemovePriceOverrideAsync(o.SourceName, o.AggregatorModelKey));
+
+    /// <summary>Runs a mutation, surfacing a failure in the inline error banner rather than letting it escape into the renderer.</summary>
+    private async Task RunAsync(Func<Task> operation)
+    {
+        _opError = null;
+        try
+        {
+            await operation();
+        }
+        catch (ProviderAdminException ex)
+        {
+            _opError = ex.Message;
+        }
+    }
+}

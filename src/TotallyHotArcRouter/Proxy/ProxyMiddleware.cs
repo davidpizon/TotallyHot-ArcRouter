@@ -1259,6 +1259,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         int? cacheCreationTokens = null;
         int? cacheReadTokens = null;
         decimal? estimatedCostUsd = null;
+        var costConfidence = CostConfidence.NoUsage;
 
         // Telemetry stops depending on translation fidelity: when a native (pre-translation) capture was
         // taken, it is parsed under the provider's own key instead of the translated bytes under
@@ -1320,13 +1321,24 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // once D3 alias resolution has mapped each source's own naming onto it at ingest
             // (docs/router/d3-alias-resolution.md), so we look up route.ModelName - a model the catalog has no
             // resolved price for simply yields null here, the safe "unknown" outcome.
+            // §5.6: the cost-confidence label travels alongside the cost itself, so a caller never has to
+            // re-derive from EstimatedCostUsd alone whether "$0" means free, unknown, or an approximate
+            // catalog match - see docs/router/token-tracking-improvements.md §5.6.
             if (route.IsFree)
             {
                 estimatedCostUsd = ModelPrice.Free.EstimateCost(usage);
+                costConfidence = CostConfidence.Exact;
             }
             else if (_priceLookup?.TryGetPrice(new ModelKey(ModelName: route.ModelName, Provider: route.Provider)) is { } price)
             {
-                estimatedCostUsd = price.EstimateCost(usage);
+                estimatedCostUsd = price.EstimateCost(usage, out var usedCacheRateFallback);
+                costConfidence = price.IsApproximateMatch || usedCacheRateFallback
+                    ? CostConfidence.CatalogApproximate
+                    : CostConfidence.Catalog;
+            }
+            else
+            {
+                costConfidence = CostConfidence.Unknown;
             }
         }
 
@@ -1377,7 +1389,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 CacheCreationTokens: cacheCreationTokens,
                 CacheReadTokens: cacheReadTokens,
                 EstimatedCostUsd: estimatedCostUsd,
-                CostConfidence: "Unknown",
+                CostConfidence: costConfidence.ToString(),
                 OccurredAtUtc: DateTimeOffset.UtcNow,
                 RequestId: ExtractUpstreamRequestId(upstreamHeaders));
             await _usageLedger.RecordAsync(ledgerEntry, CancellationToken.None).ConfigureAwait(false);
@@ -1410,6 +1422,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             TimestampUtc: DateTimeOffset.UtcNow,
             CacheCreationTokens: cacheCreationTokens,
             CacheReadTokens: cacheReadTokens,
+            CostConfidence: costConfidence,
             RequestSummary: requestSummary,
             ResponseSummary: responseSummary,
             CorrelationId: correlationId);

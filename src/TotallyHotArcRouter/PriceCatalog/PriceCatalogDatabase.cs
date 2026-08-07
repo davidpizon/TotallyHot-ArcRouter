@@ -88,6 +88,7 @@ public sealed class PriceCatalogDatabase
         MigrateJsonSchemaResponseFormatColumn(connection);
         MigrateCacheWriteInputPriceColumn(connection);
         MigrateProviderSpendCacheColumns(connection);
+        MigrateIsApproximateColumn(connection);
         SeedKnownSources(connection);
 
         return alreadyExisted;
@@ -201,6 +202,26 @@ public sealed class PriceCatalogDatabase
         }
     }
 
+    // Same blind spot again: a database created before the §5.7 resolution ladder existed has model_prices
+    // without this column. Existing rows read as 0 ("not an approximate match") - the correct default,
+    // since every price stored before the ladder existed was resolved via the old exact-only rule.
+    /// <summary>
+    /// Adds the `is_approximate` column to `model_prices` if it is missing, so databases created before the
+    /// resolution ladder existed pick it up on startup with existing rows reading as an exact (non-approximate)
+    /// match.
+    /// </summary>
+    private static void MigrateIsApproximateColumn(SqliteConnection connection)
+    {
+        if (ColumnExists(connection, "model_prices", "is_approximate"))
+        {
+            return;
+        }
+
+        using var alter = connection.CreateCommand();
+        alter.CommandText = "ALTER TABLE model_prices ADD COLUMN is_approximate INTEGER NOT NULL DEFAULT 0;";
+        alter.ExecuteNonQuery();
+    }
+
     // Every source with a client gets a row up front, so the GUI has something to toggle before the first
     // poll has ever run. Without this, rows only appear via PriceCatalogRepository.UpsertPrices - i.e. only
     // after a *successful* fetch - which would leave a fresh install with an empty panel and no way to
@@ -290,7 +311,22 @@ public sealed class PriceCatalogDatabase
             batch_output_price    REAL,
             last_updated_utc     TEXT NOT NULL,
             source_raw_payload   TEXT,
+            is_approximate       INTEGER NOT NULL DEFAULT 0,
             UNIQUE(model_id, provider_id)
+        );
+
+        -- Operator-authored overrides for the §5.7 resolution ladder's top rung (ResolutionRung.OperatorOverride):
+        -- the recourse an operator has when no automatic rung resolves a model. Keyed on (source_name,
+        -- aggregator_model_key) - the same aggregator naming UpsertPrices already resolves per row - mapping
+        -- onto the client-facing ModelName from ModelRouting:ModelList; the entry's Provider is looked up from
+        -- that ModelName at resolve time (ModelName is unique - see ConfigModelIdentityResolver.Build), so this
+        -- table does not duplicate a Provider column that config edits could drift out of sync with. Managed at
+        -- runtime via PUT/DELETE /admin/price-overrides, no restart required.
+        CREATE TABLE IF NOT EXISTS model_alias_overrides (
+            source_name          TEXT NOT NULL,
+            aggregator_model_key TEXT NOT NULL,
+            model_name           TEXT NOT NULL,
+            PRIMARY KEY (source_name, aggregator_model_key)
         );
 
         CREATE TABLE IF NOT EXISTS multimodal_prices (
