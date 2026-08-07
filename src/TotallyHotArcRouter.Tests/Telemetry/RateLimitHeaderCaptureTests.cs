@@ -15,7 +15,7 @@ public class RateLimitHeaderCaptureTests
     {
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
-        var capture = new RateLimitHeaderCapture(repository);
+        using var capture = new RateLimitHeaderCapture(repository);
 
         var headers = BuildHeaders(
             ("anthropic-ratelimit-tokens-remaining", "1000"),
@@ -33,7 +33,7 @@ public class RateLimitHeaderCaptureTests
     {
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
-        var capture = new RateLimitHeaderCapture(repository);
+        using var capture = new RateLimitHeaderCapture(repository);
 
         var headers = BuildHeaders(
             ("x-ratelimit-limit-requests", "5000"),
@@ -52,7 +52,7 @@ public class RateLimitHeaderCaptureTests
     {
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
-        var capture = new RateLimitHeaderCapture(repository);
+        using var capture = new RateLimitHeaderCapture(repository);
 
         var headers = BuildHeaders(
             ("anthropic-ratelimit-tokens-remaining", "1000"),
@@ -69,7 +69,7 @@ public class RateLimitHeaderCaptureTests
     {
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
-        var capture = new RateLimitHeaderCapture(repository);
+        using var capture = new RateLimitHeaderCapture(repository);
 
         var headers = BuildHeaders(
             ("content-type", "application/json"),
@@ -87,7 +87,7 @@ public class RateLimitHeaderCaptureTests
     {
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
-        var capture = new RateLimitHeaderCapture(repository);
+        using var capture = new RateLimitHeaderCapture(repository);
 
         await capture.CaptureAsync(string.Empty, BuildHeaders(("anthropic-ratelimit-tokens-remaining", "1")), Ct);
 
@@ -105,7 +105,7 @@ public class RateLimitHeaderCaptureTests
         var brokenDatabase = new PriceCatalogDatabase(
             Microsoft.Extensions.Options.Options.Create(new StorageOptions { DatabasePath = Path.Combine(temp.Path_, "does", "not", "exist.db") }));
         var repository = new PriceCatalogRepository(brokenDatabase);
-        var capture = new RateLimitHeaderCapture(repository);
+        using var capture = new RateLimitHeaderCapture(repository);
 
         var exception = await Record.ExceptionAsync(() =>
             capture.CaptureAsync("anthropic", BuildHeaders(("anthropic-ratelimit-tokens-remaining", "1")), Ct));

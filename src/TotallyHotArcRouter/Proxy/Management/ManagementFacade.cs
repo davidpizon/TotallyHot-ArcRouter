@@ -1003,7 +1003,10 @@ public static class HeaderValueSource
 /// <param name="DollarCap">The provider's monthly USD budget cap, or null for no dollar budget.</param>
 /// <param name="TokenCap">The provider's monthly total-token budget cap, or null for no token budget.</param>
 /// <param name="DollarSpent">USD spent against this provider in the current month.</param>
-/// <param name="TokensUsed">Total (prompt + completion) tokens used against this provider in the current month.</param>
+/// <param name="TokensUsed">
+/// Total tokens used against this provider in the current month - prompt, completion, and cache
+/// creation/read tokens combined (see <see cref="ProviderBudgetState.TokensUsed"/>).
+/// </param>
 /// <param name="Enabled">
 /// Whether the operator has this provider switched on. Enforced immediately on the next request via
 /// <see cref="ProviderOptions.Enabled"/>'s own documented routing-path gate
@@ -1026,9 +1029,11 @@ public static class HeaderValueSource
 /// been recorded this month yet. Backs the Governance card's "estimated from intercepted traffic" footer.
 /// </param>
 /// <param name="RateLimit">
-/// This provider's most recently captured <c>anthropic-ratelimit-*</c> response headers
-/// (<c>docs/router/anthropic-reported-usage-plan.md</c> §5), or <see langword="null"/> when no repository
-/// is wired up or no such header has ever been captured for this provider.
+/// This provider's most recently captured rate-limit response headers - <c>anthropic-ratelimit-*</c>
+/// (<c>docs/router/anthropic-reported-usage-plan.md</c> §5) or OpenAI's <c>x-ratelimit-*</c>
+/// (<c>docs/router/openai-format-usage-accuracy-plan.md</c> §6.2), whichever family this provider's
+/// responses carry - or <see langword="null"/> when no repository is wired up or no such header has ever
+/// been captured for this provider.
 /// </param>
 public sealed record ProviderView(
     string Key,

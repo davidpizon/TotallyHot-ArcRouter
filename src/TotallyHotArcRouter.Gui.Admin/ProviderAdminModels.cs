@@ -15,7 +15,10 @@ namespace TotallyHot.ArcRouter.Gui.Admin;
 /// <param name="DollarCap">The provider's monthly USD budget cap, or null for no dollar budget.</param>
 /// <param name="TokenCap">The provider's monthly total-token budget cap, or null for no token budget.</param>
 /// <param name="DollarSpent">USD spent against this provider in the current month.</param>
-/// <param name="TokensUsed">Total (prompt + completion) tokens used against this provider in the current month.</param>
+/// <param name="TokensUsed">
+/// Total tokens used against this provider in the current month - prompt, completion, and cache
+/// creation/read tokens combined.
+/// </param>
 /// <param name="Enabled">
 /// Whether the operator has this provider switched on, driving the Stop/Play control in Governance &gt;
 /// Providers. Enforced immediately on the next request by the proxy's routing path, no restart needed.
@@ -38,9 +41,10 @@ namespace TotallyHot.ArcRouter.Gui.Admin;
 /// "estimated from intercepted traffic" footer.
 /// </param>
 /// <param name="RateLimit">
-/// This provider's most recently captured Anthropic <c>anthropic-ratelimit-*</c> response headers, or
-/// <see langword="null"/> when none have been captured yet. Backs the Anthropic Usage card's "reported by
-/// Anthropic" section.
+/// This provider's most recently captured rate-limit response headers - Anthropic's
+/// <c>anthropic-ratelimit-*</c> or OpenAI's <c>x-ratelimit-*</c>, whichever family this provider's
+/// responses carry - or <see langword="null"/> when none have been captured yet. Backs the Anthropic Usage
+/// card's "reported by Anthropic" section.
 /// </param>
 public sealed record ProviderAdminView(
     string Key,
@@ -78,8 +82,8 @@ public sealed record RateLimitDimensionAdminView(long? Limit, long? Remaining, D
 public sealed record RateLimitWindowAdminView(string? Status, long? Remaining, DateTimeOffset? ResetAt);
 
 /// <summary>
-/// The typed projection of one provider's captured Anthropic rate-limit headers, mirroring the proxy's
-/// <c>RateLimitSnapshotView</c>.
+/// The typed projection of one provider's captured rate-limit headers - Anthropic's standard/unified
+/// families or OpenAI's <c>x-ratelimit-*</c> family - mirroring the proxy's <c>RateLimitSnapshotView</c>.
 /// </summary>
 /// <param name="StandardDimensions">Standard-family dimensions keyed by name (<c>requests</c>, <c>input-tokens</c>, <c>output-tokens</c>, <c>tokens</c>).</param>
 /// <param name="UnifiedStatus">The unified family's top-level status, or <see langword="null"/> if absent.</param>

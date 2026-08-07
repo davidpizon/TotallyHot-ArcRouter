@@ -56,9 +56,10 @@ public sealed class RateLimitHeaderCapture : IRateLimitHeaderCapture, IDisposabl
 
         // Bounded, not unbounded: if the SQLite write path ever falls behind a request path that can
         // enqueue far faster than one consumer can drain, an unbounded queue grows without limit and can
-        // OOM the process. Wait (the default FullMode) makes TryWrite fail fast instead of blocking when
-        // full, so CaptureAsync below can drop the capture - losing one best-effort telemetry entry costs
-        // far less than the alternative.
+        // OOM the process. The default FullMode (Wait) only blocks the awaitable WriteAsync; CaptureAsync
+        // below always calls the non-blocking TryWrite, which under Wait simply returns false the instant
+        // the channel is full rather than waiting - so a full queue never stalls the caller, and CaptureAsync
+        // can treat that false as "drop this capture" instead of back-pressure.
         _channel = Channel.CreateBounded<CaptureItem>(new BoundedChannelOptions(QueueCapacity)
         {
             SingleReader = true,
