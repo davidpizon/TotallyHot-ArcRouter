@@ -192,7 +192,7 @@ public class ProxyMiddlewareBudgetTests
 
         public bool IsBreached(string providerKey) => ++_checks > 1;
 
-        public Task RecordUsageAsync(string providerKey, decimal? costUsd, int? promptTokens, int? completionTokens, CancellationToken cancellationToken = default)
+        public Task RecordUsageAsync(string providerKey, decimal? costUsd, int? promptTokens, int? completionTokens, int? cacheCreationTokens, int? cacheReadTokens, DateTimeOffset usageAtUtc, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
     }
 

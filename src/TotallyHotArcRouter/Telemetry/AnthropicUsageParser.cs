@@ -34,12 +34,15 @@ public static class AnthropicUsageParser
     }
 
     /// <summary>
-    /// Extracts usage from a buffered Anthropic SSE stream. <c>input_tokens</c> comes from the
-    /// <c>message_start</c> event's <c>message.usage.input_tokens</c> (fixed for the whole response);
-    /// <c>output_tokens</c> comes from the last <c>message_delta</c> event's <c>usage.output_tokens</c>
-    /// (a running/cumulative total, so only the final one is meaningful). Returns usage as soon as
-    /// input_tokens is known even if no message_delta was seen (output_tokens then reports as 0
-    /// rather than failing outright, since a valid input-token count is still useful telemetry).
+    /// Extracts usage from a buffered Anthropic SSE stream. <c>input_tokens</c> and the cache fields come
+    /// from the <c>message_start</c> event's <c>message.usage</c> (fixed for the whole response, as
+    /// initially reported); <c>output_tokens</c> comes from the last <c>message_delta</c> event's
+    /// <c>usage.output_tokens</c> (a running/cumulative total, so only the final one is meaningful). When
+    /// the final <c>message_delta</c>'s <c>usage</c> also carries cache fields (newer API versions send
+    /// cumulative full usage there), those values win over <c>message_start</c>'s - they are final,
+    /// <c>message_start</c>'s are only initial. Returns usage as soon as input_tokens is known even if no
+    /// message_delta was seen (output_tokens then reports as 0 rather than failing outright, since a valid
+    /// input-token count is still useful telemetry).
     /// </summary>
     public static bool TryExtractFromStreamingBuffer(string sseText, out UsageInfo usage)
     {
@@ -47,6 +50,8 @@ public static class AnthropicUsageParser
         var haveInput = false;
         var promptTokens = 0;
         var completionTokens = 0;
+        var cacheCreationTokens = 0;
+        var cacheReadTokens = 0;
 
         foreach (var evt in SseEventReader.ReadDataEvents(sseText))
         {
@@ -66,12 +71,28 @@ public static class AnthropicUsageParser
                     {
                         completionTokens = initialOutputTokens;
                     }
+                    if (TryGetInt(startUsage, "cache_creation_input_tokens", out var startCacheCreation))
+                    {
+                        cacheCreationTokens = startCacheCreation;
+                    }
+                    if (TryGetInt(startUsage, "cache_read_input_tokens", out var startCacheRead))
+                    {
+                        cacheReadTokens = startCacheRead;
+                    }
                     break;
 
                 case "message_delta" when evt["usage"] is JsonObject deltaUsage:
                     if (TryGetInt(deltaUsage, "output_tokens", out var outputTokens))
                     {
                         completionTokens = outputTokens;
+                    }
+                    if (TryGetInt(deltaUsage, "cache_creation_input_tokens", out var deltaCacheCreation))
+                    {
+                        cacheCreationTokens = deltaCacheCreation;
+                    }
+                    if (TryGetInt(deltaUsage, "cache_read_input_tokens", out var deltaCacheRead))
+                    {
+                        cacheReadTokens = deltaCacheRead;
                     }
                     break;
             }
@@ -82,12 +103,14 @@ public static class AnthropicUsageParser
             return false;
         }
 
-        usage = new UsageInfo(promptTokens, completionTokens);
+        usage = new UsageInfo(promptTokens, completionTokens, cacheCreationTokens, cacheReadTokens);
         return true;
     }
 
     /// <summary>
-    /// Attempts to read input and output token counts from a top-level "usage" JSON object.
+    /// Attempts to read input, output, and cache token counts from a top-level "usage" JSON object. Cache
+    /// fields default to 0 when absent - older responses simply predate prompt caching, which is not a
+    /// parse failure.
     /// </summary>
     private static bool TryReadTopLevelUsage(JsonObject usageObj, out UsageInfo usage)
     {
@@ -99,7 +122,10 @@ public static class AnthropicUsageParser
             return false;
         }
 
-        usage = new UsageInfo(inputTokens, outputTokens);
+        TryGetInt(usageObj, "cache_creation_input_tokens", out var cacheCreationTokens);
+        TryGetInt(usageObj, "cache_read_input_tokens", out var cacheReadTokens);
+
+        usage = new UsageInfo(inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens);
         return true;
     }
 

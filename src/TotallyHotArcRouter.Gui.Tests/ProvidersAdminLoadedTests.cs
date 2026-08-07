@@ -470,6 +470,98 @@ public sealed class ProvidersAdminLoadedTests
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("provider is in use"));
     }
 
+    [Fact]
+    public void Usage_card_renders_for_Anthropic_and_OpenAi_typed_providers_but_not_LocalRuntime()
+    {
+        // docs/router/openai-format-usage-accuracy-plan.md §6.2 generalizes this card beyond Anthropic:
+        // it now renders (titled by the provider's own type) for both Anthropic- and OpenAI-typed
+        // providers, but ollama (LocalRuntime) still must not render the section.
+        var transport = new StubTransport();
+        using var ctx = NewContext(transport);
+
+        var cut = RenderLoaded(ctx);
+
+        cut.Markup.Should().Contain("Anthropic Usage");
+        cut.Markup.Should().Contain("Reported by Anthropic");
+        cut.Markup.Should().Contain("OpenAI Usage");
+        cut.Markup.Should().Contain("Reported by OpenAI");
+        cut.Markup.Should().Contain("Estimated from intercepted traffic");
+    }
+
+    [Fact]
+    public void Anthropic_Usage_card_shows_empty_states_when_nothing_recorded_yet()
+    {
+        var transport = new StubTransport();
+        using var ctx = NewContext(transport);
+
+        var cut = RenderLoaded(ctx);
+
+        // The fixture's anthropic provider has no usageLastRecordedAtUtc/rateLimit set.
+        cut.Markup.Should().Contain("No usage recorded yet");
+        cut.Markup.Should().Contain("No rate-limit data observed yet");
+    }
+
+    [Fact]
+    public void Anthropic_Usage_card_renders_backend_timestamps_for_both_sub_blocks()
+    {
+        var transport = new StubTransport { ResponseOverride = ProvidersJsonWithUsageAndRateLimit };
+        using var ctx = NewContext(transport);
+
+        var cut = RenderLoaded(ctx);
+
+        cut.Markup.Should().Contain("Last recorded 2026-03-01 08:00 UTC");
+        cut.Markup.Should().Contain("As of 2026-03-01 12:00 UTC");
+        cut.Markup.Should().Contain("Tokens: 158,000 of 200,000 remaining");
+        cut.Markup.Should().Contain("5h window: allowed");
+        cut.Markup.Should().NotContain("No usage recorded yet");
+        cut.Markup.Should().NotContain("No rate-limit data observed yet");
+    }
+
+    // Same three providers as ProvidersJson, but the anthropic entry carries a populated
+    // usageLastRecordedAtUtc and rateLimit - exercises the card's populated-data branches, which the
+    // GUI must render from these backend-supplied values, never the GUI clock.
+    private const string ProvidersJsonWithUsageAndRateLimit = """
+        {
+          "providers": [
+            {
+              "key": "anthropic",
+              "name": "Anthropic Prod",
+              "baseUrl": "https://api.anthropic.com",
+              "authHeaderName": "x-api-key",
+              "authHeaderScheme": "",
+              "hasApiKey": true,
+              "apiKeyEnvVar": null,
+              "providerType": "Anthropic",
+              "models": [],
+              "headers": [],
+              "isFree": false,
+              "dollarCap": null,
+              "tokenCap": null,
+              "dollarSpent": 12.5,
+              "tokensUsed": 158000,
+              "enabled": true,
+              "endpointCapabilities": null,
+              "usageLastRecordedAtUtc": "2026-03-01T08:00:00Z",
+              "rateLimit": {
+                "snapshot": {
+                  "standardDimensions": {
+                    "tokens": { "limit": 200000, "remaining": 158000, "resetAt": "2026-03-01T13:00:00Z" }
+                  },
+                  "unifiedStatus": "allowed",
+                  "unifiedResetAt": null,
+                  "unifiedWindows": {
+                    "5h": { "status": "allowed", "remaining": null, "resetAt": "2026-03-01T13:00:00Z" }
+                  },
+                  "representativeClaim": null,
+                  "rawHeaders": {}
+                },
+                "observedAtUtc": "2026-03-01T12:00:00Z"
+              }
+            }
+          ]
+        }
+        """;
+
     /// <summary>A record of one request the component caused, for asserting what reached the wire.</summary>
     private sealed record RecordedRequest(string Method, string Path);
 
@@ -488,6 +580,9 @@ public sealed class ProvidersAdminLoadedTests
 
         /// <summary>When set, the next non-GET request answers 400 with this message and clears the flag.</summary>
         public string? NextFailure { get; set; }
+
+        /// <summary>When set, every GET answers with this JSON instead of the default <see cref="ProvidersJson"/> fixture.</summary>
+        public string? ResponseOverride { get; set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -509,7 +604,7 @@ public sealed class ProvidersAdminLoadedTests
 
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(ProvidersJson, Encoding.UTF8, "application/json"),
+                Content = new StringContent(ResponseOverride ?? ProvidersJson, Encoding.UTF8, "application/json"),
             };
         }
     }

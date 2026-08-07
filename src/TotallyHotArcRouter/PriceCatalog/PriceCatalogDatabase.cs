@@ -86,6 +86,8 @@ public sealed class PriceCatalogDatabase
 
         MigrateEnabledColumn(connection);
         MigrateJsonSchemaResponseFormatColumn(connection);
+        MigrateCacheWriteInputPriceColumn(connection);
+        MigrateProviderSpendCacheColumns(connection);
         SeedKnownSources(connection);
 
         return alreadyExisted;
@@ -143,6 +145,60 @@ public sealed class PriceCatalogDatabase
              WHERE lmstudio_native = 1 OR ollama_native = 1;
             """;
         alter.ExecuteNonQuery();
+    }
+
+    // Same CREATE TABLE IF NOT EXISTS blind spot as the migrations above: a database created before cache-aware
+    // pricing existed has model_prices without this column, so the first read/write after upgrade would fail
+    // with "no such column". Existing rows read as NULL - "no published cache-write rate" - which is the correct
+    // "absent, not zero" meaning (D7) until the next successful poll of a source that publishes one.
+    /// <summary>
+    /// Adds the `cache_write_input_price` column to `model_prices` if it is missing, so databases created
+    /// before cache-aware pricing existed pick it up on startup with existing rows reading as an unpublished
+    /// (<see langword="null"/>) rate.
+    /// </summary>
+    private static void MigrateCacheWriteInputPriceColumn(SqliteConnection connection)
+    {
+        if (ColumnExists(connection, "model_prices", "cache_write_input_price"))
+        {
+            return;
+        }
+
+        using var alter = connection.CreateCommand();
+        alter.CommandText = "ALTER TABLE model_prices ADD COLUMN cache_write_input_price REAL;";
+        alter.ExecuteNonQuery();
+    }
+
+    // Same blind spot again, applied to provider_spend: a database created before cache-aware usage tracking
+    // existed has none of these three columns. Existing rows read as 0 tokens / NULL timestamp - "no cache
+    // usage recorded yet" / "no usage recorded yet" - which is what an install with no cache-using traffic
+    // since upgrade should show, not an error.
+    /// <summary>
+    /// Adds the `cache_creation_tokens`, `cache_read_tokens`, and `last_usage_at` columns to `provider_spend`
+    /// if missing, so databases created before cache-aware usage tracking existed pick them up on startup with
+    /// existing rows reading as zero cache tokens and no last-usage timestamp.
+    /// </summary>
+    private static void MigrateProviderSpendCacheColumns(SqliteConnection connection)
+    {
+        if (!ColumnExists(connection, "provider_spend", "cache_creation_tokens"))
+        {
+            using var alterCreation = connection.CreateCommand();
+            alterCreation.CommandText = "ALTER TABLE provider_spend ADD COLUMN cache_creation_tokens INTEGER NOT NULL DEFAULT 0;";
+            alterCreation.ExecuteNonQuery();
+        }
+
+        if (!ColumnExists(connection, "provider_spend", "cache_read_tokens"))
+        {
+            using var alterRead = connection.CreateCommand();
+            alterRead.CommandText = "ALTER TABLE provider_spend ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0;";
+            alterRead.ExecuteNonQuery();
+        }
+
+        if (!ColumnExists(connection, "provider_spend", "last_usage_at"))
+        {
+            using var alterLastUsage = connection.CreateCommand();
+            alterLastUsage.CommandText = "ALTER TABLE provider_spend ADD COLUMN last_usage_at TEXT;";
+            alterLastUsage.ExecuteNonQuery();
+        }
     }
 
     // Every source with a client gets a row up front, so the GUI has something to toggle before the first
@@ -229,6 +285,7 @@ public sealed class PriceCatalogDatabase
             standard_input_price  REAL,
             standard_output_price REAL,
             cached_input_price    REAL,
+            cache_write_input_price REAL,
             batch_input_price     REAL,
             batch_output_price    REAL,
             last_updated_utc     TEXT NOT NULL,
@@ -266,11 +323,14 @@ public sealed class PriceCatalogDatabase
         -- side-effect path (ProviderBudgetStore.RecordUsageAsync), read by the budget bars and by routing
         -- enforcement.
         CREATE TABLE IF NOT EXISTS provider_spend (
-            provider_key      TEXT    NOT NULL,
-            period            TEXT    NOT NULL,
-            cost_usd          TEXT    NOT NULL DEFAULT '0',
-            prompt_tokens     INTEGER NOT NULL DEFAULT 0,
-            completion_tokens INTEGER NOT NULL DEFAULT 0,
+            provider_key        TEXT    NOT NULL,
+            period              TEXT    NOT NULL,
+            cost_usd            TEXT    NOT NULL DEFAULT '0',
+            prompt_tokens       INTEGER NOT NULL DEFAULT 0,
+            completion_tokens   INTEGER NOT NULL DEFAULT 0,
+            cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+            cache_read_tokens   INTEGER NOT NULL DEFAULT 0,
+            last_usage_at       TEXT,
             PRIMARY KEY(provider_key, period)
         );
 
@@ -305,6 +365,37 @@ public sealed class PriceCatalogDatabase
         -- ToolCallCapabilityStore.TryRecordModelCapability); `evidence` is a short pattern description, never
         -- raw model output. Same COLLATE NOCASE reasoning as above, applied to both key columns since model
         -- names are matched case-insensitively by ModelRouteResolver too.
+        -- Latest observed value per (provider, header): the GUI's "as of" reported-usage view (Governance >
+        -- Providers > Anthropic Usage). Upserted on every captured response, so a read always reflects the
+        -- single most recent value per header regardless of how many responses have been captured.
+        -- header_name is stored lowercase (headers are case-insensitive); header_value is stored verbatim -
+        -- Anthropic rounds `remaining` to the nearest thousand and the unified family's values are opaque
+        -- strings, so interpretation belongs at read time (see RateLimitSnapshotParser), not storage.
+        CREATE TABLE IF NOT EXISTS provider_rate_limit_snapshot (
+            provider_key TEXT NOT NULL,
+            header_name  TEXT NOT NULL,
+            header_value TEXT NOT NULL,
+            observed_at  TEXT NOT NULL,
+            PRIMARY KEY (provider_key, header_name)
+        );
+
+        -- Minute-bucketed history of the same headers, for future trend charts. At most one row per
+        -- (provider, minute bucket, header) is kept - see PriceCatalogRepository.UpsertRateLimitHeaders -
+        -- so a provider proxying steady traffic doesn't grow this table once per request.
+        CREATE TABLE IF NOT EXISTS provider_rate_limit_history (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            provider_key  TEXT NOT NULL,
+            minute_bucket TEXT NOT NULL,
+            header_name   TEXT NOT NULL,
+            header_value  TEXT NOT NULL
+        );
+
+        -- Backs the dedupe in UpsertRateLimitHeaders with a single atomic `INSERT OR IGNORE` instead of a
+        -- check-then-insert, so concurrent captures for the same (provider, minute, header) can't both
+        -- observe "no row" and both insert.
+        CREATE UNIQUE INDEX IF NOT EXISTS ix_provider_rate_limit_history_dedupe
+            ON provider_rate_limit_history (provider_key, minute_bucket, header_name);
+
         CREATE TABLE IF NOT EXISTS model_tool_capabilities (
             provider_key      TEXT    NOT NULL COLLATE NOCASE,
             model_name        TEXT    NOT NULL COLLATE NOCASE,

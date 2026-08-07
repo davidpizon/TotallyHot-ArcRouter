@@ -10,8 +10,27 @@ namespace TotallyHot.ArcRouter.PriceCatalog;
 /// <param name="DollarCap">The monthly USD cap, or <see langword="null"/> for no dollar budget.</param>
 /// <param name="TokenCap">The monthly total-token cap, or <see langword="null"/> for no token budget.</param>
 /// <param name="DollarSpent">USD spent this month.</param>
-/// <param name="TokensUsed">Total (prompt + completion) tokens used this month.</param>
-public readonly record struct ProviderBudgetState(decimal? DollarCap, long? TokenCap, decimal DollarSpent, long TokensUsed)
+/// <param name="TokensUsed">
+/// Total real tokens processed this month: prompt + completion + cache-creation + cache-read. This is a
+/// deliberate widening from prompt+completion alone - cache tokens are real tokens the provider processed
+/// and billed for, so a cache-heavy provider's token cap must account for them or the cap would
+/// systematically under-count its actual load.
+/// </param>
+/// <param name="CacheTokensUsed">
+/// Cache-creation plus cache-read tokens used this month, broken out from <see cref="TokensUsed"/> for
+/// display (e.g. the GUI's "estimated from intercepted traffic" card section).
+/// </param>
+/// <param name="LastUsageAtUtc">
+/// The UTC instant the most recent usage was recorded this month, or <see langword="null"/> if no usage has
+/// been recorded this month yet.
+/// </param>
+public readonly record struct ProviderBudgetState(
+    decimal? DollarCap,
+    long? TokenCap,
+    decimal DollarSpent,
+    long TokensUsed,
+    long CacheTokensUsed = 0,
+    DateTimeOffset? LastUsageAtUtc = null)
 {
     /// <summary>
     /// Gets whether either a set dollar cap or a set token cap has been met or exceeded this month. An
@@ -112,11 +131,14 @@ public sealed class ProviderBudgetStore : IBudgetEnforcer, IDisposable
         {
             budgets.TryGetValue(key, out var budget);
             spend.TryGetValue(key, out var s);
+            var cacheTokens = (s?.CacheCreationTokens ?? 0) + (s?.CacheReadTokens ?? 0);
             next[key] = new ProviderBudgetState(
                 DollarCap: budget?.DollarCap,
                 TokenCap: budget?.TokenCap,
                 DollarSpent: s?.CostUsd ?? 0m,
-                TokensUsed: (s?.PromptTokens ?? 0) + (s?.CompletionTokens ?? 0));
+                TokensUsed: (s?.PromptTokens ?? 0) + (s?.CompletionTokens ?? 0) + cacheTokens,
+                CacheTokensUsed: cacheTokens,
+                LastUsageAtUtc: s?.LastUsageAtUtc);
         }
 
         return next;
@@ -153,6 +175,9 @@ public sealed class ProviderBudgetStore : IBudgetEnforcer, IDisposable
         decimal? costUsd,
         int? promptTokens,
         int? completionTokens,
+        int? cacheCreationTokens,
+        int? cacheReadTokens,
+        DateTimeOffset usageAtUtc,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(providerKey))
@@ -164,6 +189,8 @@ public sealed class ProviderBudgetStore : IBudgetEnforcer, IDisposable
         var cost = costUsd ?? 0m;
         var prompt = promptTokens ?? 0;
         var completion = completionTokens ?? 0;
+        var cacheCreation = cacheCreationTokens ?? 0;
+        var cacheRead = cacheReadTokens ?? 0;
 
         try
         {
@@ -174,7 +201,7 @@ public sealed class ProviderBudgetStore : IBudgetEnforcer, IDisposable
             await _spendWriteMutex.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                _repository.AddProviderSpend(providerKey, period, cost, prompt, completion);
+                _repository.AddProviderSpend(providerKey, period, cost, prompt, completion, cacheCreation, cacheRead, usageAtUtc);
             }
             finally
             {
@@ -193,12 +220,20 @@ public sealed class ProviderBudgetStore : IBudgetEnforcer, IDisposable
                 else
                 {
                     _snapshot.TryGetValue(providerKey, out var current);
+                    var cacheTokens = cacheCreation + cacheRead;
                     var next = new Dictionary<string, ProviderBudgetState>(_snapshot, StringComparer.OrdinalIgnoreCase)
                     {
                         [providerKey] = current with
                         {
                             DollarSpent = current.DollarSpent + cost,
-                            TokensUsed = current.TokensUsed + prompt + completion,
+                            TokensUsed = current.TokensUsed + prompt + completion + cacheTokens,
+                            CacheTokensUsed = current.CacheTokensUsed + cacheTokens,
+                            // Same monotonic-advance rule as AddProviderSpend's SQL MAX, so the in-memory
+                            // snapshot this fast-path updates can't disagree with the database it mirrors
+                            // when two requests for the same provider complete out of order.
+                            LastUsageAtUtc = current.LastUsageAtUtc is { } existing && existing > usageAtUtc
+                                ? existing
+                                : usageAtUtc,
                         },
                     };
                     _snapshot = next;

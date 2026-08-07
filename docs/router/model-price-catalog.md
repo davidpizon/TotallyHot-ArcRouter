@@ -377,7 +377,8 @@ Phase 1's nullable columns already carry these. D7 is why they cannot collapse i
 | Dimension | Column(s) | Why it varies by provider |
 |---|---|---|
 | **Direction** | `standard_input_price` / `standard_output_price` | Reading and generating are never priced equally — output typically costs several times input. Two numbers, never one blended rate. |
-| **Prompt caching** | `cached_input_price` | Repeating the same context or instructions across calls earns steep discounts (often 50%+) — **where it is offered at all.** A host without prompt caching charges full price on every single call. |
+| **Prompt caching (read)** | `cached_input_price` | Repeating the same context or instructions across calls earns steep discounts (often 50%+) — **where it is offered at all.** A host without prompt caching charges full price on every single call. |
+| **Prompt caching (write)** | `cache_write_input_price` | The one-time cost of writing a new cache entry, typically priced at a *premium* over standard input (e.g. Anthropic's 5-minute cache write is 1.25x input) — the opposite direction from the read discount above, so it is its own nullable column, never derived from `cached_input_price`. Added in [`docs/router/anthropic-reported-usage-plan.md`](anthropic-reported-usage-plan.md) Phase 1; `ModelPrice.EstimateCost(UsageInfo)` falls back to the standard input rate when a provider doesn't publish one, a deliberate conservative overestimate. |
 | **Batch** | `batch_input_price` / `batch_output_price` | Deep discounts for work submitted to run off-peak, when the task isn't time-sensitive. Also not universal. |
 
 The caching and batch rows are the strongest argument for the composite key, not merely two more

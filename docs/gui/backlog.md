@@ -59,7 +59,16 @@ channel. `signalr-hub-security.md`'s section 2 (shared secret/token) is still th
 design for this, needing translation from a SignalR `AccessTokenProvider` to a gRPC interceptor/call
 credential, per that doc's own status banner.
 
-### 3. Anthropic Reported Usage section (per-provider card, enterprise accounts)
+### ✅ 3. Anthropic Reported Usage section (per-provider card, non-enterprise accounts)
+
+**Shipped** — see
+[`docs/router/anthropic-reported-usage-plan.md`](../router/anthropic-reported-usage-plan.md) for the
+implemented design. The Usage & Cost Admin API path described below remains blocked (still needs an
+org-level Admin API key with no sourcing mechanism today) and is deliberately **not** what shipped;
+the plan instead sources accurate usage from data the proxy already has on the wire - the Messages API
+`usage` object (parsed cache-aware) and the `anthropic-ratelimit-*` response headers - so no enterprise
+account or Admin key is required. The rest of this entry is kept for the enterprise-only Admin-API
+path, which remains a distinct, additive future feature that plan explicitly does not conflict with.
 
 Governance > Providers cards have no way to show Anthropic's own authoritative usage/cost
 numbers — the existing "Monthly Budget" section

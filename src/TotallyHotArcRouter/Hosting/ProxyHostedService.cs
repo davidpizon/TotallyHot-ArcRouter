@@ -39,7 +39,8 @@ namespace TotallyHot.ArcRouter.Hosting
             PriceCatalogOptions? priceCatalogOptions = null,
             ProviderBudgetStore? providerBudgetStore = null,
             ProviderEndpointScanner? endpointScanner = null,
-            ToolCallCapabilityStore? toolCallCapabilityStore = null)
+            ToolCallCapabilityStore? toolCallCapabilityStore = null,
+            PriceCatalogRepository? priceCatalogRepository = null)
         {
             _logger = logger;
             _proxyServer = new ProxyServer(
@@ -57,7 +58,8 @@ namespace TotallyHot.ArcRouter.Hosting
                 priceCatalogOptions,
                 providerBudgetStore,
                 endpointScanner,
-                toolCallCapabilityStore);
+                toolCallCapabilityStore,
+                priceCatalogRepository);
         }
 
         /// <summary>

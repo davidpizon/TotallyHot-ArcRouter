@@ -3,6 +3,7 @@
    injected ProviderAdminStore. *@
 @implements IDisposable
 @inject ProviderAdminStore Store
+@using System.Linq
 @using TotallyHot.ArcRouter.Gui.Admin
 
 <div class="h-full overflow-y-auto pr-1">
@@ -271,6 +272,49 @@
                             </div>
                         }
                     </div>
+
+                    @* Usage: two sub-blocks with different provenance - estimated cost/tokens from
+                       intercepted traffic (the cache-aware ledger) vs. the provider's own server-reported
+                       rate-limit headers - kept visually distinct so the card never conflates the two
+                       (docs/router/anthropic-reported-usage-plan.md §6). Anthropic- and OpenAI-typed
+                       providers only (docs/router/openai-format-usage-accuracy-plan.md §6.2 generalizes
+                       this beyond Anthropic); no IsEnterprise gate, since both data sources work for any
+                       non-enterprise account. *@
+                    @if (string.Equals(provider.ProviderType, "Anthropic", StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(provider.ProviderType, "OpenAI", StringComparison.OrdinalIgnoreCase))
+                    {
+                        <div class="mt-3 border-t border-slate-700/60 pt-2 space-y-2.5">
+                            <span class="text-xs text-slate-500 uppercase tracking-wider">@provider.ProviderType Usage</span>
+
+                            <div>
+                                <div class="text-[10px] text-slate-600 uppercase tracking-wider mb-1">Estimated from intercepted traffic</div>
+                                <div class="text-xs font-mono text-slate-400">
+                                    $@Money2(provider.DollarSpent) spent · @provider.TokensUsed.ToString("N0", CultureInfo.InvariantCulture) tokens used
+                                </div>
+                                <div class="text-[10px] text-slate-600 mt-0.5">@FormatLastRecorded(provider.UsageLastRecordedAtUtc)</div>
+                            </div>
+
+                            <div>
+                                <div class="text-[10px] text-slate-600 uppercase tracking-wider mb-1">Reported by @provider.ProviderType</div>
+                                @if (provider.RateLimit is { } rateLimit)
+                                {
+                                    @foreach (var (dimensionName, dimension) in rateLimit.Snapshot.StandardDimensions.OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
+                                    {
+                                        <div class="text-xs font-mono text-slate-400">@FormatDimension(dimensionName, dimension)</div>
+                                    }
+                                    @foreach (var (windowName, window) in rateLimit.Snapshot.UnifiedWindows.OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
+                                    {
+                                        <div class="text-xs font-mono text-slate-400">@FormatWindow(windowName, window)</div>
+                                    }
+                                    <div class="text-[10px] text-slate-600 mt-0.5">As of @FormatUtc(rateLimit.ObservedAtUtc)</div>
+                                }
+                                else
+                                {
+                                    <div class="text-xs text-slate-600">No rate-limit data observed yet</div>
+                                }
+                            </div>
+                        </div>
+                    }
                 </div>
             }
         </div>
@@ -577,6 +621,34 @@
             100m,
             [new DistributionSeries("Utilized", BarColor(pct), [value])]);
         return ChartJson.Serialize(model);
+    }
+
+    // Backend-stored timestamps only, never the GUI clock (docs/router/anthropic-reported-usage-plan.md
+    // Phase 3 test contract) - both footers below format a value the server already computed.
+    private static string FormatUtc(DateTimeOffset value) => value.ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture);
+
+    private static string FormatLastRecorded(DateTimeOffset? lastRecordedAtUtc) =>
+        lastRecordedAtUtc is { } value ? $"Last recorded {FormatUtc(value)}" : "No usage recorded yet";
+
+    // "requests" -> "Requests", "input-tokens" -> "Input tokens" - readable labels for the standard
+    // rate-limit family's dimension keys, which RateLimitSnapshotParser leaves as their raw header-segment
+    // names since interpretation is a display concern, not a parsing one.
+    private static string DimensionLabel(string dimensionName) =>
+        dimensionName[..1].ToUpperInvariant() + dimensionName[1..].Replace('-', ' ');
+
+    private static string FormatDimension(string dimensionName, RateLimitDimensionAdminView dimension)
+    {
+        var remaining = dimension.Remaining?.ToString("N0", CultureInfo.InvariantCulture) ?? "?";
+        var limit = dimension.Limit?.ToString("N0", CultureInfo.InvariantCulture) ?? "?";
+        var reset = dimension.ResetAt is { } resetAt ? $" · resets {FormatUtc(resetAt)}" : string.Empty;
+        return $"{DimensionLabel(dimensionName)}: {remaining} of {limit} remaining{reset}";
+    }
+
+    private static string FormatWindow(string windowName, RateLimitWindowAdminView window)
+    {
+        var status = window.Status ?? "unknown";
+        var reset = window.ResetAt is { } resetAt ? $" · resets {FormatUtc(resetAt)}" : string.Empty;
+        return $"{windowName} window: {status}{reset}";
     }
 
     private async Task SaveBudget(string key)

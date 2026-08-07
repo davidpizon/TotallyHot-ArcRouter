@@ -74,5 +74,17 @@ public class UsageExtractorTests
         Assert.Equal(3, usage.PromptTokens);
         Assert.Equal(4, usage.CompletionTokens);
     }
+
+    [Theory]
+    [InlineData("anthropic", true)]
+    [InlineData("Anthropic", true)]
+    [InlineData("ANTHROPIC", true)]
+    [InlineData("openai", false)]
+    [InlineData("gemini", false)]
+    [InlineData("ollama", false)]
+    public void SupportsNativeShape_OnlyAnthropicHasARegisteredNativeParser(string provider, bool expected)
+    {
+        Assert.Equal(expected, UsageExtractor.SupportsNativeShape(provider));
+    }
 }
 

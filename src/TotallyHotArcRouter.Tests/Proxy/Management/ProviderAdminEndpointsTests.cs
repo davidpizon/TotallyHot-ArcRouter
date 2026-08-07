@@ -535,7 +535,7 @@ public sealed class ProviderAdminEndpointsTests
             Assert.Equal(HttpStatusCode.OK, put.StatusCode);
 
             // Simulate a served request billing this provider, as ProxyMiddleware would post-response.
-            await budgetStore.RecordUsageAsync("openai", 12.50m, promptTokens: 300, completionTokens: 200, TestContext.Current.CancellationToken);
+            await budgetStore.RecordUsageAsync("openai", 12.50m, promptTokens: 300, completionTokens: 200, cacheCreationTokens: null, cacheReadTokens: null, usageAtUtc: DateTimeOffset.UtcNow, cancellationToken: TestContext.Current.CancellationToken);
 
             var get = await client.GetStringAsync($"{baseAddress}/admin/providers", TestContext.Current.CancellationToken);
             using var document = JsonDocument.Parse(get);

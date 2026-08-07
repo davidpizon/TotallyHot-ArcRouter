@@ -95,5 +95,64 @@ public class OpenAiUsageParserTests
 
         Assert.False(result);
     }
+
+    [Fact]
+    public void TryExtractFromNonStreamingBody_CachedTokens_NormalizedOutOfPromptTokens()
+    {
+        // OpenAI's cached_tokens is inclusive (a subset of prompt_tokens); UsageInfo is additive, so it
+        // must be subtracted back out rather than piled on top - docs/router/openai-format-usage-accuracy-plan.md §6.1.
+        const string json = """{"usage":{"prompt_tokens":100,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":80}}}""";
+
+        var result = OpenAiUsageParser.TryExtractFromNonStreamingBody(json, out var usage);
+
+        Assert.True(result);
+        Assert.Equal(20, usage.PromptTokens);
+        Assert.Equal(80, usage.CacheReadTokens);
+        Assert.Equal(0, usage.CacheCreationTokens);
+        Assert.Equal(100, usage.TotalInputTokens);
+    }
+
+    [Fact]
+    public void TryExtractFromNonStreamingBody_NoPromptTokensDetails_CacheFieldsDefaultToZero()
+    {
+        const string json = """{"usage":{"prompt_tokens":100,"completion_tokens":20}}""";
+
+        var result = OpenAiUsageParser.TryExtractFromNonStreamingBody(json, out var usage);
+
+        Assert.True(result);
+        Assert.Equal(100, usage.PromptTokens);
+        Assert.Equal(0, usage.CacheReadTokens);
+        Assert.Equal(0, usage.CacheCreationTokens);
+    }
+
+    [Fact]
+    public void TryExtractFromNonStreamingBody_EnrichedTranslatedAnthropicBody_ReadsCacheCreationExtensionField()
+    {
+        // The shape AnthropicPayloadTranslator.BuildEnrichedUsage emits for an OpenAI-format client
+        // routed to Anthropic (docs/router/openai-format-usage-accuracy-plan.md §5.1).
+        const string json = """
+            {"usage":{"prompt_tokens":130,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":80},"cache_creation_input_tokens":30,"cache_read_input_tokens":80}}
+            """;
+
+        var result = OpenAiUsageParser.TryExtractFromNonStreamingBody(json, out var usage);
+
+        Assert.True(result);
+        Assert.Equal(20, usage.PromptTokens);
+        Assert.Equal(30, usage.CacheCreationTokens);
+        Assert.Equal(80, usage.CacheReadTokens);
+        Assert.Equal(130, usage.TotalInputTokens);
+    }
+
+    [Fact]
+    public void TryExtractFromNonStreamingBody_MalformedCachedExceedsPrompt_ClampsToZeroRatherThanNegative()
+    {
+        const string json = """{"usage":{"prompt_tokens":10,"completion_tokens":1,"prompt_tokens_details":{"cached_tokens":999}}}""";
+
+        var result = OpenAiUsageParser.TryExtractFromNonStreamingBody(json, out var usage);
+
+        Assert.True(result);
+        Assert.Equal(0, usage.PromptTokens);
+        Assert.Equal(999, usage.CacheReadTokens);
+    }
 }
 

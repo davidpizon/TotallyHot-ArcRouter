@@ -35,9 +35,22 @@ public sealed record ProviderBudgetRow(string ProviderKey, decimal? DollarCap, l
 /// </summary>
 /// <param name="ProviderKey">The provider key.</param>
 /// <param name="CostUsd">Total estimated USD spent in the period.</param>
-/// <param name="PromptTokens">Total prompt tokens in the period.</param>
+/// <param name="PromptTokens">Total prompt tokens (raw, post-cache-breakpoint <c>input_tokens</c>) in the period.</param>
 /// <param name="CompletionTokens">Total completion tokens in the period.</param>
-public sealed record ProviderSpendRow(string ProviderKey, decimal CostUsd, long PromptTokens, long CompletionTokens);
+/// <param name="CacheCreationTokens">Total cache-creation (cache-write) input tokens in the period.</param>
+/// <param name="CacheReadTokens">Total cache-read input tokens in the period.</param>
+/// <param name="LastUsageAtUtc">
+/// The UTC instant the most recent usage in this period was recorded, or <see langword="null"/> if no
+/// usage has been recorded for this period yet.
+/// </param>
+public sealed record ProviderSpendRow(
+    string ProviderKey,
+    decimal CostUsd,
+    long PromptTokens,
+    long CompletionTokens,
+    long CacheCreationTokens = 0,
+    long CacheReadTokens = 0,
+    DateTimeOffset? LastUsageAtUtc = null);
 
 /// <summary>
 /// Thin ADO.NET wrapper over the price catalog tables. Reads and writes are keyed <c>(model, provider)</c>
@@ -341,7 +354,8 @@ public sealed class PriceCatalogRepository
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT provider_key, cost_usd, prompt_tokens, completion_tokens
+            SELECT provider_key, cost_usd, prompt_tokens, completion_tokens,
+                   cache_creation_tokens, cache_read_tokens, last_usage_at
             FROM provider_spend
             WHERE period = $period;
             """;
@@ -355,7 +369,10 @@ public sealed class PriceCatalogRepository
                 ProviderKey: reader.GetString(0),
                 CostUsd: decimal.Parse(reader.GetString(1), CultureInfo.InvariantCulture),
                 PromptTokens: reader.GetInt64(2),
-                CompletionTokens: reader.GetInt64(3)));
+                CompletionTokens: reader.GetInt64(3),
+                CacheCreationTokens: reader.GetInt64(4),
+                CacheReadTokens: reader.GetInt64(5),
+                LastUsageAtUtc: reader.IsDBNull(6) ? null : ParseTimestamp(reader.GetString(6))));
         }
 
         return rows;
@@ -365,8 +382,23 @@ public sealed class PriceCatalogRepository
     /// Adds one request's usage to a provider's spend for the given <c>YYYY-MM</c> <paramref name="period"/>,
     /// creating the period row on first use. The cost is accumulated as a true decimal via read-modify-write
     /// inside a transaction (not SQL float arithmetic) so a month of small per-request costs doesn't drift.
+    /// Cache token columns accumulate via SQL <c>+</c>, like <paramref name="promptTokens"/>/
+    /// <paramref name="completionTokens"/>. <paramref name="usageAtUtc"/> only ever advances the stored
+    /// <c>last_usage_at</c> (a SQL <c>MAX</c> against the existing value) rather than overwriting it
+    /// unconditionally, so an out-of-order call - concurrent requests completing in a different order than
+    /// they're recorded, a clock adjustment, delayed telemetry - can't move it backwards. Relies on
+    /// <see cref="TimestampFormat"/> being fixed-width, so lexicographic <c>TEXT</c> comparison agrees with
+    /// chronological order.
     /// </summary>
-    public void AddProviderSpend(string providerKey, string period, decimal costUsd, long promptTokens, long completionTokens)
+    public void AddProviderSpend(
+        string providerKey,
+        string period,
+        decimal costUsd,
+        long promptTokens,
+        long completionTokens,
+        long cacheCreationTokens,
+        long cacheReadTokens,
+        DateTimeOffset usageAtUtc)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
         ArgumentException.ThrowIfNullOrWhiteSpace(period);
@@ -391,18 +423,26 @@ public sealed class PriceCatalogRepository
         {
             upsert.Transaction = transaction;
             upsert.CommandText = """
-                INSERT INTO provider_spend (provider_key, period, cost_usd, prompt_tokens, completion_tokens)
-                VALUES ($key, $period, $cost, $prompt, $completion)
+                INSERT INTO provider_spend (
+                    provider_key, period, cost_usd, prompt_tokens, completion_tokens,
+                    cache_creation_tokens, cache_read_tokens, last_usage_at)
+                VALUES ($key, $period, $cost, $prompt, $completion, $cacheCreation, $cacheRead, $usageAt)
                 ON CONFLICT(provider_key, period) DO UPDATE SET
-                    cost_usd          = $cost,
-                    prompt_tokens     = prompt_tokens + excluded.prompt_tokens,
-                    completion_tokens = completion_tokens + excluded.completion_tokens;
+                    cost_usd              = $cost,
+                    prompt_tokens         = prompt_tokens + excluded.prompt_tokens,
+                    completion_tokens     = completion_tokens + excluded.completion_tokens,
+                    cache_creation_tokens = cache_creation_tokens + excluded.cache_creation_tokens,
+                    cache_read_tokens     = cache_read_tokens + excluded.cache_read_tokens,
+                    last_usage_at         = MAX(COALESCE(last_usage_at, ''), excluded.last_usage_at);
                 """;
             upsert.Parameters.AddWithValue("$key", providerKey);
             upsert.Parameters.AddWithValue("$period", period);
             upsert.Parameters.AddWithValue("$cost", (existingCost + costUsd).ToString(CultureInfo.InvariantCulture));
             upsert.Parameters.AddWithValue("$prompt", promptTokens);
             upsert.Parameters.AddWithValue("$completion", completionTokens);
+            upsert.Parameters.AddWithValue("$cacheCreation", cacheCreationTokens);
+            upsert.Parameters.AddWithValue("$cacheRead", cacheReadTokens);
+            upsert.Parameters.AddWithValue("$usageAt", usageAtUtc.UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture));
             upsert.ExecuteNonQuery();
         }
 
@@ -434,7 +474,8 @@ public sealed class PriceCatalogRepository
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT mp.standard_input_price, mp.standard_output_price
+            SELECT mp.standard_input_price, mp.standard_output_price,
+                   mp.cached_input_price, mp.cache_write_input_price
             FROM model_prices mp
             JOIN models            m ON m.model_id    = mp.model_id
             JOIN providers         p ON p.provider_id = mp.provider_id
@@ -454,7 +495,11 @@ public sealed class PriceCatalogRepository
             return null;
         }
 
-        return new ModelPrice(reader.GetDecimal(0), reader.GetDecimal(1));
+        return new ModelPrice(
+            reader.GetDecimal(0),
+            reader.GetDecimal(1),
+            reader.IsDBNull(2) ? null : reader.GetDecimal(2),
+            reader.IsDBNull(3) ? null : reader.GetDecimal(3));
     }
 
     /// <summary>
@@ -463,6 +508,15 @@ public sealed class PriceCatalogRepository
     /// </summary>
     private static string FormatCutoff(TimeSpan maxAge) =>
         (DateTimeOffset.UtcNow - maxAge).UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Parses a round-trip UTC timestamp written in <see cref="TimestampFormat"/> back into a
+    /// <see cref="DateTimeOffset"/>.
+    /// </summary>
+    private static DateTimeOffset ParseTimestamp(string value) =>
+        new(
+            DateTime.ParseExact(value, TimestampFormat, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal),
+            TimeSpan.Zero);
 
     /// <summary>
     /// Returns the id of the aggregator source row for <paramref name="sourceName"/>, inserting it with
@@ -583,20 +637,21 @@ public sealed class PriceCatalogRepository
         command.CommandText = """
             INSERT INTO model_prices (
                 model_id, provider_id, aggregator_source_id,
-                standard_input_price, standard_output_price, cached_input_price,
+                standard_input_price, standard_output_price, cached_input_price, cache_write_input_price,
                 batch_input_price, batch_output_price, last_updated_utc)
             VALUES (
                 $model, $provider, $source,
-                $stdIn, $stdOut, $cachedIn,
+                $stdIn, $stdOut, $cachedIn, $cacheWrite,
                 $batchIn, $batchOut, $updated)
             ON CONFLICT(model_id, provider_id) DO UPDATE SET
-                aggregator_source_id  = excluded.aggregator_source_id,
-                standard_input_price  = excluded.standard_input_price,
-                standard_output_price = excluded.standard_output_price,
-                cached_input_price    = excluded.cached_input_price,
-                batch_input_price     = excluded.batch_input_price,
-                batch_output_price    = excluded.batch_output_price,
-                last_updated_utc      = excluded.last_updated_utc
+                aggregator_source_id    = excluded.aggregator_source_id,
+                standard_input_price    = excluded.standard_input_price,
+                standard_output_price   = excluded.standard_output_price,
+                cached_input_price      = excluded.cached_input_price,
+                cache_write_input_price = excluded.cache_write_input_price,
+                batch_input_price       = excluded.batch_input_price,
+                batch_output_price      = excluded.batch_output_price,
+                last_updated_utc        = excluded.last_updated_utc
             WHERE (SELECT priority_score FROM aggregator_sources WHERE source_id = excluded.aggregator_source_id)
                   >= (SELECT priority_score FROM aggregator_sources WHERE source_id = model_prices.aggregator_source_id);
             """;
@@ -606,10 +661,144 @@ public sealed class PriceCatalogRepository
         command.Parameters.AddWithValue("$stdIn", (object?)price.StandardInputPrice ?? DBNull.Value);
         command.Parameters.AddWithValue("$stdOut", (object?)price.StandardOutputPrice ?? DBNull.Value);
         command.Parameters.AddWithValue("$cachedIn", (object?)price.CachedInputPrice ?? DBNull.Value);
+        command.Parameters.AddWithValue("$cacheWrite", (object?)price.CacheWriteInputPrice ?? DBNull.Value);
         command.Parameters.AddWithValue("$batchIn", (object?)price.BatchInputPrice ?? DBNull.Value);
         command.Parameters.AddWithValue("$batchOut", (object?)price.BatchOutputPrice ?? DBNull.Value);
         command.Parameters.AddWithValue("$updated", timestamp);
         return command.ExecuteNonQuery();
+    }
+
+    // Minute-bucketed history is pruned back to this window on every write (TokenTracker's bounded-growth
+    // lesson from the plan) - opportunistic, not a scheduled job, so an install that stops receiving
+    // rate-limit headers simply stops growing the table rather than needing a cleanup task.
+    private static readonly TimeSpan HistoryRetention = TimeSpan.FromDays(30);
+
+    /// <summary>
+    /// Upserts one provider's captured <c>anthropic-ratelimit-*</c> response headers into the latest-value
+    /// snapshot, and records at most one row per (provider, minute bucket, header) into the history table -
+    /// a second capture within the same minute for a header already recorded this minute is a no-op there,
+    /// enforced atomically by a unique index plus <c>INSERT ... ON CONFLICT DO NOTHING</c> so concurrent
+    /// captures can't race past a check-then-insert and both land a row. A no-op when
+    /// <paramref name="headers"/> is empty. Also prunes history rows older than 30 days.
+    /// </summary>
+    public void UpsertRateLimitHeaders(string providerKey, IReadOnlyList<RateLimitHeaderRow> headers, DateTimeOffset observedAtUtc)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
+        ArgumentNullException.ThrowIfNull(headers);
+
+        if (headers.Count == 0)
+        {
+            return;
+        }
+
+        var observedAt = observedAtUtc.UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture);
+        var minuteBucket = observedAtUtc.UtcDateTime.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+        var historyCutoff = (observedAtUtc - HistoryRetention).UtcDateTime.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+
+        using var connection = _database.OpenConnection();
+        using var transaction = connection.BeginTransaction();
+
+        foreach (var header in headers)
+        {
+            using (var snapshot = connection.CreateCommand())
+            {
+                snapshot.Transaction = transaction;
+                snapshot.CommandText = """
+                    INSERT INTO provider_rate_limit_snapshot (provider_key, header_name, header_value, observed_at)
+                    VALUES ($key, $name, $value, $observed)
+                    ON CONFLICT(provider_key, header_name) DO UPDATE SET
+                        header_value = excluded.header_value,
+                        observed_at  = excluded.observed_at;
+                    """;
+                snapshot.Parameters.AddWithValue("$key", providerKey);
+                snapshot.Parameters.AddWithValue("$name", header.HeaderName.ToLowerInvariant());
+                snapshot.Parameters.AddWithValue("$value", header.HeaderValue);
+                snapshot.Parameters.AddWithValue("$observed", observedAt);
+                snapshot.ExecuteNonQuery();
+            }
+
+            using (var insert = connection.CreateCommand())
+            {
+                insert.Transaction = transaction;
+                insert.CommandText = """
+                    INSERT INTO provider_rate_limit_history (provider_key, minute_bucket, header_name, header_value)
+                    VALUES ($key, $bucket, $name, $value)
+                    ON CONFLICT(provider_key, minute_bucket, header_name) DO NOTHING;
+                    """;
+                insert.Parameters.AddWithValue("$key", providerKey);
+                insert.Parameters.AddWithValue("$bucket", minuteBucket);
+                insert.Parameters.AddWithValue("$name", header.HeaderName.ToLowerInvariant());
+                insert.Parameters.AddWithValue("$value", header.HeaderValue);
+                insert.ExecuteNonQuery();
+            }
+        }
+
+        using (var prune = connection.CreateCommand())
+        {
+            prune.Transaction = transaction;
+            prune.CommandText = "DELETE FROM provider_rate_limit_history WHERE minute_bucket < $cutoff;";
+            prune.Parameters.AddWithValue("$cutoff", historyCutoff);
+            prune.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+    }
+
+    /// <summary>
+    /// Returns a provider's latest captured rate-limit header snapshot, along with the shared
+    /// <c>observed_at</c> of the capture that produced it. Returns an empty header list and a
+    /// <see langword="null"/> instant when no header has ever been captured for this provider.
+    /// </summary>
+    public (IReadOnlyList<RateLimitHeaderRow> Headers, DateTimeOffset? ObservedAtUtc) GetRateLimitSnapshot(string providerKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
+
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT header_name, header_value, observed_at
+            FROM provider_rate_limit_snapshot
+            WHERE provider_key = $key;
+            """;
+        command.Parameters.AddWithValue("$key", providerKey);
+
+        // Every header captured together in one UpsertRateLimitHeaders call shares the same observed_at.
+        // A header the provider stops sending keeps its old observed_at forever (nothing upserts it again),
+        // so buffering every row first and filtering to only the latest observed_at - rather than returning
+        // every row regardless of age - keeps the returned snapshot to headers from a single coherent
+        // capture instead of mixing in a stale one. That matters for headers like OpenAI's
+        // x-ratelimit-reset-*, a duration relative to the response that produced it, not to whatever the
+        // newest unrelated header happens to be.
+        var buffered = new List<(string Name, string Value, DateTimeOffset ObservedAt)>();
+        DateTimeOffset? latest = null;
+        using (var reader = command.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                var observedAt = ParseTimestamp(reader.GetString(2));
+                buffered.Add((reader.GetString(0), reader.GetString(1), observedAt));
+                if (latest is null || observedAt > latest)
+                {
+                    latest = observedAt;
+                }
+            }
+        }
+
+        if (latest is null)
+        {
+            return ([], null);
+        }
+
+        var rows = new List<RateLimitHeaderRow>();
+        foreach (var row in buffered)
+        {
+            if (row.ObservedAt == latest)
+            {
+                rows.Add(new RateLimitHeaderRow(row.Name, row.Value));
+            }
+        }
+
+        return (rows, latest);
     }
 }
 

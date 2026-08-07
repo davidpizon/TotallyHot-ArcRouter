@@ -54,7 +54,12 @@ public static class OpenAiUsageParser
     }
 
     /// <summary>
-    /// Attempts to read prompt and completion token counts from the "usage" object nested inside the given JSON container.
+    /// Attempts to read prompt and completion token counts from the "usage" object nested inside the given
+    /// JSON container, normalizing OpenAI's <b>inclusive</b> cache semantics into <see cref="UsageInfo"/>'s
+    /// additive (Anthropic-convention) model (<c>docs/router/openai-format-usage-accuracy-plan.md</c> §6.1):
+    /// <c>usage.prompt_tokens_details.cached_tokens</c> is a subset of <c>prompt_tokens</c>, so it (and, for
+    /// an enriched translated-Anthropic body, the <c>cache_creation_input_tokens</c> extension field) is
+    /// subtracted back out rather than added on top - naively adding it would double-count.
     /// </summary>
     private static bool TryExtractFromUsageContainer(JsonObject container, out UsageInfo usage)
     {
@@ -71,7 +76,21 @@ public static class OpenAiUsageParser
             return false;
         }
 
-        usage = new UsageInfo(promptTokens, completionTokens);
+        var cacheReadTokens = 0;
+        if (usageObj["prompt_tokens_details"] is JsonObject promptTokensDetails)
+        {
+            TryGetInt(promptTokensDetails, "cached_tokens", out cacheReadTokens);
+        }
+
+        // Only an enriched translated-Anthropic body (AnthropicPayloadTranslator.BuildEnrichedUsage) carries
+        // this extension field; absent for a real OpenAI response, which has no cache-write concept.
+        TryGetInt(usageObj, "cache_creation_input_tokens", out var cacheCreationTokens);
+
+        // Math.Max guards malformed input (cached_tokens exceeding prompt_tokens) rather than producing a
+        // negative additive prompt count.
+        var additivePromptTokens = Math.Max(0, promptTokens - cacheReadTokens - cacheCreationTokens);
+
+        usage = new UsageInfo(additivePromptTokens, completionTokens, cacheCreationTokens, cacheReadTokens);
         return true;
     }
 

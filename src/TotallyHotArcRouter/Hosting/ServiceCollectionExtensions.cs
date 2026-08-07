@@ -153,6 +153,10 @@ namespace TotallyHot.ArcRouter.Hosting
             // ProxyMiddleware depends only on the enforce+record slice (IBudgetEnforcer); map it to the same
             // singleton so the request path and the admin/cap surface share one store and one snapshot.
             services.AddSingleton<IBudgetEnforcer>(sp => sp.GetRequiredService<ProviderBudgetStore>());
+            // Captures upstream anthropic-ratelimit-* response headers (docs/router/anthropic-reported-usage-plan.md
+            // §5) into the same price-catalog database. Injected into ProxyMiddleware's optional
+            // rateLimitCapture constructor parameter.
+            services.AddSingleton<IRateLimitHeaderCapture, RateLimitHeaderCapture>();
             // Per-(provider, model) tool-call dialect capabilities (docs/router/tool-call-normalization.md
             // Phase 1). Shares agent_telemetry.db with the price catalog, so it has the same
             // empty-until-schema-ready lifecycle as the two stores above: StartupHealthCheckHostedService
@@ -175,6 +179,10 @@ namespace TotallyHot.ArcRouter.Hosting
             // (docs/router/tool-call-normalization.md §3.3). Registered before the facade so the container
             // injects it into the facade's optional constructor parameters.
             services.AddSingleton<ProviderEndpointScanner>();
+            // ManagementFacade's constructor resolves PriceCatalogRepository automatically (registered
+            // above) into its optional priceCatalogRepository parameter, so the Anthropic Usage card's
+            // rate-limit snapshot is available on this MCP-facing facade the same way it is on the REST one
+            // ProxyHostedService builds below.
             services.AddSingleton<ManagementFacade>();
 
             // MCP (Model Context Protocol) management endpoint - agent-facing access to the same
@@ -219,7 +227,8 @@ namespace TotallyHot.ArcRouter.Hosting
                     // Passed across for the same reason as the price-catalog singletons: the inner host has
                     // its own container, so the REST facade it builds cannot resolve these from this one.
                     endpointScanner: sp.GetRequiredService<ProviderEndpointScanner>(),
-                    toolCallCapabilityStore: sp.GetRequiredService<ToolCallCapabilityStore>());
+                    toolCallCapabilityStore: sp.GetRequiredService<ToolCallCapabilityStore>(),
+                    priceCatalogRepository: sp.GetRequiredService<PriceCatalogRepository>());
             });
 
             return services;
