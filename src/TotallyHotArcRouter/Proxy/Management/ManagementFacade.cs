@@ -674,17 +674,22 @@ public sealed class ManagementFacade
         }
 
         var now = DateTimeOffset.UtcNow;
+
+        // Aligned to a UTC day boundary, not just "now minus N" - UsageRollupStore.Summary reads whole
+        // P1D buckets keyed by bucket_start_utc, so an unaligned 'from' (e.g. now.AddDays(-1), which lands
+        // mid-day) would fall after yesterday's bucket start and exclude that fully-elapsed bucket entirely.
+        var todayStartUtc = new DateTimeOffset(now.Date, TimeSpan.Zero);
         DateTimeOffset from;
         switch (window)
         {
             case "day":
-                from = now.AddDays(-1);
+                from = todayStartUtc.AddDays(-1);
                 break;
             case "week":
-                from = now.AddDays(-7);
+                from = todayStartUtc.AddDays(-7);
                 break;
             case "month":
-                from = now.AddMonths(-1);
+                from = todayStartUtc.AddMonths(-1);
                 break;
             case "all":
                 from = DateTimeOffset.UnixEpoch;

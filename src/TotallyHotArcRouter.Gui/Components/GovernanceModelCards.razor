@@ -54,7 +54,7 @@
             await ProviderStore.LoadAsync();
         }
 
-        var to = DateTimeOffset.UtcNow;
+        var to = BucketAlignedTo();
         var from = to.AddDays(-30);
         var buckets = await UsageStore.LoadRollupAsync(from, to, "day", "model");
         BuildCards(buckets);
@@ -64,12 +64,18 @@
     {
         // A provider/model edit can add or remove cards; re-derive from whatever rollup data is already
         // cached (LoadRollupAsync serves the same range from UsageStore's cache) rather than re-fetching.
-        var to = DateTimeOffset.UtcNow;
+        var to = BucketAlignedTo();
         var from = to.AddDays(-30);
         var buckets = await UsageStore.LoadRollupAsync(from, to, "day", "model");
         BuildCards(buckets);
         StateHasChanged();
     });
+
+    // Start of the current UTC day, not DateTimeOffset.UtcNow - UsageStore's rollup cache key includes the
+    // exact 'to' instant, so a per-call UtcNow would miss the cache on every OnInitializedAsync/HandleChanged
+    // call within the same day (and every ProviderStore.Changed refresh). Buckets more recent than this
+    // boundary are still not fully elapsed anyway, so nothing is lost by not asking for them.
+    private static DateTimeOffset BucketAlignedTo() => new(DateTimeOffset.UtcNow.Date, TimeSpan.Zero);
 
     private void BuildCards(IReadOnlyList<UsageRollupBucketView> buckets)
     {

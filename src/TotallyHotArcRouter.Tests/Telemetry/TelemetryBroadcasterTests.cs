@@ -117,6 +117,8 @@ public class TelemetryBroadcasterTests
         Assert.Equal(telemetryEvent.RequestSummary, wire.RequestSummary);
         Assert.True(wire.HasResponseSummary);
         Assert.Equal(telemetryEvent.ResponseSummary, wire.ResponseSummary);
+        Assert.True(wire.HasCostConfidence);
+        Assert.Equal(telemetryEvent.CostConfidence.ToString(), wire.CostConfidence);
     }
 
     [Fact]
@@ -145,6 +147,12 @@ public class TelemetryBroadcasterTests
         Assert.False(wire.HasEstimatedCostUsd);
         Assert.False(wire.HasRequestSummary);
         Assert.False(wire.HasResponseSummary);
+
+        // CostConfidence is a non-nullable enum on the source event (defaults to Unknown), so
+        // TelemetryBroadcaster.ToWire always sets it - unlike the fields above, its absence here isn't
+        // a "not set" case to assert.
+        Assert.True(wire.HasCostConfidence);
+        Assert.Equal(CostConfidence.Unknown.ToString(), wire.CostConfidence);
     }
 
     [Fact]
