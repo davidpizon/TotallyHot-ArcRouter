@@ -28,6 +28,7 @@ public sealed class CostReconciliationHostedService : BackgroundService
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(reconciliationService);
         ArgumentNullException.ThrowIfNull(options);
+        options.Value.EnsureValid();
 
         _logger = logger;
         _reconciliationService = reconciliationService;

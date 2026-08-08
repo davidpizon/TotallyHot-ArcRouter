@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Options;
+
 namespace TotallyHot.ArcRouter.Telemetry;
 
 /// <summary>
@@ -11,6 +13,23 @@ public sealed class CostReconciliationOptions
 
     /// <summary>Gets how often the background poll loop runs a reconciliation cycle. Default 1 hour.</summary>
     public int PollIntervalHours { get; init; } = 1;
+
+    /// <summary>
+    /// Performs domain-level validation that is not fully expressible through data annotations, mirroring
+    /// <see cref="TotallyHot.ArcRouter.Models.CircuitBreakerOptions.EnsureValid"/>'s eager-validation pattern -
+    /// fail at startup, not when <see cref="System.Threading.PeriodicTimer"/> rejects a non-positive period.
+    /// </summary>
+    /// <exception cref="OptionsValidationException">Thrown when <see cref="PollIntervalHours"/> is not positive.</exception>
+    public void EnsureValid()
+    {
+        if (PollIntervalHours < 1)
+        {
+            throw new OptionsValidationException(
+                nameof(CostReconciliationOptions),
+                typeof(CostReconciliationOptions),
+                [$"PollIntervalHours must be at least 1 (was {PollIntervalHours})."]);
+        }
+    }
 
     /// <summary>
     /// Gets the percentage difference between a provider's reported cost and the local estimate above
