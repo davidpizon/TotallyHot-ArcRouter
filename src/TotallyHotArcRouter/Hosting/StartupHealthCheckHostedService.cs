@@ -143,14 +143,26 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         // and log-only, like every check above - a sweep failure must never block startup.
         try
         {
-            var cutoff = DateTimeOffset.UtcNow - TimeSpan.FromDays(_storageOptions.UsageLedgerRetentionDays);
-            var deleted = _usageLedger.DeleteOlderThan(cutoff);
-            if (deleted > 0)
+            // A misconfigured 0 or negative value would put the cutoff at or after "now", turning this
+            // destructive startup sweep into "delete the entire ledger" - skip rather than silently wiping
+            // out durable usage history over a config mistake.
+            if (_storageOptions.UsageLedgerRetentionDays <= 0)
             {
-                _logger.LogInformation(
-                    "Usage-ledger retention sweep deleted {DeletedRows} row(s) older than {RetentionDays} days.",
-                    deleted,
+                _logger.LogWarning(
+                    "Skipping the usage-ledger retention sweep: Storage:UsageLedgerRetentionDays is {RetentionDays}, must be positive.",
                     _storageOptions.UsageLedgerRetentionDays);
+            }
+            else
+            {
+                var cutoff = DateTimeOffset.UtcNow - TimeSpan.FromDays(_storageOptions.UsageLedgerRetentionDays);
+                var deleted = _usageLedger.DeleteOlderThan(cutoff);
+                if (deleted > 0)
+                {
+                    _logger.LogInformation(
+                        "Usage-ledger retention sweep deleted {DeletedRows} row(s) older than {RetentionDays} days.",
+                        deleted,
+                        _storageOptions.UsageLedgerRetentionDays);
+                }
             }
         }
         catch (Exception ex)

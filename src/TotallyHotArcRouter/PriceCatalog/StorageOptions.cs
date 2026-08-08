@@ -34,12 +34,16 @@ public sealed class StorageOptions
     public int UsageLedgerRetentionDays { get; init; } = 370;
 
     /// <summary>
-    /// Gets the IANA timezone id <c>usage_rollup</c> bucket boundaries are computed in. Read once, on the
-    /// first run that ever creates a rollup bucket, and pinned into <c>rollup_metadata</c> from then on
-    /// (tokscale's reproducible-bucket rule - see <c>IUsageRollupStore</c>): changing this afterward has no
-    /// effect until the database is recreated, since re-cutting historical buckets would make two reports
-    /// generated a month apart over the same past day disagree. Defaults to UTC, since the proxy is
-    /// typically a headless service with no single "operator's local day" to prefer.
+    /// Gets the timezone id <c>usage_rollup</c> bucket boundaries are computed in, resolved via
+    /// <see cref="TimeZoneInfo.FindSystemTimeZoneById"/> - an IANA id (<c>"America/Los_Angeles"</c>) on
+    /// .NET's ICU-backed globalization (the default on every platform this project targets, including
+    /// Windows). An id that can't be resolved on the host falls back to UTC with a logged warning rather
+    /// than failing startup - see <c>UsageRollupStore.ResolveTimeZone</c>. Read once, on the first run that
+    /// ever creates a rollup bucket, and pinned into <c>rollup_metadata</c> from then on (tokscale's
+    /// reproducible-bucket rule - see <c>IUsageRollupStore</c>): changing this afterward has no effect until
+    /// the database is recreated, since re-cutting historical buckets would make two reports generated a
+    /// month apart over the same past day disagree. Defaults to UTC, since the proxy is typically a
+    /// headless service with no single "operator's local day" to prefer.
     /// </summary>
     public string RollupTimezone { get; init; } = "UTC";
 

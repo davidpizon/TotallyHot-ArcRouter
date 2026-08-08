@@ -53,6 +53,41 @@ public class StartupHealthCheckHostedServiceTests
         Assert.Equal(1, CountRows(temp, "recent"));
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public async Task StartAsync_NonPositiveRetentionDays_SkipsSweepInsteadOfDeletingEverything(int retentionDays)
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+        var ledger = temp.CreateUsageLedger();
+
+        var now = DateTimeOffset.UtcNow;
+        await ledger.RecordAsync(MakeEntry("recent", now.AddDays(-1)), TestContext.Current.CancellationToken);
+
+        var registry = Mock.Of<IPriceSourceRegistry>(r => r.EnabledClients == Array.Empty<IPriceSourceClient>());
+        var ingestionService = new PriceCatalogIngestionService(
+            registry, repository, temp.CreateToggleStore(repository), NullLogger<PriceCatalogIngestionService>.Instance);
+
+        var service = new StartupHealthCheckHostedService(
+            NullLogger<StartupHealthCheckHostedService>.Instance,
+            temp.Database,
+            repository,
+            ingestionService,
+            temp.CreateToggleStore(repository),
+            temp.CreateBudgetStore(repository),
+            temp.CreateToolCallCapabilityStore(),
+            ledger,
+            temp.CreateRollupStore(),
+            Options.Create(new StorageOptions { UsageLedgerRetentionDays = retentionDays }));
+
+        await service.StartAsync(TestContext.Current.CancellationToken);
+
+        // A 0/negative retention window must never be treated as "cutoff = now", which would wipe out
+        // every row instead of leaving the ledger untouched.
+        Assert.Equal(1, CountRows(temp, "recent"));
+    }
+
     private static UsageLedgerEntry MakeEntry(string requestId, DateTimeOffset occurredAtUtc) =>
         new(
             SessionId: "sess-" + requestId,

@@ -219,20 +219,20 @@ public sealed class ProviderAdminStore
     /// <summary>Adds or replaces a price override, then publishes the updated override list.</summary>
     /// <exception cref="ProviderAdminException">The edit was rejected (e.g. an unconfigured model) or the request failed.</exception>
     public Task SetPriceOverrideAsync(PriceOverrideWriteRequest body, CancellationToken cancellationToken = default) =>
-        MutatePriceOverridesAsync(() => _client.SetPriceOverrideAsync(body, cancellationToken));
+        MutatePriceOverridesAsync(() => _client.SetPriceOverrideAsync(body, cancellationToken), cancellationToken);
 
     /// <summary>Removes a price override, then publishes the updated override list.</summary>
     /// <exception cref="ProviderAdminException">No override matched, or the request failed.</exception>
     public Task RemovePriceOverrideAsync(string sourceName, string aggregatorModelKey, CancellationToken cancellationToken = default) =>
-        MutatePriceOverridesAsync(() => _client.RemovePriceOverrideAsync(sourceName, aggregatorModelKey, cancellationToken));
+        MutatePriceOverridesAsync(() => _client.RemovePriceOverrideAsync(sourceName, aggregatorModelKey, cancellationToken), cancellationToken);
 
-    private async Task MutatePriceOverridesAsync(Func<Task<IReadOnlyList<PriceOverrideView>>> mutation)
+    private async Task MutatePriceOverridesAsync(Func<Task<IReadOnlyList<PriceOverrideView>>> mutation, CancellationToken cancellationToken)
     {
         PriceOverrides = await mutation();
         // An override can change whether a model resolves (or whether the resolved price is approximate),
         // so the diagnosis view has to be refreshed alongside the override list itself, not just on the
         // next explicit LoadPriceOverridesAsync call.
-        PriceResolutionDiagnosis = await _client.GetPriceResolutionDiagnosisAsync();
+        PriceResolutionDiagnosis = await _client.GetPriceResolutionDiagnosisAsync(cancellationToken);
         IsReachable = true;
         LastError = null;
         Changed?.Invoke();
