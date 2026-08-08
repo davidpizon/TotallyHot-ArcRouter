@@ -78,8 +78,25 @@ public static class UsageAdminEndpoints
         return endpoints;
     }
 
+    // Exact ISO 8601 shapes only, not DateTimeOffset.TryParse's general (culture-permissive, locale-shape)
+    // parsing - the 400 error message promises "a valid ISO 8601 instant", and TryParse alone would silently
+    // accept many non-ISO formats too. UsageQueryClient.GetRollupAsync always sends the round-trip ("O")
+    // format; the other two cover the common no-fractional/millisecond ISO instant shapes other callers of
+    // this REST endpoint might reasonably send.
+    private static readonly string[] IsoInstantFormats =
+    [
+        "yyyy-MM-ddTHH:mm:ss.fffffffK",
+        "yyyy-MM-ddTHH:mm:ss.fffK",
+        "yyyy-MM-ddTHH:mm:ssK",
+    ];
+
     private static bool TryParseInstant(string? value, out DateTimeOffset instant) =>
-        DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out instant);
+        DateTimeOffset.TryParseExact(
+            value,
+            IsoInstantFormats,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+            out instant);
 
     private static IResult ToResult<T>(ManagementResult<T> result) =>
         result.Success

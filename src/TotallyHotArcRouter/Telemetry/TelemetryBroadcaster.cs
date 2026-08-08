@@ -162,7 +162,8 @@ public sealed class TelemetryBroadcaster
         }
 
         // Always set, unlike the nullable fields above: CostConfidence is a non-nullable enum on the C#
-        // side (defaulting to Unknown), so there is always a value to encode.
+        // side - RoutingTelemetryEvent's constructor defaults it to Unknown when the caller omits it - so
+        // there is always a value to encode.
         wire.CostConfidence = e.CostConfidence.ToString();
 
         return wire;
