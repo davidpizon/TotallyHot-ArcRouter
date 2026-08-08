@@ -62,20 +62,30 @@ public sealed class UsageLedger : IUsageLedger
     private static readonly TimeSpan FutureClockTolerance = TimeSpan.FromMinutes(5);
 
     private readonly PriceCatalogDatabase _database;
+    private readonly IUsageRollupStore? _rollupStore;
     private readonly ILogger<UsageLedger>? _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="UsageLedger"/> class.
     /// </summary>
-    public UsageLedger(PriceCatalogDatabase database, ILogger<UsageLedger>? logger = null)
+    /// <param name="database">The shared price-catalog database this ledger's table lives in.</param>
+    /// <param name="rollupStore">
+    /// The Phase 4 rollup maintainer to roll a freshly recorded entry into <c>usage_rollup</c>
+    /// ("increment the current bucket" - §5.3). Optional and defaults to <see langword="null"/> so every
+    /// existing caller/test that constructs a ledger without one keeps compiling; when absent, entries are
+    /// still durably recorded but rollups only catch up on the next startup backfill.
+    /// </param>
+    /// <param name="logger">Optional logger.</param>
+    public UsageLedger(PriceCatalogDatabase database, IUsageRollupStore? rollupStore = null, ILogger<UsageLedger>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(database);
         _database = database;
+        _rollupStore = rollupStore;
         _logger = logger;
     }
 
     /// <inheritdoc />
-    public Task RecordAsync(UsageLedgerEntry entry, CancellationToken cancellationToken = default)
+    public async Task RecordAsync(UsageLedgerEntry entry, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entry);
 
@@ -85,7 +95,7 @@ public sealed class UsageLedger : IUsageLedger
             // observe it). Recording is a best-effort post-response side-effect, so a cancellation here is
             // expected, not an error - mirrors ProviderBudgetStore.RecordUsageAsync's OperationCanceledException
             // handling.
-            return Task.CompletedTask;
+            return;
         }
 
         if (!TryValidate(entry, out var rejectionReason))
@@ -95,9 +105,10 @@ public sealed class UsageLedger : IUsageLedger
                 SanitizeForLog(entry.SessionId),
                 entry.TurnNumber,
                 rejectionReason);
-            return Task.CompletedTask;
+            return;
         }
 
+        var inserted = false;
         try
         {
             var dedupKey = BuildDedupKey(entry);
@@ -131,7 +142,10 @@ public sealed class UsageLedger : IUsageLedger
                 entry.EstimatedCostUsd is { } cost ? cost.ToString(CultureInfo.InvariantCulture) : (object)DBNull.Value);
             command.Parameters.AddWithValue("$costConfidence", entry.CostConfidence);
             command.Parameters.AddWithValue("$occurredAt", occurredAt);
-            command.ExecuteNonQuery();
+
+            // A DO NOTHING conflict returns 0 rows affected, distinguishing a fresh row (roll it into
+            // usage_rollup) from a replay of an already-recorded request (already rolled up the first time).
+            inserted = command.ExecuteNonQuery() > 0;
         }
         catch (Exception ex)
         {
@@ -140,9 +154,15 @@ public sealed class UsageLedger : IUsageLedger
                 "Failed to record usage-ledger entry for session {SessionId} turn {TurnNumber}.",
                 SanitizeForLog(entry.SessionId),
                 entry.TurnNumber);
+            return;
         }
 
-        return Task.CompletedTask;
+        if (inserted && _rollupStore is not null)
+        {
+            // Best-effort and self-contained: RollForwardAsync already logs and swallows its own failures,
+            // so a rollup hiccup never turns a successful ledger write into a warning about the write itself.
+            await _rollupStore.RollForwardAsync(CancellationToken.None).ConfigureAwait(false);
+        }
     }
 
     /// <inheritdoc />

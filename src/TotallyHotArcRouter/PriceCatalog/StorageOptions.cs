@@ -33,6 +33,16 @@ public sealed class StorageOptions
     /// </summary>
     public int UsageLedgerRetentionDays { get; init; } = 370;
 
+    /// <summary>
+    /// Gets the IANA timezone id <c>usage_rollup</c> bucket boundaries are computed in. Read once, on the
+    /// first run that ever creates a rollup bucket, and pinned into <c>rollup_metadata</c> from then on
+    /// (tokscale's reproducible-bucket rule - see <c>IUsageRollupStore</c>): changing this afterward has no
+    /// effect until the database is recreated, since re-cutting historical buckets would make two reports
+    /// generated a month apart over the same past day disagree. Defaults to UTC, since the proxy is
+    /// typically a headless service with no single "operator's local day" to prefer.
+    /// </summary>
+    public string RollupTimezone { get; init; } = "UTC";
+
     // The default's leading token. On non-Windows hosts (the project's Docker default is Linux)
     // LOCALAPPDATA is typically unset, so Environment.ExpandEnvironmentVariables leaves it literal.
     private const string LocalAppDataToken = "%LOCALAPPDATA%";

@@ -7,19 +7,19 @@ using FluentAssertions;
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
 /// <summary>
-/// Tests for <see cref="Governance"/> after budgets moved onto each provider's card: the tab is now just a
-/// two-way toggle between the <see cref="ProvidersAdmin"/> and <see cref="PriceSourcesAdmin"/> sub-views
-/// (Providers is the default). Those sub-views' own behavior is covered by
-/// <see cref="ProvidersAdminTests"/> and <see cref="PriceSourcesAdminTests"/>; here they're only
-/// smoke-tested via the toggle.
+/// Tests for <see cref="Governance"/>: a sub-view toggle between <see cref="ProvidersAdmin"/>,
+/// <see cref="GovernanceModelCards"/>, <see cref="PriceSourcesAdmin"/>, and <c>PriceOverridesAdmin</c>
+/// (Providers is the default). Each sub-view's own behavior is covered by its own test file; here they're
+/// only smoke-tested via the toggle.
 /// </summary>
 public sealed class GovernanceTests
 {
     private static Bunit.BunitContext NewContext()
     {
         var ctx = new Bunit.BunitContext();
-        // Both sub-views point at unreachable addresses - these tests only need each to mount.
+        // Every sub-view points at an unreachable address - these tests only need each to mount.
         ctx.Services.AddSingleton(new ProviderAdminStore(managementAddress: "http://127.0.0.1:59994"));
+        ctx.Services.AddSingleton(new UsageStore(managementAddress: "http://127.0.0.1:59989"));
         ctx.Services.AddSingleton(new PriceSourceStore(new StubPriceSourceAdminClient()));
         return ctx;
     }
@@ -47,9 +47,20 @@ public sealed class GovernanceTests
 
         var cut = ctx.Render<Governance>();
 
-        // The toggle offers exactly the two remaining views, and Providers (ProvidersAdmin) is mounted first.
-        cut.FindAll("button").Select(b => b.TextContent.Trim()).Should().Contain(["Providers", "Price Sources"]);
+        // The toggle offers every sub-view, and Providers (ProvidersAdmin) is mounted first.
+        cut.FindAll("button").Select(b => b.TextContent.Trim()).Should().Contain(["Providers", "Models", "Price Sources"]);
         cut.Markup.Should().Contain("Loading providers");
+    }
+
+    [Fact]
+    public void Switching_to_the_models_sub_view_renders_GovernanceModelCards()
+    {
+        using var ctx = NewContext();
+
+        var cut = ctx.Render<Governance>();
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Models").Click();
+
+        cut.Markup.Should().Contain("Loading");
     }
 
     [Fact]

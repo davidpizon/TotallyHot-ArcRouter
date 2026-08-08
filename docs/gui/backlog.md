@@ -17,32 +17,41 @@ rate, Model Distribution, the header ticker, functional time filters) are schedu
 data sources in
 [`../router/token-tracking-implementation-plan.md`](../router/token-tracking-implementation-plan.md):
 
-- **Cost Analytics — real values behind the metric explorer.** The tab is now a metric explorer
-  (see "Recently completed" below) that renders live turns merged with a mock history corpus. Cache
-  Hit Rate is now live for real turns (`RoutingTelemetryEvent.CacheCreationTokens`/`CacheReadTokens`
-  → `LiveConversationMapper` → `CostChartBuilder.CacheHitRate`, see `../router/telemetry.md`); the
-  mock history corpus underneath it is still mock. Three of the seven metrics still have **no live
-  source** and are populated by mock history only: Routing ROI (needs a "worst case" baseline cost
-  that `ModelRouteResolver` doesn't compute today — the same gap that keeps per-turn `RoutingRoi` at
-  0), Tool Steps, and Context Buffer. Wiring these means adding the corresponding fields to
-  `RoutingTelemetryEvent`/the proto and the mapper chain (see the field table in
-  `../router/telemetry.md`).
-- **Model Distribution** — real `TokenBucket`/`ModelShare` data. The Day/Month/3-Month/6-Month/Year
-  time-range filter bar and the From/To date inputs are currently **cosmetic only** — they don't
-  refilter the charts — and only become meaningful once there's real time-series data to filter.
+- **Cost Analytics — real values behind the metric explorer.** The tab is a metric explorer (see
+  "Recently completed" below) whose corpus is now real, rollup-backed history
+  (`UsageStore.LoadRollupAsync`, Phase 4 §5.15) merged with live turns — it survives a GUI restart —
+  falling back to the mock corpus only when there is neither (§5.15's exit criterion). Cache Hit Rate
+  is live for real turns (`RoutingTelemetryEvent.CacheCreationTokens`/`CacheReadTokens` →
+  `LiveConversationMapper` → `CostChartBuilder.CacheHitRate`, see `../router/telemetry.md`). Three of
+  the seven metrics still have **no live source** and are populated by mock history only when it's
+  in use: Routing ROI (needs a "worst case" baseline cost that `ModelRouteResolver` doesn't compute
+  today — the same gap that keeps per-turn `RoutingRoi` at 0), Tool Steps, and Context Buffer — the
+  rollup table has no per-turn breakdown for these dimensions. Wiring these live means adding the
+  corresponding fields to `RoutingTelemetryEvent`/the proto and the mapper chain (see the field table
+  in `../router/telemetry.md`).
+- ~~**Model Distribution** — real `TokenBucket`/`ModelShare` data.~~ **Done** (Phase 4 §5.15):
+  `ModelDistribution.razor` fetches real buckets via `UsageStore.LoadRollupAsync`, grouped by day for
+  the histogram and by model for the donut; the Day/Month/3-Month/6-Month/Year filter bar and the
+  From/To inputs now actually refilter, falling back to `MockData` only when there's nothing live to
+  show.
 - **Governance** — real per-provider budget/spend data. The Budget Cap input is editable today but
   purely client-side: edits recompute the in-memory utilization/status/bar but aren't persisted
   anywhere and are lost on refresh; needs a real place to write to. See
   [`../router/agent-cost-tracking.md`](../router/agent-cost-tracking.md) for a proposed persistent
-  usage ledger + budget-window query that would be that "real place," and
-  [`governance-model-cards.md`](governance-model-cards.md) for a proposed *new* per-model
-  pricing/spend section (config-driven, separate from the existing per-provider cap cards) built on
-  top of that ledger.
-- **Header ticker** (Total Saved / System Tokens / Avg. Cost Reduction) — still three hardcoded
-  numbers, not derived from `LiveDataStore.Conversations` at all.
-- **Dynamic chart axis ranges** — axis scales (e.g. the $0–$160 savings scale, the 0–6M token
-  scale) are currently pinned to fit the mock data's known range; need to become dynamic once real
-  data volume varies.
+  usage ledger + budget-window query that would be that "real place." A first cut of
+  [`governance-model-cards.md`](governance-model-cards.md)'s per-model pricing/spend section now
+  exists (Governance > Models) with real spend from `UsageStore`, but every card still reads "Price
+  unavailable" — that doc's dependency #1, a live model price catalog channel to the GUI, is still
+  unbuilt, so the price half of the card is not yet done.
+- ~~**Header ticker** (Total Saved / System Tokens / Avg. Cost Reduction) — still three hardcoded
+  numbers~~. **Partially done** (Phase 4 §5.15): System Tokens is now real, from
+  `UsageStore.LoadSummaryAsync("all")`. Total Saved and Avg. Cost Reduction stay mock and are now
+  labeled "(demo)" — they need a worst-case-baseline ROI concept the token-tracking plan deliberately
+  didn't invent (same gap as Cost Analytics' Routing ROI metric above).
+- ~~**Dynamic chart axis ranges**~~ **Done** for Model Distribution's token histogram
+  (`GroupedBarsModel.DynamicYMax`, Phase 4 §5.15) — computed from the actual data with headroom
+  instead of a hardcoded 6M ceiling. The $0–$160 Cost Analytics savings scale is unaffected (that
+  chart is unrelated to this plan) and remains pinned to the mock data's range.
 - **Settings modal actions** — Reset Stats / Clear History currently just close the modal with no
   effect; they need real actions once there's real state to reset or clear.
 - **Configurable telemetry server address** — `Services/LiveDataStore.cs` hardcodes

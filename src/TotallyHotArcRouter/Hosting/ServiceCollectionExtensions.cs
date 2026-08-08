@@ -165,6 +165,13 @@ namespace TotallyHot.ArcRouter.Hosting
             // §5) into the same price-catalog database. Injected into ProxyMiddleware's optional
             // rateLimitCapture constructor parameter.
             services.AddSingleton<IRateLimitHeaderCapture, RateLimitHeaderCapture>();
+            // The Phase 4 rollup maintainer (docs/router/token-tracking-implementation-plan.md §5.3),
+            // sharing agent_telemetry.db with the ledger it rolls up. Registered before IUsageLedger so the
+            // container injects it into UsageLedger's optional rollupStore constructor parameter (DI
+            // resolution order is independent of registration order, but the sequence here keeps the two
+            // reads next to each other). StartupHealthCheckHostedService pins the bucket timezone and runs
+            // the startup backfill against this same singleton.
+            services.AddSingleton<IUsageRollupStore, UsageRollupStore>();
             // The durable usage ledger (docs/router/token-tracking-implementation-plan.md Phase 2), sharing
             // agent_telemetry.db with the rest of the price catalog. Injected into ProxyMiddleware's optional
             // usageLedger constructor parameter and into PersistentConversationTurnTracker above (registered
@@ -242,7 +249,8 @@ namespace TotallyHot.ArcRouter.Hosting
                     endpointScanner: sp.GetRequiredService<ProviderEndpointScanner>(),
                     toolCallCapabilityStore: sp.GetRequiredService<ToolCallCapabilityStore>(),
                     priceCatalogRepository: sp.GetRequiredService<PriceCatalogRepository>(),
-                    modelAliasOverrideStore: sp.GetRequiredService<ModelAliasOverrideStore>());
+                    modelAliasOverrideStore: sp.GetRequiredService<ModelAliasOverrideStore>(),
+                    usageRollupStore: sp.GetRequiredService<IUsageRollupStore>());
             });
 
             return services;

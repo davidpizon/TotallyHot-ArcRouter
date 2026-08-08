@@ -193,10 +193,22 @@ the ladder, displays as approximate, and an operator override corrects it live w
 
 ---
 
-## Phase 4 — Rollups, budget windows, the query surface, and the rollup GUI (§5.3, §5.10, §5.15)
+## Phase 4 — Rollups, budget windows, the query surface, and the rollup GUI (§5.3, §5.10, §5.15) — **Implemented**
 
 The phase an operator actually notices: history becomes queryable, and Model Distribution stops
 being a mock.
+
+> **Implementation notes (deviations from the sketch above):** the Governance per-model cards land as
+> a new "Models" sub-view (Governance > Models) rather than a second section stacked under the
+> existing provider cards, and read spend via the `/admin/usage` REST surface this phase builds
+> rather than `governance-model-cards.md`'s older gRPC-RPC sketch — that doc's dependency #1 (a live
+> model price catalog channel to the GUI) is still unbuilt, so every card reads "Price unavailable"
+> rather than a real price; only the spend half is live. The budget-window "resets in" text and a
+> window-kind selector are exposed via `ProviderView.WindowKind`/`NextResetUtc` and
+> `SetBudget`'s optional window parameters, but the Governance budget editor itself does not yet
+> expose a window-kind picker in the UI (windows can be set via the REST API; the default `Monthly`
+> UI editor is unchanged). Item 7's Total Saved / Avg. Cost Reduction ticker tiles are labeled
+> "(demo)" per their stated scoping.
 
 **Rollups (§5.3)**
 

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Linq;
 
 namespace TotallyHot.ArcRouter.Gui.Charts;
 
@@ -26,6 +27,22 @@ public sealed record GroupedBarsModel(
     public GroupedBarsModel(string title, IReadOnlyList<string> categories, decimal? yMax, IReadOnlyList<DistributionSeries> series)
         : this("GroupedBars", title, categories, yMax, series)
     {
+    }
+
+    /// <summary>
+    /// Computes a y-axis maximum with headroom above the largest value across every series, or
+    /// <see langword="null"/> when there is no positive data - the ECharts renderer auto-scales the axis
+    /// in that case (see <c>echarts-interop.js</c>'s <c>m.yMax || null</c>). Replaces a chart-specific
+    /// hardcoded maximum with one derived from whatever data is actually being rendered, so the axis stays
+    /// meaningful as real traffic volume grows or shrinks instead of staying pinned to a value chosen for
+    /// mock data.
+    /// </summary>
+    /// <param name="series">Every series' data that will share this axis.</param>
+    /// <param name="headroomMultiplier">How much larger than the largest value the axis maximum should be.</param>
+    public static decimal? DynamicYMax(IEnumerable<IReadOnlyList<decimal>> series, decimal headroomMultiplier = 1.1m)
+    {
+        var max = series.SelectMany(s => s).DefaultIfEmpty(0m).Max();
+        return max <= 0m ? null : Math.Ceiling(max * headroomMultiplier);
     }
 }
 

@@ -128,7 +128,12 @@ namespace TotallyHot.ArcRouter.Proxy
         /// <c>PUT/DELETE /admin/price-overrides</c> (§5.7) is available. Defaults to <see langword="null"/>,
         /// in which case those endpoints answer <see cref="Management.ManagementErrorType.Unavailable"/>.
         /// </param>
-        public ProxyServer(ILogger<ProxyServer> logger, ProxyMiddleware proxyMiddleware, int port = 5001, TelemetryBroadcaster? telemetryBroadcaster = null, int grpcPort = DefaultGrpcPort, IProviderConfigStore? providerConfigStore = null, IEnvironmentVariableProvider? environment = null, HttpClient? managementHttpClient = null, string? managementToken = null, PriceSourceToggleStore? priceSourceToggleStore = null, PriceCatalogIngestionService? priceCatalogIngestionService = null, PriceCatalogOptions? priceCatalogOptions = null, ProviderBudgetStore? providerBudgetStore = null, ProviderEndpointScanner? endpointScanner = null, ToolCallCapabilityStore? toolCallCapabilityStore = null, PriceCatalogRepository? priceCatalogRepository = null, ModelAliasOverrideStore? modelAliasOverrideStore = null)
+        /// <param name="usageRollupStore">
+        /// Optional Phase 4 rollup store, passed to the management facade so <c>GET /admin/usage/summary</c>
+        /// and <c>GET /admin/usage/rollup</c> (§5.15) are available. Defaults to <see langword="null"/>, in
+        /// which case both answer <see cref="Management.ManagementErrorType.Unavailable"/>.
+        /// </param>
+        public ProxyServer(ILogger<ProxyServer> logger, ProxyMiddleware proxyMiddleware, int port = 5001, TelemetryBroadcaster? telemetryBroadcaster = null, int grpcPort = DefaultGrpcPort, IProviderConfigStore? providerConfigStore = null, IEnvironmentVariableProvider? environment = null, HttpClient? managementHttpClient = null, string? managementToken = null, PriceSourceToggleStore? priceSourceToggleStore = null, PriceCatalogIngestionService? priceCatalogIngestionService = null, PriceCatalogOptions? priceCatalogOptions = null, ProviderBudgetStore? providerBudgetStore = null, ProviderEndpointScanner? endpointScanner = null, ToolCallCapabilityStore? toolCallCapabilityStore = null, PriceCatalogRepository? priceCatalogRepository = null, ModelAliasOverrideStore? modelAliasOverrideStore = null, IUsageRollupStore? usageRollupStore = null)
         {
             ArgumentNullException.ThrowIfNull(logger);
             ArgumentNullException.ThrowIfNull(proxyMiddleware);
@@ -258,8 +263,10 @@ namespace TotallyHot.ArcRouter.Proxy
                                     endpointScanner,
                                     toolCallCapabilityStore,
                                     priceCatalogRepository,
-                                    modelAliasOverrideStore);
+                                    modelAliasOverrideStore,
+                                    usageRollupStore);
                                 endpoints.MapProviderAdminEndpoints(facade, managementToken);
+                                endpoints.MapUsageAdminEndpoints(facade, managementToken);
                             }
                         });
                         app.Run(context => proxyMiddleware.InvokeAsync(context, _ => Task.CompletedTask));

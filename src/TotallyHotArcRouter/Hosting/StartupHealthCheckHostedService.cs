@@ -31,6 +31,7 @@ public sealed class StartupHealthCheckHostedService : IHostedService
     private readonly ProviderBudgetStore _budgetStore;
     private readonly ToolCallCapabilityStore _toolCallCapabilityStore;
     private readonly IUsageLedger _usageLedger;
+    private readonly IUsageRollupStore _rollupStore;
     private readonly StorageOptions _storageOptions;
 
     /// <summary>
@@ -45,6 +46,7 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         ProviderBudgetStore budgetStore,
         ToolCallCapabilityStore toolCallCapabilityStore,
         IUsageLedger usageLedger,
+        IUsageRollupStore rollupStore,
         IOptions<StorageOptions> storageOptions)
     {
         ArgumentNullException.ThrowIfNull(logger);
@@ -55,6 +57,7 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         ArgumentNullException.ThrowIfNull(budgetStore);
         ArgumentNullException.ThrowIfNull(toolCallCapabilityStore);
         ArgumentNullException.ThrowIfNull(usageLedger);
+        ArgumentNullException.ThrowIfNull(rollupStore);
         ArgumentNullException.ThrowIfNull(storageOptions);
 
         _logger = logger;
@@ -65,6 +68,7 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         _budgetStore = budgetStore;
         _toolCallCapabilityStore = toolCallCapabilityStore;
         _usageLedger = usageLedger;
+        _rollupStore = rollupStore;
         _storageOptions = storageOptions.Value;
     }
 
@@ -152,6 +156,25 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Usage-ledger retention sweep failed; continuing startup.");
+        }
+
+        // Usage-rollup bucket timezone + backfill (docs/router/token-tracking-implementation-plan.md
+        // Phase 4, §5.3): pins the wall-clock timezone on first run, then rolls forward any usage_ledger
+        // entries newer than the last checkpoint - the "buckets missed while down" catch-up. Best-effort and
+        // log-only, like every check above; RollForwardAsync already swallows its own failures internally,
+        // but the outer guard also covers EnsureBucketTimezone.
+        try
+        {
+            _rollupStore.EnsureBucketTimezone();
+            var rolledUp = await _rollupStore.RollForwardAsync(cancellationToken).ConfigureAwait(false);
+            if (rolledUp > 0)
+            {
+                _logger.LogInformation("Usage-rollup backfill applied {EntryCount} ledger entry/entries.", rolledUp);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Usage-rollup backfill failed; continuing startup.");
         }
 
         _logger.LogInformation("Startup pricing health checks complete.");

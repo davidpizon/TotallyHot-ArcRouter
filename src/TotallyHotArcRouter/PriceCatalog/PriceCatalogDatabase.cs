@@ -89,6 +89,7 @@ public sealed class PriceCatalogDatabase
         MigrateCacheWriteInputPriceColumn(connection);
         MigrateProviderSpendCacheColumns(connection);
         MigrateIsApproximateColumn(connection);
+        MigrateBudgetWindowColumns(connection);
         SeedKnownSources(connection);
 
         return alreadyExisted;
@@ -220,6 +221,33 @@ public sealed class PriceCatalogDatabase
         using var alter = connection.CreateCommand();
         alter.CommandText = "ALTER TABLE model_prices ADD COLUMN is_approximate INTEGER NOT NULL DEFAULT 0;";
         alter.ExecuteNonQuery();
+    }
+
+    // Same blind spot again: a database created before per-provider budget windows existed (Phase 4, §5.10)
+    // has provider_budgets without these columns. Existing rows read as 'Monthly' with a null hour count -
+    // exactly today's hardcoded CurrentPeriod() behavior - so an upgraded install's caps keep resetting on
+    // the same calendar-month boundary they always did, until an operator opts a provider into a different
+    // window.
+    /// <summary>
+    /// Adds the `window_kind` and `window_hours` columns to `provider_budgets` if missing, so databases
+    /// created before per-provider budget windows existed pick them up on startup with existing rows
+    /// reading as the monthly window that was the only behavior before this column existed.
+    /// </summary>
+    private static void MigrateBudgetWindowColumns(SqliteConnection connection)
+    {
+        if (!ColumnExists(connection, "provider_budgets", "window_kind"))
+        {
+            using var alterKind = connection.CreateCommand();
+            alterKind.CommandText = "ALTER TABLE provider_budgets ADD COLUMN window_kind TEXT NOT NULL DEFAULT 'Monthly';";
+            alterKind.ExecuteNonQuery();
+        }
+
+        if (!ColumnExists(connection, "provider_budgets", "window_hours"))
+        {
+            using var alterHours = connection.CreateCommand();
+            alterHours.CommandText = "ALTER TABLE provider_budgets ADD COLUMN window_hours INTEGER;";
+            alterHours.ExecuteNonQuery();
+        }
     }
 
     // Every source with a client gets a row up front, so the GUI has something to toggle before the first
@@ -472,6 +500,41 @@ public sealed class PriceCatalogDatabase
         CREATE INDEX IF NOT EXISTS ix_usage_ledger_occurred_at ON usage_ledger (occurred_at_utc);
         CREATE INDEX IF NOT EXISTS ix_usage_ledger_provider_model_time
             ON usage_ledger (provider, requested_model, occurred_at_utc);
+
+        -- Pre-aggregated time buckets over usage_ledger (Phase 4, §5.3): each ledger entry contributes one
+        -- increment to the PT30M/PT1H/P1D row for its (provider, model), so the Model Distribution and Cost
+        -- Analytics GUI tabs can read a bounded-size table instead of scanning the full ledger on every
+        -- render. WITHOUT ROWID because the natural key is already unique and covers every query shape this
+        -- table serves. cost_usd is TEXT for the same invariant-decimal reason as every other money column
+        -- here; unpriced_requests tracks how many of `requests` had a null cost (§5.6), so a summary can
+        -- render "≥ $4.10 · 3 unpriced" instead of silently treating unknown as zero.
+        CREATE TABLE IF NOT EXISTS usage_rollup (
+            bucket_start_utc      TEXT    NOT NULL,
+            bucket_width          TEXT    NOT NULL,
+            provider               TEXT    NOT NULL,
+            model                  TEXT    NOT NULL,
+            requests               INTEGER NOT NULL DEFAULT 0,
+            unpriced_requests      INTEGER NOT NULL DEFAULT 0,
+            prompt_tokens          INTEGER NOT NULL DEFAULT 0,
+            completion_tokens      INTEGER NOT NULL DEFAULT 0,
+            cache_creation_tokens  INTEGER NOT NULL DEFAULT 0,
+            cache_read_tokens      INTEGER NOT NULL DEFAULT 0,
+            cost_usd               TEXT    NOT NULL DEFAULT '0',
+            PRIMARY KEY (bucket_start_utc, bucket_width, provider, model)
+        ) WITHOUT ROWID;
+
+        -- Single-row table (id is CHECK-constrained to 1) holding the rollup subsystem's two pieces of
+        -- durable state: the write-once bucket timezone (tokscale's reproducible-bucket rule - pinning this
+        -- once means two reports generated a month apart over the same past day still agree, since the day
+        -- boundary itself never moves) and the backfill checkpoint (the highest usage_ledger.entry_id
+        -- already folded into usage_rollup, so a startup backfill after downtime resumes from where it left
+        -- off instead of re-scanning the whole ledger).
+        CREATE TABLE IF NOT EXISTS rollup_metadata (
+            id                             INTEGER PRIMARY KEY CHECK (id = 1),
+            bucket_timezone_iana_id        TEXT    NOT NULL,
+            bucket_timezone_pinned_at_utc  TEXT    NOT NULL,
+            last_rolled_up_entry_id        INTEGER NOT NULL DEFAULT 0
+        );
         """;
 }
 

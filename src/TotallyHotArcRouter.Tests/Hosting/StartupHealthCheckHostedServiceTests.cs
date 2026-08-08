@@ -43,6 +43,7 @@ public class StartupHealthCheckHostedServiceTests
             temp.CreateBudgetStore(repository),
             temp.CreateToolCallCapabilityStore(),
             ledger,
+            temp.CreateRollupStore(),
             Options.Create(new StorageOptions { UsageLedgerRetentionDays = retentionDays }));
 
         await service.StartAsync(TestContext.Current.CancellationToken);

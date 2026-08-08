@@ -2,6 +2,7 @@ using System.Text.Json;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
+using TotallyHot.ArcRouter.Telemetry;
 using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Proxy.Management;
@@ -45,6 +46,7 @@ public sealed class ManagementFacade
     private readonly ToolCallCapabilityStore? _capabilityStore;
     private readonly PriceCatalogRepository? _priceCatalogRepository;
     private readonly ModelAliasOverrideStore? _overrideStore;
+    private readonly IUsageRollupStore? _rollupStore;
 
     // Constructed here rather than injected, unlike the endpoint scanner beside it. The resolver's only
     // dependencies are the HTTP client and environment accessor this facade already holds, so injecting it
@@ -82,6 +84,10 @@ public sealed class ManagementFacade
     /// Optional operator price-override store backing <c>PUT/DELETE /admin/price-overrides</c> (§5.7). When
     /// null, override reads/writes answer <see cref="ManagementErrorType.Unavailable"/>.
     /// </param>
+    /// <param name="rollupStore">
+    /// Optional Phase 4 rollup store backing <c>GET /admin/usage/summary</c> and <c>GET /admin/usage/rollup</c>
+    /// (§5.15). When null, both answer <see cref="ManagementErrorType.Unavailable"/>.
+    /// </param>
     public ManagementFacade(
         IProviderConfigStore store,
         IEnvironmentVariableProvider environment,
@@ -90,7 +96,8 @@ public sealed class ManagementFacade
         ProviderEndpointScanner? endpointScanner = null,
         ToolCallCapabilityStore? capabilityStore = null,
         PriceCatalogRepository? priceCatalogRepository = null,
-        ModelAliasOverrideStore? overrideStore = null)
+        ModelAliasOverrideStore? overrideStore = null,
+        IUsageRollupStore? rollupStore = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(environment);
@@ -104,6 +111,7 @@ public sealed class ManagementFacade
         _capabilityStore = capabilityStore;
         _priceCatalogRepository = priceCatalogRepository;
         _overrideStore = overrideStore;
+        _rollupStore = rollupStore;
         _dialectResolver = new ModelDialectResolver(httpClient, environment);
     }
 
@@ -498,9 +506,19 @@ public sealed class ManagementFacade
             return ManagementResult<ProvidersResponse>.Fail(ManagementErrorType.InvalidRequest, "Budget caps must be non-negative.");
         }
 
+        BudgetWindow? window;
         try
         {
-            _budgetStore.SetBudget(providerKey, request.DollarCap, request.TokenCap);
+            window = ParseBudgetWindow(request.WindowKind, request.WindowHours);
+        }
+        catch (ArgumentException ex)
+        {
+            return ManagementResult<ProvidersResponse>.Fail(ManagementErrorType.InvalidRequest, ex.Message);
+        }
+
+        try
+        {
+            _budgetStore.SetBudget(providerKey, request.DollarCap, request.TokenCap, window);
             return ManagementResult<ProvidersResponse>.Ok(BuildProvidersResponse());
         }
         catch (ArgumentException ex)
@@ -512,6 +530,28 @@ public sealed class ManagementFacade
             // A persistence failure (e.g. the SQLite write) shouldn't leak storage detail to the caller.
             return ManagementResult<ProvidersResponse>.Fail(ManagementErrorType.Internal, "Failed to save the provider budget.");
         }
+    }
+
+    /// <summary>
+    /// Parses a request's optional window fields into a <see cref="BudgetWindow"/>. Both null (the common
+    /// case - an editor that hasn't opted into windows yet) yields <see langword="null"/>, which
+    /// <see cref="ProviderBudgetStore.SetBudget"/> already treats as "keep Monthly".
+    /// </summary>
+    private static BudgetWindow? ParseBudgetWindow(string? windowKind, int? windowHours)
+    {
+        if (windowKind is null)
+        {
+            return null;
+        }
+
+        return windowKind switch
+        {
+            "Monthly" => new BudgetWindow.Monthly(),
+            "Weekly" => new BudgetWindow.Weekly(),
+            "RollingHours" when windowHours is > 0 => new BudgetWindow.RollingHours(windowHours.Value),
+            "RollingHours" => throw new ArgumentException("windowHours must be a positive number of hours for a RollingHours window."),
+            _ => throw new ArgumentException($"Unknown windowKind '{windowKind}'; expected 'Monthly', 'Weekly', or 'RollingHours'."),
+        };
     }
 
     // Mirrors PriceCatalogModelPriceLookup.FreshnessFloor: the same "fresh enough to act on" definition
@@ -619,6 +659,96 @@ public sealed class ManagementFacade
         }
 
         return ManagementResult<IReadOnlyList<ModelAliasOverride>>.Ok(_overrideStore.GetAll());
+    }
+
+    /// <summary>
+    /// Totals over a preset window for the header ticker and summary tiles (Phase 4, §5.15). Backed by
+    /// <see cref="IUsageRollupStore.Summary"/>.
+    /// </summary>
+    /// <param name="window">One of <c>"day"</c>, <c>"week"</c>, <c>"month"</c>, or <c>"all"</c>.</param>
+    public ManagementResult<UsageSummary> GetUsageSummary(string window)
+    {
+        if (_rollupStore is null)
+        {
+            return ManagementResult<UsageSummary>.Fail(ManagementErrorType.Unavailable, "Usage rollups are not available.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        DateTimeOffset from;
+        switch (window)
+        {
+            case "day":
+                from = now.AddDays(-1);
+                break;
+            case "week":
+                from = now.AddDays(-7);
+                break;
+            case "month":
+                from = now.AddMonths(-1);
+                break;
+            case "all":
+                from = DateTimeOffset.UnixEpoch;
+                break;
+            default:
+                return ManagementResult<UsageSummary>.Fail(ManagementErrorType.InvalidRequest, "window must be 'day', 'week', 'month', or 'all'.");
+        }
+
+        try
+        {
+            return ManagementResult<UsageSummary>.Ok(_rollupStore.Summary(from, now));
+        }
+        catch (Exception)
+        {
+            return ManagementResult<UsageSummary>.Fail(ManagementErrorType.Internal, "Failed to read the usage summary.");
+        }
+    }
+
+    /// <summary>
+    /// The Model Distribution / Cost Analytics chart feed (Phase 4, §5.15). Backed by
+    /// <see cref="IUsageRollupStore.Query"/>.
+    /// </summary>
+    /// <param name="from">Inclusive range start.</param>
+    /// <param name="to">Exclusive range end; must be after <paramref name="from"/>.</param>
+    /// <param name="width">Bucket width: <c>"hour"</c> or <c>"day"</c>.</param>
+    /// <param name="groupBy"><c>"model"</c>, <c>"provider"</c>, or <c>"day"</c>.</param>
+    public ManagementResult<IReadOnlyList<UsageRollupBucket>> GetUsageRollup(DateTimeOffset from, DateTimeOffset to, string width, string groupBy)
+    {
+        if (_rollupStore is null)
+        {
+            return ManagementResult<IReadOnlyList<UsageRollupBucket>>.Fail(ManagementErrorType.Unavailable, "Usage rollups are not available.");
+        }
+
+        if (to <= from)
+        {
+            return ManagementResult<IReadOnlyList<UsageRollupBucket>>.Fail(ManagementErrorType.InvalidRequest, "'to' must be after 'from'.");
+        }
+
+        string bucketWidth;
+        switch (width)
+        {
+            case "hour":
+                bucketWidth = "PT1H";
+                break;
+            case "day":
+                bucketWidth = "P1D";
+                break;
+            default:
+                return ManagementResult<IReadOnlyList<UsageRollupBucket>>.Fail(ManagementErrorType.InvalidRequest, "width must be 'hour' or 'day'.");
+        }
+
+        if (groupBy is not ("model" or "provider" or "day"))
+        {
+            return ManagementResult<IReadOnlyList<UsageRollupBucket>>.Fail(ManagementErrorType.InvalidRequest, "groupBy must be 'model', 'provider', or 'day'.");
+        }
+
+        try
+        {
+            return ManagementResult<IReadOnlyList<UsageRollupBucket>>.Ok(_rollupStore.Query(from, to, bucketWidth, groupBy));
+        }
+        catch (Exception)
+        {
+            return ManagementResult<IReadOnlyList<UsageRollupBucket>>.Fail(ManagementErrorType.Internal, "Failed to read usage rollups.");
+        }
     }
 
     /// <summary>
@@ -820,7 +950,9 @@ public sealed class ManagementFacade
                     EndpointCapabilities: _capabilityStore?.GetProviderCapabilities(kvp.Key),
                     ProviderType: kvp.Value.ProviderType,
                     UsageLastRecordedAtUtc: budget.LastUsageAtUtc,
-                    RateLimit: BuildRateLimitView(kvp.Key));
+                    RateLimit: BuildRateLimitView(kvp.Key),
+                    WindowKind: budget.WindowKind is { Length: > 0 } ? budget.WindowKind : "Monthly",
+                    NextResetUtc: budget.NextResetUtc);
             })
             .OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -1149,6 +1281,14 @@ public static class HeaderValueSource
 /// responses carry - or <see langword="null"/> when no repository is wired up or no such header has ever
 /// been captured for this provider.
 /// </param>
+/// <param name="WindowKind">
+/// The <see cref="BudgetWindow"/> kind the caps above reset on: <c>"Monthly"</c>, <c>"Weekly"</c>, or
+/// <c>"RollingHours"</c> (Phase 4, §5.10). <c>"Monthly"</c> when no budget store is wired up.
+/// </param>
+/// <param name="NextResetUtc">
+/// The UTC instant the current period ends and spend resets to zero, computed live from
+/// <paramref name="WindowKind"/> - backs the budget bar's "resets in 2h 10m" text.
+/// </param>
 public sealed record ProviderView(
     string Key,
     string? Name,
@@ -1165,7 +1305,9 @@ public sealed record ProviderView(
     ProviderEndpointCapabilities? EndpointCapabilities = null,
     string? ProviderType = null,
     DateTimeOffset? UsageLastRecordedAtUtc = null,
-    ProviderRateLimitView? RateLimit = null);
+    ProviderRateLimitView? RateLimit = null,
+    string WindowKind = "Monthly",
+    DateTimeOffset? NextResetUtc = null);
 
 /// <summary>
 /// A provider's most recently captured rate-limit header snapshot, as returned to a management caller.
@@ -1292,12 +1434,17 @@ public sealed record ModelEnabledWriteRequest(bool Enabled);
 public sealed record ModelToolDialectWriteRequest(string? Dialect);
 
 /// <summary>
-/// The body for setting a provider's monthly budget caps. A null cap clears that dimension; both null
-/// removes the budget. Caps must be non-negative.
+/// The body for setting a provider's budget caps and reset window. A null cap clears that dimension; both
+/// null removes the budget. Caps must be non-negative.
 /// </summary>
-/// <param name="DollarCap">The monthly USD cap, or null for no dollar budget.</param>
-/// <param name="TokenCap">The monthly total-token cap, or null for no token budget.</param>
-public sealed record ProviderBudgetWriteRequest(decimal? DollarCap, long? TokenCap);
+/// <param name="DollarCap">The cap for the window, or null for no dollar budget.</param>
+/// <param name="TokenCap">The cap for the window, or null for no token budget.</param>
+/// <param name="WindowKind">
+/// The window the caps reset on: <c>"Monthly"</c>, <c>"Weekly"</c>, or <c>"RollingHours"</c>. Null (the
+/// default) keeps today's behavior - <see cref="ProviderBudgetStore.SetBudget"/> defaults to Monthly.
+/// </param>
+/// <param name="WindowHours">Required and must be positive when <paramref name="WindowKind"/> is <c>"RollingHours"</c>; otherwise ignored.</param>
+public sealed record ProviderBudgetWriteRequest(decimal? DollarCap, long? TokenCap, string? WindowKind = null, int? WindowHours = null);
 
 /// <summary>
 /// The body for adding or replacing an operator price override (§5.7's <see cref="ResolutionRung.OperatorOverride"/> rung).

@@ -20,6 +20,12 @@
             <ProvidersAdmin />
         </div>
     }
+    else if (_view == GovView.Models)
+    {
+        <div class="flex-1 min-h-0">
+            <GovernanceModelCards />
+        </div>
+    }
     else if (_view == GovView.PriceSources)
     {
         <div class="flex-1 min-h-0">
@@ -35,11 +41,12 @@
 </div>
 
 @code {
-    private enum GovView { Providers, PriceSources, PriceOverrides }
+    private enum GovView { Providers, Models, PriceSources, PriceOverrides }
 
     private static readonly (GovView View, string Label)[] Views =
     [
         (GovView.Providers, "Providers"),
+        (GovView.Models, "Models"),
         (GovView.PriceSources, "Price Sources"),
         (GovView.PriceOverrides, "Price Overrides")
     ];

@@ -1,0 +1,96 @@
+@* Governance > Models: one informational card per configured ModelRouting:ModelList entry, per
+   docs/gui/governance-model-cards.md. Purely informational - no budget cap, no OK/WARNING/CRITICAL badge,
+   distinct from the per-provider budget cards. Spend is real, from UsageStore's rollup query (Phase 4,
+   §5.15); price is "Price unavailable" for every model until a live price-catalog channel to the GUI
+   exists (docs/router/model-price-catalog.md, this doc's still-unmet dependency #1) - never a silent
+   $0.00, which is reserved for a priced model with genuinely zero traffic in range. Deviates from that
+   doc's date-range-picker sketch with a fixed 30-day window, and lives as its own Governance sub-view
+   rather than a second section stacked under Providers - both simplifications to fit this phase's scope. *@
+@inject ProviderAdminStore ProviderStore
+@inject UsageStore UsageStore
+@implements IDisposable
+
+<div class="h-full min-h-0 overflow-auto">
+    @if (!ProviderStore.IsLoaded || !UsageStore.IsLoaded)
+    {
+        <div class="text-xs text-slate-500 p-3">Loading…</div>
+    }
+    else if (Cards.Count == 0)
+    {
+        <div class="text-xs text-slate-500 p-3">No models configured.</div>
+    }
+    else
+    {
+        <div class="grid gap-3 p-1" style="grid-template-columns:repeat(auto-fill, minmax(200px, 1fr))">
+            @foreach (var card in Cards)
+            {
+                <div class="rounded-lg p-3 flex flex-col gap-1.5 ds-surface-card-bordered">
+                    <div class="text-sm font-semibold text-slate-200">@card.ModelName</div>
+                    <div class="text-xs text-slate-500">@card.ProviderKey</div>
+                    <div class="text-xs font-mono text-slate-500">Price unavailable</div>
+                    <div class="text-xs font-mono text-slate-300 mt-1">
+                        Spend: @card.SpendDisplay <span class="text-slate-600">(last 30 days)</span>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private sealed record ModelCard(string ModelName, string ProviderKey, string ProviderModelId, string SpendDisplay);
+
+    private List<ModelCard> Cards { get; set; } = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Only ProviderStore.Changed - a provider/model edit is what should re-derive the card list.
+        // UsageStore.Changed is not subscribed to: LoadRollupAsync below deliberately doesn't raise it
+        // (see its own remarks), so subscribing here would have no effect anyway.
+        ProviderStore.Changed += HandleChanged;
+
+        if (!ProviderStore.IsLoaded)
+        {
+            await ProviderStore.LoadAsync();
+        }
+
+        var to = DateTimeOffset.UtcNow;
+        var from = to.AddDays(-30);
+        var buckets = await UsageStore.LoadRollupAsync(from, to, "day", "model");
+        BuildCards(buckets);
+    }
+
+    private void HandleChanged() => InvokeAsync(async () =>
+    {
+        // A provider/model edit can add or remove cards; re-derive from whatever rollup data is already
+        // cached (LoadRollupAsync serves the same range from UsageStore's cache) rather than re-fetching.
+        var to = DateTimeOffset.UtcNow;
+        var from = to.AddDays(-30);
+        var buckets = await UsageStore.LoadRollupAsync(from, to, "day", "model");
+        BuildCards(buckets);
+        StateHasChanged();
+    });
+
+    private void BuildCards(IReadOnlyList<UsageRollupBucketView> buckets)
+    {
+        // Spend is keyed by the resolved provider model id (what usage_ledger/usage_rollup record), not
+        // the client-facing ModelName - see UsageLedgerEntry.ResolvedModel's remarks.
+        var spendByProviderModelId = buckets.ToDictionary(b => b.GroupKey, b => b.CostUsd, StringComparer.OrdinalIgnoreCase);
+
+        Cards = ProviderStore.Providers
+            .SelectMany(p => p.Models.Select(m => new ModelCard(
+                m.ModelName,
+                p.Key,
+                m.ProviderModelId,
+                spendByProviderModelId.TryGetValue(m.ProviderModelId, out var spend)
+                    ? spend.ToString("$0.00", System.Globalization.CultureInfo.InvariantCulture)
+                    : "$0.00")))
+            .OrderBy(c => c.ModelName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    public void Dispose()
+    {
+        ProviderStore.Changed -= HandleChanged;
+    }
+}

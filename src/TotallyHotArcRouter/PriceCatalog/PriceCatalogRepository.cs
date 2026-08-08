@@ -27,7 +27,18 @@ public sealed record PriceSourceState(
 /// <param name="ProviderKey">The provider key (e.g. <c>openai</c>).</param>
 /// <param name="DollarCap">The monthly USD cap, or <see langword="null"/> for no dollar budget.</param>
 /// <param name="TokenCap">The monthly total-token cap, or <see langword="null"/> for no token budget.</param>
-public sealed record ProviderBudgetRow(string ProviderKey, decimal? DollarCap, long? TokenCap);
+/// <param name="WindowKind">
+/// The persisted <see cref="BudgetWindow"/> discriminator ("Monthly", "Weekly", or "RollingHours") the cap
+/// resets on. Always non-null on a read row; <see cref="PriceCatalogDatabase"/>'s migration backfills
+/// existing rows to "Monthly", matching the only behavior that existed before this column did.
+/// </param>
+/// <param name="WindowHours">The block length in hours when <paramref name="WindowKind"/> is "RollingHours"; otherwise <see langword="null"/>.</param>
+public sealed record ProviderBudgetRow(
+    string ProviderKey,
+    decimal? DollarCap,
+    long? TokenCap,
+    string WindowKind = "Monthly",
+    int? WindowHours = null);
 
 /// <summary>
 /// A provider's spend accumulated within one <c>YYYY-MM</c> period. Tokens are the sum of prompt and
@@ -295,7 +306,7 @@ public sealed class PriceCatalogRepository
     {
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT provider_key, dollar_cap, token_cap FROM provider_budgets;";
+        command.CommandText = "SELECT provider_key, dollar_cap, token_cap, window_kind, window_hours FROM provider_budgets;";
 
         var rows = new List<ProviderBudgetRow>();
         using var reader = command.ExecuteReader();
@@ -304,19 +315,22 @@ public sealed class PriceCatalogRepository
             rows.Add(new ProviderBudgetRow(
                 ProviderKey: reader.GetString(0),
                 DollarCap: reader.IsDBNull(1) ? null : decimal.Parse(reader.GetString(1), CultureInfo.InvariantCulture),
-                TokenCap: reader.IsDBNull(2) ? null : reader.GetInt64(2)));
+                TokenCap: reader.IsDBNull(2) ? null : reader.GetInt64(2),
+                WindowKind: reader.GetString(3),
+                WindowHours: reader.IsDBNull(4) ? null : reader.GetInt32(4)));
         }
 
         return rows;
     }
 
     /// <summary>
-    /// Persists a provider's monthly budget caps. A <see langword="null"/> cap clears that dimension; when
-    /// both are null the row is deleted, so an unbudgeted provider leaves no stale row behind. Decimals are
-    /// written as invariant text (matching how money round-trips elsewhere) so no binary-float rounding
-    /// enters a dollar cap.
+    /// Persists a provider's budget caps and reset window. A <see langword="null"/> cap clears that
+    /// dimension; when both are null the row is deleted, so an unbudgeted provider leaves no stale row
+    /// behind (in that case <paramref name="window"/> is ignored, since there is no cap left to reset).
+    /// Decimals are written as invariant text (matching how money round-trips elsewhere) so no binary-float
+    /// rounding enters a dollar cap.
     /// </summary>
-    public void SetProviderBudget(string providerKey, decimal? dollarCap, long? tokenCap)
+    public void SetProviderBudget(string providerKey, decimal? dollarCap, long? tokenCap, BudgetWindow? window = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
 
@@ -331,16 +345,22 @@ public sealed class PriceCatalogRepository
             return;
         }
 
+        var (windowKind, windowHours) = BudgetWindowCodec.Encode(window ?? new BudgetWindow.Monthly());
+
         command.CommandText = """
-            INSERT INTO provider_budgets (provider_key, dollar_cap, token_cap)
-            VALUES ($key, $dollar, $token)
+            INSERT INTO provider_budgets (provider_key, dollar_cap, token_cap, window_kind, window_hours)
+            VALUES ($key, $dollar, $token, $windowKind, $windowHours)
             ON CONFLICT(provider_key) DO UPDATE SET
-                dollar_cap = excluded.dollar_cap,
-                token_cap  = excluded.token_cap;
+                dollar_cap   = excluded.dollar_cap,
+                token_cap    = excluded.token_cap,
+                window_kind  = excluded.window_kind,
+                window_hours = excluded.window_hours;
             """;
         command.Parameters.AddWithValue("$key", providerKey);
         command.Parameters.AddWithValue("$dollar", dollarCap?.ToString(CultureInfo.InvariantCulture) ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$token", tokenCap ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$windowKind", windowKind);
+        command.Parameters.AddWithValue("$windowHours", windowHours ?? (object)DBNull.Value);
         command.ExecuteNonQuery();
     }
 
