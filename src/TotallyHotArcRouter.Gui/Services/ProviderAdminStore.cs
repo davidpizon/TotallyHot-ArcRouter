@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using TotallyHot.ArcRouter.Gui.Admin;
 using Microsoft.Extensions.Logging;
 
@@ -72,11 +73,14 @@ public sealed class ProviderAdminStore
     /// Each provider's rate-limit trend-chart history, keyed by provider key, refreshed by
     /// <see cref="LoadRateLimitHistoryAsync"/>. A provider absent here simply hasn't been loaded yet - the
     /// card renders no chart rather than a loading state, since the surrounding provider list has already
-    /// loaded by the time this is fetched.
+    /// loaded by the time this is fetched. Backed by a <see cref="ConcurrentDictionary{TKey,TValue}"/>
+    /// because <c>ProvidersAdmin.razor</c> fires <see cref="LoadRateLimitHistoryAsync"/> once per provider,
+    /// fire-and-forget - several can complete around the same time and write here concurrently, which a
+    /// plain <see cref="Dictionary{TKey,TValue}"/> does not tolerate.
     /// </summary>
     public IReadOnlyDictionary<string, RateLimitHistoryResponseAdminView> RateLimitHistory => _rateLimitHistory;
 
-    private readonly Dictionary<string, RateLimitHistoryResponseAdminView> _rateLimitHistory = [];
+    private readonly ConcurrentDictionary<string, RateLimitHistoryResponseAdminView> _rateLimitHistory = new();
 
     /// <summary>Whether a load has completed at least once (so the UI can distinguish "loading" from "empty").</summary>
     public bool IsLoaded { get; private set; }

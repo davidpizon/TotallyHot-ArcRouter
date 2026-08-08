@@ -179,6 +179,29 @@ public class OpenAiUsageParserTests
     }
 
     [Fact]
+    public void TryExtractFromNonStreamingBody_ReasoningTokensNegative_ClampedToZero()
+    {
+        const string json = """{"usage":{"prompt_tokens":14,"completion_tokens":100,"completion_tokens_details":{"reasoning_tokens":-5}}}""";
+
+        var result = OpenAiUsageParser.TryExtractFromNonStreamingBody(json, out var usage);
+
+        Assert.True(result);
+        Assert.Equal(0, usage.ReasoningTokens);
+    }
+
+    [Fact]
+    public void TryExtractFromNonStreamingBody_ReasoningTokensExceedsCompletionTokens_ClampedToCompletionTokens()
+    {
+        const string json = """{"usage":{"prompt_tokens":14,"completion_tokens":100,"completion_tokens_details":{"reasoning_tokens":9999}}}""";
+
+        var result = OpenAiUsageParser.TryExtractFromNonStreamingBody(json, out var usage);
+
+        Assert.True(result);
+        Assert.Equal(100, usage.CompletionTokens);
+        Assert.Equal(100, usage.ReasoningTokens);
+    }
+
+    [Fact]
     public void TryExtractFromStreamingBuffer_FinalChunkWithReasoningTokens_ReturnsReasoningTokens()
     {
         var sse =

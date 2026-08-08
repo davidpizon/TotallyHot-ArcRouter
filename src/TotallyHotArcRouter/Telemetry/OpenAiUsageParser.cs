@@ -98,6 +98,13 @@ public static class OpenAiUsageParser
             TryGetInt(completionTokensDetails, "reasoning_tokens", out reasoningTokens);
         }
 
+        // Math.Clamp guards a malformed/changed upstream payload (a negative value, or one exceeding
+        // completion_tokens) from violating UsageInfo.ReasoningTokens' documented "subset of
+        // CompletionTokens, never negative" contract and skewing downstream attribution. The upper bound
+        // is floored at 0 too - Math.Clamp requires min <= max, and completion_tokens itself is unvalidated
+        // upstream input that could theoretically arrive negative.
+        reasoningTokens = Math.Clamp(reasoningTokens, 0, Math.Max(0, completionTokens));
+
         usage = new UsageInfo(additivePromptTokens, completionTokens, cacheCreationTokens, cacheReadTokens, reasoningTokens);
         return true;
     }
