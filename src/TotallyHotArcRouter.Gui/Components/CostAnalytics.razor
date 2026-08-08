@@ -159,8 +159,12 @@
     // (Storage:UsageLedgerRetentionDays), so this asks for exactly as much history as could exist.
     protected override async Task OnInitializedAsync()
     {
-        var now = DateTimeOffset.UtcNow;
-        var buckets = await UsageStore.LoadRollupAsync(now.AddDays(-370), now, "day", "day");
+        // Aligned to the start of the current UTC day, not DateTimeOffset.UtcNow - rollups are stored at
+        // day granularity and an in-progress bucket is always excluded (UsageRollupStore's
+        // never-publish-the-in-progress-bucket rule), so an unaligned 'from' can land after the earliest
+        // fully-elapsed day bucket's start and drop it from the range.
+        var todayStartUtc = new DateTimeOffset(DateTimeOffset.UtcNow.Date, TimeSpan.Zero);
+        var buckets = await UsageStore.LoadRollupAsync(todayStartUtc.AddDays(-370), todayStartUtc, "day", "day");
         _rollupHistory = buckets
             .OrderBy(b => b.BucketStartUtc)
             .Select(b => new MetricTurnPoint(

@@ -351,8 +351,8 @@ public sealed class PriceCatalogDatabase
         -- table does not duplicate a Provider column that config edits could drift out of sync with. Managed at
         -- runtime via PUT/DELETE /admin/price-overrides, no restart required.
         CREATE TABLE IF NOT EXISTS model_alias_overrides (
-            source_name          TEXT NOT NULL,
-            aggregator_model_key TEXT NOT NULL,
+            source_name          TEXT NOT NULL COLLATE NOCASE,
+            aggregator_model_key TEXT NOT NULL COLLATE NOCASE,
             model_name           TEXT NOT NULL,
             PRIMARY KEY (source_name, aggregator_model_key)
         );

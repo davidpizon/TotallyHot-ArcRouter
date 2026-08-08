@@ -93,8 +93,11 @@ public abstract record BudgetWindow
             return DateTimeOffset.UnixEpoch.AddHours((index + 1) * (double)Hours);
         }
 
+        // Math.Floor, not a (long) cast - a cast truncates toward zero, which mis-buckets instants before
+        // UnixEpoch (e.g. -0.1h would truncate to block 0 instead of flooring to block -1, the actual prior
+        // block that instant falls in).
         private long BlockIndex(DateTimeOffset instant) =>
-            (long)((instant - DateTimeOffset.UnixEpoch).TotalHours / Hours);
+            (long)Math.Floor((instant - DateTimeOffset.UnixEpoch).TotalHours / Hours);
     }
 }
 
