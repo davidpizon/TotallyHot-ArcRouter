@@ -11,7 +11,7 @@ public sealed record RateLimitTrendPoint(long T, string Label, long? Remaining, 
 
 /// <summary>
 /// A rate-limit dimension's remaining-over-time trend chart, serialized to JSON and handed to the ECharts
-/// renderer (<c>wwwroot/js/echarts-interop.js</c>'s <c>RateLimitTrendLine</c> kind).
+/// renderer (<c>wwwroot/js/echarts-interop.js</c>'s <c>RemainingLine</c> kind).
 /// </summary>
 /// <param name="Kind">Renderer chart-kind discriminator; always <see cref="RateLimitTrendChartKind.RemainingLine"/>.</param>
 /// <param name="Title">Chart title, the human-readable dimension label (e.g. <c>Input tokens</c>).</param>

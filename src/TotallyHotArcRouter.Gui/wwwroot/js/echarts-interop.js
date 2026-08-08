@@ -552,7 +552,7 @@ window.echartsInterop = (function () {
         {
           type: "line",
           step: "end",
-          connectNulls: true,
+          connectNulls: false,
           data: pts.map((p) => [p.t, p.remaining == null ? null : Number(p.remaining)]),
           symbol: "circle",
           symbolSize: 5,

@@ -1021,18 +1021,25 @@ public sealed class ManagementFacade
 
         var history = _priceCatalogRepository!.GetRateLimitHistory(providerKey, observedAtUtc - ProjectionLookback);
 
+        // Parse each history bucket once and reuse the parsed snapshot across all dimensions below,
+        // rather than reparsing the same headers once per dimension.
+        var parsedHistory = new List<(DateTimeOffset BucketUtc, RateLimitSnapshotView Snapshot)>(history.Count);
+        foreach (var bucket in history)
+        {
+            parsedHistory.Add((bucket.BucketUtc, RateLimitSnapshotParser.Parse(bucket.Headers, bucket.BucketUtc)));
+        }
+
         foreach (var (dimensionName, laterDimension) in latest.StandardDimensions)
         {
             RateLimitObservation? earliest = null;
-            foreach (var bucket in history)
+            foreach (var (bucketUtc, bucketSnapshot) in parsedHistory)
             {
                 // history is chronologically ascending, so the first bucket that captured this dimension's
                 // remaining value is the earliest usable observation.
-                var bucketSnapshot = RateLimitSnapshotParser.Parse(bucket.Headers, bucket.BucketUtc);
                 if (bucketSnapshot.StandardDimensions.TryGetValue(dimensionName, out var bucketDimension)
                     && bucketDimension.Remaining is not null)
                 {
-                    earliest = new RateLimitObservation(bucket.BucketUtc, bucketDimension.Remaining, bucketDimension.ResetAt);
+                    earliest = new RateLimitObservation(bucketUtc, bucketDimension.Remaining, bucketDimension.ResetAt);
                     break;
                 }
             }
@@ -1069,6 +1076,11 @@ public sealed class ManagementFacade
         if (_priceCatalogRepository is null)
         {
             return ManagementResult<RateLimitHistoryResponse>.Fail(ManagementErrorType.Unavailable, "Rate-limit history is not available.");
+        }
+
+        if (!double.IsFinite(hours))
+        {
+            return ManagementResult<RateLimitHistoryResponse>.Fail(ManagementErrorType.InvalidRequest, "hours must be a finite number.");
         }
 
         var clampedHours = Math.Clamp(hours, 0.25, 24 * 30);
