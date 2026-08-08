@@ -10,6 +10,13 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// only whether an actual OTLP exporter is wired up (the "optional" part of §5.12) is a hosting-level
 /// decision made elsewhere.
 /// </summary>
+/// <remarks>
+/// None of the published instrument names below end in <c>_total</c>, even though every instrument here is
+/// a <see cref="Counter{T}"/> - the C# field names carry that suffix (<see cref="ExtractionFailedTotal"/>,
+/// <see cref="TokensTotal"/>, etc.) so callers can tell a counter from a gauge at a glance, but the
+/// exported name should not: OTel's Prometheus bridge already appends <c>_total</c> to every cumulative-sum
+/// instrument, so baking it into the instrument name here would double it up downstream.
+/// </remarks>
 public static class UsageMetrics
 {
     /// <summary>The meter name every usage instrument below is published under.</summary>
@@ -25,7 +32,7 @@ public static class UsageMetrics
     /// upstream bodies, providers with no usage block at all).
     /// </summary>
     public static readonly Counter<long> ExtractionFailedTotal = Meter.CreateCounter<long>(
-        "arcrouter.usage.extraction_failed_total",
+        "arcrouter.usage.extraction_failed",
         description: "Requests whose response usage could not be extracted by any parser.");
 
     /// <summary>

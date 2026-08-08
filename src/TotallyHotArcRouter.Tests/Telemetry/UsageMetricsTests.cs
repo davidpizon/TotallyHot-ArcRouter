@@ -13,7 +13,7 @@ public class UsageMetricsTests
         using var listener = new MeterListener();
         listener.InstrumentPublished = (instrument, meterListener) =>
         {
-            if (instrument.Meter.Name == UsageMetrics.MeterName && instrument.Name == "arcrouter.usage.extraction_failed_total")
+            if (instrument.Meter.Name == UsageMetrics.MeterName && instrument.Name == "arcrouter.usage.extraction_failed")
             {
                 meterListener.EnableMeasurementEvents(instrument);
             }
