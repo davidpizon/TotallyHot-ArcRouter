@@ -265,5 +265,37 @@ public class CostChartBuilderTests
 
         Assert.Equal(ChartPalette.ColorFor("claude-3-haiku"), model.Points[0].Color);
     }
+
+    [Fact]
+    public void CacheHitRate_ZeroInputTokens_ReturnsZero()
+    {
+        Assert.Equal(0m, CostChartBuilder.CacheHitRate(promptTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0));
+    }
+
+    [Fact]
+    public void CacheHitRate_FullyCachedTurn_ReturnsAtMostOneHundred()
+    {
+        var rate = CostChartBuilder.CacheHitRate(promptTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 1000);
+
+        Assert.Equal(100m, rate);
+        Assert.True(rate <= 100m);
+    }
+
+    [Fact]
+    public void CacheHitRate_UsesAdditiveTotalAsDenominator()
+    {
+        // 500 read out of (100 prompt + 400 creation + 500 read) = 1000 total input tokens.
+        var rate = CostChartBuilder.CacheHitRate(promptTokens: 100, cacheCreationTokens: 400, cacheReadTokens: 500);
+
+        Assert.Equal(50m, rate);
+    }
+
+    [Fact]
+    public void CacheHitRate_NoCacheReadTokens_ReturnsZero()
+    {
+        var rate = CostChartBuilder.CacheHitRate(promptTokens: 100, cacheCreationTokens: 0, cacheReadTokens: 0);
+
+        Assert.Equal(0m, rate);
+    }
 }
 

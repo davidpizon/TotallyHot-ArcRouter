@@ -21,11 +21,20 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// USD per 1,000,000 cache-creation (cache-write) input tokens, or <see langword="null"/> when the catalog
 /// has no published rate for this (model, provider) cell.
 /// </param>
+/// <param name="IsApproximateMatch">
+/// <see langword="true"/> when this price was resolved via a resolution-ladder rung below
+/// <c>ResolutionRung.Exact</c> (see <c>docs/router/token-tracking-improvements.md</c> §5.7) - a stripped
+/// snapshot suffix, a normalized version/tier suffix, or a provider-alias match. Such a price is a
+/// disclosed estimate, not a confidently exact one: a caller uses this to report
+/// <see cref="Telemetry.CostConfidence.CatalogApproximate"/> instead of
+/// <see cref="Telemetry.CostConfidence.Catalog"/>.
+/// </param>
 public sealed record ModelPrice(
     decimal InputPerMillionTokens,
     decimal OutputPerMillionTokens,
     decimal? CacheReadPerMillionTokens = null,
-    decimal? CacheWritePerMillionTokens = null)
+    decimal? CacheWritePerMillionTokens = null,
+    bool IsApproximateMatch = false)
 {
     /// <summary>
     /// Gets the price of a model served by a free provider: zero, at any token count. This is a known
@@ -50,10 +59,30 @@ public sealed record ModelPrice(
     /// standard input rate - a deliberate, documented conservative overestimate (a real cache read typically
     /// costs roughly 10% of standard input), chosen because overestimating keeps budget enforcement safe,
     /// while hardcoding a provider's cache-discount multiplier would recreate the hand-maintained price table
-    /// this type's <c>remarks</c> explicitly refuses.
+    /// this type's <c>remarks</c> explicitly refuses. Behaviorally identical to
+    /// <see cref="EstimateCost(UsageInfo, out bool)"/> for callers that don't need the fallback flag.
     /// </summary>
-    public decimal EstimateCost(UsageInfo usage)
+    public decimal EstimateCost(UsageInfo usage) => EstimateCost(usage, out _);
+
+    /// <summary>
+    /// Estimates the USD cost of a request given its full, cache-aware token usage, additionally reporting
+    /// whether a cache dimension with actual tokens fell back to the standard input rate because the
+    /// catalog publishes no cache rate for this cell. A caller uses this to distinguish
+    /// <see cref="Telemetry.CostConfidence.Catalog"/> (every applicable rate published) from
+    /// <see cref="Telemetry.CostConfidence.CatalogApproximate"/> (a fallback fired) - see
+    /// <c>docs/router/token-tracking-improvements.md</c> §5.6.
+    /// </summary>
+    /// <param name="usage">The request's token usage.</param>
+    /// <param name="usedCacheRateFallback">
+    /// <see langword="true"/> when a nonzero cache-read or cache-creation token count was priced at the
+    /// standard input rate because the catalog has no published cache rate for this cell.
+    /// </param>
+    public decimal EstimateCost(UsageInfo usage, out bool usedCacheRateFallback)
     {
+        var cacheReadFellBack = usage.CacheReadTokens > 0 && CacheReadPerMillionTokens is null;
+        var cacheWriteFellBack = usage.CacheCreationTokens > 0 && CacheWritePerMillionTokens is null;
+        usedCacheRateFallback = cacheReadFellBack || cacheWriteFellBack;
+
         var cacheReadRate = CacheReadPerMillionTokens ?? InputPerMillionTokens;
         var cacheWriteRate = CacheWritePerMillionTokens ?? InputPerMillionTokens;
 

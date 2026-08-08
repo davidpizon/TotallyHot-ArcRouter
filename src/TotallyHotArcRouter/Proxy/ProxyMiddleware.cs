@@ -84,6 +84,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     private readonly IReadOnlyDictionary<string, IPayloadTranslator> _translators;
     private readonly IBedrockRuntimeClientFactory _bedrockClientFactory;
     private readonly PriceCatalog.IBudgetEnforcer? _budgetStore;
+    private readonly IUsageLedger? _usageLedger;
     private readonly IRateLimitHeaderCapture _rateLimitCapture;
     private readonly ICircuitBreaker _circuitBreaker;
     private readonly ToolCallNormalizerFactory _toolCallNormalizerFactory;
@@ -129,6 +130,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// <param name="circuitBreaker">Optional per-upstream-target circuit breaker (<c>docs/router/agent-resilience-strategies.md</c>). Must be the <em>same</em> instance given to the <see cref="RequestInterceptor"/> this middleware wraps (see <c>ServiceCollectionExtensions</c>'s DI wiring) - this class is what records the successes/failures <see cref="RequestInterceptor"/> reads back when ranking candidates. Defaults to a fresh, always-CLOSED instance when omitted, which is behaviorally inert (existing callers/tests unaffected) but decoupled from any interceptor-side instance, so circuit state recorded here would never be seen there.</param>
     /// <param name="toolCallNormalizerFactory">Optional per-request tool-call normalization (<c>docs/router/tool-call-normalization.md</c> Phase 4), consulted for any candidate with no other translator registered: it decides from the (provider, model) capability row and whether the request carried <c>tools</c> whether the response needs a dialect scan at all, and rewrites a dialect-framed tool call into a real <c>tool_calls</c> shape. Replaces the provider-wide echo guard of <c>unified-api-translation.md</c> §4.5. In the real app this is always supplied via DI (a shared singleton reading the capability store); when omitted (direct construction outside DI), this instance builds a store-less one - so a tools-carrying request is still normalized with the union of dialects, but nothing is classified or persisted, mirroring <paramref name="circuitBreaker"/>'s "behaviorally inert when defaulted" pattern.</param>
     /// <param name="rateLimitCapture">Optional capture for upstream <c>anthropic-ratelimit-*</c> response headers (<c>docs/router/anthropic-reported-usage-plan.md</c> §5), invoked as soon as each attempt's response headers arrive. Defaults to a no-op, so existing callers/tests are unaffected.</param>
+    /// <param name="usageLedger">Optional durable usage ledger (<c>docs/router/token-tracking-implementation-plan.md</c> Phase 2), recorded to immediately after <paramref name="budgetStore"/> on the request path. When <see langword="null"/> (e.g. tests constructing this type directly), no ledger row is written - the rest of telemetry is unaffected.</param>
     public ProxyMiddleware(
         ILogger<ProxyMiddleware> logger,
         RequestInterceptor interceptor,
@@ -147,7 +149,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         PriceCatalog.IBudgetEnforcer? budgetStore = null,
         ICircuitBreaker? circuitBreaker = null,
         ToolCallNormalizerFactory? toolCallNormalizerFactory = null,
-        IRateLimitHeaderCapture? rateLimitCapture = null)
+        IRateLimitHeaderCapture? rateLimitCapture = null,
+        IUsageLedger? usageLedger = null)
     {
         _logger = logger;
         _interceptor = interceptor;
@@ -167,6 +170,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         _priceLookup = priceLookup;
         _translators = translators ?? NoTranslators;
         _budgetStore = budgetStore;
+        _usageLedger = usageLedger;
         _rateLimitCapture = rateLimitCapture ?? NullRateLimitHeaderCapture.Instance;
         _circuitBreaker = circuitBreaker ?? new CircuitBreaker();
         _toolCallNormalizerFactory = toolCallNormalizerFactory ?? new ToolCallNormalizerFactory();
@@ -789,7 +793,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                     // ResponseTextExtractor pick the right parser per request instead of assuming one shape per
                     // provider, which broke once "anthropic" became dual-mode.
                     var telemetryShapeProvider = translator is not null ? "openai" : route.Provider;
-                    await PublishTelemetryAsync(context, route, requestedModelName, isFallback, telemetryShapeProvider, rewrittenBody, capturedResponseBytes, nativeResponseBytes, isStreaming, latencyToHeadersMs, totalDurationMs, statusCode, context.RequestAborted);
+                    await PublishTelemetryAsync(context, route, requestedModelName, isFallback, telemetryShapeProvider, rewrittenBody, capturedResponseBytes, nativeResponseBytes, isStreaming, latencyToHeadersMs, totalDurationMs, statusCode, context.RequestAborted, responseMessage.Headers);
                 }
                 catch (Exception ex)
                 {
@@ -1196,7 +1200,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         long latencyToHeadersMs,
         long totalDurationMs,
         int statusCode,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        System.Net.Http.Headers.HttpResponseHeaders? upstreamHeaders = null)
     {
         var requestBody = TryParseJsonObject(rewrittenRequestBody);
         var resolvedSessionId = _sessionIdResolver.Resolve(context.Request.Headers, requestBody);
@@ -1254,6 +1259,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         int? cacheCreationTokens = null;
         int? cacheReadTokens = null;
         decimal? estimatedCostUsd = null;
+        var costConfidence = CostConfidence.NoUsage;
 
         // Telemetry stops depending on translation fidelity: when a native (pre-translation) capture was
         // taken, it is parsed under the provider's own key instead of the translated bytes under
@@ -1315,13 +1321,24 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // once D3 alias resolution has mapped each source's own naming onto it at ingest
             // (docs/router/d3-alias-resolution.md), so we look up route.ModelName - a model the catalog has no
             // resolved price for simply yields null here, the safe "unknown" outcome.
+            // §5.6: the cost-confidence label travels alongside the cost itself, so a caller never has to
+            // re-derive from EstimatedCostUsd alone whether "$0" means free, unknown, or an approximate
+            // catalog match - see docs/router/token-tracking-improvements.md §5.6.
             if (route.IsFree)
             {
                 estimatedCostUsd = ModelPrice.Free.EstimateCost(usage);
+                costConfidence = CostConfidence.Exact;
             }
             else if (_priceLookup?.TryGetPrice(new ModelKey(ModelName: route.ModelName, Provider: route.Provider)) is { } price)
             {
-                estimatedCostUsd = price.EstimateCost(usage);
+                estimatedCostUsd = price.EstimateCost(usage, out var usedCacheRateFallback);
+                costConfidence = price.IsApproximateMatch || usedCacheRateFallback
+                    ? CostConfidence.CatalogApproximate
+                    : CostConfidence.Catalog;
+            }
+            else
+            {
+                costConfidence = CostConfidence.Unknown;
             }
         }
 
@@ -1353,6 +1370,31 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 CancellationToken.None).ConfigureAwait(false);
         }
 
+        // The durable usage ledger (docs/router/token-tracking-implementation-plan.md Phase 2): recorded
+        // immediately after the budget store, under the same best-effort/CancellationToken.None reasoning,
+        // and gated on usageExtracted for the same "don't advance state on a zero-usage row" reason. The
+        // dedup key prefers the upstream's own request id (request-id/x-request-id, read from the response
+        // headers already in hand here) over the composite hash, so a replayed publish of the same request
+        // collides with its own earlier write instead of double-counting.
+        if (_usageLedger is not null && usageExtracted)
+        {
+            var ledgerEntry = new UsageLedgerEntry(
+                SessionId: sessionId,
+                TurnNumber: turnNumber,
+                Provider: route.Provider,
+                RequestedModel: requestedModel,
+                ResolvedModel: route.ProviderModelId,
+                PromptTokens: promptTokens,
+                CompletionTokens: completionTokens,
+                CacheCreationTokens: cacheCreationTokens,
+                CacheReadTokens: cacheReadTokens,
+                EstimatedCostUsd: estimatedCostUsd,
+                CostConfidence: costConfidence,
+                OccurredAtUtc: DateTimeOffset.UtcNow,
+                RequestId: ExtractUpstreamRequestId(upstreamHeaders));
+            await _usageLedger.RecordAsync(ledgerEntry, CancellationToken.None).ConfigureAwait(false);
+        }
+
         var requestSummary = TextTruncator.Truncate(RequestTextExtractor.ExtractNewestUserMessage(requestBody));
         var responseSummary = _responseTextExtractor.TryExtractText(usageShapeProvider, isStreaming, usageShapeBytes, out var responseText)
             ? TextTruncator.Truncate(responseText)
@@ -1378,6 +1420,9 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             TotalDurationMs: totalDurationMs,
             StatusCode: statusCode,
             TimestampUtc: DateTimeOffset.UtcNow,
+            CacheCreationTokens: cacheCreationTokens,
+            CacheReadTokens: cacheReadTokens,
+            CostConfidence: costConfidence,
             RequestSummary: requestSummary,
             ResponseSummary: responseSummary,
             CorrelationId: correlationId);
@@ -1410,6 +1455,34 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// </summary>
     private static string SanitizeForLog(string? value) =>
         value?.Replace("\r", " ").Replace("\n", " ") ?? string.Empty;
+
+    /// <summary>
+    /// Reads the upstream's own request id off <paramref name="headers"/> - <c>request-id</c> (Anthropic)
+    /// or, failing that, <c>x-request-id</c> (the more common convention) - for
+    /// <see cref="UsageLedgerEntry.RequestId"/>. Returns <see langword="null"/> when
+    /// <paramref name="headers"/> is absent (the Bedrock invocation path has no HTTP response headers to
+    /// read) or neither header was sent, in which case <see cref="Telemetry.UsageLedger"/> falls back to
+    /// its composite dedup key.
+    /// </summary>
+    private static string? ExtractUpstreamRequestId(System.Net.Http.Headers.HttpResponseHeaders? headers)
+    {
+        if (headers is null)
+        {
+            return null;
+        }
+
+        if (headers.TryGetValues("request-id", out var requestIdValues))
+        {
+            return requestIdValues.FirstOrDefault();
+        }
+
+        if (headers.TryGetValues("x-request-id", out var xRequestIdValues))
+        {
+            return xRequestIdValues.FirstOrDefault();
+        }
+
+        return null;
+    }
 
     /// <summary>Attempts to parse the given bytes as a JSON object, returning null if they are not valid JSON or not an object.</summary>
     private static JsonObject? TryParseJsonObject(byte[] bytes)

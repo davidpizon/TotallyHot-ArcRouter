@@ -372,11 +372,55 @@ public class PriceCatalogRepositoryTests
         Assert.NotNull(repository.GetFreshPrice(new ModelKey("mystery-model", "openai"), TimeSpan.FromHours(24)));
     }
 
+    [Fact]
+    public void UpsertPrices_ExactRungResolution_StoresPriceAsNotApproximate()
+    {
+        using var temp = new TempDatabase();
+        temp.Database.EnsureCreated();
+        var resolver = new StubIdentityResolver(new ResolvedModelIdentity("gpt-5.4", "openai"), ResolutionRung.Exact);
+        var repository = new PriceCatalogRepository(temp.Database, resolver);
+
+        repository.UpsertPrices("litellm", 0, new[] { Price("gpt-4o", "openai", 2m, 6m) }, DateTimeOffset.UtcNow);
+
+        var price = repository.GetFreshPrice(new ModelKey("gpt-5.4", "openai"), TimeSpan.FromHours(24));
+        Assert.False(price!.IsApproximateMatch);
+    }
+
+    [Fact]
+    public void UpsertPrices_ApproximateRungResolution_FlagsStoredPriceApproximate()
+    {
+        // §5.7: every rung below Exact/OperatorOverride marks the stored price approximate, so a later
+        // lookup can report CostConfidence.CatalogApproximate rather than an unqualified Catalog.
+        using var temp = new TempDatabase();
+        temp.Database.EnsureCreated();
+        var resolver = new StubIdentityResolver(new ResolvedModelIdentity("gpt-5.4", "openai"), ResolutionRung.SnapshotSuffixStripped);
+        var repository = new PriceCatalogRepository(temp.Database, resolver);
+
+        repository.UpsertPrices("litellm", 0, new[] { Price("gpt-4o-20250101", "openai", 2m, 6m) }, DateTimeOffset.UtcNow);
+
+        var price = repository.GetFreshPrice(new ModelKey("gpt-5.4", "openai"), TimeSpan.FromHours(24));
+        Assert.True(price!.IsApproximateMatch);
+    }
+
+    [Fact]
+    public void UpsertPrices_NoResolver_StoresPriceAsNotApproximate()
+    {
+        using var temp = new TempDatabase();
+        temp.Database.EnsureCreated();
+        var repository = new PriceCatalogRepository(temp.Database);
+
+        repository.UpsertPrices("litellm", 0, new[] { Price("gpt-4o", "openai", 2m, 6m) }, DateTimeOffset.UtcNow);
+
+        var price = repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24));
+        Assert.False(price!.IsApproximateMatch);
+    }
+
     // Returns a fixed identity (or null) regardless of input: this exercises the repository's *use* of a
     // resolver's output. The resolver's own matching logic is covered by ConfigModelIdentityResolverTests.
-    private sealed class StubIdentityResolver(ResolvedModelIdentity? identity) : IModelIdentityResolver
+    private sealed class StubIdentityResolver(ResolvedModelIdentity? identity, ResolutionRung rung = ResolutionRung.Exact) : IModelIdentityResolver
     {
-        public ResolvedModelIdentity? Resolve(string aggregatorModelId, string aggregatorProvider) => identity;
+        public IdentityResolution? Resolve(string sourceName, string aggregatorModelId, string aggregatorProvider) =>
+            identity is null ? null : new IdentityResolution(identity.Value, rung);
     }
 
     [Fact]

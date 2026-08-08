@@ -485,6 +485,40 @@ public class AnthropicProviderTests
     }
 
     [Fact]
+    public async Task NonStreaming_AnthropicResponseWithCacheTokens_PublishesTelemetryEventCarryingBothCacheCounts()
+    {
+        var handler = new DelegatingHandlerStub(_ =>
+        {
+            const string anthropicResponse = """
+                {
+                  "id": "msg_11",
+                  "model": "claude-sonnet-5",
+                  "content": [ { "type": "text", "text": "hi" } ],
+                  "stop_reason": "end_turn",
+                  "usage": { "input_tokens": 50, "output_tokens": 10, "cache_creation_input_tokens": 30, "cache_read_input_tokens": 200 }
+                }
+                """;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(anthropicResponse, Encoding.UTF8, "application/json"),
+            });
+        });
+
+        var capturing = new CapturingTelemetryPublisher();
+        var middleware = BuildMiddleware(handler, capturing);
+
+        var context = BuildContext("/v1/chat/completions", """
+            {"model":"claude-sonnet-5","messages":[{"role":"user","content":"hi"}]}
+            """);
+
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        var published = await capturing.WaitForEventAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(30, published.CacheCreationTokens);
+        Assert.Equal(200, published.CacheReadTokens);
+    }
+
+    [Fact]
     public void TranslateRequest_ThinkingBlocksOnAssistantMessage_RoundTripsFirstInContent()
     {
         // A client resending a prior assistant turn (LiteLLM's reasoning_content/thinking_blocks

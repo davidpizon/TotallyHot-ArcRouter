@@ -70,7 +70,11 @@ namespace TotallyHot.ArcRouter.Hosting
             // singleton is responsible for).
             services.AddSingleton<ISessionIdResolver, SessionIdResolver>();
             services.AddSingleton<IConversationContinuityMatcher, MessageHistoryContinuityMatcher>();
-            services.AddSingleton<IConversationTurnTracker, ConversationTurnTracker>();
+            // Persistent (ledger-seeded) turn tracker (docs/router/token-tracking-implementation-plan.md
+            // Phase 2, §5.5) replaces the process-lifetime-only ConversationTurnTracker as the app's default:
+            // a session's turn number now survives a proxy restart. ConversationTurnTracker itself remains in
+            // the codebase for tests and any no-ledger direct construction of ProxyMiddleware.
+            services.AddSingleton<IConversationTurnTracker, PersistentConversationTurnTracker>();
             services.AddSingleton<IUsageExtractor, UsageExtractor>();
             services.AddSingleton<IResponseTextExtractor, ResponseTextExtractor>();
 
@@ -132,9 +136,14 @@ namespace TotallyHot.ArcRouter.Hosting
                 .Configure<IConfiguration>((options, configuration) =>
                     configuration.GetSection(PriceCatalogOptions.SectionName).Bind(options));
             services.AddSingleton<PriceCatalogDatabase>();
-            // D3 alias resolver (docs/router/d3-alias-resolution.md): maps each source's own model/provider
-            // naming onto the configured router identity at ingest, so cost resolves on the client-facing
-            // ModelName. Registered so the container injects it into PriceCatalogRepository's optional param.
+            // Operator price-override store (docs/router/token-tracking-implementation-plan.md Phase 3 §5.7):
+            // the resolution ladder's top rung. Registered before the resolver so the container injects it
+            // into ConfigModelIdentityResolver's optional overrideStore parameter.
+            services.AddSingleton<ModelAliasOverrideStore>();
+            // D3/§5.7 alias resolver (docs/router/d3-alias-resolution.md, docs/router/token-tracking-improvements.md
+            // §5.7): maps each source's own model/provider naming onto the configured router identity at
+            // ingest via the resolution ladder, so cost resolves on the client-facing ModelName. Registered
+            // so the container injects it into PriceCatalogRepository's optional param.
             services.AddSingleton<IModelIdentityResolver, ConfigModelIdentityResolver>();
             services.AddSingleton<PriceCatalogRepository>();
             // Request-path price lookup (docs/router/model-price-catalog.md): ProxyMiddleware
@@ -156,6 +165,18 @@ namespace TotallyHot.ArcRouter.Hosting
             // §5) into the same price-catalog database. Injected into ProxyMiddleware's optional
             // rateLimitCapture constructor parameter.
             services.AddSingleton<IRateLimitHeaderCapture, RateLimitHeaderCapture>();
+            // The Phase 4 rollup maintainer (docs/router/token-tracking-implementation-plan.md §5.3),
+            // sharing agent_telemetry.db with the ledger it rolls up. Registered before IUsageLedger so the
+            // container injects it into UsageLedger's optional rollupStore constructor parameter (DI
+            // resolution order is independent of registration order, but the sequence here keeps the two
+            // reads next to each other). StartupHealthCheckHostedService pins the bucket timezone and runs
+            // the startup backfill against this same singleton.
+            services.AddSingleton<IUsageRollupStore, UsageRollupStore>();
+            // The durable usage ledger (docs/router/token-tracking-implementation-plan.md Phase 2), sharing
+            // agent_telemetry.db with the rest of the price catalog. Injected into ProxyMiddleware's optional
+            // usageLedger constructor parameter and into PersistentConversationTurnTracker above (registered
+            // earlier in this method only because DI resolution order is independent of registration order).
+            services.AddSingleton<IUsageLedger, UsageLedger>();
             // Per-(provider, model) tool-call dialect capabilities (docs/router/tool-call-normalization.md
             // Phase 1). Shares agent_telemetry.db with the price catalog, so it has the same
             // empty-until-schema-ready lifecycle as the two stores above: StartupHealthCheckHostedService
@@ -227,7 +248,9 @@ namespace TotallyHot.ArcRouter.Hosting
                     // its own container, so the REST facade it builds cannot resolve these from this one.
                     endpointScanner: sp.GetRequiredService<ProviderEndpointScanner>(),
                     toolCallCapabilityStore: sp.GetRequiredService<ToolCallCapabilityStore>(),
-                    priceCatalogRepository: sp.GetRequiredService<PriceCatalogRepository>());
+                    priceCatalogRepository: sp.GetRequiredService<PriceCatalogRepository>(),
+                    modelAliasOverrideStore: sp.GetRequiredService<ModelAliasOverrideStore>(),
+                    usageRollupStore: sp.GetRequiredService<IUsageRollupStore>());
             });
 
             return services;

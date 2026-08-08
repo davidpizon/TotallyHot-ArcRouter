@@ -1,5 +1,6 @@
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
+using TotallyHot.ArcRouter.Telemetry;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -95,6 +96,30 @@ internal sealed class TempDatabase : IDisposable
             NullLogger<ToolCallCapabilityStore>.Instance);
         store.Reload();
         return store;
+    }
+
+    /// <summary>Creates the schema and returns a <see cref="UsageLedger"/> over it, optionally wired to a rollup store.</summary>
+    public UsageLedger CreateUsageLedger(IUsageRollupStore? rollupStore = null)
+    {
+        Database.EnsureCreated();
+        return new UsageLedger(Database, rollupStore, NullLogger<UsageLedger>.Instance);
+    }
+
+    /// <summary>Creates the schema and returns a <see cref="UsageRollupStore"/> over it.</summary>
+    public UsageRollupStore CreateRollupStore(string rollupTimezone = "UTC")
+    {
+        Database.EnsureCreated();
+        return new UsageRollupStore(
+            Database,
+            Options.Create(new StorageOptions { DatabasePath = Path_, RollupTimezone = rollupTimezone }),
+            NullLogger<UsageRollupStore>.Instance);
+    }
+
+    /// <summary>Creates the schema and returns a <see cref="ModelAliasOverrideStore"/> over it.</summary>
+    public ModelAliasOverrideStore CreateOverrideStore()
+    {
+        Database.EnsureCreated();
+        return new ModelAliasOverrideStore(Database);
     }
 
     public void Dispose()

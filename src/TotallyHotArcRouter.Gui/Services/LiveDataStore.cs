@@ -250,8 +250,11 @@ public sealed class LiveDataStore : IAsyncDisposable
         TotalDurationMs: e.TotalDurationMs,
         StatusCode: e.StatusCode,
         TimestampUtc: e.TimestampUtc.ToDateTimeOffset(),
+        CacheCreationTokens: e.HasCacheCreationTokens ? e.CacheCreationTokens : null,
+        CacheReadTokens: e.HasCacheReadTokens ? e.CacheReadTokens : null,
         RequestSummary: e.HasRequestSummary ? e.RequestSummary : null,
-        ResponseSummary: e.HasResponseSummary ? e.ResponseSummary : null);
+        ResponseSummary: e.HasResponseSummary ? e.ResponseSummary : null,
+        CostConfidence: e.HasCostConfidence ? e.CostConfidence : null);
 
     /// <summary>Converts a gRPC-contract <see cref="Contract.LogLineEvent"/> into the store's <see cref="LogLineDto"/>.</summary>
     private static LogLineDto MapToDto(Contract.LogLineEvent e) => new(

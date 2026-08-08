@@ -198,6 +198,65 @@ public sealed class ProviderAdminClient
         return await SendForProvidersAsync(request, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Lists every configured price override (§5.7's operator-override rung), for the Governance
+    /// price-overrides pane's read-only diagnosis view.
+    /// </summary>
+    /// <param name="cancellationToken">A token to cancel the request.</param>
+    /// <returns>The configured overrides.</returns>
+    /// <exception cref="ProviderAdminException">Overrides are unavailable or the request failed.</exception>
+    public async Task<IReadOnlyList<PriceOverrideView>> GetPriceOverridesAsync(CancellationToken cancellationToken = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "admin/price-overrides");
+        using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        return Deserialize<List<PriceOverrideView>>(body);
+    }
+
+    /// <summary>Adds or replaces a price override.</summary>
+    /// <param name="body">The override to write; <see cref="PriceOverrideWriteRequest.ModelName"/> must name an already-configured model.</param>
+    /// <param name="cancellationToken">A token to cancel the request.</param>
+    /// <returns>The updated override list.</returns>
+    /// <exception cref="ProviderAdminException">The edit was rejected (e.g. an unknown model) or the request failed.</exception>
+    public async Task<IReadOnlyList<PriceOverrideView>> SetPriceOverrideAsync(PriceOverrideWriteRequest body, CancellationToken cancellationToken = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Put, "admin/price-overrides") { Content = JsonBody(body) };
+        using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        return Deserialize<List<PriceOverrideView>>(responseBody);
+    }
+
+    /// <summary>Removes a price override.</summary>
+    /// <param name="sourceName">The aggregator source the override applies to.</param>
+    /// <param name="aggregatorModelKey">The source's own model key the override matches.</param>
+    /// <param name="cancellationToken">A token to cancel the request.</param>
+    /// <returns>The updated override list.</returns>
+    /// <exception cref="ProviderAdminException">No override matched, overrides are unavailable, or the request failed.</exception>
+    public async Task<IReadOnlyList<PriceOverrideView>> RemovePriceOverrideAsync(string sourceName, string aggregatorModelKey, CancellationToken cancellationToken = default)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Delete,
+            $"admin/price-overrides?sourceName={Escape(sourceName)}&aggregatorModelKey={Escape(aggregatorModelKey)}");
+        using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        return Deserialize<List<PriceOverrideView>>(body);
+    }
+
+    /// <summary>
+    /// Gets, per configured model, whether the catalog currently resolves a price for it and via an exact
+    /// or approximate match - the Governance price-overrides pane's read-only diagnosis view.
+    /// </summary>
+    /// <param name="cancellationToken">A token to cancel the request.</param>
+    /// <returns>The resolution state of every configured model.</returns>
+    /// <exception cref="ProviderAdminException">The price catalog is unavailable or the request failed.</exception>
+    public async Task<IReadOnlyList<PriceResolutionDiagnosisView>> GetPriceResolutionDiagnosisAsync(CancellationToken cancellationToken = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "admin/price-resolution");
+        using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        return Deserialize<List<PriceResolutionDiagnosisView>>(body);
+    }
+
     /// <summary>Sends a request expected to return a provider snapshot and unwraps its <see cref="ProvidersSnapshot.Providers"/> list.</summary>
     private async Task<IReadOnlyList<ProviderAdminView>> SendForProvidersAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {

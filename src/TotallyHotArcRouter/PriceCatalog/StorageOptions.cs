@@ -25,6 +25,28 @@ public sealed class StorageOptions
     /// </summary>
     public string DatabasePath { get; init; } = @"%LOCALAPPDATA%\TotallyHot.ArcRouter\agent_telemetry.db";
 
+    /// <summary>
+    /// Gets the number of days a <c>usage_ledger</c> row is retained before the startup health check's
+    /// retention sweep deletes it, keyed on the row's <c>occurred_at_utc</c>. Defaults to 370 - a year plus
+    /// slack, matching the token-monitor plan's bounded-archive discipline (long enough for annual
+    /// spend/usage comparisons, bounded so the table doesn't grow forever on a long-lived install).
+    /// </summary>
+    public int UsageLedgerRetentionDays { get; init; } = 370;
+
+    /// <summary>
+    /// Gets the timezone id <c>usage_rollup</c> bucket boundaries are computed in, resolved via
+    /// <see cref="TimeZoneInfo.FindSystemTimeZoneById"/> - an IANA id (<c>"America/Los_Angeles"</c>) on
+    /// .NET's ICU-backed globalization (the default on every platform this project targets, including
+    /// Windows). An id that can't be resolved on the host falls back to UTC with a logged warning rather
+    /// than failing startup - see <c>UsageRollupStore.ResolveTimeZone</c>. Read once, on the first run that
+    /// ever creates a rollup bucket, and pinned into <c>rollup_metadata</c> from then on (tokscale's
+    /// reproducible-bucket rule - see <c>IUsageRollupStore</c>): changing this afterward has no effect until
+    /// the database is recreated, since re-cutting historical buckets would make two reports generated a
+    /// month apart over the same past day disagree. Defaults to UTC, since the proxy is typically a
+    /// headless service with no single "operator's local day" to prefer.
+    /// </summary>
+    public string RollupTimezone { get; init; } = "UTC";
+
     // The default's leading token. On non-Windows hosts (the project's Docker default is Linux)
     // LOCALAPPDATA is typically unset, so Environment.ExpandEnvironmentVariables leaves it literal.
     private const string LocalAppDataToken = "%LOCALAPPDATA%";

@@ -172,6 +172,13 @@ message RoutingTelemetryEvent {
   google.protobuf.Timestamp timestamp_utc = 15;
   optional string request_summary = 16;
   optional string response_summary = 17;
+  optional int32 cache_creation_tokens = 18;
+  optional int32 cache_read_tokens = 19;
+  // TotallyHot.ArcRouter.Telemetry.CostConfidence serialized via Enum.ToString()/Enum.Parse() on each end,
+  // matching the ledger's own cost_confidence column (docs/router/token-tracking-implementation-plan.md
+  // Phase 3, §5.6). optional (not a plain field) only so an old client, which has no such enum member to
+  // default to, can distinguish "not sent" from any real value - though every writer always sets it.
+  optional string cost_confidence = 20;
 }
 
 message LogLineEvent {

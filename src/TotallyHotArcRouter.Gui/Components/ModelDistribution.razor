@@ -1,40 +1,42 @@
 @* Model Distribution tab: time filter bar, token volume histogram, and model market share donut. Both
-   charts render through the shared <EChart> Apache ECharts host from serialized chart models. *@
+   charts render through the shared <EChart> Apache ECharts host from serialized chart models. Real data
+   (Phase 4, §5.15) is fetched from UsageStore per filter selection; MockData is the offline/no-proxy
+   fallback used only when there is no live data to show. *@
+@inject UsageStore UsageStore
 <div class="h-full flex flex-col gap-3 min-h-0">
-    @* Time filter bar (visual only for now - the mock data has a single fixed range) *@
+    @* Time filter bar - drives a real UsageStore.LoadRollupAsync call and re-render on every change. *@
     <div class="flex items-center gap-2 shrink-0">
         <div class="flex rounded overflow-hidden border border-slate-700">
             @foreach (var filter in TimeFilters)
             {
                 var isActive = _activeFilter == filter;
-                <button @onclick="() => _activeFilter = filter"
-                        class="px-3 py-1.5 text-xs font-medium transition-colors"
-                        style="background:@(isActive ? "#1ed760" : "#181818");
-                               color:@(isActive ? "#121212" : "#7c7c7c");
-                               border-right:@(filter != "Year" ? "1px solid #4d4d4d" : "none")">
+                <button @onclick="() => SetFilterAsync(filter)"
+                        class="px-3 py-1.5 text-xs font-medium transition-colors filter-button @(isActive ? "active" : "inactive") @(filter != "Year" ? "filter-button-divider" : "")">
                     @filter
                 </button>
             }
         </div>
         <div class="ml-auto flex items-center gap-2">
-            <input type="text" placeholder="From" class="px-2 py-1.5 text-xs font-mono w-24 ds-input ds-input-muted" />
+            <input type="text" @bind="_fromText" @bind:event="oninput" @bind:after="ApplyCustomRangeAsync"
+                   placeholder="YYYY-MM-DD" class="px-2 py-1.5 text-xs font-mono w-24 ds-input ds-input-muted" />
             <span class="text-slate-600 text-xs">—</span>
-            <input type="text" placeholder="To" class="px-2 py-1.5 text-xs font-mono w-24 ds-input ds-input-muted" />
+            <input type="text" @bind="_toText" @bind:event="oninput" @bind:after="ApplyCustomRangeAsync"
+                   placeholder="YYYY-MM-DD" class="px-2 py-1.5 text-xs font-mono w-24 ds-input ds-input-muted" />
         </div>
     </div>
 
     @* Charts row *@
     <div class="flex gap-3 flex-1 min-h-0">
         @* Token histogram *@
-        <div class="flex-1 rounded-lg p-4 flex flex-col min-h-0" style="background:#181818;border:1px solid #4d4d4d">
+        <div class="flex-1 rounded-lg p-4 flex flex-col min-h-0 ds-surface-card-bordered">
             <div class="mb-3 shrink-0">
                 <div class="text-xs font-semibold text-slate-400 uppercase tracking-widest">Token Volume Histogram</div>
                 <div class="flex items-center gap-4 mt-1.5">
                     <span class="flex items-center gap-1.5 text-xs font-mono text-slate-500">
-                        <span class="w-2 h-2 rounded-sm" style="background:#1ed760"></span> Prompt
+                        <span class="w-2 h-2 rounded-sm legend-swatch-accent"></span> Prompt
                     </span>
                     <span class="flex items-center gap-1.5 text-xs font-mono text-slate-500">
-                        <span class="w-2 h-2 rounded-sm" style="background:#10b981"></span> Completion
+                        <span class="w-2 h-2 rounded-sm legend-swatch-success"></span> Completion
                     </span>
                 </div>
             </div>
@@ -44,7 +46,7 @@
         </div>
 
         @* Model market share *@
-        <div class="rounded-lg p-4 flex flex-col min-h-0" style="background:#181818;border:1px solid #4d4d4d;width:42%">
+        <div class="rounded-lg p-4 flex flex-col min-h-0 ds-surface-card-bordered" style="width:42%">
             <div class="mb-2 shrink-0">
                 <div class="text-xs font-semibold text-slate-400 uppercase tracking-widest">Model Market Share</div>
                 <div class="text-xs text-slate-600 mt-0.5">By execution volume</div>
@@ -54,7 +56,7 @@
             </div>
             @* Custom legend matching the original design (the chart's own legend is hidden). *@
             <div class="flex flex-wrap gap-x-4 gap-y-1 mt-2 justify-center shrink-0">
-                @foreach (var share in ModelShares)
+                @foreach (var share in _modelShares)
                 {
                     <div class="flex items-center gap-1.5 text-xs font-mono text-slate-400">
                         <span class="w-2 h-2 rounded-full shrink-0" style="background:@share.Color"></span>
@@ -69,34 +71,128 @@
 @code {
     private static readonly string[] TimeFilters = ["Day", "Month", "3-Month", "6-Month", "Year"];
 
-    /// <summary>Prompt/completion token volume per time slot, rendered as the grouped-bar histogram.</summary>
-    [Parameter, EditorRequired]
-    public IReadOnlyList<TokenBucket> TokenBuckets { get; set; } = [];
-
-    /// <summary>Per-model market-share percentages, rendered as the donut and its custom legend.</summary>
-    [Parameter, EditorRequired]
-    public IReadOnlyList<ModelShare> ModelShares { get; set; } = [];
-
     private string _activeFilter = "Month";
+    private string _fromText = string.Empty;
+    private string _toText = string.Empty;
 
     private string _histogramJson = "{}";
     private string _donutJson = "{}";
+    private IReadOnlyList<ModelShare> _modelShares = [];
 
-    protected override void OnParametersSet()
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task SetFilterAsync(string filter)
     {
+        _activeFilter = filter;
+        _fromText = string.Empty;
+        _toText = string.Empty;
+        await ReloadAsync();
+    }
+
+    // Only applies once both fields parse to a valid range - a half-typed date must not trigger a fetch.
+    // Exact "yyyy-MM-dd" parse against the invariant culture, not DateTimeOffset.TryParse's culture- and
+    // timezone-dependent parsing - the placeholder advertises that one format, and a locale-dependent parse
+    // of the same typed text would resolve to a different UTC instant depending on the operator's machine.
+    // Interpreted as UTC midnight to match the rollup buckets' own UTC storage (UsageRollupStore).
+    private async Task ApplyCustomRangeAsync()
+    {
+        if (DateOnly.TryParseExact(_fromText, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var fromDate) &&
+            DateOnly.TryParseExact(_toText, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var toDate))
+        {
+            var from = new DateTimeOffset(fromDate.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+            var to = new DateTimeOffset(toDate.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+            if (to > from)
+            {
+                await ReloadAsync(from, to);
+            }
+        }
+    }
+
+    private async Task ReloadAsync(DateTimeOffset? explicitFrom = null, DateTimeOffset? explicitTo = null)
+    {
+        DateTimeOffset from;
+        DateTimeOffset to;
+        string width;
+        if (explicitFrom is { } customFrom && explicitTo is { } customTo)
+        {
+            (from, to, width) = (customFrom, customTo, "day");
+        }
+        else
+        {
+            (from, to, width) = RangeFor(_activeFilter, DateTimeOffset.UtcNow);
+        }
+
+        // Concurrent, not sequential: these are two independent queries, and awaiting them one after the
+        // other would double the wait on a slow or unreachable proxy for no benefit.
+        var dayTask = UsageStore.LoadRollupAsync(from, to, width, "day");
+        var modelTask = UsageStore.LoadRollupAsync(from, to, width, "model");
+        await Task.WhenAll(dayTask, modelTask);
+        var dayBuckets = dayTask.Result;
+        var modelBuckets = modelTask.Result;
+
+        if (dayBuckets.Count == 0 && modelBuckets.Count == 0)
+        {
+            // No live data yet (proxy unreachable, rollups unavailable, or genuinely no traffic in range) -
+            // fall back to the offline/no-proxy demo, matching the plan's stated policy for this tab.
+            BuildCharts(MockData.TokenBuckets, MockData.ModelShares);
+        }
+        else
+        {
+            var tokenBuckets = dayBuckets
+                .OrderBy(b => b.BucketStartUtc)
+                .Select(b => new TokenBucket(FormatSlot(b.BucketStartUtc, width), b.PromptTokens, b.CompletionTokens))
+                .ToList();
+
+            var totalRequests = modelBuckets.Sum(b => b.Requests);
+            var modelShares = modelBuckets
+                .OrderByDescending(b => b.Requests)
+                .Select(b => new ModelShare(
+                    b.GroupKey,
+                    totalRequests == 0 ? 0m : Math.Round((decimal)b.Requests / totalRequests * 100m, 1),
+                    ChartPalette.ColorFor(b.GroupKey)))
+                .ToList();
+
+            BuildCharts(tokenBuckets, modelShares);
+        }
+
+        StateHasChanged();
+    }
+
+    private void BuildCharts(IReadOnlyList<TokenBucket> tokenBuckets, IReadOnlyList<ModelShare> modelShares)
+    {
+        _modelShares = modelShares;
+
+        var yMax = GroupedBarsModel.DynamicYMax(
+        [
+            tokenBuckets.Select(b => b.Prompt).ToList(),
+            tokenBuckets.Select(b => b.Completion).ToList(),
+        ]);
         var histogram = new GroupedBarsModel(
             "Token Volume Histogram",
-            TokenBuckets.Select(b => b.Slot).ToList(),
-            6_000_000m,
+            tokenBuckets.Select(b => b.Slot).ToList(),
+            yMax,
             [
-                new DistributionSeries("Prompt", "#1ed760", TokenBuckets.Select(b => b.Prompt).ToList()),
-                new DistributionSeries("Completion", "#10b981", TokenBuckets.Select(b => b.Completion).ToList()),
+                new DistributionSeries("Prompt", "#1ed760", tokenBuckets.Select(b => b.Prompt).ToList()),
+                new DistributionSeries("Completion", "#10b981", tokenBuckets.Select(b => b.Completion).ToList()),
             ]);
         _histogramJson = ChartJson.Serialize(histogram);
 
         var donut = new DonutModel(
             "Model Market Share",
-            ModelShares.Select(s => new DistributionSlice(s.Model, s.Value, s.Color)).ToList());
+            modelShares.Select(s => new DistributionSlice(s.Model, s.Value, s.Color)).ToList());
         _donutJson = ChartJson.Serialize(donut);
     }
+
+    private static (DateTimeOffset From, DateTimeOffset To, string Width) RangeFor(string filter, DateTimeOffset now) => filter switch
+    {
+        "Day" => (now.AddDays(-1), now, "hour"),
+        "Month" => (now.AddMonths(-1), now, "day"),
+        "3-Month" => (now.AddMonths(-3), now, "day"),
+        "6-Month" => (now.AddMonths(-6), now, "day"),
+        "Year" => (now.AddYears(-1), now, "day"),
+        _ => (now.AddMonths(-1), now, "day"),
+    };
+
+    private static string FormatSlot(DateTimeOffset bucketStartUtc, string width) =>
+        width == "hour" ? bucketStartUtc.ToLocalTime().ToString("HH:mm") : bucketStartUtc.ToLocalTime().ToString("MM/dd");
 }

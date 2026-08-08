@@ -27,7 +27,18 @@ public sealed record PriceSourceState(
 /// <param name="ProviderKey">The provider key (e.g. <c>openai</c>).</param>
 /// <param name="DollarCap">The monthly USD cap, or <see langword="null"/> for no dollar budget.</param>
 /// <param name="TokenCap">The monthly total-token cap, or <see langword="null"/> for no token budget.</param>
-public sealed record ProviderBudgetRow(string ProviderKey, decimal? DollarCap, long? TokenCap);
+/// <param name="WindowKind">
+/// The persisted <see cref="BudgetWindow"/> discriminator ("Monthly", "Weekly", or "RollingHours") the cap
+/// resets on. Always non-null on a read row; <see cref="PriceCatalogDatabase"/>'s migration backfills
+/// existing rows to "Monthly", matching the only behavior that existed before this column did.
+/// </param>
+/// <param name="WindowHours">The block length in hours when <paramref name="WindowKind"/> is "RollingHours"; otherwise <see langword="null"/>.</param>
+public sealed record ProviderBudgetRow(
+    string ProviderKey,
+    decimal? DollarCap,
+    long? TokenCap,
+    string WindowKind = "Monthly",
+    int? WindowHours = null);
 
 /// <summary>
 /// A provider's spend accumulated within one <c>YYYY-MM</c> period. Tokens are the sum of prompt and
@@ -120,9 +131,10 @@ public sealed class PriceCatalogRepository
             // priority gate below and lets the runtime cost lookup resolve on ModelName. A miss falls back to
             // the source's own keys verbatim: an unmatched model is left unresolved, never mis-mapped. See
             // docs/router/d3-alias-resolution.md.
-            var identity = _identityResolver?.Resolve(price.ModelIdentifier, price.Provider);
-            var providerName = identity?.Provider ?? price.Provider;
-            var modelIdentifier = identity?.ModelName ?? price.ModelIdentifier;
+            var resolution = _identityResolver?.Resolve(sourceName, price.ModelIdentifier, price.Provider);
+            var providerName = resolution?.Identity.Provider ?? price.Provider;
+            var modelIdentifier = resolution?.Identity.ModelName ?? price.ModelIdentifier;
+            var isApproximate = resolution?.IsApproximate ?? false;
 
             var providerId = GetOrCreateProviderId(connection, transaction, providerName);
             var modelId = GetOrCreateModelId(connection, transaction, modelIdentifier);
@@ -132,7 +144,7 @@ public sealed class PriceCatalogRepository
             // priority gate below rejects the price row - a losing source's naming of a model is still a fact
             // worth keeping, and the alias table has no priority concept of its own.
             UpsertAlias(connection, transaction, sourceId, modelId, price.ModelIdentifier);
-            written += UpsertPriceRow(connection, transaction, modelId, providerId, sourceId, price, timestamp);
+            written += UpsertPriceRow(connection, transaction, modelId, providerId, sourceId, price, timestamp, isApproximate);
         }
 
         transaction.Commit();
@@ -294,7 +306,7 @@ public sealed class PriceCatalogRepository
     {
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT provider_key, dollar_cap, token_cap FROM provider_budgets;";
+        command.CommandText = "SELECT provider_key, dollar_cap, token_cap, window_kind, window_hours FROM provider_budgets;";
 
         var rows = new List<ProviderBudgetRow>();
         using var reader = command.ExecuteReader();
@@ -303,19 +315,22 @@ public sealed class PriceCatalogRepository
             rows.Add(new ProviderBudgetRow(
                 ProviderKey: reader.GetString(0),
                 DollarCap: reader.IsDBNull(1) ? null : decimal.Parse(reader.GetString(1), CultureInfo.InvariantCulture),
-                TokenCap: reader.IsDBNull(2) ? null : reader.GetInt64(2)));
+                TokenCap: reader.IsDBNull(2) ? null : reader.GetInt64(2),
+                WindowKind: reader.GetString(3),
+                WindowHours: reader.IsDBNull(4) ? null : reader.GetInt32(4)));
         }
 
         return rows;
     }
 
     /// <summary>
-    /// Persists a provider's monthly budget caps. A <see langword="null"/> cap clears that dimension; when
-    /// both are null the row is deleted, so an unbudgeted provider leaves no stale row behind. Decimals are
-    /// written as invariant text (matching how money round-trips elsewhere) so no binary-float rounding
-    /// enters a dollar cap.
+    /// Persists a provider's budget caps and reset window. A <see langword="null"/> cap clears that
+    /// dimension; when both are null the row is deleted, so an unbudgeted provider leaves no stale row
+    /// behind (in that case <paramref name="window"/> is ignored, since there is no cap left to reset).
+    /// Decimals are written as invariant text (matching how money round-trips elsewhere) so no binary-float
+    /// rounding enters a dollar cap.
     /// </summary>
-    public void SetProviderBudget(string providerKey, decimal? dollarCap, long? tokenCap)
+    public void SetProviderBudget(string providerKey, decimal? dollarCap, long? tokenCap, BudgetWindow? window = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
 
@@ -330,16 +345,22 @@ public sealed class PriceCatalogRepository
             return;
         }
 
+        var (windowKind, windowHours) = BudgetWindowCodec.Encode(window ?? new BudgetWindow.Monthly());
+
         command.CommandText = """
-            INSERT INTO provider_budgets (provider_key, dollar_cap, token_cap)
-            VALUES ($key, $dollar, $token)
+            INSERT INTO provider_budgets (provider_key, dollar_cap, token_cap, window_kind, window_hours)
+            VALUES ($key, $dollar, $token, $windowKind, $windowHours)
             ON CONFLICT(provider_key) DO UPDATE SET
-                dollar_cap = excluded.dollar_cap,
-                token_cap  = excluded.token_cap;
+                dollar_cap   = excluded.dollar_cap,
+                token_cap    = excluded.token_cap,
+                window_kind  = excluded.window_kind,
+                window_hours = excluded.window_hours;
             """;
         command.Parameters.AddWithValue("$key", providerKey);
         command.Parameters.AddWithValue("$dollar", dollarCap?.ToString(CultureInfo.InvariantCulture) ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$token", tokenCap ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$windowKind", windowKind);
+        command.Parameters.AddWithValue("$windowHours", windowHours ?? (object)DBNull.Value);
         command.ExecuteNonQuery();
     }
 
@@ -475,7 +496,7 @@ public sealed class PriceCatalogRepository
         using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT mp.standard_input_price, mp.standard_output_price,
-                   mp.cached_input_price, mp.cache_write_input_price
+                   mp.cached_input_price, mp.cache_write_input_price, mp.is_approximate
             FROM model_prices mp
             JOIN models            m ON m.model_id    = mp.model_id
             JOIN providers         p ON p.provider_id = mp.provider_id
@@ -499,7 +520,8 @@ public sealed class PriceCatalogRepository
             reader.GetDecimal(0),
             reader.GetDecimal(1),
             reader.IsDBNull(2) ? null : reader.GetDecimal(2),
-            reader.IsDBNull(3) ? null : reader.GetDecimal(3));
+            reader.IsDBNull(3) ? null : reader.GetDecimal(3),
+            reader.GetInt32(4) != 0);
     }
 
     /// <summary>
@@ -621,7 +643,8 @@ public sealed class PriceCatalogRepository
         int providerId,
         int sourceId,
         NormalizedPrice price,
-        string timestamp)
+        string timestamp,
+        bool isApproximate)
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -638,11 +661,11 @@ public sealed class PriceCatalogRepository
             INSERT INTO model_prices (
                 model_id, provider_id, aggregator_source_id,
                 standard_input_price, standard_output_price, cached_input_price, cache_write_input_price,
-                batch_input_price, batch_output_price, last_updated_utc)
+                batch_input_price, batch_output_price, last_updated_utc, is_approximate)
             VALUES (
                 $model, $provider, $source,
                 $stdIn, $stdOut, $cachedIn, $cacheWrite,
-                $batchIn, $batchOut, $updated)
+                $batchIn, $batchOut, $updated, $approximate)
             ON CONFLICT(model_id, provider_id) DO UPDATE SET
                 aggregator_source_id    = excluded.aggregator_source_id,
                 standard_input_price    = excluded.standard_input_price,
@@ -651,7 +674,8 @@ public sealed class PriceCatalogRepository
                 cache_write_input_price = excluded.cache_write_input_price,
                 batch_input_price       = excluded.batch_input_price,
                 batch_output_price      = excluded.batch_output_price,
-                last_updated_utc        = excluded.last_updated_utc
+                last_updated_utc        = excluded.last_updated_utc,
+                is_approximate          = excluded.is_approximate
             WHERE (SELECT priority_score FROM aggregator_sources WHERE source_id = excluded.aggregator_source_id)
                   >= (SELECT priority_score FROM aggregator_sources WHERE source_id = model_prices.aggregator_source_id);
             """;
@@ -665,6 +689,7 @@ public sealed class PriceCatalogRepository
         command.Parameters.AddWithValue("$batchIn", (object?)price.BatchInputPrice ?? DBNull.Value);
         command.Parameters.AddWithValue("$batchOut", (object?)price.BatchOutputPrice ?? DBNull.Value);
         command.Parameters.AddWithValue("$updated", timestamp);
+        command.Parameters.AddWithValue("$approximate", isApproximate ? 1 : 0);
         return command.ExecuteNonQuery();
     }
 

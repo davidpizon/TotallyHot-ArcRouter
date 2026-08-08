@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 
@@ -13,55 +14,109 @@ namespace TotallyHot.ArcRouter.PriceCatalog;
 public readonly record struct ResolvedModelIdentity(string ModelName, string Provider);
 
 /// <summary>
-/// Resolves an aggregator's own <c>(model, provider)</c> naming onto the configured router identity (D3),
-/// so a price ingested from LiteLLM (<c>gpt-4o</c>) and one from OpenRouter (<c>openai/gpt-4o</c>) for the
-/// same real model land in a single <c>(model, provider)</c> cell keyed by the operator's
-/// <c>ModelName</c> - which is what the runtime cost lookup queries. A resolver that cannot match returns
-/// <see langword="null"/>, and the caller stores the price under the source's own keys unchanged: an
-/// unmatched model is left unresolved, never approximately mapped. See
-/// <c>docs/router/d3-alias-resolution.md</c>.
+/// The ordered ladder of identity-resolution strategies, highest confidence first. Adapted from tokscale's
+/// 8-step pricing resolution, trimmed to the rungs that apply to a router that owns its own model list:
+/// tokscale's vendor-hardcoded and fuzzy word-boundary rungs are deliberately omitted (see
+/// <c>docs/router/token-tracking-improvements.md</c> §5.7).
+/// </summary>
+public enum ResolutionRung
+{
+    /// <summary>An operator-authored override in the price-override store. Wins over everything.</summary>
+    OperatorOverride,
+
+    /// <summary>Provider and model id match exactly - the original <see cref="ConfigModelIdentityResolver"/> behavior.</summary>
+    Exact,
+
+    /// <summary>Matched after stripping a trailing dated-snapshot suffix (e.g. "-20250929").</summary>
+    SnapshotSuffixStripped,
+
+    /// <summary>Matched after normalizing a version/tier suffix (e.g. "-latest", "-preview", ":free").</summary>
+    VersionNormalized,
+
+    /// <summary>Matched on model id alone, ignoring a provider-name mismatch (e.g. azure-openai vs openai).</summary>
+    ProviderAlias,
+}
+
+/// <summary>
+/// A resolution attempt's outcome: the identity, plus which rung of the ladder produced it. The rung is
+/// carried rather than discarded because it is what lets an approximate match be labeled approximate
+/// downstream (see <see cref="Telemetry.CostConfidence"/>) instead of being indistinguishable from an exact
+/// one - which is the actual objection <c>d3-alias-resolution.md</c> raises against fuzzy matching.
+/// </summary>
+/// <param name="Identity">The resolved client-facing identity.</param>
+/// <param name="Rung">
+/// Which rung matched. <see cref="ResolutionRung.Exact"/> and <see cref="ResolutionRung.OperatorOverride"/>
+/// are authoritative; every lower rung marks the resulting price approximate (<see cref="IsApproximate"/>).
+/// </param>
+public readonly record struct IdentityResolution(ResolvedModelIdentity Identity, ResolutionRung Rung)
+{
+    /// <summary>
+    /// Whether <see cref="Rung"/> is below the ladder's authoritative rungs, so the resulting price should
+    /// be marked <see cref="Telemetry.CostConfidence.CatalogApproximate"/> rather than
+    /// <see cref="Telemetry.CostConfidence.Catalog"/>.
+    /// </summary>
+    public bool IsApproximate => Rung is not (ResolutionRung.OperatorOverride or ResolutionRung.Exact);
+}
+
+/// <summary>
+/// Resolves an aggregator's own <c>(model, provider)</c> naming onto the configured router identity via the
+/// §5.7 resolution ladder: an operator override, then an exact match, then progressively looser automatic
+/// rungs. A resolver that cannot match any rung returns <see langword="null"/>, and the caller stores the
+/// price under the source's own keys unchanged - an unmatched model is left unresolved, never approximately
+/// mapped without disclosure. See <c>docs/router/d3-alias-resolution.md</c> and
+/// <c>docs/router/token-tracking-improvements.md</c> §5.7.
 /// </summary>
 public interface IModelIdentityResolver
 {
     /// <summary>
-    /// Maps an aggregator's own model/provider naming onto the configured router identity, or returns
-    /// <see langword="null"/> when no configured model matches exactly.
+    /// Maps an aggregator's own model/provider naming onto the configured router identity via the
+    /// resolution ladder, or returns <see langword="null"/> when no rung matches.
     /// </summary>
+    /// <param name="sourceName">The aggregator source name (e.g. <c>LiteLLM</c>), used for operator-override lookup.</param>
     /// <param name="aggregatorModelId">The source's own model key, e.g. <c>gpt-4o</c> or <c>openai/gpt-4o</c>.</param>
     /// <param name="aggregatorProvider">The source's own provider string, e.g. <c>openai</c>.</param>
-    ResolvedModelIdentity? Resolve(string aggregatorModelId, string aggregatorProvider);
+    IdentityResolution? Resolve(string sourceName, string aggregatorModelId, string aggregatorProvider);
 }
 
 /// <summary>
-/// <see cref="IModelIdentityResolver"/> backed by the live <see cref="IProviderConfigStore"/>. Matches an
-/// aggregator row against a <c>ModelRouting:ModelList</c> entry when the provider names agree
-/// (case-insensitively) and the aggregator's model id, after stripping its own <c>provider/</c> prefix,
-/// equals the entry's <c>ProviderModelId</c>. The match is deliberately exact - no fuzzy or best-guess
-/// matching - because a confidently wrong price is the failure the whole price subsystem exists to prevent
-/// (see <c>docs/router/d3-alias-resolution.md</c>). Provider-name divergence (config <c>azure-openai</c>
-/// vs aggregator <c>openai</c>) and pinned <c>ProviderModelId</c>s are left for the explicit-override slice,
-/// not guessed here.
+/// <see cref="IModelIdentityResolver"/> backed by the live <see cref="IProviderConfigStore"/> and an optional
+/// <see cref="ModelAliasOverrideStore"/>. Tries each <see cref="ResolutionRung"/> in order and returns the
+/// first that matches; see the ladder's own remarks for why no fuzzy rung follows <see cref="ResolutionRung.ProviderAlias"/>.
 /// </summary>
 public sealed class ConfigModelIdentityResolver : IModelIdentityResolver
 {
+    // Strips a trailing 8-digit dated snapshot suffix, e.g. "-20250929" off "claude-sonnet-4-5-20250929".
+    private static readonly Regex SnapshotSuffix = new(@"-\d{8}$", RegexOptions.Compiled);
+
+    // A small, fixed set of version/tier suffixes aggregators commonly append that a router's own
+    // ModelList entry never carries. Not exhaustive by design - an unrecognized suffix simply falls through
+    // to the next rung rather than being guessed at.
+    private static readonly Regex VersionSuffix = new(@"(-latest|-preview|-exp|-beta|:free)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     private readonly IProviderConfigStore _configStore;
+    private readonly ModelAliasOverrideStore? _overrideStore;
 
     // The resolved index is rebuilt only when the config's version changes, so a poll cycle's hundreds of
     // Resolve calls share one build rather than re-scanning ModelList each time. Guarded because ingestion
     // (which calls Resolve) and a runtime config edit (which bumps the version) run on different threads.
     private readonly object _sync = new();
     private int _cachedVersion = -1;
-    private Dictionary<(string Provider, string ModelId), ResolvedModelIdentity> _index = new();
+    private ResolvedIndex _index = new([], [], [], [], []);
 
     /// <param name="configStore">The live routing-configuration source the alias index is derived from.</param>
-    public ConfigModelIdentityResolver(IProviderConfigStore configStore)
+    /// <param name="overrideStore">
+    /// Optional operator-override store consulted first (<see cref="ResolutionRung.OperatorOverride"/>).
+    /// When <see langword="null"/>, that rung is skipped and resolution starts at <see cref="ResolutionRung.Exact"/>.
+    /// </param>
+    public ConfigModelIdentityResolver(IProviderConfigStore configStore, ModelAliasOverrideStore? overrideStore = null)
     {
         ArgumentNullException.ThrowIfNull(configStore);
         _configStore = configStore;
+        _overrideStore = overrideStore;
     }
 
     /// <inheritdoc />
-    public ResolvedModelIdentity? Resolve(string aggregatorModelId, string aggregatorProvider)
+    public IdentityResolution? Resolve(string sourceName, string aggregatorModelId, string aggregatorProvider)
     {
         if (string.IsNullOrWhiteSpace(aggregatorModelId) || string.IsNullOrWhiteSpace(aggregatorProvider))
         {
@@ -69,11 +124,50 @@ public sealed class ConfigModelIdentityResolver : IModelIdentityResolver
         }
 
         var index = GetIndex();
-        var key = (NormalizeProvider(aggregatorProvider), NormalizeModelId(aggregatorModelId, aggregatorProvider));
-        return index.TryGetValue(key, out var identity) ? identity : null;
+
+        if (!string.IsNullOrWhiteSpace(sourceName) && _overrideStore is not null)
+        {
+            var overriddenModelName = _overrideStore.TryGetModelName(sourceName, aggregatorModelId);
+            if (overriddenModelName is not null && index.ByModelName.TryGetValue(overriddenModelName, out var overriddenIdentity))
+            {
+                return new IdentityResolution(overriddenIdentity, ResolutionRung.OperatorOverride);
+            }
+        }
+
+        var provider = NormalizeProvider(aggregatorProvider);
+        var modelId = NormalizeModelId(aggregatorModelId, aggregatorProvider);
+
+        if (index.ByProviderAndModelId.TryGetValue((provider, modelId), out var exact))
+        {
+            return new IdentityResolution(exact, ResolutionRung.Exact);
+        }
+
+        var snapshotStripped = SnapshotSuffix.Replace(modelId, string.Empty);
+        if (snapshotStripped != modelId && index.ByProviderAndStrippedModelId.TryGetValue((provider, snapshotStripped), out var snapshotMatch))
+        {
+            return new IdentityResolution(snapshotMatch, ResolutionRung.SnapshotSuffixStripped);
+        }
+
+        var versionNormalized = VersionSuffix.Replace(SnapshotSuffix.Replace(modelId, string.Empty), string.Empty);
+        if (versionNormalized != modelId && index.ByProviderAndVersionNormalizedModelId.TryGetValue((provider, versionNormalized), out var versionMatch))
+        {
+            return new IdentityResolution(versionMatch, ResolutionRung.VersionNormalized);
+        }
+
+        // Provider-alias rung: match on model id alone, across every configured provider, ignoring the
+        // aggregator's stated provider entirely - the resolved identity still carries the *configured*
+        // provider (never the aggregator's), so a genuine cross-provider naming collision (rare, since
+        // ProviderModelId values are host-specific) resolves to whichever configured entry matched first.
+        if (index.ByModelIdAnyProvider.TryGetValue(versionNormalized, out var aliasMatch) ||
+            index.ByModelIdAnyProvider.TryGetValue(modelId, out aliasMatch))
+        {
+            return new IdentityResolution(aliasMatch, ResolutionRung.ProviderAlias);
+        }
+
+        return null;
     }
 
-    private Dictionary<(string Provider, string ModelId), ResolvedModelIdentity> GetIndex()
+    private ResolvedIndex GetIndex()
     {
         var snapshot = _configStore.Snapshot;
         lock (_sync)
@@ -88,9 +182,13 @@ public sealed class ConfigModelIdentityResolver : IModelIdentityResolver
         }
     }
 
-    private static Dictionary<(string Provider, string ModelId), ResolvedModelIdentity> Build(ModelRoutingOptions options)
+    private static ResolvedIndex Build(ModelRoutingOptions options)
     {
-        var index = new Dictionary<(string, string), ResolvedModelIdentity>();
+        var byModelName = new Dictionary<string, ResolvedModelIdentity>(StringComparer.OrdinalIgnoreCase);
+        var byProviderAndModelId = new Dictionary<(string Provider, string ModelId), ResolvedModelIdentity>();
+        var byProviderAndStripped = new Dictionary<(string Provider, string ModelId), ResolvedModelIdentity>();
+        var byProviderAndVersionNormalized = new Dictionary<(string Provider, string ModelId), ResolvedModelIdentity>();
+        var byModelIdAnyProvider = new Dictionary<string, ResolvedModelIdentity>();
 
         foreach (var entry in options.ModelList)
         {
@@ -99,15 +197,25 @@ public sealed class ConfigModelIdentityResolver : IModelIdentityResolver
                 continue;
             }
 
-            var key = (NormalizeProvider(entry.Provider), NormalizeModelId(entry.ProviderModelId, entry.Provider));
+            var identity = new ResolvedModelIdentity(entry.ModelName, entry.Provider);
+            var provider = NormalizeProvider(entry.Provider);
+            var modelId = NormalizeModelId(entry.ProviderModelId, entry.Provider);
 
-            // First entry wins on a duplicate (provider, providerModelId): two ModelNames mapping to one
-            // provider cell is ambiguous, so decline to guess which the aggregator meant rather than let the
-            // later one silently overwrite. ModelName itself is already unique (ModelRoutingOptions.EnsureValid).
-            index.TryAdd(key, new ResolvedModelIdentity(entry.ModelName, entry.Provider));
+            // First entry wins on a duplicate key: two ModelNames mapping to one ambiguous cell should not
+            // let the later one silently overwrite. ModelName itself is already unique (ModelRoutingOptions.EnsureValid).
+            byModelName.TryAdd(entry.ModelName, identity);
+            byProviderAndModelId.TryAdd((provider, modelId), identity);
+
+            var stripped = SnapshotSuffix.Replace(modelId, string.Empty);
+            byProviderAndStripped.TryAdd((provider, stripped), identity);
+
+            var versionNormalized = VersionSuffix.Replace(stripped, string.Empty);
+            byProviderAndVersionNormalized.TryAdd((provider, versionNormalized), identity);
+            byModelIdAnyProvider.TryAdd(versionNormalized, identity);
+            byModelIdAnyProvider.TryAdd(modelId, identity);
         }
 
-        return index;
+        return new ResolvedIndex(byModelName, byProviderAndModelId, byProviderAndStripped, byProviderAndVersionNormalized, byModelIdAnyProvider);
     }
 
     /// <summary>
@@ -115,10 +223,6 @@ public sealed class ConfigModelIdentityResolver : IModelIdentityResolver
     /// </summary>
     private static string NormalizeProvider(string provider) => provider.Trim().ToLowerInvariant();
 
-    // Strips the aggregator's own "provider/" prefix when present (OpenRouter's "openai/gpt-4o" -> "gpt-4o";
-    // LiteLLM's bare "gpt-4o" is unchanged), then lowercases. Only the source's own provider prefix is
-    // stripped - not any leading slash-segment - so a model id that legitimately contains a slash is not
-    // mangled.
     /// <summary>
     /// Normalizes a model id for use as a dictionary key: strips the source's own "provider/" prefix if
     /// present, then lowercases the result.
@@ -134,5 +238,12 @@ public sealed class ConfigModelIdentityResolver : IModelIdentityResolver
 
         return trimmed.ToLowerInvariant();
     }
-}
 
+    /// <summary>The rebuildable indexes <see cref="Build"/> derives from <see cref="ModelRoutingOptions"/>, one per resolution rung.</summary>
+    private sealed record ResolvedIndex(
+        Dictionary<string, ResolvedModelIdentity> ByModelName,
+        Dictionary<(string Provider, string ModelId), ResolvedModelIdentity> ByProviderAndModelId,
+        Dictionary<(string Provider, string ModelId), ResolvedModelIdentity> ByProviderAndStrippedModelId,
+        Dictionary<(string Provider, string ModelId), ResolvedModelIdentity> ByProviderAndVersionNormalizedModelId,
+        Dictionary<string, ResolvedModelIdentity> ByModelIdAnyProvider);
+}

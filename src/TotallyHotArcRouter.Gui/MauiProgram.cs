@@ -12,7 +12,7 @@ namespace TotallyHot.ArcRouter.Gui;
 /// Excluded from code coverage: <see cref="CreateMauiApp"/> calls <c>MauiAppBuilder.Build()</c>, which
 /// requires a live Windows App SDK host to initialize and cannot run inside an xUnit/bUnit process; the
 /// services it registers (<see cref="LiveDataStore"/>, <see cref="ProviderAdminStore"/>,
-/// <see cref="PriceSourceStore"/>) are unit-tested directly instead.
+/// <see cref="PriceSourceStore"/>, <see cref="UsageStore"/>) are unit-tested directly instead.
 /// </remarks>
 [ExcludeFromCodeCoverage]
 public static class MauiProgram
@@ -39,6 +39,10 @@ public static class MauiProgram
         // Backs the Governance tab's price-source panel. A singleton for the same reason, sharing the TLS
         // gRPC port (5002) with LiveDataStore. See Services/PriceSourceStore.cs.
         builder.Services.AddSingleton<PriceSourceStore>();
+        // Backs the Model Distribution / Cost Analytics history / header ticker's real data (Phase 4,
+        // §5.15). A singleton so its range-keyed cache survives tab switches; talks to the proxy's
+        // /admin/usage API (port 5001), same as ProviderAdminStore. See Services/UsageStore.cs.
+        builder.Services.AddSingleton<UsageStore>();
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();
 #endif

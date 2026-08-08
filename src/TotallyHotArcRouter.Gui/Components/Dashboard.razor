@@ -2,6 +2,7 @@
 @implements IDisposable
 @inject LiveDataStore LiveDataStore
 @inject ProviderAdminStore ProviderStore
+@inject UsageStore UsageStore
 
 <div class="flex flex-col h-screen overflow-hidden ds-surface-base">
     @* ── HEADER ── *@
@@ -57,18 +58,20 @@
 
         @* Ticker row *@
         <div class="flex items-center gap-6 px-4 py-1.5" style="border-top:1px solid var(--surface-base);background:var(--surface-interactive)">
+            @* Total Saved and Avg. Cost Reduction stay demo values - they need a worst-case-baseline ROI
+               concept the token-tracking plan deliberately does not invent (docs/gui/backlog.md). *@
             <div class="flex items-center gap-2">
-                <span class="text-xs text-slate-500">Total Saved</span>
+                <span class="text-xs text-slate-500">Total Saved (demo)</span>
                 <span class="font-mono text-xs font-semibold text-emerald-400">$142.36</span>
             </div>
             <div class="w-px h-3 ds-divider"></div>
             <div class="flex items-center gap-2">
                 <span class="text-xs text-slate-500">System Tokens</span>
-                <span class="font-mono text-xs font-semibold text-slate-200">12.4M</span>
+                <span class="font-mono text-xs font-semibold text-slate-200">@_systemTokensDisplay</span>
             </div>
             <div class="w-px h-3 ds-divider"></div>
             <div class="flex items-center gap-2">
-                <span class="text-xs text-slate-500">Avg. Cost Reduction</span>
+                <span class="text-xs text-slate-500">Avg. Cost Reduction (demo)</span>
                 <span class="font-mono text-xs font-semibold text-emerald-400">74.20% ↓</span>
             </div>
             <div class="ml-auto flex items-center gap-1.5">
@@ -106,7 +109,7 @@
                 <CostAnalytics Conversations="LiveDataStore.Conversations" InitialSessionId="@_selectedConversationId" />
                 break;
             case Tab.Distribution:
-                <ModelDistribution TokenBuckets="MockData.TokenBuckets" ModelShares="MockData.ModelShares" />
+                <ModelDistribution />
                 break;
             case Tab.Governance:
                 <Governance />
@@ -155,6 +158,11 @@
     private List<string> _breached = [];
     private List<string> _approaching = [];
 
+    // "12.4M"-style display for the header ticker's System Tokens tile - real, from UsageStore.Summary
+    // (Phase 4, §5.15). Starts at the mock's placeholder value and only changes once a real summary loads,
+    // so an unreachable proxy leaves the ticker showing what it always showed rather than a jarring "0".
+    private string _systemTokensDisplay = "12.4M";
+
     protected override async Task OnInitializedAsync()
     {
         LiveDataStore.Changed += HandleLiveDataChanged;
@@ -165,7 +173,22 @@
         // IsReachable flag), so the dashboard renders "System Status: OK" when the proxy isn't running.
         await ProviderStore.LoadAsync();
         RecomputeBudgetAlerts();
+
+        // Same best-effort shape: a failed/unavailable load just leaves the ticker's placeholder in place.
+        await UsageStore.LoadSummaryAsync("all");
+        if (UsageStore is { IsReachable: true, Summary: { } summary })
+        {
+            _systemTokensDisplay = FormatTokenCount(summary.PromptTokens + summary.CompletionTokens + summary.CacheCreationTokens + summary.CacheReadTokens);
+        }
     }
+
+    // Abbreviates a token count for the ticker tile: "12.4M", "830.0K", or the bare number under 1,000.
+    private static string FormatTokenCount(long tokens) => tokens switch
+    {
+        >= 1_000_000 => FormattableString.Invariant($"{tokens / 1_000_000d:0.0}M"),
+        >= 1_000 => FormattableString.Invariant($"{tokens / 1_000d:0.0}K"),
+        _ => tokens.ToString(System.Globalization.CultureInfo.InvariantCulture),
+    };
 
     // LiveDataStore raises Changed from whatever thread the gRPC stream delivered the event on;
     // InvokeAsync marshals back to this component's render context before calling StateHasChanged.

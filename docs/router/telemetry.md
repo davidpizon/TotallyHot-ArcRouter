@@ -31,7 +31,7 @@ request, after the response has already been fully forwarded to the client:
 | Field | Source |
 |---|---|
 | `SessionId`, `IsSessionSynthesized` | `SessionIdResolver`, falling back to `MessageHistoryContinuityMatcher` (see below) |
-| `TurnNumber` | `ConversationTurnTracker`, an in-memory per-session counter |
+| `TurnNumber` | `IConversationTurnTracker` - `PersistentConversationTurnTracker` (ledger-seeded, app default) or `ConversationTurnTracker` (in-memory only, tests/no-ledger callers) |
 | `RequestedModel`, `ResolvedModel`, `Provider` | From the existing `ModelRouteResolver` resolution already computed for routing |
 | `IsFallback` | Hardcoded `false` — `ModelRouteResolver` has no fallback-routing concept today, unlike the GUI's mock data which simulates one |
 | `PromptTokens`, `CompletionTokens` | `UsageExtractor`, parsed from the captured response body (see below); `null` if extraction fails or the provider is unrecognized |
@@ -65,16 +65,19 @@ lives on only in this .NET resolver.)
    before giving up.
 
 `ConversationTurnTracker` is a `ConcurrentDictionary<string, int>` counting turns per session,
-process-lifetime only (not persisted, resets on restart).
+process-lifetime only (not persisted, resets on restart). It remains in the codebase and is still what
+a directly-constructed `ProxyMiddleware` (tests, or any no-ledger caller) falls back to.
 
-> **Superseding decision (2026-08-07):** the "no persistence beyond the process" model for turn
-> tracking has been deliberately abandoned as part of adopting
+> **Superseding decision (2026-08-07): implemented.** The "no persistence beyond the process" model for
+> turn tracking has been abandoned as part of adopting
 > [`token-tracking-improvements.md`](token-tracking-improvements.md) §5.5 — once a durable per-request
 > ledger exists (§5.2 there), a turn counter that restarts at 1 after a proxy restart corrupts every
-> durable `(sessionId, turnNumber)` ordering built on it. The replacement (ledger-seeded high-water
-> mark + TTL eviction) is scheduled in
-> [`token-tracking-implementation-plan.md`](token-tracking-implementation-plan.md); until that phase
-> lands, the paragraph above still describes actual behavior.
+> durable `(sessionId, turnNumber)` ordering built on it. As of Phase 2 of
+> [`token-tracking-implementation-plan.md`](token-tracking-implementation-plan.md),
+> `PersistentConversationTurnTracker` is the app's default `IConversationTurnTracker` registration: on
+> first sight of a session it seeds its in-memory counter from `IUsageLedger.GetMaxTurnNumber`, then
+> counts purely in memory, evicting idle sessions after 12h (safe because a resumed session simply
+> re-seeds from the ledger).
 
 **Client integration note:** plain OpenAI-compatible clients hitting `/v1/chat/completions` (as
 opposed to Claude Code CLI or another client that already follows one of `SessionIdResolver`'s
@@ -384,12 +387,19 @@ to **honest, explicit defaults rather than fabricated values**:
 |---|---|---|
 | `RoutingRoi` | `0` | No "worst case" baseline cost is computed for live requests |
 | `ToolExecutionSteps` | `0` | The proxy doesn't introspect tool calls within a turn |
-| `CacheHitRate` | `0` | Prompt-cache usage isn't parsed from provider responses |
 | `ContextBufferPercent` | `0` | No per-model context-window-size configuration exists |
 
 `RequestSummary`/`ResponseSummary` are **not** in this table - they're real, mapped straight through
 from `LiveConversationTurn.RequestSummary`/`ResponseSummary` (see "Request/response text extraction"
 above), null only when there's genuinely nothing extractable for that turn.
+
+`CacheHitRate` is **also not** in this table anymore: `RoutingTelemetryEvent` now carries
+`CacheCreationTokens`/`CacheReadTokens` (parsed the same way as `PromptTokens`/`CompletionTokens`,
+see the table above) through the wire contract, `LiveConversationTurn`, and
+`RoutingTelemetryEventDto`. `LiveConversationMapper` derives `CacheHitRate` from them via
+`CostChartBuilder.CacheHitRate(prompt, cacheCreation, cacheRead)`, dividing by the additive total
+(`prompt + cacheCreation + cacheRead`) rather than by `prompt` alone - dividing by the provider's own
+`input_tokens` (which excludes cached tokens) could otherwise push the rate over 100%.
 
 `ConversationTurn.TimeToFirstTokenMs` **is** real — it's `LatencyToHeadersMs` from the event. The
 Razor components already render these defaults gracefully (e.g. `TurnCard.razor` shows "—" for a

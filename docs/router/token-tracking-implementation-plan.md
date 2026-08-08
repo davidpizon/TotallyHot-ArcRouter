@@ -49,7 +49,7 @@ GUI surface, so no phase completes invisible work (§5.15's requirement).
 
 ---
 
-## Phase 1 — Cache tokens on the wire, and a real cache-hit tile (§5.1)
+## Phase 1 — Cache tokens on the wire, and a real cache-hit tile (§5.1) — **Implemented**
 
 The smallest change with the largest visible effect: the proxy already extracts, prices, and
 budget-charges all four token dimensions; this phase stops dropping two of them at the
@@ -92,7 +92,7 @@ Cache stat end-to-end.
 
 ---
 
-## Phase 2 — The durable ledger: `usage_ledger`, dedup key, persistent turns (§5.2, §5.4, §5.5)
+## Phase 2 — The durable ledger: `usage_ledger`, dedup key, persistent turns (§5.2, §5.4, §5.5) — **Implemented**
 
 History stops evaporating. These three land together because the ledger without a dedup key
 double-counts on the first restart, and a durable `(sessionId, turnNumber)` key is corrupt without a
@@ -140,7 +140,7 @@ duplicate ledger rows, (b) the resumed session's next turn number continues rath
 
 ---
 
-## Phase 3 — Honest costs: confidence, coverage, and the resolution ladder (§5.6, §5.7)
+## Phase 3 — Honest costs: confidence, coverage, and the resolution ladder (§5.6, §5.7) — **Implemented**
 
 The "unknown ≠ zero" discipline the codebase holds at the type level, extended to aggregates and to
 model-identity resolution.
@@ -193,10 +193,22 @@ the ladder, displays as approximate, and an operator override corrects it live w
 
 ---
 
-## Phase 4 — Rollups, budget windows, the query surface, and the rollup GUI (§5.3, §5.10, §5.15)
+## Phase 4 — Rollups, budget windows, the query surface, and the rollup GUI (§5.3, §5.10, §5.15) — **Implemented**
 
 The phase an operator actually notices: history becomes queryable, and Model Distribution stops
 being a mock.
+
+> **Implementation notes (deviations from the sketch above):** the Governance per-model cards land as
+> a new "Models" sub-view (Governance > Models) rather than a second section stacked under the
+> existing provider cards, and read spend via the `/admin/usage` REST surface this phase builds
+> rather than `governance-model-cards.md`'s older gRPC-RPC sketch — that doc's dependency #1 (a live
+> model price catalog channel to the GUI) is still unbuilt, so every card reads "Price unavailable"
+> rather than a real price; only the spend half is live. The budget-window "resets in" text and a
+> window-kind selector are exposed via `ProviderView.WindowKind`/`NextResetUtc` and
+> `SetBudget`'s optional window parameters, but the Governance budget editor itself does not yet
+> expose a window-kind picker in the UI (windows can be set via the REST API; the default `Monthly`
+> UI editor is unchanged). Item 7's Total Saved / Avg. Cost Reduction ticker tiles are labeled
+> "(demo)" per their stated scoping.
 
 **Rollups (§5.3)**
 

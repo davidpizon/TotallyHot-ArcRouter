@@ -46,6 +46,8 @@ namespace TotallyHot.ArcRouter.Gui.Admin;
 /// responses carry - or <see langword="null"/> when none have been captured yet. Backs the Anthropic Usage
 /// card's "reported by Anthropic" section.
 /// </param>
+/// <param name="WindowKind">The window the caps above reset on: <c>"Monthly"</c>, <c>"Weekly"</c>, or <c>"RollingHours"</c> (Phase 4, §5.10).</param>
+/// <param name="NextResetUtc">The UTC instant the current period ends and spend resets to zero - backs a budget bar's "resets in" text.</param>
 public sealed record ProviderAdminView(
     string Key,
     string? Name,
@@ -62,7 +64,9 @@ public sealed record ProviderAdminView(
     string? ProviderType = null,
     ProviderEndpointCapabilitiesView? EndpointCapabilities = null,
     DateTimeOffset? UsageLastRecordedAtUtc = null,
-    ProviderRateLimitAdminView? RateLimit = null);
+    ProviderRateLimitAdminView? RateLimit = null,
+    string WindowKind = "Monthly",
+    DateTimeOffset? NextResetUtc = null);
 
 /// <summary>
 /// A standard-family rate-limit dimension (<c>requests</c>, <c>input-tokens</c>, <c>output-tokens</c>, or
@@ -260,6 +264,31 @@ public sealed record ModelEnabledWriteRequest(bool Enabled);
 public sealed record ModelToolDialectWriteRequest(string? Dialect);
 
 /// <summary>
+/// One operator-authored price override, as returned by <c>GET /admin/price-overrides</c> - the §5.7
+/// resolution ladder's top rung. Backs the Governance price-overrides pane.
+/// </summary>
+/// <param name="SourceName">The aggregator source this override applies to (e.g. <c>LiteLLM</c>).</param>
+/// <param name="AggregatorModelKey">The source's own model key this override matches, verbatim.</param>
+/// <param name="ModelName">The client-facing <c>ModelName</c> the override resolves to.</param>
+public sealed record PriceOverrideView(string SourceName, string AggregatorModelKey, string ModelName);
+
+/// <summary>The body for adding or replacing a price override (<c>PUT /admin/price-overrides</c>).</summary>
+/// <param name="SourceName">The aggregator source this override applies to.</param>
+/// <param name="AggregatorModelKey">The source's own model key this override matches, verbatim.</param>
+/// <param name="ModelName">The client-facing <c>ModelName</c> to resolve to; must already be configured.</param>
+public sealed record PriceOverrideWriteRequest(string SourceName, string AggregatorModelKey, string ModelName);
+
+/// <summary>
+/// One configured model's current price-resolution state, as returned by <c>GET /admin/price-resolution</c>.
+/// Backs the Governance price-overrides pane's read-only diagnosis view.
+/// </summary>
+/// <param name="ModelName">The client-facing <c>ModelName</c>.</param>
+/// <param name="Provider">The configured provider serving this model.</param>
+/// <param name="Resolved">Whether the catalog currently holds a fresh price for this model.</param>
+/// <param name="IsApproximate">Whether the resolved price was matched via a ladder rung below Exact/OperatorOverride.</param>
+public sealed record PriceResolutionDiagnosisView(string ModelName, string Provider, bool Resolved, bool IsApproximate);
+
+/// <summary>
 /// The tool-call dialect names the Governance UI offers for an operator override.
 /// </summary>
 /// <remarks>
@@ -279,9 +308,11 @@ public static class ToolCallDialectNames
 /// The body sent to set a provider's monthly budget caps (<c>PUT /admin/providers/{key}/budget</c>). A null
 /// cap clears that dimension; both null removes the budget entirely.
 /// </summary>
-/// <param name="DollarCap">The monthly USD cap, or null for no dollar budget.</param>
-/// <param name="TokenCap">The monthly total-token cap, or null for no token budget.</param>
-public sealed record ProviderBudgetWriteRequest(decimal? DollarCap, long? TokenCap);
+/// <param name="DollarCap">The cap for the window, or null for no dollar budget.</param>
+/// <param name="TokenCap">The cap for the window, or null for no token budget.</param>
+/// <param name="WindowKind">The window the caps reset on (<c>"Monthly"</c>, <c>"Weekly"</c>, or <c>"RollingHours"</c>); null keeps today's window.</param>
+/// <param name="WindowHours">Required and must be positive when <paramref name="WindowKind"/> is <c>"RollingHours"</c>; otherwise ignored.</param>
+public sealed record ProviderBudgetWriteRequest(decimal? DollarCap, long? TokenCap, string? WindowKind = null, int? WindowHours = null);
 
 /// <summary>
 /// The result of <c>POST /admin/providers/{key}/discover-models</c>: the model ids the provider's own
@@ -291,4 +322,50 @@ public sealed record ProviderBudgetWriteRequest(decimal? DollarCap, long? TokenC
 /// <param name="Models">The discovered model ids (empty when unsupported).</param>
 /// <param name="Error">A human-readable reason when <paramref name="Supported"/> is false.</param>
 public sealed record DiscoverModelsResult(bool Supported, IReadOnlyList<string> Models, string? Error);
+
+/// <summary>
+/// Totals over a preset window, as returned by <c>GET /admin/usage/summary</c> (Phase 4, §5.15). Backs the
+/// header ticker's System Tokens tile and other summary displays.
+/// </summary>
+/// <param name="Requests">Total requests in the window.</param>
+/// <param name="UnpricedRequests">How many of <paramref name="Requests"/> had an unknown cost (§5.6) - never silently folded into a zero total.</param>
+/// <param name="PromptTokens">Total prompt/input tokens.</param>
+/// <param name="CompletionTokens">Total completion/output tokens.</param>
+/// <param name="CacheCreationTokens">Total cache-creation input tokens.</param>
+/// <param name="CacheReadTokens">Total cache-read input tokens.</param>
+/// <param name="CostUsd">Total USD cost summed over priced requests only.</param>
+public sealed record UsageSummaryView(
+    long Requests,
+    long UnpricedRequests,
+    long PromptTokens,
+    long CompletionTokens,
+    long CacheCreationTokens,
+    long CacheReadTokens,
+    decimal CostUsd);
+
+/// <summary>
+/// One aggregated bucket, as returned by <c>GET /admin/usage/rollup</c> (Phase 4, §5.15) - the Model
+/// Distribution / Cost Analytics chart feed.
+/// </summary>
+/// <param name="BucketStartUtc">Meaningful only when the query grouped by <c>"day"</c>; otherwise the query's <c>from</c> bound.</param>
+/// <param name="BucketWidth">The ISO-8601 duration the query was made at (<c>"PT1H"</c> or <c>"P1D"</c>).</param>
+/// <param name="GroupKey">The model name, provider key, or ISO day string this row aggregates, depending on the query's <c>groupBy</c>.</param>
+/// <param name="Requests">Requests in this bucket.</param>
+/// <param name="UnpricedRequests">How many of <paramref name="Requests"/> had an unknown cost.</param>
+/// <param name="PromptTokens">Prompt/input tokens in this bucket.</param>
+/// <param name="CompletionTokens">Completion/output tokens in this bucket.</param>
+/// <param name="CacheCreationTokens">Cache-creation input tokens in this bucket.</param>
+/// <param name="CacheReadTokens">Cache-read input tokens in this bucket.</param>
+/// <param name="CostUsd">USD cost summed over priced requests in this bucket.</param>
+public sealed record UsageRollupBucketView(
+    DateTimeOffset BucketStartUtc,
+    string BucketWidth,
+    string GroupKey,
+    long Requests,
+    long UnpricedRequests,
+    long PromptTokens,
+    long CompletionTokens,
+    long CacheCreationTokens,
+    long CacheReadTokens,
+    decimal CostUsd);
 

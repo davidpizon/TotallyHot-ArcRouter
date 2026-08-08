@@ -12,10 +12,30 @@ public sealed record LiveConversationTurn(
     bool IsFallback,
     long LatencyToHeadersMs,
     DateTimeOffset TimestampUtc,
+    int CacheCreationTokens = 0,
+    int CacheReadTokens = 0,
     string? RequestSummary = null,
-    string? ResponseSummary = null);
+    string? ResponseSummary = null,
+    string? CostConfidence = null);
 
 /// <summary>A conversation (session) reconstructed from the live telemetry stream.</summary>
+/// <param name="SessionId">The session id every turn in <paramref name="Turns"/> shares.</param>
+/// <param name="IsSessionSynthesized">Whether the session id was synthesized rather than resolved from an explicit client-sent id.</param>
+/// <param name="FirstTimestampUtc">The first turn's timestamp.</param>
+/// <param name="LastTimestampUtc">The most recent turn's timestamp.</param>
+/// <param name="TotalCost">The sum of every turn's known cost - see <paramref name="UnpricedTurns"/> for what this excludes.</param>
+/// <param name="TotalPromptTokens">The sum of every turn's prompt tokens.</param>
+/// <param name="TotalCompletionTokens">The sum of every turn's completion tokens.</param>
+/// <param name="HasFallbackTurns">Whether any turn in <paramref name="Turns"/> was served by fallback routing.</param>
+/// <param name="Turns">This conversation's turns, in chronological order.</param>
+/// <param name="TotalCacheCreationTokens">The sum of every turn's cache-creation tokens.</param>
+/// <param name="TotalCacheReadTokens">The sum of every turn's cache-read tokens.</param>
+/// <param name="UnpricedTurns">
+/// How many turns in <paramref name="Turns"/> had no cost at all (a null <c>EstimatedCostUsd</c> - see
+/// <see cref="RoutingTelemetryEventDto.EstimatedCostUsd"/>), and so contributed nothing to
+/// <paramref name="TotalCost"/>: a non-zero value here means <paramref name="TotalCost"/> is a floor, not
+/// a total (§5.6, <c>docs/router/token-tracking-improvements.md</c>).
+/// </param>
 public sealed record LiveConversation(
     string SessionId,
     bool IsSessionSynthesized,
@@ -25,7 +45,10 @@ public sealed record LiveConversation(
     int TotalPromptTokens,
     int TotalCompletionTokens,
     bool HasFallbackTurns,
-    IReadOnlyList<LiveConversationTurn> Turns);
+    IReadOnlyList<LiveConversationTurn> Turns,
+    int TotalCacheCreationTokens = 0,
+    int TotalCacheReadTokens = 0,
+    int UnpricedTurns = 0);
 
 /// <summary>
 /// Groups a flat stream of <see cref="RoutingTelemetryEventDto"/>s into conversations, mirroring the
@@ -34,10 +57,12 @@ public sealed record LiveConversation(
 /// Pure and stateless: callers own how/when to re-run it as new events arrive (e.g. re-aggregate the
 /// full accumulated event list on every new event - see the "Verification limitation" and
 /// "Known gaps" notes on this feature in docs/gui/dashboard.md for why several
-/// <c>ConversationTurn</c> fields - RoutingRoi, ToolExecutionSteps, CacheHitRate,
+/// <c>ConversationTurn</c> fields - RoutingRoi, ToolExecutionSteps,
 /// ContextBufferPercent, RoutingSteps - have no live-data source yet and are left at safe defaults by
 /// the Gui-side mapping layer, not by this aggregator. RequestSummary/ResponseSummary are real: they
 /// pass straight through from <see cref="RoutingTelemetryEventDto"/>, already truncated server-side.
+/// CacheHitRate is also real now: the Gui-side mapping layer derives it from
+/// <see cref="LiveConversationTurn.CacheCreationTokens"/>/<see cref="LiveConversationTurn.CacheReadTokens"/>.
 /// </summary>
 public static class ConversationAggregator
 {
@@ -75,8 +100,11 @@ public static class ConversationAggregator
                 IsFallback: e.IsFallback,
                 LatencyToHeadersMs: e.LatencyToHeadersMs,
                 TimestampUtc: e.TimestampUtc,
+                CacheCreationTokens: e.CacheCreationTokens ?? 0,
+                CacheReadTokens: e.CacheReadTokens ?? 0,
                 RequestSummary: e.RequestSummary,
-                ResponseSummary: e.ResponseSummary))
+                ResponseSummary: e.ResponseSummary,
+                CostConfidence: e.CostConfidence))
             .ToList();
 
         return new LiveConversation(
@@ -88,7 +116,10 @@ public static class ConversationAggregator
             TotalPromptTokens: turns.Sum(t => t.PromptTokens),
             TotalCompletionTokens: turns.Sum(t => t.CompletionTokens),
             HasFallbackTurns: turns.Any(t => t.IsFallback),
-            Turns: turns);
+            Turns: turns,
+            TotalCacheCreationTokens: turns.Sum(t => t.CacheCreationTokens),
+            TotalCacheReadTokens: turns.Sum(t => t.CacheReadTokens),
+            UnpricedTurns: orderedEvents.Count(e => e.EstimatedCostUsd is null));
     }
 }
 

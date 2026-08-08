@@ -88,6 +88,8 @@ public sealed class PriceCatalogDatabase
         MigrateJsonSchemaResponseFormatColumn(connection);
         MigrateCacheWriteInputPriceColumn(connection);
         MigrateProviderSpendCacheColumns(connection);
+        MigrateIsApproximateColumn(connection);
+        MigrateBudgetWindowColumns(connection);
         SeedKnownSources(connection);
 
         return alreadyExisted;
@@ -201,6 +203,53 @@ public sealed class PriceCatalogDatabase
         }
     }
 
+    // Same blind spot again: a database created before the §5.7 resolution ladder existed has model_prices
+    // without this column. Existing rows read as 0 ("not an approximate match") - the correct default,
+    // since every price stored before the ladder existed was resolved via the old exact-only rule.
+    /// <summary>
+    /// Adds the `is_approximate` column to `model_prices` if it is missing, so databases created before the
+    /// resolution ladder existed pick it up on startup with existing rows reading as an exact (non-approximate)
+    /// match.
+    /// </summary>
+    private static void MigrateIsApproximateColumn(SqliteConnection connection)
+    {
+        if (ColumnExists(connection, "model_prices", "is_approximate"))
+        {
+            return;
+        }
+
+        using var alter = connection.CreateCommand();
+        alter.CommandText = "ALTER TABLE model_prices ADD COLUMN is_approximate INTEGER NOT NULL DEFAULT 0;";
+        alter.ExecuteNonQuery();
+    }
+
+    // Same blind spot again: a database created before per-provider budget windows existed (Phase 4, §5.10)
+    // has provider_budgets without these columns. Existing rows read as 'Monthly' with a null hour count -
+    // exactly today's hardcoded CurrentPeriod() behavior - so an upgraded install's caps keep resetting on
+    // the same calendar-month boundary they always did, until an operator opts a provider into a different
+    // window.
+    /// <summary>
+    /// Adds the `window_kind` and `window_hours` columns to `provider_budgets` if missing, so databases
+    /// created before per-provider budget windows existed pick them up on startup with existing rows
+    /// reading as the monthly window that was the only behavior before this column existed.
+    /// </summary>
+    private static void MigrateBudgetWindowColumns(SqliteConnection connection)
+    {
+        if (!ColumnExists(connection, "provider_budgets", "window_kind"))
+        {
+            using var alterKind = connection.CreateCommand();
+            alterKind.CommandText = "ALTER TABLE provider_budgets ADD COLUMN window_kind TEXT NOT NULL DEFAULT 'Monthly';";
+            alterKind.ExecuteNonQuery();
+        }
+
+        if (!ColumnExists(connection, "provider_budgets", "window_hours"))
+        {
+            using var alterHours = connection.CreateCommand();
+            alterHours.CommandText = "ALTER TABLE provider_budgets ADD COLUMN window_hours INTEGER;";
+            alterHours.ExecuteNonQuery();
+        }
+    }
+
     // Every source with a client gets a row up front, so the GUI has something to toggle before the first
     // poll has ever run. Without this, rows only appear via PriceCatalogRepository.UpsertPrices - i.e. only
     // after a *successful* fetch - which would leave a fresh install with an empty panel and no way to
@@ -290,7 +339,22 @@ public sealed class PriceCatalogDatabase
             batch_output_price    REAL,
             last_updated_utc     TEXT NOT NULL,
             source_raw_payload   TEXT,
+            is_approximate       INTEGER NOT NULL DEFAULT 0,
             UNIQUE(model_id, provider_id)
+        );
+
+        -- Operator-authored overrides for the §5.7 resolution ladder's top rung (ResolutionRung.OperatorOverride):
+        -- the recourse an operator has when no automatic rung resolves a model. Keyed on (source_name,
+        -- aggregator_model_key) - the same aggregator naming UpsertPrices already resolves per row - mapping
+        -- onto the client-facing ModelName from ModelRouting:ModelList; the entry's Provider is looked up from
+        -- that ModelName at resolve time (ModelName is unique - see ConfigModelIdentityResolver.Build), so this
+        -- table does not duplicate a Provider column that config edits could drift out of sync with. Managed at
+        -- runtime via PUT/DELETE /admin/price-overrides, no restart required.
+        CREATE TABLE IF NOT EXISTS model_alias_overrides (
+            source_name          TEXT NOT NULL COLLATE NOCASE,
+            aggregator_model_key TEXT NOT NULL COLLATE NOCASE,
+            model_name           TEXT NOT NULL,
+            PRIMARY KEY (source_name, aggregator_model_key)
         );
 
         CREATE TABLE IF NOT EXISTS multimodal_prices (
@@ -405,6 +469,71 @@ public sealed class PriceCatalogDatabase
             observation_count INTEGER NOT NULL DEFAULT 0,
             detected_at_utc   TEXT    NOT NULL,
             PRIMARY KEY(provider_key, model_name)
+        );
+
+        -- The durable usage ledger (docs/router/token-tracking-implementation-plan.md Phase 2, §5.2):
+        -- every priced/unpriced request's usage, surviving process restarts (unlike the in-memory-only
+        -- telemetry stream). dedup_key is either the upstream provider's own request id (preferred) or a
+        -- composite hash over the request's identity, so replaying an already-recorded request (a restart
+        -- racing an in-flight write, a retried publish) is a no-op via INSERT ... ON CONFLICT DO NOTHING
+        -- rather than a double count. estimated_cost_usd is TEXT (decimal-as-string), matching every other
+        -- money column in this database - see UsageLedger. cost_confidence is TEXT holding a
+        -- Telemetry.CostConfidence enum member's name (via Enum.ToString()), e.g. "Unknown" or "Catalog".
+        CREATE TABLE IF NOT EXISTS usage_ledger (
+            entry_id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            dedup_key             TEXT    NOT NULL,
+            session_id            TEXT    NOT NULL,
+            turn_number           INTEGER NOT NULL,
+            provider              TEXT    NOT NULL,
+            requested_model       TEXT    NOT NULL,
+            resolved_model        TEXT    NOT NULL,
+            prompt_tokens         INTEGER,
+            completion_tokens     INTEGER,
+            cache_creation_tokens INTEGER,
+            cache_read_tokens     INTEGER,
+            estimated_cost_usd    TEXT,
+            cost_confidence       TEXT    NOT NULL,
+            occurred_at_utc       TEXT    NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS ix_usage_ledger_dedup_key ON usage_ledger (dedup_key);
+        CREATE INDEX IF NOT EXISTS ix_usage_ledger_occurred_at ON usage_ledger (occurred_at_utc);
+        CREATE INDEX IF NOT EXISTS ix_usage_ledger_provider_model_time
+            ON usage_ledger (provider, requested_model, occurred_at_utc);
+
+        -- Pre-aggregated time buckets over usage_ledger (Phase 4, §5.3): each ledger entry contributes one
+        -- increment to the PT30M/PT1H/P1D row for its (provider, model), so the Model Distribution and Cost
+        -- Analytics GUI tabs can read a bounded-size table instead of scanning the full ledger on every
+        -- render. WITHOUT ROWID because the natural key is already unique and covers every query shape this
+        -- table serves. cost_usd is TEXT for the same invariant-decimal reason as every other money column
+        -- here; unpriced_requests tracks how many of `requests` had a null cost (§5.6), so a summary can
+        -- render "≥ $4.10 · 3 unpriced" instead of silently treating unknown as zero.
+        CREATE TABLE IF NOT EXISTS usage_rollup (
+            bucket_start_utc      TEXT    NOT NULL,
+            bucket_width          TEXT    NOT NULL,
+            provider               TEXT    NOT NULL,
+            model                  TEXT    NOT NULL,
+            requests               INTEGER NOT NULL DEFAULT 0,
+            unpriced_requests      INTEGER NOT NULL DEFAULT 0,
+            prompt_tokens          INTEGER NOT NULL DEFAULT 0,
+            completion_tokens      INTEGER NOT NULL DEFAULT 0,
+            cache_creation_tokens  INTEGER NOT NULL DEFAULT 0,
+            cache_read_tokens      INTEGER NOT NULL DEFAULT 0,
+            cost_usd               TEXT    NOT NULL DEFAULT '0',
+            PRIMARY KEY (bucket_start_utc, bucket_width, provider, model)
+        ) WITHOUT ROWID;
+
+        -- Single-row table (id is CHECK-constrained to 1) holding the rollup subsystem's two pieces of
+        -- durable state: the write-once bucket timezone (tokscale's reproducible-bucket rule - pinning this
+        -- once means two reports generated a month apart over the same past day still agree, since the day
+        -- boundary itself never moves) and the backfill checkpoint (the highest usage_ledger.entry_id
+        -- already folded into usage_rollup, so a startup backfill after downtime resumes from where it left
+        -- off instead of re-scanning the whole ledger).
+        CREATE TABLE IF NOT EXISTS rollup_metadata (
+            id                             INTEGER PRIMARY KEY CHECK (id = 1),
+            bucket_timezone_iana_id        TEXT    NOT NULL,
+            bucket_timezone_pinned_at_utc  TEXT    NOT NULL,
+            last_rolled_up_entry_id        INTEGER NOT NULL DEFAULT 0
         );
         """;
 }

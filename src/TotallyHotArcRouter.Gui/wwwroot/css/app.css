@@ -533,6 +533,33 @@ input[type="number"]:focus {
   color: var(--accent);
 }
 
+.metric-critical {
+  color: var(--color-critical);
+}
+
+/* Stat-strip categorical hues (docs/gui/DESIGN.md §"Data-encoding palettes") — rose and violet appear
+   only in the TurnCard stat strip and are data labels, not chrome; kept as their own tokens rather than
+   reusing the chrome semantic vars. */
+.stat-color-tokens {
+  color: #a78bfa;
+}
+
+.stat-color-ttft {
+  color: #fb7185;
+}
+
+.sparkline-line {
+  stroke: var(--accent);
+}
+
+.legend-swatch-accent {
+  background: var(--accent);
+}
+
+.legend-swatch-success {
+  background: var(--color-success);
+}
+
 /* 2. Component State Classes */
 .state-enabled {
   color: var(--text-primary);
@@ -790,6 +817,21 @@ input[type="number"]:focus {
   border-radius: var(--radius-card);
 }
 
+/* Same card surface, dimmed border — a disabled/stopped item (provider, price source) that keeps its
+   card chrome but visually recedes. */
+.ds-surface-card-bordered-dim {
+  background: var(--surface-card);
+  border: 1px solid #4d4d4d80;
+  border-radius: var(--radius-card);
+}
+
+/* Card surface with a critical border — an unreachable-backend banner that still reads as a card,
+   not a full error-tint alert box (see .ds-alert-critical for that). */
+.ds-surface-card-critical {
+  background: var(--surface-card);
+  border: 1px solid #ef444444;
+}
+
 .ds-toolbar {
   background: var(--surface-card);
   border-bottom: 1px solid var(--border-button);
@@ -957,6 +999,42 @@ input[type="number"]:focus {
   color: #fca5a5;
 }
 
+/* ---- Pull/refresh outcome banners (PriceSourcesAdmin) ---- */
+.ds-outcome-success {
+  background: #10b98111;
+  border-top: 1px solid #10b98122;
+}
+
+.ds-outcome-critical {
+  background: #ef444411;
+  border-top: 1px solid #ef444422;
+}
+
+/* ---- Draggable source-card border overrides (PriceSourcesAdmin) — base border color comes from
+   .ds-surface-card-draggable; these override just the color for the disabled/lifted states. ---- */
+.ds-source-border-dim {
+  border-color: #4d4d4d80;
+}
+
+.ds-source-border-lifted {
+  border-color: var(--accent);
+}
+
+/* ---- Time-filter pill buttons (ModelDistribution) ---- */
+.filter-button.active {
+  background: var(--accent);
+  color: var(--surface-base);
+}
+
+.filter-button.inactive {
+  background: var(--surface-card);
+  color: var(--text-muted);
+}
+
+.filter-button-divider {
+  border-right: 1px solid var(--border-button);
+}
+
 /* ---- Static card surfaces (prefer over inline `background:#181818;border:1px solid #4d4d4d`) ---- */
 .ds-surface-card {
   background: var(--surface-card);
@@ -1021,6 +1099,8 @@ input[type="number"] {
 }
 
 .overlay-backdrop {
+  background-color: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
   animation: overlay-backdrop-enter var(--dur-default) var(--ease-standard);
 }
 
@@ -1031,6 +1111,7 @@ input[type="number"] {
   min-width: min(100% - 2rem, 400px);
   max-height: calc(100vh - 120px);
   overflow: hidden;
+  background: var(--surface-card);
   animation: overlay-panel-enter var(--dur-slow) var(--ease-out-quart);
 }
 

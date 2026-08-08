@@ -1,15 +1,18 @@
 # D3 Alias Resolution: Mapping Aggregator Model Names onto the Router Key
 
-> **Status: auto-match implemented; explicit overrides + UI still open.** This is the implementation plan
+> **Status: implemented, including Slice 4 and its UI.** This is the implementation plan
 > for [`model-price-catalog.md`](model-price-catalog.md)'s [D3](model-price-catalog.md#d3-an-internal-model-registry-decouples-aggregator-naming-from-the-router-key).
 > **Done:** the exact auto-match resolver (`ConfigModelIdentityResolver`), its ingest wiring in
 > `PriceCatalogRepository.UpsertPrices`, and the runtime cost lookup repoint onto the client-facing
 > `ModelName` (`ProxyMiddleware`) — Slices 1–3 and 5 below. So a model whose configured `ProviderModelId`
 > equals the aggregator's public model id now resolves a real per-request cost, and two sources naming one
-> model differently collide into a single cell (first real exercise of the priority gate). **Still open:**
-> Slice 4 (explicit operator overrides for what auto-match can't reach) and the
-> [UI to manage them](#future-ui-managed-overrides). No schema migration was required: the `models`,
-> `model_aliases`, and `model_prices` tables already had the right shape.
+> model differently collide into a single cell (first real exercise of the priority gate). **Also done:**
+> the superseding decision below — the exact-only rule widened into the §5.7 resolution ladder, with
+> Slice 4 (`ModelAliasOverrideStore`, `model_alias_overrides` table) as its top rung, managed via
+> `PUT/DELETE /admin/price-overrides` and the Governance → Price Overrides pane
+> (`docs/router/token-tracking-implementation-plan.md` Phase 3). No schema migration was required beyond
+> the new `model_alias_overrides` table and `model_prices.is_approximate` column: the `models`,
+> `model_aliases`, and `model_prices` tables otherwise already had the right shape.
 
 ## Why this exists
 
@@ -55,16 +58,17 @@ has to supply that mapping. The chosen approach is a **hybrid**:
 the exact failure the whole price subsystem exists to prevent. An aggregator entry that doesn't match
 exactly (after the defined normalizations) is left unmapped, not approximately mapped.
 
-> **Superseding decision (2026-08-07): "exact" is being widened to a ranked, labeled ladder.** The
-> maintainer has adopted [`token-tracking-improvements.md`](token-tracking-improvements.md) §5.7: an
-> ordered resolution ladder (operator override → exact → snapshot-suffix stripped → version normalized
-> → provider alias) in which **every rung below Exact marks the resulting price
-> `CostConfidence.CatalogApproximate`** and aggregates report their approximate/unpriced fraction.
-> This preserves what the rule above actually protects against — a wrong price that *reads as* a right
-> one — by disclosure rather than by refusal, and it still bans fuzzy matching outright (tokscale's
-> word-boundary rung is explicitly not adopted). Slice 4's operator override below becomes the
-> ladder's top rung. The paragraph above remains the shipped behavior until that work lands; see
-> [`token-tracking-implementation-plan.md`](token-tracking-implementation-plan.md) for sequencing.
+> **Superseding decision (2026-08-07): "exact" was widened to a ranked, labeled ladder — implemented.** Per
+> [`token-tracking-improvements.md`](token-tracking-improvements.md) §5.7: an ordered resolution ladder
+> (operator override → exact → snapshot-suffix stripped → version normalized → provider alias, in
+> `ConfigModelIdentityResolver`) in which **every rung below Exact marks the resulting price
+> `CostConfidence.CatalogApproximate`** (`model_prices.is_approximate`) and aggregates report their
+> approximate/unpriced fraction (`SpendSummary.UnpricedRequests`). This preserves what the rule above
+> actually protects against — a wrong price that *reads as* a right one — by disclosure rather than by
+> refusal, and it still bans fuzzy matching outright (tokscale's word-boundary rung was not adopted).
+> Slice 4's operator override is the ladder's top rung, backed by `ModelAliasOverrideStore` and surfaced
+> through the Governance → Price Overrides pane. See
+> [`token-tracking-implementation-plan.md`](token-tracking-implementation-plan.md) Phase 3.
 
 ### Resolution happens at ingest, not at read
 
@@ -115,13 +119,15 @@ client-facing routing name). **This is the change that actually makes cost resol
 > Slices 2 and 3 must land in the **same PR**: repointing the lookup to `ModelName` before ingest stores
 > prices under `ModelName` would briefly resolve against neither key.
 
-### Slice 4 — Explicit alias overrides (config) — open
+### Slice 4 — Explicit alias overrides (config) — ✅ implemented
 
 For the cases auto-match can't reach — a provider-name divergence the normalization map doesn't cover
 (`azure-openai` vs `openai`), or a `ProviderModelId` that isn't the provider's public model id (a pinned
-snapshot like `gpt-4o-2026-01` against an aggregator's `gpt-4o`). An optional operator-declared mapping
-of `(aggregator source, aggregator model key) → ModelName` (or a per-`ModelRouteEntry` catalog-key field),
-consulted by the resolver ahead of auto-match. Still exact; still never a guess.
+snapshot like `gpt-4o-2026-01` against an aggregator's `gpt-4o`). An operator-declared mapping of
+`(aggregator source, aggregator model key) → ModelName`, persisted in `model_alias_overrides` via
+`ModelAliasOverrideStore` and consulted by `ConfigModelIdentityResolver` ahead of every other rung
+(`ResolutionRung.OperatorOverride`). Managed at runtime through `PUT/DELETE /admin/price-overrides` and
+the Governance → Price Overrides pane — no restart required.
 
 ### Slice 5 — Tests ✅ implemented (auto-match paths)
 
@@ -132,36 +138,30 @@ consulted by the resolver ahead of auto-match. Still exact; still never a guess.
   `EstimatedCostUsd`.
 - An unmappable aggregator entry falls back to its raw key without error and stays unpriced-by-routing-key.
 
-The above cover the auto-match paths and are implemented. One further test lands **with Slice 4**, not yet:
+The above cover the auto-match paths and are implemented. Slice 4 added its own coverage in
+`ManagementFacadeTests` (override CRUD via the facade) and `ModelAliasOverrideStoreTests` (the store's
+CRUD directly), plus a `ConfigModelIdentityResolverTests` case proving an operator override resolves a
+case the exact rung misses and takes precedence over it.
 
-- *(pending Slice 4)* An explicit override resolves a case auto-match misses.
+## UI-managed overrides — ✅ implemented
 
-## Future: UI-managed overrides
+Explicit overrides (Slice 4) are manageable through the Governance UI, not `appsettings.json`.
 
-**TODO — make explicit overrides (Slice 4) manageable through the Governance UI, not just `appsettings.json`.**
+The **Governance → Price Overrides** pane:
 
-The auto-match path needs no configuration, but the override layer, if it ships as a raw config block, has
-the same ergonomic problem D6's toggle originally had: the operator can only change it by editing a file
-and restarting. The reasons to add an override are discovered at runtime — an operator notices a model's
-cost is showing as unknown and wants to correct the mapping — so it should be fixable where that's noticed.
-
-Scope of the future UI work (a **Governance → Price Sources** extension, or an adjacent "Model Aliases"
-pane):
-
-- Surface, per configured `ModelName`, whether a catalog price currently resolves and via which source /
-  aggregator key (read-only diagnosis first — this alone tells the operator *why* a cost is unknown).
-- Let the operator declare an override mapping `(source, aggregator model key) → ModelName` and have it
-  take effect on the next poll cycle **without a restart**, mirroring how `PriceSourceToggleStore` moved
-  D6's toggle from config into the database.
-- Persist overrides in the catalog database (alongside `aggregator_sources`), not `appsettings.json`, for
-  the same runtime-editability reason.
-- Keep the licensing boundary from [D5](model-price-catalog.md#d5-price-data-must-never-be-exposed-via-a-public-api--licensing):
+- Lets the operator declare an override mapping `(source, aggregator model key) → ModelName`, validated
+  against the currently configured model list, and have it take effect on the very next resolve call **without
+  a restart** — the same runtime-editability `PriceSourceToggleStore` established for D6's toggle.
+- Persists overrides in the catalog database (`model_alias_overrides`, alongside `aggregator_sources`), not
+  `appsettings.json`.
+- Keeps the licensing boundary from [D5](model-price-catalog.md#d5-price-data-must-never-be-exposed-via-a-public-api--licensing):
   this is operator control over the user's own mapping, carrying no price values outward — the same footing
-  that lets the Price Sources panel exist.
+  the Price Sources panel already stands on.
 
-This TODO is deliberately **not** on the critical path for closing D3: auto-match (Slices 1–3) resolves the
-common case and is what unblocks cost for configured models. The override UI is an ergonomic follow-up for
-the long tail auto-match can't reach.
+A per-`ModelName` read-only resolution diagnosis (which rung a price currently resolves at, if any) is
+implemented: `ManagementFacade.GetPriceResolutionDiagnosis` / the `/admin/price-resolution` endpoint, backing
+the Governance → Price Overrides pane's diagnosis view (Phase 4 of
+[`token-tracking-implementation-plan.md`](token-tracking-implementation-plan.md)).
 
 ## Risks
 

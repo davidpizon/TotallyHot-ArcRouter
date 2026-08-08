@@ -1,7 +1,9 @@
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
+using TotallyHot.ArcRouter.Telemetry;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Hosting;
 
@@ -28,6 +30,9 @@ public sealed class StartupHealthCheckHostedService : IHostedService
     private readonly PriceSourceToggleStore _toggleStore;
     private readonly ProviderBudgetStore _budgetStore;
     private readonly ToolCallCapabilityStore _toolCallCapabilityStore;
+    private readonly IUsageLedger _usageLedger;
+    private readonly IUsageRollupStore _rollupStore;
+    private readonly StorageOptions _storageOptions;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="StartupHealthCheckHostedService"/> class.
@@ -39,7 +44,10 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         PriceCatalogIngestionService ingestionService,
         PriceSourceToggleStore toggleStore,
         ProviderBudgetStore budgetStore,
-        ToolCallCapabilityStore toolCallCapabilityStore)
+        ToolCallCapabilityStore toolCallCapabilityStore,
+        IUsageLedger usageLedger,
+        IUsageRollupStore rollupStore,
+        IOptions<StorageOptions> storageOptions)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(database);
@@ -48,6 +56,9 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         ArgumentNullException.ThrowIfNull(toggleStore);
         ArgumentNullException.ThrowIfNull(budgetStore);
         ArgumentNullException.ThrowIfNull(toolCallCapabilityStore);
+        ArgumentNullException.ThrowIfNull(usageLedger);
+        ArgumentNullException.ThrowIfNull(rollupStore);
+        ArgumentNullException.ThrowIfNull(storageOptions);
 
         _logger = logger;
         _database = database;
@@ -56,6 +67,9 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         _toggleStore = toggleStore;
         _budgetStore = budgetStore;
         _toolCallCapabilityStore = toolCallCapabilityStore;
+        _usageLedger = usageLedger;
+        _rollupStore = rollupStore;
+        _storageOptions = storageOptions.Value;
     }
 
     /// <inheritdoc />
@@ -122,6 +136,57 @@ public sealed class StartupHealthCheckHostedService : IHostedService
             _logger.LogError(
                 "No pricing data is available: no manual prices are configured and all fetched price data is missing or older than {FreshnessHours} hours.",
                 FreshnessFloor.TotalHours);
+        }
+
+        // Usage-ledger retention sweep (docs/router/token-tracking-implementation-plan.md Phase 2):
+        // deletes rows older than Storage:UsageLedgerRetentionDays, keyed on occurred_at_utc. Best-effort
+        // and log-only, like every check above - a sweep failure must never block startup.
+        try
+        {
+            // A misconfigured 0 or negative value would put the cutoff at or after "now", turning this
+            // destructive startup sweep into "delete the entire ledger" - skip rather than silently wiping
+            // out durable usage history over a config mistake.
+            if (_storageOptions.UsageLedgerRetentionDays <= 0)
+            {
+                _logger.LogWarning(
+                    "Skipping the usage-ledger retention sweep: Storage:UsageLedgerRetentionDays is {RetentionDays}, must be positive.",
+                    _storageOptions.UsageLedgerRetentionDays);
+            }
+            else
+            {
+                var cutoff = DateTimeOffset.UtcNow - TimeSpan.FromDays(_storageOptions.UsageLedgerRetentionDays);
+                var deleted = _usageLedger.DeleteOlderThan(cutoff);
+                if (deleted > 0)
+                {
+                    _logger.LogInformation(
+                        "Usage-ledger retention sweep deleted {DeletedRows} row(s) older than {RetentionDays} days.",
+                        deleted,
+                        _storageOptions.UsageLedgerRetentionDays);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Usage-ledger retention sweep failed; continuing startup.");
+        }
+
+        // Usage-rollup bucket timezone + backfill (docs/router/token-tracking-implementation-plan.md
+        // Phase 4, §5.3): pins the wall-clock timezone on first run, then rolls forward any usage_ledger
+        // entries newer than the last checkpoint - the "buckets missed while down" catch-up. Best-effort and
+        // log-only, like every check above; RollForwardAsync already swallows its own failures internally,
+        // but the outer guard also covers EnsureBucketTimezone.
+        try
+        {
+            _rollupStore.EnsureBucketTimezone();
+            var rolledUp = await _rollupStore.RollForwardAsync(cancellationToken).ConfigureAwait(false);
+            if (rolledUp > 0)
+            {
+                _logger.LogInformation("Usage-rollup backfill applied {EntryCount} ledger entry/entries.", rolledUp);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Usage-rollup backfill failed; continuing startup.");
         }
 
         _logger.LogInformation("Startup pricing health checks complete.");

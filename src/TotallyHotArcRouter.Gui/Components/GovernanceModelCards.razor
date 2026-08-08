@@ -1,0 +1,143 @@
+@* Governance > Models: one informational card per configured ModelRouting:ModelList entry, per
+   docs/gui/governance-model-cards.md. Purely informational - no budget cap, no OK/WARNING/CRITICAL badge,
+   distinct from the per-provider budget cards. Spend is real, from UsageStore's rollup query (Phase 4,
+   §5.15); price is "Price unavailable" for every model until a live price-catalog channel to the GUI
+   exists (docs/router/model-price-catalog.md, this doc's still-unmet dependency #1) - never a silent
+   $0.00, which is reserved for a priced model with genuinely zero traffic in range. Deviates from that
+   doc's date-range-picker sketch with a fixed 30-day window, and lives as its own Governance sub-view
+   rather than a second section stacked under Providers - both simplifications to fit this phase's scope. *@
+@inject ProviderAdminStore ProviderStore
+@inject UsageStore UsageStore
+@implements IDisposable
+
+<div class="h-full min-h-0 overflow-auto">
+    @if (!ProviderStore.IsLoaded || !UsageStore.IsLoaded)
+    {
+        <div class="text-xs text-slate-500 p-3">Loading…</div>
+    }
+    else if (!ProviderStore.IsReachable || !UsageStore.IsReachable)
+    {
+        <div class="rounded-lg p-4 space-y-2 ds-surface-card-critical">
+            <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
+                <Icon Name="alert-triangle" Size="14" /> Router unreachable
+            </div>
+            <div class="text-xs text-slate-400">
+                Could not load model spend - is the proxy running?
+            </div>
+            @if (!string.IsNullOrEmpty(ProviderStore.LastError ?? UsageStore.LastError))
+            {
+                <div class="text-xs text-slate-500 font-mono">@(ProviderStore.LastError ?? UsageStore.LastError)</div>
+            }
+            <button @onclick="ReloadAsync" class="btn btn-ghost">Retry</button>
+        </div>
+    }
+    else if (Cards.Count == 0)
+    {
+        <div class="text-xs text-slate-500 p-3">No models configured.</div>
+    }
+    else
+    {
+        <div class="grid gap-3 p-1" style="grid-template-columns:repeat(auto-fill, minmax(200px, 1fr))">
+            @foreach (var card in Cards)
+            {
+                <div class="rounded-lg p-3 flex flex-col gap-1.5 ds-surface-card-bordered">
+                    <div class="text-sm font-semibold text-slate-200">@card.ModelName</div>
+                    <div class="text-xs text-slate-500">@card.ProviderKey</div>
+                    <div class="text-xs font-mono text-slate-500">Price unavailable</div>
+                    <div class="text-xs font-mono text-slate-300 mt-1">
+                        Spend: @card.SpendDisplay <span class="text-slate-600">(last 30 days)</span>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private sealed record ModelCard(string ModelName, string ProviderKey, string ProviderModelId, string SpendDisplay);
+
+    private List<ModelCard> Cards { get; set; } = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Only ProviderStore.Changed - a provider/model edit is what should re-derive the card list.
+        // UsageStore.Changed is not subscribed to: LoadRollupAsync below deliberately doesn't raise it
+        // (see its own remarks), so subscribing here would have no effect anyway.
+        ProviderStore.Changed += HandleChanged;
+
+        if (!ProviderStore.IsLoaded)
+        {
+            await ProviderStore.LoadAsync();
+        }
+
+        await LoadRollupAndBuildCardsAsync();
+    }
+
+    private void HandleChanged() => InvokeAsync(async () =>
+    {
+        // A provider/model edit can add or remove cards; re-derive from whatever rollup data is already
+        // cached (LoadRollupAsync serves the same range from UsageStore's cache) rather than re-fetching.
+        await LoadRollupAndBuildCardsAsync();
+        StateHasChanged();
+    });
+
+    // Shared by the initial load, the provider-changed refresh, and the unreachable-state Retry button -
+    // all three need the same "re-fetch the 30-day rollup, then re-derive Cards" sequence.
+    private async Task ReloadAsync()
+    {
+        if (!ProviderStore.IsReachable)
+        {
+            await ProviderStore.LoadAsync();
+        }
+
+        await LoadRollupAndBuildCardsAsync();
+    }
+
+    private async Task LoadRollupAndBuildCardsAsync()
+    {
+        var to = BucketAlignedTo();
+        var from = to.AddDays(-30);
+        var buckets = await UsageStore.LoadRollupAsync(from, to, "day", "model");
+        BuildCards(buckets);
+    }
+
+    // Start of the current UTC day, not DateTimeOffset.UtcNow - UsageStore's rollup cache key includes the
+    // exact 'to' instant, so a per-call UtcNow would miss the cache on every OnInitializedAsync/HandleChanged
+    // call within the same day (and every ProviderStore.Changed refresh). Buckets more recent than this
+    // boundary are still not fully elapsed anyway, so nothing is lost by not asking for them.
+    private static DateTimeOffset BucketAlignedTo() => new(DateTimeOffset.UtcNow.Date, TimeSpan.Zero);
+
+    private void BuildCards(IReadOnlyList<UsageRollupBucketView> buckets)
+    {
+        // Spend is keyed by the resolved provider model id (what usage_ledger/usage_rollup record), not
+        // the client-facing ModelName - see UsageLedgerEntry.ResolvedModel's remarks.
+        var spendByProviderModelId = buckets.ToDictionary(
+            b => b.GroupKey, b => (b.CostUsd, b.UnpricedRequests), StringComparer.OrdinalIgnoreCase);
+
+        Cards = ProviderStore.Providers
+            .SelectMany(p => p.Models.Select(m => new ModelCard(
+                m.ModelName,
+                p.Key,
+                m.ProviderModelId,
+                FormatSpend(spendByProviderModelId.GetValueOrDefault(m.ProviderModelId)))))
+            .OrderBy(c => c.ModelName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    // CostUsd sums only priced requests (see UsageRollupBucket's remarks), so when UnpricedRequests > 0
+    // the true total is at least this figure, not exactly it - the same "unknown != zero" discipline
+    // ModelPrice/SpendTracker apply elsewhere, surfaced here as a "≥" prefix and the unpriced count rather
+    // than a plain dollar amount that would silently understate spend.
+    private static string FormatSpend((decimal CostUsd, long UnpricedRequests) spend)
+    {
+        var amount = spend.CostUsd.ToString("$0.00", System.Globalization.CultureInfo.InvariantCulture);
+        return spend.UnpricedRequests > 0
+            ? FormattableString.Invariant($"≥{amount} ({spend.UnpricedRequests} unpriced)")
+            : amount;
+    }
+
+    public void Dispose()
+    {
+        ProviderStore.Changed -= HandleChanged;
+    }
+}
