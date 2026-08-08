@@ -47,9 +47,9 @@ public static class UsageExportFormatter
         return builder.ToString();
     }
 
-    private static void AppendRow(StringBuilder builder, params IReadOnlyList<string> fields)
+    private static void AppendRow(StringBuilder builder, params string[] fields)
     {
-        for (var i = 0; i < fields.Count; i++)
+        for (var i = 0; i < fields.Length; i++)
         {
             if (i > 0)
             {

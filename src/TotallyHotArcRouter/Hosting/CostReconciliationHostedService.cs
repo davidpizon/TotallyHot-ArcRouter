@@ -8,10 +8,10 @@ namespace TotallyHot.ArcRouter.Hosting;
 /// <summary>
 /// Background poll loop that runs a <see cref="CostReconciliationService"/> cycle on
 /// <see cref="CostReconciliationOptions.PollIntervalHours"/>, mirroring
-/// <see cref="PriceCatalogIngestionHostedService"/>'s shape. Only registered when at least one provider
-/// reconciler is configured with a resolvable Admin API key (see
-/// <c>ServiceCollectionExtensions.AddTotallyHotArcRouter</c>) - reconciliation is entirely optional, per
-/// §5.8.
+/// <see cref="PriceCatalogIngestionHostedService"/>'s shape. Always registered (see
+/// <c>ServiceCollectionExtensions.AddTotallyHotArcRouter</c>), but reconciliation itself is entirely
+/// optional per §5.8: a provider only gets an <see cref="IProviderCostReconciler"/> when its Admin API key
+/// is configured, so with none configured the loop still runs on schedule but each cycle is a no-op.
 /// </summary>
 public sealed class CostReconciliationHostedService : BackgroundService
 {
