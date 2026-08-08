@@ -1333,9 +1333,15 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
         if (!usageExtracted)
         {
-            UsageMetrics.ExtractionFailedTotal.Add(1, new KeyValuePair<string, object?>("provider", telemetryShapeProvider));
+            // Tagged with route.Provider (the real upstream provider), not telemetryShapeProvider: for a
+            // translated provider (gemini, ollama), telemetryShapeProvider is forced to "openai" (the
+            // shape the extractor parses, not who actually served the request), and the metric's own doc
+            // comment promises per-provider attribution so a regression in one translator's output is
+            // distinguishable from another's.
+            UsageMetrics.ExtractionFailedTotal.Add(1, new KeyValuePair<string, object?>("provider", route.Provider));
             _logger.LogDebug(
-                "Could not extract usage for provider {Provider} (streaming: {IsStreaming}); no cost/token telemetry will be recorded for this request.",
+                "Could not extract usage for provider {Provider} (telemetry shape {TelemetryShapeProvider}, streaming: {IsStreaming}); no cost/token telemetry will be recorded for this request.",
+                SanitizeForLog(route.Provider),
                 SanitizeForLog(telemetryShapeProvider),
                 isStreaming);
         }
