@@ -257,6 +257,25 @@ public sealed class ProviderAdminClient
         return Deserialize<List<PriceResolutionDiagnosisView>>(body);
     }
 
+    /// <summary>
+    /// Gets a provider's rate-limit remaining-over-time history, per dimension - the Providers card's trend
+    /// chart data source (§5.9).
+    /// </summary>
+    /// <param name="key">The provider key.</param>
+    /// <param name="hours">How far back to look, in hours (default 6).</param>
+    /// <param name="cancellationToken">A token to cancel the request.</param>
+    /// <returns>The per-dimension history series.</returns>
+    /// <exception cref="ProviderAdminException">The provider is unknown, history is unavailable, or the request failed.</exception>
+    public async Task<RateLimitHistoryResponseAdminView> GetRateLimitHistoryAsync(string key, double hours = 6.0, CancellationToken cancellationToken = default)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"admin/providers/{Escape(key)}/rate-limit-history?hours={hours.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+        using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        return Deserialize<RateLimitHistoryResponseAdminView>(body);
+    }
+
     /// <summary>Sends a request expected to return a provider snapshot and unwraps its <see cref="ProvidersSnapshot.Providers"/> list.</summary>
     private async Task<IReadOnlyList<ProviderAdminView>> SendForProvidersAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {

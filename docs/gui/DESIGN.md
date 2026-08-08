@@ -362,14 +362,35 @@ reused for static elevation.
 ## 7. Inline Styles Policy & Refactoring Status
 
 ### Refactoring Status
-**In progress:** Removing all static inline styles from components. The following CSS classes have been added to support this:
+**Complete.** All static and conditional inline styles have been extracted to CSS classes. The
+following classes have been added to support this, on top of the earlier round below:
+- `.ls-turn-card`, `.ls-turn-card-toggle`, `.ls-flex-auto`, `.ls-stat-strip-gap` — `TurnCard`/
+  `ConversationSummary` static chrome (the AgentColor-tinted background/border-left stays inline —
+  that part is genuinely data-driven, §7 exception 1)
+- `.ds-dashboard-ticker` — Dashboard ticker row border/background
+- `.ls-console-line` — `ConsoleTab` line wrapping (the per-level text color stays inline, §7
+  exception 1)
+- `.ls-drag-placeholder` — `PriceSourcesAdmin` reorder-arrow placeholder sizing
+- `.drag-enabled`/`.drag-disabled` cursor + `.drag-enabled.card-lifted` — replaced
+  `PriceSourcesAdmin`'s conditional `style="cursor:@cursor"` with class binding
+- `.ls-provider-budget-chart`, `.ls-provider-trend-chart` — `ProvidersAdmin` chart container sizing
+- `.ls-price-overrides-grid`, `.ls-governance-grid` — grid-template-columns for `PriceOverridesAdmin`/
+  `GovernanceModelCards`
+- `.ls-livestream-right-panel`, `.ls-model-distribution-panel` — panel sizing for `LiveStream`/
+  `ModelDistribution`
+
+Earlier round of classes:
 - `.ds-surface-base`, `.ds-surface-card-bordered`, `.ds-toolbar` — card and container styling
 - `.ds-divider`, `.ds-divider-subtle` — separator lines
 - `.ds-code-block` — code/payload block styling
 - `.tab-button` with `.active`/`.inactive` states — tab bar button styling
 - `.btn-state-active`, `.btn-state-inactive`, `.btn-metric-active`, `.btn-metric-inactive` — conditional button states
 
-Remaining work: Update components to use class binding (`class="@(isActive ? "active" : "inactive")"`) instead of conditional inline styles. See components: CostAnalytics, ConversationSummary, TurnCard, ConsoleTab, Governance, PriceSourcesAdmin.
+Every remaining `style=` attribute in `TotallyHotArcRouter.Gui/Components` is one of the sanctioned
+exceptions: a per-agent/per-model color computed from backend data (`ColorUtils`, `m.Color`,
+`share.Color`, `AgentColor`), a log-level color (`LogLevelColorMapper`), a `--i` stagger-index custom
+property feeding the `.row-enter`/`.disclosure-enter` animation delay (§6/MOTION.md), or `Icon.razor`'s
+`Style` passthrough parameter (a generic per-instance API, unused by any current caller).
 
 ## 7. Inline Styles Policy
 

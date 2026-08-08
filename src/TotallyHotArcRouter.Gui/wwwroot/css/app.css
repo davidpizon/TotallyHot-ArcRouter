@@ -643,11 +643,19 @@ input[type="number"]:focus {
 .drag-enabled {
   user-select: none;
   touch-action: none;
+  cursor: grab;
 }
 
 .drag-disabled {
   user-select: auto;
   touch-action: auto;
+  cursor: default;
+}
+
+/* Two-class selector so this always wins over .drag-enabled's cursor regardless of source
+   order - a lifted card is always mid-drag, so its cursor is always "grabbing". */
+.drag-enabled.card-lifted {
+  cursor: grabbing;
 }
 
 /* 6. Border State Classes */
@@ -1151,6 +1159,63 @@ input[type="number"] {
 
 /* Value Tick (MOTION.md §6) is deliberately not defined here: it needs per-stat previous-value
    tracking to fire on, and unused CSS rots. Add it together with its wiring, not before. */
+
+/* ---- Static layout replacing inline style= (DESIGN.md §7) ---- */
+.ls-turn-card {
+  border: 1px solid var(--border-button);
+}
+
+.ls-turn-card-toggle {
+  background: transparent;
+}
+
+.ls-flex-auto {
+  flex: 1 1 auto;
+}
+
+.ls-stat-strip-gap {
+  gap: 2px 14px;
+}
+
+.ds-dashboard-ticker {
+  border-top: 1px solid var(--surface-base);
+  background: var(--surface-interactive);
+}
+
+.ls-console-line {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ls-drag-placeholder {
+  width: 12px;
+  height: 12px;
+}
+
+.ls-provider-budget-chart {
+  height: 96px;
+}
+
+.ls-provider-trend-chart {
+  height: 72px;
+  margin-top: 0.25rem;
+}
+
+.ls-price-overrides-grid {
+  grid-template-columns: 1fr 1fr 1fr auto;
+}
+
+.ls-governance-grid {
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+}
+
+.ls-livestream-right-panel {
+  min-width: 0;
+}
+
+.ls-model-distribution-panel {
+  width: 42%;
+}
 
 /* ---------------------------------------------------------------------------
    Reduced motion. Note that .flash-* and .pulse-dot degrade to a STATIC equivalent

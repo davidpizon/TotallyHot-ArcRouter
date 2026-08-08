@@ -1,13 +1,12 @@
 # Token Tracking Implementation Plan
 
-> **Status: Proposed — not yet implemented.** This is the phase-by-phase execution plan for every
-> finding adopted from [`token-tracking-improvements.md`](token-tracking-improvements.md) (the
-> analysis; section references like §5.1 below point into it). The maintainer has adopted the
-> analysis's recommended position on all three contested findings — the §5.7 resolution ladder
-> (superseding [`d3-alias-resolution.md`](d3-alias-resolution.md)'s exact-only rule, see the note
-> there), the §5.5 persistent turn tracker (superseding [`telemetry.md`](telemetry.md)'s
-> process-lifetime model, see the note there), and the §5.11 incremental scanner fallback. Remove
-> this banner only when every phase below is complete; strike each phase's checkbox list as it lands.
+> **Status: Implemented.** This was the phase-by-phase execution plan for every finding adopted from
+> [`token-tracking-improvements.md`](token-tracking-improvements.md) (the analysis; section references
+> like §5.1 below point into it). The maintainer adopted the analysis's recommended position on all
+> three contested findings — the §5.7 resolution ladder (superseding
+> [`d3-alias-resolution.md`](d3-alias-resolution.md)'s exact-only rule, see the note there), the §5.5
+> persistent turn tracker (superseding [`telemetry.md`](telemetry.md)'s process-lifetime model, see the
+> note there), and the §5.11 incremental scanner fallback. All six phases below have landed.
 
 ## Ground rules (apply to every phase)
 
@@ -264,11 +263,22 @@ past day, generated a month apart, agree.
 
 ---
 
-## Phase 5 — Rate-limit interpretation: burn rate, trends, staleness (§5.9)
+## Phase 5 — Rate-limit interpretation: burn rate, trends, staleness (§5.9) — **Implemented**
 
 The capture → parse → display pipeline shipped with
 [`anthropic-reported-usage-plan.md`](anthropic-reported-usage-plan.md); this phase adds the missing
 interpretation layer. This is the "provider-imposed limits" GUI deliverable.
+
+> **Implementation notes (deviations from the sketch above):** the staleness threshold is a
+> `ManagementFacade` constructor parameter (default 15 minutes) rather than an `appsettings.json`-bound
+> option — `ProxyServer`/`ProxyHostedService`/`ServiceCollectionExtensions` don't yet thread it through,
+> so today it can only be overridden by a caller constructing the facade directly. Item 3's trend chart
+> reads a dedicated `GET /admin/providers/{key}/rate-limit-history?hours=` endpoint (added to
+> `ProviderAdminEndpoints`, not the `GET /admin/providers` shape) and renders via a new
+> `RateLimitTrendChartBuilder` + `RemainingLine` ECharts kind, following the `EChart`/`ChartJson`
+> pattern rather than reusing `BudgetBarJson` (a single-bar utilization chart, the wrong shape for a
+> time series). Item 5's optional stretch (a `rate_limit` oneof on the telemetry stream) was not built —
+> the REST path is the only exhaustion-projection surface for now.
 
 1. `ProjectExhaustion` (pure, in `PriceCatalog/` beside `RateLimitSnapshotParser`) over two
    observations of a `(provider, dimension)` — from `provider_rate_limit_history` minute buckets —
@@ -297,10 +307,27 @@ visible countdown and a history curve on the provider card.
 
 ---
 
-## Phase 6 — Close the loop: exports, reconciliation, capture recovery, cleanup (§5.12, §5.8, §5.11, §5.13, §5.14)
+## Phase 6 — Close the loop: exports, reconciliation, capture recovery, cleanup (§5.12, §5.8, §5.11, §5.13, §5.14) — **Implemented**
 
-Independent items, grouped because each is small once Phases 2–4 exist. They can land as separate
-PRs within the phase.
+Independent items, grouped because each is small once Phases 2–4 exist. They landed as separate PRs
+within the phase.
+
+> **Implementation notes (deviations from the sketch above):** item 5's `ReasoningTokens` deviates from
+> the sketch's "Anthropic thinking deltas when present" clause — Anthropic's Messages API reports no
+> distinct reasoning-token count in its `usage` object (thinking tokens are billed inside
+> `output_tokens` with no separate figure exposed), so `ReasoningTokens` stays 0 for every Anthropic
+> request, documented on `UsageInfo.ReasoningTokens` as the same "not modeled, blocked on the upstream
+> API" treatment already used for web-search request counts. Item 3's `IncrementalUsageScanner` keeps a
+> bounded trailing-byte window fed live during the response copy (independent of the head-capped
+> `MaxCapturedResponseBytes` buffer), rather than re-scanning the already-capped bytes a second time —
+> the failure mode it exists for (a streamed response's trailing usage event landing past the head cap)
+> can only be recovered from bytes the head-capped buffer never kept in the first place. Item 2's
+> reconciler HTTP calls share the DI container's existing `HttpClient` singleton rather than a dedicated
+> one; `CostReconciliationHostedService` runs cycle #1 immediately on startup (no equivalent of the
+> startup-health-check gate `PriceCatalogIngestionHostedService` relies on for its first cycle), and a
+> provider more than `CostReconciliationService.MaxCatchUpDays` (7) behind its checkpoint catches up by
+> one further day per cycle rather than all at once, bounding how many billing-API calls a
+> long-downtime restart can fire.
 
 1. **Exports (§5.12)** — `GET /admin/usage/export?from=&to=&format=csv|json&groupBy=…` reusing
    Phase 4's queries verbatim; an optional `System.Diagnostics.Metrics` meter
@@ -333,7 +360,7 @@ usage still extracted; reasoning-token subset invariant; spend-log deprecation w
 
 **Exit criteria** — ground rules; plus: the analysis doc's status banner and this doc's banner both
 updated to reflect completion; [`agent-cost-tracking.md`](agent-cost-tracking.md)'s reconciliation
-half marked implemented.
+half marked implemented. **Met.**
 
 ---
 

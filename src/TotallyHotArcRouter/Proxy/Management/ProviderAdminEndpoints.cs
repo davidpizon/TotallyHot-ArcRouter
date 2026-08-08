@@ -135,6 +135,12 @@ public static class ProviderAdminEndpoints
         group.MapDelete("/price-overrides", (string sourceName, string aggregatorModelKey) =>
             ToResult(facade.RemovePriceOverride(sourceName, aggregatorModelKey)));
 
+        // The Providers card's rate-limit trend chart data source (§5.9): per-dimension remaining-over-time
+        // history for the last `hours` hours (default 6). Read-only, so a plain GET like every other query
+        // route in this file.
+        group.MapGet("/providers/{key}/rate-limit-history", (string key, double? hours) =>
+            ToResult(facade.GetRateLimitHistory(key, hours ?? 6.0)));
+
         return endpoints;
     }
 

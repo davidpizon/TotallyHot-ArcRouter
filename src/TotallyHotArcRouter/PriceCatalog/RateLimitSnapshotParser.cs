@@ -12,6 +12,17 @@ namespace TotallyHot.ArcRouter.PriceCatalog;
 public sealed record RateLimitHeaderRow(string HeaderName, string HeaderValue);
 
 /// <summary>
+/// One provider's captured rate-limit headers for a single minute bucket, as returned by
+/// <see cref="PriceCatalogRepository.GetRateLimitHistory"/>. Carries only the headers actually captured in
+/// that bucket (not filled forward from a prior one) - callers reuse <see cref="RateLimitSnapshotParser.Parse"/>
+/// per bucket, exactly as <see cref="PriceCatalogRepository.GetRateLimitSnapshot"/>'s callers do for the
+/// latest snapshot.
+/// </summary>
+/// <param name="BucketUtc">The minute bucket's start instant, UTC.</param>
+/// <param name="Headers">The headers captured within this bucket.</param>
+public sealed record RateLimitHistoryBucket(DateTimeOffset BucketUtc, IReadOnlyList<RateLimitHeaderRow> Headers);
+
+/// <summary>
 /// A standard-family rate-limit dimension: Anthropic's <c>requests</c>, <c>input-tokens</c>,
 /// <c>output-tokens</c>, or <c>tokens</c>; or OpenAI's <c>requests</c>/<c>tokens</c>
 /// (<c>docs/router/openai-format-usage-accuracy-plan.md</c> §6.2) - the <c>-limit</c>/<c>-remaining</c>/

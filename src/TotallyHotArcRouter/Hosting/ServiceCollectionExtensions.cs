@@ -13,6 +13,7 @@ using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tools;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Hosting
@@ -177,6 +178,21 @@ namespace TotallyHot.ArcRouter.Hosting
             // usageLedger constructor parameter and into PersistentConversationTurnTracker above (registered
             // earlier in this method only because DI resolution order is independent of registration order).
             services.AddSingleton<IUsageLedger, UsageLedger>();
+            // Provider cost reconciliation (docs/router/token-tracking-implementation-plan.md §5.8):
+            // compares each configured provider's own billing API against the local ledger estimate.
+            // Entirely optional - a provider only gets an IProviderCostReconciler when its
+            // AdminApiKeyEnvVar is configured *and* resolves to a non-empty value; with none configured,
+            // CostReconciliationHostedService's poll loop still runs but does nothing every cycle. The
+            // reconciler list is built once (a singleton factory, not per-call) since the underlying admin
+            // keys don't change without a restart.
+            services.AddOptions<CostReconciliationOptions>()
+                .Configure<IConfiguration>((options, configuration) =>
+                    configuration.GetSection(CostReconciliationOptions.SectionName).Bind(options));
+            services.AddSingleton<IProviderCostReconciliationStore, ProviderCostReconciliationStore>();
+            services.AddSingleton<IReadOnlyList<IProviderCostReconciler>>(sp => BuildCostReconcilers(sp));
+            services.AddSingleton<IEnumerable<IProviderCostReconciler>>(
+                sp => sp.GetRequiredService<IReadOnlyList<IProviderCostReconciler>>());
+            services.AddSingleton<CostReconciliationService>();
             // Per-(provider, model) tool-call dialect capabilities (docs/router/tool-call-normalization.md
             // Phase 1). Shares agent_telemetry.db with the price catalog, so it has the same
             // empty-until-schema-ready lifecycle as the two stores above: StartupHealthCheckHostedService
@@ -219,6 +235,7 @@ namespace TotallyHot.ArcRouter.Hosting
             // it does not run its own initial cycle.
             services.AddHostedService<StartupHealthCheckHostedService>();
             services.AddHostedService<PriceCatalogIngestionHostedService>();
+            services.AddHostedService<CostReconciliationHostedService>();
 
             // ProxyServer's inner Kestrel host is handed an already-constructed ProxyMiddleware instance rather
             // than a copy of this IServiceCollection. It never gets its own IHostedService registrations, so it
@@ -254,6 +271,59 @@ namespace TotallyHot.ArcRouter.Hosting
             });
 
             return services;
+        }
+
+        /// <summary>
+        /// Builds the list of <see cref="IProviderCostReconciler"/>s from <see cref="CostReconciliationOptions.Providers"/>:
+        /// one per provider whose <see cref="ProviderReconciliationOptions.AdminApiKeyEnvVar"/> is
+        /// configured and resolves to a non-empty environment variable value. Only <c>openai</c> and
+        /// <c>anthropic</c> are recognized (docs/router/agent-cost-tracking.md §3.5) - an unrecognized
+        /// provider key under <c>CostTracking:Reconciliation:Providers</c> is silently ignored, matching
+        /// how an unresearched provider (Alibaba/Zhipu/Moonshot/MiniMax) simply has no reconciler.
+        /// </summary>
+        private static IReadOnlyList<IProviderCostReconciler> BuildCostReconcilers(IServiceProvider sp)
+        {
+            var options = sp.GetRequiredService<IOptions<CostReconciliationOptions>>().Value;
+            var environment = sp.GetRequiredService<IEnvironmentVariableProvider>();
+            var httpClient = sp.GetRequiredService<HttpClient>();
+
+            var reconcilers = new List<IProviderCostReconciler>();
+
+            if (TryResolveAdminApiKey(options, environment, "openai", out var openAiKey))
+            {
+                reconcilers.Add(new OpenAiCostReconciler(httpClient, openAiKey, sp.GetService<ILogger<OpenAiCostReconciler>>()));
+            }
+
+            if (TryResolveAdminApiKey(options, environment, "anthropic", out var anthropicKey))
+            {
+                reconcilers.Add(new AnthropicCostReconciler(httpClient, anthropicKey, sp.GetService<ILogger<AnthropicCostReconciler>>()));
+            }
+
+            return reconcilers;
+        }
+
+        private static bool TryResolveAdminApiKey(
+            CostReconciliationOptions options,
+            IEnvironmentVariableProvider environment,
+            string provider,
+            out string adminApiKey)
+        {
+            adminApiKey = string.Empty;
+
+            if (!options.Providers.TryGetValue(provider, out var providerOptions) ||
+                string.IsNullOrWhiteSpace(providerOptions.AdminApiKeyEnvVar))
+            {
+                return false;
+            }
+
+            var resolved = environment.GetVariable(providerOptions.AdminApiKeyEnvVar);
+            if (string.IsNullOrWhiteSpace(resolved))
+            {
+                return false;
+            }
+
+            adminApiKey = resolved;
+            return true;
         }
     }
 }

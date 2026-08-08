@@ -90,7 +90,15 @@ public static class OpenAiUsageParser
         // negative additive prompt count.
         var additivePromptTokens = Math.Max(0, promptTokens - cacheReadTokens - cacheCreationTokens);
 
-        usage = new UsageInfo(additivePromptTokens, completionTokens, cacheCreationTokens, cacheReadTokens);
+        // A subset of completion_tokens (see UsageInfo.ReasoningTokens), not a fifth additive dimension -
+        // absent for models with no extended-thinking concept, which is also the correct default (0).
+        var reasoningTokens = 0;
+        if (usageObj["completion_tokens_details"] is JsonObject completionTokensDetails)
+        {
+            TryGetInt(completionTokensDetails, "reasoning_tokens", out reasoningTokens);
+        }
+
+        usage = new UsageInfo(additivePromptTokens, completionTokens, cacheCreationTokens, cacheReadTokens, reasoningTokens);
         return true;
     }
 

@@ -479,6 +479,46 @@ public sealed class ProviderAdminClientTests
         Assert.Null(provider.Name);
     }
 
+    [Fact]
+    public async Task GetRateLimitHistoryAsync_DeserializesDimensionsAndSendsExpectedUrl()
+    {
+        const string HistoryJson = """
+            {
+              "dimensions": {
+                "tokens": [
+                  { "bucketUtc": "2026-03-01T12:00:00Z", "remaining": 1000, "limit": 2000 },
+                  { "bucketUtc": "2026-03-01T12:01:00Z", "remaining": 900, "limit": 2000 }
+                ]
+              }
+            }
+            """;
+        var handler = new StubHandler(_ => Json(HistoryJson));
+        var client = CreateClient(handler);
+
+        var response = await client.GetRateLimitHistoryAsync("openai", hours: 3.5, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpMethod.Get, handler.LastRequest!.Method);
+        Assert.Contains("admin/providers/openai/rate-limit-history", handler.LastRequest.RequestUri!.ToString());
+        Assert.Contains("hours=3.5", handler.LastRequest.RequestUri!.ToString());
+        var points = response.Dimensions["tokens"];
+        Assert.Equal(2, points.Count);
+        Assert.Equal(1000, points[0].Remaining);
+        Assert.Equal(900, points[1].Remaining);
+    }
+
+    [Fact]
+    public async Task GetRateLimitHistoryAsync_NotFound_ThrowsProviderAdminException()
+    {
+        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound)
+        {
+            Content = new StringContent("""{"error":{"message":"Provider 'x' not found."}}""", Encoding.UTF8, "application/json"),
+        });
+        var client = CreateClient(handler);
+
+        await Assert.ThrowsAsync<ProviderAdminException>(
+            () => client.GetRateLimitHistoryAsync("x", cancellationToken: TestContext.Current.CancellationToken));
+    }
+
     private static HttpResponseMessage Json(string body) =>
         new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
 

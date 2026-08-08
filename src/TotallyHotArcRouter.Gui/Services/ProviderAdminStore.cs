@@ -68,6 +68,16 @@ public sealed class ProviderAdminStore
     /// </summary>
     public IReadOnlyList<PriceResolutionDiagnosisView> PriceResolutionDiagnosis { get; private set; } = [];
 
+    /// <summary>
+    /// Each provider's rate-limit trend-chart history, keyed by provider key, refreshed by
+    /// <see cref="LoadRateLimitHistoryAsync"/>. A provider absent here simply hasn't been loaded yet - the
+    /// card renders no chart rather than a loading state, since the surrounding provider list has already
+    /// loaded by the time this is fetched.
+    /// </summary>
+    public IReadOnlyDictionary<string, RateLimitHistoryResponseAdminView> RateLimitHistory => _rateLimitHistory;
+
+    private readonly Dictionary<string, RateLimitHistoryResponseAdminView> _rateLimitHistory = [];
+
     /// <summary>Whether a load has completed at least once (so the UI can distinguish "loading" from "empty").</summary>
     public bool IsLoaded { get; private set; }
 
@@ -188,6 +198,26 @@ public sealed class ProviderAdminStore
         IsLoaded = true;
         LastError = null;
         Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// Loads one provider's rate-limit trend-chart history and caches it in <see cref="RateLimitHistory"/>.
+    /// Best-effort and per-provider: a failure (e.g. the proxy has no price-catalog repository wired up, so
+    /// history is unavailable) is swallowed and simply leaves that provider absent from the cache, rather
+    /// than surfacing as a store-wide reachability failure the way <see cref="LoadAsync"/> does - one
+    /// provider's missing history shouldn't blank the whole Providers pane.
+    /// </summary>
+    public async Task LoadRateLimitHistoryAsync(string key, double hours = 6.0, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            _rateLimitHistory[key] = await _client.GetRateLimitHistoryAsync(key, hours, cancellationToken);
+            Changed?.Invoke();
+        }
+        catch (ProviderAdminException ex)
+        {
+            _logger?.LogDebug(ex, "Failed to load rate-limit history for provider {Provider}.", key);
+        }
     }
 
     /// <summary>

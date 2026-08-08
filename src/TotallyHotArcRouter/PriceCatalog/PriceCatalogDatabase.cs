@@ -535,6 +535,37 @@ public sealed class PriceCatalogDatabase
             bucket_timezone_pinned_at_utc  TEXT    NOT NULL,
             last_rolled_up_entry_id        INTEGER NOT NULL DEFAULT 0
         );
+
+        -- Periodic snapshots comparing a provider's own reported spend against usage_ledger's local
+        -- estimate for the same window (Phase 6, §5.8): the "did our per-request cost model actually
+        -- match the provider's bill" check. One row per (provider, window) reconciliation run - never
+        -- overwritten, so a history of drift over time is preserved rather than only the latest snapshot.
+        -- Money columns are TEXT (decimal-as-string), matching every other money column in this database.
+        -- scope_note records the org-vs-proxy caveat (agent-cost-tracking.md §3.5/§5.8): the provider's
+        -- reported figure is org-wide (every key under that Admin API key), while local_estimated_cost_usd
+        -- is only what this proxy instance routed - the two can legitimately differ even with a perfect
+        -- price table if other traffic shares the same organization.
+        CREATE TABLE IF NOT EXISTS provider_cost_reconciliation (
+            id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+            provider                  TEXT    NOT NULL,
+            window_start_utc          TEXT    NOT NULL,
+            window_end_utc            TEXT    NOT NULL,
+            provider_reported_cost_usd TEXT   NOT NULL,
+            local_estimated_cost_usd  TEXT    NOT NULL,
+            scope_note                TEXT    NOT NULL,
+            fetched_at_utc            TEXT    NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_provider_cost_reconciliation_provider_window
+            ON provider_cost_reconciliation (provider, window_start_utc);
+
+        -- The reconciliation checkpoint cursor (§5.8's "checkpoint the cursor" honeycomb discipline): the
+        -- most recent fully-closed day already reconciled per provider, so a restart resumes from there
+        -- instead of re-reconciling (and re-calling the provider's billing API for) days already done.
+        CREATE TABLE IF NOT EXISTS reconciliation_checkpoint (
+            provider              TEXT PRIMARY KEY,
+            last_reconciled_day   TEXT NOT NULL
+        );
         """;
 }
 

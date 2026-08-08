@@ -59,6 +59,18 @@ public class PriceCatalogDatabaseTests
     }
 
     [Fact]
+    public void EnsureCreated_CreatesProviderCostReconciliationAndCheckpointTables()
+    {
+        using var temp = new TempDatabase();
+        temp.Database.EnsureCreated();
+
+        var tables = ReadTableNames(temp.Database);
+
+        Assert.Contains("provider_cost_reconciliation", tables);
+        Assert.Contains("reconciliation_checkpoint", tables);
+    }
+
+    [Fact]
     public void EnsureCreated_SeedsBothKnownSourcesEnabled()
     {
         using var temp = new TempDatabase();

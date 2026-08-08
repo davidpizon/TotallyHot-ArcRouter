@@ -401,7 +401,7 @@ public sealed class PriceSourcesAdminTests
         var cut = ctx.Render<PriceSourcesAdmin>();
 
         // Same reasoning as the arrows: with nothing to reorder against, a card that invites a drag is a lie.
-        Card(cut, 0).GetAttribute("style").Should().Contain("cursor:default");
+        Card(cut, 0).GetAttribute("class").Should().Contain("drag-disabled");
     }
 
     [Fact]

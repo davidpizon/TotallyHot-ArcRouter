@@ -1,0 +1,198 @@
+using TotallyHot.ArcRouter.Telemetry;
+using TotallyHot.ArcRouter.Tests.PriceCatalog;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+
+namespace TotallyHot.ArcRouter.Tests.Telemetry;
+
+/// <summary>
+/// Covers <see cref="CostReconciliationService"/>'s cycle logic: checkpoint progression, the catch-up
+/// cap, and stopping at the first failed day (§5.8).
+/// </summary>
+public class CostReconciliationServiceTests
+{
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
+    private static DateOnly Yesterday => DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(-1));
+
+    private static CostReconciliationService BuildService(
+        TempDatabase temp,
+        IEnumerable<IProviderCostReconciler> reconcilers,
+        decimal deltaWarningPercent = 20m) =>
+        new(
+            reconcilers,
+            temp.CreateRollupStore(),
+            temp.CreateCostReconciliationStore(),
+            Options.Create(new CostReconciliationOptions { DeltaWarningPercent = deltaWarningPercent }),
+            NullLogger<CostReconciliationService>.Instance);
+
+    [Fact]
+    public async Task RunCycleAsync_NoReconcilers_DoesNothingAndDoesNotThrow()
+    {
+        using var temp = new TempDatabase();
+        var service = BuildService(temp, []);
+
+        await service.RunCycleAsync(Ct);
+    }
+
+    [Fact]
+    public async Task RunCycleAsync_FirstRun_ReconcilesOnlyYesterday_AndAdvancesCheckpoint()
+    {
+        using var temp = new TempDatabase();
+        var reconciler = new FakeCostReconciler("openai", _ => 5m);
+        var store = temp.CreateCostReconciliationStore();
+        var service = new CostReconciliationService(
+            [reconciler],
+            temp.CreateRollupStore(),
+            store,
+            Options.Create(new CostReconciliationOptions()),
+            NullLogger<CostReconciliationService>.Instance);
+
+        await service.RunCycleAsync(Ct);
+
+        Assert.Equal(Yesterday, store.GetLastReconciledDay("openai"));
+        Assert.Single(reconciler.CalledDays);
+        Assert.Equal(Yesterday, reconciler.CalledDays[0]);
+    }
+
+    [Fact]
+    public async Task RunCycleAsync_AlreadyCaughtUp_DoesNotCallReconcilerAgain()
+    {
+        using var temp = new TempDatabase();
+        var reconciler = new FakeCostReconciler("openai", _ => 5m);
+        var store = temp.CreateCostReconciliationStore();
+        store.SetLastReconciledDay("openai", Yesterday);
+        var service = new CostReconciliationService(
+            [reconciler],
+            temp.CreateRollupStore(),
+            store,
+            Options.Create(new CostReconciliationOptions()),
+            NullLogger<CostReconciliationService>.Instance);
+
+        await service.RunCycleAsync(Ct);
+
+        Assert.Empty(reconciler.CalledDays);
+    }
+
+    [Fact]
+    public async Task RunCycleAsync_CheckpointTwoDaysBehind_ReconcilesBothMissingDaysInOrder()
+    {
+        using var temp = new TempDatabase();
+        var reconciler = new FakeCostReconciler("openai", _ => 1m);
+        var store = temp.CreateCostReconciliationStore();
+        store.SetLastReconciledDay("openai", Yesterday.AddDays(-2));
+        var service = new CostReconciliationService(
+            [reconciler],
+            temp.CreateRollupStore(),
+            store,
+            Options.Create(new CostReconciliationOptions()),
+            NullLogger<CostReconciliationService>.Instance);
+
+        await service.RunCycleAsync(Ct);
+
+        Assert.Equal([Yesterday.AddDays(-1), Yesterday], reconciler.CalledDays);
+        Assert.Equal(Yesterday, store.GetLastReconciledDay("openai"));
+    }
+
+    [Fact]
+    public async Task RunCycleAsync_CheckpointFarBehind_CapsCatchUpAtMaxCatchUpDays()
+    {
+        using var temp = new TempDatabase();
+        var reconciler = new FakeCostReconciler("openai", _ => 1m);
+        var store = temp.CreateCostReconciliationStore();
+        store.SetLastReconciledDay("openai", Yesterday.AddDays(-100));
+        var service = new CostReconciliationService(
+            [reconciler],
+            temp.CreateRollupStore(),
+            store,
+            Options.Create(new CostReconciliationOptions()),
+            NullLogger<CostReconciliationService>.Instance);
+
+        await service.RunCycleAsync(Ct);
+
+        Assert.Equal(CostReconciliationService.MaxCatchUpDays, reconciler.CalledDays.Count);
+        Assert.Equal(Yesterday, reconciler.CalledDays[^1]);
+    }
+
+    [Fact]
+    public async Task RunCycleAsync_ReconcilerThrowsOnSecondDay_StopsAndDoesNotAdvanceCheckpointPastFailure()
+    {
+        using var temp = new TempDatabase();
+        var failDay = Yesterday;
+        var reconciler = new FakeCostReconciler("openai", day => day == failDay ? throw new HttpRequestException("boom") : 1m);
+        var store = temp.CreateCostReconciliationStore();
+        store.SetLastReconciledDay("openai", Yesterday.AddDays(-2));
+        var service = new CostReconciliationService(
+            [reconciler],
+            temp.CreateRollupStore(),
+            store,
+            Options.Create(new CostReconciliationOptions()),
+            NullLogger<CostReconciliationService>.Instance);
+
+        await service.RunCycleAsync(Ct);
+
+        // Day -1 succeeded and advanced the checkpoint; "yesterday" (failDay) threw, so the checkpoint
+        // must stop at -1, not skip past the failure.
+        Assert.Equal(Yesterday.AddDays(-1), store.GetLastReconciledDay("openai"));
+    }
+
+    [Fact]
+    public async Task RunCycleAsync_InsertsReconciliationRowWithReportedAndLocalCost()
+    {
+        using var temp = new TempDatabase();
+        var reconciler = new FakeCostReconciler("openai", _ => 42m);
+        var costStore = temp.CreateCostReconciliationStore();
+        var service = new CostReconciliationService(
+            [reconciler],
+            temp.CreateRollupStore(),
+            costStore,
+            Options.Create(new CostReconciliationOptions()),
+            NullLogger<CostReconciliationService>.Instance);
+
+        await service.RunCycleAsync(Ct);
+
+        using var connection = temp.Database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT provider, provider_reported_cost_usd, local_estimated_cost_usd FROM provider_cost_reconciliation;";
+        using var reader = command.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.Equal("openai", reader.GetString(0));
+        Assert.Equal("42", reader.GetString(1));
+        Assert.Equal("0", reader.GetString(2)); // no local usage_ledger data seeded for this window
+    }
+
+    [Fact]
+    public async Task RunCycleAsync_MultipleReconcilers_EachTrackedIndependently()
+    {
+        using var temp = new TempDatabase();
+        var openAi = new FakeCostReconciler("openai", _ => 1m);
+        var anthropic = new FakeCostReconciler("anthropic", _ => 2m);
+        var store = temp.CreateCostReconciliationStore();
+        var service = new CostReconciliationService(
+            [openAi, anthropic],
+            temp.CreateRollupStore(),
+            store,
+            Options.Create(new CostReconciliationOptions()),
+            NullLogger<CostReconciliationService>.Instance);
+
+        await service.RunCycleAsync(Ct);
+
+        Assert.Equal(Yesterday, store.GetLastReconciledDay("openai"));
+        Assert.Equal(Yesterday, store.GetLastReconciledDay("anthropic"));
+        Assert.Single(openAi.CalledDays);
+        Assert.Single(anthropic.CalledDays);
+    }
+
+    private sealed class FakeCostReconciler(string provider, Func<DateOnly, decimal> costForDay) : IProviderCostReconciler
+    {
+        public List<DateOnly> CalledDays { get; } = [];
+
+        public string Provider => provider;
+
+        public Task<decimal> GetReportedCostAsync(DateOnly day, CancellationToken cancellationToken = default)
+        {
+            CalledDays.Add(day);
+            return Task.FromResult(costForDay(day));
+        }
+    }
+}

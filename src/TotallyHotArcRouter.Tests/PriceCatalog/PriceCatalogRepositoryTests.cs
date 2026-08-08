@@ -611,6 +611,67 @@ public class PriceCatalogRepositoryTests
         Assert.Equal(1, CountHistoryRows(database, "anthropic"));
     }
 
+    [Fact]
+    public void GetRateLimitHistory_ReturnsBucketsChronologicallyWithOnlyCapturedHeaders()
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+        var first = new DateTimeOffset(2026, 3, 1, 12, 0, 0, TimeSpan.Zero);
+        var second = first.AddMinutes(1);
+
+        repository.UpsertRateLimitHeaders(
+            "anthropic",
+            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
+            first);
+        repository.UpsertRateLimitHeaders(
+            "anthropic",
+            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "900")],
+            second);
+
+        var buckets = repository.GetRateLimitHistory("anthropic", first.AddMinutes(-5));
+
+        Assert.Equal(2, buckets.Count);
+        Assert.Equal(first, buckets[0].BucketUtc);
+        Assert.Single(buckets[0].Headers);
+        Assert.Equal("1000", buckets[0].Headers[0].HeaderValue);
+        Assert.Equal(second, buckets[1].BucketUtc);
+        Assert.Equal("900", buckets[1].Headers[0].HeaderValue);
+    }
+
+    [Fact]
+    public void GetRateLimitHistory_ExcludesBucketsBeforeSince()
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+        var old = new DateTimeOffset(2026, 3, 1, 12, 0, 0, TimeSpan.Zero);
+        var recent = old.AddMinutes(10);
+
+        repository.UpsertRateLimitHeaders(
+            "anthropic",
+            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
+            old);
+        repository.UpsertRateLimitHeaders(
+            "anthropic",
+            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "900")],
+            recent);
+
+        var buckets = repository.GetRateLimitHistory("anthropic", old.AddMinutes(5));
+
+        Assert.Single(buckets);
+        Assert.Equal(recent, buckets[0].BucketUtc);
+    }
+
+    [Fact]
+    public void GetRateLimitHistory_UnknownProvider_ReturnsEmpty()
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+
+        var buckets = repository.GetRateLimitHistory("does-not-exist", DateTimeOffset.UtcNow.AddDays(-1));
+
+        Assert.Empty(buckets);
+    }
+
     private static int CountHistoryRows(PriceCatalogDatabase database, string providerKey)
     {
         using var connection = database.OpenConnection();

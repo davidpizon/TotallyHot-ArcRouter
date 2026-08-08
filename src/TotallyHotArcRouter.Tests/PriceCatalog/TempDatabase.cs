@@ -122,6 +122,13 @@ internal sealed class TempDatabase : IDisposable
         return new ModelAliasOverrideStore(Database);
     }
 
+    /// <summary>Creates the schema and returns a <see cref="ProviderCostReconciliationStore"/> over it.</summary>
+    public ProviderCostReconciliationStore CreateCostReconciliationStore()
+    {
+        Database.EnsureCreated();
+        return new ProviderCostReconciliationStore(Database);
+    }
+
     public void Dispose()
     {
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();

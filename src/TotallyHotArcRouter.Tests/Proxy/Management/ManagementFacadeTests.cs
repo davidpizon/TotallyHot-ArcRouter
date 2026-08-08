@@ -34,14 +34,16 @@ public sealed class ManagementFacadeTests
         IProviderConfigStore? store = null,
         ProviderBudgetStore? budgetStore = null,
         PriceCatalogRepository? priceCatalogRepository = null,
-        ModelAliasOverrideStore? overrideStore = null) =>
+        ModelAliasOverrideStore? overrideStore = null,
+        TimeSpan? rateLimitStalenessThreshold = null) =>
         new(
             store ?? new InMemoryProviderConfigStore(SeedOptions()),
             Mock.Of<IEnvironmentVariableProvider>(),
             new HttpClient(),
             budgetStore,
             priceCatalogRepository: priceCatalogRepository,
-            overrideStore: overrideStore);
+            overrideStore: overrideStore,
+            rateLimitStalenessThreshold: rateLimitStalenessThreshold);
 
     [Fact]
     public void ListProviders_NeverReturnsALockedHeaderValue()
@@ -578,6 +580,182 @@ public sealed class ManagementFacadeTests
         Assert.NotNull(provider.RateLimit);
         Assert.Equal(observedAt, provider.RateLimit!.ObservedAtUtc);
         Assert.Equal(1000, provider.RateLimit.Snapshot.StandardDimensions["tokens"].Remaining);
+    }
+
+    [Fact]
+    public void ListProviders_RecentCapture_IsNotStale()
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+        repository.UpsertRateLimitHeaders(
+            "openai",
+            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
+            DateTimeOffset.UtcNow.AddMinutes(-1));
+        var facade = CreateFacade(priceCatalogRepository: repository);
+
+        var provider = facade.ListProviders().Providers.Single();
+
+        Assert.False(provider.RateLimit!.IsStale);
+    }
+
+    [Fact]
+    public void ListProviders_CaptureOlderThanStalenessThreshold_IsStale()
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+        repository.UpsertRateLimitHeaders(
+            "openai",
+            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
+            DateTimeOffset.UtcNow.AddMinutes(-30));
+        var facade = CreateFacade(priceCatalogRepository: repository, rateLimitStalenessThreshold: TimeSpan.FromMinutes(15));
+
+        var provider = facade.ListProviders().Providers.Single();
+
+        Assert.True(provider.RateLimit!.IsStale);
+    }
+
+    [Fact]
+    public void ListProviders_NoNewCaptureSinceLastLoad_LastGoodSnapshotStandsUnchanged()
+    {
+        // Pins the "last-good" contract (§5.9): a header-free response never clears/replaces a prior
+        // snapshot - RateLimitHeaderCapture.CaptureAsync already no-ops on an empty header list (see
+        // PriceCatalogRepositoryTests.UpsertRateLimitHeaders_EmptyList_IsNoOp), so simulating "no headers
+        // this time" here is simply not calling UpsertRateLimitHeaders again.
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+        var observedAt = DateTimeOffset.UtcNow.AddMinutes(-2);
+        repository.UpsertRateLimitHeaders(
+            "openai",
+            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
+            observedAt);
+        var facade = CreateFacade(priceCatalogRepository: repository);
+
+        var first = facade.ListProviders().Providers.Single().RateLimit;
+        var second = facade.ListProviders().Providers.Single().RateLimit;
+
+        Assert.NotNull(first);
+        Assert.NotNull(second);
+        Assert.Equal(observedAt, first!.ObservedAtUtc);
+        Assert.Equal(observedAt, second!.ObservedAtUtc);
+        Assert.Equal(1000, second.Snapshot.StandardDimensions["tokens"].Remaining);
+    }
+
+    [Fact]
+    public void ListProviders_TwoHistoryObservations_PopulatesExhaustionProjection()
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+        var earlier = DateTimeOffset.UtcNow.AddMinutes(-20);
+        var later = DateTimeOffset.UtcNow.AddMinutes(-10);
+        repository.UpsertRateLimitHeaders(
+            "openai",
+            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "10000")],
+            earlier);
+        repository.UpsertRateLimitHeaders(
+            "openai",
+            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "8000")],
+            later);
+        var facade = CreateFacade(priceCatalogRepository: repository);
+
+        var rateLimit = facade.ListProviders().Providers.Single().RateLimit!;
+
+        var projection = rateLimit.Projections["tokens"];
+        Assert.True(projection.TimeToExhaustion > TimeSpan.Zero);
+        Assert.True(projection.BurnRatePerMinute > 0);
+    }
+
+    [Fact]
+    public void ListProviders_OnlyOneObservation_ProjectionsIsEmpty()
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+        repository.UpsertRateLimitHeaders(
+            "openai",
+            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
+            DateTimeOffset.UtcNow.AddMinutes(-1));
+        var facade = CreateFacade(priceCatalogRepository: repository);
+
+        var rateLimit = facade.ListProviders().Providers.Single().RateLimit!;
+
+        Assert.Empty(rateLimit.Projections);
+    }
+
+    [Fact]
+    public void GetRateLimitHistory_UnknownProvider_ReturnsNotFound()
+    {
+        using var temp = new TempDatabase();
+        var facade = CreateFacade(priceCatalogRepository: temp.CreateRepository());
+
+        var result = facade.GetRateLimitHistory("does-not-exist", hours: 6);
+
+        Assert.False(result.Success);
+        Assert.Equal(ManagementErrorType.NotFound, result.ErrorType);
+    }
+
+    [Fact]
+    public void GetRateLimitHistory_NoPriceCatalogRepository_ReturnsUnavailable()
+    {
+        var facade = CreateFacade(priceCatalogRepository: null);
+
+        var result = facade.GetRateLimitHistory("openai", hours: 6);
+
+        Assert.False(result.Success);
+        Assert.Equal(ManagementErrorType.Unavailable, result.ErrorType);
+    }
+
+    [Fact]
+    public void GetRateLimitHistory_ReturnsChronologicalPointsPerDimension()
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+        var first = DateTimeOffset.UtcNow.AddMinutes(-5);
+        var second = DateTimeOffset.UtcNow.AddMinutes(-3);
+        repository.UpsertRateLimitHeaders(
+            "openai",
+            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
+            first);
+        repository.UpsertRateLimitHeaders(
+            "openai",
+            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "900")],
+            second);
+        var facade = CreateFacade(priceCatalogRepository: repository);
+
+        var result = facade.GetRateLimitHistory("openai", hours: 1);
+
+        Assert.True(result.Success);
+        var points = result.Value!.Dimensions["tokens"];
+        Assert.Equal(3, points.Count);
+        Assert.Equal(1000, points[0].Remaining);
+        Assert.Null(points[1].Remaining);
+        Assert.Null(points[1].Limit);
+        Assert.Equal(points[0].BucketUtc.AddMinutes(1), points[1].BucketUtc);
+        Assert.Equal(900, points[2].Remaining);
+    }
+
+    [Fact]
+    public void GetRateLimitHistory_NoGapBetweenBuckets_DoesNotInsertNullPoint()
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+        var first = DateTimeOffset.UtcNow.AddMinutes(-2);
+        var second = DateTimeOffset.UtcNow.AddMinutes(-1);
+        repository.UpsertRateLimitHeaders(
+            "openai",
+            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
+            first);
+        repository.UpsertRateLimitHeaders(
+            "openai",
+            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "900")],
+            second);
+        var facade = CreateFacade(priceCatalogRepository: repository);
+
+        var result = facade.GetRateLimitHistory("openai", hours: 1);
+
+        Assert.True(result.Success);
+        var points = result.Value!.Dimensions["tokens"];
+        Assert.Equal(2, points.Count);
+        Assert.Equal(1000, points[0].Remaining);
+        Assert.Equal(900, points[1].Remaining);
     }
 
     [Fact]
