@@ -20,7 +20,7 @@ window.echartsInterop = (function () {
   const AXIS_COLOR = "#475569";
   const GRID_COLOR = "#1e3a5f";
   const FONT = "JetBrains Mono, Fira Code, monospace";
-  const ACCENT = "#38bdf8";
+  const ACCENT = "#1ed760";
 
   function disposeChart(elementId) {
     const inst = instances.get(elementId);
@@ -322,8 +322,8 @@ window.echartsInterop = (function () {
           lineStyle: { color: ACCENT, width: 2.5 },
           areaStyle: {
             color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: "rgba(56,189,248,.45)" },
-              { offset: 1, color: "rgba(56,189,248,.03)" },
+              { offset: 0, color: "rgba(30,215,96,.45)" },
+              { offset: 1, color: "rgba(30,215,96,.03)" },
             ]),
           },
           markArea: {
@@ -559,8 +559,8 @@ window.echartsInterop = (function () {
           lineStyle: { color: ACCENT, width: 2 },
           areaStyle: {
             color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: "rgba(56,189,248,.38)" },
-              { offset: 1, color: "rgba(56,189,248,.02)" },
+              { offset: 0, color: "rgba(30,215,96,.38)" },
+              { offset: 1, color: "rgba(30,215,96,.02)" },
             ]),
           },
         },
