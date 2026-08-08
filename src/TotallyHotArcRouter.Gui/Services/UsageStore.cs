@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using TotallyHot.ArcRouter.Gui.Admin;
 using Microsoft.Extensions.Logging;
 
@@ -17,8 +18,10 @@ public sealed class UsageStore
 
     // Keyed per distinct range/width/groupBy so repeated filter-bar clicks over an already-seen range don't
     // re-fetch. Small and unbounded by design: a session's worth of distinct filter selections is a handful
-    // of entries, nowhere near large enough to need eviction.
-    private readonly Dictionary<RollupCacheKey, IReadOnlyList<UsageRollupBucketView>> _rollupCache = new();
+    // of entries, nowhere near large enough to need eviction. Concurrent, not a plain Dictionary: callers
+    // (e.g. ModelDistribution's day/model pair) issue overlapping LoadRollupAsync calls via Task.WhenAll,
+    // and a plain Dictionary's reads/writes aren't safe to interleave.
+    private readonly ConcurrentDictionary<RollupCacheKey, IReadOnlyList<UsageRollupBucketView>> _rollupCache = new();
 
     /// <summary>Initializes a new instance of the <see cref="UsageStore"/> class.</summary>
     /// <param name="logger">Optional logger.</param>

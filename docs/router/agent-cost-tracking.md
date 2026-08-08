@@ -14,8 +14,8 @@
 > per-request **`usage_ledger`** (`UsageLedger`/`IUsageLedger`) with the dedup key, cache-token columns,
 > and decimal-as-TEXT cost the richer design in
 > [`token-tracking-improvements.md`](token-tracking-improvements.md) §5.2 specifies - `cost_confidence`
-> is written as a fixed `"Unknown"` placeholder until Phase 3's `CostConfidence` enum lands. The schema
-> in §2 below remains superseded by that §5.2 design; treat this document's own `usage_ledger` CREATE
+> is written as the `CostConfidence` enum's member name (via `Enum.ToString()`; Phase 3 is implemented).
+> The schema in §2 below remains superseded by that §5.2 design; treat this document's own `usage_ledger` CREATE
 > TABLE as historical, not current. What **still does not exist** is the **provider cost reconciliation**
 > service (§3.4/§3.5, extended by §5.8): nothing calls any provider's billing API to check the ledger
 > against.

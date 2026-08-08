@@ -158,10 +158,10 @@ The **Governance → Price Overrides** pane:
   this is operator control over the user's own mapping, carrying no price values outward — the same footing
   the Price Sources panel already stands on.
 
-A per-`ModelName` read-only resolution diagnosis (which rung a price currently resolves at, if any) is not
-yet in the pane — it would need the query surface Phase 4 of
-[`token-tracking-implementation-plan.md`](token-tracking-implementation-plan.md) adds; tracked there rather
-than duplicated here.
+A per-`ModelName` read-only resolution diagnosis (which rung a price currently resolves at, if any) is
+implemented: `ManagementFacade.GetPriceResolutionDiagnosis` / the `/admin/price-resolution` endpoint, backing
+the Governance → Price Overrides pane's diagnosis view (Phase 4 of
+[`token-tracking-implementation-plan.md`](token-tracking-implementation-plan.md)).
 
 ## Risks
 
