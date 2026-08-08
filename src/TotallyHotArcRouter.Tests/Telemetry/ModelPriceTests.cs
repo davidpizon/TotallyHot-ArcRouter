@@ -120,6 +120,18 @@ public class ModelPriceTests
     }
 
     [Fact]
+    public void EstimateCost_UsageInfo_ReasoningTokensDoNotChangeCost()
+    {
+        // ReasoningTokens is a subset of CompletionTokens (UsageInfo's doc contract), so it must not be
+        // priced as a fifth, additive dimension - the cost is identical whether it's populated or zero.
+        var price = new ModelPrice(InputPerMillionTokens: 3.00m, OutputPerMillionTokens: 15.00m);
+        var withoutReasoning = new UsageInfo(PromptTokens: 1_000, CompletionTokens: 2_000);
+        var withReasoning = new UsageInfo(PromptTokens: 1_000, CompletionTokens: 2_000, ReasoningTokens: 1_500);
+
+        Assert.Equal(price.EstimateCost(withoutReasoning), price.EstimateCost(withReasoning));
+    }
+
+    [Fact]
     public void IsApproximateMatch_DefaultsToFalse()
     {
         var price = new ModelPrice(3.00m, 15.00m);

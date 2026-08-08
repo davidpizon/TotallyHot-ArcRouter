@@ -105,9 +105,12 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// - a second, capped copy of the pre-translation native bytes, immune to translation lossiness
     /// (<c>docs/router/openai-format-usage-accuracy-plan.md</c> §4). <see cref="NativeBytes"/> is
     /// <see langword="null"/> for a pass-through (no translator ran, so the client bytes already are native)
-    /// or an unsupported translated provider (e.g. Gemini).
+    /// or an unsupported translated provider (e.g. Gemini). <see cref="TailScanner"/> retained a trailing
+    /// window over the client-shape stream, independent of <see cref="ClientShapeBytes"/>'s head cap -
+    /// consulted by <c>PublishTelemetryAsync</c> only when usage extraction fails against both the
+    /// head-capped and native captures (§5.11).
     /// </summary>
-    private readonly record struct CapturedResponse(byte[] ClientShapeBytes, byte[]? NativeBytes);
+    private readonly record struct CapturedResponse(byte[] ClientShapeBytes, byte[]? NativeBytes, IncrementalUsageScanner? TailScanner);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ProxyMiddleware"/> class.
@@ -707,6 +710,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
                 byte[] capturedResponseBytes;
                 byte[]? nativeResponseBytes = null;
+                IncrementalUsageScanner? tailScanner = null;
                 if (preReadErrorBody is not null && geminiEmbeddedErrorMessage is not null)
                 {
                     // A Gemini 400 that reached here (either it wasn't the UNAUTHENTICATED case, or it was
@@ -748,7 +752,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                     {
                         if (translator is null)
                         {
-                            capturedResponseBytes = await CopyAndCaptureAsync(upstreamBody, context.Response.Body, MaxCapturedResponseBytes, context.RequestAborted);
+                            (capturedResponseBytes, tailScanner) = await CopyAndCaptureAsync(upstreamBody, context.Response.Body, MaxCapturedResponseBytes, context.RequestAborted);
                         }
                         else
                         {
@@ -757,6 +761,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                                 : await TranslateAndCaptureBufferedAsync(translator, upstreamBody, context.Response.Body, MaxCapturedResponseBytes, context.RequestAborted);
                             capturedResponseBytes = captured.ClientShapeBytes;
                             nativeResponseBytes = captured.NativeBytes;
+                            tailScanner = captured.TailScanner;
                         }
                     }
                     catch (Exception ex) when (!context.Response.HasStarted && IsStreamAbort(ex))
@@ -793,7 +798,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                     // ResponseTextExtractor pick the right parser per request instead of assuming one shape per
                     // provider, which broke once "anthropic" became dual-mode.
                     var telemetryShapeProvider = translator is not null ? "openai" : route.Provider;
-                    await PublishTelemetryAsync(context, route, requestedModelName, isFallback, telemetryShapeProvider, rewrittenBody, capturedResponseBytes, nativeResponseBytes, isStreaming, latencyToHeadersMs, totalDurationMs, statusCode, context.RequestAborted, responseMessage.Headers);
+                    await PublishTelemetryAsync(context, route, requestedModelName, isFallback, telemetryShapeProvider, rewrittenBody, capturedResponseBytes, nativeResponseBytes, isStreaming, latencyToHeadersMs, totalDurationMs, statusCode, context.RequestAborted, responseMessage.Headers, tailScanner);
                 }
                 catch (Exception ex)
                 {
@@ -955,6 +960,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         var stopwatch = Stopwatch.StartNew();
         byte[] capturedResponseBytes;
         long latencyToHeadersMs;
+        IncrementalUsageScanner? tailScanner = null;
 
         try
         {
@@ -973,7 +979,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 context.Response.StatusCode = StatusCodes.Status200OK;
                 context.Response.ContentType = "text/event-stream";
 
-                capturedResponseBytes = await TranslateAndCaptureBedrockStreamAsync(translator, response.Body, context.Response.Body, MaxCapturedResponseBytes, context.RequestAborted);
+                (capturedResponseBytes, tailScanner) = await TranslateAndCaptureBedrockStreamAsync(translator, response.Body, context.Response.Body, MaxCapturedResponseBytes, context.RequestAborted);
             }
             else
             {
@@ -994,6 +1000,9 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 await context.Response.Body.WriteAsync(translated, context.RequestAborted);
 
                 capturedResponseBytes = translated.Length <= MaxCapturedResponseBytes ? translated : translated[..MaxCapturedResponseBytes];
+                var bufferedTailScanner = new IncrementalUsageScanner();
+                bufferedTailScanner.Append(translated);
+                tailScanner = bufferedTailScanner;
             }
         }
         catch (AmazonClientException ex)
@@ -1079,7 +1088,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // its streaming chunks aren't SSE-framed, so the same capture approach doesn't apply. Always
             // null here - telemetry falls back to parsing the translated "openai"-shaped bytes, unchanged
             // from before this plan.
-            await PublishTelemetryAsync(context, route, requestedModelName, isFallback, "openai", rewrittenBody, capturedResponseBytes, nativeResponseBytes: null, isStreamingRequest, latencyToHeadersMs, totalDurationMs, StatusCodes.Status200OK, context.RequestAborted);
+            await PublishTelemetryAsync(context, route, requestedModelName, isFallback, "openai", rewrittenBody, capturedResponseBytes, nativeResponseBytes: null, isStreamingRequest, latencyToHeadersMs, totalDurationMs, StatusCodes.Status200OK, context.RequestAborted, upstreamHeaders: null, tailScanner: tailScanner);
         }
         catch (Exception ex)
         {
@@ -1096,10 +1105,11 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// client as it's produced, and captures up to <paramref name="captureCap"/> bytes for telemetry -
     /// mirrors <see cref="TranslateAndCaptureStreamAsync"/>'s role for the raw-HTTP path.
     /// </summary>
-    private async Task<byte[]> TranslateAndCaptureBedrockStreamAsync(IBedrockPayloadTranslator translator, ResponseStream body, Stream destination, int captureCap, CancellationToken cancellationToken)
+    private async Task<(byte[] Captured, IncrementalUsageScanner TailScanner)> TranslateAndCaptureBedrockStreamAsync(IBedrockPayloadTranslator translator, ResponseStream body, Stream destination, int captureCap, CancellationToken cancellationToken)
     {
         var chunkTranslator = translator.CreateBedrockStreamChunkTranslator();
         using var capture = new MemoryStream();
+        var tailScanner = new IncrementalUsageScanner();
 
         async Task EmitAsync(byte[] translated)
         {
@@ -1110,6 +1120,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
             await destination.WriteAsync(translated, cancellationToken);
             await destination.FlushAsync(cancellationToken);
+
+            tailScanner.Append(translated);
 
             var remainingCapacity = captureCap - (int)capture.Length;
             if (remainingCapacity > 0)
@@ -1151,7 +1163,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             _logger.LogWarning(ex, "Streaming response to the client was interrupted (client disconnected, or the connection was aborted); the forward was terminated early.");
         }
 
-        return capture.ToArray();
+        return (capture.ToArray(), tailScanner);
     }
 
     /// <summary>Writes a client-facing error envelope for a failed upstream call (a Bedrock SDK failure, or an exhausted transport-outage cascade), matching <see cref="WriteModelNotFoundResponseAsync"/>'s shape. Defaults to 502 (the request was valid; the upstream call failed) rather than 400 (a malformed/unknown-model client request); <paramref name="statusCode"/> lets a caller override this - e.g. 401 for a Bedrock credential-resolution failure treated like the HTTP path's 401 handling. Callers pass a client-safe <paramref name="errorMessage"/> - never a raw transport-exception message, which can leak infrastructure detail.</summary>
@@ -1201,7 +1213,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         long totalDurationMs,
         int statusCode,
         CancellationToken cancellationToken,
-        System.Net.Http.Headers.HttpResponseHeaders? upstreamHeaders = null)
+        System.Net.Http.Headers.HttpResponseHeaders? upstreamHeaders = null,
+        IncrementalUsageScanner? tailScanner = null)
     {
         var requestBody = TryParseJsonObject(rewrittenRequestBody);
         var resolvedSessionId = _sessionIdResolver.Resolve(context.Request.Headers, requestBody);
@@ -1305,6 +1318,28 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             }
         }
 
+        // Last resort (§5.11): both captures above are head-capped at MaxCapturedResponseBytes, so a
+        // response larger than the cap can cut off entirely before reaching its usage block (typically the
+        // final SSE event of a streamed response). tailScanner retained a trailing window over the stream
+        // independent of that cap - deliberately NOT reassigning usageShapeProvider/usageShapeBytes here,
+        // unlike the native-capture fallback above: the response-text extraction below reuses that same
+        // pair, and a tail-only buffer holds only the end of a long streamed answer, which would make
+        // ResponseSummary a worse (truncated-from-the-front) result than what the head-capped bytes already
+        // gave it - the tail is only trustworthy for recovering the trailing usage numbers, not the text.
+        if (!usageExtracted && tailScanner is not null)
+        {
+            usageExtracted = tailScanner.TryExtractUsage(telemetryShapeProvider, isStreaming, _usageExtractor, out usage);
+        }
+
+        if (!usageExtracted)
+        {
+            UsageMetrics.ExtractionFailedTotal.Add(1, new KeyValuePair<string, object?>("provider", telemetryShapeProvider));
+            _logger.LogDebug(
+                "Could not extract usage for provider {Provider} (streaming: {IsStreaming}); no cost/token telemetry will be recorded for this request.",
+                SanitizeForLog(telemetryShapeProvider),
+                isStreaming);
+        }
+
         if (usageExtracted)
         {
             promptTokens = usage.PromptTokens;
@@ -1395,6 +1430,15 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             await _usageLedger.RecordAsync(ledgerEntry, CancellationToken.None).ConfigureAwait(false);
         }
 
+        // §5.12: published unconditionally (not gated on _usageLedger being configured) so an operator who
+        // wants OTLP/Prometheus export but not the SQLite ledger still gets it. Creating a Meter/instrument
+        // and calling Add on it is cheap with no listener attached - only an actually-configured OTLP
+        // exporter (a hosting-level decision, not this class's) turns these into real exported metrics.
+        if (usageExtracted)
+        {
+            EmitUsageMetrics(route.Provider, requestedModel, promptTokens, completionTokens, cacheCreationTokens, cacheReadTokens, estimatedCostUsd);
+        }
+
         var requestSummary = TextTruncator.Truncate(RequestTextExtractor.ExtractNewestUserMessage(requestBody));
         var responseSummary = _responseTextExtractor.TryExtractText(usageShapeProvider, isStreaming, usageShapeBytes, out var responseText)
             ? TextTruncator.Truncate(responseText)
@@ -1441,6 +1485,44 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 Model: requestedModel,
                 CorrelationId: correlationId,
                 SessionId: sessionId));
+        }
+    }
+
+    /// <summary>
+    /// Publishes one request's usage to <see cref="UsageMetrics"/> (§5.12): a token count per non-zero
+    /// dimension, cost when known, and <see cref="UsageMetrics.UnpricedRequestsTotal"/> when it isn't -
+    /// mirroring the ledger's own "unknown is not zero" distinction rather than defaulting a missing cost
+    /// to 0.0 in the exported metric.
+    /// </summary>
+    private static void EmitUsageMetrics(string provider, string model, int? promptTokens, int? completionTokens, int? cacheCreationTokens, int? cacheReadTokens, decimal? estimatedCostUsd)
+    {
+        void AddTokens(int? value, string kind)
+        {
+            if (value is > 0)
+            {
+                UsageMetrics.TokensTotal.Add(
+                    value.Value,
+                    new KeyValuePair<string, object?>("provider", provider),
+                    new KeyValuePair<string, object?>("model", model),
+                    new KeyValuePair<string, object?>("kind", kind));
+            }
+        }
+
+        AddTokens(promptTokens, "prompt");
+        AddTokens(completionTokens, "completion");
+        AddTokens(cacheCreationTokens, "cache_creation");
+        AddTokens(cacheReadTokens, "cache_read");
+
+        if (estimatedCostUsd is decimal cost)
+        {
+            UsageMetrics.CostUsdTotal.Add(
+                (double)cost,
+                new KeyValuePair<string, object?>("provider", provider),
+                new KeyValuePair<string, object?>("model", model));
+        }
+        else
+        {
+            UsageMetrics.UnpricedRequestsTotal.Add(1, new KeyValuePair<string, object?>("provider", provider));
         }
     }
 
@@ -1542,7 +1624,10 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 ? (nativeBytes.Length <= captureCap ? nativeBytes : nativeBytes[..captureCap])
                 : null;
 
-            return new CapturedResponse(clientShapeBytes, capturedNativeBytes);
+            var tailScanner = new IncrementalUsageScanner();
+            tailScanner.Append(translated);
+
+            return new CapturedResponse(clientShapeBytes, capturedNativeBytes, tailScanner);
         }
         catch (Exception ex) when (IsStreamAbort(ex) && cancellationToken.IsCancellationRequested)
         {
@@ -1554,7 +1639,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // distinction for the SendAsync case) is deliberately left to propagate, so the caller can still
             // turn it into a real 502 instead of silently committing a 200 with an empty body.
             _logger.LogWarning(ex, "Buffered response to the client was interrupted by a client disconnect; the forward was terminated early.");
-            return new CapturedResponse([], null);
+            return new CapturedResponse([], null, null);
         }
     }
 
@@ -1576,6 +1661,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         var captureNativeBytes = UsageExtractor.SupportsNativeShape(translator.Provider);
         using var capture = new MemoryStream();
         using var nativeCapture = captureNativeBytes ? new MemoryStream() : null;
+        var tailScanner = new IncrementalUsageScanner();
         var buffer = ArrayPool<byte>.Shared.Rent(81920);
 
         async Task EmitAsync(byte[] translated)
@@ -1587,6 +1673,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
             await destination.WriteAsync(translated, cancellationToken);
             await destination.FlushAsync(cancellationToken);
+
+            tailScanner.Append(translated);
 
             var remainingCapacity = captureCap - (int)capture.Length;
             if (remainingCapacity > 0)
@@ -1631,18 +1719,20 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             ArrayPool<byte>.Shared.Return(buffer);
         }
 
-        return new CapturedResponse(capture.ToArray(), nativeCapture?.ToArray());
+        return new CapturedResponse(capture.ToArray(), nativeCapture?.ToArray(), tailScanner);
     }
 
     /// <summary>
     /// Copies <paramref name="source"/> to <paramref name="destination"/> unchanged (the client-facing
     /// forward), while also capturing up to <paramref name="captureCap"/> bytes for telemetry usage
-    /// parsing. The capture never delays or alters what reaches <paramref name="destination"/> - it's an
+    /// parsing, plus a trailing <see cref="IncrementalUsageScanner"/> window independent of that cap
+    /// (§5.11). The capture never delays or alters what reaches <paramref name="destination"/> - it's an
     /// in-memory side copy of each chunk immediately after (not instead of) writing it downstream.
     /// </summary>
-    private async Task<byte[]> CopyAndCaptureAsync(Stream source, Stream destination, int captureCap, CancellationToken cancellationToken)
+    private async Task<(byte[] Captured, IncrementalUsageScanner TailScanner)> CopyAndCaptureAsync(Stream source, Stream destination, int captureCap, CancellationToken cancellationToken)
     {
         using var capture = new MemoryStream();
+        var tailScanner = new IncrementalUsageScanner();
         var buffer = ArrayPool<byte>.Shared.Rent(81920);
         try
         {
@@ -1658,6 +1748,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 // - in its internal buffer instead of pushing them to the client promptly, so the client
                 // sees no bytes at all until the connection eventually closes (or times out first).
                 await destination.FlushAsync(cancellationToken);
+
+                tailScanner.Append(buffer.AsSpan(0, bytesRead));
 
                 var remainingCapacity = captureCap - (int)capture.Length;
                 if (remainingCapacity > 0)
@@ -1678,7 +1770,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             ArrayPool<byte>.Shared.Return(buffer);
         }
 
-        return capture.ToArray();
+        return (capture.ToArray(), tailScanner);
     }
 
     /// <summary>

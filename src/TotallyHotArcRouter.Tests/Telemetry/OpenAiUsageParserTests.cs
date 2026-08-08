@@ -154,5 +154,43 @@ public class OpenAiUsageParserTests
         Assert.Equal(0, usage.PromptTokens);
         Assert.Equal(999, usage.CacheReadTokens);
     }
+
+    [Fact]
+    public void TryExtractFromNonStreamingBody_ReasoningTokens_ReadAsSubsetOfCompletionTokens()
+    {
+        const string json = """{"usage":{"prompt_tokens":14,"completion_tokens":678,"completion_tokens_details":{"reasoning_tokens":536}}}""";
+
+        var result = OpenAiUsageParser.TryExtractFromNonStreamingBody(json, out var usage);
+
+        Assert.True(result);
+        Assert.Equal(678, usage.CompletionTokens);
+        Assert.Equal(536, usage.ReasoningTokens);
+    }
+
+    [Fact]
+    public void TryExtractFromNonStreamingBody_NoCompletionTokensDetails_ReasoningTokensDefaultsToZero()
+    {
+        const string json = """{"usage":{"prompt_tokens":100,"completion_tokens":20}}""";
+
+        var result = OpenAiUsageParser.TryExtractFromNonStreamingBody(json, out var usage);
+
+        Assert.True(result);
+        Assert.Equal(0, usage.ReasoningTokens);
+    }
+
+    [Fact]
+    public void TryExtractFromStreamingBuffer_FinalChunkWithReasoningTokens_ReturnsReasoningTokens()
+    {
+        var sse =
+            "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n" +
+            "data: {\"id\":\"1\",\"choices\":[],\"usage\":{\"prompt_tokens\":80,\"completion_tokens\":300,\"completion_tokens_details\":{\"reasoning_tokens\":220}}}\n\n" +
+            "data: [DONE]\n\n";
+
+        var result = OpenAiUsageParser.TryExtractFromStreamingBuffer(sse, out var usage);
+
+        Assert.True(result);
+        Assert.Equal(300, usage.CompletionTokens);
+        Assert.Equal(220, usage.ReasoningTokens);
+    }
 }
 

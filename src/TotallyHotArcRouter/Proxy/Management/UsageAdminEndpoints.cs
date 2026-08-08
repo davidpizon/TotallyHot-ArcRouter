@@ -2,6 +2,7 @@ using System.Globalization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Proxy.Management;
 
@@ -73,6 +74,38 @@ public static class UsageAdminEndpoints
             }
 
             return ToResult(facade.GetUsageRollup(fromInstant, toInstant, width ?? "day", groupBy ?? "day"));
+        });
+
+        // §5.12: reuses the exact same GetUsageRollup query the chart feed above does - export is a
+        // rendering choice (CSV/JSON), never a second query path - so the two can never disagree on what
+        // counts as "the same range" the way an independently-written export query could.
+        group.MapGet("/export", (string? from, string? to, string? width, string? groupBy, string? format) =>
+        {
+            if (!TryParseInstant(from, out var fromInstant))
+            {
+                return Error(StatusCodes.Status400BadRequest, "'from' must be a valid ISO 8601 instant.", "invalid_request_error");
+            }
+
+            if (!TryParseInstant(to, out var toInstant))
+            {
+                return Error(StatusCodes.Status400BadRequest, "'to' must be a valid ISO 8601 instant.", "invalid_request_error");
+            }
+
+            var exportFormat = format ?? "json";
+            if (exportFormat is not ("csv" or "json"))
+            {
+                return Error(StatusCodes.Status400BadRequest, "'format' must be 'csv' or 'json'.", "invalid_request_error");
+            }
+
+            var result = facade.GetUsageRollup(fromInstant, toInstant, width ?? "day", groupBy ?? "day");
+            if (!result.Success)
+            {
+                return ToResult(result);
+            }
+
+            return exportFormat == "csv"
+                ? Results.Text(UsageExportFormatter.ToCsv(result.Value!), "text/csv")
+                : Results.Ok(result.Value);
         });
 
         return endpoints;
