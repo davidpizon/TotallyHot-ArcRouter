@@ -95,12 +95,19 @@ public sealed class GovernanceModelCardsTests
     }
 
     [Fact]
-    public void Renders_no_models_message_when_unreachable()
+    public void Renders_unreachable_state_when_stores_cannot_reach_the_router()
     {
         using var ctx = NewContext(withData: false);
 
         var cut = ctx.Render<GovernanceModelCards>();
 
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("No models configured."), TimeSpan.FromSeconds(6));
+        // Distinct from "No models configured." - an unreachable proxy must never render as if there
+        // were genuinely zero configured models (see GovernanceModelCards' ProviderStore.IsReachable /
+        // UsageStore.IsReachable branch).
+        cut.WaitForAssertion(() =>
+        {
+            cut.Markup.Should().Contain("Router unreachable");
+            cut.Markup.Should().NotContain("No models configured.");
+        }, TimeSpan.FromSeconds(6));
     }
 }

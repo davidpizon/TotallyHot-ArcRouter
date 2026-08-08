@@ -90,11 +90,21 @@
     }
 
     // Only applies once both fields parse to a valid range - a half-typed date must not trigger a fetch.
+    // Exact "yyyy-MM-dd" parse against the invariant culture, not DateTimeOffset.TryParse's culture- and
+    // timezone-dependent parsing - the placeholder advertises that one format, and a locale-dependent parse
+    // of the same typed text would resolve to a different UTC instant depending on the operator's machine.
+    // Interpreted as UTC midnight to match the rollup buckets' own UTC storage (UsageRollupStore).
     private async Task ApplyCustomRangeAsync()
     {
-        if (DateTimeOffset.TryParse(_fromText, out var from) && DateTimeOffset.TryParse(_toText, out var to) && to > from)
+        if (DateOnly.TryParseExact(_fromText, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var fromDate) &&
+            DateOnly.TryParseExact(_toText, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var toDate))
         {
-            await ReloadAsync(from, to);
+            var from = new DateTimeOffset(fromDate.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+            var to = new DateTimeOffset(toDate.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+            if (to > from)
+            {
+                await ReloadAsync(from, to);
+            }
         }
     }
 

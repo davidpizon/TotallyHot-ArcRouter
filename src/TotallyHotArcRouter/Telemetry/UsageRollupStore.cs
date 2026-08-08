@@ -251,10 +251,10 @@ public sealed class UsageRollupStore : IUsageRollupStore, IDisposable
 
     private List<RawRow> ReadRawBuckets(DateTimeOffset from, DateTimeOffset to, string bucketWidth)
     {
-        var widthDuration = WidthToDuration(bucketWidth);
         var now = DateTimeOffset.UtcNow;
 
         using var connection = _database.OpenConnection();
+        var tz = ResolveTimeZone(connection);
         using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT bucket_start_utc, provider, model, requests, unpriced_requests,
@@ -274,7 +274,7 @@ public sealed class UsageRollupStore : IUsageRollupStore, IDisposable
 
             // Honeycomb's rule: a bucket that has not fully elapsed yet would return a partial figure a
             // later read would contradict, so it is excluded from every query rather than published early.
-            if (bucketStart + widthDuration > now)
+            if (BucketEndUtc(bucketStart, tz, bucketWidth) > now)
             {
                 continue;
             }
@@ -302,6 +302,30 @@ public sealed class UsageRollupStore : IUsageRollupStore, IDisposable
         "P1D" => TimeSpan.FromDays(1),
         _ => throw new ArgumentOutOfRangeException(nameof(width), width, "Unknown bucket width; expected 'PT30M', 'PT1H', or 'P1D'."),
     };
+
+    // For P1D this is NOT bucketStartUtc + 24h: BucketStartUtc floors to local midnight in the pinned
+    // timezone, and a local calendar day can be 23h or 25h long across a DST transition, so a fixed 24h
+    // duration can call a still-in-progress bucket "elapsed" (spring-forward) or hold a genuinely finished
+    // one back an extra hour (fall-back). Walking to the next local midnight and converting that back to
+    // UTC - the same wall-clock math BucketStartUtc itself uses - gives the true end of that calendar day
+    // regardless of its actual UTC-duration. PT30M/PT1H buckets don't span a local calendar day, so a fixed
+    // duration is exact for them.
+    private static DateTimeOffset BucketEndUtc(DateTimeOffset bucketStartUtc, TimeZoneInfo tz, string width)
+    {
+        if (width != "P1D")
+        {
+            return bucketStartUtc + WidthToDuration(width);
+        }
+
+        var localStart = TimeZoneInfo.ConvertTime(bucketStartUtc, tz).DateTime;
+        var nextLocalMidnight = localStart.Date.AddDays(1);
+        if (tz.IsInvalidTime(nextLocalMidnight))
+        {
+            nextLocalMidnight = nextLocalMidnight.AddHours(1);
+        }
+
+        return TimeZoneInfo.ConvertTimeToUtc(nextLocalMidnight, tz);
+    }
 
     // INSERT OR IGNORE, not an upsert: once a row exists at id=1 it is never modified except for
     // last_rolled_up_entry_id (via WriteCheckpoint), because the timezone itself is write-once (see the

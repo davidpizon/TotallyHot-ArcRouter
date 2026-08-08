@@ -172,7 +172,10 @@
                 PromptTokens: (int)Math.Min(b.PromptTokens, int.MaxValue),
                 CompletionTokens: (int)Math.Min(b.CompletionTokens, int.MaxValue),
                 ToolExecutionSteps: 0,
-                CacheHitRate: 0m,
+                CacheHitRate: CostChartBuilder.CacheHitRate(
+                    (int)Math.Min(b.PromptTokens, int.MaxValue),
+                    (int)Math.Min(b.CacheCreationTokens, int.MaxValue),
+                    (int)Math.Min(b.CacheReadTokens, int.MaxValue)),
                 TimeToFirstTokenMs: 0,
                 ContextBufferPercent: 0m))
             .ToList();
