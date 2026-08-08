@@ -79,9 +79,13 @@ public sealed class PersistentConversationTurnTracker : IConversationTurnTracker
         }
     }
 
-    // Called under _lock. Walks the whole map on every call rather than a scheduled sweep: session counts
-    // are small relative to request volume, and this keeps the tracker free of any background timer to
-    // dispose of.
+    // Called under _lock, on NextTurn's slow path only (an untracked or idle-expired session) - not on
+    // every call, since the fast path above returns before reaching this. Walks the whole map rather than
+    // a scheduled sweep: session counts are small relative to request volume, and this keeps the tracker
+    // free of any background timer to dispose of. A stretch of pure fast-path traffic (all sessions already
+    // tracked and fresh) won't itself trigger a sweep of other, unrelated idle sessions - they're cleaned up
+    // the next time any session takes the slow path, which is frequent enough in practice (every new or
+    // idle-expired session) to keep memory bounded per this type's own idle-eviction contract.
     private void EvictIdle(DateTimeOffset now)
     {
         List<string>? stale = null;
