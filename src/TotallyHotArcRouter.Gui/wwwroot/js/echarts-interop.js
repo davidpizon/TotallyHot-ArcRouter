@@ -527,6 +527,47 @@ window.echartsInterop = (function () {
     });
   }
 
+  // ---- Providers card builder ---------------------------------------------------
+
+  // Rate-limit trend: a dimension's remaining budget over time, stepped line with a soft gradient track
+  // (Phase 5, §5.9). Structurally the same shape as the Cost Analytics cache-hit-rate line, but its own
+  // function since the unit is a raw count (tokens/requests), not a fixed 0-100% axis.
+  function optionRateLimitTrendLine(m) {
+    const pts = m.points || [];
+    return Object.assign({}, boldAnim, {
+      grid: baseGrid({ left: 46 }),
+      tooltip: Object.assign({ trigger: "axis" }, baseTooltip, {
+        formatter: (ps) => {
+          const p = pts[ps[0].dataIndex];
+          const lines = [
+            `Remaining: ${p.remaining == null ? "?" : Number(p.remaining).toLocaleString()}`,
+          ];
+          if (p.limit != null) lines.push(`Limit: ${Number(p.limit).toLocaleString()}`);
+          return tooltipBox(p.label, lines, ACCENT);
+        },
+      }),
+      xAxis: timeAxis(),
+      yAxis: valueAxis("tok", { min: 0 }),
+      series: [
+        {
+          type: "line",
+          step: "end",
+          connectNulls: true,
+          data: pts.map((p) => [p.t, p.remaining == null ? null : Number(p.remaining)]),
+          symbol: "circle",
+          symbolSize: 5,
+          lineStyle: { color: ACCENT, width: 2 },
+          areaStyle: {
+            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+              { offset: 0, color: "rgba(56,189,248,.38)" },
+              { offset: 1, color: "rgba(56,189,248,.02)" },
+            ]),
+          },
+        },
+      ],
+    });
+  }
+
   // ---- Model Distribution builders ---------------------------------------------
 
   function optionGroupedBars(m) {
@@ -597,6 +638,8 @@ window.echartsInterop = (function () {
         return optionZonedLatencyLine(m);
       case "ThresholdLine":
         return optionThresholdLine(m);
+      case "RemainingLine":
+        return optionRateLimitTrendLine(m);
       case "GroupedBars":
         return optionGroupedBars(m);
       case "Donut":

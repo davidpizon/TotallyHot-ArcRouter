@@ -56,6 +56,15 @@ public sealed class ManagementFacade
     // endpoint scan: by stubbing the HttpMessageHandler behind the injected client.
     private readonly ModelDialectResolver _dialectResolver;
 
+    // Config default (§5.9); overridable via the constructor's rateLimitStalenessThreshold parameter.
+    private static readonly TimeSpan DefaultRateLimitStalenessThreshold = TimeSpan.FromMinutes(15);
+    private readonly TimeSpan _rateLimitStalenessThreshold;
+
+    // How far back BuildExhaustionProjections looks for an "earlier" observation to pair with the current
+    // snapshot. Short deliberately: a burn rate measured over the last half hour reflects current traffic,
+    // not a stale average diluted by a quiet period earlier in the retention window.
+    private static readonly TimeSpan ProjectionLookback = TimeSpan.FromMinutes(30);
+
     /// <summary>
     /// Initializes a new instance of the <see cref="ManagementFacade"/> class.
     /// </summary>
@@ -88,6 +97,10 @@ public sealed class ManagementFacade
     /// Optional Phase 4 rollup store backing <c>GET /admin/usage/summary</c> and <c>GET /admin/usage/rollup</c>
     /// (§5.15). When null, both answer <see cref="ManagementErrorType.Unavailable"/>.
     /// </param>
+    /// <param name="rateLimitStalenessThreshold">
+    /// How old a captured rate-limit snapshot may be before <see cref="ProviderRateLimitView.IsStale"/> is
+    /// set (§5.9). Defaults to 15 minutes.
+    /// </param>
     public ManagementFacade(
         IProviderConfigStore store,
         IEnvironmentVariableProvider environment,
@@ -97,7 +110,8 @@ public sealed class ManagementFacade
         ToolCallCapabilityStore? capabilityStore = null,
         PriceCatalogRepository? priceCatalogRepository = null,
         ModelAliasOverrideStore? overrideStore = null,
-        IUsageRollupStore? rollupStore = null)
+        IUsageRollupStore? rollupStore = null,
+        TimeSpan? rateLimitStalenessThreshold = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(environment);
@@ -112,6 +126,7 @@ public sealed class ManagementFacade
         _priceCatalogRepository = priceCatalogRepository;
         _overrideStore = overrideStore;
         _rollupStore = rollupStore;
+        _rateLimitStalenessThreshold = rateLimitStalenessThreshold ?? DefaultRateLimitStalenessThreshold;
         _dialectResolver = new ModelDialectResolver(httpClient, environment);
     }
 
@@ -983,7 +998,104 @@ public sealed class ManagementFacade
             return null;
         }
 
-        return new ProviderRateLimitView(RateLimitSnapshotParser.Parse(headers, observedAt), observedAt);
+        var snapshot = RateLimitSnapshotParser.Parse(headers, observedAt);
+        var isStale = DateTimeOffset.UtcNow - observedAt > _rateLimitStalenessThreshold;
+        var projections = BuildExhaustionProjections(providerKey, snapshot, observedAt);
+        return new ProviderRateLimitView(snapshot, observedAt, isStale, projections);
+    }
+
+    /// <summary>
+    /// Projects each standard-family dimension's time-to-exhaustion (§5.9) by pairing the current snapshot
+    /// with the earliest history point inside <see cref="ProjectionLookback"/> that still carries a
+    /// <c>Remaining</c> value for that dimension. A dimension with no such history point (too new, or the
+    /// header simply wasn't captured that recently) is omitted rather than projected from stale history.
+    /// </summary>
+    private Dictionary<string, RateLimitExhaustionProjection> BuildExhaustionProjections(
+        string providerKey, RateLimitSnapshotView latest, DateTimeOffset observedAtUtc)
+    {
+        var projections = new Dictionary<string, RateLimitExhaustionProjection>(StringComparer.OrdinalIgnoreCase);
+        if (latest.StandardDimensions.Count == 0)
+        {
+            return projections;
+        }
+
+        var history = _priceCatalogRepository!.GetRateLimitHistory(providerKey, observedAtUtc - ProjectionLookback);
+
+        foreach (var (dimensionName, laterDimension) in latest.StandardDimensions)
+        {
+            RateLimitObservation? earliest = null;
+            foreach (var bucket in history)
+            {
+                // history is chronologically ascending, so the first bucket that captured this dimension's
+                // remaining value is the earliest usable observation.
+                var bucketSnapshot = RateLimitSnapshotParser.Parse(bucket.Headers, bucket.BucketUtc);
+                if (bucketSnapshot.StandardDimensions.TryGetValue(dimensionName, out var bucketDimension)
+                    && bucketDimension.Remaining is not null)
+                {
+                    earliest = new RateLimitObservation(bucket.BucketUtc, bucketDimension.Remaining, bucketDimension.ResetAt);
+                    break;
+                }
+            }
+
+            if (earliest is null)
+            {
+                continue;
+            }
+
+            var later = new RateLimitObservation(observedAtUtc, laterDimension.Remaining, laterDimension.ResetAt);
+            var projection = RateLimitProjection.Project(earliest, later);
+            if (projection is not null)
+            {
+                projections[dimensionName] = projection;
+            }
+        }
+
+        return projections;
+    }
+
+    /// <summary>
+    /// Returns a provider's rate-limit remaining-over-time series for the last <paramref name="hours"/>
+    /// hours, per standard-family dimension - the Providers card's trend-chart data source (§5.9).
+    /// </summary>
+    /// <param name="providerKey">The provider key.</param>
+    /// <param name="hours">How far back to look, clamped to [0.25, 720] hours (15 minutes to 30 days).</param>
+    public ManagementResult<RateLimitHistoryResponse> GetRateLimitHistory(string providerKey, double hours)
+    {
+        if (!_store.Snapshot.Options.Providers.ContainsKey(providerKey))
+        {
+            return ManagementResult<RateLimitHistoryResponse>.Fail(ManagementErrorType.NotFound, $"Provider '{providerKey}' not found.");
+        }
+
+        if (_priceCatalogRepository is null)
+        {
+            return ManagementResult<RateLimitHistoryResponse>.Fail(ManagementErrorType.Unavailable, "Rate-limit history is not available.");
+        }
+
+        var clampedHours = Math.Clamp(hours, 0.25, 24 * 30);
+        var sinceUtc = DateTimeOffset.UtcNow.AddHours(-clampedHours);
+        var buckets = _priceCatalogRepository.GetRateLimitHistory(providerKey, sinceUtc);
+
+        var series = new Dictionary<string, List<RateLimitHistoryPointView>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var bucket in buckets)
+        {
+            var bucketSnapshot = RateLimitSnapshotParser.Parse(bucket.Headers, bucket.BucketUtc);
+            foreach (var (dimensionName, dimension) in bucketSnapshot.StandardDimensions)
+            {
+                if (!series.TryGetValue(dimensionName, out var points))
+                {
+                    points = [];
+                    series[dimensionName] = points;
+                }
+
+                points.Add(new RateLimitHistoryPointView(bucket.BucketUtc, dimension.Remaining, dimension.Limit));
+            }
+        }
+
+        var dimensions = series.ToDictionary(
+            kvp => kvp.Key,
+            kvp => (IReadOnlyList<RateLimitHistoryPointView>)kvp.Value,
+            StringComparer.OrdinalIgnoreCase);
+        return ManagementResult<RateLimitHistoryResponse>.Ok(new RateLimitHistoryResponse(dimensions));
     }
 
     /// <summary>Classifies a stored header's <see cref="HeaderValueSource"/> from which of its fields is set.</summary>
@@ -1322,7 +1434,32 @@ public sealed record ProviderView(
 /// The UTC instant the most recent header in <see cref="Snapshot"/> was captured. Server-reported numbers
 /// are trustworthy only as of this instant - the GUI's "As of" footer.
 /// </param>
-public sealed record ProviderRateLimitView(RateLimitSnapshotView Snapshot, DateTimeOffset ObservedAtUtc);
+/// <param name="IsStale">
+/// Whether <see cref="ObservedAtUtc"/> is older than the configured staleness threshold (§5.9) - the GUI
+/// dims the "As of" footer and labels it stale when set, rather than presenting an old snapshot as current.
+/// The snapshot itself is unaffected: a stale/absent capture never clears the last-known values.
+/// </param>
+/// <param name="Projections">
+/// Per-dimension projected time-to-exhaustion (§5.9), keyed by the same dimension names as
+/// <see cref="RateLimitSnapshotView.StandardDimensions"/>. A dimension is absent here - not present with a
+/// null value - when no projection could be made (flat, refilled, reset-before-empty, or too little
+/// history); the GUI shows nothing for that dimension rather than fabricating urgency.
+/// </param>
+public sealed record ProviderRateLimitView(
+    RateLimitSnapshotView Snapshot,
+    DateTimeOffset ObservedAtUtc,
+    bool IsStale,
+    IReadOnlyDictionary<string, RateLimitExhaustionProjection> Projections);
+
+/// <summary>One dimension's history points for the Providers card's rate-limit trend chart (§5.9).</summary>
+/// <param name="BucketUtc">The minute bucket's start instant, UTC.</param>
+/// <param name="Remaining">What was left in this bucket, or <see langword="null"/> if the header was absent/unparsable that minute.</param>
+/// <param name="Limit">The dimension's configured cap in this bucket, or <see langword="null"/> if unknown.</param>
+public sealed record RateLimitHistoryPointView(DateTimeOffset BucketUtc, long? Remaining, long? Limit);
+
+/// <summary>The <c>GET /admin/providers/{key}/rate-limit-history</c> response: per-dimension history series.</summary>
+/// <param name="Dimensions">History points per standard-family dimension name, chronologically ordered.</param>
+public sealed record RateLimitHistoryResponse(IReadOnlyDictionary<string, IReadOnlyList<RateLimitHistoryPointView>> Dimensions);
 
 /// <summary>A single configured model as returned to a management caller.</summary>
 /// <param name="ModelName">The client-facing model name.</param>

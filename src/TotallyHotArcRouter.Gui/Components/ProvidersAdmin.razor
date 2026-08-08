@@ -240,7 +240,7 @@
                                             <span>% $ spent</span>
                                             <span>$@Money2(provider.DollarSpent) / $@Money2(dollarCap)</span>
                                         </div>
-                                        <div style="height:96px">
+                                        <div class="ls-provider-budget-chart">
                                             <EChart ModelJson="@BudgetBarJson("% $ spent", dollarPct)" />
                                         </div>
                                     }
@@ -259,7 +259,7 @@
                                             <span>% tokens utilized</span>
                                             <span>@provider.TokensUsed.ToString("N0", CultureInfo.InvariantCulture) / @tokenCap.ToString("N0", CultureInfo.InvariantCulture)</span>
                                         </div>
-                                        <div style="height:96px">
+                                        <div class="ls-provider-budget-chart">
                                             <EChart ModelJson="@BudgetBarJson("% tokens utilized", tokenPct)" />
                                         </div>
                                     }
@@ -300,12 +300,28 @@
                                     @foreach (var (dimensionName, dimension) in rateLimit.Snapshot.StandardDimensions.OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
                                     {
                                         <div class="text-xs font-mono text-slate-400">@FormatDimension(dimensionName, dimension)</div>
+                                        @if (rateLimit.Projections is not null && rateLimit.Projections.TryGetValue(dimensionName, out var projection))
+                                        {
+                                            <div class="text-[10px] text-sky-400/80 font-mono pl-2">@FormatBurnRate(projection)</div>
+                                        }
                                     }
                                     @foreach (var (windowName, window) in rateLimit.Snapshot.UnifiedWindows.OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
                                     {
                                         <div class="text-xs font-mono text-slate-400">@FormatWindow(windowName, window)</div>
                                     }
-                                    <div class="text-[10px] text-slate-600 mt-0.5">As of @FormatUtc(rateLimit.ObservedAtUtc)</div>
+                                    <div class="text-[10px] mt-0.5 @(rateLimit.IsStale ? "text-slate-700" : "text-slate-600")">
+                                        As of @FormatUtc(rateLimit.ObservedAtUtc)@(rateLimit.IsStale ? " · stale" : "")
+                                    </div>
+
+                                    @if (Store.RateLimitHistory.TryGetValue(provider.Key, out var history) && history.Dimensions is { Count: > 0 })
+                                    {
+                                        @foreach (var (dimensionName, points) in history.Dimensions.OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
+                                        {
+                                            <div class="ls-provider-trend-chart">
+                                                <EChart ModelJson="@RateLimitTrendJson(dimensionName, points)" />
+                                            </div>
+                                        }
+                                    }
                                 }
                                 else
                                 {
@@ -368,13 +384,39 @@
     private string _dialogProviderName = string.Empty;
     private string? _dialogError;
 
+    // Providers whose rate-limit trend history has already been requested this session - loaded once per
+    // provider rather than on every Store.Changed re-render, since the history endpoint is a separate
+    // request from the provider list itself.
+    private readonly HashSet<string> _historyRequested = new(StringComparer.OrdinalIgnoreCase);
+
     protected override async Task OnInitializedAsync()
     {
         Store.Changed += OnStoreChanged;
         await Store.LoadAsync();
+        RequestRateLimitHistories();
     }
 
-    private void OnStoreChanged() => InvokeAsync(StateHasChanged);
+    private void OnStoreChanged()
+    {
+        InvokeAsync(StateHasChanged);
+        RequestRateLimitHistories();
+    }
+
+    // Kicks off (fire-and-forget, best-effort) a history load for every provider that has a rate-limit
+    // snapshot and hasn't been requested yet. LoadRateLimitHistoryAsync raises Store.Changed on success,
+    // which re-enters this method - the HashSet guard is what stops that from looping.
+    private void RequestRateLimitHistories()
+    {
+        foreach (var provider in Store.Providers)
+        {
+            if (provider.RateLimit is null || !_historyRequested.Add(provider.Key))
+            {
+                continue;
+            }
+
+            _ = Store.LoadRateLimitHistoryAsync(provider.Key);
+        }
+    }
 
     public void Dispose() => Store.Changed -= OnStoreChanged;
 
@@ -648,6 +690,26 @@
         var status = window.Status ?? "unknown";
         var reset = window.ResetAt is { } resetAt ? $" · resets {FormatUtc(resetAt)}" : string.Empty;
         return $"{windowName} window: {status}{reset}";
+    }
+
+    // "~19 min at current rate" / "~2h 5m at current rate" - no fabricated urgency: this only renders when
+    // ManagementFacade has already decided a projection exists (RateLimitProjection.Project returned
+    // non-null), so there is nothing to show when burn rate can't be trusted (flat, refilled, reset-before-empty).
+    private static string FormatBurnRate(RateLimitExhaustionAdminView projection)
+    {
+        var eta = projection.TimeToExhaustion;
+        var span = eta.TotalHours >= 1
+            ? $"{(int)eta.TotalHours}h {eta.Minutes}m"
+            : $"{Math.Max(1, (int)eta.TotalMinutes)} min";
+        return $"~{span} at current rate";
+    }
+
+    private static string RateLimitTrendJson(string dimensionName, IReadOnlyList<RateLimitHistoryPointAdminView> points)
+    {
+        var model = RateLimitTrendChartBuilder.Build(
+            dimensionName,
+            points.Select(p => (p.BucketUtc, p.Remaining, p.Limit)).ToList());
+        return ChartJson.Serialize(model);
     }
 
     private async Task SaveBudget(string key)

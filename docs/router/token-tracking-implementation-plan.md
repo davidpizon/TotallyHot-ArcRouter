@@ -264,11 +264,22 @@ past day, generated a month apart, agree.
 
 ---
 
-## Phase 5 — Rate-limit interpretation: burn rate, trends, staleness (§5.9)
+## Phase 5 — Rate-limit interpretation: burn rate, trends, staleness (§5.9) — **Implemented**
 
 The capture → parse → display pipeline shipped with
 [`anthropic-reported-usage-plan.md`](anthropic-reported-usage-plan.md); this phase adds the missing
 interpretation layer. This is the "provider-imposed limits" GUI deliverable.
+
+> **Implementation notes (deviations from the sketch above):** the staleness threshold is a
+> `ManagementFacade` constructor parameter (default 15 minutes) rather than an `appsettings.json`-bound
+> option — `ProxyServer`/`ProxyHostedService`/`ServiceCollectionExtensions` don't yet thread it through,
+> so today it can only be overridden by a caller constructing the facade directly. Item 3's trend chart
+> reads a dedicated `GET /admin/providers/{key}/rate-limit-history?hours=` endpoint (added to
+> `ProviderAdminEndpoints`, not the `GET /admin/providers` shape) and renders via a new
+> `RateLimitTrendChartBuilder` + `RemainingLine` ECharts kind, following the `EChart`/`ChartJson`
+> pattern rather than reusing `BudgetBarJson` (a single-bar utilization chart, the wrong shape for a
+> time series). Item 5's optional stretch (a `rate_limit` oneof on the telemetry stream) was not built —
+> the REST path is the only exhaustion-projection surface for now.
 
 1. `ProjectExhaustion` (pure, in `PriceCatalog/` beside `RateLimitSnapshotParser`) over two
    observations of a `(provider, dimension)` — from `provider_rate_limit_history` minute buckets —

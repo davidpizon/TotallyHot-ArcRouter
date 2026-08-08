@@ -517,6 +517,71 @@ public sealed class ProvidersAdminLoadedTests
         cut.Markup.Should().NotContain("No rate-limit data observed yet");
     }
 
+    [Fact]
+    public void RateLimit_Stale_DimsAsOfFooterAndLabelsIt()
+    {
+        var transport = new StubTransport { ResponseOverride = ProvidersJsonWithStaleRateLimit };
+        using var ctx = NewContext(transport);
+
+        var cut = RenderLoaded(ctx);
+
+        cut.Markup.Should().Contain("As of 2026-03-01 12:00 UTC · stale");
+    }
+
+    [Fact]
+    public void RateLimit_ExhaustionProjection_RendersBurnRateLine()
+    {
+        var transport = new StubTransport { ResponseOverride = ProvidersJsonWithUsageAndRateLimit };
+        using var ctx = NewContext(transport);
+
+        var cut = RenderLoaded(ctx);
+
+        cut.Markup.Should().Contain("at current rate");
+    }
+
+    // Same fixture as ProvidersJsonWithUsageAndRateLimit but IsStale is set and no projections - exercises
+    // the "As of ... stale" branch distinctly from the fresh-and-projected one.
+    private const string ProvidersJsonWithStaleRateLimit = """
+        {
+          "providers": [
+            {
+              "key": "anthropic",
+              "name": "Anthropic Prod",
+              "baseUrl": "https://api.anthropic.com",
+              "authHeaderName": "x-api-key",
+              "authHeaderScheme": "",
+              "hasApiKey": true,
+              "apiKeyEnvVar": null,
+              "providerType": "Anthropic",
+              "models": [],
+              "headers": [],
+              "isFree": false,
+              "dollarCap": null,
+              "tokenCap": null,
+              "dollarSpent": 12.5,
+              "tokensUsed": 158000,
+              "enabled": true,
+              "endpointCapabilities": null,
+              "usageLastRecordedAtUtc": "2026-03-01T08:00:00Z",
+              "rateLimit": {
+                "snapshot": {
+                  "standardDimensions": {
+                    "tokens": { "limit": 200000, "remaining": 158000, "resetAt": "2026-03-01T13:00:00Z" }
+                  },
+                  "unifiedStatus": null,
+                  "unifiedResetAt": null,
+                  "unifiedWindows": {},
+                  "representativeClaim": null,
+                  "rawHeaders": {}
+                },
+                "observedAtUtc": "2026-03-01T12:00:00Z",
+                "isStale": true
+              }
+            }
+          ]
+        }
+        """;
+
     // Same three providers as ProvidersJson, but the anthropic entry carries a populated
     // usageLastRecordedAtUtc and rateLimit - exercises the card's populated-data branches, which the
     // GUI must render from these backend-supplied values, never the GUI clock.
@@ -555,7 +620,10 @@ public sealed class ProvidersAdminLoadedTests
                   "representativeClaim": null,
                   "rawHeaders": {}
                 },
-                "observedAtUtc": "2026-03-01T12:00:00Z"
+                "observedAtUtc": "2026-03-01T12:00:00Z",
+                "projections": {
+                  "tokens": { "timeToExhaustion": "00:19:00", "burnRatePerMinute": 2210.5 }
+                }
               }
             }
           ]
