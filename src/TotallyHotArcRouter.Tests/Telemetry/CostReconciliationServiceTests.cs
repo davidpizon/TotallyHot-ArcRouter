@@ -1,5 +1,6 @@
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tests.PriceCatalog;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -183,6 +184,29 @@ public class CostReconciliationServiceTests
         Assert.Single(anthropic.CalledDays);
     }
 
+    [Fact]
+    public async Task RunCycleAsync_LocalCostZero_ReportedCostPositive_DoesNotLogWarning()
+    {
+        // localCost == 0 while reportedCost > 0 is the documented, legitimate "this proxy routed no
+        // traffic for the provider that day" gap (see the persisted entry's ScopeNote) - naively computing
+        // deltaPercent against a zero local base would always read as a 100% difference and misfire a
+        // "price table may be stale" warning on every occurrence of an expected scope mismatch.
+        using var temp = new TempDatabase();
+        var reconciler = new FakeCostReconciler("openai", _ => 42m);
+        var logger = new CapturingLogger<CostReconciliationService>();
+        var service = new CostReconciliationService(
+            [reconciler],
+            temp.CreateRollupStore(),
+            temp.CreateCostReconciliationStore(),
+            Options.Create(new CostReconciliationOptions()),
+            logger);
+
+        await service.RunCycleAsync(Ct);
+
+        Assert.DoesNotContain(logger.Entries, e => e.Level == LogLevel.Warning);
+        Assert.Contains(logger.Entries, e => e.Level == LogLevel.Debug);
+    }
+
     private sealed class FakeCostReconciler(string provider, Func<DateOnly, decimal> costForDay) : IProviderCostReconciler
     {
         public List<DateOnly> CalledDays { get; } = [];
@@ -194,5 +218,19 @@ public class CostReconciliationServiceTests
             CalledDays.Add(day);
             return Task.FromResult(costForDay(day));
         }
+    }
+
+    /// <summary>Minimal <see cref="ILogger{TCategoryName}"/> test double that records each entry's level.</summary>
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
     }
 }

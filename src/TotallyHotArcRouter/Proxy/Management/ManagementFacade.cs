@@ -1116,6 +1116,18 @@ public sealed class ManagementFacade
                 points.Add(new RateLimitHistoryPointView(bucket.BucketUtc, dimension.Remaining, dimension.Limit));
             }
 
+            // A dimension already tracked from an earlier bucket but absent from this one (header not
+            // captured/unparsable that minute, while other dimensions still were) needs its own null point
+            // at this bucket's timestamp too - otherwise its series simply skips the x-value, and the
+            // stepped line visually holds the previous value through what should render as a gap.
+            foreach (var (dimensionName, points) in series)
+            {
+                if (!bucketSnapshot.StandardDimensions.ContainsKey(dimensionName))
+                {
+                    points.Add(new RateLimitHistoryPointView(bucket.BucketUtc, null, null));
+                }
+            }
+
             previousBucketUtc = bucket.BucketUtc;
         }
 

@@ -759,6 +759,46 @@ public sealed class ManagementFacadeTests
     }
 
     [Fact]
+    public void GetRateLimitHistory_DimensionMissingFromOneBucketButPresentInAnother_InsertsNullPointForThatBucket()
+    {
+        // First bucket captures both dimensions; second bucket (one minute later, no time gap) only
+        // captured "requests" - the "tokens" header was absent/unparsable that minute. "tokens" must still
+        // get an explicit null point at the second bucket's timestamp rather than simply skipping the
+        // x-value, so the stepped chart (connectNulls: false) renders a gap instead of holding steady.
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+        var first = DateTimeOffset.UtcNow.AddMinutes(-2);
+        var second = DateTimeOffset.UtcNow.AddMinutes(-1);
+        repository.UpsertRateLimitHeaders(
+            "openai",
+            [
+                new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000"),
+                new RateLimitHeaderRow("anthropic-ratelimit-requests-remaining", "50"),
+            ],
+            first);
+        repository.UpsertRateLimitHeaders(
+            "openai",
+            [new RateLimitHeaderRow("anthropic-ratelimit-requests-remaining", "49")],
+            second);
+        var facade = CreateFacade(priceCatalogRepository: repository);
+
+        var result = facade.GetRateLimitHistory("openai", hours: 1);
+
+        Assert.True(result.Success);
+        var tokenPoints = result.Value!.Dimensions["tokens"];
+        Assert.Equal(2, tokenPoints.Count);
+        Assert.Equal(1000, tokenPoints[0].Remaining);
+        Assert.Null(tokenPoints[1].Remaining);
+        Assert.Null(tokenPoints[1].Limit);
+        Assert.Equal(tokenPoints[0].BucketUtc.AddMinutes(1), tokenPoints[1].BucketUtc);
+
+        var requestPoints = result.Value.Dimensions["requests"];
+        Assert.Equal(2, requestPoints.Count);
+        Assert.Equal(50, requestPoints[0].Remaining);
+        Assert.Equal(49, requestPoints[1].Remaining);
+    }
+
+    [Fact]
     public void ListProviders_NoUsageRecorded_UsageLastRecordedAtUtcIsNull()
     {
         using var temp = new TempDatabase();

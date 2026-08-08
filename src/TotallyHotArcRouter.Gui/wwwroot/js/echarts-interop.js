@@ -69,6 +69,7 @@ window.echartsInterop = (function () {
       case "ms":
         return (v) => Number(v).toFixed(0) + " ms";
       case "tok":
+      case "req":
         return (v) => {
           const a = Math.abs(v);
           if (a >= 1e6) return (v / 1e6).toFixed(1) + "M";
@@ -547,7 +548,7 @@ window.echartsInterop = (function () {
         },
       }),
       xAxis: timeAxis(),
-      yAxis: valueAxis("tok", { min: 0 }),
+      yAxis: valueAxis(m.unit || "tok", { min: 0 }),
       series: [
         {
           type: "line",

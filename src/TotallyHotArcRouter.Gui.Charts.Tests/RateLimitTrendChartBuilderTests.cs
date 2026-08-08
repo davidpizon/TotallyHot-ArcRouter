@@ -33,6 +33,19 @@ public class RateLimitTrendChartBuilderTests
         Assert.Equal("Input tokens", model.Title);
     }
 
+    [Theory]
+    [InlineData("requests", "req")]
+    [InlineData("input-tokens", "tok")]
+    [InlineData("output-tokens", "tok")]
+    [InlineData("tokens", "tok")]
+    [InlineData("Requests", "req")]
+    public void Build_UnitReflectsDimension_RequestsIsReqEverythingElseIsTok(string dimensionName, string expectedUnit)
+    {
+        var model = RateLimitTrendChartBuilder.Build(dimensionName, []);
+
+        Assert.Equal(expectedUnit, model.Unit);
+    }
+
     [Fact]
     public void Build_KindIsRemainingLine()
     {

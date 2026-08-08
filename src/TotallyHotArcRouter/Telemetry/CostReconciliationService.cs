@@ -136,10 +136,13 @@ public sealed class CostReconciliationService
 
     private void LogDelta(string provider, DateOnly day, decimal reportedCost, decimal localCost)
     {
-        if (reportedCost <= 0m)
+        if (reportedCost <= 0m || localCost <= 0m)
         {
-            // No meaningful percentage difference against a zero base - log the raw comparison at Debug
-            // only, never a divide-by-zero warning.
+            // reportedCost <= 0: no meaningful percentage difference against a zero base, never a
+            // divide-by-zero warning. localCost <= 0: this proxy instance routed no traffic for the
+            // provider that day while other org traffic did (ScopeNote above) - deltaPercent would always
+            // compute to 100%, which would misread as "the local price table is stale/wrong" every time
+            // this legitimate, expected gap occurs. Both cases get the same Debug-only treatment.
             _logger.LogDebug(
                 "Cost reconciliation for provider {Provider} on {Day}: provider reported ${ReportedCost}, local estimate ${LocalCost}.",
                 provider, day, reportedCost, localCost);

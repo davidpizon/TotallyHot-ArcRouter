@@ -16,8 +16,15 @@ public sealed record RateLimitTrendPoint(long T, string Label, long? Remaining, 
 /// <param name="Kind">Renderer chart-kind discriminator; always <see cref="RateLimitTrendChartKind.RemainingLine"/>.</param>
 /// <param name="Title">Chart title, the human-readable dimension label (e.g. <c>Input tokens</c>).</param>
 /// <param name="Headline">The most recent remaining value, pre-formatted, or <c>"—"</c> when there is no history.</param>
+/// <param name="Unit">
+/// The axis/tooltip number-formatting unit key the JS renderer switches on (<c>echarts-interop.js</c>'s
+/// <c>numberFmt</c>) - <c>"req"</c> for the <c>requests</c> dimension, <c>"tok"</c> for every other
+/// standard dimension (<c>input-tokens</c>, <c>output-tokens</c>, <c>tokens</c>), so a request-count trend
+/// isn't formatted as if it were a token count.
+/// </param>
 /// <param name="Points">The bucketed points, chronologically ordered.</param>
-public sealed record RateLimitTrendModel(string Kind, string Title, string Headline, IReadOnlyList<RateLimitTrendPoint> Points);
+public sealed record RateLimitTrendModel(
+    string Kind, string Title, string Headline, string Unit, IReadOnlyList<RateLimitTrendPoint> Points);
 
 /// <summary>The bespoke chart format the ECharts renderer draws for a rate-limit trend. Serialized as its name.</summary>
 public static class RateLimitTrendChartKind
@@ -58,7 +65,9 @@ public static class RateLimitTrendChartBuilder
             ? last.ToString("N0", Inv)
             : "—";
 
-        return new RateLimitTrendModel(RateLimitTrendChartKind.RemainingLine, DimensionLabel(dimensionName), headline, chartPoints);
+        var unit = string.Equals(dimensionName, "requests", StringComparison.OrdinalIgnoreCase) ? "req" : "tok";
+
+        return new RateLimitTrendModel(RateLimitTrendChartKind.RemainingLine, DimensionLabel(dimensionName), headline, unit, chartPoints);
     }
 
     // "input-tokens" -> "Input tokens" - readable label, mirroring ProvidersAdmin.razor's DimensionLabel.
