@@ -1088,8 +1088,22 @@ public sealed class ManagementFacade
         var buckets = _priceCatalogRepository.GetRateLimitHistory(providerKey, sinceUtc);
 
         var series = new Dictionary<string, List<RateLimitHistoryPointView>>(StringComparer.OrdinalIgnoreCase);
+        DateTimeOffset? previousBucketUtc = null;
         foreach (var bucket in buckets)
         {
+            // A gap of more than a minute between consecutive stored buckets means nothing was captured
+            // in between - insert an explicit null point at the first missing minute for every dimension
+            // already in the series so the stepped chart (connectNulls: false) renders a break instead of
+            // implying the value held steady across the gap.
+            if (previousBucketUtc is { } prev && bucket.BucketUtc - prev > TimeSpan.FromMinutes(1))
+            {
+                var gapUtc = prev.AddMinutes(1);
+                foreach (var points in series.Values)
+                {
+                    points.Add(new RateLimitHistoryPointView(gapUtc, null, null));
+                }
+            }
+
             var bucketSnapshot = RateLimitSnapshotParser.Parse(bucket.Headers, bucket.BucketUtc);
             foreach (var (dimensionName, dimension) in bucketSnapshot.StandardDimensions)
             {
@@ -1101,6 +1115,8 @@ public sealed class ManagementFacade
 
                 points.Add(new RateLimitHistoryPointView(bucket.BucketUtc, dimension.Remaining, dimension.Limit));
             }
+
+            previousBucketUtc = bucket.BucketUtc;
         }
 
         var dimensions = series.ToDictionary(

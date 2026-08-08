@@ -724,6 +724,35 @@ public sealed class ManagementFacadeTests
 
         Assert.True(result.Success);
         var points = result.Value!.Dimensions["tokens"];
+        Assert.Equal(3, points.Count);
+        Assert.Equal(1000, points[0].Remaining);
+        Assert.Null(points[1].Remaining);
+        Assert.Null(points[1].Limit);
+        Assert.Equal(points[0].BucketUtc.AddMinutes(1), points[1].BucketUtc);
+        Assert.Equal(900, points[2].Remaining);
+    }
+
+    [Fact]
+    public void GetRateLimitHistory_NoGapBetweenBuckets_DoesNotInsertNullPoint()
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+        var first = DateTimeOffset.UtcNow.AddMinutes(-2);
+        var second = DateTimeOffset.UtcNow.AddMinutes(-1);
+        repository.UpsertRateLimitHeaders(
+            "openai",
+            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
+            first);
+        repository.UpsertRateLimitHeaders(
+            "openai",
+            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "900")],
+            second);
+        var facade = CreateFacade(priceCatalogRepository: repository);
+
+        var result = facade.GetRateLimitHistory("openai", hours: 1);
+
+        Assert.True(result.Success);
+        var points = result.Value!.Dimensions["tokens"];
         Assert.Equal(2, points.Count);
         Assert.Equal(1000, points[0].Remaining);
         Assert.Equal(900, points[1].Remaining);
