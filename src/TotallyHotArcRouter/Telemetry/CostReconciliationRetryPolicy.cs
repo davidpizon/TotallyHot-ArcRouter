@@ -11,7 +11,7 @@ public static class CostReconciliationRetryPolicy
 {
     private static readonly HashSet<int> RetryableStatusCodes = [408, 429, 500, 502, 503, 504];
 
-    /// <summary>The maximum number of attempts (the first try plus up to this many retries).</summary>
+    /// <summary>The maximum number of attempts total (the first try plus up to <c>MaxAttempts - 1</c> retries).</summary>
     public const int MaxAttempts = 4;
 
     /// <summary>

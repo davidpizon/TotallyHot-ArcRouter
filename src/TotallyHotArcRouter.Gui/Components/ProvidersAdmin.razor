@@ -396,11 +396,16 @@
         RequestRateLimitHistories();
     }
 
-    private void OnStoreChanged()
-    {
-        InvokeAsync(StateHasChanged);
-        RequestRateLimitHistories();
-    }
+    // Store.Changed is raised from async continuations in ProviderAdminStore, not guaranteed to already be
+    // on the Blazor renderer's sync context - RequestRateLimitHistories mutates _historyRequested (a plain,
+    // non-thread-safe HashSet), so it has to run inside the same InvokeAsync as StateHasChanged rather than
+    // directly on whatever thread raised the event.
+    private void OnStoreChanged() =>
+        InvokeAsync(() =>
+        {
+            RequestRateLimitHistories();
+            StateHasChanged();
+        });
 
     // Kicks off (fire-and-forget, best-effort) a history load for every provider that has a rate-limit
     // snapshot and hasn't been requested yet. LoadRateLimitHistoryAsync raises Store.Changed on success,
