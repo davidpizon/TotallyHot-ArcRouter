@@ -71,7 +71,17 @@ public static class UsageExportFormatter
 
     private static string QuoteIfNeeded(string field)
     {
-        if (field.Length > 0 && Array.IndexOf(FormulaTriggerChars, field[0]) >= 0)
+        // Spreadsheet apps trim leading spaces before deciding whether a cell's content is a formula, so
+        // " =1+1" is just as dangerous as "=1+1" - check the first non-space character, not literally
+        // field[0], while still catching a field that leads with a trigger char directly (including tab/CR,
+        // which are themselves in FormulaTriggerChars rather than being skipped over like plain spaces).
+        var firstNonSpace = 0;
+        while (firstNonSpace < field.Length && field[firstNonSpace] == ' ')
+        {
+            firstNonSpace++;
+        }
+
+        if (firstNonSpace < field.Length && Array.IndexOf(FormulaTriggerChars, field[firstNonSpace]) >= 0)
         {
             field = "'" + field;
         }

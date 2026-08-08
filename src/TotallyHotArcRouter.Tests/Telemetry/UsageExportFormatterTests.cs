@@ -83,6 +83,35 @@ public class UsageExportFormatterTests
         Assert.Contains($"'{groupKey}", csv, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(" =1+1")]
+    [InlineData("  +1+1")]
+    [InlineData(" -1+1")]
+    [InlineData(" @SUM(A1:A2)")]
+    public void ToCsv_GroupKeyLeadingSpacesThenFormulaTrigger_IsNeutralizedWithLeadingApostrophe(string groupKey)
+    {
+        // Spreadsheet apps trim leading spaces before deciding whether a cell is a formula, so a value
+        // that hides a trigger character behind leading spaces is just as dangerous as one with the
+        // trigger at position 0.
+        var bucket = new UsageRollupBucket(
+            DateTimeOffset.UnixEpoch, "P1D", groupKey, 1, 0, 1, 1, 0, 0, 0m);
+
+        var csv = UsageExportFormatter.ToCsv([bucket]);
+
+        Assert.Contains($"'{groupKey}", csv, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ToCsv_GroupKeyAllSpaces_IsUnchanged()
+    {
+        var bucket = new UsageRollupBucket(
+            DateTimeOffset.UnixEpoch, "P1D", "   ", 1, 0, 1, 1, 0, 0, 0m);
+
+        var csv = UsageExportFormatter.ToCsv([bucket]);
+
+        Assert.Contains(",   ,", csv, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void ToCsv_GroupKeyNotStartingWithFormulaTrigger_IsUnchanged()
     {
