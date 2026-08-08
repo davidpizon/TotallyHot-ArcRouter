@@ -27,7 +27,7 @@ public class UsageLedgerTests
             CacheCreationTokens: null,
             CacheReadTokens: null,
             EstimatedCostUsd: estimatedCostUsd,
-            CostConfidence: "Unknown",
+            CostConfidence: CostConfidence.Unknown,
             OccurredAtUtc: occurredAtUtc ?? DateTimeOffset.UtcNow,
             RequestId: requestId);
 

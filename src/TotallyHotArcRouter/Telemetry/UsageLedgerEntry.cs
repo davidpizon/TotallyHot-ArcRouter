@@ -16,10 +16,7 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// <param name="CacheCreationTokens">Input tokens written to a new prompt cache entry, or <see langword="null"/> if usage couldn't be determined.</param>
 /// <param name="CacheReadTokens">Input tokens served from an existing prompt cache entry, or <see langword="null"/> if usage couldn't be determined.</param>
 /// <param name="EstimatedCostUsd">Estimated USD cost, or <see langword="null"/> when unknown - never a silent zero (see <c>ModelPrice.EstimateCost</c>).</param>
-/// <param name="CostConfidence">
-/// How much to trust <paramref name="EstimatedCostUsd"/> - a <see cref="Telemetry.CostConfidence"/> value
-/// serialized via <see cref="Enum.ToString()"/>.
-/// </param>
+/// <param name="CostConfidence">How much to trust <paramref name="EstimatedCostUsd"/>; persisted as its enum member name (see <see cref="UsageLedger"/>).</param>
 /// <param name="OccurredAtUtc">When the request completed (matches <see cref="RoutingTelemetryEvent.TimestampUtc"/>).</param>
 /// <param name="RequestId">
 /// The upstream provider's own request id (from a <c>request-id</c>/<c>x-request-id</c> response header),
@@ -37,6 +34,6 @@ public sealed record UsageLedgerEntry(
     int? CacheCreationTokens,
     int? CacheReadTokens,
     decimal? EstimatedCostUsd,
-    string CostConfidence,
+    CostConfidence CostConfidence,
     DateTimeOffset OccurredAtUtc,
     string? RequestId = null);

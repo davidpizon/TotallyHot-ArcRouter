@@ -497,7 +497,9 @@ public static class CostChartBuilder
     /// </summary>
     public static decimal CacheHitRate(int promptTokens, int cacheCreationTokens, int cacheReadTokens)
     {
-        var totalInputTokens = promptTokens + cacheCreationTokens + cacheReadTokens;
+        // Widened to long before summing: three int.MaxValue-range counts could overflow a 32-bit sum and
+        // silently wrap into a wrong (possibly negative) denominator.
+        var totalInputTokens = (long)promptTokens + cacheCreationTokens + cacheReadTokens;
         return totalInputTokens <= 0 ? 0m : Round(cacheReadTokens / (decimal)totalInputTokens * 100m, 1);
     }
 

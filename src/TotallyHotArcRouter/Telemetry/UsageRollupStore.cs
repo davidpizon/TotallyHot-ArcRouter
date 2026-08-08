@@ -413,7 +413,7 @@ public sealed class UsageRollupStore : IUsageRollupStore, IDisposable
                 CacheCreationTokens: reader.IsDBNull(8) ? null : reader.GetInt32(8),
                 CacheReadTokens: reader.IsDBNull(9) ? null : reader.GetInt32(9),
                 EstimatedCostUsd: reader.IsDBNull(10) ? null : decimal.Parse(reader.GetString(10), CultureInfo.InvariantCulture),
-                CostConfidence: reader.GetString(11),
+                CostConfidence: Enum.Parse<CostConfidence>(reader.GetString(11)),
                 OccurredAtUtc: ParseTimestamp(reader.GetString(12)));
             pending.Add((entryId, entry));
         }

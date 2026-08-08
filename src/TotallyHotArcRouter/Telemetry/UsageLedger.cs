@@ -140,7 +140,7 @@ public sealed class UsageLedger : IUsageLedger
             command.Parameters.AddWithValue(
                 "$estimatedCostUsd",
                 entry.EstimatedCostUsd is { } cost ? cost.ToString(CultureInfo.InvariantCulture) : (object)DBNull.Value);
-            command.Parameters.AddWithValue("$costConfidence", entry.CostConfidence);
+            command.Parameters.AddWithValue("$costConfidence", entry.CostConfidence.ToString());
             command.Parameters.AddWithValue("$occurredAt", occurredAt);
 
             // A DO NOTHING conflict returns 0 rows affected, distinguishing a fresh row (roll it into

@@ -65,7 +65,7 @@ public class StartupHealthCheckHostedServiceTests
             CacheCreationTokens: null,
             CacheReadTokens: null,
             EstimatedCostUsd: 0.01m,
-            CostConfidence: "Unknown",
+            CostConfidence: CostConfidence.Unknown,
             OccurredAtUtc: occurredAtUtc,
             RequestId: requestId);
 

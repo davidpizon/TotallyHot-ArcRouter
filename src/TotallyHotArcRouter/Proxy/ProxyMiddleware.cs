@@ -1389,7 +1389,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 CacheCreationTokens: cacheCreationTokens,
                 CacheReadTokens: cacheReadTokens,
                 EstimatedCostUsd: estimatedCostUsd,
-                CostConfidence: costConfidence.ToString(),
+                CostConfidence: costConfidence,
                 OccurredAtUtc: DateTimeOffset.UtcNow,
                 RequestId: ExtractUpstreamRequestId(upstreamHeaders));
             await _usageLedger.RecordAsync(ledgerEntry, CancellationToken.None).ConfigureAwait(false);

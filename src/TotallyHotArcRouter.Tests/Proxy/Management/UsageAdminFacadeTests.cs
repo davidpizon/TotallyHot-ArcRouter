@@ -66,7 +66,7 @@ public sealed class UsageAdminFacadeTests
         await ledger.RecordAsync(
             new UsageLedgerEntry(
                 "sess-1", 1, "openai", "gpt-5.4", "gpt-5.4",
-                100, 50, null, null, 1.5m, "Catalog",
+                100, 50, null, null, 1.5m, CostConfidence.Catalog,
                 DateTimeOffset.UtcNow.AddDays(-2), Guid.NewGuid().ToString("N")),
             Ct);
 

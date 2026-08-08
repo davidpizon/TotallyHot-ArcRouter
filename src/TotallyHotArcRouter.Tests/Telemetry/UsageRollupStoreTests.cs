@@ -32,7 +32,7 @@ public class UsageRollupStoreTests
             CacheCreationTokens: null,
             CacheReadTokens: null,
             EstimatedCostUsd: costUsd,
-            CostConfidence: costUsd is null ? "Unknown" : "Catalog",
+            CostConfidence: costUsd is null ? CostConfidence.Unknown : CostConfidence.Catalog,
             OccurredAtUtc: occurredAtUtc ?? DateTimeOffset.UtcNow,
             RequestId: requestId ?? Guid.NewGuid().ToString("N"));
 

@@ -477,8 +477,8 @@ public sealed class PriceCatalogDatabase
         -- composite hash over the request's identity, so replaying an already-recorded request (a restart
         -- racing an in-flight write, a retried publish) is a no-op via INSERT ... ON CONFLICT DO NOTHING
         -- rather than a double count. estimated_cost_usd is TEXT (decimal-as-string), matching every other
-        -- money column in this database - see UsageLedger. cost_confidence is written "Unknown" until
-        -- Phase 3's confidence enum lands.
+        -- money column in this database - see UsageLedger. cost_confidence is TEXT holding a
+        -- Telemetry.CostConfidence enum member's name (via Enum.ToString()), e.g. "Unknown" or "Catalog".
         CREATE TABLE IF NOT EXISTS usage_ledger (
             entry_id              INTEGER PRIMARY KEY AUTOINCREMENT,
             dedup_key             TEXT    NOT NULL,

@@ -81,7 +81,7 @@ public sealed class UsageAdminEndpointsTests
         await ledger.RecordAsync(
             new UsageLedgerEntry(
                 "sess-1", 1, "openai", "gpt-5.4", "gpt-5.4",
-                100, 50, null, null, 2m, "Catalog",
+                100, 50, null, null, 2m, CostConfidence.Catalog,
                 DateTimeOffset.UtcNow.AddDays(-2), Guid.NewGuid().ToString("N")),
             Ct);
 
@@ -132,7 +132,7 @@ public sealed class UsageAdminEndpointsTests
         await ledger.RecordAsync(
             new UsageLedgerEntry(
                 "sess-1", 1, "openai", "gpt-5.4", "gpt-5.4",
-                100, 50, null, null, 2m, "Catalog",
+                100, 50, null, null, 2m, CostConfidence.Catalog,
                 occurredAt, Guid.NewGuid().ToString("N")),
             Ct);
 

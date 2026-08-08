@@ -111,18 +111,29 @@
     {
         // Spend is keyed by the resolved provider model id (what usage_ledger/usage_rollup record), not
         // the client-facing ModelName - see UsageLedgerEntry.ResolvedModel's remarks.
-        var spendByProviderModelId = buckets.ToDictionary(b => b.GroupKey, b => b.CostUsd, StringComparer.OrdinalIgnoreCase);
+        var spendByProviderModelId = buckets.ToDictionary(
+            b => b.GroupKey, b => (b.CostUsd, b.UnpricedRequests), StringComparer.OrdinalIgnoreCase);
 
         Cards = ProviderStore.Providers
             .SelectMany(p => p.Models.Select(m => new ModelCard(
                 m.ModelName,
                 p.Key,
                 m.ProviderModelId,
-                spendByProviderModelId.TryGetValue(m.ProviderModelId, out var spend)
-                    ? spend.ToString("$0.00", System.Globalization.CultureInfo.InvariantCulture)
-                    : "$0.00")))
+                FormatSpend(spendByProviderModelId.GetValueOrDefault(m.ProviderModelId)))))
             .OrderBy(c => c.ModelName, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    // CostUsd sums only priced requests (see UsageRollupBucket's remarks), so when UnpricedRequests > 0
+    // the true total is at least this figure, not exactly it - the same "unknown != zero" discipline
+    // ModelPrice/SpendTracker apply elsewhere, surfaced here as a "≥" prefix and the unpriced count rather
+    // than a plain dollar amount that would silently understate spend.
+    private static string FormatSpend((decimal CostUsd, long UnpricedRequests) spend)
+    {
+        var amount = spend.CostUsd.ToString("$0.00", System.Globalization.CultureInfo.InvariantCulture);
+        return spend.UnpricedRequests > 0
+            ? FormattableString.Invariant($"≥{amount} ({spend.UnpricedRequests} unpriced)")
+            : amount;
     }
 
     public void Dispose()
