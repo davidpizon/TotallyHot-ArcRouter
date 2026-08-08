@@ -46,14 +46,33 @@ public sealed class PersistentConversationTurnTracker : IConversationTurnTracker
 
         var now = _timeProvider.GetUtcNow();
 
+        // Fast path: an already-tracked, still-fresh session skips both the O(n) eviction scan and any
+        // ledger round-trip - the common case on this hot path (ProxyMiddleware calls NextTurn for every
+        // routed request), since most requests are turn >1 of an already-seen session. An idle-expired
+        // entry falls through to the slow path below, which evicts it and re-seeds from the ledger exactly
+        // as the single-path version did.
+        lock (_lock)
+        {
+            if (_sessions.TryGetValue(sessionId, out var tracked) && now - tracked.LastSeenUtc <= IdleEviction)
+            {
+                var next = tracked.Counter + 1;
+                _sessions[sessionId] = new TrackedSession(next, now);
+                return next;
+            }
+        }
+
+        // Not tracked (or idle-expired): GetMaxTurnNumber is a synchronous SQLite query, so it runs outside
+        // _lock rather than serializing every other session's NextTurn call behind this one's I/O.
+        var seed = _ledger.GetMaxTurnNumber(sessionId);
+
         lock (_lock)
         {
             EvictIdle(now);
 
-            var counter = _sessions.TryGetValue(sessionId, out var tracked)
-                ? tracked.Counter
-                : _ledger.GetMaxTurnNumber(sessionId);
-
+            // Re-check under the lock: another thread may have raced this one and already tracked/advanced
+            // this session while the ledger query above was in flight - use its counter rather than
+            // silently reissuing an already-issued turn number.
+            var counter = _sessions.TryGetValue(sessionId, out var tracked) ? tracked.Counter : seed;
             var next = counter + 1;
             _sessions[sessionId] = new TrackedSession(next, now);
             return next;
