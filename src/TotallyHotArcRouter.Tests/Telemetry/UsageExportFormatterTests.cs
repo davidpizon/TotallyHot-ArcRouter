@@ -68,6 +68,32 @@ public class UsageExportFormatterTests
         Assert.Contains("\"line1\nline2\"", csv, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("=cmd|'/c calc'!A1")]
+    [InlineData("+1+1")]
+    [InlineData("-1+1")]
+    [InlineData("@SUM(A1:A2)")]
+    public void ToCsv_GroupKeyStartingWithFormulaTrigger_IsNeutralizedWithLeadingApostrophe(string groupKey)
+    {
+        var bucket = new UsageRollupBucket(
+            DateTimeOffset.UnixEpoch, "P1D", groupKey, 1, 0, 1, 1, 0, 0, 0m);
+
+        var csv = UsageExportFormatter.ToCsv([bucket]);
+
+        Assert.Contains($"'{groupKey}", csv, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ToCsv_GroupKeyNotStartingWithFormulaTrigger_IsUnchanged()
+    {
+        var bucket = new UsageRollupBucket(
+            DateTimeOffset.UnixEpoch, "P1D", "gpt-5.4", 1, 0, 1, 1, 0, 0, 0m);
+
+        var csv = UsageExportFormatter.ToCsv([bucket]);
+
+        Assert.Contains(",gpt-5.4,", csv, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void ToCsv_MultipleBuckets_OneLinePerBucketPlusHeader()
     {

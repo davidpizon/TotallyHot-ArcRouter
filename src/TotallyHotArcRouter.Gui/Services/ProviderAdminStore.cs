@@ -218,6 +218,14 @@ public sealed class ProviderAdminStore
         {
             _logger?.LogDebug(ex, "Failed to load rate-limit history for provider {Provider}.", key);
         }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            // ProviderAdminClient.SendAsync only wraps HttpRequestException into ProviderAdminException;
+            // a request timeout surfaces as a raw TaskCanceledException instead. Called fire-and-forget
+            // from ProvidersAdmin.razor, so letting this escape would become an unobserved task exception
+            // rather than the best-effort no-op this method promises.
+            _logger?.LogDebug(ex, "Timed out loading rate-limit history for provider {Provider}.", key);
+        }
     }
 
     /// <summary>

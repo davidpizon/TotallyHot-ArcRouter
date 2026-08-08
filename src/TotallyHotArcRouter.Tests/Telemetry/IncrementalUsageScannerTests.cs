@@ -90,6 +90,31 @@ public class IncrementalUsageScannerTests
     }
 
     [Fact]
+    public void Append_ManyTinyChunks_WrapsTheCircularBufferMultipleTimesAndStillExtracts()
+    {
+        // A small tail window with two-byte appends ("x\n" pairs) forces the circular buffer to wrap
+        // around several times before the usage event lands, exercising the wrap-around path in Append
+        // and MaterializeTail (as opposed to the larger, few-chunks case above). Every filler chunk ends
+        // in a newline so the buffer's write cursor - always advancing by an even count - never splits a
+        // pair mid-line, keeping the SSE event that follows on its own clean line once the filler wraps
+        // out of the window.
+        var scanner = new IncrementalUsageScanner(maxTailBytes: 128);
+        var filler = "x\n"u8.ToArray();
+        for (var i = 0; i < 200; i++)
+        {
+            scanner.Append(filler);
+        }
+
+        scanner.Append("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}\n\ndata: [DONE]\n\n"u8.ToArray());
+
+        var result = scanner.TryExtractUsage("openai", isStreaming: true, _extractor, out var usage);
+
+        Assert.True(result);
+        Assert.Equal(10, usage.PromptTokens);
+        Assert.Equal(5, usage.CompletionTokens);
+    }
+
+    [Fact]
     public void Constructor_NonPositiveMaxTailBytes_Throws()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => new IncrementalUsageScanner(maxTailBytes: 0));

@@ -72,5 +72,35 @@ public sealed class ProviderAdminStoreTests
         var act = () => new ProviderAdminStore(managementAddress: "http://127.0.0.1:59991/already-slashed/");
         act.Should().NotThrow();
     }
+
+    [Fact]
+    public async Task LoadRateLimitHistoryAsync_unreachable_does_not_throw()
+    {
+        var store = new ProviderAdminStore(managementAddress: UnreachableAddress);
+
+        var act = () => store.LoadRateLimitHistoryAsync("openai", cancellationToken: TestContext.Current.CancellationToken);
+
+        await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task LoadRateLimitHistoryAsync_timeout_is_swallowed_not_propagated()
+    {
+        // ProviderAdminClient.SendAsync only wraps HttpRequestException into ProviderAdminException; a
+        // request timeout surfaces as a raw TaskCanceledException instead. Called fire-and-forget from
+        // ProvidersAdmin.razor, this method must swallow that too rather than let it become an
+        // unobserved task exception.
+        var store = new ProviderAdminStore(managementAddress: "http://127.0.0.1:59991", transport: new TimingOutHandler());
+
+        var act = () => store.LoadRateLimitHistoryAsync("openai", cancellationToken: TestContext.Current.CancellationToken);
+
+        await act.Should().NotThrowAsync();
+    }
+
+    private sealed class TimingOutHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            throw new TaskCanceledException("Simulated request timeout.");
+    }
 }
 

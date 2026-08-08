@@ -19,7 +19,9 @@ public sealed class IncrementalUsageScanner
     public const int DefaultMaxTailBytes = 65_536;
 
     private readonly int _maxTailBytes;
-    private byte[] _tail = [];
+    private readonly byte[] _buffer;
+    private int _writePos;
+    private int _count;
 
     /// <summary>Initializes a new instance of the <see cref="IncrementalUsageScanner"/> class.</summary>
     /// <param name="maxTailBytes">The maximum number of trailing bytes retained. Defaults to <see cref="DefaultMaxTailBytes"/>.</param>
@@ -31,12 +33,15 @@ public sealed class IncrementalUsageScanner
         }
 
         _maxTailBytes = maxTailBytes;
+        _buffer = new byte[maxTailBytes];
     }
 
     /// <summary>
     /// Appends a newly-arrived chunk of the raw response stream, discarding whatever earlier bytes no
-    /// longer fit within the tail window. Cheap relative to the cap: at most one array allocation of
-    /// size at most <see cref="DefaultMaxTailBytes"/> per call.
+    /// longer fit within the tail window. Writes straight into a fixed-size circular buffer allocated
+    /// once in the constructor - unlike a naive "concat and re-slice" tail, this call never allocates,
+    /// which matters since <c>ProxyMiddleware</c>'s copy loop invokes it once per streamed chunk and a
+    /// large response can stream thousands of them.
     /// </summary>
     public void Append(ReadOnlySpan<byte> chunk)
     {
@@ -47,21 +52,33 @@ public sealed class IncrementalUsageScanner
 
         if (chunk.Length >= _maxTailBytes)
         {
-            _tail = chunk[^_maxTailBytes..].ToArray();
+            // Only the trailing maxTailBytes of this chunk can possibly matter; landing them at index 0
+            // and resetting the write cursor there keeps the buffer's "oldest byte" invariant intact
+            // without needing to touch bytes this chunk is about to overwrite anyway.
+            chunk[^_maxTailBytes..].CopyTo(_buffer);
+            _writePos = 0;
+            _count = _maxTailBytes;
             return;
         }
 
-        var combinedLength = Math.Min(_tail.Length + chunk.Length, _maxTailBytes);
-        var keepFromExisting = combinedLength - chunk.Length;
-        var combined = new byte[combinedLength];
-        _tail.AsSpan(_tail.Length - keepFromExisting).CopyTo(combined);
-        chunk.CopyTo(combined.AsSpan(keepFromExisting));
-        _tail = combined;
+        var firstLen = Math.Min(chunk.Length, _maxTailBytes - _writePos);
+        chunk[..firstLen].CopyTo(_buffer.AsSpan(_writePos));
+        var remaining = chunk.Length - firstLen;
+        if (remaining > 0)
+        {
+            chunk[firstLen..].CopyTo(_buffer.AsSpan(0, remaining));
+        }
+
+        _writePos = (_writePos + chunk.Length) % _maxTailBytes;
+        _count = Math.Min(_count + chunk.Length, _maxTailBytes);
     }
 
     /// <summary>
     /// Attempts to extract usage from the retained tail window via <paramref name="extractor"/>, using
     /// the same provider-specific parsers <c>UsageExtractor</c> uses for the primary (head-capped) path.
+    /// This is the one point where the circular buffer's contents are copied into a contiguous
+    /// <see cref="byte"/>[] - a single allocation made only when a caller actually needs to parse the
+    /// tail, not on every <see cref="Append"/> call.
     /// </summary>
     /// <param name="provider">The provider key whose parser should read the tail bytes.</param>
     /// <param name="isStreaming">Whether the response was streamed.</param>
@@ -72,6 +89,27 @@ public sealed class IncrementalUsageScanner
         ArgumentNullException.ThrowIfNull(extractor);
 
         usage = default;
-        return _tail.Length > 0 && extractor.TryExtractUsage(provider, isStreaming, _tail, out usage);
+        if (_count == 0)
+        {
+            return false;
+        }
+
+        return extractor.TryExtractUsage(provider, isStreaming, MaterializeTail(), out usage);
+    }
+
+    /// <summary>Copies the circular buffer's valid range, oldest byte first, into a contiguous array.</summary>
+    private byte[] MaterializeTail()
+    {
+        var result = new byte[_count];
+        var oldestIndex = (_writePos - _count + _maxTailBytes) % _maxTailBytes;
+        var firstLen = Math.Min(_count, _maxTailBytes - oldestIndex);
+        _buffer.AsSpan(oldestIndex, firstLen).CopyTo(result);
+        var remaining = _count - firstLen;
+        if (remaining > 0)
+        {
+            _buffer.AsSpan(0, remaining).CopyTo(result.AsSpan(firstLen));
+        }
+
+        return result;
     }
 }

@@ -62,8 +62,20 @@ public static class UsageExportFormatter
         builder.Append("\r\n");
     }
 
+    // Spreadsheet formula injection (OWASP CSV Injection): GroupKey ultimately comes from request/model/
+    // provider strings, so a crafted value starting with one of these characters would execute as a
+    // formula if an operator opens the export in Excel/Sheets. Prefixing with an apostrophe is the
+    // standard mitigation - it forces the cell to render as text without altering the field's real value
+    // for any other consumer (a CSV parser sees the literal leading apostrophe, same as any other char).
+    private static readonly char[] FormulaTriggerChars = ['=', '+', '-', '@', '\t', '\r'];
+
     private static string QuoteIfNeeded(string field)
     {
+        if (field.Length > 0 && Array.IndexOf(FormulaTriggerChars, field[0]) >= 0)
+        {
+            field = "'" + field;
+        }
+
         if (field.IndexOfAny([',', '"', '\r', '\n']) < 0)
         {
             return field;
