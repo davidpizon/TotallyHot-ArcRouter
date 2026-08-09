@@ -22,7 +22,7 @@ public class CostReconciliationServiceTests
         decimal deltaWarningPercent = 20m) =>
         new(
             reconcilers,
-            temp.CreateRollupStore(),
+            temp.CreateUsageLedger(),
             temp.CreateCostReconciliationStore(),
             Options.Create(new CostReconciliationOptions { DeltaWarningPercent = deltaWarningPercent }),
             NullLogger<CostReconciliationService>.Instance);
@@ -44,7 +44,7 @@ public class CostReconciliationServiceTests
         var store = temp.CreateCostReconciliationStore();
         var service = new CostReconciliationService(
             [reconciler],
-            temp.CreateRollupStore(),
+            temp.CreateUsageLedger(),
             store,
             Options.Create(new CostReconciliationOptions()),
             NullLogger<CostReconciliationService>.Instance);
@@ -65,7 +65,7 @@ public class CostReconciliationServiceTests
         store.SetLastReconciledDay("openai", Yesterday);
         var service = new CostReconciliationService(
             [reconciler],
-            temp.CreateRollupStore(),
+            temp.CreateUsageLedger(),
             store,
             Options.Create(new CostReconciliationOptions()),
             NullLogger<CostReconciliationService>.Instance);
@@ -84,7 +84,7 @@ public class CostReconciliationServiceTests
         store.SetLastReconciledDay("openai", Yesterday.AddDays(-2));
         var service = new CostReconciliationService(
             [reconciler],
-            temp.CreateRollupStore(),
+            temp.CreateUsageLedger(),
             store,
             Options.Create(new CostReconciliationOptions()),
             NullLogger<CostReconciliationService>.Instance);
@@ -104,7 +104,7 @@ public class CostReconciliationServiceTests
         store.SetLastReconciledDay("openai", Yesterday.AddDays(-100));
         var service = new CostReconciliationService(
             [reconciler],
-            temp.CreateRollupStore(),
+            temp.CreateUsageLedger(),
             store,
             Options.Create(new CostReconciliationOptions()),
             NullLogger<CostReconciliationService>.Instance);
@@ -125,7 +125,7 @@ public class CostReconciliationServiceTests
         store.SetLastReconciledDay("openai", Yesterday.AddDays(-2));
         var service = new CostReconciliationService(
             [reconciler],
-            temp.CreateRollupStore(),
+            temp.CreateUsageLedger(),
             store,
             Options.Create(new CostReconciliationOptions()),
             NullLogger<CostReconciliationService>.Instance);
@@ -145,7 +145,7 @@ public class CostReconciliationServiceTests
         var costStore = temp.CreateCostReconciliationStore();
         var service = new CostReconciliationService(
             [reconciler],
-            temp.CreateRollupStore(),
+            temp.CreateUsageLedger(),
             costStore,
             Options.Create(new CostReconciliationOptions()),
             NullLogger<CostReconciliationService>.Instance);
@@ -171,7 +171,7 @@ public class CostReconciliationServiceTests
         var store = temp.CreateCostReconciliationStore();
         var service = new CostReconciliationService(
             [openAi, anthropic],
-            temp.CreateRollupStore(),
+            temp.CreateUsageLedger(),
             store,
             Options.Create(new CostReconciliationOptions()),
             NullLogger<CostReconciliationService>.Instance);
@@ -182,6 +182,51 @@ public class CostReconciliationServiceTests
         Assert.Equal(Yesterday, store.GetLastReconciledDay("anthropic"));
         Assert.Single(openAi.CalledDays);
         Assert.Single(anthropic.CalledDays);
+    }
+
+    [Fact]
+    public async Task RunCycleAsync_LocalCostQueriedDirectlyFromLedger_UnaffectedByNonUtcRollupTimezone()
+    {
+        // A P1D usage_rollup bucket's boundaries are computed in the pinned Storage:RollupTimezone, not
+        // UTC (see UsageRollupStore.BucketStartUtc) - if local cost were still read from that rollup store
+        // with a plain UTC-midnight window, a non-UTC timezone would make this query miss the bucket
+        // entirely and silently report localCost = 0 despite real local usage existing for that UTC day.
+        // Seeding a non-UTC rollup store here (never queried by the fix) alongside a ledger entry proves
+        // the reconciliation result no longer depends on it.
+        using var temp = new TempDatabase();
+        _ = temp.CreateRollupStore(rollupTimezone: "America/New_York");
+        var ledger = temp.CreateUsageLedger();
+        await ledger.RecordAsync(new UsageLedgerEntry(
+            SessionId: "s1",
+            TurnNumber: 1,
+            Provider: "openai",
+            RequestedModel: "gpt-5",
+            ResolvedModel: "gpt-5",
+            PromptTokens: 10,
+            CompletionTokens: 5,
+            CacheCreationTokens: 0,
+            CacheReadTokens: 0,
+            EstimatedCostUsd: 7.5m,
+            CostConfidence: CostConfidence.Catalog,
+            OccurredAtUtc: Yesterday.ToDateTime(new TimeOnly(12, 0), DateTimeKind.Utc)), Ct);
+
+        var reconciler = new FakeCostReconciler("openai", _ => 42m);
+        var costStore = temp.CreateCostReconciliationStore();
+        var service = new CostReconciliationService(
+            [reconciler],
+            ledger,
+            costStore,
+            Options.Create(new CostReconciliationOptions()),
+            NullLogger<CostReconciliationService>.Instance);
+
+        await service.RunCycleAsync(Ct);
+
+        using var connection = temp.Database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT local_estimated_cost_usd FROM provider_cost_reconciliation;";
+        using var reader = command.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.Equal("7.5", reader.GetString(0));
     }
 
     [Fact]
@@ -196,7 +241,7 @@ public class CostReconciliationServiceTests
         var logger = new CapturingLogger<CostReconciliationService>();
         var service = new CostReconciliationService(
             [reconciler],
-            temp.CreateRollupStore(),
+            temp.CreateUsageLedger(),
             temp.CreateCostReconciliationStore(),
             Options.Create(new CostReconciliationOptions()),
             logger);

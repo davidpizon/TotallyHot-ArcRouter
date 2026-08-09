@@ -131,6 +131,9 @@ public class PersistentConversationTurnTrackerTests
 
         public int DeleteOlderThan(DateTimeOffset cutoffUtc) =>
             throw new NotSupportedException("Not exercised by the turn tracker.");
+
+        public decimal SumEstimatedCostUsd(string provider, DateTimeOffset fromUtc, DateTimeOffset toUtc) =>
+            throw new NotSupportedException("Not exercised by the turn tracker.");
     }
 
     private sealed class FakeTimeProvider(DateTimeOffset start) : TimeProvider

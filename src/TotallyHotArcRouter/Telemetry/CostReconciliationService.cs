@@ -20,7 +20,7 @@ public sealed class CostReconciliationService
     public const int MaxCatchUpDays = 7;
 
     private readonly IReadOnlyList<IProviderCostReconciler> _reconcilers;
-    private readonly IUsageRollupStore _rollupStore;
+    private readonly IUsageLedger _usageLedger;
     private readonly IProviderCostReconciliationStore _store;
     private readonly ILogger<CostReconciliationService> _logger;
     private readonly decimal _deltaWarningPercent;
@@ -28,19 +28,19 @@ public sealed class CostReconciliationService
     /// <summary>Initializes a new instance of the <see cref="CostReconciliationService"/> class.</summary>
     public CostReconciliationService(
         IEnumerable<IProviderCostReconciler> reconcilers,
-        IUsageRollupStore rollupStore,
+        IUsageLedger usageLedger,
         IProviderCostReconciliationStore store,
         IOptions<CostReconciliationOptions> options,
         ILogger<CostReconciliationService> logger)
     {
         ArgumentNullException.ThrowIfNull(reconcilers);
-        ArgumentNullException.ThrowIfNull(rollupStore);
+        ArgumentNullException.ThrowIfNull(usageLedger);
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
 
         _reconcilers = reconcilers.ToList();
-        _rollupStore = rollupStore;
+        _usageLedger = usageLedger;
         _store = store;
         _logger = logger;
         _deltaWarningPercent = options.Value.DeltaWarningPercent;
@@ -112,13 +112,13 @@ public sealed class CostReconciliationService
         var windowStart = new DateTimeOffset(day.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
         var windowEnd = windowStart.AddDays(1);
 
-        // Reuses the exact same query Phase 4's rollup GUI/export surface reads - never a second,
-        // independently-written local-cost query that could silently drift from the one everything else
-        // already trusts.
-        var localCost = _rollupStore
-            .Query(windowStart, windowEnd, "P1D", "provider")
-            .FirstOrDefault(bucket => string.Equals(bucket.GroupKey, reconciler.Provider, StringComparison.OrdinalIgnoreCase))
-            ?.CostUsd ?? 0m;
+        // Sums usage_ledger directly over this exact UTC window, rather than IUsageRollupStore's
+        // pre-aggregated buckets: a P1D rollup bucket's boundaries are computed in the pinned
+        // Storage:RollupTimezone, not UTC, so querying it with a plain UTC-midnight window would silently
+        // return nothing (localCost = 0) whenever that timezone isn't UTC - exactly the false "price table
+        // is stale" signal the zero-localCost guard in LogDelta below exists to suppress, except here it'd
+        // be a false positive from a mismatched query window, not a genuine no-traffic day.
+        var localCost = _usageLedger.SumEstimatedCostUsd(reconciler.Provider, windowStart, windowEnd);
 
         _store.InsertReconciliation(new ProviderCostReconciliationEntry(
             Provider: reconciler.Provider,

@@ -41,6 +41,16 @@ public interface IUsageLedger
     /// </summary>
     /// <returns>The number of rows deleted.</returns>
     int DeleteOlderThan(DateTimeOffset cutoffUtc);
+
+    /// <summary>
+    /// Sums <see cref="UsageLedgerEntry.EstimatedCostUsd"/> for <paramref name="provider"/> over
+    /// <c>[fromUtc, toUtc)</c>, filtered directly against this table's own <c>occurred_at_utc</c> column -
+    /// deliberately not <see cref="IUsageRollupStore"/>'s pre-aggregated buckets, whose boundaries are
+    /// computed in the pinned <c>Storage:RollupTimezone</c> rather than UTC. A caller needing an exact UTC
+    /// window (<see cref="CostReconciliationService"/> reconciling a provider's UTC calendar day) would
+    /// otherwise silently miss the rollup bucket entirely whenever that timezone isn't UTC.
+    /// </summary>
+    decimal SumEstimatedCostUsd(string provider, DateTimeOffset fromUtc, DateTimeOffset toUtc);
 }
 
 /// <inheritdoc cref="IUsageLedger" />
@@ -189,6 +199,35 @@ public sealed class UsageLedger : IUsageLedger
         command.CommandText = "DELETE FROM usage_ledger WHERE occurred_at_utc < $cutoff;";
         command.Parameters.AddWithValue("$cutoff", cutoff);
         return command.ExecuteNonQuery();
+    }
+
+    /// <inheritdoc />
+    public decimal SumEstimatedCostUsd(string provider, DateTimeOffset fromUtc, DateTimeOffset toUtc)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(provider);
+
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT estimated_cost_usd FROM usage_ledger
+            WHERE provider = $provider AND occurred_at_utc >= $from AND occurred_at_utc < $to
+              AND estimated_cost_usd IS NOT NULL;
+            """;
+        command.Parameters.AddWithValue("$provider", provider);
+        command.Parameters.AddWithValue("$from", fromUtc.UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$to", toUtc.UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture));
+
+        // Summed in .NET rather than SQLite's own SUM(): estimated_cost_usd is stored as TEXT (decimal
+        // precision would be lost round-tripping through SQLite's REAL), matching every other money column
+        // in this database - see the class remarks on estimated_cost_usd's storage.
+        var total = 0m;
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            total += decimal.Parse(reader.GetString(0), CultureInfo.InvariantCulture);
+        }
+
+        return total;
     }
 
     // The §5.4 validation gate: reject negative token/cost figures and implausibly future-dated entries at
