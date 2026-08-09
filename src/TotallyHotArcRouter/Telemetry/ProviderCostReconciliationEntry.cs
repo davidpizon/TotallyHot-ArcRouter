@@ -8,7 +8,7 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// <param name="WindowStartUtc">The reconciled window's inclusive start (a UTC day boundary).</param>
 /// <param name="WindowEndUtc">The reconciled window's exclusive end (one day after <see cref="WindowStartUtc"/>).</param>
 /// <param name="ProviderReportedCostUsd">The provider's own reported cost for this window, summed across every paginated page.</param>
-/// <param name="LocalEstimatedCostUsd">This proxy's locally estimated cost for the same window, from <c>usage_ledger</c> via the rollup store.</param>
+/// <param name="LocalEstimatedCostUsd">This proxy's locally estimated cost for the same window, summed directly from <c>usage_ledger</c> (<see cref="IUsageLedger.SumEstimatedCostUsd"/>) rather than the rollup store, whose bucket boundaries are timezone-pinned and would otherwise misalign with this UTC window.</param>
 /// <param name="ScopeNote">
 /// Records the org-vs-proxy scope caveat: <paramref name="ProviderReportedCostUsd"/> is organization-wide
 /// (every key under the configured Admin API key), while <paramref name="LocalEstimatedCostUsd"/> only
