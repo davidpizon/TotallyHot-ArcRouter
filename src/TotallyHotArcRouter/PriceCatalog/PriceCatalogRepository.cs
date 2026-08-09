@@ -520,21 +520,36 @@ public sealed class PriceCatalogRepository
     {
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
-        command.CommandText = $"""
-            SELECT mp.standard_input_price, mp.standard_output_price,
-                   mp.cached_input_price, mp.cache_write_input_price, mp.is_approximate,
-                   mp.batch_input_price, mp.batch_output_price, mp.last_updated_utc
-            FROM model_prices mp
-            JOIN models            m ON m.model_id    = mp.model_id
-            JOIN providers         p ON p.provider_id = mp.provider_id
-            JOIN aggregator_sources s ON s.source_id  = mp.aggregator_source_id
-            WHERE m.model_identifier = $model
-              AND p.provider_name    = $provider
-              AND s.enabled = 1
-              {(cutoff is null ? string.Empty : "AND mp.last_updated_utc >= $cutoff")}
-            ORDER BY mp.last_updated_utc DESC
-            LIMIT 1;
-            """;
+        command.CommandText = cutoff is null
+            ? """
+              SELECT mp.standard_input_price, mp.standard_output_price,
+                     mp.cached_input_price, mp.cache_write_input_price, mp.is_approximate,
+                     mp.batch_input_price, mp.batch_output_price, mp.last_updated_utc
+              FROM model_prices mp
+              JOIN models            m ON m.model_id    = mp.model_id
+              JOIN providers         p ON p.provider_id = mp.provider_id
+              JOIN aggregator_sources s ON s.source_id  = mp.aggregator_source_id
+              WHERE m.model_identifier = $model
+                AND p.provider_name    = $provider
+                AND s.enabled = 1
+              ORDER BY mp.last_updated_utc DESC
+              LIMIT 1;
+              """
+            : """
+              SELECT mp.standard_input_price, mp.standard_output_price,
+                     mp.cached_input_price, mp.cache_write_input_price, mp.is_approximate,
+                     mp.batch_input_price, mp.batch_output_price, mp.last_updated_utc
+              FROM model_prices mp
+              JOIN models            m ON m.model_id    = mp.model_id
+              JOIN providers         p ON p.provider_id = mp.provider_id
+              JOIN aggregator_sources s ON s.source_id  = mp.aggregator_source_id
+              WHERE m.model_identifier = $model
+                AND p.provider_name    = $provider
+                AND s.enabled = 1
+                AND mp.last_updated_utc >= $cutoff
+              ORDER BY mp.last_updated_utc DESC
+              LIMIT 1;
+              """;
         command.Parameters.AddWithValue("$model", key.ModelName);
         command.Parameters.AddWithValue("$provider", key.Provider);
 

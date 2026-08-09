@@ -51,7 +51,8 @@ public sealed class ModelPriceCatalog : IModelPriceCatalog
     }
 
     /// <inheritdoc />
-    public void Invalidate() => _cache = new ConcurrentDictionary<ModelKey, CatalogPriceEntry?>();
+    public void Invalidate() =>
+        Interlocked.Exchange(ref _cache, new ConcurrentDictionary<ModelKey, CatalogPriceEntry?>());
 
     /// <summary>
     /// Returns the cached row for <paramref name="key"/>, reading through to the repository on a miss.
