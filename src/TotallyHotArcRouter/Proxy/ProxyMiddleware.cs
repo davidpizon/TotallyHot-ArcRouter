@@ -1000,9 +1000,15 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 await context.Response.Body.WriteAsync(translated, context.RequestAborted);
 
                 capturedResponseBytes = translated.Length <= MaxCapturedResponseBytes ? translated : translated[..MaxCapturedResponseBytes];
-                var bufferedTailScanner = new IncrementalUsageScanner();
-                bufferedTailScanner.Append(translated);
-                tailScanner = bufferedTailScanner;
+
+                // Only worth the ~64KB tail-window allocation when capturedResponseBytes above actually
+                // lost data - a response that fits within the cap is already fully captured.
+                if (translated.Length > MaxCapturedResponseBytes)
+                {
+                    var bufferedTailScanner = new IncrementalUsageScanner();
+                    bufferedTailScanner.Append(translated);
+                    tailScanner = bufferedTailScanner;
+                }
             }
         }
         catch (AmazonClientException ex)
@@ -1105,11 +1111,11 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// client as it's produced, and captures up to <paramref name="captureCap"/> bytes for telemetry -
     /// mirrors <see cref="TranslateAndCaptureStreamAsync"/>'s role for the raw-HTTP path.
     /// </summary>
-    private async Task<(byte[] Captured, IncrementalUsageScanner TailScanner)> TranslateAndCaptureBedrockStreamAsync(IBedrockPayloadTranslator translator, ResponseStream body, Stream destination, int captureCap, CancellationToken cancellationToken)
+    private async Task<(byte[] Captured, IncrementalUsageScanner? TailScanner)> TranslateAndCaptureBedrockStreamAsync(IBedrockPayloadTranslator translator, ResponseStream body, Stream destination, int captureCap, CancellationToken cancellationToken)
     {
         var chunkTranslator = translator.CreateBedrockStreamChunkTranslator();
         using var capture = new MemoryStream();
-        var tailScanner = new IncrementalUsageScanner();
+        IncrementalUsageScanner? tailScanner = null;
 
         async Task EmitAsync(byte[] translated)
         {
@@ -1121,12 +1127,19 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             await destination.WriteAsync(translated, cancellationToken);
             await destination.FlushAsync(cancellationToken);
 
-            tailScanner.Append(translated);
-
             var remainingCapacity = captureCap - (int)capture.Length;
             if (remainingCapacity > 0)
             {
                 await capture.WriteAsync(translated.AsMemory(0, Math.Min(translated.Length, remainingCapacity)), cancellationToken);
+            }
+
+            if (remainingCapacity < translated.Length)
+            {
+                // Same lazy-allocation reasoning as CopyAndCaptureAsync: only worth the tail window once
+                // the head-capped capture has actually lost bytes, and the boundary-crossing chunk itself
+                // still needs to land in the scanner in full.
+                tailScanner ??= new IncrementalUsageScanner();
+                tailScanner.Append(translated);
             }
         }
 
@@ -1674,7 +1687,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         var captureNativeBytes = UsageExtractor.SupportsNativeShape(translator.Provider);
         using var capture = new MemoryStream();
         using var nativeCapture = captureNativeBytes ? new MemoryStream() : null;
-        var tailScanner = new IncrementalUsageScanner();
+        IncrementalUsageScanner? tailScanner = null;
         var buffer = ArrayPool<byte>.Shared.Rent(81920);
 
         async Task EmitAsync(byte[] translated)
@@ -1687,12 +1700,19 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             await destination.WriteAsync(translated, cancellationToken);
             await destination.FlushAsync(cancellationToken);
 
-            tailScanner.Append(translated);
-
             var remainingCapacity = captureCap - (int)capture.Length;
             if (remainingCapacity > 0)
             {
                 await capture.WriteAsync(translated.AsMemory(0, Math.Min(translated.Length, remainingCapacity)), cancellationToken);
+            }
+
+            if (remainingCapacity < translated.Length)
+            {
+                // Same lazy-allocation reasoning as CopyAndCaptureAsync: only worth the tail window once
+                // the head-capped capture has actually lost bytes, and the boundary-crossing chunk itself
+                // still needs to land in the scanner in full.
+                tailScanner ??= new IncrementalUsageScanner();
+                tailScanner.Append(translated);
             }
         }
 
