@@ -233,6 +233,8 @@ public sealed class UsageLedger : IUsageLedger
     // The §5.4 validation gate: reject negative token/cost figures and implausibly future-dated entries at
     // ingest, rather than let a translator regression silently corrupt the durable ledger. Logged at
     // Warning (not Error - this is an expected defensive check, not an operational failure) and dropped.
+    // §5.4's third proposed check - totals consistent with a "recorded total" - is not implemented: no
+    // provider-reported total flows into UsageLedgerEntry to validate the four token fields against.
     private static bool TryValidate(UsageLedgerEntry entry, out string reason)
     {
         if (entry.PromptTokens is < 0 || entry.CompletionTokens is < 0 ||

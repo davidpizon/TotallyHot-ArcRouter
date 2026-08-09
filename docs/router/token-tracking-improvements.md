@@ -1,11 +1,12 @@
 # Token Tracking: Improvements Adapted from Open-Source Usage Trackers
 
-> **Status: Analysis and proposal — nothing here is implemented.** This document surveys seven
-> external open-source token/cost trackers (plus two on-path proxy peers, LiteLLM and Helicone — see
-> §3), compares each technique against TotallyHotArcRouter's
-> *current, on-disk* token-tracking implementation, and proposes concrete changes. Every "current
-> behavior" claim below was read from source in this repository at the time of writing and cites the
-> file and line. Every "proposed" block is a sketch, not shipped code.
+> **Status: Implemented.** This document originally surveyed seven external open-source token/cost
+> trackers (plus two on-path proxy peers, LiteLLM and Helicone — see §3), compared each technique
+> against TotallyHotArcRouter's token-tracking implementation *as it stood at the time of writing*,
+> and proposed concrete changes. Every "current behavior" claim below reflects that snapshot, not the
+> present state of the repository — the "proposed" blocks are the sketches that were adopted and
+> shipped; see [`token-tracking-implementation-plan.md`](token-tracking-implementation-plan.md) for
+> what actually landed and where it deviated from the sketch.
 >
 > Where a proposal conflicts with an architectural decision already documented in
 > [`agent-cost-tracking.md`](agent-cost-tracking.md), [`model-price-catalog.md`](model-price-catalog.md),

@@ -89,8 +89,8 @@ jobs:
       # generated/non-testable code (protobuf stubs, MAUI/WinRT bootstrap) from the line-coverage math
       # so the bar reflects code we actually own. TotallyHotArcRouter.Gui/.Gui.Tests aren't in $PROJECTS
       # (Windows-only MAUI, can't build/test on this Linux runner - same exclusion as Build/Test above)
-      # so they're checked against this same 80% bar locally on a Windows dev machine instead; see
-      # coverlet.runsettings' own comment for why the split exists.
+      # so they're checked against this same 80% bar by the windows-gui-build-and-test job below instead;
+      # see coverlet.runsettings' own comment for why the split exists.
       - name: Check coverage threshold
         run: |
           set -euo pipefail
@@ -128,3 +128,76 @@ jobs:
 
           print(f"All assemblies meet the {threshold}% line coverage bar.")
           PY
+
+  windows-gui-build-and-test:
+    name: Build and test GUI (Windows/MAUI)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      # TotallyHotArcRouter.Gui.csproj is the only project needing this - see its
+      # `UseMaui Condition="...IsOSPlatform('windows')"` guard. The Linux job above never
+      # touches it (see its $PROJECTS comment), so it's built here instead, on a
+      # windows-latest runner where the MAUI workload can actually be installed.
+      # maui-windows (not the full maui workload) matches this project's single
+      # net10.0-windows TFM - no android/ios/maccatalyst targets exist here to justify the
+      # extra install time of the other platform workloads.
+      - name: Install MAUI workload
+        run: dotnet workload install maui-windows
+
+      - name: Restore
+        run: |
+          dotnet restore src/TotallyHotArcRouter.Gui/TotallyHotArcRouter.Gui.csproj
+          dotnet restore src/TotallyHotArcRouter.Gui.Tests/TotallyHotArcRouter.Gui.Tests.csproj
+
+      - name: Build
+        run: dotnet build src/TotallyHotArcRouter.Gui/TotallyHotArcRouter.Gui.csproj --configuration Release --no-restore
+
+      # TotallyHotArcRouter.Gui.Tests uses bUnit to render the already-compiled Razor components with its
+      # own renderer (see the project's own comment) - it needs the net10.0-windows TFM to reference
+      # TotallyHotArcRouter.Gui directly, but does not start a MAUI runtime.
+      - name: Test
+        run: |
+          dotnet test src/TotallyHotArcRouter.Gui.Tests/TotallyHotArcRouter.Gui.Tests.csproj `
+            --configuration Release --no-restore `
+            --collect:"XPlat Code Coverage" --settings coverlet.runsettings `
+            --results-directory TestResults/TotallyHotArcRouter.Gui.Tests
+
+      # Mirrors the Linux job's coverage gate (same coverlet.runsettings, same AGENTS.md 80% bar) for
+      # the one assembly that can only be measured on Windows - see coverlet.runsettings' own comment
+      # for why TotallyHotArcRouter.Gui/.Gui.Tests were previously checked here only by hand.
+      # -assemblyfilters restricts the report to TotallyHotArcRouter.Gui itself: TotallyHotArcRouter.Gui.Tests
+      # (bUnit) also links TotallyHotArcRouter.Gui.Admin/.Charts/.Console/.Telemetry through Gui's
+      # ProjectReferences, but only touches slivers of them - those assemblies already have their own
+      # dedicated test projects and 80% bar on the Linux job above, so including them here would fail
+      # the gate on coverage this job was never meant to provide.
+      - name: Check coverage threshold
+        run: |
+          dotnet tool install -g dotnet-reportgenerator-globaltool
+          $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
+          reportgenerator `
+            "-reports:TestResults/**/coverage.cobertura.xml" `
+            "-targetdir:TestResults/Report" `
+            "-reporttypes:JsonSummary;TextSummary" `
+            "-assemblyfilters:+TotallyHotArcRouter.Gui"
+          Get-Content TestResults/Report/Summary.txt
+
+          $threshold = 80.0
+          $data = Get-Content TestResults/Report/Summary.json -Raw | ConvertFrom-Json
+          $failures = $data.coverage.assemblies | Where-Object { $_.coverage -lt $threshold }
+
+          if ($failures) {
+            Write-Host "::error::The following assemblies are below the $threshold% line coverage bar required by AGENTS.md:"
+            foreach ($f in $failures) {
+              Write-Host "::error::  $($f.name): $($f.coverage)%"
+            }
+            exit 1
+          }
+
+          Write-Host "All assemblies meet the $threshold% line coverage bar."
