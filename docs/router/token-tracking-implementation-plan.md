@@ -109,8 +109,11 @@ indexes.
 1. New `Telemetry/UsageLedger.cs` (`IUsageLedger` + SQLite implementation) and
    `Telemetry/UsageLedgerEntry.cs`. `RecordAsync` never throws;
    `INSERT ... ON CONFLICT(dedup_key) DO NOTHING` makes replay idempotent. Includes the analysis
-   §5.4 validation gate: reject negative token counts, future timestamps, inconsistent totals — log
-   at Warning and drop, so a translator regression is caught at ingest.
+   §5.4 validation gate: reject negative token counts and future timestamps — log at Warning and
+   drop, so a translator regression is caught at ingest. §5.4's third check, "consistent with the
+   recorded total," is not implemented: `UsageInfo`/`UsageLedgerEntry` never carry a
+   provider-reported total to check the four token fields against, only the components themselves,
+   so there is nothing for that check to validate against without a parser/schema change first.
 2. `BuildDedupKey` per §5.4: upstream request id (`request-id`, `x-request-id` — read from the
    upstream response headers in `ProxyMiddleware`, which already has them in hand) when present,
    else the composite SHA-256 over
