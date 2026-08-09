@@ -1630,8 +1630,15 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 ? (nativeBytes.Length <= captureCap ? nativeBytes : nativeBytes[..captureCap])
                 : null;
 
-            var tailScanner = new IncrementalUsageScanner();
-            tailScanner.Append(translated);
+            // Only worth the ~64KB tail-window allocation when the head-capped clientShapeBytes above
+            // actually lost data - a response that fits within captureCap is already fully captured, so
+            // TryExtractUsage's primary parse never needs the tail fallback.
+            IncrementalUsageScanner? tailScanner = null;
+            if (translated.Length > captureCap)
+            {
+                tailScanner = new IncrementalUsageScanner();
+                tailScanner.Append(translated);
+            }
 
             return new CapturedResponse(clientShapeBytes, capturedNativeBytes, tailScanner);
         }
@@ -1735,10 +1742,10 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// (§5.11). The capture never delays or alters what reaches <paramref name="destination"/> - it's an
     /// in-memory side copy of each chunk immediately after (not instead of) writing it downstream.
     /// </summary>
-    private async Task<(byte[] Captured, IncrementalUsageScanner TailScanner)> CopyAndCaptureAsync(Stream source, Stream destination, int captureCap, CancellationToken cancellationToken)
+    private async Task<(byte[] Captured, IncrementalUsageScanner? TailScanner)> CopyAndCaptureAsync(Stream source, Stream destination, int captureCap, CancellationToken cancellationToken)
     {
         using var capture = new MemoryStream();
-        var tailScanner = new IncrementalUsageScanner();
+        IncrementalUsageScanner? tailScanner = null;
         var buffer = ArrayPool<byte>.Shared.Rent(81920);
         try
         {
@@ -1755,12 +1762,23 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 // sees no bytes at all until the connection eventually closes (or times out first).
                 await destination.FlushAsync(cancellationToken);
 
-                tailScanner.Append(buffer.AsSpan(0, bytesRead));
-
                 var remainingCapacity = captureCap - (int)capture.Length;
                 if (remainingCapacity > 0)
                 {
                     await capture.WriteAsync(buffer.AsMemory(0, Math.Min(bytesRead, remainingCapacity)), cancellationToken);
+                }
+
+                if (remainingCapacity < bytesRead)
+                {
+                    // This chunk pushes (or has already pushed) the head-capped capture past captureCap, so
+                    // some/all of it would otherwise be lost - exactly when the tail scanner earns its
+                    // allocation. A response that never exceeds the cap is already fully captured by
+                    // `capture` above, so tailScanner would be dead weight for the common case. Checking
+                    // remainingCapacity (computed before this chunk's write) rather than capture.Length
+                    // after it ensures the very chunk that crosses the cap boundary is still captured in
+                    // full here, not just the chunks after it.
+                    tailScanner ??= new IncrementalUsageScanner();
+                    tailScanner.Append(buffer.AsSpan(0, bytesRead));
                 }
             }
         }
