@@ -58,10 +58,13 @@ public interface IModelPriceCatalog
     ModelPrice? GetFreshPriceForRouting(ModelKey key, PriceContext context, TimeSpan maxAge);
 
     /// <summary>
-    /// Drops every cached row, so the next read re-reads the database. Called by the ingestion service once
-    /// a cycle has actually committed a change - see <c>docs/router/model-price-catalog.md</c> Phase 4's
-    /// eviction signal, which is deliberately "a delta was committed" rather than a timer, so an unchanged
-    /// refresh does not churn the cache.
+    /// Drops every cached row, so the next read re-reads the database. Called by the ingestion service after
+    /// any cycle in which a source actually wrote a row - see <c>docs/router/model-price-catalog.md</c>
+    /// Phase 4's eviction signal, which is deliberately "a source wrote something" rather than a timer, so a
+    /// cycle where every source failed or returned nothing leaves the cache untouched. This is not a
+    /// value-diff check: the priority gate rewrites a row (and its <c>last_updated_utc</c>) on every
+    /// successful poll even when the reported rate hasn't moved, so a healthy single-source setup invalidates
+    /// on essentially every cycle.
     /// </summary>
     void Invalidate();
 }
