@@ -64,7 +64,7 @@
 
         @* Add form *@
         <div class="rounded-lg p-3 space-y-2 mb-3 ds-surface-card-bordered">
-            <div class="grid gap-2" style="grid-template-columns:1fr 1fr 1fr auto">
+            <div class="grid gap-2 ls-price-overrides-grid">
                 <input @bind="_newSourceName" placeholder="Source (e.g. LiteLLM)" class="px-2 py-1.5 text-xs ds-input" />
                 <input @bind="_newAggregatorModelKey" placeholder="Aggregator model key (e.g. big-pickle)" class="px-2 py-1.5 text-xs font-mono ds-input" />
                 <select @bind="_newModelName" class="px-2 py-1.5 text-xs ds-input">

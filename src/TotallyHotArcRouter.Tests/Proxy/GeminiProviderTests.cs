@@ -323,6 +323,37 @@ public class GeminiProviderTests
     }
 
     [Fact]
+    public async Task Streaming_TranslatedResponseLargerThanCaptureCap_RecoversUsageFromTail()
+    {
+        // Exercises TranslateAndCaptureStreamAsync's lazily-allocated IncrementalUsageScanner (the
+        // translated-stream sibling of ProxyMiddlewareCaptureRecoveryTests' raw-HTTP-path coverage): a
+        // giant leading content-delta chunk pushes the trailing usageMetadata chunk well past the 4 MiB
+        // head cap, so a successful token count here can only have come from the tail-window fallback.
+        const int fillerBytes = 5 * 1024 * 1024;
+        var filler = new string('a', fillerBytes);
+        var geminiSse =
+            $"data: {{\"candidates\":[{{\"content\":{{\"role\":\"model\",\"parts\":[{{\"text\":\"{filler}\"}}]}}}}]}}\n\n" +
+            "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"done\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":5,\"totalTokenCount\":15}}\n\n";
+
+        var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(geminiSse, Encoding.UTF8, "text/event-stream"),
+        }));
+
+        var capturing = new CapturingTelemetryPublisher();
+        var middleware = BuildMiddleware(handler, capturing);
+        var context = BuildContext("""
+            {"model":"gemini-2.5-pro","messages":[{"role":"user","content":"hi"}],"stream":true}
+            """);
+
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        var published = await capturing.WaitForEventAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(10, published.PromptTokens);
+        Assert.Equal(5, published.CompletionTokens);
+    }
+
+    [Fact]
     public async Task Streaming_EmbeddedProviderError_TerminatesStream_WithoutDone()
     {
         // Gemini can deliver an error (e.g. 429 RESOURCE_EXHAUSTED) as an HTTP 200 SSE body with an

@@ -1,30 +1,21 @@
-using System.Text.Json;
 using TotallyHot.ArcRouter.Telemetry;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Moq;
 
 namespace TotallyHot.ArcRouter.Tests.Telemetry;
 
 /// <summary>Covers <see cref="SpendTracker"/>: the basic token/cost tracking parity pillar.</summary>
-public class SpendTrackerTests : IDisposable
+public class SpendTrackerTests
 {
-    private readonly string _logFilePath = Path.Combine(Path.GetTempPath(), $"spend-tracker-tests-{Guid.NewGuid():N}.jsonl");
-
-    public void Dispose()
-    {
-        if (File.Exists(_logFilePath))
-        {
-            File.Delete(_logFilePath);
-        }
-    }
-
-    private SpendTracker CreateTracker(bool enabled = true) =>
-        new(NullLogger<SpendTracker>.Instance, Options.Create(new SpendTrackingOptions { Enabled = enabled, LogPath = _logFilePath }));
+    private static SpendTracker CreateTracker(bool enabled = true, string? logPath = null) =>
+        new(NullLogger<SpendTracker>.Instance, Options.Create(new SpendTrackingOptions { Enabled = enabled, LogPath = logPath ?? SpendTrackingOptions.DefaultLogPath }));
 
     [Fact]
     public void GetSummary_NoRecordsYet_ReturnsZeroedSummary()
     {
-        using var tracker = CreateTracker();
+        var tracker = CreateTracker();
 
         var summary = tracker.GetSummary();
 
@@ -34,7 +25,7 @@ public class SpendTrackerTests : IDisposable
     [Fact]
     public async Task RecordAsync_AccumulatesRunningTotal_AcrossMultipleCalls()
     {
-        using var tracker = CreateTracker();
+        var tracker = CreateTracker();
 
         await tracker.RecordAsync("claude-opus-4.6", 100, 20, 0.0015m, TestContext.Current.CancellationToken);
         var summary = await tracker.RecordAsync("gpt-5.4", 50, 10, 0.0006m, TestContext.Current.CancellationToken);
@@ -49,7 +40,7 @@ public class SpendTrackerTests : IDisposable
     [Fact]
     public async Task RecordAsync_UnknownUsage_StillIncrementsRequestCount_ButNotCostOrTokens()
     {
-        using var tracker = CreateTracker();
+        var tracker = CreateTracker();
         await tracker.RecordAsync("claude-opus-4.6", 100, 20, 0.0015m, TestContext.Current.CancellationToken);
 
         var summary = await tracker.RecordAsync("unsupported-provider-model", null, null, null, TestContext.Current.CancellationToken);
@@ -64,7 +55,7 @@ public class SpendTrackerTests : IDisposable
     [Fact]
     public async Task RecordAsync_NullCost_CountsAsUnpriced_NotAsZero()
     {
-        using var tracker = CreateTracker();
+        var tracker = CreateTracker();
 
         var summary = await tracker.RecordAsync("unsupported-provider-model", 100, 20, null, TestContext.Current.CancellationToken);
 
@@ -76,7 +67,7 @@ public class SpendTrackerTests : IDisposable
     [Fact]
     public async Task RecordAsync_KnownCost_DoesNotIncrementUnpricedRequests()
     {
-        using var tracker = CreateTracker();
+        var tracker = CreateTracker();
 
         var summary = await tracker.RecordAsync("gpt-5.4", 10, 5, 0.0001m, TestContext.Current.CancellationToken);
 
@@ -84,67 +75,50 @@ public class SpendTrackerTests : IDisposable
     }
 
     [Fact]
-    public async Task RecordAsync_Disabled_DoesNotIncrementTotals_AndDoesNotWriteFile()
+    public async Task RecordAsync_Disabled_DoesNotIncrementTotals()
     {
-        using var tracker = CreateTracker(enabled: false);
+        var tracker = CreateTracker(enabled: false);
 
         var summary = await tracker.RecordAsync("claude-opus-4.6", 100, 20, 0.0015m, TestContext.Current.CancellationToken);
 
         Assert.Equal(default(SpendSummary), summary);
         Assert.Equal(default(SpendSummary), tracker.GetSummary());
-        Assert.False(File.Exists(_logFilePath));
     }
 
     [Fact]
-    public async Task RecordAsync_AppendsOneJsonLineEntry_WithExpectedFields()
+    public async Task RecordAsync_ConcurrentCalls_EveryCallIsCountedExactlyOnce()
     {
-        using var tracker = CreateTracker();
-
-        await tracker.RecordAsync("claude-opus-4.6", 100, 20, 0.0015m, TestContext.Current.CancellationToken);
-
-        Assert.True(File.Exists(_logFilePath));
-        var lines = await File.ReadAllLinesAsync(_logFilePath, TestContext.Current.CancellationToken);
-        var entry = Assert.Single(lines);
-
-        using var json = JsonDocument.Parse(entry);
-        var root = json.RootElement;
-        Assert.Equal("claude-opus-4.6", root.GetProperty("Model").GetString());
-        Assert.Equal(100, root.GetProperty("PromptTokens").GetInt32());
-        Assert.Equal(20, root.GetProperty("CompletionTokens").GetInt32());
-        Assert.Equal(0.0015m, root.GetProperty("CostUsd").GetDecimal());
-        Assert.Equal(0.0015m, root.GetProperty("RunningTotalCostUsd").GetDecimal());
-        Assert.Equal(1, root.GetProperty("RequestCount").GetInt32());
-    }
-
-    [Fact]
-    public async Task RecordAsync_MultipleCalls_AppendsOneLinePerCall_AllParseable()
-    {
-        using var tracker = CreateTracker();
-
-        for (var i = 0; i < 5; i++)
-        {
-            await tracker.RecordAsync("gpt-5.4", 10, 5, 0.0001m, TestContext.Current.CancellationToken);
-        }
-
-        var lines = await File.ReadAllLinesAsync(_logFilePath, TestContext.Current.CancellationToken);
-        Assert.Equal(5, lines.Length);
-        Assert.All(lines, line => JsonDocument.Parse(line).Dispose());
-    }
-
-    [Fact]
-    public async Task RecordAsync_ConcurrentCalls_EveryLineIsWrittenAndParseable_NoInterleavedCorruption()
-    {
-        using var tracker = CreateTracker();
+        var tracker = CreateTracker();
 
         var tasks = Enumerable.Range(0, 25)
             .Select(i => tracker.RecordAsync($"model-{i}", 1, 1, 0.000001m, TestContext.Current.CancellationToken));
         await Task.WhenAll(tasks);
 
         Assert.Equal(25, tracker.GetSummary().RequestCount);
+    }
 
-        var lines = await File.ReadAllLinesAsync(_logFilePath, TestContext.Current.CancellationToken);
-        Assert.Equal(25, lines.Length);
-        Assert.All(lines, line => JsonDocument.Parse(line).Dispose());
+    [Fact]
+    public void Constructor_DefaultLogPath_DoesNotWarn()
+    {
+        var loggerMock = new Mock<ILogger<SpendTracker>>();
+
+        _ = CreateTrackerWithLogger(loggerMock.Object, SpendTrackingOptions.DefaultLogPath);
+
+        loggerMock.Verify(
+            l => l.Log(LogLevel.Warning, It.IsAny<EventId>(), It.IsAny<It.IsAnyType>(), It.IsAny<Exception?>(), It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public void Constructor_CustomLogPath_WarnsOnceThatItIsDeprecated()
+    {
+        var loggerMock = new Mock<ILogger<SpendTracker>>();
+
+        _ = CreateTrackerWithLogger(loggerMock.Object, "custom-spend-log.jsonl");
+
+        loggerMock.Verify(
+            l => l.Log(LogLevel.Warning, It.IsAny<EventId>(), It.IsAny<It.IsAnyType>(), It.IsAny<Exception?>(), It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
     }
 
     [Fact]
@@ -157,5 +131,7 @@ public class SpendTrackerTests : IDisposable
         Assert.Equal(default(SpendSummary), summary);
         Assert.Equal(default(SpendSummary), tracker.GetSummary());
     }
-}
 
+    private static SpendTracker CreateTrackerWithLogger(ILogger<SpendTracker> logger, string logPath) =>
+        new(logger, Options.Create(new SpendTrackingOptions { Enabled = true, LogPath = logPath }));
+}

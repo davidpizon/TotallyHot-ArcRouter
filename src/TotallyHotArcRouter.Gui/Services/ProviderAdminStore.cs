@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using TotallyHot.ArcRouter.Gui.Admin;
 using Microsoft.Extensions.Logging;
 
@@ -67,6 +68,19 @@ public sealed class ProviderAdminStore
     /// alongside <see cref="PriceOverrides"/> - the pane's read-only diagnosis view.
     /// </summary>
     public IReadOnlyList<PriceResolutionDiagnosisView> PriceResolutionDiagnosis { get; private set; } = [];
+
+    /// <summary>
+    /// Each provider's rate-limit trend-chart history, keyed by provider key, refreshed by
+    /// <see cref="LoadRateLimitHistoryAsync"/>. A provider absent here simply hasn't been loaded yet - the
+    /// card renders no chart rather than a loading state, since the surrounding provider list has already
+    /// loaded by the time this is fetched. Backed by a <see cref="ConcurrentDictionary{TKey,TValue}"/>
+    /// because <c>ProvidersAdmin.razor</c> fires <see cref="LoadRateLimitHistoryAsync"/> once per provider,
+    /// fire-and-forget - several can complete around the same time and write here concurrently, which a
+    /// plain <see cref="Dictionary{TKey,TValue}"/> does not tolerate.
+    /// </summary>
+    public IReadOnlyDictionary<string, RateLimitHistoryResponseAdminView> RateLimitHistory => _rateLimitHistory;
+
+    private readonly ConcurrentDictionary<string, RateLimitHistoryResponseAdminView> _rateLimitHistory = new();
 
     /// <summary>Whether a load has completed at least once (so the UI can distinguish "loading" from "empty").</summary>
     public bool IsLoaded { get; private set; }
@@ -188,6 +202,34 @@ public sealed class ProviderAdminStore
         IsLoaded = true;
         LastError = null;
         Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// Loads one provider's rate-limit trend-chart history and caches it in <see cref="RateLimitHistory"/>.
+    /// Best-effort and per-provider: a failure (e.g. the proxy has no price-catalog repository wired up, so
+    /// history is unavailable) is swallowed and simply leaves that provider absent from the cache, rather
+    /// than surfacing as a store-wide reachability failure the way <see cref="LoadAsync"/> does - one
+    /// provider's missing history shouldn't blank the whole Providers pane.
+    /// </summary>
+    public async Task LoadRateLimitHistoryAsync(string key, double hours = 6.0, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            _rateLimitHistory[key] = await _client.GetRateLimitHistoryAsync(key, hours, cancellationToken);
+            Changed?.Invoke();
+        }
+        catch (ProviderAdminException ex)
+        {
+            _logger?.LogDebug(ex, "Failed to load rate-limit history for provider {Provider}.", key);
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            // ProviderAdminClient.SendAsync only wraps HttpRequestException into ProviderAdminException;
+            // a request timeout surfaces as a raw TaskCanceledException instead. Called fire-and-forget
+            // from ProvidersAdmin.razor, so letting this escape would become an unobserved task exception
+            // rather than the best-effort no-op this method promises.
+            _logger?.LogDebug(ex, "Timed out loading rate-limit history for provider {Provider}.", key);
+        }
     }
 
     /// <summary>

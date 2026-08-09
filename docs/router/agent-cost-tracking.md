@@ -1,24 +1,28 @@
 # Agent Cost Tracking: Persistent Ledger, Auto-Refreshed Pricing, and Provider Reconciliation
 
-> **Status: partially superseded — pricing shipped elsewhere; the ledger half is now implemented,
-> reconciliation remains unbuilt.** This banner previously claimed no SQLite dependency and no price data
-> existed; both claims are stale (corrected 2026-08-07). What exists today in
-> `src/TotallyHotArcRouter/PriceCatalog/` and `src/TotallyHotArcRouter/Telemetry/`: the SQLite database
-> (`agent_telemetry.db`, `Microsoft.Data.Sqlite`), the multi-source price catalog of
+> **Status: superseded by the current implementation — pricing shipped elsewhere; the ledger and
+> reconciliation halves are both now implemented.** This banner previously claimed no SQLite dependency,
+> no price data, and no reconciliation service existed; all three claims are stale (last corrected
+> 2026-08-08). What exists today in `src/TotallyHotArcRouter/PriceCatalog/` and
+> `src/TotallyHotArcRouter/Telemetry/`: the SQLite database (`agent_telemetry.db`,
+> `Microsoft.Data.Sqlite`), the multi-source price catalog of
 > [`model-price-catalog.md`](model-price-catalog.md) with live LiteLLM/OpenRouter feeds, the per-request
 > cost path (`ProxyMiddleware` → `IModelPriceLookup` → `PriceCatalogRepository.GetFreshPrice`, resolved
 > via [`d3-alias-resolution.md`](d3-alias-resolution.md)), per-provider monthly spend rows
 > (`provider_spend`) with budget enforcement (`ProviderBudgetStore`), rate-limit header
-> snapshots/history ([`anthropic-reported-usage-plan.md`](anthropic-reported-usage-plan.md)), and, as of
-> Phase 2 of [`token-tracking-implementation-plan.md`](token-tracking-implementation-plan.md), the
-> per-request **`usage_ledger`** (`UsageLedger`/`IUsageLedger`) with the dedup key, cache-token columns,
-> and decimal-as-TEXT cost the richer design in
+> snapshots/history ([`anthropic-reported-usage-plan.md`](anthropic-reported-usage-plan.md)), the
+> per-request **`usage_ledger`** (`UsageLedger`/`IUsageLedger`, Phase 2) with the dedup key, cache-token
+> columns, and decimal-as-TEXT cost the richer design in
 > [`token-tracking-improvements.md`](token-tracking-improvements.md) §5.2 specifies - `cost_confidence`
-> is written as the `CostConfidence` enum's member name (via `Enum.ToString()`; Phase 3 is implemented).
-> The schema in §2 below remains superseded by that §5.2 design; treat this document's own `usage_ledger` CREATE
-> TABLE as historical, not current. What **still does not exist** is the **provider cost reconciliation**
-> service (§3.4/§3.5, extended by §5.8): nothing calls any provider's billing API to check the ledger
-> against.
+> is written as the `CostConfidence` enum's member name (via `Enum.ToString()`; Phase 3 is implemented) -
+> and, as of Phase 6 §5.8, the **provider cost reconciliation** service: `CostReconciliationService` +
+> `CostReconciliationHostedService` (`src/TotallyHotArcRouter/Telemetry/`,
+> `src/TotallyHotArcRouter/Hosting/`), `OpenAiCostReconciler`/`AnthropicCostReconciler` calling each
+> provider's real Admin cost API with pagination and capped-backoff retry, and
+> `provider_cost_reconciliation`/`reconciliation_checkpoint` tables in `agent_telemetry.db`. The schema
+> in §2 below remains superseded by the current implementation's columns (see
+> `PriceCatalogDatabase`'s schema, not this document's own CREATE TABLE statements); treat §2/§3's SQL
+> as historical design rationale, not current schema.
 
 ## Why this exists
 

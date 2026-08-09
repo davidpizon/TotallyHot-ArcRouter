@@ -24,11 +24,25 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// Input tokens served from an existing prompt cache entry (Anthropic's <c>cache_read_input_tokens</c>).
 /// Defaults to 0 for the same reason as <see cref="CacheCreationTokens"/>.
 /// </param>
+/// <param name="ReasoningTokens">
+/// Extended-thinking / reasoning tokens, which are a <b>subset of</b> <see cref="CompletionTokens"/>, not
+/// an addition to it - OpenAI (<c>completion_tokens_details.reasoning_tokens</c>) counts them inside the
+/// output total. This field exists for attribution ("how much of this turn's output was thinking?"), and
+/// any cost formula that adds it on top of <see cref="CompletionTokens"/> is double-counting. Contrast
+/// <see cref="CacheCreationTokens"/>/<see cref="CacheReadTokens"/>, which are genuinely additive to
+/// <see cref="PromptTokens"/> - the two conventions are opposite and easy to conflate. Defaults to 0, which
+/// is also correct for a provider with no extended-thinking concept, or where the response didn't request
+/// it. Anthropic's Messages API reports no distinct reasoning-token count in its <c>usage</c> object -
+/// thinking tokens are billed inside <c>output_tokens</c> with no separate figure exposed - so this stays 0
+/// for Anthropic requests, the same "not modeled, blocked on the upstream API" treatment
+/// <c>docs/router/token-tracking-improvements.md</c> §5.14 gives web-search request counts.
+/// </param>
 public readonly record struct UsageInfo(
     int PromptTokens,
     int CompletionTokens,
     int CacheCreationTokens = 0,
-    int CacheReadTokens = 0)
+    int CacheReadTokens = 0,
+    int ReasoningTokens = 0)
 {
     /// <summary>
     /// Gets the true total input token count: <see cref="PromptTokens"/> plus <see cref="CacheCreationTokens"/>

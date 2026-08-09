@@ -77,7 +77,6 @@
                 var canDrag = canReorder && !Store.IsRefreshing;
                 var isLifted = _dragActive && _dragName == source.Name;
                 var borderClass = isLifted ? "ds-source-border-lifted" : (source.Enabled ? "" : "ds-source-border-dim");
-                var cursor = isLifted ? "grabbing" : (canDrag ? "grab" : "default");
 
                 @* Keep Razor comments outside the tag: written between attributes they are emitted as literal
                    markup rather than stripped, which reaches the browser as an invalid attribute name and takes
@@ -89,8 +88,7 @@
                    the list is re-keyed rather than transformed. *@
                 <div @key="source.Name" class="rounded-lg p-3 space-y-2.5 @(canDrag ? "drag-enabled" : "drag-disabled") @(isLifted ? "card-lifted" : "") ds-surface-card-draggable @borderClass"
                      @onpointerdown="e => OnPointerDown(source, e)"
-                     @onpointerenter="e => OnPointerEnter(source, e)"
-                     style="cursor:@cursor">
+                     @onpointerenter="e => OnPointerEnter(source, e)">
                     @* Header: rank controls + name + toggle *@
                     <div class="flex items-start justify-between gap-2">
                         <div class="flex items-start gap-2 min-w-0">
@@ -100,7 +98,7 @@
                                     <Icon Name="grip-vertical" Size="12" Class="text-slate-600 mb-0.5" />
                                     @if (index == 0)
                                     {
-                                        <div class="p-0.5" style="width:12px;height:12px"></div>
+                                        <div class="p-0.5 ls-drag-placeholder"></div>
                                     }
                                     else
                                     {
@@ -113,7 +111,7 @@
                                     }
                                     @if (index == sources.Count - 1)
                                     {
-                                        <div class="p-0.5" style="width:12px;height:12px"></div>
+                                        <div class="p-0.5 ls-drag-placeholder"></div>
                                     }
                                     else
                                     {

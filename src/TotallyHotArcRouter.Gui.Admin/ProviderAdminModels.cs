@@ -106,7 +106,28 @@ public sealed record RateLimitSnapshotAdminView(
 /// <summary>A provider's most recently captured rate-limit header snapshot, mirroring the proxy's <c>ProviderRateLimitView</c>.</summary>
 /// <param name="Snapshot">The typed projection of the captured headers.</param>
 /// <param name="ObservedAtUtc">The UTC instant the most recent header in <see cref="Snapshot"/> was captured.</param>
-public sealed record ProviderRateLimitAdminView(RateLimitSnapshotAdminView Snapshot, DateTimeOffset ObservedAtUtc);
+/// <param name="IsStale">Whether <see cref="ObservedAtUtc"/> is older than the proxy's configured staleness threshold (§5.9) - the card dims and labels the "As of" footer when set.</param>
+/// <param name="Projections">Per-dimension projected time-to-exhaustion, keyed by the same names as <see cref="RateLimitSnapshotAdminView.StandardDimensions"/>. A dimension absent here has no projection to show.</param>
+public sealed record ProviderRateLimitAdminView(
+    RateLimitSnapshotAdminView Snapshot,
+    DateTimeOffset ObservedAtUtc,
+    bool IsStale = false,
+    IReadOnlyDictionary<string, RateLimitExhaustionAdminView>? Projections = null);
+
+/// <summary>A projected time-to-exhaustion for one rate-limit dimension, mirroring the proxy's <c>RateLimitExhaustionProjection</c>.</summary>
+/// <param name="TimeToExhaustion">How long until the dimension would hit zero at the observed burn rate.</param>
+/// <param name="BurnRatePerMinute">The observed consumption rate, in the dimension's own unit, per minute.</param>
+public sealed record RateLimitExhaustionAdminView(TimeSpan TimeToExhaustion, double BurnRatePerMinute);
+
+/// <summary>One dimension history point for the Providers card's rate-limit trend chart, mirroring the proxy's <c>RateLimitHistoryPointView</c>.</summary>
+/// <param name="BucketUtc">The minute bucket's start instant, UTC.</param>
+/// <param name="Remaining">What was left in this bucket, or <see langword="null"/> if unknown that minute.</param>
+/// <param name="Limit">The dimension's configured cap in this bucket, or <see langword="null"/> if unknown.</param>
+public sealed record RateLimitHistoryPointAdminView(DateTimeOffset BucketUtc, long? Remaining, long? Limit);
+
+/// <summary>The <c>GET /admin/providers/{key}/rate-limit-history</c> response, mirroring the proxy's <c>RateLimitHistoryResponse</c>.</summary>
+/// <param name="Dimensions">History points per standard-family dimension name, chronologically ordered.</param>
+public sealed record RateLimitHistoryResponseAdminView(IReadOnlyDictionary<string, IReadOnlyList<RateLimitHistoryPointAdminView>> Dimensions);
 
 /// <summary>A configured model as returned by the management API.</summary>
 /// <param name="ModelName">The client-facing model name.</param>

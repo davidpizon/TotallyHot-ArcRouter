@@ -48,7 +48,8 @@
                 @* Composite key (not just index) so a dropped-oldest-line buffer shift diffs as "one
                    row removed, one added" rather than re-diffing every remaining row's content. *@
                 <div @key="@($"{line.TimestampUtc.Ticks}|{line.Level}|{line.Message}")"
-                     style="color:@LogLevelColorMapper.GetColor(line.Level);white-space:pre-wrap;word-break:break-word">@LogLineFormatter.Format(line)</div>
+                     class="ls-console-line"
+                     style="color:@LogLevelColorMapper.GetColor(line.Level)">@LogLineFormatter.Format(line)</div>
             }
         }
     </div>

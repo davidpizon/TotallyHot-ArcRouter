@@ -72,5 +72,65 @@ public sealed class ProviderAdminStoreTests
         var act = () => new ProviderAdminStore(managementAddress: "http://127.0.0.1:59991/already-slashed/");
         act.Should().NotThrow();
     }
+
+    [Fact]
+    public async Task LoadRateLimitHistoryAsync_unreachable_does_not_throw()
+    {
+        var store = new ProviderAdminStore(managementAddress: UnreachableAddress);
+
+        var act = () => store.LoadRateLimitHistoryAsync("openai", cancellationToken: TestContext.Current.CancellationToken);
+
+        await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task LoadRateLimitHistoryAsync_timeout_is_swallowed_not_propagated()
+    {
+        // ProviderAdminClient.SendAsync only wraps HttpRequestException into ProviderAdminException; a
+        // request timeout surfaces as a raw TaskCanceledException instead. Called fire-and-forget from
+        // ProvidersAdmin.razor, this method must swallow that too rather than let it become an
+        // unobserved task exception.
+        var store = new ProviderAdminStore(managementAddress: "http://127.0.0.1:59991", transport: new TimingOutHandler());
+
+        var act = () => store.LoadRateLimitHistoryAsync("openai", cancellationToken: TestContext.Current.CancellationToken);
+
+        await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task LoadRateLimitHistoryAsync_ManyProvidersConcurrently_AllLandWithoutCorruption()
+    {
+        // ProvidersAdmin.razor fires one fire-and-forget LoadRateLimitHistoryAsync call per provider, so
+        // several can complete around the same time and write into the shared cache concurrently -
+        // RateLimitHistory is backed by a ConcurrentDictionary specifically so this doesn't throw or drop
+        // entries.
+        const string HistoryJson = """{"dimensions":{"tokens":[{"bucketUtc":"2026-03-01T12:00:00Z","remaining":1000,"limit":2000}]}}""";
+        var store = new ProviderAdminStore(managementAddress: "http://127.0.0.1:59991", transport: new StubHandler(HistoryJson));
+        var providerKeys = Enumerable.Range(0, 50).Select(i => $"provider-{i}").ToArray();
+
+        await Task.WhenAll(providerKeys.Select(key =>
+            store.LoadRateLimitHistoryAsync(key, cancellationToken: TestContext.Current.CancellationToken)));
+
+        store.RateLimitHistory.Should().HaveCount(providerKeys.Length);
+        foreach (var key in providerKeys)
+        {
+            store.RateLimitHistory.Should().ContainKey(key);
+        }
+    }
+
+    private sealed class TimingOutHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            throw new TaskCanceledException("Simulated request timeout.");
+    }
+
+    private sealed class StubHandler(string jsonBody) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json"),
+            });
+    }
 }
 

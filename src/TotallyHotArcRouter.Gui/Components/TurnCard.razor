@@ -4,19 +4,18 @@
    (same visual language as the routing-decision rows in the drill-down). Clicking the header
    expands the routing decision log and the request/response text. Metric tooltips are floating
    data-tip tooltips (wwwroot/js/tooltips.js). *@
-<div class="rounded"
-     style="background:@(AgentColor)10;border:1px solid var(--border-button);border-left:3px solid @AgentColor">
+<div class="rounded ls-turn-card"
+     style="background:@(AgentColor)10;border-left:3px solid @AgentColor">
     @* Header: turn number · request excerpt · agent chip · timestamp · expand toggle. The sub-spans
        here are informational only (no tabindex/aria-describedby of their own): nesting a focusable
        element inside a <button> is an ARIA anti-pattern, so screen-reader users instead get the
        same facts via this button's aria-label; sighted keyboard users already see the plain text. *@
     <button @onclick="() => _expanded = !_expanded"
             aria-label="@HeaderAriaLabel"
-            class="w-full flex items-center gap-2 px-2.5 pt-1.5 text-left"
-            style="background:transparent">
+            class="w-full flex items-center gap-2 px-2.5 pt-1.5 text-left ls-turn-card-toggle">
         <span class="text-xs font-mono text-slate-500 shrink-0 ls-tip"
               data-tip="Turn position within this conversation">@Turn.TurnNumber/@TotalTurns</span>
-        <span class="text-xs font-medium text-slate-200 ls-truncate" style="flex:1 1 auto">@TitleExcerpt</span>
+        <span class="text-xs font-medium text-slate-200 ls-truncate ls-flex-auto">@TitleExcerpt</span>
         <span class="shrink-0 rounded px-1.5 py-0.5 text-xs font-semibold ls-tip"
               data-tip="Agent the router selected for this turn"
               style="background:@(AgentColor)22;color:@AgentColor;border:1px solid @(AgentColor)44">@Turn.Agent</span>
@@ -33,7 +32,7 @@
        Each stat is its own tab stop (tabindex="0") with aria-describedby pointing at the shared
        floating tooltip (wwwroot/js/tooltips.js), so every metric a mouse user can hover is also
        reachable and announced for keyboard/screen-reader users. *@
-    <div class="flex flex-wrap items-baseline px-2.5 pb-1.5 pt-1" style="gap:2px 14px">
+    <div class="flex flex-wrap items-baseline px-2.5 pb-1.5 pt-1 ls-stat-strip-gap">
         <span class="flex items-baseline gap-1 ls-tip" tabindex="0" aria-describedby="ls-tooltip"
               data-tip="Routing ROI: cost reduction from routing this task to a cheaper model vs. the worst-case expensive model">
             <span class="ls-stat-label">ROI</span>

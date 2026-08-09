@@ -192,4 +192,35 @@ public class UsageLedgerTests
         Assert.Equal(1, deleted);
         Assert.Equal(2, CountRows(temp));
     }
+
+    [Fact]
+    public async Task SumEstimatedCostUsd_SumsOnlyMatchingProviderWithinWindow()
+    {
+        using var temp = new TempDatabase();
+        var ledger = temp.CreateUsageLedger();
+        var windowStart = new DateTimeOffset(2026, 1, 10, 0, 0, 0, TimeSpan.Zero);
+        var windowEnd = windowStart.AddDays(1);
+
+        await ledger.RecordAsync(MakeEntry(requestId: "in-window-openai-1", provider: "openai", estimatedCostUsd: 1.25m, occurredAtUtc: windowStart), TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(MakeEntry(requestId: "in-window-openai-2", provider: "openai", estimatedCostUsd: 2.50m, occurredAtUtc: windowStart.AddHours(12)), TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(MakeEntry(requestId: "in-window-anthropic", provider: "anthropic", estimatedCostUsd: 99m, occurredAtUtc: windowStart.AddHours(1)), TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(MakeEntry(requestId: "before-window", provider: "openai", estimatedCostUsd: 100m, occurredAtUtc: windowStart.AddSeconds(-1)), TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(MakeEntry(requestId: "at-window-end", provider: "openai", estimatedCostUsd: 100m, occurredAtUtc: windowEnd), TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(MakeEntry(requestId: "no-cost", provider: "openai", estimatedCostUsd: null, occurredAtUtc: windowStart.AddHours(2)), TestContext.Current.CancellationToken);
+
+        var total = ledger.SumEstimatedCostUsd("openai", windowStart, windowEnd);
+
+        Assert.Equal(3.75m, total);
+    }
+
+    [Fact]
+    public void SumEstimatedCostUsd_NoMatchingRows_ReturnsZero()
+    {
+        using var temp = new TempDatabase();
+        var ledger = temp.CreateUsageLedger();
+
+        var total = ledger.SumEstimatedCostUsd("openai", DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow);
+
+        Assert.Equal(0m, total);
+    }
 }

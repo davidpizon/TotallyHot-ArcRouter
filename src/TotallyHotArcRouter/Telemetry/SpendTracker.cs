@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -7,8 +6,10 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// <summary>
 /// Tracks a personal-scale running spend total across the process lifetime - not a team/org billing
 /// system, just enough for a single developer to see what they've spent. Every recorded request's
-/// running total is logged (visible as terminal output through the configured Serilog Console sink)
-/// and appended to a local JSON Lines file, giving both a terminal view and a simple local file log.
+/// running total is logged (visible as terminal output through the configured Serilog Console sink),
+/// gated by <see cref="SpendTrackingOptions.Enabled"/>. §5.13 retired the JSON Lines file this class
+/// used to append to alongside the console line - the durable usage ledger supersedes it - so this is
+/// now the console line and the in-memory running total only.
 /// </summary>
 public interface ISpendTracker
 {
@@ -44,18 +45,13 @@ public readonly record struct SpendSummary(
     int UnpricedRequests = 0);
 
 /// <inheritdoc cref="ISpendTracker" />
-public sealed class SpendTracker : ISpendTracker, IDisposable
+public sealed class SpendTracker : ISpendTracker
 {
     private readonly ILogger<SpendTracker> _logger;
     private readonly SpendTrackingOptions _options;
-    private readonly string _logFilePath;
 
     // Guards the four running totals below (fast, synchronous - never held across an await).
     private readonly object _totalsLock = new();
-
-    // Serializes file appends only, so two requests completing at nearly the same time can't
-    // interleave their JSON Lines writes into a corrupted line.
-    private readonly SemaphoreSlim _fileMutex = new(1, 1);
 
     private int _requestCount;
     private long _totalPromptTokens;
@@ -64,7 +60,10 @@ public sealed class SpendTracker : ISpendTracker, IDisposable
     private int _unpricedRequests;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="SpendTracker"/> class.
+    /// Initializes a new instance of the <see cref="SpendTracker"/> class. Warns once, at construction,
+    /// when <paramref name="options"/> carries a <see cref="SpendTrackingOptions.LogPath"/> other than
+    /// the compiled-in default - the only signal available (without reading raw configuration) that an
+    /// operator has actually set it - since that setting no longer does anything (§5.13).
     /// </summary>
     public SpendTracker(ILogger<SpendTracker> logger, IOptions<SpendTrackingOptions> options)
     {
@@ -74,17 +73,22 @@ public sealed class SpendTracker : ISpendTracker, IDisposable
         _logger = logger;
         _options = options.Value;
 
-        _logFilePath = Path.IsPathRooted(_options.LogPath)
-            ? _options.LogPath
-            : Path.Combine(AppContext.BaseDirectory, _options.LogPath);
+        if (!string.Equals(_options.LogPath, SpendTrackingOptions.DefaultLogPath, StringComparison.Ordinal))
+        {
+            _logger.LogWarning(
+                "SpendTracking:LogPath is set to {LogPath} but is deprecated and no longer written - " +
+                "the durable usage ledger supersedes the JSON Lines spend log. This setting will be " +
+                "removed in a future release.",
+                _options.LogPath);
+        }
     }
 
     /// <inheritdoc />
-    public async Task<SpendSummary> RecordAsync(string model, int? promptTokens, int? completionTokens, decimal? estimatedCostUsd, CancellationToken cancellationToken = default)
+    public Task<SpendSummary> RecordAsync(string model, int? promptTokens, int? completionTokens, decimal? estimatedCostUsd, CancellationToken cancellationToken = default)
     {
         if (!_options.Enabled)
         {
-            return GetSummary();
+            return Task.FromResult(GetSummary());
         }
 
         SpendSummary summary;
@@ -132,19 +136,7 @@ public sealed class SpendTracker : ISpendTracker, IDisposable
                 summary.RequestCount);
         }
 
-        // Best-effort, like every other telemetry sink in this codebase (see ProxyMiddleware's
-        // PublishTelemetryAsync try/catch) - a disk/permission failure here must never affect request
-        // handling, so failures are logged at Debug and otherwise swallowed.
-        try
-        {
-            await AppendLogLineAsync(model, promptTokens, completionTokens, estimatedCostUsd, summary, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to append spend log entry to {LogFilePath}.", _logFilePath);
-        }
-
-        return summary;
+        return Task.FromResult(summary);
     }
 
     /// <inheritdoc />
@@ -156,54 +148,6 @@ public sealed class SpendTracker : ISpendTracker, IDisposable
         }
     }
 
-    /// <inheritdoc />
-    public void Dispose() => _fileMutex.Dispose();
-
-    /// <summary>
-    /// Serializes a <see cref="SpendLogEntry"/> for the given request and appends it as a line to the
-    /// log file, creating the containing directory if needed and serializing access via <see cref="_fileMutex"/>.
-    /// </summary>
-    private async Task AppendLogLineAsync(string model, int? promptTokens, int? completionTokens, decimal? estimatedCostUsd, SpendSummary summary, CancellationToken cancellationToken)
-    {
-        var directoryPath = Path.GetDirectoryName(_logFilePath);
-        if (!string.IsNullOrWhiteSpace(directoryPath))
-        {
-            Directory.CreateDirectory(directoryPath);
-        }
-
-        var entry = new SpendLogEntry(DateTimeOffset.UtcNow, model, promptTokens, completionTokens, estimatedCostUsd, summary.TotalCostUsd, summary.RequestCount);
-        var line = JsonSerializer.Serialize(entry) + Environment.NewLine;
-
-        await _fileMutex.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            await File.AppendAllTextAsync(_logFilePath, line, cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            _fileMutex.Release();
-        }
-    }
-
-    /// <summary>
-    /// A single line of the JSON-lines spend log, recording one request's usage and cost alongside the
-    /// running totals at the time it was recorded.
-    /// </summary>
-    /// <param name="TimestampUtc">The UTC time the request was recorded.</param>
-    /// <param name="Model">The model used to serve the request.</param>
-    /// <param name="PromptTokens">The number of prompt tokens consumed, if known.</param>
-    /// <param name="CompletionTokens">The number of completion tokens produced, if known.</param>
-    /// <param name="CostUsd">The estimated cost in USD for this request, if known.</param>
-    /// <param name="RunningTotalCostUsd">The cumulative cost in USD across all recorded requests, including this one.</param>
-    /// <param name="RequestCount">The cumulative number of requests recorded, including this one.</param>
-    private sealed record SpendLogEntry(
-        DateTimeOffset TimestampUtc,
-        string Model,
-        int? PromptTokens,
-        int? CompletionTokens,
-        decimal? CostUsd,
-        decimal RunningTotalCostUsd,
-        int RequestCount);
 }
 
 /// <summary>

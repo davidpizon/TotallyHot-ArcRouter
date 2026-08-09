@@ -79,6 +79,46 @@ public sealed class ProviderAdminEndpointsTests
     }
 
     [Fact]
+    public async Task GetRateLimitHistory_NoPriceCatalogRepository_ReturnsServiceUnavailable()
+    {
+        var store = new InMemoryProviderConfigStore(SeedOptions());
+        using var server = BuildServer(store);
+        await server.StartAsync(TestContext.Current.CancellationToken);
+        try
+        {
+            using var client = new HttpClient();
+            var response = await client.GetAsync(
+                $"{BaseAddress(server)}/admin/providers/openai/rate-limit-history", TestContext.Current.CancellationToken);
+
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        }
+        finally
+        {
+            await server.StopAsync(TestContext.Current.CancellationToken);
+        }
+    }
+
+    [Fact]
+    public async Task GetRateLimitHistory_UnknownProvider_ReturnsNotFound()
+    {
+        var store = new InMemoryProviderConfigStore(SeedOptions());
+        using var server = BuildServer(store);
+        await server.StartAsync(TestContext.Current.CancellationToken);
+        try
+        {
+            using var client = new HttpClient();
+            var response = await client.GetAsync(
+                $"{BaseAddress(server)}/admin/providers/does-not-exist/rate-limit-history", TestContext.Current.CancellationToken);
+
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+        finally
+        {
+            await server.StopAsync(TestContext.Current.CancellationToken);
+        }
+    }
+
+    [Fact]
     public async Task PutProvider_ThenPutModel_IsReflectedLiveInModelsEndpoint()
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());

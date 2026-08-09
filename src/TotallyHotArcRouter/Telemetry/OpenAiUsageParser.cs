@@ -90,7 +90,22 @@ public static class OpenAiUsageParser
         // negative additive prompt count.
         var additivePromptTokens = Math.Max(0, promptTokens - cacheReadTokens - cacheCreationTokens);
 
-        usage = new UsageInfo(additivePromptTokens, completionTokens, cacheCreationTokens, cacheReadTokens);
+        // A subset of completion_tokens (see UsageInfo.ReasoningTokens), not a fifth additive dimension -
+        // absent for models with no extended-thinking concept, which is also the correct default (0).
+        var reasoningTokens = 0;
+        if (usageObj["completion_tokens_details"] is JsonObject completionTokensDetails)
+        {
+            TryGetInt(completionTokensDetails, "reasoning_tokens", out reasoningTokens);
+        }
+
+        // Math.Clamp guards a malformed/changed upstream payload (a negative value, or one exceeding
+        // completion_tokens) from violating UsageInfo.ReasoningTokens' documented "subset of
+        // CompletionTokens, never negative" contract and skewing downstream attribution. The upper bound
+        // is floored at 0 too - Math.Clamp requires min <= max, and completion_tokens itself is unvalidated
+        // upstream input that could theoretically arrive negative.
+        reasoningTokens = Math.Clamp(reasoningTokens, 0, Math.Max(0, completionTokens));
+
+        usage = new UsageInfo(additivePromptTokens, completionTokens, cacheCreationTokens, cacheReadTokens, reasoningTokens);
         return true;
     }
 

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Linq;
 using TotallyHot.ArcRouter.PriceCatalog.Sources;
 using TotallyHot.ArcRouter.Telemetry;
 using Microsoft.Data.Sqlite;
@@ -825,5 +826,60 @@ public sealed class PriceCatalogRepository
 
         return (rows, latest);
     }
+
+    /// <summary>
+    /// Returns a provider's captured rate-limit header history since <paramref name="sinceUtc"/>, grouped
+    /// into minute buckets in chronological order (the shape <see cref="UpsertRateLimitHeaders"/> writes).
+    /// Each bucket carries only the headers actually captured in that minute; a bucket with no captures is
+    /// simply absent, never filled forward. Backs the Providers card's rate-limit trend chart and burn-rate
+    /// projection (§5.9).
+    /// </summary>
+    public IReadOnlyList<RateLimitHistoryBucket> GetRateLimitHistory(string providerKey, DateTimeOffset sinceUtc)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
+
+        var sinceBucket = sinceUtc.UtcDateTime.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT minute_bucket, header_name, header_value
+            FROM provider_rate_limit_history
+            WHERE provider_key = $key AND minute_bucket >= $since
+            ORDER BY minute_bucket;
+            """;
+        command.Parameters.AddWithValue("$key", providerKey);
+        command.Parameters.AddWithValue("$since", sinceBucket);
+
+        // Rows arrive pre-sorted by minute_bucket, so a run of rows sharing the same bucket string is
+        // always contiguous - one pass groups them without a Dictionary's unordered enumeration risk.
+        var buckets = new List<(string Bucket, List<RateLimitHeaderRow> Headers)>();
+        using (var reader = command.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                var bucket = reader.GetString(0);
+                if (buckets.Count == 0 || buckets[^1].Bucket != bucket)
+                {
+                    buckets.Add((bucket, []));
+                }
+
+                buckets[^1].Headers.Add(new RateLimitHeaderRow(reader.GetString(1), reader.GetString(2)));
+            }
+        }
+
+        return buckets
+            .Select(b => new RateLimitHistoryBucket(ParseMinuteBucket(b.Bucket), b.Headers))
+            .ToList();
+    }
+
+    // minute_bucket is stored as "yyyy-MM-ddTHH:mm" (see UpsertRateLimitHeaders); appending seconds and a
+    // 'Z' turns it into an unambiguous UTC instant for ParseExact.
+    private static DateTimeOffset ParseMinuteBucket(string minuteBucket) =>
+        DateTimeOffset.ParseExact(
+            minuteBucket + ":00Z",
+            "yyyy-MM-ddTHH:mm:ssK",
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal);
 }
 
