@@ -1,4 +1,6 @@
-@* System settings modal: destructive actions gated behind a typed confirmation word. *@
+@* System settings modal: telemetry connection settings plus destructive actions gated behind a typed confirmation word. *@
+@inject LiveDataStore LiveDataStore
+@inject IGuiSettingsStore SettingsStore
 <div class="overlay-backdrop fixed inset-0 z-50 flex items-center justify-center"
      @onclick="OnClose">
     <div class="overlay-panel w-full max-w-md rounded-lg border border-slate-700"
@@ -14,6 +16,29 @@
         </div>
 
         <div class="overlay-content p-5 space-y-4">
+            @* Connection settings *@
+            <div class="space-y-2">
+                <label for="telemetry-address" class="text-xs text-slate-400 font-medium uppercase tracking-widest">
+                    Telemetry Server Address
+                </label>
+                <div class="flex gap-2">
+                    <input id="telemetry-address"
+                           type="text"
+                           value="@_telemetryAddress"
+                           @oninput="e => _telemetryAddress = (string?)e.Value ?? string.Empty"
+                           class="flex-1 px-3 py-2 text-sm font-mono ds-input" />
+                    <button @onclick="SaveTelemetryAddress"
+                            disabled="@string.IsNullOrWhiteSpace(_telemetryAddress)"
+                            class="btn btn-ghost">
+                        Save
+                    </button>
+                </div>
+                @if (_telemetryAddressSaved)
+                {
+                    <p class="text-xs text-emerald-400">Saved. Restart the app to connect to the new address.</p>
+                }
+            </div>
+
             @* Destructive zone label *@
             <div class="flex items-center gap-2 text-xs text-amber-400 font-medium uppercase tracking-widest">
                 <Icon Name="alert-triangle" Size="12" />
@@ -80,10 +105,28 @@
     private string _confirmText = string.Empty;
     private ElementReference _confirmInput;
     private bool _focusPending;
+    private string _telemetryAddress = string.Empty;
+    private bool _telemetryAddressSaved;
 
     private string Required => _activeAction == "reset" ? "RESET" : "PURGE";
 
     private bool IsConfirmed => _confirmText == Required;
+
+    protected override void OnInitialized()
+    {
+        _telemetryAddress = SettingsStore.Load().TelemetryServerAddress;
+    }
+
+    private void SaveTelemetryAddress()
+    {
+        if (string.IsNullOrWhiteSpace(_telemetryAddress))
+        {
+            return;
+        }
+
+        SettingsStore.Save(new GuiSettings(_telemetryAddress));
+        _telemetryAddressSaved = true;
+    }
 
     private void StartAction(string action)
     {
@@ -98,12 +141,22 @@
         _confirmText = string.Empty;
     }
 
-    // No real reset/purge is wired up yet - confirming just closes the modal, matching the mock design.
+    // Both actions clear this session's live view (LiveDataStore.ClearEvents); Clear History additionally
+    // empties the Console tab's log buffer, since "history" reads as everything accumulated, not just the
+    // Live Stream/Cost Analytics stats "Reset Stats" implies. Neither touches the proxy's own durable
+    // history (see ClearEvents' remarks) or any persisted configuration - the note below the buttons stays
+    // accurate.
     private async Task ExecuteAction()
     {
         if (!IsConfirmed)
         {
             return;
+        }
+
+        LiveDataStore.ClearEvents();
+        if (_activeAction == "purge")
+        {
+            LiveDataStore.ClearLogLines();
         }
 
         CancelAction();

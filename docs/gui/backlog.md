@@ -28,17 +28,30 @@ data sources in
   today — the same gap that keeps per-turn `RoutingRoi` at 0), Tool Steps, and Context Buffer — the
   rollup table has no per-turn breakdown for these dimensions. Wiring these live means adding the
   corresponding fields to `RoutingTelemetryEvent`/the proto and the mapper chain (see the field table
-  in `../router/telemetry.md`).
+  in `../router/telemetry.md`). **Deliberately deferred**, not a small follow-up: each of the three
+  needs a new domain concept nothing in the codebase computes today — a worst-case/baseline-cost
+  model for Routing ROI, a per-model context-window-size configuration for Context Buffer, and
+  within-turn tool-call introspection for Tool Steps — plus its own proto field and
+  `LiveConversationMapper`/`ModelRouteResolver` wiring. Populating any of them without that data
+  would mean inventing numbers, the same fabricated-data trap `model-price-catalog.md` and
+  `src/PLAN.md`'s Phase E multimodal-pricing decision already declined. If picked up, Tool Steps is
+  the smallest first step: it only requires parsing response bodies already captured by
+  `ResponseTextExtractor`, where Routing ROI and Context Buffer both need new pricing/config data
+  sources that don't exist yet.
 - ~~**Model Distribution** — real `TokenBucket`/`ModelShare` data.~~ **Done** (Phase 4 §5.15):
   `ModelDistribution.razor` fetches real buckets via `UsageStore.LoadRollupAsync`, grouped by day for
   the histogram and by model for the donut; the Day/Month/3-Month/6-Month/Year filter bar and the
   From/To inputs now actually refilter, falling back to `MockData` only when there's nothing live to
   show.
-- **Governance** — real per-provider budget/spend data. The Budget Cap input is editable today but
-  purely client-side: edits recompute the in-memory utilization/status/bar but aren't persisted
-  anywhere and are lost on refresh; needs a real place to write to. See
-  [`../router/agent-cost-tracking.md`](../router/agent-cost-tracking.md) for a proposed persistent
-  usage ledger + budget-window query that would be that "real place." A first cut of
+- ~~**Governance** — real per-provider budget/spend data.~~ **Done.** Budget Cap edits persist
+  through `ProviderAdminClient.SetBudgetAsync` → the proxy's `/admin/providers/{key}/budget`
+  endpoint → `ProviderBudgetStore` (SQLite `provider_budgets`/`provider_spend` tables, with
+  per-provider `BudgetWindow` support), tested by `ProviderBudgetStoreTests`/
+  `ProviderAdminEndpointsTests` — they survive a refresh and a GUI restart. (This corrects an
+  earlier version of this bullet, which described the input as purely client-side; that was already
+  stale by the time of writing.) [`../router/agent-cost-tracking.md`](../router/agent-cost-tracking.md)'s
+  deeper per-request usage ledger (`UsageLedger`/`IUsageLedger`) is also implemented, separately
+  from this budget/spend path. A first cut of
   [`governance-model-cards.md`](governance-model-cards.md)'s per-model pricing/spend section now
   exists (Governance > Models) with real spend from `UsageStore`, but every card still reads "Price
   unavailable" — that doc's dependency #1, a live model price catalog channel to the GUI, is still

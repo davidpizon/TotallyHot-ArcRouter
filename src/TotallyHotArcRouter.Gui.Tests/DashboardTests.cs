@@ -19,6 +19,7 @@ public sealed class DashboardTests
         ctx.Services.AddSingleton(new LiveDataStore(serverAddress: "https://127.0.0.1:59996"));
         ctx.Services.AddSingleton(new ProviderAdminStore(managementAddress: "http://127.0.0.1:59994"));
         ctx.Services.AddSingleton(new UsageStore(managementAddress: "http://127.0.0.1:59993"));
+        ctx.Services.AddSingleton<IGuiSettingsStore>(new GuiSettingsStore(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".json")));
         return ctx;
     }
 

@@ -83,7 +83,7 @@ public sealed class LiveDataStore : IAsyncDisposable
         // TelemetryChannelFactory, shared with PriceSourceAdminClient - both talk to the same process over
         // the same certificate, and two copies of a validation callback is how they drift apart.
         _channel = TelemetryChannelFactory.Create(serverAddress);
-        _client = new Contract.TelemetryService.TelemetryServiceClient(_channel);
+        _client = new Contract.TelemetryService.TelemetryServiceClient(TelemetryChannelFactory.Authenticated(_channel));
         WriteDiagnosticLog($"LiveDataStore constructed. serverAddress={serverAddress}");
     }
 
@@ -291,6 +291,23 @@ public sealed class LiveDataStore : IAsyncDisposable
     {
         _logBuffer.Clear();
         LogLinesChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// Empties accumulated telemetry events and the derived <see cref="Conversations"/> list. Implements
+    /// the Settings modal's Reset Stats/Clear History actions - scoped to this session's live view, not
+    /// the proxy's own durable history (<see cref="UsageStore"/> reads that separately, straight from
+    /// the proxy, and is unaffected by this).
+    /// </summary>
+    public void ClearEvents()
+    {
+        lock (_lock)
+        {
+            _events.Clear();
+        }
+
+        _conversations = [];
+        Changed?.Invoke();
     }
 
     /// <summary>Cancels the live telemetry stream and releases the gRPC channel.</summary>

@@ -79,9 +79,11 @@ namespace TotallyHot.ArcRouter.Proxy
         /// </param>
         /// <param name="managementToken">
         /// Optional shared secret required (in the <c>X-Admin-Token</c> header) on every <c>/admin/*</c>
-        /// request when set. Defaults to <see langword="null"/> (no inbound auth) - production wiring
+        /// request when set, and - via <see cref="Telemetry.TelemetryAuthInterceptor"/> - on every call to
+        /// the TLS <paramref name="grpcPort"/> gRPC endpoint (the telemetry stream and price-source admin
+        /// service alike). Defaults to <see langword="null"/> (no inbound auth) - production wiring
         /// (<see cref="TotallyHot.ArcRouter.Hosting.ServiceCollectionExtensions"/>) always passes the
-        /// <see cref="Management.ManagementAccessToken"/> value here, so <c>/admin/*</c> is gated by
+        /// <see cref="Management.ManagementAccessToken"/> value here, so both surfaces are gated by
         /// default; a caller passing <see langword="null"/> explicitly opts out (e.g. a test exercising
         /// forwarding only).
         /// </param>
@@ -210,7 +212,21 @@ namespace TotallyHot.ArcRouter.Proxy
                     // above), not the outer one.
                     webBuilder.ConfigureServices(services =>
                     {
-                        services.AddGrpc();
+                        // Gate every gRPC call (telemetry stream and price-source admin alike) behind the
+                        // same shared management token the REST /admin/* API and MCP endpoint require -
+                        // see TelemetryAuthInterceptor's remarks. Only registered when a token is
+                        // configured, mirroring managementToken's REST/MCP gating: a null token means "no
+                        // inbound auth", used by tests exercising forwarding only.
+                        if (!string.IsNullOrWhiteSpace(managementToken))
+                        {
+                            services.AddSingleton(new TelemetryAuthInterceptor(managementToken));
+                            services.AddGrpc(options => options.Interceptors.Add<TelemetryAuthInterceptor>());
+                        }
+                        else
+                        {
+                            services.AddGrpc();
+                        }
+
                         services.AddSingleton(broadcaster);
 
                         // Same reasoning as the broadcaster: the price catalog singletons live in the outer

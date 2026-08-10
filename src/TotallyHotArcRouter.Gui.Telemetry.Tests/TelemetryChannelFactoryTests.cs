@@ -91,6 +91,16 @@ public class TelemetryChannelFactoryTests
     }
 
     [Fact]
+    public void Authenticated_wraps_the_channel_in_a_call_invoker()
+    {
+        using var channel = TelemetryChannelFactory.Create();
+
+        var invoker = TelemetryChannelFactory.Authenticated(channel);
+
+        invoker.Should().NotBeNull();
+    }
+
+    [Fact]
     public void DefaultServerAddress_is_the_tls_grpc_port()
     {
         // Pinned because the proxy binds 5002 for gRPC over TLS while 5001 stays plain HTTP for LLM
