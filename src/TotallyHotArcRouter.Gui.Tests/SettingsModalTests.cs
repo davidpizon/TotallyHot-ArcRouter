@@ -15,9 +15,12 @@ public sealed class SettingsModalTests
     {
         var ctx = new Bunit.BunitContext();
         liveDataStore = new LiveDataStore(serverAddress: "https://127.0.0.1:59996");
-        settingsStore = new GuiSettingsStore(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".json"));
+        var settingsPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".json");
+        settingsStore = new GuiSettingsStore(settingsPath);
         ctx.Services.AddSingleton(liveDataStore);
         ctx.Services.AddSingleton(settingsStore);
+        ctx.Services.AddSingleton(_ => new TempFileCleanup(settingsPath));
+        ctx.Services.GetRequiredService<TempFileCleanup>();
         return ctx;
     }
 
