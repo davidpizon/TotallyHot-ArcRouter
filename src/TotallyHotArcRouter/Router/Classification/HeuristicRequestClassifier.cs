@@ -7,7 +7,7 @@ namespace TotallyHot.ArcRouter.Router.Classification;
 
 /// <summary>
 /// A keyword/shape heuristic <see cref="IRequestClassifier"/> - deliberately minimal to start (same
-/// philosophy as <see cref="Sandbox.Extraction.KeywordDimensionInferrer"/>, architecture doc §10).
+/// philosophy as <see cref="TotallyHot.ArcRouter.Sandbox.Extraction.KeywordDimensionInferrer"/>, architecture doc §10).
 /// Delegates dimension inference to the shared <see cref="IDimensionInferrer"/> so a request classified
 /// here and the same prompt's later sandbox-side dimension can never independently drift apart.
 /// </summary>
@@ -50,13 +50,13 @@ public sealed class HeuristicRequestClassifier : IRequestClassifier
 
     /// <summary>Initializes a new instance of the <see cref="HeuristicRequestClassifier"/> class.</summary>
     /// <param name="dimensionInferrer">
-    /// The shared dimension inferrer - defaults to a fresh <see cref="Sandbox.Extraction.KeywordDimensionInferrer"/>
-    /// when omitted, the same default <see cref="Proxy.RequestInterceptor"/> uses, so the two stay
+    /// The shared dimension inferrer - defaults to a fresh <see cref="TotallyHot.ArcRouter.Sandbox.Extraction.KeywordDimensionInferrer"/>
+    /// when omitted, the same default <see cref="TotallyHot.ArcRouter.Proxy.RequestInterceptor"/> uses, so the two stay
     /// classified identically without either side hand-picking an instance.
     /// </param>
     public HeuristicRequestClassifier(IDimensionInferrer? dimensionInferrer = null)
     {
-        _dimensionInferrer = dimensionInferrer ?? new Sandbox.Extraction.KeywordDimensionInferrer();
+        _dimensionInferrer = dimensionInferrer ?? new TotallyHot.ArcRouter.Sandbox.Extraction.KeywordDimensionInferrer();
     }
 
     /// <inheritdoc />
