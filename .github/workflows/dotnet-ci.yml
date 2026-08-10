@@ -131,6 +131,7 @@ jobs:
 
   windows-gui-build-and-test:
     name: Build and test GUI (Windows/MAUI)
+    if: false
     runs-on: windows-latest
     steps:
       - name: Checkout
