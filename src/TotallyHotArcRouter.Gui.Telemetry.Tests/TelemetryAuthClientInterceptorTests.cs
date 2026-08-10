@@ -65,6 +65,30 @@ public class TelemetryAuthClientInterceptorTests
     }
 
     [Fact]
+    public void Picks_up_a_token_file_created_after_construction()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".txt");
+        try
+        {
+            var interceptor = new TelemetryAuthClientInterceptor(tokenPath: path);
+            File.WriteAllText(path, "late-token");
+            ClientInterceptorContext<string, string>? captured = null;
+
+            interceptor.BlockingUnaryCall("request", NewContext(), (_, ctx) =>
+            {
+                captured = ctx;
+                return "response";
+            });
+
+            captured!.Value.Options.Headers!.Get(TokenHeaderName)!.Value.Should().Be("late-token");
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void Leaves_the_call_untouched_when_no_token_file_exists()
     {
         var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".txt");

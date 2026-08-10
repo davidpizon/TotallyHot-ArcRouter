@@ -17,17 +17,21 @@ public sealed class TelemetryAuthClientInterceptor : Interceptor
     private const string TokenHeaderName = "x-admin-token";
     private const string TokenFileName = "management-token.txt";
 
-    private readonly string? _token;
+    private readonly string? _explicitToken;
+    private readonly string? _tokenPath;
 
     /// <summary>Initializes a new instance of the <see cref="TelemetryAuthClientInterceptor"/> class.</summary>
     /// <param name="token">
-    /// The token to attach, or <see langword="null"/> to read it from the default per-user token file.
-    /// Only meant to be overridden by tests; production callers omit it.
+    /// The token to attach, or <see langword="null"/> to read it from the per-user token file on every
+    /// call (so a token created after this interceptor was constructed - e.g. the GUI starting before
+    /// the proxy on first run - still gets picked up). Only meant to be overridden by tests; production
+    /// callers omit it.
     /// </param>
     /// <param name="tokenPath">The token file path override; only meant for tests. Production callers omit it.</param>
     public TelemetryAuthClientInterceptor(string? token = null, string? tokenPath = null)
     {
-        _token = token ?? TryReadToken(tokenPath);
+        _explicitToken = token;
+        _tokenPath = tokenPath;
     }
 
     /// <inheritdoc/>
@@ -54,14 +58,17 @@ public sealed class TelemetryAuthClientInterceptor : Interceptor
     /// <summary>
     /// Returns <paramref name="context"/> unchanged when no token is available (the call proceeds and the
     /// server rejects it, exactly as a REST admin call with no token file yet would), otherwise returns a
-    /// copy with the token attached as the <c>x-admin-token</c> metadata entry.
+    /// copy with the token attached as the <c>x-admin-token</c> metadata entry. Resolves the token fresh
+    /// on every call (unless an explicit token was supplied) rather than caching it at construction time,
+    /// so a token file created after this interceptor was built - e.g. the GUI starting before the proxy
+    /// on first run - is picked up as soon as it exists.
     /// </summary>
     private ClientInterceptorContext<TRequest, TResponse> WithToken<TRequest, TResponse>(
         ClientInterceptorContext<TRequest, TResponse> context)
         where TRequest : class
         where TResponse : class
     {
-        var token = _token;
+        var token = _explicitToken ?? TryReadToken(_tokenPath);
         if (string.IsNullOrEmpty(token))
         {
             return context;

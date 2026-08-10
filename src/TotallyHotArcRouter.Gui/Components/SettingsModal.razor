@@ -133,7 +133,7 @@
         }
 
         _telemetryAddress = trimmed;
-        SettingsStore.Save(new GuiSettings(trimmed));
+        SettingsStore.Save(SettingsStore.Load() with { TelemetryServerAddress = trimmed });
         _telemetryAddressSaved = true;
     }
 
