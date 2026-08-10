@@ -32,6 +32,7 @@ public sealed class PriceCatalogIngestionService
     private readonly PriceCatalogRepository _repository;
     private readonly PriceSourceToggleStore _toggleStore;
     private readonly ILogger<PriceCatalogIngestionService> _logger;
+    private readonly IModelPriceCatalog? _priceCatalog;
 
     // Single-flight gate. The background poll loop and the Governance panel's "Pull Now" both land here, and
     // two concurrent cycles would double-fetch every source and race their upserts against each other. A
@@ -47,11 +48,21 @@ public sealed class PriceCatalogIngestionService
     /// <summary>
     /// Initializes a new instance of the <see cref="PriceCatalogIngestionService"/> class.
     /// </summary>
+    /// <param name="registry">The enabled price-source clients this service fetches from each cycle.</param>
+    /// <param name="repository">The catalog repository each cycle's normalized prices are upserted into.</param>
+    /// <param name="toggleStore">Owns each source's enabled state (D6), including the mid-fetch cancellation token.</param>
+    /// <param name="logger">Structured log sink for per-source outcomes and D4's zero-fresh-prices error.</param>
+    /// <param name="priceCatalog">
+    /// Optional read-side cache to invalidate once a cycle has actually written rows - Phase 4's eviction
+    /// signal. When <see langword="null"/> (tests constructing this type directly), nothing is invalidated
+    /// and ingestion behaves exactly as before; the cache is a read-path concern, not an ingestion one.
+    /// </param>
     public PriceCatalogIngestionService(
         IPriceSourceRegistry registry,
         PriceCatalogRepository repository,
         PriceSourceToggleStore toggleStore,
-        ILogger<PriceCatalogIngestionService> logger)
+        ILogger<PriceCatalogIngestionService> logger,
+        IModelPriceCatalog? priceCatalog = null)
     {
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(repository);
@@ -62,6 +73,7 @@ public sealed class PriceCatalogIngestionService
         _repository = repository;
         _toggleStore = toggleStore;
         _logger = logger;
+        _priceCatalog = priceCatalog;
 
         // Construction time seeds the anchor so the schedule is well-defined before cycle #1. Without it a
         // router with every source disabled - which skips the startup cycle entirely
@@ -118,6 +130,7 @@ public sealed class PriceCatalogIngestionService
     private async Task<IngestionCycleSummary> RunCycleCoreAsync(CancellationToken cancellationToken)
     {
         var outcomes = new List<SourceOutcome>();
+        var wroteAnyPrices = false;
 
         foreach (var client in _registry.EnabledClients)
         {
@@ -152,6 +165,7 @@ public sealed class PriceCatalogIngestionService
                 // so by the time ingestion runs, the row - and its operator-set rank - already exists, and the
                 // priority gate below reads that stored rank, not this parameter.
                 var written = _repository.UpsertPrices(client.Name, priorityScore: 0, prices, DateTimeOffset.UtcNow);
+                wroteAnyPrices |= written > 0;
 
                 outcomes.Add(new SourceOutcome(client.Name, Succeeded: true, PriceCount: written, Error: null));
                 _logger.LogInformation(
@@ -173,6 +187,14 @@ public sealed class PriceCatalogIngestionService
 
             // An OperationCanceledException with the caller's token cancelled falls through both catches and
             // propagates - the host is shutting down, and that is not a source failure to report.
+        }
+
+        // Phase 4's eviction signal: drop the read-side cache only when a source actually wrote rows, so a
+        // cycle where every source failed - or returned nothing - leaves the cache serving the last prices
+        // that were known good rather than forcing every reader back to SQLite for the same answers.
+        if (wroteAnyPrices)
+        {
+            _priceCatalog?.Invalidate();
         }
 
         var freshPriceCount = _repository.CountFreshPrices(FreshnessFloor);

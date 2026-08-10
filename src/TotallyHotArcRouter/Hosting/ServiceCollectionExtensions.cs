@@ -151,6 +151,12 @@ namespace TotallyHot.ArcRouter.Hosting
             // estimates each paid request's cost from the catalog through this seam. Registered so the
             // container injects it into ProxyMiddleware's optional priceLookup constructor parameter.
             services.AddSingleton<IModelPriceLookup, PriceCatalogModelPriceLookup>();
+            // The wider Phase 4 read surface (docs/router/model-price-catalog.md): the same rows as the
+            // lookup above, but tier-selected via PriceContext and served from an in-memory cache so a
+            // routing decision can price candidates inline with a live request without touching SQLite.
+            // A singleton because the cache is the point - a per-request instance would never hit.
+            services.AddSingleton<ModelPriceCatalog>();
+            services.AddSingleton<IModelPriceCatalog>(sp => sp.GetRequiredService<ModelPriceCatalog>());
             // Owns aggregator_sources.enabled (D6). Starts empty and is populated by
             // StartupHealthCheckHostedService once the schema exists - see PriceSourceToggleStore's remarks.
             services.AddSingleton<PriceSourceToggleStore>();

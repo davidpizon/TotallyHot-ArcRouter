@@ -1,5 +1,6 @@
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.PriceCatalog.Sources;
+using TotallyHot.ArcRouter.Telemetry;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace TotallyHot.ArcRouter.Tests.PriceCatalog;
@@ -273,15 +274,77 @@ public class PriceCatalogIngestionServiceTests
         Assert.Equal(2, source.FetchCount);
     }
 
+    [Fact]
+    public async Task RunCycleAsync_SourceWritesPrices_InvalidatesTheCatalog()
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+        using var toggleStore = temp.CreateToggleStore(repository);
+        var registry = new FakeRegistry(new StubSource("litellm", new NormalizedPrice("gpt-4o", "openai", 2.5m, 10.0m, null, null, null)));
+        var catalog = new RecordingModelPriceCatalog();
+        var service = Build(registry, repository, toggleStore, catalog);
+
+        await service.RunCycleAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, catalog.InvalidateCallCount);
+    }
+
+    [Fact]
+    public async Task RunCycleAsync_EverySourceFails_DoesNotInvalidateTheCatalog()
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+        using var toggleStore = temp.CreateToggleStore(repository);
+        var registry = new FakeRegistry(new ThrowingSource("litellm"));
+        var catalog = new RecordingModelPriceCatalog();
+        var service = Build(registry, repository, toggleStore, catalog);
+
+        await service.RunCycleAsync(TestContext.Current.CancellationToken);
+
+        // A failed cycle wrote nothing, so the cache serving the last known-good prices must be left alone -
+        // see IModelPriceCatalog.Invalidate's own remarks on why eviction is keyed on "a source wrote
+        // something" rather than "a cycle ran".
+        Assert.Equal(0, catalog.InvalidateCallCount);
+    }
+
+    [Fact]
+    public async Task RunCycleAsync_NoEnabledSources_DoesNotInvalidateTheCatalog()
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+        using var toggleStore = temp.CreateToggleStore(repository);
+        var catalog = new RecordingModelPriceCatalog();
+        var service = Build(new FakeRegistry(), repository, toggleStore, catalog);
+
+        await service.RunCycleAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, catalog.InvalidateCallCount);
+    }
+
     private static PriceCatalogIngestionService Build(
         IPriceSourceRegistry registry,
         PriceCatalogRepository repository,
-        PriceSourceToggleStore toggleStore) =>
-        new(registry, repository, toggleStore, NullLogger<PriceCatalogIngestionService>.Instance);
+        PriceSourceToggleStore toggleStore,
+        IModelPriceCatalog? priceCatalog = null) =>
+        new(registry, repository, toggleStore, NullLogger<PriceCatalogIngestionService>.Instance, priceCatalog);
 
     private sealed class FakeRegistry(params IPriceSourceClient[] clients) : IPriceSourceRegistry
     {
         public IReadOnlyList<IPriceSourceClient> EnabledClients { get; } = clients;
+    }
+
+    /// <summary>Spies on <see cref="IModelPriceCatalog.Invalidate"/> calls; the read methods are unused here.</summary>
+    private sealed class RecordingModelPriceCatalog : IModelPriceCatalog
+    {
+        public int InvalidateCallCount { get; private set; }
+
+        public void Invalidate() => InvalidateCallCount++;
+
+        public ModelPrice? GetBestPriceForModel(ModelKey key, PriceContext context) =>
+            throw new NotSupportedException("Not exercised by these tests.");
+
+        public ModelPrice? GetFreshPriceForRouting(ModelKey key, PriceContext context, TimeSpan maxAge) =>
+            throw new NotSupportedException("Not exercised by these tests.");
     }
 
     private sealed class StubSource(string name, params NormalizedPrice[] prices) : IPriceSourceClient

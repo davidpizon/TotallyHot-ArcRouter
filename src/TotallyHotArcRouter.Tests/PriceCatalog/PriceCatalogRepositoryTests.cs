@@ -450,6 +450,70 @@ public class PriceCatalogRepositoryTests
     }
 
     [Fact]
+    public void GetFreshPrice_RoundTripsBatchRates()
+    {
+        // The batch columns were written by ingestion long before any read surfaced them; this pins the
+        // read half so a stored batch discount can never again be silently invisible to cost estimation.
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+
+        repository.UpsertPrices(
+            "litellm",
+            0,
+            new[]
+            {
+                new NormalizedPrice(
+                    "gpt-4o", "openai",
+                    StandardInputPrice: 2.50m, StandardOutputPrice: 10.00m,
+                    CachedInputPrice: null, BatchInputPrice: 1.25m, BatchOutputPrice: 5.00m),
+            },
+            DateTimeOffset.UtcNow);
+
+        var price = repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24));
+
+        Assert.NotNull(price);
+        Assert.Equal(1.25m, price!.BatchInputPerMillionTokens);
+        Assert.Equal(5.00m, price.BatchOutputPerMillionTokens);
+    }
+
+    [Fact]
+    public void GetFreshPrice_NoBatchRatesPublished_BatchFieldsAreNull()
+    {
+        // Null, never 0m: a provider that publishes no batch rate does not offer batch pricing, and
+        // collapsing that into a zero rate would price batch work as free.
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+
+        repository.UpsertPrices("litellm", 0, new[] { Price("gpt-4o", "openai", 2.50m, 10.00m) }, DateTimeOffset.UtcNow);
+
+        var price = repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24));
+
+        Assert.NotNull(price);
+        Assert.Null(price!.BatchInputPerMillionTokens);
+        Assert.Null(price.BatchOutputPerMillionTokens);
+    }
+
+    [Fact]
+    public void GetPriceEntry_ReturnsAStaleRowWithItsFetchTimestamp()
+    {
+        // GetFreshPrice's counterpart: no age bound, and it carries last_updated_utc so the read-side cache
+        // can evaluate the freshness floor in memory instead of caching one entry per age bound.
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+        var fetchedAt = DateTimeOffset.UtcNow.AddDays(-30);
+
+        repository.UpsertPrices("litellm", 0, new[] { Price("gpt-4o", "openai", 2.50m, 10.00m) }, fetchedAt);
+
+        Assert.Null(repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24)));
+
+        var entry = repository.GetPriceEntry(new ModelKey("gpt-4o", "openai"));
+
+        Assert.NotNull(entry);
+        Assert.Equal(2.50m, entry!.Value.Price.InputPerMillionTokens);
+        Assert.Equal(fetchedAt, entry.Value.LastUpdatedUtc, TimeSpan.FromSeconds(1));
+    }
+
+    [Fact]
     public void GetFreshPrice_NoCacheRatesPublished_CacheFieldsAreNull()
     {
         using var temp = new TempDatabase();

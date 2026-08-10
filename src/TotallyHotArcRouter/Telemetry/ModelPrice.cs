@@ -29,19 +29,41 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// <see cref="Telemetry.CostConfidence.CatalogApproximate"/> instead of
 /// <see cref="Telemetry.CostConfidence.Catalog"/>.
 /// </param>
+/// <param name="BatchInputPerMillionTokens">
+/// USD per 1,000,000 input tokens at batch/off-peak rates, or <see langword="null"/> when this
+/// (model, provider) cell publishes no batch rate. Null means <em>this provider does not offer batch
+/// pricing for this model</em> - never that batch is free - so a caller that cannot find a batch rate
+/// pays the standard one rather than treating the absence as a discount (D7).
+/// </param>
+/// <param name="BatchOutputPerMillionTokens">
+/// USD per 1,000,000 output tokens at batch/off-peak rates, with the same null semantics as
+/// <see cref="BatchInputPerMillionTokens"/>. Kept as its own column rather than derived from the input
+/// rate: the two are discounted independently by the providers that publish them.
+/// </param>
 public sealed record ModelPrice(
     decimal InputPerMillionTokens,
     decimal OutputPerMillionTokens,
     decimal? CacheReadPerMillionTokens = null,
     decimal? CacheWritePerMillionTokens = null,
-    bool IsApproximateMatch = false)
+    bool IsApproximateMatch = false,
+    decimal? BatchInputPerMillionTokens = null,
+    decimal? BatchOutputPerMillionTokens = null)
 {
     /// <summary>
-    /// Gets the price of a model served by a free provider: zero, at any token count. This is a known
-    /// price, not a missing one - a local runtime genuinely costs nothing, which is a fact about the
-    /// deployment rather than an estimate.
+    /// Gets the price of a model served by a free provider: zero, at any token count and at every rate
+    /// tier. This is a known price, not a missing one - a local runtime genuinely costs nothing, which is a
+    /// fact about the deployment rather than an estimate. Every tier is an explicit <c>0m</c> rather than
+    /// <see langword="null"/>, because null carries the opposite meaning everywhere else in this type
+    /// ("this provider does not publish this rate"), and a free provider offers every tier at zero.
     /// </summary>
-    public static ModelPrice Free { get; } = new(0m, 0m, 0m, 0m);
+    public static ModelPrice Free { get; } = new(
+        InputPerMillionTokens: 0m,
+        OutputPerMillionTokens: 0m,
+        CacheReadPerMillionTokens: 0m,
+        CacheWritePerMillionTokens: 0m,
+        IsApproximateMatch: false,
+        BatchInputPerMillionTokens: 0m,
+        BatchOutputPerMillionTokens: 0m);
 
     /// <summary>
     /// Estimates the USD cost of a request given only its standard prompt and completion tokens. Kept for

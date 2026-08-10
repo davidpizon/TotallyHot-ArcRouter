@@ -472,15 +472,14 @@ public sealed class PriceCatalogRepository
     }
 
     /// <summary>
-    /// Returns the standard-rate price for a <c>(model, provider)</c> key only when it was fetched within
-    /// <paramref name="maxAge"/> - the query D1's 24h routing floor reads. Returns <see langword="null"/>
-    /// when the row is stale, absent, or has no standard rates; all three mean <em>unpriced</em> and a
-    /// caller must treat them identically.
+    /// Returns every published rate tier for a <c>(model, provider)</c> key, but only when the row was
+    /// fetched within <paramref name="maxAge"/> - the query D1's 24h routing floor reads. Returns
+    /// <see langword="null"/> when the row is stale, absent, or has no standard rates; all three mean
+    /// <em>unpriced</em> and a caller must treat them identically.
     /// </summary>
     /// <remarks>
-    /// Not called by anything in this slice yet - it exists now so a future <c>UtilityRoutingPolicy</c>
-    /// can honor D1 without another schema or repository pass. A free provider's zero does not come from
-    /// here (see <c>ProviderOptions.IsFree</c>); this returns <see langword="null"/> for such a model.
+    /// A free provider's zero does not come from here (see <c>ProviderOptions.IsFree</c>); this returns
+    /// <see langword="null"/> for such a model, and the caller owns that carve-out.
     /// <para>
     /// A row owned by a <em>disabled</em> source is excluded outright, which is D6's "neither polled nor
     /// served" half: a model priced only by a disabled source becomes unpriced the moment the operator
@@ -488,28 +487,76 @@ public sealed class PriceCatalogRepository
     /// is not the same as a source that merely <em>failed</em> - stale rows from a failing source are still
     /// trusted for display, because "we couldn't refresh this" is a different claim from "stop using this".
     /// </para>
+    /// <para>
+    /// Every tier the row publishes is returned, unfiltered; picking <em>which</em> of them applies to a
+    /// given request is <see cref="ModelPriceCatalog"/>'s job via <see cref="PriceContext"/>, not this
+    /// method's. Keeping selection out of the repository is what lets the display and routing queries share
+    /// one row shape while answering different questions about it.
+    /// </para>
     /// </remarks>
-    public ModelPrice? GetFreshPrice(ModelKey key, TimeSpan maxAge)
-    {
-        var cutoff = FormatCutoff(maxAge);
+    public ModelPrice? GetFreshPrice(ModelKey key, TimeSpan maxAge) =>
+        ReadPrice(key, FormatCutoff(maxAge))?.Price;
 
+    /// <summary>
+    /// Returns every published rate tier for a <c>(model, provider)</c> key at <em>any</em> age, together
+    /// with when the row was last refreshed. This is the read <see cref="ModelPriceCatalog"/> caches: it
+    /// deliberately applies no freshness bound, because carrying the timestamp lets the caller evaluate D1's
+    /// floor in memory at read time rather than baking an age bound into what was cached.
+    /// </summary>
+    /// <remarks>
+    /// A disabled source's rows are excluded here exactly as in <see cref="GetFreshPrice"/> - D6's "not
+    /// served" is about operator intent, which does not soften just because the question is a display one.
+    /// Returns <see langword="null"/> only when there is no row at all, or it publishes no standard rates.
+    /// </remarks>
+    public CatalogPriceEntry? GetPriceEntry(ModelKey key) => ReadPrice(key, cutoff: null);
+
+    /// <summary>
+    /// Shared read behind <see cref="GetFreshPrice"/> and <see cref="GetPriceEntry"/>, applying the
+    /// freshness predicate only when <paramref name="cutoff"/> is supplied. One method so the two queries
+    /// can never drift in which columns or which source-enabled filter they apply - the only intended
+    /// difference between them is the age bound.
+    /// </summary>
+    private CatalogPriceEntry? ReadPrice(ModelKey key, string? cutoff)
+    {
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT mp.standard_input_price, mp.standard_output_price,
-                   mp.cached_input_price, mp.cache_write_input_price, mp.is_approximate
-            FROM model_prices mp
-            JOIN models            m ON m.model_id    = mp.model_id
-            JOIN providers         p ON p.provider_id = mp.provider_id
-            JOIN aggregator_sources s ON s.source_id  = mp.aggregator_source_id
-            WHERE m.model_identifier = $model
-              AND p.provider_name    = $provider
-              AND mp.last_updated_utc >= $cutoff
-              AND s.enabled = 1;
-            """;
+        command.CommandText = cutoff is null
+            ? """
+              SELECT mp.standard_input_price, mp.standard_output_price,
+                     mp.cached_input_price, mp.cache_write_input_price, mp.is_approximate,
+                     mp.batch_input_price, mp.batch_output_price, mp.last_updated_utc
+              FROM model_prices mp
+              JOIN models            m ON m.model_id    = mp.model_id
+              JOIN providers         p ON p.provider_id = mp.provider_id
+              JOIN aggregator_sources s ON s.source_id  = mp.aggregator_source_id
+              WHERE m.model_identifier = $model
+                AND p.provider_name    = $provider
+                AND s.enabled = 1
+              ORDER BY mp.last_updated_utc DESC
+              LIMIT 1;
+              """
+            : """
+              SELECT mp.standard_input_price, mp.standard_output_price,
+                     mp.cached_input_price, mp.cache_write_input_price, mp.is_approximate,
+                     mp.batch_input_price, mp.batch_output_price, mp.last_updated_utc
+              FROM model_prices mp
+              JOIN models            m ON m.model_id    = mp.model_id
+              JOIN providers         p ON p.provider_id = mp.provider_id
+              JOIN aggregator_sources s ON s.source_id  = mp.aggregator_source_id
+              WHERE m.model_identifier = $model
+                AND p.provider_name    = $provider
+                AND s.enabled = 1
+                AND mp.last_updated_utc >= $cutoff
+              ORDER BY mp.last_updated_utc DESC
+              LIMIT 1;
+              """;
         command.Parameters.AddWithValue("$model", key.ModelName);
         command.Parameters.AddWithValue("$provider", key.Provider);
-        command.Parameters.AddWithValue("$cutoff", cutoff);
+
+        if (cutoff is not null)
+        {
+            command.Parameters.AddWithValue("$cutoff", cutoff);
+        }
 
         using var reader = command.ExecuteReader();
         if (!reader.Read() || reader.IsDBNull(0) || reader.IsDBNull(1))
@@ -517,12 +564,16 @@ public sealed class PriceCatalogRepository
             return null;
         }
 
-        return new ModelPrice(
-            reader.GetDecimal(0),
-            reader.GetDecimal(1),
-            reader.IsDBNull(2) ? null : reader.GetDecimal(2),
-            reader.IsDBNull(3) ? null : reader.GetDecimal(3),
-            reader.GetInt32(4) != 0);
+        var price = new ModelPrice(
+            InputPerMillionTokens: reader.GetDecimal(0),
+            OutputPerMillionTokens: reader.GetDecimal(1),
+            CacheReadPerMillionTokens: reader.IsDBNull(2) ? null : reader.GetDecimal(2),
+            CacheWritePerMillionTokens: reader.IsDBNull(3) ? null : reader.GetDecimal(3),
+            IsApproximateMatch: reader.GetInt32(4) != 0,
+            BatchInputPerMillionTokens: reader.IsDBNull(5) ? null : reader.GetDecimal(5),
+            BatchOutputPerMillionTokens: reader.IsDBNull(6) ? null : reader.GetDecimal(6));
+
+        return new CatalogPriceEntry(price, ParseTimestamp(reader.GetString(7)));
     }
 
     /// <summary>

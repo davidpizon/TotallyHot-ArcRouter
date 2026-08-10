@@ -1,18 +1,25 @@
 # Model Price Catalog: Multi-Aggregator Ingestion, Resolution, and Runtime Cache
 
-> **Status: Phases 1–3 implemented, including multi-source; Phase 4's full design is unbuilt, but a
-> thin runtime consumer now exists.** The SQLite dependency, the six catalog tables, the LiteLLM and
-> OpenRouter clients, the priority-ordered upsert gate, the ingestion worker, and the startup health
-> checks all exist in `src/TotallyHotArcRouter/PriceCatalog/`. So does the Governance → Price Sources
-> panel, which owns the D6 toggle, can pull on demand, and can reorder the two sources' rank.
-> **Phase 4 as designed does not exist** — no `ConcurrentDictionary` cache, no `IModelPriceCatalog`,
-> no `GetBestPriceForModel`/`GetFreshPriceForRouting`, no staging table or hash diff. However, an
-> earlier revision's claim that "`GetFreshPrice` has no caller" is stale (corrected 2026-08-07): since
-> [`d3-alias-resolution.md`](d3-alias-resolution.md)'s Slices 1–3 shipped, `ProxyMiddleware` resolves
-> a per-request cost through `IModelPriceLookup` → `PriceCatalogModelPriceLookup` →
-> `PriceCatalogRepository.GetFreshPrice` (with the D1 24-hour freshness floor) — a direct SQLite read
-> per request rather than Phase 4's in-memory cache, which remains the designed end state. Sections
-> still describing unbuilt work are marked inline.
+> **Status: Phases 1–4 implemented, including multi-source and the rate-tier read surface.** The SQLite
+> dependency, the six catalog tables, the LiteLLM and OpenRouter clients, the priority-ordered upsert
+> gate, the ingestion worker, and the startup health checks all exist in
+> `src/TotallyHotArcRouter/PriceCatalog/`. So does the Governance → Price Sources panel, which owns the D6
+> toggle, can pull on demand, and can reorder the two sources' rank.
+>
+> **Phase 4's query surface now exists** (added 2026-08-09): `IModelPriceCatalog` /
+> `ModelPriceCatalog` implement `GetBestPriceForModel` and `GetFreshPriceForRouting` over a
+> `ConcurrentDictionary` cache, `PriceContext` selects the standard/batch/cached rate tier, and
+> `ModelPrice` carries nullable `BatchInputPerMillionTokens`/`BatchOutputPerMillionTokens` alongside the
+> cache rates it already had. The ingestion service invalidates the cache after any cycle that actually
+> wrote rows. **Still unbuilt from this phase: the staging table and hash diff** — invalidation is
+> currently "a source wrote something," not "a source wrote something *different*," which is coarser than
+> the designed eviction signal but never serves a stale value.
+>
+> `IModelPriceLookup` → `PriceCatalogModelPriceLookup` → `PriceCatalogRepository.GetFreshPrice` remains
+> the narrow per-request seam `ProxyMiddleware` uses for telemetry costing (a direct SQLite read, with the
+> D1 24-hour floor). It is deliberately kept rather than folded into the catalog: that caller wants
+> standard rates for one key and has no `PriceContext` opinion to express. Sections still describing
+> unbuilt work are marked inline.
 >
 > **There is no hand-maintained price data, and that is deliberate.** The `Pricing` section in
 > `appsettings.json` that used to supply placeholder rates has been **deleted**, not fenced off — its
@@ -765,7 +772,27 @@ polls.
   says so.** The only price available before the first successful poll is a free provider's zero, which
   needs no seed because it was never fetched.
 
-## Phase 4: Runtime querying & cache layer
+## Phase 4: Runtime querying & cache layer — **Implemented** (except the staging table / hash diff)
+
+> Shipped in `PriceCatalog/IModelPriceCatalog.cs`, `ModelPriceCatalog.cs`, `PriceContext.cs`, and
+> `CatalogPriceEntry.cs`, pinned by `ModelPriceCatalogTests`. Two deliberate deviations from the sketch
+> below, both documented where they land in code:
+>
+> 1. **The cache stores the raw row plus its `last_updated_utc`, not a tier-selected price.** One entry
+>    per `ModelKey` has to answer for every `PriceContext` a caller might ask about, and freshness is
+>    evaluated per read against that timestamp rather than baked in when the entry was filled — so an
+>    entry cached while fresh correctly stops being routable once it ages past the floor, with no eviction
+>    needed. That is what `CatalogPriceEntry` exists for.
+> 2. **Misses are cached too.** A request path that prices every candidate asks about unknown models
+>    constantly, and re-querying SQLite for a row known not to exist would defeat the cache.
+>
+> **`RepeatsCachedContext` is an a-priori flag only.** It rewrites the headline *input* rate to the
+> cached rate for ranking candidates before a request is sent. A caller holding a real `UsageInfo` must
+> pass `PriceContext.Standard`, because `ModelPrice.EstimateCost(UsageInfo)` already prices the
+> provider's own reported cache-read/cache-write token counts at their own rates — setting the flag *and*
+> passing real usage would discount the same tokens twice and under-report spend. This hazard did not
+> exist when the sketch below was written (cache-aware `EstimateCost` landed later), which is why the
+> invariant is spelled out on `PriceContext` itself rather than left implicit.
 
 - **Read-heavy optimization.** `Journal Mode = WAL`, `Synchronous = Normal` — concurrent reads while
   ingestion writes.
@@ -864,25 +891,35 @@ polls.
   meaningful in both — it is the *unpriced* signal `utility-model-routing.md` §B3 depends on, and must
   not be papered over inside either method.
 
-### Impact on the shipped `ModelPrice` type
+### Impact on the shipped `ModelPrice` type — **done**
 
-`Telemetry/ModelPrice.cs` currently defines:
+`Telemetry/ModelPrice.cs` now carries all four price dimensions as nullable columns alongside the two
+required standard rates:
 
 ```csharp
-public sealed record ModelPrice(decimal InputPerMillionTokens, decimal OutputPerMillionTokens)
-{
-    public static ModelPrice Free { get; } = new(0m, 0m);
-}
+public sealed record ModelPrice(
+    decimal InputPerMillionTokens,
+    decimal OutputPerMillionTokens,
+    decimal? CacheReadPerMillionTokens = null,
+    decimal? CacheWritePerMillionTokens = null,
+    bool IsApproximateMatch = false,
+    decimal? BatchInputPerMillionTokens = null,
+    decimal? BatchOutputPerMillionTokens = null);
 ```
 
-with `EstimateCost(promptTokens, completionTokens)`, pinned by `Telemetry/ModelPriceTests.cs`. Its only
-production call site today is the free-provider path in `ProxyMiddleware.PublishTelemetryAsync`
-(`ModelPrice.Free.EstimateCost(...)`) — the catalog is what will give it a second one. The catalog's
-price shape is wider (batch/cached variants, nullable). **Recommended:** extend `ModelPrice` with
-nullable `CachedInputPerMillionTokens` / `BatchInputPerMillionTokens` / `BatchOutputPerMillionTokens`
-and keep the existing two-arg `EstimateCost` overload delegating to standard rates, so no existing call
-site or test changes; the query methods select *which* rates populate the record. Per [D2](#d2-units-are-usd-per-1000000-tokens-everywhere)
-the units already match, so this is additive.
+The extension was additive exactly as recommended: every new field is optional, both existing
+`EstimateCost` overloads are unchanged, and no prior call site or test needed edits. Per
+[D2](#d2-units-are-usd-per-1000000-tokens-everywhere) the units already matched.
+
+`ModelPrice.Free` sets **every** tier to an explicit `0m` rather than leaving the new ones null, because
+null carries the opposite meaning everywhere else on this type ("this provider does not publish this
+rate") and a free provider genuinely offers every tier at zero.
+
+Tier selection lives in `ModelPriceCatalog.ApplyTier`, not on `ModelPrice` — `PriceContext` is a
+`PriceCatalog` concept and `Telemetry` cannot reference it without a circular dependency. `ApplyTier`
+rewrites only the headline input/output rates and passes the row's own cache columns through untouched,
+so `EstimateCost(UsageInfo)` keeps pricing real cache tokens from real cache rates no matter which tier
+was selected.
 
 Per [`agent-cost-tracking.md`](agent-cost-tracking.md) §3.3, cost math must not be duplicated: the
 catalog feeds the *existing* `EstimateCost` computation rather than growing a parallel one.
