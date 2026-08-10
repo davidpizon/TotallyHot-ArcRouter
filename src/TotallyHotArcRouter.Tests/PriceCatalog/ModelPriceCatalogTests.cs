@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.PriceCatalog.Sources;
 
@@ -13,13 +14,16 @@ public class ModelPriceCatalogTests
 {
     private static readonly TimeSpan Floor = TimeSpan.FromHours(24);
 
+    private static ModelPriceCatalog CreateCatalog(PriceCatalogRepository repository) =>
+        new(repository, NullLogger<ModelPriceCatalog>.Instance);
+
     [Fact]
     public void GetBestPriceForModel_StandardContext_ReportsStandardRatesUntouched()
     {
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
         WriteFullyTieredRow(repository, DateTimeOffset.UtcNow);
-        var catalog = new ModelPriceCatalog(repository);
+        var catalog = CreateCatalog(repository);
 
         var price = catalog.GetBestPriceForModel(Key, PriceContext.Standard);
 
@@ -34,7 +38,7 @@ public class ModelPriceCatalogTests
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
         WriteFullyTieredRow(repository, DateTimeOffset.UtcNow);
-        var catalog = new ModelPriceCatalog(repository);
+        var catalog = CreateCatalog(repository);
 
         var price = catalog.GetBestPriceForModel(Key, new PriceContext(IsBatchRequest: true, RepeatsCachedContext: false));
 
@@ -52,7 +56,7 @@ public class ModelPriceCatalogTests
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
         WriteRow(repository, DateTimeOffset.UtcNow, cachedInput: null, batchInput: null, batchOutput: null);
-        var catalog = new ModelPriceCatalog(repository);
+        var catalog = CreateCatalog(repository);
 
         var price = catalog.GetBestPriceForModel(Key, new PriceContext(IsBatchRequest: true, RepeatsCachedContext: false));
 
@@ -67,7 +71,7 @@ public class ModelPriceCatalogTests
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
         WriteFullyTieredRow(repository, DateTimeOffset.UtcNow);
-        var catalog = new ModelPriceCatalog(repository);
+        var catalog = CreateCatalog(repository);
 
         var price = catalog.GetBestPriceForModel(Key, new PriceContext(IsBatchRequest: false, RepeatsCachedContext: true));
 
@@ -85,7 +89,7 @@ public class ModelPriceCatalogTests
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
         WriteRow(repository, DateTimeOffset.UtcNow, cachedInput: null, batchInput: null, batchOutput: null);
-        var catalog = new ModelPriceCatalog(repository);
+        var catalog = CreateCatalog(repository);
 
         var price = catalog.GetBestPriceForModel(Key, new PriceContext(IsBatchRequest: false, RepeatsCachedContext: true));
 
@@ -102,7 +106,7 @@ public class ModelPriceCatalogTests
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
         WriteFullyTieredRow(repository, DateTimeOffset.UtcNow);
-        var catalog = new ModelPriceCatalog(repository);
+        var catalog = CreateCatalog(repository);
 
         var price = catalog.GetBestPriceForModel(Key, new PriceContext(IsBatchRequest: true, RepeatsCachedContext: true));
 
@@ -120,7 +124,7 @@ public class ModelPriceCatalogTests
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
         WriteFullyTieredRow(repository, DateTimeOffset.UtcNow);
-        var catalog = new ModelPriceCatalog(repository);
+        var catalog = CreateCatalog(repository);
 
         var price = catalog.GetBestPriceForModel(Key, new PriceContext(IsBatchRequest: true, RepeatsCachedContext: true));
 
@@ -139,7 +143,7 @@ public class ModelPriceCatalogTests
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
         WriteFullyTieredRow(repository, DateTimeOffset.UtcNow.AddDays(-30));
-        var catalog = new ModelPriceCatalog(repository);
+        var catalog = CreateCatalog(repository);
 
         Assert.NotNull(catalog.GetBestPriceForModel(Key, PriceContext.Standard));
         Assert.Null(catalog.GetFreshPriceForRouting(Key, PriceContext.Standard, Floor));
@@ -151,7 +155,7 @@ public class ModelPriceCatalogTests
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
         WriteFullyTieredRow(repository, DateTimeOffset.UtcNow.AddHours(-1));
-        var catalog = new ModelPriceCatalog(repository);
+        var catalog = CreateCatalog(repository);
 
         var price = catalog.GetFreshPriceForRouting(Key, new PriceContext(IsBatchRequest: true, RepeatsCachedContext: false), Floor);
 
@@ -160,11 +164,31 @@ public class ModelPriceCatalogTests
     }
 
     [Fact]
+    public void GetBestPriceForModel_RepositoryReadThrows_ReturnsNullInsteadOfPropagating()
+    {
+        // IModelPriceCatalog promises a live request path that a read never throws (see its own XML doc) -
+        // a transient storage fault (SQLite locked/missing) must degrade to "unpriced" for this call, not
+        // take the caller down.
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+        WriteFullyTieredRow(repository, DateTimeOffset.UtcNow);
+        var catalog = CreateCatalog(repository);
+
+        // Pooled connections keep the file handle open even after the row above is committed, so the
+        // directory delete below would otherwise fail with "file in use" rather than exercising the fault
+        // this test is after.
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        Directory.Delete(Path.GetDirectoryName(temp.Path_)!, recursive: true);
+
+        Assert.Null(catalog.GetBestPriceForModel(Key, PriceContext.Standard));
+    }
+
+    [Fact]
     public void BothQueries_ReturnNull_ForAModelTheCatalogHasNoRowFor()
     {
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
-        var catalog = new ModelPriceCatalog(repository);
+        var catalog = CreateCatalog(repository);
 
         var missing = new ModelKey("never-heard-of-it", "nowhere");
 
@@ -181,7 +205,7 @@ public class ModelPriceCatalogTests
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
         WriteFullyTieredRow(repository, DateTimeOffset.UtcNow);
-        var catalog = new ModelPriceCatalog(repository);
+        var catalog = CreateCatalog(repository);
 
         Assert.Equal(15.00m, catalog.GetBestPriceForModel(Key, PriceContext.Standard)!.InputPerMillionTokens);
 
@@ -201,7 +225,7 @@ public class ModelPriceCatalogTests
         // if invalidation only dropped the hits.
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
-        var catalog = new ModelPriceCatalog(repository);
+        var catalog = CreateCatalog(repository);
 
         Assert.Null(catalog.GetBestPriceForModel(Key, PriceContext.Standard));
 

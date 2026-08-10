@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging;
 using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.PriceCatalog;
@@ -20,6 +21,7 @@ namespace TotallyHot.ArcRouter.PriceCatalog;
 public sealed class ModelPriceCatalog : IModelPriceCatalog
 {
     private readonly PriceCatalogRepository _repository;
+    private readonly ILogger<ModelPriceCatalog> _logger;
 
     // Entries hold the raw row plus its fetch timestamp, never a tier-selected price: the same cached row
     // has to answer for every PriceContext a caller might ask about, and freshness is evaluated per read
@@ -27,10 +29,16 @@ public sealed class ModelPriceCatalog : IModelPriceCatalog
     private ConcurrentDictionary<ModelKey, CatalogPriceEntry?> _cache = new();
 
     /// <param name="repository">The catalog repository this instance reads rows from on a cache miss.</param>
-    public ModelPriceCatalog(PriceCatalogRepository repository)
+    /// <param name="logger">
+    /// Records a cache-miss read that failed against the repository - see <see cref="GetEntry"/>'s remarks
+    /// for why that is swallowed rather than propagated.
+    /// </param>
+    public ModelPriceCatalog(PriceCatalogRepository repository, ILogger<ModelPriceCatalog> logger)
     {
         ArgumentNullException.ThrowIfNull(repository);
+        ArgumentNullException.ThrowIfNull(logger);
         _repository = repository;
+        _logger = logger;
     }
 
     /// <inheritdoc />
@@ -64,18 +72,43 @@ public sealed class ModelPriceCatalog : IModelPriceCatalog
     /// this deliberately does not lock. Serializing every price read behind a lock to close a window that
     /// yields a marginally stale rate would cost far more than the staleness it prevents.
     /// <para>
-    /// Uses <see cref="ConcurrentDictionary{TKey,TValue}.GetOrAdd(TKey,System.Func{TKey,TValue})"/> rather
+    /// Uses the <see cref="ConcurrentDictionary{TKey,TValue}.GetOrAdd(TKey,TValue)"/> value overload rather
     /// than a separate <c>TryGetValue</c>/<c>TryAdd</c> pair, so a caller always gets back the dictionary's
     /// own value for the key - not a locally-fetched one that lost the add race and may already be stale
     /// relative to what another thread just inserted.
+    /// </para>
+    /// <para>
+    /// A read-through that fails (e.g. the SQLite file is locked or missing) is caught and logged rather
+    /// than propagated, and deliberately left uncached: <see cref="IModelPriceCatalog"/> promises callers
+    /// on a live request path that a read never throws, so a transient storage fault degrades to "unpriced"
+    /// for this one call instead of taking the caller down, and the next call gets a fresh attempt rather
+    /// than being stuck behind a cached failure.
     /// </para>
     /// </remarks>
     private CatalogPriceEntry? GetEntry(ModelKey key)
     {
         var cache = _cache;
-        return cache.TryGetValue(key, out var cached)
-            ? cached
-            : cache.GetOrAdd(key, static (k, repository) => repository.GetPriceEntry(k), _repository);
+        if (cache.TryGetValue(key, out var cached))
+        {
+            return cached;
+        }
+
+        CatalogPriceEntry? entry;
+        try
+        {
+            entry = _repository.GetPriceEntry(key);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                ex,
+                "Price catalog read failed for {ModelName}/{Provider}; treating this read as unpriced.",
+                key.ModelName,
+                key.Provider);
+            return null;
+        }
+
+        return cache.GetOrAdd(key, entry);
     }
 
     /// <summary>
