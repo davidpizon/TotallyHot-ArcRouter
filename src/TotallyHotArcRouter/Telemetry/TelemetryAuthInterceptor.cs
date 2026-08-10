@@ -51,6 +51,27 @@ public sealed class TelemetryAuthInterceptor : Interceptor
         return continuation(request, responseStream, context);
     }
 
+    /// <inheritdoc/>
+    public override Task<TResponse> ClientStreamingServerHandler<TRequest, TResponse>(
+        IAsyncStreamReader<TRequest> requestStream,
+        ServerCallContext context,
+        ClientStreamingServerMethod<TRequest, TResponse> continuation)
+    {
+        Authenticate(context);
+        return continuation(requestStream, context);
+    }
+
+    /// <inheritdoc/>
+    public override Task DuplexStreamingServerHandler<TRequest, TResponse>(
+        IAsyncStreamReader<TRequest> requestStream,
+        IServerStreamWriter<TResponse> responseStream,
+        ServerCallContext context,
+        DuplexStreamingServerMethod<TRequest, TResponse> continuation)
+    {
+        Authenticate(context);
+        return continuation(requestStream, responseStream, context);
+    }
+
     /// <summary>
     /// Verifies the call's <c>x-admin-token</c> metadata entry against the expected token.
     /// </summary>

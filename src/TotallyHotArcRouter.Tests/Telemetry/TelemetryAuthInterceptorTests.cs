@@ -94,6 +94,13 @@ public class TelemetryAuthInterceptorTests
         public Task WriteAsync(T message) => Task.CompletedTask;
     }
 
+    private sealed class FakeAsyncStreamReader<T> : IAsyncStreamReader<T>
+    {
+        public T Current => default!;
+
+        public Task<bool> MoveNext(CancellationToken cancellationToken) => Task.FromResult(false);
+    }
+
     [Fact]
     public async Task ServerStreamingServerHandler_MatchingToken_InvokesContinuation()
     {
@@ -123,6 +130,86 @@ public class TelemetryAuthInterceptorTests
 
         var exception = await Assert.ThrowsAsync<RpcException>(() => interceptor.ServerStreamingServerHandler<string, string>(
             "request",
+            new FakeServerStreamWriter<string>(),
+            context,
+            (_, _, _) =>
+            {
+                invoked = true;
+                return Task.CompletedTask;
+            }));
+
+        Assert.Equal(StatusCode.Unauthenticated, exception.StatusCode);
+        Assert.False(invoked);
+    }
+
+    [Fact]
+    public async Task ClientStreamingServerHandler_MatchingToken_InvokesContinuation()
+    {
+        var interceptor = new TelemetryAuthInterceptor("expected-token");
+        var context = CreateContext([new Metadata.Entry(TokenHeaderName, "expected-token")]);
+        var invoked = false;
+
+        await interceptor.ClientStreamingServerHandler<string, string>(
+            new FakeAsyncStreamReader<string>(),
+            context,
+            (_, _) =>
+            {
+                invoked = true;
+                return Task.FromResult("response");
+            });
+
+        Assert.True(invoked);
+    }
+
+    [Fact]
+    public async Task ClientStreamingServerHandler_MissingToken_ThrowsUnauthenticatedAndSkipsContinuation()
+    {
+        var interceptor = new TelemetryAuthInterceptor("expected-token");
+        var context = CreateContext([]);
+        var invoked = false;
+
+        var exception = await Assert.ThrowsAsync<RpcException>(() => interceptor.ClientStreamingServerHandler<string, string>(
+            new FakeAsyncStreamReader<string>(),
+            context,
+            (_, _) =>
+            {
+                invoked = true;
+                return Task.FromResult("response");
+            }));
+
+        Assert.Equal(StatusCode.Unauthenticated, exception.StatusCode);
+        Assert.False(invoked);
+    }
+
+    [Fact]
+    public async Task DuplexStreamingServerHandler_MatchingToken_InvokesContinuation()
+    {
+        var interceptor = new TelemetryAuthInterceptor("expected-token");
+        var context = CreateContext([new Metadata.Entry(TokenHeaderName, "expected-token")]);
+        var invoked = false;
+
+        await interceptor.DuplexStreamingServerHandler<string, string>(
+            new FakeAsyncStreamReader<string>(),
+            new FakeServerStreamWriter<string>(),
+            context,
+            (_, _, _) =>
+            {
+                invoked = true;
+                return Task.CompletedTask;
+            });
+
+        Assert.True(invoked);
+    }
+
+    [Fact]
+    public async Task DuplexStreamingServerHandler_MissingToken_ThrowsUnauthenticatedAndSkipsContinuation()
+    {
+        var interceptor = new TelemetryAuthInterceptor("expected-token");
+        var context = CreateContext([]);
+        var invoked = false;
+
+        var exception = await Assert.ThrowsAsync<RpcException>(() => interceptor.DuplexStreamingServerHandler<string, string>(
+            new FakeAsyncStreamReader<string>(),
             new FakeServerStreamWriter<string>(),
             context,
             (_, _, _) =>

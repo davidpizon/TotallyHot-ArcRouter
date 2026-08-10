@@ -2,6 +2,7 @@ using System.Text;
 using TotallyHot.ArcRouter.Gui.Telemetry;
 using Grpc.Core;
 using Grpc.Core.Interceptors;
+using Grpc.Core.Testing;
 using FluentAssertions;
 
 namespace TotallyHot.ArcRouter.Gui.Telemetry.Tests;
@@ -103,5 +104,63 @@ public class TelemetryAuthClientInterceptorTests
 
         (captured!.Value.Options.Headers is null || captured.Value.Options.Headers.Get(TokenHeaderName) is null)
             .Should().BeTrue();
+    }
+
+    private sealed class FakeClientStreamWriter<T> : IClientStreamWriter<T>
+    {
+        public WriteOptions? WriteOptions { get; set; }
+
+        public Task CompleteAsync() => Task.CompletedTask;
+
+        public Task WriteAsync(T message) => Task.CompletedTask;
+    }
+
+    [Fact]
+    public void AsyncClientStreamingCall_attaches_the_supplied_token_as_a_header()
+    {
+        var interceptor = new TelemetryAuthClientInterceptor(token: "my-token");
+        ClientInterceptorContext<string, string>? captured = null;
+
+        using var call = interceptor.AsyncClientStreamingCall(NewContext(), ctx =>
+        {
+            captured = ctx;
+            return TestCalls.AsyncClientStreamingCall(
+                new FakeClientStreamWriter<string>(),
+                Task.FromResult("response"),
+                Task.FromResult(Metadata.Empty),
+                () => Status.DefaultSuccess,
+                () => [],
+                () => { });
+        });
+
+        captured!.Value.Options.Headers!.Get(TokenHeaderName)!.Value.Should().Be("my-token");
+    }
+
+    [Fact]
+    public void AsyncDuplexStreamingCall_attaches_the_supplied_token_as_a_header()
+    {
+        var interceptor = new TelemetryAuthClientInterceptor(token: "my-token");
+        ClientInterceptorContext<string, string>? captured = null;
+
+        using var call = interceptor.AsyncDuplexStreamingCall(NewContext(), ctx =>
+        {
+            captured = ctx;
+            return TestCalls.AsyncDuplexStreamingCall(
+                new FakeClientStreamWriter<string>(),
+                new FakeAsyncStreamReader<string>(),
+                Task.FromResult(Metadata.Empty),
+                () => Status.DefaultSuccess,
+                () => [],
+                () => { });
+        });
+
+        captured!.Value.Options.Headers!.Get(TokenHeaderName)!.Value.Should().Be("my-token");
+    }
+
+    private sealed class FakeAsyncStreamReader<T> : IAsyncStreamReader<T>
+    {
+        public T Current => default!;
+
+        public Task<bool> MoveNext(CancellationToken cancellationToken) => Task.FromResult(false);
     }
 }

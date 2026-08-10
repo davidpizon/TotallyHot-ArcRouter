@@ -55,6 +55,18 @@ public sealed class TelemetryAuthClientInterceptor : Interceptor
         AsyncServerStreamingCallContinuation<TRequest, TResponse> continuation) =>
         continuation(request, WithToken(context));
 
+    /// <inheritdoc/>
+    public override AsyncClientStreamingCall<TRequest, TResponse> AsyncClientStreamingCall<TRequest, TResponse>(
+        ClientInterceptorContext<TRequest, TResponse> context,
+        AsyncClientStreamingCallContinuation<TRequest, TResponse> continuation) =>
+        continuation(WithToken(context));
+
+    /// <inheritdoc/>
+    public override AsyncDuplexStreamingCall<TRequest, TResponse> AsyncDuplexStreamingCall<TRequest, TResponse>(
+        ClientInterceptorContext<TRequest, TResponse> context,
+        AsyncDuplexStreamingCallContinuation<TRequest, TResponse> continuation) =>
+        continuation(WithToken(context));
+
     /// <summary>
     /// Returns <paramref name="context"/> unchanged when no token is available (the call proceeds and the
     /// server rejects it, exactly as a REST admin call with no token file yet would), otherwise returns a
