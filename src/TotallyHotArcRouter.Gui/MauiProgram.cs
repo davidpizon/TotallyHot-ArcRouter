@@ -37,7 +37,7 @@ public static class MauiProgram
         // singleton so the gRPC stream and accumulated conversation state survive navigation between
         // tabs; Dashboard.razor starts the connection on first render. The server address comes from
         // GuiSettingsStore rather than the hardcoded default, so a change in Settings takes effect on
-        // the next launch (the channel is constructed once, here, at DI-registration time).
+        // the next launch (the singleton factory below runs once, on first resolution).
         builder.Services.AddSingleton(sp =>
             new LiveDataStore(
                 sp.GetRequiredService<ILogger<LiveDataStore>>(),
