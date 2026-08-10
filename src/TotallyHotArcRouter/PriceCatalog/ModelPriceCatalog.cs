@@ -63,18 +63,19 @@ public sealed class ModelPriceCatalog : IModelPriceCatalog
     /// harmless - the value is a price that was true moments ago, and the next invalidation clears it - so
     /// this deliberately does not lock. Serializing every price read behind a lock to close a window that
     /// yields a marginally stale rate would cost far more than the staleness it prevents.
+    /// <para>
+    /// Uses <see cref="ConcurrentDictionary{TKey,TValue}.GetOrAdd(TKey,System.Func{TKey,TValue})"/> rather
+    /// than a separate <c>TryGetValue</c>/<c>TryAdd</c> pair, so a caller always gets back the dictionary's
+    /// own value for the key - not a locally-fetched one that lost the add race and may already be stale
+    /// relative to what another thread just inserted.
+    /// </para>
     /// </remarks>
     private CatalogPriceEntry? GetEntry(ModelKey key)
     {
         var cache = _cache;
-        if (cache.TryGetValue(key, out var cached))
-        {
-            return cached;
-        }
-
-        var entry = _repository.GetPriceEntry(key);
-        cache.TryAdd(key, entry);
-        return entry;
+        return cache.TryGetValue(key, out var cached)
+            ? cached
+            : cache.GetOrAdd(key, static (k, repository) => repository.GetPriceEntry(k), _repository);
     }
 
     /// <summary>
