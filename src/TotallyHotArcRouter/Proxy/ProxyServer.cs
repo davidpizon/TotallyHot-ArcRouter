@@ -79,7 +79,7 @@ namespace TotallyHot.ArcRouter.Proxy
         /// </param>
         /// <param name="managementToken">
         /// Optional shared secret required (in the <c>X-Admin-Token</c> header) on every <c>/admin/*</c>
-        /// request when set, and - via <see cref="Telemetry.TelemetryAuthInterceptor"/> - on every call to
+        /// request when set, and - via <see cref="TelemetryAuthInterceptor"/> - on every call to
         /// the TLS <paramref name="grpcPort"/> gRPC endpoint (the telemetry stream and price-source admin
         /// service alike). Defaults to <see langword="null"/> (no inbound auth) - production wiring
         /// (<see cref="TotallyHot.ArcRouter.Hosting.ServiceCollectionExtensions"/>) always passes the
