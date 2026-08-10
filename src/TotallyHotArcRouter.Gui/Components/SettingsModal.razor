@@ -25,7 +25,7 @@
                     <input id="telemetry-address"
                            type="text"
                            value="@_telemetryAddress"
-                           @oninput="e => _telemetryAddress = (string?)e.Value ?? string.Empty"
+                           @oninput="OnTelemetryAddressInput"
                            class="flex-1 px-3 py-2 text-sm font-mono ds-input" />
                     <button @onclick="SaveTelemetryAddress"
                             disabled="@string.IsNullOrWhiteSpace(_telemetryAddress)"
@@ -117,14 +117,23 @@
         _telemetryAddress = SettingsStore.Load().TelemetryServerAddress;
     }
 
+    /// <summary>Updates the address field and clears any stale "Saved" confirmation from a previous save.</summary>
+    private void OnTelemetryAddressInput(ChangeEventArgs e)
+    {
+        _telemetryAddress = (string?)e.Value ?? string.Empty;
+        _telemetryAddressSaved = false;
+    }
+
     private void SaveTelemetryAddress()
     {
-        if (string.IsNullOrWhiteSpace(_telemetryAddress))
+        var trimmed = _telemetryAddress.Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
         {
             return;
         }
 
-        SettingsStore.Save(new GuiSettings(_telemetryAddress));
+        _telemetryAddress = trimmed;
+        SettingsStore.Save(new GuiSettings(trimmed));
         _telemetryAddressSaved = true;
     }
 

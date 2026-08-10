@@ -67,7 +67,18 @@ public sealed class TelemetryAuthClientInterceptor : Interceptor
             return context;
         }
 
-        var headers = context.Options.Headers ?? [];
+        var headers = new Metadata();
+        if (context.Options.Headers is { } existing)
+        {
+            foreach (var entry in existing)
+            {
+                if (!string.Equals(entry.Key, TokenHeaderName, StringComparison.OrdinalIgnoreCase))
+                {
+                    headers.Add(entry);
+                }
+            }
+        }
+
         headers.Add(TokenHeaderName, token);
         var options = context.Options.WithHeaders(headers);
         return new ClientInterceptorContext<TRequest, TResponse>(context.Method, context.Host, options);

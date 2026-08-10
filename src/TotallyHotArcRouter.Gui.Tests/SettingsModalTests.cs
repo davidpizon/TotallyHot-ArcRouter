@@ -111,6 +111,10 @@ public sealed class SettingsModalTests
     {
         using var ctx = NewContext(out var liveDataStore, out _);
         var closed = false;
+        var changedRaised = false;
+        var logLinesChangedRaised = false;
+        liveDataStore.Changed += () => changedRaised = true;
+        liveDataStore.LogLinesChanged += () => logLinesChangedRaised = true;
 
         var cut = ctx.Render<SettingsModal>(p => p.Add(c => c.OnClose, () => closed = true));
         cut.FindAll("button").First(b => b.TextContent.Contains("Reset Stats")).Click();
@@ -118,21 +122,26 @@ public sealed class SettingsModalTests
         cut.FindAll("button").First(b => b.TextContent.Contains("Confirm Reset")).Click();
 
         closed.Should().BeTrue();
-        liveDataStore.Conversations.Should().BeEmpty();
+        changedRaised.Should().BeTrue("Reset Stats clears live events, which raises LiveDataStore.Changed");
+        logLinesChangedRaised.Should().BeFalse("Reset Stats must not touch the Console tab's log buffer");
     }
 
     [Fact]
     public void Confirming_a_purge_clears_both_live_events_and_log_lines()
     {
         using var ctx = NewContext(out var liveDataStore, out _);
+        var changedRaised = false;
+        var logLinesChangedRaised = false;
+        liveDataStore.Changed += () => changedRaised = true;
+        liveDataStore.LogLinesChanged += () => logLinesChangedRaised = true;
 
         var cut = ctx.Render<SettingsModal>();
         cut.FindAll("button").First(b => b.TextContent.Contains("Clear History")).Click();
         cut.FindAll("input").First(i => i.GetAttribute("id") != "telemetry-address").Input("PURGE");
         cut.FindAll("button").First(b => b.TextContent.Contains("Confirm Purge")).Click();
 
-        liveDataStore.Conversations.Should().BeEmpty();
-        liveDataStore.LogLines.Should().BeEmpty();
+        changedRaised.Should().BeTrue("Clear History clears live events, which raises LiveDataStore.Changed");
+        logLinesChangedRaised.Should().BeTrue("Clear History also empties the Console tab's log buffer");
     }
 
     [Fact]

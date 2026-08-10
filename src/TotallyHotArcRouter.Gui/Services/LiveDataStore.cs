@@ -265,16 +265,13 @@ public sealed class LiveDataStore : IAsyncDisposable
     /// <summary>Appends a routing telemetry event, rebuilds the aggregated conversation list, and raises <see cref="Changed"/>.</summary>
     private void OnRoutingTelemetryReceived(RoutingTelemetryEventDto dto)
     {
-        List<RoutingTelemetryEventDto> snapshot;
         lock (_lock)
         {
             _events.Add(dto);
-            snapshot = [.. _events];
+            _conversations = ConversationAggregator.Aggregate(_events)
+                .Select(LiveConversationMapper.ToModel)
+                .ToList();
         }
-
-        _conversations = ConversationAggregator.Aggregate(snapshot)
-            .Select(LiveConversationMapper.ToModel)
-            .ToList();
 
         Changed?.Invoke();
     }
@@ -297,16 +294,18 @@ public sealed class LiveDataStore : IAsyncDisposable
     /// Empties accumulated telemetry events and the derived <see cref="Conversations"/> list. Implements
     /// the Settings modal's Reset Stats/Clear History actions - scoped to this session's live view, not
     /// the proxy's own durable history (<see cref="UsageStore"/> reads that separately, straight from
-    /// the proxy, and is unaffected by this).
+    /// the proxy, and is unaffected by this). Clears both fields under <see cref="_lock"/> alongside
+    /// <see cref="OnRoutingTelemetryReceived"/> so a telemetry event racing with a reset can never leave
+    /// <see cref="_events"/> and <see cref="Conversations"/> out of sync.
     /// </summary>
     public void ClearEvents()
     {
         lock (_lock)
         {
             _events.Clear();
+            _conversations = [];
         }
 
-        _conversations = [];
         Changed?.Invoke();
     }
 
