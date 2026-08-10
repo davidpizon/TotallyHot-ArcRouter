@@ -13,40 +13,40 @@ public sealed class KeywordDimensionInferrer : IDimensionInferrer
 
         if (ContainsAny(p, "fix", "bug", "error", "exception", "stack trace", "traceback", "doesn't work", "not working"))
         {
-            return "bug_fixing";
+            return RouterDimension.BugFixing;
         }
 
         if (ContainsAny(p, "refactor", "clean up", "rename", "restructure", "simplify"))
         {
-            return "code_refactoring";
+            return RouterDimension.CodeRefactoring;
         }
 
         if (ContainsAny(p, "unit test", "write tests", "test case", "pytest", "xunit", "jest"))
         {
-            return "test_generation";
+            return RouterDimension.TestGeneration;
         }
 
         if (ContainsAny(p, "explain", "what does", "how does", "understand", "walk through"))
         {
-            return "code_understanding";
+            return RouterDimension.CodeUnderstanding;
         }
 
         if (ContainsAny(p, "complexity", "algorithm", "optimize", "big-o", "sort", "search", "dynamic programming"))
         {
-            return "algorithm_design";
+            return RouterDimension.AlgorithmDesign;
         }
 
         if (ContainsAny(p, "dataframe", "pandas", "numpy", "plot", "dataset", "regression"))
         {
-            return "data_science";
+            return RouterDimension.DataScience;
         }
 
         if (ContainsAny(p, "complete", "finish", "fill in", "autocomplete"))
         {
-            return "code_completion";
+            return RouterDimension.CodeCompletion;
         }
 
-        return "code_generation";
+        return RouterDimension.CodeGeneration;
     }
 
     /// <summary>Returns true if the haystack contains any of the given needles, using an ordinal substring match.</summary>
