@@ -116,36 +116,42 @@ stale premises on:
    Console account into an organization is a self-serve Console → Settings → Organization step, not an
    enterprise contract.
 
-Governance > Providers cards have no way to show Anthropic's own authoritative usage/cost
-numbers — the existing "Monthly Budget" section
+Governance > Providers cards previously had no way to show Anthropic's own authoritative usage/cost
+numbers — the "Monthly Budget" section
 ([`ProvidersAdmin.razor`](../../src/TotallyHotArcRouter.Gui/Components/ProvidersAdmin.razor))
 renders bar charts, but they're driven entirely by the proxy's own internal request tally
-(`ProviderBudgetStore`), not by Anthropic. The proposed feature:
+(`ProviderBudgetStore`), not by Anthropic. **Shipped**, per `secrets-at-rest-plan.md` Phases 4-6:
 
-- **What**: a new "Anthropic Reported Usage" section on a provider card, shown for every
-  `ProviderType == Anthropic` provider once an Admin key resolves for it - no separate
-  "enterprise account" flag needed; see `secrets-at-rest-plan.md` §2.
+- **What**: a new "Reported Usage (Anthropic)" section on a provider card
+  (`ProvidersAdmin.razor`), shown for every `ProviderType == Anthropic` provider - "No reported usage
+  fetched yet" until an Admin key resolves and the first cycle runs, then daily token bars grouped by
+  model. No separate "enterprise account" flag; see `secrets-at-rest-plan.md` §2.
 - **Data source**: Anthropic's [Usage & Cost Admin
-  API](https://platform.claude.com/docs/en/manage-claude/usage-cost-api) — token usage and cost
-  reports over a trailing 30-day window, refreshed on the existing hourly reconciliation cycle (not on
+  API](https://platform.claude.com/docs/en/manage-claude/usage-cost-api) via
+  `Telemetry/AnthropicUsageReportClient.cs` — token usage over a trailing 30-day window, refreshed by
+  `AnthropicUsageReportService` on the existing hourly `CostReconciliationHostedService` cycle (not on
   card load - Anthropic documents a one-request-per-minute polling ceiling).
-- **Actual blocking prerequisite: an Admin key must exist for the `anthropic` provider's Console
-  account.** As of this repository's last check (2026-08-10), that account is an **individual Console
-  account** - the Admin API answers "unavailable for individual accounts" until it is converted to an
-  organization (self-serve, ~5 minutes), after which any org admin can create an
-  `sk-ant-admin01-…` key and set `CostTracking:Reconciliation:Providers:anthropic:AdminApiKeyEnvVar`.
-  Two related exclusions: **Bedrock has no programmatic Usage/Cost API**, so `bedrock-anthropic` can
-  never populate this card regardless of key; and **Claude Enterprise** carries a *different*
-  credential (an Analytics API key, `sk-ant-api01-…`) against a different endpoint family
-  (`/v1/organizations/analytics/…`), not interchangeable with an Admin key.
-- **Display**: bar charts, reusing the existing `EChart`/`ChartJson` pattern from the Monthly Budget
-  section, plus a visible "fetched at" timestamp — Anthropic's reported numbers are only trustworthy
-  as of the moment they were pulled. This is additive, not a replacement: Anthropic's API has no
-  endpoint to read back a spend *limit*, so it can't drive the existing local $/token cap-utilization
-  bars, which stay exactly as they are.
-- **Secret handling**: the Admin key itself is written through `PUT /admin/secrets/{name}` into the
+- **Remaining prerequisite is account-level, not code: an Admin key must exist for the `anthropic`
+  provider's Console account.** As of this repository's last check (2026-08-10), that account is an
+  **individual Console account** - the Admin API answers "unavailable for individual accounts" until it
+  is converted to an organization (self-serve, ~5 minutes), after which any org admin can create an
+  `sk-ant-admin01-…` key. It can be entered either via the provider card's "Admin API Key (cost
+  reconciliation, optional)" field or `CostTracking:Reconciliation:Providers:anthropic:AdminApiKeyEnvVar`
+  - the stored secret takes priority (`agent-cost-tracking.md` §4). Two related exclusions: **Bedrock
+  has no programmatic Usage/Cost API**, so `bedrock-anthropic` can never populate this card regardless
+  of key; and **Claude Enterprise** carries a *different* credential (an Analytics API key,
+  `sk-ant-api01-…`) against a different endpoint family (`/v1/organizations/analytics/…`), not
+  interchangeable with an Admin key.
+- **Display**: daily token bars grouped by model, reusing the existing `EChart`/`ChartJson`
+  `GroupedBarsModel` pattern from the Monthly Budget section, plus a "Fetched" timestamp footer —
+  Anthropic's reported numbers are only trustworthy as of the moment they were pulled. This is
+  additive, not a replacement: Anthropic's API has no endpoint to read back a spend *limit*, so it
+  can't drive the existing local $/token cap-utilization bars, which stay exactly as they are.
+- **Secret handling**: the Admin key itself is written through `PUT /admin/secrets/{name}`
+  (`ManagementFacade.SetSecret`, restricted to `reconciliation:{openai|anthropic}:admin-key`) into the
   protected secret store (`docs/router/secrets-at-rest.md`) rather than `model-routing.json` - there is
-  deliberately no `GET` counterpart on that route.
+  deliberately no `GET` counterpart on that route; `GET /admin/providers` exposes only a
+  `HasStoredAdminKey` boolean.
 
 ## Recently completed
 

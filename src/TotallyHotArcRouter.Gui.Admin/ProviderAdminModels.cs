@@ -48,6 +48,15 @@ namespace TotallyHot.ArcRouter.Gui.Admin;
 /// </param>
 /// <param name="WindowKind">The window the caps above reset on: <c>"Monthly"</c>, <c>"Weekly"</c>, or <c>"RollingHours"</c> (Phase 4, §5.10).</param>
 /// <param name="NextResetUtc">The UTC instant the current period ends and spend resets to zero - backs a budget bar's "resets in" text.</param>
+/// <param name="HasStoredAdminKey">
+/// Whether a reconciliation Admin API key is stored for this provider (docs/router/secrets-at-rest-plan.md
+/// §4/§7) - a boolean only, the key itself is never returned by any management surface.
+/// </param>
+/// <param name="ReportedUsage">
+/// This provider's own reported per-model daily token usage (docs/router/secrets-at-rest-plan.md §8.1),
+/// currently populated for <c>anthropic</c> only, or <see langword="null"/> when nothing has been fetched
+/// yet (no Admin API key configured, or the first cycle hasn't run).
+/// </param>
 public sealed record ProviderAdminView(
     string Key,
     string? Name,
@@ -66,7 +75,29 @@ public sealed record ProviderAdminView(
     DateTimeOffset? UsageLastRecordedAtUtc = null,
     ProviderRateLimitAdminView? RateLimit = null,
     string WindowKind = "Monthly",
-    DateTimeOffset? NextResetUtc = null);
+    DateTimeOffset? NextResetUtc = null,
+    bool HasStoredAdminKey = false,
+    ProviderReportedUsageAdminView? ReportedUsage = null);
+
+/// <summary>A provider's own reported per-model daily token usage (docs/router/secrets-at-rest-plan.md §8.1), mirroring the proxy's <c>ProviderReportedUsageView</c>.</summary>
+/// <param name="Rows">Every currently-stored row, ordered by day then model.</param>
+/// <param name="FetchedAtUtc">The most recent instant any of <paramref name="Rows"/> was fetched.</param>
+public sealed record ProviderReportedUsageAdminView(IReadOnlyList<ReportedUsageRowAdminView> Rows, DateTimeOffset FetchedAtUtc);
+
+/// <summary>One (day, model) row of <see cref="ProviderReportedUsageAdminView.Rows"/>. Raw reported counts - no derived totals.</summary>
+/// <param name="UsageDay">The UTC calendar day this usage was reported for.</param>
+/// <param name="Model">The provider's own model identifier for this row.</param>
+/// <param name="InputTokens">Uncached input tokens for this day/model.</param>
+/// <param name="OutputTokens">Output tokens for this day/model.</param>
+/// <param name="CacheCreationTokens">Cache-creation (cache-write) input tokens for this day/model.</param>
+/// <param name="CacheReadTokens">Cache-read input tokens for this day/model.</param>
+public sealed record ReportedUsageRowAdminView(
+    DateOnly UsageDay,
+    string Model,
+    long InputTokens,
+    long OutputTokens,
+    long CacheCreationTokens,
+    long CacheReadTokens);
 
 /// <summary>
 /// A standard-family rate-limit dimension (<c>requests</c>, <c>input-tokens</c>, <c>output-tokens</c>, or
@@ -340,6 +371,10 @@ public static class ToolCallDialectNames
 /// <param name="WindowKind">The window the caps reset on (<c>"Monthly"</c>, <c>"Weekly"</c>, or <c>"RollingHours"</c>); null keeps today's window.</param>
 /// <param name="WindowHours">Required and must be positive when <paramref name="WindowKind"/> is <c>"RollingHours"</c>; otherwise ignored.</param>
 public sealed record ProviderBudgetWriteRequest(decimal? DollarCap, long? TokenCap, string? WindowKind = null, int? WindowHours = null);
+
+/// <summary>The body sent to store a secret (<c>PUT /admin/secrets/{name}</c>, docs/router/secrets-at-rest-plan.md §7). Mirrors the proxy's own <c>SecretWriteRequest</c> - this project deliberately doesn't reference the proxy assembly (see <see cref="ProviderAdminClient"/>'s remarks).</summary>
+/// <param name="Value">The secret value to store.</param>
+public sealed record SecretWriteRequest(string Value);
 
 /// <summary>
 /// The result of <c>POST /admin/providers/{key}/discover-models</c>: the model ids the provider's own

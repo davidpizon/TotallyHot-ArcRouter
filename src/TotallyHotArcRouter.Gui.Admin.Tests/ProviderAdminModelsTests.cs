@@ -140,6 +140,43 @@ public sealed class ProviderAdminModelsTests
     }
 
     [Fact]
+    public void ProviderAdminView_HasStoredAdminKey_DefaultsToFalse()
+    {
+        var view = new ProviderAdminView("anthropic", "Anthropic", "https://api.anthropic.com", "x-api-key", [], []);
+
+        Assert.False(view.HasStoredAdminKey);
+    }
+
+    [Fact]
+    public void ProviderAdminView_RoundTripsHasStoredAdminKeyAndReportedUsage()
+    {
+        var options = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        var view = new ProviderAdminView(
+            "anthropic",
+            "Anthropic Prod",
+            "https://api.anthropic.com",
+            "x-api-key",
+            [],
+            [],
+            HasStoredAdminKey: true,
+            ReportedUsage: new ProviderReportedUsageAdminView(
+                [new ReportedUsageRowAdminView(new DateOnly(2026, 3, 1), "claude-opus-4-1", 100, 50, 5, 10)],
+                DateTimeOffset.Parse("2026-03-02T04:00:00Z", System.Globalization.CultureInfo.InvariantCulture)));
+
+        var json = System.Text.Json.JsonSerializer.Serialize(view, options);
+        var roundTripped = System.Text.Json.JsonSerializer.Deserialize<ProviderAdminView>(json, options)!;
+
+        Assert.True(roundTripped.HasStoredAdminKey);
+        Assert.NotNull(roundTripped.ReportedUsage);
+        Assert.Equal(view.ReportedUsage!.FetchedAtUtc, roundTripped.ReportedUsage!.FetchedAtUtc);
+        var row = Assert.Single(roundTripped.ReportedUsage.Rows);
+        Assert.Equal(new DateOnly(2026, 3, 1), row.UsageDay);
+        Assert.Equal("claude-opus-4-1", row.Model);
+        Assert.Equal(100, row.InputTokens);
+        Assert.Equal(5, row.CacheCreationTokens);
+    }
+
+    [Fact]
     public void ProviderTemplates_HasATemplateForEveryProviderType()
     {
         foreach (var providerType in Enum.GetValues<ProviderType>())

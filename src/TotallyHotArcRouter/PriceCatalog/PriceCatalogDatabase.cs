@@ -460,6 +460,26 @@ public sealed class PriceCatalogDatabase
         CREATE UNIQUE INDEX IF NOT EXISTS ix_provider_rate_limit_history_dedupe
             ON provider_rate_limit_history (provider_key, minute_bucket, header_name);
 
+        -- Anthropic's own reported per-model daily token usage (docs/router/secrets-at-rest-plan.md §8.1),
+        -- fetched via GET /v1/organizations/usage_report/messages - a distinct, more privileged Admin API
+        -- key than the provider's per-request inference key. One row per (provider, day, model); refreshed
+        -- wholesale on every hourly reconciliation cycle (AnthropicUsageReportService), which re-fetches the
+        -- full trailing 30-day window and upserts every row rather than tracking a checkpoint, so a value
+        -- Anthropic revises after the fact (their docs note usage can settle over ~5 minutes, occasionally
+        -- longer) is picked up automatically rather than frozen at first fetch. Raw reported token counts
+        -- are stored; totals are derived at read time (ManagementFacade), never pre-summed here.
+        CREATE TABLE IF NOT EXISTS provider_reported_usage_snapshot (
+            provider_key          TEXT    NOT NULL,
+            usage_day             TEXT    NOT NULL,
+            model                 TEXT    NOT NULL,
+            input_tokens          INTEGER NOT NULL,
+            output_tokens         INTEGER NOT NULL,
+            cache_creation_tokens INTEGER NOT NULL,
+            cache_read_tokens     INTEGER NOT NULL,
+            fetched_at_utc        TEXT    NOT NULL,
+            PRIMARY KEY (provider_key, usage_day, model)
+        );
+
         CREATE TABLE IF NOT EXISTS model_tool_capabilities (
             provider_key      TEXT    NOT NULL COLLATE NOCASE,
             model_name        TEXT    NOT NULL COLLATE NOCASE,

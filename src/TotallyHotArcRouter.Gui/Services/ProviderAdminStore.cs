@@ -161,6 +161,26 @@ public sealed class ProviderAdminStore
         MutateAsync(() => _client.SetModelToolDialectAsync(key, modelName, body, cancellationToken));
 
     /// <summary>
+    /// Stores a provider's reconciliation Admin API key (docs/router/secrets-at-rest-plan.md §7), then
+    /// reloads the provider list so <see cref="ProviderAdminView.HasStoredAdminKey"/> reflects it. Only
+    /// <c>openai</c> and <c>anthropic</c> are recognized.
+    /// </summary>
+    /// <exception cref="ProviderAdminException">The provider is unrecognized, the store is unavailable, or the write failed.</exception>
+    public async Task SetAdminApiKeyAsync(string provider, string value, CancellationToken cancellationToken = default)
+    {
+        await _client.SetAdminApiKeyAsync(provider, value, cancellationToken);
+        await LoadAsync(cancellationToken);
+    }
+
+    /// <summary>Clears a provider's stored reconciliation Admin API key, then reloads the provider list.</summary>
+    /// <exception cref="ProviderAdminException">The provider is unrecognized, the store is unavailable, or the write failed.</exception>
+    public async Task DeleteAdminApiKeyAsync(string provider, CancellationToken cancellationToken = default)
+    {
+        await _client.DeleteAdminApiKeyAsync(provider, cancellationToken);
+        await LoadAsync(cancellationToken);
+    }
+
+    /// <summary>
     /// Queries a provider's own model list (live discovery). An independently callable building block - the
     /// Governance UI's "Refresh from endpoint" action uses <see cref="RefreshFromEndpointAsync"/> instead.
     /// </summary>

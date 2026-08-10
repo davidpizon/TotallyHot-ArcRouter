@@ -138,6 +138,56 @@ public class CostReconciliationServiceTests
     }
 
     [Fact]
+    public async Task RunCycleAsync_ReconcilerFactorySupplied_IsInvokedFreshEachCycle_InsteadOfTheFixedList()
+    {
+        // Simulates an Admin API key saved from the GUI between two cycles (docs/router/secrets-at-rest-plan.md
+        // §7): the constructor's fixed reconciler list is empty, but the factory starts returning a
+        // reconciler on the second call - proving the fixed list is not what RunCycleAsync uses when a
+        // factory is supplied.
+        using var temp = new TempDatabase();
+        var reconciler = new FakeCostReconciler("anthropic", _ => 3m);
+        var store = temp.CreateCostReconciliationStore();
+        var calls = 0;
+        IReadOnlyList<IProviderCostReconciler> Factory()
+        {
+            calls++;
+            return calls == 1 ? [] : [reconciler];
+        }
+
+        var service = new CostReconciliationService(
+            [],
+            temp.CreateUsageLedger(),
+            store,
+            Options.Create(new CostReconciliationOptions()),
+            NullLogger<CostReconciliationService>.Instance,
+            Factory);
+
+        await service.RunCycleAsync(Ct);
+        Assert.Empty(reconciler.CalledDays);
+
+        await service.RunCycleAsync(Ct);
+        Assert.Single(reconciler.CalledDays);
+    }
+
+    [Fact]
+    public async Task RunCycleAsync_NoReconcilerFactorySupplied_UsesTheFixedConstructorList()
+    {
+        using var temp = new TempDatabase();
+        var reconciler = new FakeCostReconciler("openai", _ => 5m);
+        var store = temp.CreateCostReconciliationStore();
+        var service = new CostReconciliationService(
+            [reconciler],
+            temp.CreateUsageLedger(),
+            store,
+            Options.Create(new CostReconciliationOptions()),
+            NullLogger<CostReconciliationService>.Instance);
+
+        await service.RunCycleAsync(Ct);
+
+        Assert.Single(reconciler.CalledDays);
+    }
+
+    [Fact]
     public async Task RunCycleAsync_InsertsReconciliationRowWithReportedAndLocalCost()
     {
         using var temp = new TempDatabase();

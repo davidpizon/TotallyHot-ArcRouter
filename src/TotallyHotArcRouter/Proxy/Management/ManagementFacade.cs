@@ -1031,7 +1031,9 @@ public sealed class ManagementFacade
                     UsageLastRecordedAtUtc: budget.LastUsageAtUtc,
                     RateLimit: BuildRateLimitView(kvp.Key),
                     WindowKind: budget.WindowKind is { Length: > 0 } ? budget.WindowKind : "Monthly",
-                    NextResetUtc: budget.NextResetUtc);
+                    NextResetUtc: budget.NextResetUtc,
+                    HasStoredAdminKey: _secretReader?.TryRead(AdminKeySecretName(kvp.Key), out _) ?? false,
+                    ReportedUsage: BuildReportedUsageView(kvp.Key));
             })
             .OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -1061,6 +1063,31 @@ public sealed class ManagementFacade
         var isStale = DateTimeOffset.UtcNow - observedAt > _rateLimitStalenessThreshold;
         var projections = BuildExhaustionProjections(providerKey, snapshot, observedAt);
         return new ProviderRateLimitView(snapshot, observedAt, isStale, projections);
+    }
+
+    /// <summary>
+    /// Builds a provider's reported-usage view from the price catalog repository
+    /// (docs/router/secrets-at-rest-plan.md §8.1), or <see langword="null"/> when no repository is wired up
+    /// or nothing has been fetched for this provider yet (the common case - only <c>anthropic</c> with a
+    /// stored/configured Admin API key ever has rows).
+    /// </summary>
+    private ProviderReportedUsageView? BuildReportedUsageView(string providerKey)
+    {
+        if (_priceCatalogRepository is null)
+        {
+            return null;
+        }
+
+        var (rows, fetchedAtUtc) = _priceCatalogRepository.GetReportedUsage(providerKey);
+        if (rows.Count == 0 || fetchedAtUtc is not { } fetchedAt)
+        {
+            return null;
+        }
+
+        var rowViews = rows
+            .Select(r => new ReportedUsageRowView(r.UsageDay, r.Model, r.InputTokens, r.OutputTokens, r.CacheCreationTokens, r.CacheReadTokens))
+            .ToList();
+        return new ProviderReportedUsageView(rowViews, fetchedAt);
     }
 
     /// <summary>
@@ -1373,6 +1400,94 @@ public sealed class ManagementFacade
     /// <summary>The protected-store name for one provider header (<c>docs/router/secrets-at-rest-plan.md</c> §3's naming convention).</summary>
     private static string SecretRefName(string providerKey, string headerName) => $"provider:{providerKey}:header:{headerName}";
 
+    /// <summary>The protected-store name for a provider's reconciliation Admin API key (docs/router/secrets-at-rest-plan.md §3's naming convention), matching <c>Hosting.ServiceCollectionExtensions.AdminApiKeySecretName</c>.</summary>
+    private static string AdminKeySecretName(string provider) => $"reconciliation:{provider}:admin-key";
+
+    // Only these two are recognized by BuildCostReconcilers (docs/router/agent-cost-tracking.md §3.5), so
+    // this is the complete set of names SetSecret/DeleteSecret may ever touch.
+    private static readonly string[] RecognizedReconciliationProviders = ["openai", "anthropic"];
+
+    /// <summary>
+    /// Stores <paramref name="value"/> as a provider's reconciliation Admin API key
+    /// (docs/router/secrets-at-rest-plan.md §7), taking effect on the next reconciliation cycle with no
+    /// restart required. The public route is named by secret (<c>PUT /admin/secrets/{name}</c>) rather than
+    /// by provider so it matches the plan's write-only-secrets shape, but only the fixed
+    /// <c>reconciliation:{openai|anthropic}:admin-key</c> names are accepted - this is not a generic secret
+    /// store write endpoint.
+    /// </summary>
+    public ManagementResult<object?> SetSecret(string name, string value)
+    {
+        if (_secretWriter is null)
+        {
+            return ManagementResult<object?>.Fail(ManagementErrorType.Unavailable, "The protected secret store is unavailable on this platform.");
+        }
+
+        if (!TryParseAdminKeySecretName(name, out var provider))
+        {
+            return ManagementResult<object?>.Fail(ManagementErrorType.InvalidRequest, $"Unsupported secret name '{name}'.");
+        }
+
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return ManagementResult<object?>.Fail(ManagementErrorType.InvalidRequest, "value must not be blank.");
+        }
+
+        try
+        {
+            _secretWriter.Write(AdminKeySecretName(provider), value);
+            return ManagementResult<object?>.Ok(null);
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return ManagementResult<object?>.Fail(ManagementErrorType.Unavailable, "The protected secret store is unavailable on this platform.");
+        }
+    }
+
+    /// <summary>Clears a stored secret by name - the only counterpart to <see cref="SetSecret"/>, same name restriction. There is deliberately no read counterpart (docs/router/secrets-at-rest-plan.md §4).</summary>
+    public ManagementResult<object?> DeleteSecret(string name)
+    {
+        if (_secretWriter is null)
+        {
+            return ManagementResult<object?>.Fail(ManagementErrorType.Unavailable, "The protected secret store is unavailable on this platform.");
+        }
+
+        if (!TryParseAdminKeySecretName(name, out var provider))
+        {
+            return ManagementResult<object?>.Fail(ManagementErrorType.InvalidRequest, $"Unsupported secret name '{name}'.");
+        }
+
+        _secretWriter.Delete(AdminKeySecretName(provider));
+        return ManagementResult<object?>.Ok(null);
+    }
+
+    /// <summary>Parses a secret name as <c>reconciliation:{provider}:admin-key</c> for a recognized provider, the only shape <see cref="SetSecret"/>/<see cref="DeleteSecret"/> accept.</summary>
+    private static bool TryParseAdminKeySecretName(string name, out string provider)
+    {
+        provider = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        var parts = name.Split(':');
+        if (parts.Length != 3 || parts[0] != "reconciliation" || parts[2] != "admin-key")
+        {
+            return false;
+        }
+
+        foreach (var candidate in RecognizedReconciliationProviders)
+        {
+            if (string.Equals(candidate, parts[1], StringComparison.OrdinalIgnoreCase))
+            {
+                provider = candidate;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>Writes <paramref name="value"/> to the protected store under this header's name. Returns <see langword="false"/> when no store is configured or it is unavailable on this platform.</summary>
     private bool TryWriteSecret(string providerKey, string headerName, string value)
     {
@@ -1601,6 +1716,18 @@ public static class HeaderValueSource
 /// The UTC instant the current period ends and spend resets to zero, computed live from
 /// <paramref name="WindowKind"/> - backs the budget bar's "resets in 2h 10m" text.
 /// </param>
+/// <param name="HasStoredAdminKey">
+/// Whether a reconciliation Admin API key is stored for this provider (docs/router/secrets-at-rest-plan.md
+/// §4/§7) - a boolean only, never the key itself, matching every other secret-existence flag this view
+/// exposes. <see langword="false"/> both when no key was ever saved and on a platform where the protected
+/// store is unavailable.
+/// </param>
+/// <param name="ReportedUsage">
+/// This provider's own reported per-model daily token usage (docs/router/secrets-at-rest-plan.md §8.1),
+/// currently populated for <c>anthropic</c> only, or <see langword="null"/> when no price catalog
+/// repository is wired up or nothing has been fetched yet (no Admin API key configured, or the first cycle
+/// hasn't run).
+/// </param>
 public sealed record ProviderView(
     string Key,
     string? Name,
@@ -1619,7 +1746,32 @@ public sealed record ProviderView(
     DateTimeOffset? UsageLastRecordedAtUtc = null,
     ProviderRateLimitView? RateLimit = null,
     string WindowKind = "Monthly",
-    DateTimeOffset? NextResetUtc = null);
+    DateTimeOffset? NextResetUtc = null,
+    bool HasStoredAdminKey = false,
+    ProviderReportedUsageView? ReportedUsage = null);
+
+/// <summary>
+/// A provider's own reported per-model daily token usage (docs/router/secrets-at-rest-plan.md §8.1), as
+/// returned to a management caller.
+/// </summary>
+/// <param name="Rows">Every currently-stored row, ordered by day then model.</param>
+/// <param name="FetchedAtUtc">The most recent instant any of <paramref name="Rows"/> was fetched - the GUI's "Fetched" footer.</param>
+public sealed record ProviderReportedUsageView(IReadOnlyList<ReportedUsageRowView> Rows, DateTimeOffset FetchedAtUtc);
+
+/// <summary>One (day, model) row of <see cref="ProviderReportedUsageView.Rows"/>. Raw reported counts - no derived totals.</summary>
+/// <param name="UsageDay">The UTC calendar day this usage was reported for.</param>
+/// <param name="Model">The provider's own model identifier for this row.</param>
+/// <param name="InputTokens">Uncached input tokens for this day/model.</param>
+/// <param name="OutputTokens">Output tokens for this day/model.</param>
+/// <param name="CacheCreationTokens">Cache-creation (cache-write) input tokens for this day/model.</param>
+/// <param name="CacheReadTokens">Cache-read input tokens for this day/model.</param>
+public sealed record ReportedUsageRowView(
+    DateOnly UsageDay,
+    string Model,
+    long InputTokens,
+    long OutputTokens,
+    long CacheCreationTokens,
+    long CacheReadTokens);
 
 /// <summary>
 /// A provider's most recently captured rate-limit header snapshot, as returned to a management caller.
@@ -1737,6 +1889,10 @@ public sealed record ProviderWriteRequest(
 /// </summary>
 /// <param name="Enabled">The provider's new on/off state.</param>
 public sealed record ProviderEnabledWriteRequest(bool Enabled);
+
+/// <summary>The body sent to store a secret (<c>PUT /admin/secrets/{name}</c>, docs/router/secrets-at-rest-plan.md §7). See <see cref="ManagementFacade.SetSecret"/> for which names are accepted.</summary>
+/// <param name="Value">The secret value to store.</param>
+public sealed record SecretWriteRequest(string Value);
 
 /// <summary>A single custom header to store for a provider.</summary>
 /// <param name="Name">The header name.</param>

@@ -489,6 +489,84 @@ public sealed class ProvidersAdminLoadedTests
     }
 
     [Fact]
+    public void ReportedUsage_section_renders_only_for_AnthropicTyped_providers_andShowsEmptyState_whenNothingFetched()
+    {
+        // docs/router/secrets-at-rest-plan.md §8.2: the section is Anthropic-only, unlike the wider
+        // Anthropic/OpenAI usage block it lives inside; the fixture's anthropic provider carries no
+        // reportedUsage, so the empty state renders.
+        var transport = new StubTransport();
+        using var ctx = NewContext(transport);
+
+        var cut = RenderLoaded(ctx);
+
+        cut.Markup.Should().Contain("Reported Usage (Anthropic)");
+        cut.Markup.Should().Contain("No reported usage fetched yet");
+        System.Text.RegularExpressions.Regex.Matches(cut.Markup, "Reported Usage \\(Anthropic\\)").Count.Should().Be(1);
+    }
+
+    [Fact]
+    public void AdminApiKey_field_renders_for_recognized_reconciliation_providers()
+    {
+        var transport = new StubTransport();
+        using var ctx = NewContext(transport);
+
+        var cut = RenderLoaded(ctx);
+
+        // anthropic and openai are both recognized (docs/router/agent-cost-tracking.md §3.5); the fixture's
+        // "ollama" provider is neither, so its card must not offer the field at all.
+        System.Text.RegularExpressions.Regex.Matches(cut.Markup, "Admin API Key \\(cost reconciliation, optional\\)").Count.Should().Be(2);
+    }
+
+    [Fact]
+    public void ReportedUsage_section_rendersChartAndFetchedFooter_whenDataPresent()
+    {
+        var transport = new StubTransport { ResponseOverride = ProvidersJsonWithReportedUsage };
+        using var ctx = NewContext(transport);
+
+        var cut = RenderLoaded(ctx);
+
+        cut.Markup.Should().Contain("Fetched 2026-03-02 04:00 UTC");
+        cut.Markup.Should().NotContain("No reported usage fetched yet");
+        cut.Markup.Should().Contain("•••••••• stored");
+    }
+
+    // Same anthropic provider as ProvidersJson, but with reportedUsage rows and a stored admin key -
+    // exercises the populated-data branches of the reported-usage section (§8.2), which must render from
+    // these backend-supplied values, never the GUI clock.
+    private const string ProvidersJsonWithReportedUsage = """
+        {
+          "providers": [
+            {
+              "key": "anthropic",
+              "name": "Anthropic Prod",
+              "baseUrl": "https://api.anthropic.com",
+              "authHeaderName": "x-api-key",
+              "authHeaderScheme": "",
+              "hasApiKey": true,
+              "apiKeyEnvVar": null,
+              "providerType": "Anthropic",
+              "models": [],
+              "headers": [],
+              "isFree": false,
+              "dollarCap": null,
+              "tokenCap": null,
+              "dollarSpent": 0.0,
+              "tokensUsed": 0,
+              "enabled": true,
+              "endpointCapabilities": null,
+              "hasStoredAdminKey": true,
+              "reportedUsage": {
+                "rows": [
+                  { "usageDay": "2026-03-01", "model": "claude-opus-4-1", "inputTokens": 100, "outputTokens": 50, "cacheCreationTokens": 5, "cacheReadTokens": 10 }
+                ],
+                "fetchedAtUtc": "2026-03-02T04:00:00Z"
+              }
+            }
+          ]
+        }
+        """;
+
+    [Fact]
     public void Anthropic_Usage_card_shows_empty_states_when_nothing_recorded_yet()
     {
         var transport = new StubTransport();

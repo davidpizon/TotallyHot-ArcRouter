@@ -404,6 +404,28 @@ Admin API key is a distinct, more privileged credential class (org-wide read acc
 usage/billing) that should not be the same secret already deployed for routing traffic, and should
 not be required for the feature's core (per-request estimate + ledger) to work.
 
+**Resolution order: stored secret first, then `AdminApiKeyEnvVar`**
+([`secrets-at-rest-plan.md`](secrets-at-rest-plan.md) §7). `ServiceCollectionExtensions.TryResolveAdminApiKey`
+checks the protected secret store for `reconciliation:{provider}:admin-key` before falling back to the
+configured environment variable, so a key pasted into the Governance UI's provider card takes priority
+over an existing environment-variable deployment without requiring any config change. The reconciler
+list (`BuildCostReconcilers`) is rebuilt from this resolution on every hourly cycle rather than once at
+startup, so a key saved from the GUI is picked up by the very next cycle - no restart. The same
+resolution backs `AnthropicUsageReportService`'s reported-usage fetch (§3.5.1 below).
+
+### 4.1 Reported usage (Anthropic only)
+
+Alongside cost reconciliation, the same Admin API key also unlocks Anthropic's own reported per-model
+daily token usage via `GET /v1/organizations/usage_report/messages` (`bucket_width=1d`,
+`group_by[]=model`, a trailing 30-day window). `AnthropicUsageReportClient` fetches it and
+`AnthropicUsageReportService` upserts the raw counts into `provider_reported_usage_snapshot`
+(`provider_key`, `usage_day`, `model` primary key) on the same hourly cycle as reconciliation -
+`CostReconciliationHostedService` runs both in turn, each independently swallowing its own failures so
+one never blocks the other. `ManagementFacade.ProviderView.ReportedUsage` exposes it on the existing
+`GET /admin/providers` payload; an account with no Admin API key configured simply never populates the
+table, and the Governance UI's Anthropic Usage card shows "No reported usage fetched yet" instead of
+failing. See [`secrets-at-rest-plan.md`](secrets-at-rest-plan.md) §8 for the full design.
+
 ---
 
 ## 5. Operational: budget checks

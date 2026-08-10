@@ -1,10 +1,11 @@
 # Secrets at rest
 
 Reference documentation for the protected secret store implemented per
-[`secrets-at-rest-plan.md`](secrets-at-rest-plan.md) Phases 1-3. Phases 4-6 (Anthropic Admin-key
-sourcing and the reported-usage card) are documented in that plan and in
-[`../gui/backlog.md`](../gui/backlog.md) item #3, and remain gated on the eligibility check described
-there.
+[`secrets-at-rest-plan.md`](secrets-at-rest-plan.md), all six phases. Phases 4-6 (Anthropic Admin-key
+sourcing and the reported-usage card) are functional for any account with a Console/Enterprise Admin API
+key; an account without one (a Claude Pro/Max subscription, say - see the plan's §2 eligibility check)
+simply has nothing to store, every reconciliation cycle involving it is a no-op, and Phase 6's card
+renders its empty state. The rest of the application works fully either way.
 
 ## 1. What is protected today
 
@@ -13,7 +14,7 @@ there.
 | Provider header literals (inference API keys) with `Locked = true` | Protected store, referenced from `model-routing.json` by `ProviderHeader.ValueSecretRef` | DPAPI-encrypted, ACL-restricted (`ProtectedSecretStore`) |
 | Telemetry certificate password | Protected store (`telemetry:cert-password`) | DPAPI-encrypted, ACL-restricted |
 | Management token | `%LOCALAPPDATA%\TotallyHotArcRouter\management-token.txt` | ACL-restricted via `ManagementAccessToken.WriteRestricted`; contents plaintext (deliberately left as-is - see §5) |
-| Admin API keys (OpenAI/Anthropic cost reconcilers) | Environment variable only | n/a - nothing is stored (Phase 4, not yet built) |
+| Admin API keys (OpenAI/Anthropic cost reconcilers) | Protected store (`reconciliation:{provider}:admin-key`), stored secret preferred, environment variable fallback | DPAPI-encrypted, ACL-restricted; optional - an account with neither configured simply has no reconciler/usage report for that provider |
 | AWS credentials | Environment variable only, by design | n/a - no change |
 
 A provider header that predates this store, or was written while the store was unavailable, may still
@@ -41,7 +42,7 @@ the store:
 |---|---|
 | A provider header value | `provider:{providerKey}:header:{headerName}` |
 | The telemetry certificate password | `telemetry:cert-password` |
-| A reconciler's Admin API key (Phase 4, not yet built) | `reconciliation:{provider}:admin-key` |
+| A reconciler's Admin API key | `reconciliation:{provider}:admin-key` (only `openai`/`anthropic` are recognized) |
 
 ## 4. Non-Windows behavior: refuse, do not degrade
 
@@ -64,6 +65,12 @@ proxied traffic in `ModelRouteResolver`, and the "Discover models" probe in
 a caller. `GET /admin/providers` and the MCP `list_providers` tool report a header's source as
 `"protected"` and nothing else - see `HeaderValueSource.Protected`.
 
+`PUT`/`DELETE /admin/secrets/{name}` (`ManagementFacade.SetSecret`/`DeleteSecret`) is the one write path
+into the store from outside a provider's own headers, and it is intentionally not a generic secret
+store endpoint: `name` must match `reconciliation:{openai|anthropic}:admin-key` exactly, or the request
+is rejected with 400 before it ever reaches `ISecretWriter`. `GET /admin/providers` reports only a
+`HasStoredAdminKey` boolean per provider - never the key.
+
 A known scope limit: the endpoint-capability scanner and tool-call dialect resolver
 (`ProviderEndpointScanner`, `ModelDialectResolver`) do not currently take a secret reader, so a
 best-effort capability scan or dialect detection for a provider whose credential lives only in the
@@ -77,3 +84,20 @@ affect real request routing, which always resolves through the store.
 deliberately does not reference the router project, and folding the token into the shared store would
 mean either duplicating it into `Gui.Admin` or introducing a shared assembly - a bigger change than
 warranted for the one secret in the inventory that is already ACL-restricted.
+
+## 7. Admin key sourcing and reported usage (Phases 4-6)
+
+`ServiceCollectionExtensions.TryResolveAdminApiKey` resolves a provider's Admin API key stored secret
+first, then `CostTracking:Reconciliation:Providers:{provider}:AdminApiKeyEnvVar` - so a key saved through
+the GUI takes priority over (and needs no change to) an existing environment-variable deployment. This
+runs fresh on every reconciliation cycle (`BuildCostReconcilers`, called again each cycle via the
+registered `Func<IReadOnlyList<IProviderCostReconciler>>` rather than once at DI construction), and
+`AnthropicUsageReportService` resolves the same way for the reported-usage fetch - so a key pasted into
+the GUI takes effect on the very next hourly cycle, no restart required.
+
+Anthropic's own reported per-model daily token usage (`GET /v1/organizations/usage_report/messages`) is
+fetched on that same cycle and stored raw (no derived totals) in `provider_reported_usage_snapshot`,
+keyed `(provider_key, usage_day, model)`; see `agent-cost-tracking.md` §4 for the resolution order and
+`secrets-at-rest-plan.md` §8 for the full fetch/storage/GUI design. An account with no Admin API key
+configured simply never populates this table, and `ManagementFacade.ProviderView.ReportedUsage` reads
+back `null`.

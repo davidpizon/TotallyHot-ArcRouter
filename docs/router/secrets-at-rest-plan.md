@@ -1,8 +1,13 @@
 # Secrets at rest — a generic protected store, with the Anthropic Admin-API path as its first consumer
 
-> **Status: planned.** Phases 1-3 are unconditional and are the higher-value work. Phases 4-6 are
-> gated on [§2's eligibility check](#2-step-0--admin-key-eligibility-gate-product-decision) and revise
-> [`../gui/backlog.md`](../gui/backlog.md) item #3, whose stated blocker is stale. Complements
+> **Status: implemented, all six phases.** See [`secrets-at-rest.md`](secrets-at-rest.md) for the
+> as-built reference. Phases 4-6 build unconditionally - the code has no dependency on any particular
+> account's eligibility - but only *do* anything for an account for which
+> [§2's eligibility check](#2-step-0--admin-key-eligibility-gate-product-decision) resolves: an
+> individual Console account or a Claude Pro/Max subscription simply has no Admin API key to resolve, so
+> every reconciliation cycle involving it is a no-op and the reported-usage card shows its empty state,
+> exactly as if these phases hadn't run. Revises [`../gui/backlog.md`](../gui/backlog.md) item #3, whose
+> stated blocker was stale. Complements
 > [`anthropic-reported-usage-plan.md`](anthropic-reported-usage-plan.md), which deliberately sources
 > accurate usage *without* any admin credential; nothing here conflicts with it.
 

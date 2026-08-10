@@ -208,7 +208,29 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddSingleton<IReadOnlyList<IProviderCostReconciler>>(sp => BuildCostReconcilers(sp));
             services.AddSingleton<IEnumerable<IProviderCostReconciler>>(
                 sp => sp.GetRequiredService<IReadOnlyList<IProviderCostReconciler>>());
+            // Rebuilds the reconciler list from scratch on every reconciliation cycle
+            // (docs/router/secrets-at-rest-plan.md §7) rather than the fixed list above, which is captured
+            // once at DI construction: an operator who saves a stored Admin API key from the GUI needs the
+            // very next cycle to pick it up, not the next process restart. CostReconciliationService falls
+            // back to the fixed list when no factory is supplied (every existing unit test).
+            services.AddSingleton<Func<IReadOnlyList<IProviderCostReconciler>>>(sp => () => BuildCostReconcilers(sp));
             services.AddSingleton<CostReconciliationService>();
+            // Anthropic's own reported per-model daily token usage (docs/router/secrets-at-rest-plan.md
+            // §8.1) - a Console/Enterprise-only feature layered on the same Admin API key as reconciliation
+            // above. The key resolver runs stored-secret-then-env-var fresh on every cycle (mirroring
+            // BuildCostReconcilers), so a key saved from the GUI takes effect without a restart, and an
+            // account with none configured (Claude Pro/Max) simply gets a permanent no-op.
+            services.AddSingleton(sp => new AnthropicUsageReportService(
+                sp.GetRequiredService<HttpClient>(),
+                sp.GetRequiredService<PriceCatalogRepository>(),
+                () =>
+                {
+                    var reconciliationOptions = sp.GetRequiredService<IOptions<CostReconciliationOptions>>().Value;
+                    var environment = sp.GetRequiredService<IEnvironmentVariableProvider>();
+                    var secretReader = sp.GetService<ISecretReader>();
+                    return TryResolveAdminApiKey(reconciliationOptions, environment, secretReader, "anthropic", out var key) ? key : null;
+                },
+                sp.GetRequiredService<ILogger<AnthropicUsageReportService>>()));
             // Per-(provider, model) tool-call dialect capabilities (docs/router/tool-call-normalization.md
             // Phase 1). Shares agent_telemetry.db with the price catalog, so it has the same
             // empty-until-schema-ready lifecycle as the two stores above: StartupHealthCheckHostedService
@@ -292,27 +314,31 @@ namespace TotallyHot.ArcRouter.Hosting
         }
 
         /// <summary>
-        /// Builds the list of <see cref="IProviderCostReconciler"/>s from <see cref="CostReconciliationOptions.Providers"/>:
-        /// one per provider whose <see cref="ProviderReconciliationOptions.AdminApiKeyEnvVar"/> is
-        /// configured and resolves to a non-empty environment variable value. Only <c>openai</c> and
-        /// <c>anthropic</c> are recognized (docs/router/agent-cost-tracking.md §3.5) - an unrecognized
-        /// provider key under <c>CostTracking:Reconciliation:Providers</c> is silently ignored, matching
-        /// how an unresearched provider (Alibaba/Zhipu/Moonshot/MiniMax) simply has no reconciler.
+        /// Builds the list of <see cref="IProviderCostReconciler"/>s: one per provider with a resolvable
+        /// Admin API key - a stored secret (<c>reconciliation:{provider}:admin-key</c>, see
+        /// <see cref="TryResolveAdminApiKey"/>) or <see cref="ProviderReconciliationOptions.AdminApiKeyEnvVar"/>.
+        /// Only <c>openai</c> and <c>anthropic</c> are recognized (docs/router/agent-cost-tracking.md §3.5) -
+        /// an unrecognized provider key under <c>CostTracking:Reconciliation:Providers</c> is silently
+        /// ignored, matching how an unresearched provider (Alibaba/Zhipu/Moonshot/MiniMax) simply has no
+        /// reconciler. Called once at DI construction for the fixed fallback list, and again on every
+        /// reconciliation cycle via the registered <c>Func&lt;IReadOnlyList&lt;IProviderCostReconciler&gt;&gt;</c>
+        /// (docs/router/secrets-at-rest-plan.md §7) so a key saved from the GUI takes effect without a restart.
         /// </summary>
-        private static IReadOnlyList<IProviderCostReconciler> BuildCostReconcilers(IServiceProvider sp)
+        internal static IReadOnlyList<IProviderCostReconciler> BuildCostReconcilers(IServiceProvider sp)
         {
             var options = sp.GetRequiredService<IOptions<CostReconciliationOptions>>().Value;
             var environment = sp.GetRequiredService<IEnvironmentVariableProvider>();
+            var secretReader = sp.GetService<ISecretReader>();
             var httpClient = sp.GetRequiredService<HttpClient>();
 
             var reconcilers = new List<IProviderCostReconciler>();
 
-            if (TryResolveAdminApiKey(options, environment, "openai", out var openAiKey))
+            if (TryResolveAdminApiKey(options, environment, secretReader, "openai", out var openAiKey))
             {
                 reconcilers.Add(new OpenAiCostReconciler(httpClient, openAiKey, sp.GetService<ILogger<OpenAiCostReconciler>>()));
             }
 
-            if (TryResolveAdminApiKey(options, environment, "anthropic", out var anthropicKey))
+            if (TryResolveAdminApiKey(options, environment, secretReader, "anthropic", out var anthropicKey))
             {
                 reconcilers.Add(new AnthropicCostReconciler(httpClient, anthropicKey, sp.GetService<ILogger<AnthropicCostReconciler>>()));
             }
@@ -320,13 +346,28 @@ namespace TotallyHot.ArcRouter.Hosting
             return reconcilers;
         }
 
-        private static bool TryResolveAdminApiKey(
+        /// <summary>
+        /// Resolves <paramref name="provider"/>'s Admin API key, stored secret first
+        /// (<see cref="AdminApiKeySecretName"/>) then <see cref="ProviderReconciliationOptions.AdminApiKeyEnvVar"/>
+        /// (docs/router/secrets-at-rest-plan.md §7) - so a key saved through <c>PUT /admin/secrets/{name}</c>
+        /// takes priority over (and needs no change to) an existing environment-variable deployment.
+        /// </summary>
+        internal static bool TryResolveAdminApiKey(
             CostReconciliationOptions options,
             IEnvironmentVariableProvider environment,
+            ISecretReader? secretReader,
             string provider,
             out string adminApiKey)
         {
             adminApiKey = string.Empty;
+
+            if (secretReader is not null &&
+                secretReader.TryRead(AdminApiKeySecretName(provider), out var stored) &&
+                !string.IsNullOrWhiteSpace(stored))
+            {
+                adminApiKey = stored;
+                return true;
+            }
 
             if (!options.Providers.TryGetValue(provider, out var providerOptions) ||
                 string.IsNullOrWhiteSpace(providerOptions.AdminApiKeyEnvVar))
@@ -343,6 +384,9 @@ namespace TotallyHot.ArcRouter.Hosting
             adminApiKey = resolved;
             return true;
         }
+
+        /// <summary>The protected-store name for a provider's reconciliation Admin API key (docs/router/secrets-at-rest-plan.md §3's naming convention).</summary>
+        internal static string AdminApiKeySecretName(string provider) => $"reconciliation:{provider}:admin-key";
     }
 }
 
