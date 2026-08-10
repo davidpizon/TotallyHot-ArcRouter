@@ -141,6 +141,16 @@ public static class ProviderAdminEndpoints
         group.MapGet("/providers/{key}/rate-limit-history", (string key, double? hours) =>
             ToResult(facade.GetRateLimitHistory(key, hours ?? 6.0)));
 
+        // Write-only protected-secret surface (docs/router/secrets-at-rest-plan.md §4/§7): stores or clears
+        // a reconciliation Admin API key. Deliberately no GET counterpart - the invariant is that no secret
+        // that reaches the protected store is ever readable back through any management API. GET
+        // /admin/providers reports only the HasStoredAdminKey boolean.
+        group.MapPut("/secrets/{name}", (string name, SecretWriteRequest request) =>
+            ToResult(facade.SetSecret(name, request.Value)));
+
+        group.MapDelete("/secrets/{name}", (string name) =>
+            ToResult(facade.DeleteSecret(name)));
+
         return endpoints;
     }
 

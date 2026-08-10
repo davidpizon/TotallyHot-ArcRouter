@@ -20,18 +20,32 @@ public sealed class CostReconciliationService
     public const int MaxCatchUpDays = 7;
 
     private readonly IReadOnlyList<IProviderCostReconciler> _reconcilers;
+    private readonly Func<IReadOnlyList<IProviderCostReconciler>>? _reconcilerFactory;
     private readonly IUsageLedger _usageLedger;
     private readonly IProviderCostReconciliationStore _store;
     private readonly ILogger<CostReconciliationService> _logger;
     private readonly decimal _deltaWarningPercent;
 
     /// <summary>Initializes a new instance of the <see cref="CostReconciliationService"/> class.</summary>
+    /// <param name="reconcilers">The fixed reconciler list used when <paramref name="reconcilerFactory"/> is <see langword="null"/>.</param>
+    /// <param name="usageLedger">The local usage ledger each reconciled day's estimated cost is summed from.</param>
+    /// <param name="store">Persists reconciliation snapshots and each provider's checkpoint cursor.</param>
+    /// <param name="options">Provides <see cref="CostReconciliationOptions.DeltaWarningPercent"/>.</param>
+    /// <param name="logger">Logs per-day failures and reported/local cost deltas.</param>
+    /// <param name="reconcilerFactory">
+    /// Optional. When supplied, called at the start of every <see cref="RunCycleAsync"/> instead of using
+    /// the fixed <paramref name="reconcilers"/> snapshot - so a provider's Admin API key saved to the
+    /// protected secret store after startup (docs/router/secrets-at-rest-plan.md §7) is picked up by the
+    /// very next cycle rather than requiring a restart. Defaults to <see langword="null"/>, in which case
+    /// behavior is unchanged from before this parameter existed.
+    /// </param>
     public CostReconciliationService(
         IEnumerable<IProviderCostReconciler> reconcilers,
         IUsageLedger usageLedger,
         IProviderCostReconciliationStore store,
         IOptions<CostReconciliationOptions> options,
-        ILogger<CostReconciliationService> logger)
+        ILogger<CostReconciliationService> logger,
+        Func<IReadOnlyList<IProviderCostReconciler>>? reconcilerFactory = null)
     {
         ArgumentNullException.ThrowIfNull(reconcilers);
         ArgumentNullException.ThrowIfNull(usageLedger);
@@ -40,6 +54,7 @@ public sealed class CostReconciliationService
         ArgumentNullException.ThrowIfNull(logger);
 
         _reconcilers = reconcilers.ToList();
+        _reconcilerFactory = reconcilerFactory;
         _usageLedger = usageLedger;
         _store = store;
         _logger = logger;
@@ -54,7 +69,8 @@ public sealed class CostReconciliationService
     /// </summary>
     public async Task RunCycleAsync(CancellationToken cancellationToken = default)
     {
-        foreach (var reconciler in _reconcilers)
+        var reconcilers = _reconcilerFactory?.Invoke() ?? _reconcilers;
+        foreach (var reconciler in reconcilers)
         {
             cancellationToken.ThrowIfCancellationRequested();
             await ReconcileProviderAsync(reconciler, cancellationToken).ConfigureAwait(false);

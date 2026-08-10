@@ -63,7 +63,7 @@ directly and never reads proxy-side storage directly. Every piece of this design
 `TotallyHotArcRouter` proxy process:
 
 - The SQLite database (`model_prices`, `usage_ledger`, `provider_cost_reconciliation`) is opened and
-  owned exclusively by the proxy. `TotallyHotArcRouter.Gui` never opens `agent_telemetry.db` itself, even
+  owned exclusively by the proxy. `TotallyHot.ArcRouter.Gui` never opens `agent_telemetry.db` itself, even
   though both processes typically run on the same machine as the same user and doing so would be
   technically possible - it reaches this data only through whatever the proxy chooses to expose (see
   [`../gui/governance-model-cards.md`](../gui/governance-model-cards.md) for the first proposed
@@ -195,7 +195,7 @@ SQLite is still the right call here anyway).
 ### 3.1 Schema initialization
 
 ```csharp
-namespace TotallyHotArcRouter.Telemetry.CostTracking;
+namespace TotallyHot.ArcRouter.Telemetry.CostTracking;
 
 /// <summary>
 /// Creates the cost-tracking SQLite schema if it doesn't already exist. Safe to call on every
@@ -240,7 +240,7 @@ public sealed class CostTrackingSchema
 ### 3.3 Usage ledger
 
 ```csharp
-namespace TotallyHotArcRouter.Telemetry.CostTracking;
+namespace TotallyHot.ArcRouter.Telemetry.CostTracking;
 
 public interface IUsageLedger
 {
@@ -292,7 +292,7 @@ New `IHostedService`, mirroring `ProxyHostedService`'s existing pattern of a bac
 registered via `services.AddHostedService(...)` in `ServiceCollectionExtensions.cs`:
 
 ```csharp
-namespace TotallyHotArcRouter.Telemetry.CostTracking;
+namespace TotallyHot.ArcRouter.Telemetry.CostTracking;
 
 public sealed class CostReconciliationHostedService : BackgroundService
 {
@@ -403,6 +403,28 @@ entries, but is a **separate** environment variable from the inference key - an
 Admin API key is a distinct, more privileged credential class (org-wide read access to
 usage/billing) that should not be the same secret already deployed for routing traffic, and should
 not be required for the feature's core (per-request estimate + ledger) to work.
+
+**Resolution order: stored secret first, then `AdminApiKeyEnvVar`**
+([`secrets-at-rest-plan.md`](secrets-at-rest-plan.md) §7). `ServiceCollectionExtensions.TryResolveAdminApiKey`
+checks the protected secret store for `reconciliation:{provider}:admin-key` before falling back to the
+configured environment variable, so a key pasted into the Governance UI's provider card takes priority
+over an existing environment-variable deployment without requiring any config change. The reconciler
+list (`BuildCostReconcilers`) is rebuilt from this resolution on every hourly cycle rather than once at
+startup, so a key saved from the GUI is picked up by the very next cycle - no restart. The same
+resolution backs `AnthropicUsageReportService`'s reported-usage fetch (§3.5.1 below).
+
+### 4.1 Reported usage (Anthropic only)
+
+Alongside cost reconciliation, the same Admin API key also unlocks Anthropic's own reported per-model
+daily token usage via `GET /v1/organizations/usage_report/messages` (`bucket_width=1d`,
+`group_by[]=model`, a trailing 30-day window). `AnthropicUsageReportClient` fetches it and
+`AnthropicUsageReportService` upserts the raw counts into `provider_reported_usage_snapshot`
+(`provider_key`, `usage_day`, `model` primary key) on the same hourly cycle as reconciliation -
+`CostReconciliationHostedService` runs both in turn, each independently swallowing its own failures so
+one never blocks the other. `ManagementFacade.ProviderView.ReportedUsage` exposes it on the existing
+`GET /admin/providers` payload; an account with no Admin API key configured simply never populates the
+table, and the Governance UI's Anthropic Usage card shows "No reported usage fetched yet" instead of
+failing. See [`secrets-at-rest-plan.md`](secrets-at-rest-plan.md) §8 for the full design.
 
 ---
 

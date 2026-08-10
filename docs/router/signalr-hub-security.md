@@ -1,18 +1,17 @@
-# Secure SignalR Communication (TotallyHotArcRouter ↔ TotallyHotArcRouter.Gui)
+# Secure SignalR Communication (TotallyHotArcRouter ↔ TotallyHot.ArcRouter.Gui)
 
-> **Status: Proposed — not yet implemented, AND the transport this doc was written against no longer
-> exists.** [`grpc-migration.md`](grpc-migration.md) has since shipped: `Telemetry/TelemetryHub.cs` is
+> **Status: Shipped — and the transport this doc was originally written against no longer exists.**
+> [`grpc-migration.md`](grpc-migration.md) has since shipped: `Telemetry/TelemetryHub.cs` is
 > deleted, and `Proxy/ProxyServer.cs` now serves telemetry over `TelemetryGrpcService`
-> (`TelemetryService.StreamEvents`), not SignalR. The underlying gap this doc describes is still real
-> and unaddressed on the new transport - the gRPC endpoint is still plain, unencrypted HTTP/2 (h2c)
-> with no authentication, bound to loopback only, so any local process can still connect and receive
-> everything, including real prompt/response text (see "Why this matters" below, and
-> [`telemetry.md`](telemetry.md#transport-grpc) for the gRPC transport as it exists today) - but every
-> C# code sample below (`HubConnectionBuilder`, `MapHub<TelemetryHub>`, `options.AccessTokenProvider`,
-> SignalR's `JsonHubProtocol`) is written against the removed SignalR API and needs translating to a
-> gRPC equivalent (channel credentials for TLS, a server interceptor plus per-call metadata for the
-> auth token) before any of it is actionable. That translation is itself proposed and not done - see
-> "If `grpc-migration.md` ships..." immediately below, now updated to reflect that it did.
+> (`TelemetryService.StreamEvents`), not SignalR. Both gaps this doc originally described are now
+> addressed on the gRPC transport: encryption in transit ships as TLS via a self-signed certificate
+> (`TelemetryTlsCertificate.cs`), and authentication ships as `ManagementAccessToken`, enforced by
+> `TelemetryAuthInterceptor`/`TelemetryAuthClientInterceptor` on every call (see
+> [`telemetry.md`](telemetry.md#transport-grpc) for the gRPC transport as it exists today). Every C#
+> code sample below (`HubConnectionBuilder`, `MapHub<TelemetryHub>`, `options.AccessTokenProvider`,
+> SignalR's `JsonHubProtocol`) is written against the removed SignalR API and is kept here as
+> historical design rationale, not as an actionable snippet — the shipped gRPC equivalents are
+> `TelemetryAuthInterceptor`/`TelemetryAuthClientInterceptor` (auth) and Kestrel's `UseHttps` (TLS).
 
 ## Why this matters
 
@@ -20,31 +19,26 @@ The hub carries routing metadata (session id, model, token counts, cost, latency
 `telemetry.md`'s field table - **and**, since `RequestTextExtractor`/`ResponseTextExtractor` shipped
 (see [`backlog.md`](../gui/backlog.md)'s "Turn card request/response text" item), actual prompt/response
 text: the newest user message and the assistant's reply, for every turn, truncated but otherwise real.
-That's potentially proprietary code, credentials pasted into a chat, customer data, etc., flowing over
-this unauthenticated, unencrypted channel to any local process that connects - not a hypothetical
-future exposure, current behavior today.
+That's potentially proprietary code, credentials pasted into a chat, customer data, etc. — which is why
+both concerns below were addressed before shipping the gRPC transport.
 
-Two separate concerns, both covered below:
+Two separate concerns, both covered below (as historical SignalR design rationale) and both shipped
+on the gRPC transport that replaced it:
 
 - **Encryption in transit** - stop another local process from reading hub traffic off the loopback
-  interface (packet capture).
+  interface (packet capture). Shipped as Kestrel `UseHttps` with a self-signed certificate
+  (`TelemetryTlsCertificate.cs`).
 - **Authentication** - stop another local process from simply connecting to the hub and being handed
-  everything, which encryption alone does not prevent.
+  everything, which encryption alone does not prevent. Shipped as `ManagementAccessToken`, enforced by
+  `TelemetryAuthInterceptor` (server) and `TelemetryAuthClientInterceptor` (client).
 
-**[`grpc-migration.md`](grpc-migration.md) has shipped, so this doc's SignalR-specific code needs
-translating, not its concerns.** That doc's own "Scope" section anticipated this: the authentication
-piece (section 2) should carry over almost unchanged as a gRPC interceptor checking call metadata
-instead of a SignalR `AccessTokenProvider`/`?access_token=` query string; the encryption piece
-(section 1) should get *simpler* under gRPC, since HTTP/2 + TLS is a standard ALPN negotiation rather
-than the self-signed-cert-plus-client-bypass dance section 1 below has to do specifically because
-SignalR (via `HubConnectionBuilder`) didn't otherwise give an easy hook for trusting a non-CA-issued
-certificate. This doc itself is still proposed and unimplemented - none of section 1/2's code below
-was ever built, SignalR or otherwise - so what's left is authoring the gRPC-native version of
-sections 1 and 2 (a `GrpcChannel`/`ServerCredentials` equivalent of section 1, an
-`Interceptor`/`CallCredentials` equivalent of section 2) from scratch, not migrating working code.
-Don't build section 1/2's code exactly as written below (`HubConnectionBuilder`,
-`options.AccessTokenProvider`, `RequireAuthorization()` on `MapHub<TelemetryHub>`) - none of those
-APIs exist in this codebase anymore.
+**[`grpc-migration.md`](grpc-migration.md) has shipped, and so has the gRPC-native version of both
+concerns below.** Section 1/2's code as written (`HubConnectionBuilder`, `options.AccessTokenProvider`,
+`RequireAuthorization()` on `MapHub<TelemetryHub>`) no longer exists in this codebase — those SignalR
+APIs were never built against; instead, the gRPC equivalents were authored from scratch
+(`GrpcChannel`/Kestrel `UseHttps` for section 1's concern, an `Interceptor`/per-call metadata for
+section 2's). Read sections 1 and 2 below as the design rationale that motivated the shipped gRPC
+implementation, not as code to build.
 
 ---
 
@@ -166,7 +160,7 @@ webBuilder.UseKestrel(options =>
 ### Client-side: bypassing the trust issue
 
 Because this certificate is generated programmatically rather than issued by a globally recognized
-Certificate Authority, Windows marks it as untrusted. When `TotallyHotArcRouter.Gui`'s
+Certificate Authority, Windows marks it as untrusted. When `TotallyHot.ArcRouter.Gui`'s
 `Services/LiveDataStore.cs` connects via `https://localhost:5001/telemetry/hub`, the underlying
 HTTP/WebSocket client throws an `AuthenticationException` and aborts the handshake to protect against
 tampering - unless the client is explicitly told to trust this specific certificate.
@@ -238,7 +232,7 @@ guarantee the secret gives:
 
 1. On startup, the proxy generates a random token (if one doesn't already exist) and writes it to a
    file only the current Windows user can read - e.g. `%LOCALAPPDATA%\TotallyHotArcRouter\telemetry-token`.
-2. `TotallyHotArcRouter.Gui` reads that same file before connecting (same user, same machine, so it can).
+2. `TotallyHot.ArcRouter.Gui` reads that same file before connecting (same user, same machine, so it can).
 3. Server side: a check runs before the hub is reached - either a small custom middleware comparing
    `context.Request.Query["access_token"]` against the expected value and returning 401 on mismatch,
    or the standard ASP.NET Core auth pipeline with `endpoints.MapHub<TelemetryHub>(...).RequireAuthorization()`.
@@ -248,6 +242,16 @@ guarantee the secret gives:
 5. What this actually buys: "only processes running as the same OS user as the proxy can connect" -
    filesystem ACLs are doing the real work, not the token's secrecy. A meaningful boundary on a shared
    multi-user machine, and a reasonable one for a personal local dev tool.
+
+This design shipped as `ManagementAccessToken` (`%LOCALAPPDATA%\TotallyHotArcRouter\management-token.txt`,
+ACL-restricted on write, gating the REST `/admin/*` API, the MCP endpoint, and the TLS gRPC telemetry
+port alike). [`secrets-at-rest-plan.md`](secrets-at-rest-plan.md) §6.1 considered - and deliberately
+deferred - moving this token's storage into the new protected secret store
+(`docs/router/secrets-at-rest.md`): `TotallyHot.ArcRouter.Gui.Admin`, home of `ManagementTokenReader`,
+documents itself as *not* referencing the router project so it can be deployed independently, and
+folding the token into the shared store would mean either duplicating the store there or introducing a
+new shared assembly - a bigger architectural change than the one secret in play (already ACL-restricted,
+unlike the plaintext header values and certificate password that store was built for) justifies.
 
 ### Option B - hardcoded shared constant (weaker, simpler)
 

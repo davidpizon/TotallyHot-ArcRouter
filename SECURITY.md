@@ -2,20 +2,18 @@
 
 ## Supported Versions
 
-Use this section to tell people about which versions of your project are
-currently being supported with security updates.
-
-| Version | Supported          |
-| ------- | ------------------ |
-| 5.1.x   | :white_check_mark: |
-| 5.0.x   | :x:                |
-| 4.0.x   | :white_check_mark: |
-| < 4.0   | :x:                |
+This project does not cut versioned releases — there is a single rolling
+`main` branch. Security fixes are made against the current `main`; there is
+no support commitment for older commits or forks.
 
 ## Reporting a Vulnerability
 
-Use this section to tell people how to report a vulnerability.
+Please report suspected vulnerabilities privately via
+[GitHub's private vulnerability reporting](https://github.com/davidpizon/TotallyHot-ArcRouter/security/advisories/new)
+rather than filing a public issue. Include reproduction steps and the
+affected file/commit where possible.
 
-Tell them where to go, how often they can expect to get an update on a
-reported vulnerability, what to expect if the vulnerability is accepted or
-declined, etc.
+There is no formal SLA — this is a personal project maintained by one
+person — but reports will be acknowledged and triaged as soon as
+practical, and a fix or mitigation will be prioritized once a report is
+confirmed.

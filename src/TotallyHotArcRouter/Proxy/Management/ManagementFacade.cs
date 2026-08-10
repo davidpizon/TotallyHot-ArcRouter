@@ -47,6 +47,8 @@ public sealed class ManagementFacade
     private readonly PriceCatalogRepository? _priceCatalogRepository;
     private readonly ModelAliasOverrideStore? _overrideStore;
     private readonly IUsageRollupStore? _rollupStore;
+    private readonly ISecretWriter? _secretWriter;
+    private readonly ISecretReader? _secretReader;
 
     // Constructed here rather than injected, unlike the endpoint scanner beside it. The resolver's only
     // dependencies are the HTTP client and environment accessor this facade already holds, so injecting it
@@ -101,6 +103,22 @@ public sealed class ManagementFacade
     /// How old a captured rate-limit snapshot may be before <see cref="ProviderRateLimitView.IsStale"/> is
     /// set (§5.9). Defaults to 15 minutes.
     /// </param>
+    /// <param name="secretWriter">
+    /// Optional writer for the protected secret store (<c>docs/router/secrets-at-rest-plan.md</c> §3). When
+    /// supplied, a locked literal header written through <see cref="UpsertProviderAsync"/> is stored here
+    /// instead of in <c>model-routing.json</c> - see <see cref="ResolveHeader"/>. This is the only secret
+    /// dependency this facade can use to write; it deliberately has no way to read a value back (§4's
+    /// write-only invariant). Defaults to <see langword="null"/>, in which case a locked literal continues
+    /// to be stored in configuration exactly as before the store existed.
+    /// </param>
+    /// <param name="secretReader">
+    /// Optional reader for the protected secret store, used only for <see cref="DiscoverModelsAsync"/> and
+    /// <see cref="RefreshFromEndpointAsync"/>'s outbound probe of the provider's own endpoint - so a
+    /// provider whose credential has been migrated to the store can still be discovered from. Never consulted
+    /// while building any value this facade returns to a caller (see <see cref="BuildProvidersResponse"/>),
+    /// so injecting this alongside <paramref name="secretWriter"/> does not weaken §4's invariant that no
+    /// management surface ever reads a secret's value back.
+    /// </param>
     public ManagementFacade(
         IProviderConfigStore store,
         IEnvironmentVariableProvider environment,
@@ -111,7 +129,9 @@ public sealed class ManagementFacade
         PriceCatalogRepository? priceCatalogRepository = null,
         ModelAliasOverrideStore? overrideStore = null,
         IUsageRollupStore? rollupStore = null,
-        TimeSpan? rateLimitStalenessThreshold = null)
+        TimeSpan? rateLimitStalenessThreshold = null,
+        ISecretWriter? secretWriter = null,
+        ISecretReader? secretReader = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(environment);
@@ -127,6 +147,8 @@ public sealed class ManagementFacade
         _overrideStore = overrideStore;
         _rollupStore = rollupStore;
         _rateLimitStalenessThreshold = rateLimitStalenessThreshold ?? DefaultRateLimitStalenessThreshold;
+        _secretWriter = secretWriter;
+        _secretReader = secretReader;
         _dialectResolver = new ModelDialectResolver(httpClient, environment);
     }
 
@@ -139,7 +161,7 @@ public sealed class ManagementFacade
     {
         var current = _store.Snapshot.Options;
         current.Providers.TryGetValue(key, out var existing);
-        var provider = MergeProvider(request, existing);
+        var provider = MergeProvider(key, request, existing);
         var result = await MutateAsync(() => _store.UpsertProviderAsync(key, provider, cancellationToken)).ConfigureAwait(false);
 
         // Refresh the endpoint-capability record for the provider that was just saved, so tier-1 dialect
@@ -333,7 +355,11 @@ public sealed class ManagementFacade
         }
     }
 
-    /// <summary>Removes a provider by key, cascading to every model that routes to it. Rejected (404-shaped) if unknown. Historical metrics are retained.</summary>
+    /// <summary>
+    /// Removes a provider by key, cascading to every model that routes to it and to every secret this
+    /// provider ever wrote to the protected store (<c>docs/router/secrets-at-rest-plan.md</c> §5). Rejected
+    /// (404-shaped) if unknown. Historical metrics are retained.
+    /// </summary>
     public async Task<ManagementResult<ProvidersResponse>> RemoveProviderAsync(string key, CancellationToken cancellationToken = default)
     {
         if (!_store.Snapshot.Options.Providers.ContainsKey(key))
@@ -341,8 +367,38 @@ public sealed class ManagementFacade
             return ManagementResult<ProvidersResponse>.Fail(ManagementErrorType.NotFound, $"Provider '{key}' not found.");
         }
 
-        return await MutateAsync(() => _store.RemoveProviderAsync(key, cancellationToken)).ConfigureAwait(false);
+        var result = await MutateAsync(() => _store.RemoveProviderAsync(key, cancellationToken)).ConfigureAwait(false);
+
+        // Best-effort: the provider's configuration is already gone by this point, so a store failure here
+        // (e.g. non-Windows) would only leave orphaned ciphertext behind, never resurrect the provider.
+        if (result.Success)
+        {
+            TryDeleteProviderSecrets(key);
+        }
+
+        return result;
     }
+
+    /// <summary>Removes every protected-store entry named under <paramref name="providerKey"/>'s prefix, swallowing a store that is unavailable on this platform.</summary>
+    private void TryDeleteProviderSecrets(string providerKey)
+    {
+        if (_secretWriter is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _secretWriter.DeleteByPrefix(SecretRefPrefix(providerKey));
+        }
+        catch (PlatformNotSupportedException)
+        {
+            // The store never wrote anything on this platform in the first place - see ResolveHeader.
+        }
+    }
+
+    /// <summary>The protected-store name prefix for every secret belonging to <paramref name="providerKey"/> (<c>docs/router/secrets-at-rest-plan.md</c> §3's naming convention).</summary>
+    private static string SecretRefPrefix(string providerKey) => $"provider:{providerKey}:header:";
 
     /// <summary>Adds or replaces a model route under a provider.</summary>
     /// <remarks>
@@ -936,8 +992,11 @@ public sealed class ManagementFacade
                         var source = ClassifyHeaderSource(h);
                         // The one place a stored literal header value can leave the application. A locked
                         // header is a secret the operator chose to make unreadable, so its value is dropped
-                        // here rather than at any caller - see docs/gui/secret-field.md.
-                        var locked = source == HeaderValueSource.Literal && h.Locked;
+                        // here rather than at any caller - see docs/gui/secret-field.md. A protected-store
+                        // header never carries a value to drop (h.Value is always null once migrated/written
+                        // there), but still reports Locked so the GUI's "saved, blank keeps it" placeholder
+                        // keeps working identically to a locked literal.
+                        var locked = (source == HeaderValueSource.Literal || source == HeaderValueSource.Protected) && h.Locked;
                         // ValueEnvVar is only meaningful for an envVar-sourced header; a header with both
                         // fields somehow set (legacy/bad data) classifies as literal, and must not also
                         // surface the env-var name - that would violate HeaderView's documented contract.
@@ -972,7 +1031,9 @@ public sealed class ManagementFacade
                     UsageLastRecordedAtUtc: budget.LastUsageAtUtc,
                     RateLimit: BuildRateLimitView(kvp.Key),
                     WindowKind: budget.WindowKind is { Length: > 0 } ? budget.WindowKind : "Monthly",
-                    NextResetUtc: budget.NextResetUtc);
+                    NextResetUtc: budget.NextResetUtc,
+                    HasStoredAdminKey: _secretReader?.TryRead(AdminKeySecretName(kvp.Key), out _) ?? false,
+                    ReportedUsage: BuildReportedUsageView(kvp.Key));
             })
             .OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -1002,6 +1063,31 @@ public sealed class ManagementFacade
         var isStale = DateTimeOffset.UtcNow - observedAt > _rateLimitStalenessThreshold;
         var projections = BuildExhaustionProjections(providerKey, snapshot, observedAt);
         return new ProviderRateLimitView(snapshot, observedAt, isStale, projections);
+    }
+
+    /// <summary>
+    /// Builds a provider's reported-usage view from the price catalog repository
+    /// (docs/router/secrets-at-rest-plan.md §8.1), or <see langword="null"/> when no repository is wired up
+    /// or nothing has been fetched for this provider yet (the common case - only <c>anthropic</c> with a
+    /// stored/configured Admin API key ever has rows).
+    /// </summary>
+    private ProviderReportedUsageView? BuildReportedUsageView(string providerKey)
+    {
+        if (_priceCatalogRepository is null)
+        {
+            return null;
+        }
+
+        var (rows, fetchedAtUtc) = _priceCatalogRepository.GetReportedUsage(providerKey);
+        if (rows.Count == 0 || fetchedAtUtc is not { } fetchedAt)
+        {
+            return null;
+        }
+
+        var rowViews = rows
+            .Select(r => new ReportedUsageRowView(r.UsageDay, r.Model, r.InputTokens, r.OutputTokens, r.CacheCreationTokens, r.CacheReadTokens))
+            .ToList();
+        return new ProviderReportedUsageView(rowViews, fetchedAt);
     }
 
     /// <summary>
@@ -1141,6 +1227,7 @@ public sealed class ManagementFacade
     /// <summary>Classifies a stored header's <see cref="HeaderValueSource"/> from which of its fields is set.</summary>
     private static string ClassifyHeaderSource(ProviderHeader header) =>
         !string.IsNullOrWhiteSpace(header.Value) ? HeaderValueSource.Literal
+            : !string.IsNullOrWhiteSpace(header.ValueSecretRef) ? HeaderValueSource.Protected
             : !string.IsNullOrWhiteSpace(header.ValueEnvVar) ? HeaderValueSource.EnvVar
             : HeaderValueSource.None;
 
@@ -1149,7 +1236,10 @@ public sealed class ManagementFacade
     /// existing provider. Fields fall back to the existing value when omitted, then to sensible defaults;
     /// each custom header is resolved by <see cref="ResolveHeader"/>.
     /// </summary>
-    private static ProviderOptions MergeProvider(ProviderWriteRequest request, ProviderOptions? existing)
+    /// <param name="providerKey">The provider key being upserted, used to name any secret <see cref="ResolveHeader"/> writes.</param>
+    /// <param name="request">The incoming write request.</param>
+    /// <param name="existing">The provider's current configuration, or <see langword="null"/> when adding a new one.</param>
+    private ProviderOptions MergeProvider(string providerKey, ProviderWriteRequest request, ProviderOptions? existing)
     {
         // A `with` over the existing provider (or a default one when adding), rather than a hand-listed
         // rebuild. Only the fields this request can actually change are named below; everything else -
@@ -1178,13 +1268,37 @@ public sealed class ManagementFacade
             // ResolveHeader so a blank value preserves what's already stored under that name.
             Headers = request.Headers is null
                 ? baseline.Headers
-                : request.Headers
-                    .Where(h => !string.IsNullOrWhiteSpace(h.Name))
-                    .Select(h => ResolveHeader(h, baseline.Headers))
-                    .ToList(),
+                : ResolveHeaders(providerKey, request.Headers, baseline.Headers),
             IsFree = request.IsFree ?? baseline.IsFree,
             Enabled = request.Enabled ?? baseline.Enabled,
         };
+    }
+
+    /// <summary>
+    /// Resolves every incoming header write via <see cref="ResolveHeader"/>, then cleans up the protected
+    /// store for any header that existed under <paramref name="existingHeaders"/> with a
+    /// <see cref="ProviderHeader.ValueSecretRef"/> but is entirely absent from the resolved result - the
+    /// case <see cref="ResolveHeader"/> itself cannot see, since it only runs once per header still present
+    /// in the write request.
+    /// </summary>
+    private List<ProviderHeader> ResolveHeaders(
+        string providerKey, IReadOnlyList<HeaderWriteRequest> requests, IReadOnlyList<ProviderHeader> existingHeaders)
+    {
+        var resolved = requests
+            .Where(h => !string.IsNullOrWhiteSpace(h.Name))
+            .Select(h => ResolveHeader(providerKey, h, existingHeaders))
+            .ToList();
+
+        var resolvedNames = new HashSet<string>(resolved.Select(h => h.Name), StringComparer.OrdinalIgnoreCase);
+        foreach (var existing in existingHeaders)
+        {
+            if (!string.IsNullOrWhiteSpace(existing.ValueSecretRef) && !resolvedNames.Contains(existing.Name))
+            {
+                DeleteExistingSecret(providerKey, existing, existing.Name);
+            }
+        }
+
+        return resolved;
     }
 
     /// <summary>
@@ -1208,20 +1322,26 @@ public sealed class ManagementFacade
 
     /// <summary>
     /// Resolves one incoming header write to the <see cref="ProviderHeader"/> to store: a non-blank
-    /// <see cref="HeaderWriteRequest.Value"/> is a literal, a non-blank
-    /// <see cref="HeaderWriteRequest.ValueEnvVar"/> is an env-var reference, and - since a locked header's
-    /// value is never returned for a caller to resend - both blank preserves whatever value is already
-    /// stored under this header's name, and otherwise stores as <see cref="HeaderValueSource.None"/>.
+    /// <see cref="HeaderWriteRequest.Value"/> is a literal - written straight to the protected secret store
+    /// and referenced via <see cref="ProviderHeader.ValueSecretRef"/> when it is locked and the store is
+    /// available (<c>docs/router/secrets-at-rest-plan.md</c> §5), or kept as a plain literal otherwise - a
+    /// non-blank <see cref="HeaderWriteRequest.ValueEnvVar"/> is an env-var reference, and - since a locked
+    /// header's value is never returned for a caller to resend - both blank preserves whatever is already
+    /// stored under this header's name (literal, protected-store reference, or env var alike), and otherwise
+    /// stores as <see cref="HeaderValueSource.None"/>.
     /// <para>
     /// <see cref="HeaderWriteRequest.Locked"/> travels with the header independently of its value, so an
     /// operator can lock an already-stored secret without retyping it - and it is also what makes the
-    /// blank rule safe to relax: an <em>explicitly unlocked</em> blank write clears the stored value,
-    /// because the caller was shown that value in full and chose to empty the field. That is how the
-    /// editor's unlock destroys a secret. Null (the legacy shape) keeps the old preserve-on-blank
-    /// behavior in every case.
+    /// blank rule safe to relax: an <em>explicitly unlocked</em> blank write clears the stored value
+    /// (including deleting any protected-store entry), because the caller was shown that value in full and
+    /// chose to empty the field. That is how the editor's unlock destroys a secret. Null (the legacy shape)
+    /// keeps the old preserve-on-blank behavior in every case.
     /// </para>
     /// </summary>
-    private static ProviderHeader ResolveHeader(HeaderWriteRequest request, IReadOnlyList<ProviderHeader> existingHeaders)
+    /// <param name="providerKey">The provider key being upserted, used to name this header's protected-store entry.</param>
+    /// <param name="request">The incoming header write.</param>
+    /// <param name="existingHeaders">The provider's current headers, consulted for the preserve-on-blank and secret-cleanup rules.</param>
+    private ProviderHeader ResolveHeader(string providerKey, HeaderWriteRequest request, IReadOnlyList<ProviderHeader> existingHeaders)
     {
         var name = request.Name!.Trim();
 
@@ -1229,8 +1349,22 @@ public sealed class ManagementFacade
         // "locked" rather than silently becoming readable.
         var locked = request.Locked ?? true;
 
+        // HTTP header names are case-insensitive, so "X-Foo" and "x-foo" must be treated as the same
+        // header when looking up the value to preserve or clean up - otherwise a casing mismatch between
+        // what was stored and what the caller resends silently drops the stored secret instead of keeping
+        // it, or leaves its protected-store entry orphaned.
+        var existing = existingHeaders.FirstOrDefault(h => string.Equals(h.Name, name, StringComparison.OrdinalIgnoreCase));
+
         if (!string.IsNullOrWhiteSpace(request.Value))
         {
+            if (locked && TryWriteSecret(providerKey, name, request.Value))
+            {
+                return new ProviderHeader { Name = name, Value = null, ValueEnvVar = null, ValueSecretRef = SecretRefName(providerKey, name), Locked = true };
+            }
+
+            // Either unlocked (public configuration, stored verbatim) or the store is unavailable on this
+            // platform - either way this header no longer references the store, so drop any stale entry.
+            DeleteExistingSecret(providerKey, existing, name);
             return new ProviderHeader { Name = name, Value = request.Value, ValueEnvVar = null, Locked = locked };
         }
 
@@ -1238,29 +1372,157 @@ public sealed class ManagementFacade
         // there is nothing to withhold and it always stores unlocked.
         if (!string.IsNullOrWhiteSpace(request.ValueEnvVar))
         {
+            DeleteExistingSecret(providerKey, existing, name);
             return new ProviderHeader { Name = name, Value = null, ValueEnvVar = request.ValueEnvVar.Trim(), Locked = false };
         }
 
         if (request.Locked is false)
         {
+            DeleteExistingSecret(providerKey, existing, name);
             return new ProviderHeader { Name = name, Value = null, ValueEnvVar = null, Locked = false };
         }
 
-        // HTTP header names are case-insensitive, so "X-Foo" and "x-foo" must be treated as the same
-        // header when looking up the value to preserve - otherwise a casing mismatch between what was
-        // stored and what the caller resends silently drops the stored secret instead of keeping it.
-        var existing = existingHeaders.FirstOrDefault(h => string.Equals(h.Name, name, StringComparison.OrdinalIgnoreCase));
         var preservedValue = existing?.Value;
+        var preservedSecretRef = existing?.ValueSecretRef;
 
         return new ProviderHeader
         {
             Name = name,
             Value = preservedValue,
             ValueEnvVar = existing?.ValueEnvVar,
-            // Only a literal can be a secret, so a preserved env-var (or valueless) header stores unlocked
-            // no matter what the caller asked for.
-            Locked = !string.IsNullOrWhiteSpace(preservedValue) && locked
+            ValueSecretRef = preservedSecretRef,
+            // Only a literal or a protected-store reference can be a secret, so a preserved env-var (or
+            // valueless) header stores unlocked no matter what the caller asked for.
+            Locked = (!string.IsNullOrWhiteSpace(preservedValue) || !string.IsNullOrWhiteSpace(preservedSecretRef)) && locked
         };
+    }
+
+    /// <summary>The protected-store name for one provider header (<c>docs/router/secrets-at-rest-plan.md</c> §3's naming convention).</summary>
+    private static string SecretRefName(string providerKey, string headerName) => $"provider:{providerKey}:header:{headerName}";
+
+    /// <summary>The protected-store name for a provider's reconciliation Admin API key (docs/router/secrets-at-rest-plan.md §3's naming convention), matching <c>Hosting.ServiceCollectionExtensions.AdminApiKeySecretName</c>.</summary>
+    private static string AdminKeySecretName(string provider) => $"reconciliation:{provider}:admin-key";
+
+    // Only these two are recognized by BuildCostReconcilers (docs/router/agent-cost-tracking.md §3.5), so
+    // this is the complete set of names SetSecret/DeleteSecret may ever touch.
+    private static readonly string[] RecognizedReconciliationProviders = ["openai", "anthropic"];
+
+    /// <summary>
+    /// Stores <paramref name="value"/> as a provider's reconciliation Admin API key
+    /// (docs/router/secrets-at-rest-plan.md §7), taking effect on the next reconciliation cycle with no
+    /// restart required. The public route is named by secret (<c>PUT /admin/secrets/{name}</c>) rather than
+    /// by provider so it matches the plan's write-only-secrets shape, but only the fixed
+    /// <c>reconciliation:{openai|anthropic}:admin-key</c> names are accepted - this is not a generic secret
+    /// store write endpoint.
+    /// </summary>
+    public ManagementResult<object?> SetSecret(string name, string value)
+    {
+        if (_secretWriter is null)
+        {
+            return ManagementResult<object?>.Fail(ManagementErrorType.Unavailable, "The protected secret store is unavailable on this platform.");
+        }
+
+        if (!TryParseAdminKeySecretName(name, out var provider))
+        {
+            return ManagementResult<object?>.Fail(ManagementErrorType.InvalidRequest, $"Unsupported secret name '{name}'.");
+        }
+
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return ManagementResult<object?>.Fail(ManagementErrorType.InvalidRequest, "value must not be blank.");
+        }
+
+        try
+        {
+            _secretWriter.Write(AdminKeySecretName(provider), value);
+            return ManagementResult<object?>.Ok(null);
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return ManagementResult<object?>.Fail(ManagementErrorType.Unavailable, "The protected secret store is unavailable on this platform.");
+        }
+    }
+
+    /// <summary>Clears a stored secret by name - the only counterpart to <see cref="SetSecret"/>, same name restriction. There is deliberately no read counterpart (docs/router/secrets-at-rest-plan.md §4).</summary>
+    public ManagementResult<object?> DeleteSecret(string name)
+    {
+        if (_secretWriter is null)
+        {
+            return ManagementResult<object?>.Fail(ManagementErrorType.Unavailable, "The protected secret store is unavailable on this platform.");
+        }
+
+        if (!TryParseAdminKeySecretName(name, out var provider))
+        {
+            return ManagementResult<object?>.Fail(ManagementErrorType.InvalidRequest, $"Unsupported secret name '{name}'.");
+        }
+
+        _secretWriter.Delete(AdminKeySecretName(provider));
+        return ManagementResult<object?>.Ok(null);
+    }
+
+    /// <summary>Parses a secret name as <c>reconciliation:{provider}:admin-key</c> for a recognized provider, the only shape <see cref="SetSecret"/>/<see cref="DeleteSecret"/> accept.</summary>
+    private static bool TryParseAdminKeySecretName(string name, out string provider)
+    {
+        provider = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        var parts = name.Split(':');
+        if (parts.Length != 3 || parts[0] != "reconciliation" || parts[2] != "admin-key")
+        {
+            return false;
+        }
+
+        foreach (var candidate in RecognizedReconciliationProviders)
+        {
+            if (string.Equals(candidate, parts[1], StringComparison.OrdinalIgnoreCase))
+            {
+                provider = candidate;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Writes <paramref name="value"/> to the protected store under this header's name. Returns <see langword="false"/> when no store is configured or it is unavailable on this platform.</summary>
+    private bool TryWriteSecret(string providerKey, string headerName, string value)
+    {
+        if (_secretWriter is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            _secretWriter.Write(SecretRefName(providerKey, headerName), value);
+            return true;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Deletes <paramref name="existing"/>'s protected-store entry, if it has one, swallowing a store that is unavailable on this platform.</summary>
+    private void DeleteExistingSecret(string providerKey, ProviderHeader? existing, string headerName)
+    {
+        if (_secretWriter is null || string.IsNullOrWhiteSpace(existing?.ValueSecretRef))
+        {
+            return;
+        }
+
+        try
+        {
+            _secretWriter.Delete(SecretRefName(providerKey, headerName));
+        }
+        catch (PlatformNotSupportedException)
+        {
+            // Nothing was ever written to the store on this platform in the first place.
+        }
     }
 
     /// <summary>Runs a store mutation and maps it to a <see cref="ManagementResult{T}"/>, translating validation/argument failures into <see cref="ManagementErrorType.InvalidRequest"/>.</summary>
@@ -1300,7 +1562,7 @@ public sealed class ManagementFacade
         // The provider's credentials and configured custom headers, sent identically to the forwarding path.
         // This is how a provider that requires an extra header for discovery gets it (e.g. Anthropic's
         // anthropic-version) without any provider-specific code here.
-        ProviderCredentialResolver.ApplyToRequest(requestMessage, provider, _environment);
+        ProviderCredentialResolver.ApplyToRequest(requestMessage, provider, _environment, _secretReader);
 
         try
         {
@@ -1391,7 +1653,15 @@ public static class HeaderValueSource
     /// <summary>The value is read at request time from an environment variable (see <see cref="HeaderView.ValueEnvVar"/>).</summary>
     public const string EnvVar = "envVar";
 
-    /// <summary>Neither a literal value nor an environment variable is configured.</summary>
+    /// <summary>
+    /// The value is stored in the protected secret store (<c>docs/router/secrets-at-rest-plan.md</c> §3),
+    /// referenced by <see cref="TotallyHot.ArcRouter.Models.ProviderHeader.ValueSecretRef"/>. Never returned
+    /// by any management surface, exactly like a locked <see cref="Literal"/> - see §4's write-only
+    /// invariant.
+    /// </summary>
+    public const string Protected = "protected";
+
+    /// <summary>Neither a literal value, a protected-store reference, nor an environment variable is configured.</summary>
     public const string None = "none";
 }
 
@@ -1446,6 +1716,18 @@ public static class HeaderValueSource
 /// The UTC instant the current period ends and spend resets to zero, computed live from
 /// <paramref name="WindowKind"/> - backs the budget bar's "resets in 2h 10m" text.
 /// </param>
+/// <param name="HasStoredAdminKey">
+/// Whether a reconciliation Admin API key is stored for this provider (docs/router/secrets-at-rest-plan.md
+/// §4/§7) - a boolean only, never the key itself, matching every other secret-existence flag this view
+/// exposes. <see langword="false"/> both when no key was ever saved and on a platform where the protected
+/// store is unavailable.
+/// </param>
+/// <param name="ReportedUsage">
+/// This provider's own reported per-model daily token usage (docs/router/secrets-at-rest-plan.md §8.1),
+/// currently populated for <c>anthropic</c> only, or <see langword="null"/> when no price catalog
+/// repository is wired up or nothing has been fetched yet (no Admin API key configured, or the first cycle
+/// hasn't run).
+/// </param>
 public sealed record ProviderView(
     string Key,
     string? Name,
@@ -1464,7 +1746,32 @@ public sealed record ProviderView(
     DateTimeOffset? UsageLastRecordedAtUtc = null,
     ProviderRateLimitView? RateLimit = null,
     string WindowKind = "Monthly",
-    DateTimeOffset? NextResetUtc = null);
+    DateTimeOffset? NextResetUtc = null,
+    bool HasStoredAdminKey = false,
+    ProviderReportedUsageView? ReportedUsage = null);
+
+/// <summary>
+/// A provider's own reported per-model daily token usage (docs/router/secrets-at-rest-plan.md §8.1), as
+/// returned to a management caller.
+/// </summary>
+/// <param name="Rows">Every currently-stored row, ordered by day then model.</param>
+/// <param name="FetchedAtUtc">The most recent instant any of <paramref name="Rows"/> was fetched - the GUI's "Fetched" footer.</param>
+public sealed record ProviderReportedUsageView(IReadOnlyList<ReportedUsageRowView> Rows, DateTimeOffset FetchedAtUtc);
+
+/// <summary>One (day, model) row of <see cref="ProviderReportedUsageView.Rows"/>. Raw reported counts - no derived totals.</summary>
+/// <param name="UsageDay">The UTC calendar day this usage was reported for.</param>
+/// <param name="Model">The provider's own model identifier for this row.</param>
+/// <param name="InputTokens">Uncached input tokens for this day/model.</param>
+/// <param name="OutputTokens">Output tokens for this day/model.</param>
+/// <param name="CacheCreationTokens">Cache-creation (cache-write) input tokens for this day/model.</param>
+/// <param name="CacheReadTokens">Cache-read input tokens for this day/model.</param>
+public sealed record ReportedUsageRowView(
+    DateOnly UsageDay,
+    string Model,
+    long InputTokens,
+    long OutputTokens,
+    long CacheCreationTokens,
+    long CacheReadTokens);
 
 /// <summary>
 /// A provider's most recently captured rate-limit header snapshot, as returned to a management caller.
@@ -1582,6 +1889,10 @@ public sealed record ProviderWriteRequest(
 /// </summary>
 /// <param name="Enabled">The provider's new on/off state.</param>
 public sealed record ProviderEnabledWriteRequest(bool Enabled);
+
+/// <summary>The body sent to store a secret (<c>PUT /admin/secrets/{name}</c>, docs/router/secrets-at-rest-plan.md §7). See <see cref="ManagementFacade.SetSecret"/> for which names are accepted.</summary>
+/// <param name="Value">The secret value to store.</param>
+public sealed record SecretWriteRequest(string Value);
 
 /// <summary>A single custom header to store for a provider.</summary>
 /// <param name="Name">The header name.</param>

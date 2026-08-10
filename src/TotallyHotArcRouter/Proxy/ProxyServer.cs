@@ -79,9 +79,11 @@ namespace TotallyHot.ArcRouter.Proxy
         /// </param>
         /// <param name="managementToken">
         /// Optional shared secret required (in the <c>X-Admin-Token</c> header) on every <c>/admin/*</c>
-        /// request when set. Defaults to <see langword="null"/> (no inbound auth) - production wiring
+        /// request when set, and - via <see cref="TelemetryAuthInterceptor"/> - on every call to
+        /// the TLS <paramref name="grpcPort"/> gRPC endpoint (the telemetry stream and price-source admin
+        /// service alike). Defaults to <see langword="null"/> (no inbound auth) - production wiring
         /// (<see cref="TotallyHot.ArcRouter.Hosting.ServiceCollectionExtensions"/>) always passes the
-        /// <see cref="Management.ManagementAccessToken"/> value here, so <c>/admin/*</c> is gated by
+        /// <see cref="Management.ManagementAccessToken"/> value here, so both surfaces are gated by
         /// default; a caller passing <see langword="null"/> explicitly opts out (e.g. a test exercising
         /// forwarding only).
         /// </param>
@@ -133,7 +135,18 @@ namespace TotallyHot.ArcRouter.Proxy
         /// and <c>GET /admin/usage/rollup</c> (§5.15) are available. Defaults to <see langword="null"/>, in
         /// which case both answer <see cref="Management.ManagementErrorType.Unavailable"/>.
         /// </param>
-        public ProxyServer(ILogger<ProxyServer> logger, ProxyMiddleware proxyMiddleware, int port = 5001, TelemetryBroadcaster? telemetryBroadcaster = null, int grpcPort = DefaultGrpcPort, IProviderConfigStore? providerConfigStore = null, IEnvironmentVariableProvider? environment = null, HttpClient? managementHttpClient = null, string? managementToken = null, PriceSourceToggleStore? priceSourceToggleStore = null, PriceCatalogIngestionService? priceCatalogIngestionService = null, PriceCatalogOptions? priceCatalogOptions = null, ProviderBudgetStore? providerBudgetStore = null, ProviderEndpointScanner? endpointScanner = null, ToolCallCapabilityStore? toolCallCapabilityStore = null, PriceCatalogRepository? priceCatalogRepository = null, ModelAliasOverrideStore? modelAliasOverrideStore = null, IUsageRollupStore? usageRollupStore = null)
+        /// <param name="secretWriter">
+        /// Optional writer for the protected secret store, passed to the management facade so a locked
+        /// literal header is stored there instead of in <c>model-routing.json</c>
+        /// (<c>docs/router/secrets-at-rest-plan.md</c> §3). Defaults to <see langword="null"/>, in which case
+        /// a locked literal is stored in configuration exactly as before the store existed.
+        /// </param>
+        /// <param name="secretReader">
+        /// Optional reader for the protected secret store, passed to the management facade so
+        /// <c>POST /admin/providers/{key}/discover-models</c> can still authenticate a provider whose
+        /// credential lives in the store. Defaults to <see langword="null"/>.
+        /// </param>
+        public ProxyServer(ILogger<ProxyServer> logger, ProxyMiddleware proxyMiddleware, int port = 5001, TelemetryBroadcaster? telemetryBroadcaster = null, int grpcPort = DefaultGrpcPort, IProviderConfigStore? providerConfigStore = null, IEnvironmentVariableProvider? environment = null, HttpClient? managementHttpClient = null, string? managementToken = null, PriceSourceToggleStore? priceSourceToggleStore = null, PriceCatalogIngestionService? priceCatalogIngestionService = null, PriceCatalogOptions? priceCatalogOptions = null, ProviderBudgetStore? providerBudgetStore = null, ProviderEndpointScanner? endpointScanner = null, ToolCallCapabilityStore? toolCallCapabilityStore = null, PriceCatalogRepository? priceCatalogRepository = null, ModelAliasOverrideStore? modelAliasOverrideStore = null, IUsageRollupStore? usageRollupStore = null, ISecretWriter? secretWriter = null, ISecretReader? secretReader = null)
         {
             ArgumentNullException.ThrowIfNull(logger);
             ArgumentNullException.ThrowIfNull(proxyMiddleware);
@@ -210,7 +223,21 @@ namespace TotallyHot.ArcRouter.Proxy
                     // above), not the outer one.
                     webBuilder.ConfigureServices(services =>
                     {
-                        services.AddGrpc();
+                        // Gate every gRPC call (telemetry stream and price-source admin alike) behind the
+                        // same shared management token the REST /admin/* API and MCP endpoint require -
+                        // see TelemetryAuthInterceptor's remarks. Only registered when a token is
+                        // configured, mirroring managementToken's REST/MCP gating: a null token means "no
+                        // inbound auth", used by tests exercising forwarding only.
+                        if (!string.IsNullOrWhiteSpace(managementToken))
+                        {
+                            services.AddSingleton(new TelemetryAuthInterceptor(managementToken));
+                            services.AddGrpc(options => options.Interceptors.Add<TelemetryAuthInterceptor>());
+                        }
+                        else
+                        {
+                            services.AddGrpc();
+                        }
+
                         services.AddSingleton(broadcaster);
 
                         // Same reasoning as the broadcaster: the price catalog singletons live in the outer
@@ -264,7 +291,9 @@ namespace TotallyHot.ArcRouter.Proxy
                                     toolCallCapabilityStore,
                                     priceCatalogRepository,
                                     modelAliasOverrideStore,
-                                    usageRollupStore);
+                                    usageRollupStore,
+                                    secretWriter: secretWriter,
+                                    secretReader: secretReader);
                                 endpoints.MapProviderAdminEndpoints(facade, managementToken);
                                 endpoints.MapUsageAdminEndpoints(facade, managementToken);
                             }

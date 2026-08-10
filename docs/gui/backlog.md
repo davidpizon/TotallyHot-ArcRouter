@@ -28,17 +28,30 @@ data sources in
   today — the same gap that keeps per-turn `RoutingRoi` at 0), Tool Steps, and Context Buffer — the
   rollup table has no per-turn breakdown for these dimensions. Wiring these live means adding the
   corresponding fields to `RoutingTelemetryEvent`/the proto and the mapper chain (see the field table
-  in `../router/telemetry.md`).
+  in `../router/telemetry.md`). **Deliberately deferred**, not a small follow-up: each of the three
+  needs a new domain concept nothing in the codebase computes today — a worst-case/baseline-cost
+  model for Routing ROI, a per-model context-window-size configuration for Context Buffer, and
+  within-turn tool-call introspection for Tool Steps — plus its own proto field and
+  `LiveConversationMapper`/`ModelRouteResolver` wiring. Populating any of them without that data
+  would mean inventing numbers, the same fabricated-data trap `model-price-catalog.md` and
+  `src/PLAN.md`'s Phase E multimodal-pricing decision already declined. If picked up, Tool Steps is
+  the smallest first step: it only requires parsing response bodies already captured by
+  `ResponseTextExtractor`, where Routing ROI and Context Buffer both need new pricing/config data
+  sources that don't exist yet.
 - ~~**Model Distribution** — real `TokenBucket`/`ModelShare` data.~~ **Done** (Phase 4 §5.15):
   `ModelDistribution.razor` fetches real buckets via `UsageStore.LoadRollupAsync`, grouped by day for
   the histogram and by model for the donut; the Day/Month/3-Month/6-Month/Year filter bar and the
   From/To inputs now actually refilter, falling back to `MockData` only when there's nothing live to
   show.
-- **Governance** — real per-provider budget/spend data. The Budget Cap input is editable today but
-  purely client-side: edits recompute the in-memory utilization/status/bar but aren't persisted
-  anywhere and are lost on refresh; needs a real place to write to. See
-  [`../router/agent-cost-tracking.md`](../router/agent-cost-tracking.md) for a proposed persistent
-  usage ledger + budget-window query that would be that "real place." A first cut of
+- ~~**Governance** — real per-provider budget/spend data.~~ **Done.** Budget Cap edits persist
+  through `ProviderAdminClient.SetBudgetAsync` → the proxy's `/admin/providers/{key}/budget`
+  endpoint → `ProviderBudgetStore` (SQLite `provider_budgets`/`provider_spend` tables, with
+  per-provider `BudgetWindow` support), tested by `ProviderBudgetStoreTests`/
+  `ProviderAdminEndpointsTests` — they survive a refresh and a GUI restart. (This corrects an
+  earlier version of this bullet, which described the input as purely client-side; that was already
+  stale by the time of writing.) [`../router/agent-cost-tracking.md`](../router/agent-cost-tracking.md)'s
+  deeper per-request usage ledger (`UsageLedger`/`IUsageLedger`) is also implemented, separately
+  from this budget/spend path. A first cut of
   [`governance-model-cards.md`](governance-model-cards.md)'s per-model pricing/spend section now
   exists (Governance > Models) with real spend from `UsageStore`, but every card still reads "Price
   unavailable" — that doc's dependency #1, a live model price catalog channel to the GUI, is still
@@ -52,64 +65,93 @@ data sources in
   (`GroupedBarsModel.DynamicYMax`, Phase 4 §5.15) — computed from the actual data with headroom
   instead of a hardcoded 6M ceiling. The $0–$160 Cost Analytics savings scale is unaffected (that
   chart is unrelated to this plan) and remains pinned to the mock data's range.
-- **Settings modal actions** — Reset Stats / Clear History currently just close the modal with no
-  effect; they need real actions once there's real state to reset or clear.
-- **Configurable telemetry server address** — `Services/LiveDataStore.cs` hardcodes
-  `https://localhost:5002` (the gRPC channel address - a dedicated TLS port, separate from the
-  plain-HTTP proxy port 5001); there's no settings UI to point at a differently-configured proxy,
-  since the GUI has no settings-persistence mechanism at all yet.
+- ~~**Settings modal actions**~~ **Done.** Reset Stats calls `LiveDataStore.ClearEvents()`; Clear
+  History also clears the log buffer (`ClearLogLines()`). Both act on this session's live view only —
+  the proxy's own durable history is untouched by design (see `LiveDataStore.ClearEvents`'s remarks).
+- ~~**Configurable telemetry server address**~~ **Done.** `GuiSettingsStore` persists the address as
+  JSON under `%LOCALAPPDATA%\TotallyHotArcRouter\gui-settings.json` (the same per-user directory the
+  telemetry certificate and management token already use), editable from a new field in
+  `SettingsModal.razor`; `MauiProgram` builds `LiveDataStore` from the persisted address.
 
-### 2. Authenticate the telemetry gRPC stream
+### ✅ 2. Authenticate the telemetry gRPC stream
 
-Encryption in transit is now real (`Telemetry/TelemetryTlsCertificate.cs`, a self-signed cert on a
+Encryption in transit is real (`Telemetry/TelemetryTlsCertificate.cs`, a self-signed cert on a
 dedicated port - see [`../router/grpc-migration.md`](../router/grpc-migration.md)'s section 2), fixing
 half of what [`../router/signalr-hub-security.md`](../router/signalr-hub-security.md) originally
 proposed, via a different, gRPC-native mechanism rather than that doc's SignalR-era sketch.
-**Authentication is still missing**: `TelemetryGrpcService`/`Proxy/ProxyServer.cs` have no
-connection-time credential check. It's loopback-only today, so not reachable from the network, but
-any local process (that also trusts, or bypasses trust of, the self-signed cert) can connect and
-receive every broadcast event. This is a real concern now that turn cards' request/response text (see
-"Recently completed" below) is actual prompt/response content flowing over that same unauthenticated
-channel. `signalr-hub-security.md`'s section 2 (shared secret/token) is still the closest existing
-design for this, needing translation from a SignalR `AccessTokenProvider` to a gRPC interceptor/call
-credential, per that doc's own status banner.
+**Authentication is now done too.** `Telemetry/TelemetryAuthInterceptor` gates every call to the
+telemetry gRPC endpoint (`TelemetryGrpcService`'s `StreamEvents` and `PriceSourceAdminGrpcService`,
+which share the TLS port) behind the shared per-user management token, presented in the
+`x-admin-token` metadata entry and verified against `ManagementAccessToken` — the same shared secret
+that already gates the REST `/admin/*` API and the MCP endpoint, so every management surface uses one
+identical check. It overrides all four gRPC call shapes (unary, server-streaming, client-streaming,
+duplex), not just the ones this service currently uses, so a future streaming admin RPC doesn't
+silently reopen the gap. `TelemetryAuthClientInterceptor` attaches the token client-side;
+`TelemetryChannelFactory.Authenticated` builds the channel with it wired in, used by both
+`LiveDataStore` and `PriceSourceAdminClient`. This is `signalr-hub-security.md` §2's shared-secret
+design translated from a SignalR `AccessTokenProvider` to a gRPC interceptor/call credential, per that
+doc's own status banner.
 
-### ✅ 3. Anthropic Reported Usage section (per-provider card, non-enterprise accounts)
+### ✅ 3. Anthropic Reported Usage section (per-provider card, non-enterprise accounts) — code shipped, currently blocked on account tier
 
 **Shipped** — see
 [`docs/router/anthropic-reported-usage-plan.md`](../router/anthropic-reported-usage-plan.md) for the
-implemented design. The Usage & Cost Admin API path described below remains blocked (still needs an
-org-level Admin API key with no sourcing mechanism today) and is deliberately **not** what shipped;
-the plan instead sources accurate usage from data the proxy already has on the wire - the Messages API
-`usage` object (parsed cache-aware) and the `anthropic-ratelimit-*` response headers - so no enterprise
-account or Admin key is required. The rest of this entry is kept for the enterprise-only Admin-API
-path, which remains a distinct, additive future feature that plan explicitly does not conflict with.
+implemented design. That plan sources accurate usage from data the proxy already has on the wire - the
+Messages API `usage` object (parsed cache-aware) and the `anthropic-ratelimit-*` response headers - so no
+Admin key is required. The rest of this entry is kept for the distinct, additive Admin-API-backed card
+described below, which
+[`docs/router/secrets-at-rest-plan.md`](../router/secrets-at-rest-plan.md) audited and corrected two
+stale premises on:
 
-Governance > Providers cards have no way to show Anthropic's own authoritative usage/cost
-numbers — the existing "Monthly Budget" section
+1. **A sourcing mechanism already shipped.** `CostTracking:Reconciliation:Providers:anthropic:AdminApiKeyEnvVar`
+   names an environment variable; `TryResolveAdminApiKey`
+   ([`ServiceCollectionExtensions.cs`](../../src/TotallyHotArcRouter/Hosting/ServiceCollectionExtensions.cs))
+   resolves it; and
+   [`AnthropicCostReconciler`](../../src/TotallyHotArcRouter/Telemetry/AnthropicCostReconciler.cs)
+   already calls `GET /v1/organizations/cost_report` with it. The "env var convention vs. a dedicated
+   provider-editor field" choice this entry used to call open was made and shipped.
+2. **The gate is "not an individual account", not "enterprise".** Per Anthropic's [Usage and Cost
+   API](https://platform.claude.com/docs/en/manage-claude/usage-cost-api) docs, any **Claude Console**
+   organization member with the **admin** role can create an Admin key; converting an individual
+   Console account into an organization is a self-serve Console → Settings → Organization step, not an
+   enterprise contract.
+
+Governance > Providers cards previously had no way to show Anthropic's own authoritative usage/cost
+numbers — the "Monthly Budget" section
 ([`ProvidersAdmin.razor`](../../src/TotallyHotArcRouter.Gui/Components/ProvidersAdmin.razor))
 renders bar charts, but they're driven entirely by the proxy's own internal request tally
-(`ProviderBudgetStore`), not by Anthropic. The proposed feature:
+(`ProviderBudgetStore`), not by Anthropic. **Shipped**, per `secrets-at-rest-plan.md` Phases 4-6:
 
-- **What**: a new "Anthropic Reported Usage" section on a provider card, shown only when
-  `ProviderType == Anthropic` *and* the provider is flagged as an enterprise Anthropic account — a
-  concept that doesn't exist yet and needs to be designed (likely a new field on
-  `ProviderAdminView`/`ProviderWriteRequest`, alongside `ProviderTemplates.cs`'s existing per-type
-  metadata).
+- **What**: a new "Reported Usage (Anthropic)" section on a provider card
+  (`ProvidersAdmin.razor`), shown for every `ProviderType == Anthropic` provider - "No reported usage
+  fetched yet" until an Admin key resolves and the first cycle runs, then daily token bars grouped by
+  model. No separate "enterprise account" flag; see `secrets-at-rest-plan.md` §2.
 - **Data source**: Anthropic's [Usage & Cost Admin
-  API](https://platform.claude.com/docs/en/manage-claude/usage-cost-api) — token usage and cost
-  reports over a trailing 30-day window, fetched automatically whenever the card loads.
-- **Blocking prerequisite**: the Usage/Cost API requires an org-level **Admin API key**, distinct
-  from the per-provider `x-api-key` credential a provider already stores for completions
-  ([`ProviderTemplates.cs`](../../src/TotallyHotArcRouter.Gui.Admin/ProviderTemplates.cs)). There's
-  no sourcing mechanism for this key today (env var convention vs. a dedicated provider-editor field
-  is still an open choice) — this is the actual reason the feature isn't buildable yet, not just the
-  enterprise-account flag.
-- **Display**: bar charts, reusing the existing `EChart`/`ChartJson` pattern from the Monthly Budget
-  section, plus a visible "fetched at" timestamp — Anthropic's reported numbers are only trustworthy
-  as of the moment they were pulled. This is additive, not a replacement: Anthropic's API has no
-  endpoint to read back a spend *limit*, so it can't drive the existing local $/token cap-utilization
-  bars, which stay exactly as they are.
+  API](https://platform.claude.com/docs/en/manage-claude/usage-cost-api) via
+  `Telemetry/AnthropicUsageReportClient.cs` — token usage over a trailing 30-day window, refreshed by
+  `AnthropicUsageReportService` on the existing hourly `CostReconciliationHostedService` cycle (not on
+  card load - Anthropic documents a one-request-per-minute polling ceiling).
+- **Remaining prerequisite is account-level, not code: an Admin key must exist for the `anthropic`
+  provider's Console account.** As of this repository's last check (2026-08-10), that account is an
+  **individual Console account** - the Admin API answers "unavailable for individual accounts" until it
+  is converted to an organization (self-serve, ~5 minutes), after which any org admin can create an
+  `sk-ant-admin01-…` key. It can be entered either via the provider card's "Admin API Key (cost
+  reconciliation, optional)" field or `CostTracking:Reconciliation:Providers:anthropic:AdminApiKeyEnvVar`
+  - the stored secret takes priority (`agent-cost-tracking.md` §4). Two related exclusions: **Bedrock
+  has no programmatic Usage/Cost API**, so `bedrock-anthropic` can never populate this card regardless
+  of key; and **Claude Enterprise** carries a *different* credential (an Analytics API key,
+  `sk-ant-api01-…`) against a different endpoint family (`/v1/organizations/analytics/…`), not
+  interchangeable with an Admin key.
+- **Display**: daily token bars grouped by model, reusing the existing `EChart`/`ChartJson`
+  `GroupedBarsModel` pattern from the Monthly Budget section, plus a "Fetched" timestamp footer —
+  Anthropic's reported numbers are only trustworthy as of the moment they were pulled. This is
+  additive, not a replacement: Anthropic's API has no endpoint to read back a spend *limit*, so it
+  can't drive the existing local $/token cap-utilization bars, which stay exactly as they are.
+- **Secret handling**: the Admin key itself is written through `PUT /admin/secrets/{name}`
+  (`ManagementFacade.SetSecret`, restricted to `reconciliation:{openai|anthropic}:admin-key`) into the
+  protected secret store (`docs/router/secrets-at-rest.md`) rather than `model-routing.json` - there is
+  deliberately no `GET` counterpart on that route; `GET /admin/providers` exposes only a
+  `HasStoredAdminKey` boolean.
 
 ## Recently completed
 
@@ -125,7 +167,7 @@ ApexCharts to Apache ECharts**: `echarts.min.js` is vendored under `wwwroot/lib/
 and driven by `wwwroot/js/echarts-interop.js` through the reusable `Components/EChart.razor` host;
 `Blazor-ApexCharts-MAUI`, its `AddApexChartsMaui()` registration, and its CSS are gone, and Model
 Distribution's grouped-bar + donut charts were ported too. The pure, unit-tested
-`TotallyHotArcRouter.Gui.Charts.CostChartBuilder` (+ `CostChartBuilderTests`) builds each chart model and
+`TotallyHot.ArcRouter.Gui.Charts.CostChartBuilder` (+ `CostChartBuilderTests`) builds each chart model and
 derives every rich tooltip figure (baseline cost, per-step model split, cached/uncached tokens,
 context token counts, cold-start split) from the turn's existing fields; `ChartJson` serializes it and
 `ChartJsonTests` guards the C#↔JS field contract; `ChartPalette` (which `ColorUtils` now delegates to)
@@ -151,8 +193,8 @@ Fully specified in [`../router/grpc-migration.md`](../router/grpc-migration.md) 
 the doc's status banner): `Telemetry/TelemetryHub.cs` is deleted, `TelemetryGrpcService`/
 `TelemetryBroadcaster` replace it server-side, and `LiveDataStore.cs` now speaks gRPC via a
 `GrpcChannel` instead of a SignalR `HubConnection`. `src/Protos/telemetry.proto` is the shared
-contract, compiled independently into both `TotallyHotArcRouter` and `TotallyHotArcRouter.Gui.Telemetry` (not
-`TotallyHotArcRouter.Gui` itself - .NET MAUI's `SingleProject` build doesn't reliably run Grpc.Tools'
+contract, compiled independently into both `TotallyHotArcRouter` and `TotallyHot.ArcRouter.Gui.Telemetry` (not
+`TotallyHot.ArcRouter.Gui` itself - .NET MAUI's `SingleProject` build doesn't reliably run Grpc.Tools'
 codegen), closing the hand-synced-DTO drift risk that motivated this. See
 [`../router/telemetry.md`](../router/telemetry.md)'s "Transport: gRPC" section for the full mechanism.
 
@@ -180,9 +222,9 @@ proxy-side source noted here previously is closed by
 the transport migrated to gRPC - see the item above), a custom Serilog `ILogEventSink` that forwards
 every log event (additively, alongside the existing `Console` sink -
 `serilog-logging-guide.md` is otherwise unchanged) as a `LogLineEvent` over the same telemetry gRPC
-stream routing telemetry already uses. `TotallyHotArcRouter.Gui.Console` (+
+stream routing telemetry already uses. `TotallyHot.ArcRouter.Gui.Console` (+
 `.Tests`) hosts the reusable, unit-tested pieces (`LogLevelColorMapper`, `LogBuffer`), mirroring the
-`TotallyHotArcRouter.Gui.Charts` pattern; `LiveDataStore` and `Components/ConsoleTab.razor` wire it into
+`TotallyHot.ArcRouter.Gui.Charts` pattern; `LiveDataStore` and `Components/ConsoleTab.razor` wire it into
 the dashboard.
 
 ### ✅ Wire the dashboard to live TotallyHotArcRouter proxy telemetry, with real-time push updates
@@ -190,7 +232,7 @@ the dashboard.
 `src/TotallyHotArcRouter/Telemetry/` now captures per-request session/turn tracking, OpenAI/Anthropic
 token usage (streaming and non-streaming), and estimated cost, and pushes each request as a
 `RoutingTelemetryEvent` over a gRPC stream (`TelemetryService.StreamEvents`) as soon as it's
-forwarded — no polling. `TotallyHotArcRouter.Gui`'s `Services/LiveDataStore.cs` consumes this live, and the
+forwarded — no polling. `TotallyHot.ArcRouter.Gui`'s `Services/LiveDataStore.cs` consumes this live, and the
 Live Stream tab plus Cost Analytics' Token Compounding chart now render real conversations instead of
 `MockData`. Full pipeline, field-by-field data provenance, and what's still honestly defaulted
 (Routing ROI, Tool Steps, Context Buffer) vs. real (Time to First Token, Cache Hit Rate,
@@ -203,14 +245,14 @@ rather than adding polling first.
 
 Originally implemented in `CostAnalytics.razor` as a "Token Compounding by Conversation" panel: a
 conversation picker plus a two-series line chart (cumulative prompt tokens, cumulative completion
-tokens) per turn, built via `TotallyHotArcRouter.Gui.Charts.TokenCompoundingSeries.Build`. This is now the
+tokens) per turn, built via `TotallyHot.ArcRouter.Gui.Charts.TokenCompoundingSeries.Build`. This is now the
 `Tokens` metric (single-session scope) of the metric explorer; `TokenCompoundingSeries` itself
 remains in use for the `ConversationSummary` sparkline.
 
 ### ✅ Token-compounding sparkline on the conversation summary card
 
 Implemented in `ConversationSummary.razor`: a compact inline SVG polyline ("Trend" stat) showing
-per-turn total tokens, built via `TotallyHotArcRouter.Gui.Charts.TokenCompoundingSeries.BuildSparkline`
+per-turn total tokens, built via `TotallyHot.ArcRouter.Gui.Charts.TokenCompoundingSeries.BuildSparkline`
 and `SparklineLayout.Normalize`.
 
 ### ✅ Keyboard-accessible tooltips

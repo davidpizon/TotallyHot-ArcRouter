@@ -1,6 +1,6 @@
 # Generic Sandboxed Executor for Live Traffic
 
-> **Status: Implemented (Phases 1–6).** The `TotallyHotArcRouter.Sandbox` project implements this design:
+> **Status: Implemented (Phases 1–6).** The `TotallyHot.ArcRouter.Sandbox` project implements this design:
 > Tier-0 static analysis, off-path async orchestration, the Tier-1 native Linux jail, the Tier-2
 > Firecracker microVM path, verifier weighting/learning into `RouterMemory` (live namespace), and the
 > hardening pass. Execution tiers (1/2) are Linux-only and gated by a capability probe; on other hosts
@@ -522,7 +522,7 @@ integration tests behind the capability probe so CI on non-KVM runners still goe
 
 | Phase | Scope | Exit criteria |
 |---|---|---|
-| **1. Contracts & Tier 0** | `TotallyHotArcRouter.Sandbox` project; `SandboxRequest`/`SandboxResult`/`SyntaxVerdict` records; `ISignalExtractor` (code-block extraction) + `IStructuralParser` (C# via Roslyn, Python/JS/shell parse probes); `IVerifierScorer`; `ISandboxCapabilityProbe`. No execution yet. | Extraction + Tier-0 syntax scoring unit-tested; scorer maps verdicts to `u_i`; capability probe reports correctly on this Linux host and (mocked) on non-Linux. |
+| **1. Contracts & Tier 0** | `TotallyHot.ArcRouter.Sandbox` project; `SandboxRequest`/`SandboxResult`/`SyntaxVerdict` records; `ISignalExtractor` (code-block extraction) + `IStructuralParser` (C# via Roslyn, Python/JS/shell parse probes); `IVerifierScorer`; `ISandboxCapabilityProbe`. No execution yet. | Extraction + Tier-0 syntax scoring unit-tested; scorer maps verdicts to `u_i`; capability probe reports correctly on this Linux host and (mocked) on non-Linux. |
 | **2. Async orchestration** | Bounded `Channel`, `SandboxExecutionService` background worker, enqueue hook in `ProxyMiddleware` (best-effort, swallowed), DI registration, `Sandbox` options binding, sampling + drop-on-full. Workers run Tier 0 only for now. | Proxy path provably unaffected (enqueue is non-blocking/drops when full); worker observes Tier-0 scores into `RouterMemory`; tests cover full-channel shedding and disabled mode. |
 | **3. Tier 1 jail** | Native-primitive isolate: namespaces (net/pid/mount/uts/ipc), cgroups v2 limits, tmpfs writable, ro-rootfs, seccomp allowlist, external supervisor with hard timeout; Python/Node/shell runtimes in the base rootfs; `ISandboxPool` warm pool + per-lease tmpfs reset. | Linux+KVM integration tests: air-gap verified (no egress), memory/pids/timeout limits enforced and reported, reset leaves no residue; unit tests mock the process boundary; non-Linux CI skips via probe. |
 | **4. Tier 2 microVM** | Firecracker integration: minimal guest rootfs + kernel, **snapshot/restore** pool, no virtio-net, jailer, CoW writable overlay; `ITierSelector` escalation (size/risk/seccomp-denial). | Snapshot-restore reset validated; microVM has no network device; selection + escalation unit-tested; integration tests gated on Firecracker availability. |

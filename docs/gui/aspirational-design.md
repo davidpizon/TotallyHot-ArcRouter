@@ -1,6 +1,6 @@
 # Aspirational Design
 
-This document defines the aspirational GUI design direction for TotallyHotArcRouter. It is prescriptive for future redesign work across all dashboard surfaces: **Live Stream**, **Cost Analytics**, **Governance**, and **Console**. It complements and will eventually supersede DESIGN.md and MOTION.md as outlined in the adoption plan (aspirational-design-adoption-plan.md).
+This document defines the aspirational GUI design direction for TotallyHot.ArcRouter. It is prescriptive for future redesign work across all dashboard surfaces: **Live Stream**, **Cost Analytics**, **Governance**, and **Console**. It complements and will eventually supersede DESIGN.md and MOTION.md as outlined in the adoption plan (aspirational-design-adoption-plan.md).
 
 ## Design Principles
 

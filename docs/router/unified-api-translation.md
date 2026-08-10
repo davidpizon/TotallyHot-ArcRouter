@@ -60,7 +60,7 @@ each shipped separately.
 A new seam, not yet implemented:
 
 ```csharp
-namespace TotallyHotArcRouter.Proxy.Translation;
+namespace TotallyHot.ArcRouter.Proxy.Translation;
 
 /// <summary>
 /// Translates one provider's native request/response payload shape to/from the OpenAI-compatible

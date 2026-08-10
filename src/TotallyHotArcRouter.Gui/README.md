@@ -19,7 +19,8 @@ does not start, stop, or otherwise manage it.
 
 The Live Stream tab and the Cost Analytics tab's Token Compounding chart connect to the running
 TotallyHotArcRouter proxy's telemetry hub (`Services/LiveDataStore.cs`, default
-`http://localhost:5001/telemetry/hub`, not yet configurable) and show nothing until the proxy is
+`http://localhost:5001/telemetry/hub`, configurable via `GuiSettingsStore` and `SettingsModal.razor`)
+and show nothing until the proxy is
 reachable and has forwarded at least one request. The rest of the dashboard (Model Distribution,
 Governance, the header ticker, and Cost Analytics' other two charts) still reads from hard-coded
 mock data (`Models/DashboardData.cs`) - no telemetry source exists for that data yet. See
@@ -35,7 +36,7 @@ mock data (`Models/DashboardData.cs`) - no telemetry source exists for that data
 | `Components/SettingsModal.razor` | The **System Settings** window - also the reference shell every new window/modal copies (see below). |
 | `Models/DashboardData.cs` | Dashboard data model + the mock data. |
 | `Services/LiveDataStore.cs` | gRPC client connecting to the proxy's `TelemetryService.StreamEvents` RPC; accumulates and re-aggregates live routing events into `Conversation`/`ConversationTurn` records. |
-| `Services/LiveConversationMapper.cs` | Maps `TotallyHotArcRouter.Gui.Telemetry`'s live-aggregation output onto the dashboard's `Conversation`/`ConversationTurn` view-model shape, with honest defaults for fields telemetry doesn't cover. |
+| `Services/LiveConversationMapper.cs` | Maps `TotallyHot.ArcRouter.Gui.Telemetry`'s live-aggregation output onto the dashboard's `Conversation`/`ConversationTurn` view-model shape, with honest defaults for fields telemetry doesn't cover. |
 | `Platforms/Windows/TrayWindowManager.cs` | Win32 tray icon + WndProc subclass implementing the tray-resident window behavior (MAUI has no built-in tray support). |
 | `wwwroot/` | Blazor host page and the dashboard stylesheet (`css/app.css`). Static source - no build step. |
 
@@ -51,7 +52,7 @@ and color - is in [`docs/gui/DESIGN.md`](../../docs/gui/DESIGN.md) §4.1.
 Charts are rendered with [Apache ECharts](https://echarts.apache.org/) (Apache-2.0), vendored as
 `wwwroot/lib/echarts/echarts.min.js` and driven by `wwwroot/js/echarts-interop.js` through the reusable
 `Components/EChart.razor` host, so the charts work offline inside the WebView with no NuGet chart
-dependency. The per-chart models are built in the pure `TotallyHotArcRouter.Gui.Charts` library
+dependency. The per-chart models are built in the pure `TotallyHot.ArcRouter.Gui.Charts` library
 (`CostChartBuilder` for the Cost Analytics tab) and serialized to the renderer with `ChartJson`.
 
 ## Prerequisites

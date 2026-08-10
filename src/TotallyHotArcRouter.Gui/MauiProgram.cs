@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using TotallyHot.ArcRouter.Gui.Platforms.Windows;
 using TotallyHot.ArcRouter.Gui.Services;
+using Microsoft.Extensions.Logging;
 using Microsoft.Maui.LifecycleEvents;
 
 namespace TotallyHot.ArcRouter.Gui;
@@ -28,10 +29,19 @@ public static class MauiProgram
         builder.UseMauiApp<App>();
 
         builder.Services.AddMauiBlazorWebView();
+        // Local, per-user GUI settings (currently just the telemetry server address) - see
+        // Services/GuiSettingsStore.cs. Registered before LiveDataStore so its factory below can read
+        // the persisted address.
+        builder.Services.AddSingleton<IGuiSettingsStore>(_ => new GuiSettingsStore());
         // Live routing telemetry from the TotallyHot.ArcRouter proxy (see Services/LiveDataStore.cs). A
         // singleton so the gRPC stream and accumulated conversation state survive navigation between
-        // tabs; Dashboard.razor starts the connection on first render.
-        builder.Services.AddSingleton<LiveDataStore>();
+        // tabs; Dashboard.razor starts the connection on first render. The server address comes from
+        // GuiSettingsStore rather than the hardcoded default, so a change in Settings takes effect on
+        // the next launch (the singleton factory below runs once, on first resolution).
+        builder.Services.AddSingleton(sp =>
+            new LiveDataStore(
+                sp.GetRequiredService<ILogger<LiveDataStore>>(),
+                sp.GetRequiredService<IGuiSettingsStore>().Load().TelemetryServerAddress));
         // Backs the Governance tab's provider/credential/model manager. A singleton so its loaded
         // provider list survives tab switches; it talks to the proxy's /admin API (port 5001) via the
         // tested TotallyHot.ArcRouter.Gui.Admin client. See Services/ProviderAdminStore.cs.

@@ -328,6 +328,61 @@
                                     <div class="text-xs text-slate-600">No rate-limit data observed yet</div>
                                 }
                             </div>
+
+                            @* Admin API key for provider cost reconciliation and reported usage
+                               (docs/router/secrets-at-rest-plan.md §4/§7) - a distinct, more privileged
+                               credential than the per-request inference key above. Optional: a Claude Pro/Max
+                               or plain OpenAI account has no such key, and the rest of this card (and the
+                               rest of the app) works fully without one. Only openai/anthropic are recognized,
+                               matching BuildCostReconcilers/ManagementFacade.SetSecret. *@
+                            @if (IsRecognizedReconciliationProvider(provider.Key))
+                            {
+                                <div>
+                                    <div class="text-[10px] text-slate-600 uppercase tracking-wider mb-1">Admin API Key (cost reconciliation, optional)</div>
+                                    @if (provider.HasStoredAdminKey)
+                                    {
+                                        <div class="flex items-center gap-1.5">
+                                            <span class="text-xs font-mono text-slate-400">•••••••• stored</span>
+                                            <button @onclick="() => ClearAdminApiKey(provider.Key)" class="btn-small-action">Clear</button>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <div class="flex items-center gap-1.5">
+                                            <input type="password"
+                                                   value="@GetAdminKeyDraft(provider.Key)"
+                                                   @oninput="e => _draftAdminKey[provider.Key] = AsString(e.Value)"
+                                                   placeholder="sk-ant-admin01-… or Admin API key"
+                                                   class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input" />
+                                            <button @onclick="() => SaveAdminApiKey(provider.Key)" class="btn-small-action">Save</button>
+                                        </div>
+                                    }
+                                </div>
+                            }
+
+                            @* Anthropic's own reported per-model daily token usage
+                               (docs/router/secrets-at-rest-plan.md §8.1/§8.2), refreshed on the same hourly
+                               cycle as cost reconciliation - never on card load, per Anthropic's caching
+                               guidance. Anthropic-typed providers only: this is a Console/Enterprise Admin-key
+                               feature, so an account without one (Claude Pro/Max) simply sees the empty state
+                               below and nothing else on this card is affected. *@
+                            @if (string.Equals(provider.ProviderType, "Anthropic", StringComparison.OrdinalIgnoreCase))
+                            {
+                                <div class="mt-1">
+                                    <div class="text-[10px] text-slate-600 uppercase tracking-wider mb-1">Reported Usage (Anthropic)</div>
+                                    @if (provider.ReportedUsage is { Rows.Count: > 0 } reportedUsage)
+                                    {
+                                        <div class="ls-provider-budget-chart">
+                                            <EChart ModelJson="@ReportedUsageJson(reportedUsage)" />
+                                        </div>
+                                        <div class="text-[10px] text-slate-600 mt-0.5">Fetched @FormatUtc(reportedUsage.FetchedAtUtc)</div>
+                                    }
+                                    else
+                                    {
+                                        <div class="text-xs text-slate-600">No reported usage fetched yet</div>
+                                    }
+                                </div>
+                            }
                         </div>
                     }
                 </div>
@@ -364,6 +419,7 @@
     private readonly Dictionary<string, string> _draftId = [];
     private readonly Dictionary<string, string> _draftDollarCap = [];
     private readonly Dictionary<string, string> _draftTokenCap = [];
+    private readonly Dictionary<string, string> _draftAdminKey = [];
     // Which providers currently have the "Add model manually" pane expanded - absent/false is the default
     // (collapsed), matching every other per-provider draft dictionary's "missing key = default" shape.
     private readonly HashSet<string> _addModelPaneOpen = [];
@@ -709,6 +765,36 @@
         return $"~{span} at current rate";
     }
 
+    // Cycled by model index rather than picked per model name, so the palette stays stable regardless of
+    // how many distinct models a provider reports on a given day.
+    private static readonly string[] ReportedUsageSeriesColors = ["#1ed760", "#10b981", "#38bdf8", "#a78bfa", "#f59e0b", "#f472b6"];
+
+    /// <summary>Builds a daily-token-bars-grouped-by-model chart (docs/router/secrets-at-rest-plan.md §8.2): one category per reported day, one series per reported model.</summary>
+    private static string ReportedUsageJson(ProviderReportedUsageAdminView usage)
+    {
+        var days = usage.Rows.Select(r => r.UsageDay).Distinct().OrderBy(d => d).ToList();
+        var models = usage.Rows.Select(r => r.Model).Distinct().OrderBy(m => m, StringComparer.Ordinal).ToList();
+
+        var series = models.Select((model, index) =>
+        {
+            var data = days.Select(day =>
+            {
+                var row = usage.Rows.FirstOrDefault(r => r.UsageDay == day && r.Model == model);
+                return row is null
+                    ? 0m
+                    : (decimal)(row.InputTokens + row.OutputTokens + row.CacheCreationTokens + row.CacheReadTokens);
+            }).ToList();
+            return new DistributionSeries(model, ReportedUsageSeriesColors[index % ReportedUsageSeriesColors.Length], data);
+        }).ToList();
+
+        var model = new GroupedBarsModel(
+            "Daily Token Usage",
+            days.Select(d => d.ToString("MM-dd", CultureInfo.InvariantCulture)).ToList(),
+            GroupedBarsModel.DynamicYMax(series.Select(s => s.Data)),
+            series);
+        return ChartJson.Serialize(model);
+    }
+
     private static string RateLimitTrendJson(string dimensionName, IReadOnlyList<RateLimitHistoryPointAdminView> points)
     {
         var model = RateLimitTrendChartBuilder.Build(
@@ -743,6 +829,40 @@
             // Drop the drafts so the inputs re-seed from the persisted values the refreshed store now holds.
             _draftDollarCap.Remove(key);
             _draftTokenCap.Remove(key);
+        }
+    }
+
+    // The only two providers BuildCostReconcilers/ManagementFacade.SetSecret recognize
+    // (docs/router/agent-cost-tracking.md §3.5) - matches the provider dictionary key convention under
+    // CostTracking:Reconciliation:Providers, not ProviderType.
+    private static bool IsRecognizedReconciliationProvider(string key) =>
+        string.Equals(key, "openai", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(key, "anthropic", StringComparison.OrdinalIgnoreCase);
+
+    private string GetAdminKeyDraft(string key) => _draftAdminKey.TryGetValue(key, out var value) ? value : string.Empty;
+
+    private async Task SaveAdminApiKey(string key)
+    {
+        _opError = null;
+
+        var value = GetAdminKeyDraft(key);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            _opError = "Admin API key must not be blank.";
+            return;
+        }
+
+        if (await RunAsync(() => Store.SetAdminApiKeyAsync(key, value)))
+        {
+            _draftAdminKey.Remove(key);
+        }
+    }
+
+    private async Task ClearAdminApiKey(string key)
+    {
+        if (await RunAsync(() => Store.DeleteAdminApiKeyAsync(key)))
+        {
+            _draftAdminKey.Remove(key);
         }
     }
 

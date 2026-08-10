@@ -70,7 +70,7 @@ VS Code's chat provider API has exactly one representation of a tool call
 (`LanguageModelToolCallPart{callId, name, input}`). There is **no channel to tell VS Code "this model
 speaks Hermes syntax."** Conveying a dialect to the client is therefore not achievable, and not
 useful if it were. The only thing worth conveying is an already-normalized call — which is what Spark
-consumes today without modification. Normalization must happen server-side, in TotallyHotArcRouter.
+consumes today without modification. Normalization must happen server-side, in TotallyHot.ArcRouter.
 
 That placement is also the right one on its merits: one implementation serves every client (Copilot,
 Claude Code, `curl`, other IDEs), TotallyHotArcRouter already owns the translator seam and the streaming

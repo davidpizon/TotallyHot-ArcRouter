@@ -1,6 +1,7 @@
 using System.Net;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using TotallyHot.ArcRouter.Proxy.Management;
 
 namespace TotallyHot.ArcRouter.Telemetry;
 
@@ -32,6 +33,9 @@ public static class TelemetryTlsCertificate
     private const string CertificateFileName = "telemetry-cert.pfx";
     private const string PasswordFileName = "telemetry-cert-pwd.txt";
 
+    /// <summary>The protected secret store's name for the certificate password (<c>docs/router/secrets-at-rest-plan.md</c> §3's naming convention).</summary>
+    private const string PasswordSecretName = "telemetry:cert-password";
+
     /// <summary>
     /// Loads the persisted certificate if one already exists, otherwise generates a new self-signed
     /// one (subject <c>CN=localhost</c>, with <c>localhost</c>/loopback IPs as Subject Alternative
@@ -40,14 +44,32 @@ public static class TelemetryTlsCertificate
     public static X509Certificate2 GetOrCreate()
     {
         var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TotallyHotArcRouter");
-        Directory.CreateDirectory(directory);
+        return GetOrCreate(
+            Path.Combine(directory, CertificateFileName),
+            Path.Combine(directory, PasswordFileName),
+            new ProtectedSecretStore());
+    }
 
-        var certificatePath = Path.Combine(directory, CertificateFileName);
-        var passwordPath = Path.Combine(directory, PasswordFileName);
-
-        if (File.Exists(certificatePath) && File.Exists(passwordPath))
+    /// <summary>
+    /// Overload taking explicit paths and a secret store, for tests. See <see cref="GetOrCreate()"/> for
+    /// behavior.
+    /// </summary>
+    /// <param name="certificatePath">The <c>.pfx</c> file path.</param>
+    /// <param name="passwordPath">
+    /// The legacy plaintext password file path (<c>docs/router/secrets-at-rest-plan.md</c> §6): read and
+    /// migrated into <paramref name="secretStore"/> when the store holds no entry yet, then deleted.
+    /// </param>
+    /// <param name="secretStore">The protected secret store the password is read from and persisted to.</param>
+    internal static X509Certificate2 GetOrCreate(string certificatePath, string passwordPath, ProtectedSecretStore secretStore)
+    {
+        var directory = Path.GetDirectoryName(certificatePath);
+        if (!string.IsNullOrWhiteSpace(directory))
         {
-            var existingPassword = File.ReadAllText(passwordPath);
+            Directory.CreateDirectory(directory);
+        }
+
+        if (File.Exists(certificatePath) && TryResolvePassword(passwordPath, secretStore, out var existingPassword))
+        {
             return X509CertificateLoader.LoadPkcs12FromFile(certificatePath, existingPassword, X509KeyStorageFlags.Exportable);
         }
 
@@ -74,9 +96,56 @@ public static class TelemetryTlsCertificate
         var certificateBytes = certificate.Export(X509ContentType.Pkcs12, password);
 
         File.WriteAllBytes(certificatePath, certificateBytes);
-        File.WriteAllText(passwordPath, password);
+        StorePassword(passwordPath, secretStore, password);
 
         return X509CertificateLoader.LoadPkcs12(certificateBytes, password, X509KeyStorageFlags.Exportable);
+    }
+
+    /// <summary>
+    /// Resolves the certificate's password: the protected store first, falling back to (and migrating in)
+    /// the legacy plaintext file. Returns <see langword="false"/> when neither holds a password - a
+    /// certificate file with no recoverable password must be regenerated, not opened with a guessed one.
+    /// </summary>
+    private static bool TryResolvePassword(string passwordPath, ProtectedSecretStore secretStore, out string password)
+    {
+        if (secretStore.TryRead(PasswordSecretName, out password))
+        {
+            return true;
+        }
+
+        if (!File.Exists(passwordPath))
+        {
+            password = string.Empty;
+            return false;
+        }
+
+        password = File.ReadAllText(passwordPath);
+
+        // Migrate the legacy file into the store, then remove it - best-effort: on a platform where the
+        // store is unavailable, the legacy file stays exactly where it is and keeps working.
+        try
+        {
+            secretStore.Write(PasswordSecretName, password);
+            File.Delete(passwordPath);
+        }
+        catch (PlatformNotSupportedException)
+        {
+        }
+
+        return true;
+    }
+
+    /// <summary>Persists a freshly generated password to the protected store, falling back to the legacy plaintext file when the store is unavailable on this platform.</summary>
+    private static void StorePassword(string passwordPath, ProtectedSecretStore secretStore, string password)
+    {
+        try
+        {
+            secretStore.Write(PasswordSecretName, password);
+        }
+        catch (PlatformNotSupportedException)
+        {
+            File.WriteAllText(passwordPath, password);
+        }
     }
 }
 

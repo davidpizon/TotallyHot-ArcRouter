@@ -1,16 +1,16 @@
 # TotallyHotArcRouter Design System
 
-A design system built for this repository's `TotallyHotArcRouter.Gui` project (`src/TotallyHotArcRouter.Gui/`) and the docs describing it (`docs/gui/dashboard.md`). Explore those paths further — and the repo's root `README.md` / `AGENTS.md` — for deeper product and architecture context than what's captured here.
+A design system built for this repository's `TotallyHot.ArcRouter.Gui` project (`src/TotallyHotArcRouter.Gui/`) and the docs describing it (`docs/gui/dashboard.md`). Explore those paths further — and the repo's root `README.md` / `AGENTS.md` — for deeper product and architecture context than what's captured here.
 
 ## Company / product context
 
 **TotallyHot Arc Router (TotallyHotArcRouter runtime)** is a model-routing project for coding tasks under a performance-cost tradeoff. It ships the production .NET runtime, a Windows tray dashboard, benchmark data assets, and engineering documentation for local routing workflows.
 
-The one real **product UI** in the repo is **TotallyHotArcRouter.Gui**: a Windows system-tray application (.NET MAUI Blazor Hybrid) that shows a dashboard of routing, cost, and governance telemetry for the TotallyHotArcRouter proxy. It launches hidden in the tray; right-click → "Show Dashboard" opens a single window hosting a Razor single-page dashboard. **This design system is built entirely around that dashboard's visual language.**
+The one real **product UI** in the repo is **TotallyHot.ArcRouter.Gui**: a Windows system-tray application (.NET MAUI Blazor Hybrid) that shows a dashboard of routing, cost, and governance telemetry for the TotallyHotArcRouter proxy. It launches hidden in the tray; right-click → "Show Dashboard" opens a single window hosting a Razor single-page dashboard. **This design system is built entirely around that dashboard's visual language.**
 
 Note: the dashboard's actual Razor component markup now exists at `src/TotallyHotArcRouter.Gui/Components/*.razor` (it did not when this design system was first generated from `wwwroot/css/app.css`, `Models/DashboardData.cs`, `Utils/ColorUtils.cs`, and the prose spec at `docs/gui/dashboard.md`). This system's `ui_kits/dashboard/` was reconstructed from that CSS + data + spec, not copied component source — treat it as a faithful recreation, not a byte-for-byte port, and re-check it against the real `.razor` markup next time this design system is regenerated.
 
-Currently the dashboard displays **hard-coded mock data only** — it is not wired to the live proxy yet. This design system's mock data mirrors that same fixture data.
+Currently the dashboard is **mixed live and mock data**: Live Stream and Console are fully live-wired to the proxy's gRPC telemetry; Cost Analytics merges live conversation turns onto a deterministic mock history; Model Distribution and the header ticker still read entirely from hard-coded mock data; Governance's Providers and Price Sources sub-views are fully live. See `docs/gui/dashboard.md`'s "Current status" section for the exact breakdown. This design system's mock data mirrors the same fixture data used for the still-mock surfaces.
 
 ## No logo
 
@@ -31,7 +31,7 @@ The source repository defines no company or product logo/brand mark. `assets/app
   - `overlay/Modal`
   - `forms/Button`, `forms/Input`
   - `data/Card`, `data/StatItem`, `data/AgentChip`
-- `ui_kits/dashboard/` — the TotallyHot Arc Router Dashboard recreation: `index.html` (interactive, all 4 tabs + Settings modal clickable), `Dashboard.jsx`, `Header.jsx`, `LiveStream.jsx`, `CostAnalytics.jsx`, `ModelDistribution.jsx`, `Governance.jsx`, `SettingsModal.jsx`, `mockData.js`.
+- `ui_kits/dashboard/` — the TotallyHot Arc Router Dashboard recreation: `index.html` (interactive, all 5 tabs + Settings modal clickable), `Dashboard.jsx`, `Header.jsx`, `LiveStream.jsx`, `CostAnalytics.jsx`, `ModelDistribution.jsx`, `Governance.jsx`, `SettingsModal.jsx`, `mockData.js`.
 - `SKILL.md` — portable skill definition for use in Claude Code or other agent environments.
 
 ## Intentional additions
@@ -42,7 +42,7 @@ The source defines a dashboard's worth of ad-hoc markup (per `docs/gui/dashboard
 - **Input** — same reasoning, for the budget-cap and confirmation-word fields.
 - **Tooltip** — generalized from the doc's `data-tip` / `js/tooltips.js` floating-tooltip mechanism into a reusable component.
 
-Everything else (Icon, Badge, ProgressBar, Tabs, Modal, Card, StatItem, AgentChip) maps directly to a named piece of the source (`Icon.razor`, the OK/WARNING/CRITICAL tags, `.progress-bar-track`, the 4-tab nav, `SettingsModal.razor`, `ConversationCard`/`TurnCard`/provider cards, the per-turn stat strip, and the agent color-dot chip).
+Everything else (Icon, Badge, ProgressBar, Tabs, Modal, Card, StatItem, AgentChip) maps directly to a named piece of the source (`Icon.razor`, the OK/WARNING/CRITICAL tags, `.progress-bar-track`, the 5-tab nav, `SettingsModal.razor`, `ConversationCard`/`TurnCard`/provider cards, the per-turn stat strip, and the agent color-dot chip).
 
 ---
 
@@ -51,7 +51,7 @@ Everything else (Icon, Badge, ProgressBar, Tabs, Modal, Card, StatItem, AgentChi
 The product has almost no marketing copy — it's an internal ops console, so "content" here means **UI microcopy and log/telemetry phrasing**, not brand voice copywriting. Drawing from `docs/gui/dashboard.md` and `Models/DashboardData.cs`:
 
 - **Voice**: terse, technical, third-person/systems-oriented — never "you"/"we". Labels read like a systems-monitoring tool, not a consumer app: "System Status: OK", "Fallback Engine Engaged", "Route Confirmed: claude-3-haiku".
-- **Casing**: Title Case for headers and tab labels ("Live Stream", "Cost Analytics", "Model Distribution", "Governance"); UPPERCASE for short status tags ("OK", "WARNING", "CRITICAL", "LIVE"); sentence case for routing-log messages and mock request/response text.
+- **Casing**: Title Case for headers and tab labels ("Live Stream", "Cost Analytics", "Model Distribution", "Governance", "Console"); UPPERCASE for short status tags ("OK", "WARNING", "CRITICAL", "LIVE"); sentence case for routing-log messages and mock request/response text.
 - **Numbers over adjectives**: nearly every piece of copy is a number or an ID, not prose — costs to 4-6 decimal places (`$0.006310`), token counts, percentages to 1-2 decimals, trace/session IDs (`a4f89c02`). This is a data-dense console; don't pad it with descriptive sentences where a number belongs.
 - **Routing-log phrasing pattern**: short declarative fragments, present tense, systems-log style — `"Prompt cache hit: 2,333 tokens read from cache"`, `"Anthropic hourly budget breached; routing restricted"`, `"Route Confirmed: <model>"` as the standing final line of every log.
 - **No emoji as decoration** — the only emoji-like glyphs are functional status glyphs: 🤖 (header brand mark, used once), 🚨 (critical breach), ⚠️/⚠ (warning/fallback), ● (live dot, rendered as a real dot not emoji). Never used for tone or flourish.
@@ -64,8 +64,8 @@ The product has almost no marketing copy — it's an internal ops console, so "c
 Source of truth: `src/TotallyHotArcRouter.Gui/wwwroot/css/app.css` (compiled Tailwind) + the "Visual theme" section of `docs/gui/dashboard.md`.
 
 - **Theme**: dark only, no light mode, no toggle. This is fixed at the app level (`html,body,#root { background:#121212 }`).
-- **Color**: a near-black neutral scale (`#121212` page → `#181818` cards/header/nav → `#4d4d4d` borders → `#ffffff` primary text) plus four semantic hues used consistently: Dark Green `#1ed760` (accent/info/active nav), emerald `#10b981` (positive/savings/OK), amber `#f59e0b` (warning), red `#ef4444` (critical). A separate 12-color deterministic palette (FNV-1a hash of agent name) tints agent-specific rows/borders/chips — never assigned by hand, always computed from the name so it's stable across sessions.
-- **Type**: two families only — **Inter** for all UI text, **JetBrains Mono** for every number (costs, token counts, timestamps, session/trace IDs, model names). This split is load-bearing: if a value could ever be a number or code-like token, it's mono; everything else is Inter. Sizes used: 10px uppercase micro-labels, 11-12px body/stat values, 13-14px card titles, 18px (`text-lg`) for the single header brand title. Weights: 500/600/700 only, no light weights.
+- **Color**: a near-black neutral scale (`#121212` page → `#181818` cards/header/nav → `#4d4d4d` borders → `#ffffff` primary text) plus four semantic hues used consistently: Dark Green `#1ed760` (accent, swapped from sky `#38bdf8` as part of aspirational-design adoption), emerald `#10b981` (positive/savings/OK), amber `#f59e0b` (warning), red `#ef4444` (critical). "Routing step — Info" keeps sky rather than moving to the new accent green, since it's a semantic (informational) hue, not chrome. A separate 12-color deterministic palette (FNV-1a hash of agent name) tints agent-specific rows/borders/chips — never assigned by hand, always computed from the name so it's stable across sessions.
+- **Type**: two families only — **`--font-ds`** (`"Century Gothic", "Avenir Next", "Poppins", Inter, system-ui, sans-serif`; was Inter-only before aspirational-design adoption) for all UI text, **JetBrains Mono** for every number (costs, token counts, timestamps, session/trace IDs, model names). This split is load-bearing: if a value could ever be a number or code-like token, it's mono; everything else is `--font-ds`. Sizes used: 10px uppercase micro-labels, 11-12px body/stat values, 13-14px card titles, 18px (`text-lg`) for the single header brand title. Weights: 500/600/700 only, no light weights.
 - **Spacing**: a small, tight scale (2px–24px, i.e. Tailwind's 0.125rem–1.5rem) — dense, information-forward layout, not airy marketing spacing. Cards use ~10-14px internal padding; gaps between stat items are 8-20px depending on density.
 - **Backgrounds**: flat solid fills only. No photography, no illustration, no gradients, no textures/patterns, no grain. The one exception is a subtle radial-free flat `rgba` overlay + blur behind modals (`rgba(0,0,0,0.7)` + 4px blur, i.e. `.overlay-backdrop` in `app.css`) — functional dimming, not decorative.
 - **Animation**: minimal and purely functional — no entrance choreography, no bounces, no easing flourishes.

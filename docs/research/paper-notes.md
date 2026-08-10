@@ -70,7 +70,7 @@ Lower is better.
 - **Static heuristic:** DimensionBest, frozen kNN retrieval.
 - **Static trained policy:** LogReg, TF-IDF+MLP, RouteLLM variants, Qwen3.5-FT.
 - **Dynamic online bandit:** LinUCB / LinTS.
-- **Loop-complete agentic router:** TotallyHotArcRouter.
+- **Loop-complete agentic router:** TotallyHot.ArcRouter.
 
 ## CodeRouterBench
 ### Scale and Split

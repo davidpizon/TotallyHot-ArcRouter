@@ -310,6 +310,16 @@ public sealed class ProviderHeader
     public string? ValueEnvVar { get; init; }
 
     /// <summary>
+    /// Gets the protected-secret-store name holding the header value (<c>docs/router/secrets-at-rest-plan.md</c>
+    /// §5), used only when both <see cref="Value"/> and <see cref="ValueEnvVar"/> are empty. Populated by
+    /// <c>TotallyHot.ArcRouter.Proxy.Management.ManagementFacade</c> when a locked literal header is saved
+    /// with the protected secret store available, and by <c>ProviderConfigStore</c>'s one-time migration of
+    /// an already-persisted locked literal. The referenced value is never itself present in
+    /// <c>model-routing.json</c>.
+    /// </summary>
+    public string? ValueSecretRef { get; init; }
+
+    /// <summary>
     /// Gets whether the literal <see cref="Value"/> is a secret that must never be read back by a
     /// management client (see the GUI's secret field, <c>docs/gui/secret-field.md</c>). Locked values are
     /// still sent upstream; they are only withheld from callers of the management API, which is what makes

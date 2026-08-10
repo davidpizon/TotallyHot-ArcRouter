@@ -13,9 +13,9 @@ If the user invokes this skill without any other guidance, ask them what they wa
 Key things to know before you start:
 
 - This is a **dark-theme-only, data-dense ops console** (routing/cost/governance telemetry for an LLM router), not a marketing product — keep copy terse and numeric, never adjective-heavy.
-- Two fonts only: Inter for UI text, JetBrains Mono for every number/ID/timestamp. Never mix these up.
+- Two font roles: `--font-ds` (`"Century Gothic", "Avenir Next", "Poppins", Inter, system-ui, sans-serif` — Spotify's own font can't be legally bundled, so this is a substitute stack) for UI text, JetBrains Mono for every number/ID/timestamp. Never mix these up.
 - No logo exists in the source — use plain type for the brand name; the only real vector asset is a small app-tray icon (`assets/appicon.svg`), not a wordmark.
-- Colors: slate neutrals + sky (accent) / emerald (positive) / amber (warning) / red (critical), plus a fixed 12-color deterministic per-agent palette. See `tokens/colors.css`.
+- Colors: near-black neutrals + Dark Green `#1ed760` (accent) / emerald (positive) / amber (warning) / red (critical), plus a fixed 12-color deterministic per-agent palette. See `tokens/colors.css`.
 - Motion is minimal and functional only — a single pulsing "live" dot and a one-shot attention flash; no other looping or decorative animation.
 - Components live in `components/`; the full interactive dashboard recreation lives in `ui_kits/dashboard/`.
 

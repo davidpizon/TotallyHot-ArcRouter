@@ -5,14 +5,14 @@
 > `RequestInterceptor.ResolveModelRouteAsync` / `ProxyMiddleware.InvokeAsync` used to implement (the
 > "Simple Local Fallbacks" parity goal, closed 2026-07-23) — **has been removed** and replaced by the Circuit
 > Breaker below: there is no hardcoded fallback list anymore. A target agent (keyed per concrete upstream -
-> provider + base URL + provider model id, `TotallyHotArcRouter.Proxy.CircuitBreakerTargetKey`, not per
-> client-facing model name) is tracked by `TotallyHotArcRouter.Proxy.CircuitBreaker`; when one trips OPEN, the
+> provider + base URL + provider model id, `TotallyHot.ArcRouter.Proxy.CircuitBreakerTargetKey`, not per
+> client-facing model name) is tracked by `TotallyHot.ArcRouter.Proxy.CircuitBreaker`; when one trips OPEN, the
 > next-best agent is selected instead - ranked by `RouterMemory` score via
 > `RequestInterceptor.RankEligibleModels`, reusing the exact same ranking mechanism as
 > [`utility-model-routing.md`](utility-model-routing.md)'s unresolved-model fallback
 > (`TryAgenticallyRouteUnresolvedModel`), not a separate mechanism. Tuning knobs
 > (`FailureThreshold`/`BaseCooldown`/`MaxCooldown`) are configurable via the `CircuitBreaker` appsettings
-> section (`TotallyHotArcRouter.Models.CircuitBreakerOptions`), registered as one DI singleton shared by
+> section (`TotallyHot.ArcRouter.Models.CircuitBreakerOptions`), registered as one DI singleton shared by
 > `RequestInterceptor` and `ProxyMiddleware` (see `ServiceCollectionExtensions`) since the latter is what
 > records successes/failures the former reads back when ranking candidates. Tests:
 > `CircuitBreakerTests.cs` (state machine), `RequestInterceptorTests.cs`
@@ -130,7 +130,7 @@ System.Net.Http.HttpRequestException: No connection could be made because the ta
    at System.Net.Http.DiagnosticsHandler.SendAsyncCore(HttpRequestMessage request, Boolean async, CancellationToken cancellationToken)
    at System.Net.Http.RedirectHandler.SendAsync(HttpRequestMessage request, Boolean async, CancellationToken cancellationToken)
    at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
-   at TotallyHotArcRouter.Proxy.ProxyMiddleware.InvokeAsync(HttpContext context, RequestDelegate next) in C:\git\ArcRouter\src\TotallyHotArcRouter\Proxy\ProxyMiddleware.cs:line 374
+   at TotallyHot.ArcRouter.Proxy.ProxyMiddleware.InvokeAsync(HttpContext context, RequestDelegate next) in C:\git\ArcRouter\src\TotallyHotArcRouter\Proxy\ProxyMiddleware.cs:line 374
 [06:13:57 INF] [INTERCEPTOR] Intercepting response for /v1/chat/completions with status 403
 [06:13:57 DBG] No session id found on request to /v1/chat/completions, and no tracked conversation's message history matched; started tracking new session a109fd37117e4a52914a50303cf488c7. Request header names: [Accept, Accept-Encoding, Accept-Language, Connection, Content-Length, Content-Type, Host, sec-fetch-mode, User-Agent]. Top-level body keys: [model, messages, stream, stream_options, tools, tool_choice].
 [06:13:57 INF] [SPEND] model=gpt-5.4 cost=unknown runningTotal=$0.000000 requests=1

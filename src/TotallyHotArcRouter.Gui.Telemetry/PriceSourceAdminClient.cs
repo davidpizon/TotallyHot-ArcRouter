@@ -109,7 +109,7 @@ public sealed class PriceSourceAdminClient : IPriceSourceAdminClient, IDisposabl
     {
         var channel = TelemetryChannelFactory.Create(serverAddress);
         _ownedChannel = channel;
-        _client = new Contract.PriceSourceAdminService.PriceSourceAdminServiceClient(channel);
+        _client = new Contract.PriceSourceAdminService.PriceSourceAdminServiceClient(TelemetryChannelFactory.Authenticated(channel));
     }
 
     /// <summary>

@@ -17,13 +17,24 @@ public sealed class CostReconciliationHostedService : BackgroundService
 {
     private readonly ILogger<CostReconciliationHostedService> _logger;
     private readonly CostReconciliationService _reconciliationService;
+    private readonly AnthropicUsageReportService? _usageReportService;
     private readonly TimeSpan _pollInterval;
 
     /// <summary>Initializes a new instance of the <see cref="CostReconciliationHostedService"/> class.</summary>
+    /// <param name="logger">Logs pool-loop start and any unexpected per-cycle failure.</param>
+    /// <param name="reconciliationService">Runs one cost-reconciliation cycle per tick.</param>
+    /// <param name="options">Provides <see cref="CostReconciliationOptions.PollIntervalHours"/>.</param>
+    /// <param name="usageReportService">
+    /// Optional. Refreshes Anthropic's reported per-model daily token usage
+    /// (docs/router/secrets-at-rest-plan.md §8.1) on the same cycle as reconciliation, right after it. Runs
+    /// on every tick when supplied - it swallows its own no-key/failure cases internally - so a
+    /// <see langword="null"/> caller (only tests today) simply skips this step.
+    /// </param>
     public CostReconciliationHostedService(
         ILogger<CostReconciliationHostedService> logger,
         CostReconciliationService reconciliationService,
-        IOptions<CostReconciliationOptions> options)
+        IOptions<CostReconciliationOptions> options,
+        AnthropicUsageReportService? usageReportService = null)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(reconciliationService);
@@ -32,6 +43,7 @@ public sealed class CostReconciliationHostedService : BackgroundService
 
         _logger = logger;
         _reconciliationService = reconciliationService;
+        _usageReportService = usageReportService;
         _pollInterval = TimeSpan.FromHours(options.Value.PollIntervalHours);
     }
 
@@ -58,6 +70,20 @@ public sealed class CostReconciliationHostedService : BackgroundService
                 // A cycle should already swallow per-provider/per-day failures; this guards the
                 // unexpected so a single bad tick never tears down the loop.
                 _logger.LogError(ex, "Cost reconciliation cycle threw unexpectedly; continuing.");
+            }
+
+            if (_usageReportService is not null)
+            {
+                // A separate try/catch: a reconciliation failure above must not skip the usage-report
+                // refresh, and vice versa - the two are independent optional features sharing one timer.
+                try
+                {
+                    await _usageReportService.RunCycleAsync(stoppingToken).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogError(ex, "Anthropic usage report refresh threw unexpectedly; continuing.");
+                }
             }
         }
         while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));

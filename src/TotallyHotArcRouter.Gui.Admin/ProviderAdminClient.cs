@@ -276,6 +276,37 @@ public sealed class ProviderAdminClient
         return Deserialize<RateLimitHistoryResponseAdminView>(body);
     }
 
+    /// <summary>
+    /// Stores <paramref name="provider"/>'s reconciliation Admin API key in the proxy's protected secret
+    /// store (docs/router/secrets-at-rest-plan.md §7), taking effect on the next reconciliation cycle with
+    /// no restart required. Only <c>openai</c> and <c>anthropic</c> are recognized.
+    /// </summary>
+    /// <param name="provider">The reconciliation provider key (<c>openai</c> or <c>anthropic</c>).</param>
+    /// <param name="value">The Admin API key to store.</param>
+    /// <param name="cancellationToken">A token to cancel the request.</param>
+    /// <exception cref="ProviderAdminException">The provider is unrecognized, the store is unavailable, or the request failed.</exception>
+    public async Task SetAdminApiKeyAsync(string provider, string value, CancellationToken cancellationToken = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Put, $"admin/secrets/{Escape(AdminApiKeySecretName(provider))}")
+        {
+            Content = JsonBody(new SecretWriteRequest(value))
+        };
+        using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Clears <paramref name="provider"/>'s stored reconciliation Admin API key, the counterpart to <see cref="SetAdminApiKeyAsync"/>.</summary>
+    /// <param name="provider">The reconciliation provider key (<c>openai</c> or <c>anthropic</c>).</param>
+    /// <param name="cancellationToken">A token to cancel the request.</param>
+    /// <exception cref="ProviderAdminException">The provider is unrecognized, the store is unavailable, or the request failed.</exception>
+    public async Task DeleteAdminApiKeyAsync(string provider, CancellationToken cancellationToken = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Delete, $"admin/secrets/{Escape(AdminApiKeySecretName(provider))}");
+        using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>The protected-store name for a provider's reconciliation Admin API key, matching <c>ManagementFacade</c>'s naming convention (docs/router/secrets-at-rest-plan.md §3).</summary>
+    private static string AdminApiKeySecretName(string provider) => $"reconciliation:{provider}:admin-key";
+
     /// <summary>Sends a request expected to return a provider snapshot and unwraps its <see cref="ProvidersSnapshot.Providers"/> list.</summary>
     private async Task<IReadOnlyList<ProviderAdminView>> SendForProvidersAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {

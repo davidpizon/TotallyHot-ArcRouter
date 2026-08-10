@@ -1,6 +1,8 @@
 using System.Net.Http;
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
+using Grpc.Core;
+using Grpc.Core.Interceptors;
 using Grpc.Net.Client;
 
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
@@ -44,6 +46,14 @@ public static class TelemetryChannelFactory
             serverAddress,
             new GrpcChannelOptions { HttpHandler = handler, DisposeHttpClient = true });
     }
+
+    /// <summary>
+    /// Wraps <paramref name="channel"/> with <see cref="TelemetryAuthClientInterceptor"/> so every call
+    /// made through the returned <see cref="CallInvoker"/> presents the shared management token. Callers
+    /// still own and dispose <paramref name="channel"/> itself - intercepting doesn't change ownership.
+    /// </summary>
+    public static CallInvoker Authenticated(GrpcChannel channel) =>
+        channel.Intercept(new TelemetryAuthClientInterceptor());
 
     /// <summary>
     /// Trusts a certificate only if its subject is exactly <c>CN=localhost</c> and the request targets a
