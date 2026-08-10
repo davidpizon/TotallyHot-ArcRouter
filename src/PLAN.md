@@ -199,16 +199,36 @@ Four voters, weighted vote, argmax — research-doc §3.3 and A.1.
 - **`memory_kNN`** — top-10 neighbors from Phase J, voting by neighbor-weighted observed reward.
 - **`logreg`** — TF-IDF → logistic regression trained on the probing set. Training and inference both
   in .NET; a checked-in trained model with a documented, reproducible training step.
-- **`llm_router`** — the substitute for the paper's fine-tuned Qwen3.5-0.8B, which this stack cannot
-  host. Calls a configured cheap backend using the **+Perf-stats prompt** of research-doc Appendix B.3
-  — the ablation the paper measures at 47.74 AvgPerf, *above* DimensionBest (47.50), which is the
-  entire information-deficit finding. Implement its four-step response-parsing fallback chain
-  (JSON → fenced-block regex → model-name match → default) verbatim; the paper shows a parser failure
-  collapses a router to ~41.31.
+- **`llm_router`** — **the paper's own fine-tuned Qwen3.5-0.8B, hosted locally via ONNX Runtime**
+  (`Microsoft.ML.OnnxRuntime`, the same dependency Phase J adds for embeddings), not a call to a
+  configured remote/hosted backend. This is a correction to this plan's earlier draft, which proposed
+  substituting "a configured cheap backend" because the stack "cannot host" the fine-tune — that
+  premise doesn't hold: Phase J already commits to in-process ONNX inference with local
+  model-artifact acquisition/caching, and a 0.8B causal LM is squarely in that same class of
+  local-model problem. Reusing a remote backend instead would be a static, network-dependent
+  substitute for the one voter the paper's central finding is *about* — see the information-deficit
+  result below — so it is the one voter this plan should least want to approximate.
+  - **Scope beyond Phase J.** Embedding inference is a single forward pass; this voter is
+    autoregressive generation (tokenizer, KV-cache, sampling, one forward pass per output token) over
+    the **+Perf-stats prompt** of research-doc Appendix B.3 — the ablation the paper measures at 47.74
+    AvgPerf, *above* DimensionBest (47.50), the entire information-deficit finding this voter exists to
+    reproduce. Scope explicitly includes: sourcing/exporting the fine-tuned Qwen3.5-0.8B weights to
+    ONNX (or the closest available fine-tune-compatible open checkpoint, documented if substituted),
+    the tokenizer, and a documented cold-start path for a first run before the model is present —
+    mirroring Phase J's cold-start requirement, not inventing a new one.
+  - Implement the four-step response-parsing fallback chain (JSON → fenced-block regex → model-name
+    match → default) verbatim; the paper shows a parser failure collapses a router to ~41.31.
   - **Cost control:** invoke this voter only when the three local voters disagree. Record the
     disagreement rate in telemetry so the trigger can be tuned against real traffic rather than guessed.
-  - Must degrade to a three-voter vote — never to a hard failure — when no backend is reachable, the
-    circuit is open, or the parse chain exhausts.
+    Generation latency (not network cost) is the resource being rationed here, so this gate matters even
+    though there is no remote spend to control.
+  - Must degrade to a three-voter vote — never to a hard failure — when the model artifact isn't
+    present yet, generation exceeds a configured time budget, or the parse chain exhausts. There is no
+    circuit breaker here (nothing remote to trip one): the failure modes are local-model-unavailable and
+    local-generation-timeout, not an unreachable backend.
+  - Stays within the 5-second heavy-test bound (AGENTS.md); if a full unquantized 0.8B decode can't
+    clear that bound in CI, gate the heavy path behind the same kind of fixture/environment gate Phase J
+    uses for its embedding-model load, per the Final Validation Gate's item 4.
 - Voter weights and per-voter enablement are configuration. Log the full vote breakdown (each voter's
   pick, each weighted score, the argmax) into `RoutingDecision.CandidateScores` so the GUI's decision
   log shows *why*, not just *what*.
