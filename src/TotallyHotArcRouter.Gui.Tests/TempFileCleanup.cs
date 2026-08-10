@@ -8,7 +8,7 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 /// <param name="path">The temp file path to delete on dispose.</param>
 internal sealed class TempFileCleanup(string path) : IDisposable
 {
-    /// <summary>Deletes the file at <see cref="path"/> if it still exists.</summary>
+    /// <summary>Deletes the file at <paramref name="path"/> if it still exists.</summary>
     public void Dispose()
     {
         if (File.Exists(path))
