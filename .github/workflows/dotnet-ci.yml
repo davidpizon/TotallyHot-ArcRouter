@@ -131,6 +131,11 @@ jobs:
 
   windows-gui-build-and-test:
     name: Build and test GUI (Windows/MAUI)
+    # Deliberately disabled (repo owner's decision, not a build failure): skips the MAUI build/test/coverage
+    # run below rather than removing the job, so it stays visible - as skipped - in the Actions UI and
+    # re-enabling it is a one-line revert. Re-enabling also restores AGENTS.md's 80% coverage bar for
+    # TotallyHotArcRouter.Gui, which this job is what enforces - see the "Check coverage threshold" step's
+    # own comment.
     if: false
     runs-on: windows-latest
     steps:
