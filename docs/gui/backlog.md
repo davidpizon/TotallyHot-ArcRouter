@@ -65,27 +65,32 @@ data sources in
   (`GroupedBarsModel.DynamicYMax`, Phase 4 §5.15) — computed from the actual data with headroom
   instead of a hardcoded 6M ceiling. The $0–$160 Cost Analytics savings scale is unaffected (that
   chart is unrelated to this plan) and remains pinned to the mock data's range.
-- **Settings modal actions** — Reset Stats / Clear History currently just close the modal with no
-  effect; they need real actions once there's real state to reset or clear.
-- **Configurable telemetry server address** — `Services/LiveDataStore.cs` hardcodes
-  `https://localhost:5002` (the gRPC channel address - a dedicated TLS port, separate from the
-  plain-HTTP proxy port 5001); there's no settings UI to point at a differently-configured proxy,
-  since the GUI has no settings-persistence mechanism at all yet.
+- ~~**Settings modal actions**~~ **Done.** Reset Stats calls `LiveDataStore.ClearEvents()`; Clear
+  History also clears the log buffer (`ClearLogLines()`). Both act on this session's live view only —
+  the proxy's own durable history is untouched by design (see `LiveDataStore.ClearEvents`'s remarks).
+- ~~**Configurable telemetry server address**~~ **Done.** `GuiSettingsStore` persists the address as
+  JSON under `%LOCALAPPDATA%\TotallyHotArcRouter\gui-settings.json` (the same per-user directory the
+  telemetry certificate and management token already use), editable from a new field in
+  `SettingsModal.razor`; `MauiProgram` builds `LiveDataStore` from the persisted address.
 
-### 2. Authenticate the telemetry gRPC stream
+### ✅ 2. Authenticate the telemetry gRPC stream
 
-Encryption in transit is now real (`Telemetry/TelemetryTlsCertificate.cs`, a self-signed cert on a
+Encryption in transit is real (`Telemetry/TelemetryTlsCertificate.cs`, a self-signed cert on a
 dedicated port - see [`../router/grpc-migration.md`](../router/grpc-migration.md)'s section 2), fixing
 half of what [`../router/signalr-hub-security.md`](../router/signalr-hub-security.md) originally
 proposed, via a different, gRPC-native mechanism rather than that doc's SignalR-era sketch.
-**Authentication is still missing**: `TelemetryGrpcService`/`Proxy/ProxyServer.cs` have no
-connection-time credential check. It's loopback-only today, so not reachable from the network, but
-any local process (that also trusts, or bypasses trust of, the self-signed cert) can connect and
-receive every broadcast event. This is a real concern now that turn cards' request/response text (see
-"Recently completed" below) is actual prompt/response content flowing over that same unauthenticated
-channel. `signalr-hub-security.md`'s section 2 (shared secret/token) is still the closest existing
-design for this, needing translation from a SignalR `AccessTokenProvider` to a gRPC interceptor/call
-credential, per that doc's own status banner.
+**Authentication is now done too.** `Telemetry/TelemetryAuthInterceptor` gates every call to the
+telemetry gRPC endpoint (`TelemetryGrpcService`'s `StreamEvents` and `PriceSourceAdminGrpcService`,
+which share the TLS port) behind the shared per-user management token, presented in the
+`x-admin-token` metadata entry and verified against `ManagementAccessToken` — the same shared secret
+that already gates the REST `/admin/*` API and the MCP endpoint, so every management surface uses one
+identical check. It overrides all four gRPC call shapes (unary, server-streaming, client-streaming,
+duplex), not just the ones this service currently uses, so a future streaming admin RPC doesn't
+silently reopen the gap. `TelemetryAuthClientInterceptor` attaches the token client-side;
+`TelemetryChannelFactory.Authenticated` builds the channel with it wired in, used by both
+`LiveDataStore` and `PriceSourceAdminClient`. This is `signalr-hub-security.md` §2's shared-secret
+design translated from a SignalR `AccessTokenProvider` to a gRPC interceptor/call credential, per that
+doc's own status banner.
 
 ### ✅ 3. Anthropic Reported Usage section (per-provider card, non-enterprise accounts)
 
