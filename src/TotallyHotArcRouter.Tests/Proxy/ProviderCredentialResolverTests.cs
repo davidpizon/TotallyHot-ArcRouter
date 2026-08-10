@@ -1,5 +1,6 @@
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
+using TotallyHot.ArcRouter.Proxy.Management;
 using Moq;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
@@ -81,6 +82,56 @@ public sealed class ProviderCredentialResolverTests
         var header = Assert.Single(resolved);
         Assert.Equal("X-Kept", header.Key);
         Assert.Equal("yes", header.Value);
+    }
+
+    [Fact]
+    public void ResolveExtraHeaders_ReadsValueFromSecretStore_WhenNoLiteralOrEnvVar()
+    {
+        var secretReader = new Mock<ISecretReader>();
+        string outValue = "sk-ant-from-store";
+        secretReader.Setup(r => r.TryRead("provider:anthropic:header:x-api-key", out outValue)).Returns(true);
+        var provider = new ProviderOptions
+        {
+            BaseUrl = "https://api.anthropic.com",
+            Headers = [new ProviderHeader { Name = "x-api-key", ValueSecretRef = "provider:anthropic:header:x-api-key", Locked = true }]
+        };
+
+        var resolved = ProviderCredentialResolver.ResolveExtraHeaders(provider, Mock.Of<IEnvironmentVariableProvider>(), secretReader.Object);
+
+        var header = Assert.Single(resolved);
+        Assert.Equal("x-api-key", header.Key);
+        Assert.Equal("sk-ant-from-store", header.Value);
+    }
+
+    [Fact]
+    public void ResolveExtraHeaders_LiteralAndEnvVarTakePrecedenceOverSecretStore()
+    {
+        var secretReader = new Mock<ISecretReader>(MockBehavior.Strict);
+        var provider = new ProviderOptions
+        {
+            BaseUrl = "https://api.anthropic.com",
+            Headers = [new ProviderHeader { Name = "x-api-key", Value = "literal-wins", ValueSecretRef = "provider:anthropic:header:x-api-key" }]
+        };
+
+        var header = Assert.Single(ProviderCredentialResolver.ResolveExtraHeaders(provider, Mock.Of<IEnvironmentVariableProvider>(), secretReader.Object));
+
+        // Strict mock: if the resolver had consulted the secret store, this test would throw on the
+        // unconfigured TryRead call instead of getting here.
+        Assert.Equal("literal-wins", header.Value);
+    }
+
+    [Fact]
+    public void ResolveExtraHeaders_SecretStoreRef_WithNoReaderSupplied_ResolvesToNothing()
+    {
+        var provider = new ProviderOptions
+        {
+            BaseUrl = "https://api.anthropic.com",
+            Headers = [new ProviderHeader { Name = "x-api-key", ValueSecretRef = "provider:anthropic:header:x-api-key", Locked = true }]
+        };
+
+        var resolved = ProviderCredentialResolver.ResolveExtraHeaders(provider, Mock.Of<IEnvironmentVariableProvider>());
+
+        Assert.Empty(resolved);
     }
 
     [Fact]

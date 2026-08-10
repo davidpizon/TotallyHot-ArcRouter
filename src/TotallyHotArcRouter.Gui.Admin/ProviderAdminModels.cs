@@ -191,7 +191,13 @@ public static class HeaderValueSource
     /// <summary>The value is read at request time from an environment variable (see <see cref="ProviderHeaderView.ValueEnvVar"/>).</summary>
     public const string EnvVar = "envVar";
 
-    /// <summary>Neither a literal value nor an environment variable is configured.</summary>
+    /// <summary>
+    /// The value is stored in the router's protected secret store. Never returned by the management API,
+    /// exactly like a locked <see cref="Literal"/> - see <see cref="ProviderHeaderView.Locked"/>.
+    /// </summary>
+    public const string Protected = "protected";
+
+    /// <summary>Neither a literal value, a protected-store reference, nor an environment variable is configured.</summary>
     public const string None = "none";
 }
 

@@ -135,7 +135,18 @@ namespace TotallyHot.ArcRouter.Proxy
         /// and <c>GET /admin/usage/rollup</c> (§5.15) are available. Defaults to <see langword="null"/>, in
         /// which case both answer <see cref="Management.ManagementErrorType.Unavailable"/>.
         /// </param>
-        public ProxyServer(ILogger<ProxyServer> logger, ProxyMiddleware proxyMiddleware, int port = 5001, TelemetryBroadcaster? telemetryBroadcaster = null, int grpcPort = DefaultGrpcPort, IProviderConfigStore? providerConfigStore = null, IEnvironmentVariableProvider? environment = null, HttpClient? managementHttpClient = null, string? managementToken = null, PriceSourceToggleStore? priceSourceToggleStore = null, PriceCatalogIngestionService? priceCatalogIngestionService = null, PriceCatalogOptions? priceCatalogOptions = null, ProviderBudgetStore? providerBudgetStore = null, ProviderEndpointScanner? endpointScanner = null, ToolCallCapabilityStore? toolCallCapabilityStore = null, PriceCatalogRepository? priceCatalogRepository = null, ModelAliasOverrideStore? modelAliasOverrideStore = null, IUsageRollupStore? usageRollupStore = null)
+        /// <param name="secretWriter">
+        /// Optional writer for the protected secret store, passed to the management facade so a locked
+        /// literal header is stored there instead of in <c>model-routing.json</c>
+        /// (<c>docs/router/secrets-at-rest-plan.md</c> §3). Defaults to <see langword="null"/>, in which case
+        /// a locked literal is stored in configuration exactly as before the store existed.
+        /// </param>
+        /// <param name="secretReader">
+        /// Optional reader for the protected secret store, passed to the management facade so
+        /// <c>POST /admin/providers/{key}/discover-models</c> can still authenticate a provider whose
+        /// credential lives in the store. Defaults to <see langword="null"/>.
+        /// </param>
+        public ProxyServer(ILogger<ProxyServer> logger, ProxyMiddleware proxyMiddleware, int port = 5001, TelemetryBroadcaster? telemetryBroadcaster = null, int grpcPort = DefaultGrpcPort, IProviderConfigStore? providerConfigStore = null, IEnvironmentVariableProvider? environment = null, HttpClient? managementHttpClient = null, string? managementToken = null, PriceSourceToggleStore? priceSourceToggleStore = null, PriceCatalogIngestionService? priceCatalogIngestionService = null, PriceCatalogOptions? priceCatalogOptions = null, ProviderBudgetStore? providerBudgetStore = null, ProviderEndpointScanner? endpointScanner = null, ToolCallCapabilityStore? toolCallCapabilityStore = null, PriceCatalogRepository? priceCatalogRepository = null, ModelAliasOverrideStore? modelAliasOverrideStore = null, IUsageRollupStore? usageRollupStore = null, ISecretWriter? secretWriter = null, ISecretReader? secretReader = null)
         {
             ArgumentNullException.ThrowIfNull(logger);
             ArgumentNullException.ThrowIfNull(proxyMiddleware);
@@ -280,7 +291,9 @@ namespace TotallyHot.ArcRouter.Proxy
                                     toolCallCapabilityStore,
                                     priceCatalogRepository,
                                     modelAliasOverrideStore,
-                                    usageRollupStore);
+                                    usageRollupStore,
+                                    secretWriter: secretWriter,
+                                    secretReader: secretReader);
                                 endpoints.MapProviderAdminEndpoints(facade, managementToken);
                                 endpoints.MapUsageAdminEndpoints(facade, managementToken);
                             }

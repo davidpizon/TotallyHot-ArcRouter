@@ -52,6 +52,16 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddOptions<ProviderConfigStoreOptions>()
                 .Configure<IConfiguration>((options, configuration) =>
                     configuration.GetSection(ProviderConfigStoreOptions.SectionName).Bind(options));
+            // The generic protected secret store (docs/router/secrets-at-rest-plan.md §3): one DPAPI-
+            // encrypted file backing both the resolution surface (ISecretReader, injected into
+            // ProviderConfigStore's migration, ModelRouteResolver's request path, and ManagementFacade's
+            // model-discovery probe) and the management surface (ISecretWriter, injected into
+            // ManagementFacade's write path only - it never receives a reader). Registered before
+            // IProviderConfigStore so the container can inject it into ProviderConfigStore's optional
+            // migration parameter.
+            services.AddSingleton<ProtectedSecretStore>();
+            services.AddSingleton<ISecretReader>(sp => sp.GetRequiredService<ProtectedSecretStore>());
+            services.AddSingleton<ISecretWriter>(sp => sp.GetRequiredService<ProtectedSecretStore>());
             services.AddSingleton<IProviderConfigStore, ProviderConfigStore>();
             services.AddSingleton<IEnvironmentVariableProvider, EnvironmentVariableProvider>();
             services.AddSingleton<IModelRouteResolver, ModelRouteResolver>();
@@ -273,7 +283,9 @@ namespace TotallyHot.ArcRouter.Hosting
                     toolCallCapabilityStore: sp.GetRequiredService<ToolCallCapabilityStore>(),
                     priceCatalogRepository: sp.GetRequiredService<PriceCatalogRepository>(),
                     modelAliasOverrideStore: sp.GetRequiredService<ModelAliasOverrideStore>(),
-                    usageRollupStore: sp.GetRequiredService<IUsageRollupStore>());
+                    usageRollupStore: sp.GetRequiredService<IUsageRollupStore>(),
+                    secretWriter: sp.GetRequiredService<ISecretWriter>(),
+                    secretReader: sp.GetRequiredService<ISecretReader>());
             });
 
             return services;

@@ -1,4 +1,5 @@
 using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.Proxy.Management;
 
 namespace TotallyHot.ArcRouter.Proxy;
 
@@ -12,12 +13,22 @@ internal static class ProviderCredentialResolver
 {
     /// <summary>
     /// Resolves a provider's custom <see cref="ProviderOptions.Headers"/> to concrete name/value pairs to
-    /// send upstream, each value taken from the header's literal <see cref="ProviderHeader.Value"/> or, when
-    /// that's empty, the environment variable named by <see cref="ProviderHeader.ValueEnvVar"/>. Headers with
-    /// an empty name, or whose value can't be resolved (e.g. a missing env var), are skipped. Order is
+    /// send upstream. Documented precedence: the header's literal <see cref="ProviderHeader.Value"/>, then
+    /// the environment variable named by <see cref="ProviderHeader.ValueEnvVar"/>, then - when
+    /// <paramref name="secretReader"/> is supplied - the protected-store entry named by
+    /// <see cref="ProviderHeader.ValueSecretRef"/> (<c>docs/router/secrets-at-rest-plan.md</c> §5). Headers
+    /// with an empty name, or whose value can't be resolved through any of the three, are skipped. Order is
     /// preserved. Shared by the forwarding path and the discovery endpoint so both send identical headers.
     /// </summary>
-    public static IReadOnlyList<KeyValuePair<string, string>> ResolveExtraHeaders(ProviderOptions provider, IEnvironmentVariableProvider environment)
+    /// <param name="provider">The provider whose custom headers to resolve.</param>
+    /// <param name="environment">Accessor used to resolve env-var-sourced values.</param>
+    /// <param name="secretReader">
+    /// Optional reader for the protected secret store. Defaults to <see langword="null"/>, in which case a
+    /// header whose value lives only in the store (neither a literal nor an env var) resolves to nothing -
+    /// the same behavior as before <see cref="ProviderHeader.ValueSecretRef"/> existed.
+    /// </param>
+    public static IReadOnlyList<KeyValuePair<string, string>> ResolveExtraHeaders(
+        ProviderOptions provider, IEnvironmentVariableProvider environment, ISecretReader? secretReader = null)
     {
         if (provider.Headers.Count == 0)
         {
@@ -32,10 +43,7 @@ internal static class ProviderCredentialResolver
                 continue;
             }
 
-            var value = string.IsNullOrWhiteSpace(header.Value)
-                ? (string.IsNullOrWhiteSpace(header.ValueEnvVar) ? null : environment.GetVariable(header.ValueEnvVar))
-                : header.Value;
-
+            var value = ResolveHeaderValue(header, environment, secretReader);
             if (value is not null)
             {
                 resolved.Add(new KeyValuePair<string, string>(header.Name, value));
@@ -43,6 +51,28 @@ internal static class ProviderCredentialResolver
         }
 
         return resolved;
+    }
+
+    /// <summary>Resolves a single header's value through the literal → env-var → secret-store precedence documented on <see cref="ResolveExtraHeaders"/>.</summary>
+    private static string? ResolveHeaderValue(ProviderHeader header, IEnvironmentVariableProvider environment, ISecretReader? secretReader)
+    {
+        if (!string.IsNullOrWhiteSpace(header.Value))
+        {
+            return header.Value;
+        }
+
+        if (!string.IsNullOrWhiteSpace(header.ValueEnvVar))
+        {
+            return environment.GetVariable(header.ValueEnvVar);
+        }
+
+        if (!string.IsNullOrWhiteSpace(header.ValueSecretRef) && secretReader is not null
+            && secretReader.TryRead(header.ValueSecretRef, out var secretValue))
+        {
+            return secretValue;
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -63,14 +93,16 @@ internal static class ProviderCredentialResolver
     /// <param name="request">The request to apply headers to.</param>
     /// <param name="provider">The provider whose custom headers to apply.</param>
     /// <param name="environment">Accessor used to resolve env-var-sourced values.</param>
+    /// <param name="secretReader">Optional reader for the protected secret store; see <see cref="ResolveExtraHeaders"/>.</param>
     public static IReadOnlyList<string> ApplyToRequest(
         HttpRequestMessage request,
         ProviderOptions provider,
-        IEnvironmentVariableProvider environment)
+        IEnvironmentVariableProvider environment,
+        ISecretReader? secretReader = null)
     {
         List<string>? rejected = null;
 
-        foreach (var (headerName, headerValue) in ResolveExtraHeaders(provider, environment))
+        foreach (var (headerName, headerValue) in ResolveExtraHeaders(provider, environment, secretReader))
         {
             if (!request.Headers.TryAddWithoutValidation(headerName, headerValue))
             {

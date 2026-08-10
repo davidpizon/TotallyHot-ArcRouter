@@ -1,5 +1,6 @@
 using System.Text.Json;
 using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.Proxy.Management;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -84,6 +85,7 @@ public sealed class ProviderConfigStore : IProviderConfigStore, IDisposable
 
     private readonly ILogger<ProviderConfigStore> _logger;
     private readonly string _filePath;
+    private readonly ISecretWriter? _secretWriter;
 
     // Serializes edits so two concurrent writes can't interleave their file writes / version bumps.
     private readonly SemaphoreSlim _writeMutex = new(1, 1);
@@ -99,17 +101,25 @@ public sealed class ProviderConfigStore : IProviderConfigStore, IDisposable
     /// <param name="logger">The logger.</param>
     /// <param name="seed">The <c>appsettings.json</c>-bound configuration to seed from on first run.</param>
     /// <param name="options">Store settings (persistence path).</param>
+    /// <param name="secretWriter">
+    /// Optional writer for the protected secret store, used for the one-time migration of an
+    /// already-persisted locked literal provider header off <c>model-routing.json</c>
+    /// (<c>docs/router/secrets-at-rest-plan.md</c> §5). Defaults to <see langword="null"/>, in which case no
+    /// migration runs and locked literals already on disk are left exactly where they are.
+    /// </param>
     /// <exception cref="OptionsValidationException">The effective configuration (loaded or seeded) is invalid.</exception>
     public ProviderConfigStore(
         ILogger<ProviderConfigStore> logger,
         IOptions<ModelRoutingOptions> seed,
-        IOptions<ProviderConfigStoreOptions> options)
+        IOptions<ProviderConfigStoreOptions> options,
+        ISecretWriter? secretWriter = null)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(seed);
         ArgumentNullException.ThrowIfNull(options);
 
         _logger = logger;
+        _secretWriter = secretWriter;
 
         var configuredPath = options.Value.FilePath;
         _filePath = Path.IsPathRooted(configuredPath)
@@ -121,6 +131,7 @@ public sealed class ProviderConfigStore : IProviderConfigStore, IDisposable
         {
             initial = LoadFromFile();
             _logger.LogInformation("Loaded provider configuration from {FilePath}.", _filePath);
+            initial = MigrateSecretHeaders(initial);
         }
         else
         {
@@ -132,6 +143,82 @@ public sealed class ProviderConfigStore : IProviderConfigStore, IDisposable
         }
 
         _snapshot = new ProviderConfigSnapshot(initial, 0);
+    }
+
+    /// <summary>
+    /// One-time migration (<c>docs/router/secrets-at-rest-plan.md</c> §5): moves every already-persisted
+    /// locked literal provider header value into the protected secret store, replacing it with a
+    /// <see cref="ProviderHeader.ValueSecretRef"/>, and persists the result once. Idempotent - a header
+    /// already migrated (<see cref="ProviderHeader.Value"/> already null) is left untouched, so a second
+    /// startup is a no-op. If the store is unavailable on this platform, the configuration is left
+    /// untouched and a warning is logged - a machine that cannot encrypt must keep working, not lose its
+    /// keys.
+    /// </summary>
+    private ModelRoutingOptions MigrateSecretHeaders(ModelRoutingOptions options)
+    {
+        if (_secretWriter is null)
+        {
+            return options;
+        }
+
+        var providers = new Dictionary<string, ProviderOptions>(options.Providers, StringComparer.OrdinalIgnoreCase);
+        var migratedCount = 0;
+
+        foreach (var (providerKey, provider) in options.Providers)
+        {
+            List<ProviderHeader>? migratedHeaders = null;
+
+            for (var i = 0; i < provider.Headers.Count; i++)
+            {
+                var header = provider.Headers[i];
+                if (!header.Locked || string.IsNullOrEmpty(header.Value))
+                {
+                    continue;
+                }
+
+                var secretRef = $"provider:{providerKey}:header:{header.Name}";
+                try
+                {
+                    _secretWriter.Write(secretRef, header.Value);
+                }
+                catch (PlatformNotSupportedException)
+                {
+                    _logger.LogWarning(
+                        "Skipped migrating provider {ProviderKey} header {HeaderName} to the protected secret store: unavailable on this platform.",
+                        providerKey, header.Name);
+                    continue;
+                }
+
+                migratedHeaders ??= [.. provider.Headers];
+                migratedHeaders[i] = new ProviderHeader
+                {
+                    Name = header.Name,
+                    Value = null,
+                    ValueEnvVar = header.ValueEnvVar,
+                    ValueSecretRef = secretRef,
+                    Locked = header.Locked
+                };
+                migratedCount++;
+            }
+
+            if (migratedHeaders is not null)
+            {
+                providers[providerKey] = provider with { Headers = migratedHeaders };
+            }
+        }
+
+        if (migratedCount == 0)
+        {
+            return options;
+        }
+
+        var migrated = new ModelRoutingOptions { Providers = providers, ModelList = [.. options.ModelList] };
+        PersistAsync(migrated, CancellationToken.None).GetAwaiter().GetResult();
+        _logger.LogInformation(
+            "Migrated {Count} provider header secret(s) from {FilePath} to the protected secret store.",
+            migratedCount, _filePath);
+
+        return migrated;
     }
 
     /// <inheritdoc />

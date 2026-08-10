@@ -1,8 +1,4 @@
-using System.Runtime.InteropServices;
-using System.Runtime.Versioning;
-using System.Security.AccessControl;
 using System.Security.Cryptography;
-using System.Security.Principal;
 using System.Text;
 
 namespace TotallyHot.ArcRouter.Proxy.Management;
@@ -128,64 +124,10 @@ public static class ManagementAccessToken
             .TrimEnd('=');
 
     /// <summary>
-    /// Creates <paramref name="path"/>, restricts it to the current user (Windows ACL, or POSIX mode
-    /// 600), and only then writes <paramref name="token"/> - in that order, so the secret is never
-    /// briefly readable under the file's default/inherited permissions. The write happens through a
-    /// handle opened with <see cref="FileShare.None"/> and held open until the token is fully written, so
-    /// any other process trying to open the file in the meantime (e.g. a reader that isn't serialized
-    /// behind <see cref="GetOrCreate"/>'s mutex, like the GUI's separate token reader) hits a sharing
-    /// violation and fails fast instead of silently observing an empty file.
+    /// Restricts <paramref name="path"/> to the current user and writes <paramref name="token"/> to it,
+    /// via the shared <see cref="SecureFile.WriteRestricted(string, byte[])"/> sequence.
     /// </summary>
-    private static void WriteRestricted(string path, string token)
-    {
-        // Create empty and closed first: applying the ACL (SetAccessControl) needs to open its own handle,
-        // which would conflict with an already-open FileShare.None handle on the same path. No secret
-        // content exists yet at this point, so there's nothing sensitive to expose - only after the file
-        // is restricted do we reopen it exclusively to write the token.
-        using (File.Create(path))
-        {
-        }
-
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        {
-            RestrictToCurrentUserWindows(path);
-        }
-        else
-        {
-            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        }
-
-        using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None);
-        var bytes = Encoding.UTF8.GetBytes(token);
-        stream.Write(bytes, 0, bytes.Length);
-        stream.Flush();
-    }
-
-    /// <summary>
-    /// Breaks ACL inheritance on <paramref name="path"/> and grants full control to only the current
-    /// Windows user. If the current user's SID can't be resolved, the file's inherited ACL is left
-    /// untouched rather than applying a protected-but-empty DACL, which would lock out every account
-    /// (including the router process itself) on next read.
-    /// </summary>
-    [SupportedOSPlatform("windows")]
-    private static void RestrictToCurrentUserWindows(string path)
-    {
-        var currentUser = WindowsIdentity.GetCurrent().User;
-        if (currentUser is null)
-        {
-            return;
-        }
-
-        var security = new FileSecurity();
-        // Break inheritance and drop every inherited rule first, so the only access granted is the one
-        // rule added below - not "current user plus whatever the parent folder already allowed".
-        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
-        security.AddAccessRule(new FileSystemAccessRule(
-            currentUser,
-            FileSystemRights.FullControl,
-            AccessControlType.Allow));
-
-        new FileInfo(path).SetAccessControl(security);
-    }
+    private static void WriteRestricted(string path, string token) =>
+        SecureFile.WriteRestricted(path, Encoding.UTF8.GetBytes(token));
 }
 

@@ -232,18 +232,21 @@
         foreach (var header in Headers)
         {
             var useEnvVar = header.Source == HeaderValueSource.EnvVar;
-            var isLiteral = header.Source == HeaderValueSource.Literal;
+            // A protected-store header is write-only exactly like a locked literal (its value is never
+            // returned either), so it drives the same "saved, blank keeps it" placeholder - see
+            // docs/router/secrets-at-rest-plan.md §4.
+            var hasStoredSecret = header.Source == HeaderValueSource.Literal || header.Source == HeaderValueSource.Protected;
             _headers.Add(new HeaderRow
             {
                 Name = header.Name,
                 UseEnvVar = useEnvVar,
-                Locked = isLiteral && header.Locked,
+                Locked = hasStoredSecret && header.Locked,
                 // An unlocked literal comes back in full and is shown as ordinary editable text. A locked
                 // one is never returned, so its row starts blank - HasStoredLiteralValue drives the
                 // "saved" placeholder below, and leaving the field blank on save preserves the stored
                 // value (mirrors the API key field's blank-keeps-existing behavior).
                 Value = useEnvVar ? (header.ValueEnvVar ?? string.Empty) : (header.Value ?? string.Empty),
-                HasStoredLiteralValue = isLiteral && header.Locked
+                HasStoredLiteralValue = hasStoredSecret && header.Locked
             });
         }
     }

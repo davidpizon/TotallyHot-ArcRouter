@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.Proxy.Management;
 
 namespace TotallyHot.ArcRouter.Proxy;
 
@@ -135,6 +136,7 @@ public sealed class ModelRouteResolver : IModelRouteResolver
 {
     private readonly IProviderConfigStore _store;
     private readonly IEnvironmentVariableProvider _environment;
+    private readonly ISecretReader? _secretReader;
 
     // Guards a rebuild of the cached lookup below when the store's snapshot version advances.
     private readonly object _rebuildLock = new();
@@ -154,14 +156,21 @@ public sealed class ModelRouteResolver : IModelRouteResolver
     /// </summary>
     /// <param name="store">The writable provider-configuration store to resolve routes from.</param>
     /// <param name="environment">The environment variable accessor used to resolve provider API keys.</param>
+    /// <param name="secretReader">
+    /// Optional reader for the protected secret store (<c>docs/router/secrets-at-rest-plan.md</c> §5), used
+    /// to resolve a header whose value was migrated off <see cref="ProviderHeader.Value"/> onto
+    /// <see cref="ProviderHeader.ValueSecretRef"/>. Defaults to <see langword="null"/>, in which case such a
+    /// header never resolves - matching behavior before the store existed.
+    /// </param>
     /// <exception cref="Microsoft.Extensions.Options.OptionsValidationException">Thrown when the store's current configuration is inconsistent.</exception>
-    public ModelRouteResolver(IProviderConfigStore store, IEnvironmentVariableProvider environment)
+    public ModelRouteResolver(IProviderConfigStore store, IEnvironmentVariableProvider environment, ISecretReader? secretReader = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(environment);
 
         _store = store;
         _environment = environment;
+        _secretReader = secretReader;
 
         // Build eagerly so an invalid configuration surfaces at construction (startup), preserving the
         // previous fail-fast behavior rather than deferring the throw to the first request.
@@ -222,7 +231,7 @@ public sealed class ModelRouteResolver : IModelRouteResolver
         }
 
         var (entry, provider) = match;
-        var extraHeaders = ProviderCredentialResolver.ResolveExtraHeaders(provider, _environment);
+        var extraHeaders = ProviderCredentialResolver.ResolveExtraHeaders(provider, _environment, _secretReader);
         var authHeaderConfigured = provider.Headers.Any(h =>
             !string.IsNullOrWhiteSpace(h.Name) && string.Equals(h.Name.Trim(), provider.AuthHeaderName.Trim(), StringComparison.OrdinalIgnoreCase));
         var (awsAccessKeyId, awsSecretAccessKey, awsSessionToken) = ProviderCredentialResolver.ResolveAwsCredentials(provider, _environment);

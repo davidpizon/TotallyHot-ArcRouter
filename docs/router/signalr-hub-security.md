@@ -249,6 +249,16 @@ guarantee the secret gives:
    filesystem ACLs are doing the real work, not the token's secrecy. A meaningful boundary on a shared
    multi-user machine, and a reasonable one for a personal local dev tool.
 
+This design shipped as `ManagementAccessToken` (`%LOCALAPPDATA%\TotallyHotArcRouter\management-token.txt`,
+ACL-restricted on write, gating the REST `/admin/*` API, the MCP endpoint, and the TLS gRPC telemetry
+port alike). [`secrets-at-rest-plan.md`](secrets-at-rest-plan.md) §6.1 considered - and deliberately
+deferred - moving this token's storage into the new protected secret store
+(`docs/router/secrets-at-rest.md`): `TotallyHotArcRouter.Gui.Admin`, home of `ManagementTokenReader`,
+documents itself as *not* referencing the router project so it can be deployed independently, and
+folding the token into the shared store would mean either duplicating the store there or introducing a
+new shared assembly - a bigger architectural change than the one secret in play (already ACL-restricted,
+unlike the plaintext header values and certificate password that store was built for) justifies.
+
 ### Option B - hardcoded shared constant (weaker, simpler)
 
 Same mechanism, but the token is a fixed string compiled into both the proxy and the GUI instead of
