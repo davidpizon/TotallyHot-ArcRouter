@@ -1,15 +1,15 @@
 # 📺 Streaming Log Console Specification
 
 > **Status: Implemented.** The fifth "Console" tab described below is real: `Components/ConsoleTab.razor`
-> in `TotallyHotArcRouter.Gui` renders a live, color-coded log stream backed by every Serilog log event the
+> in `TotallyHot.ArcRouter.Gui` renders a live, color-coded log stream backed by every Serilog log event the
 > proxy emits. `src/TotallyHotArcRouter/Telemetry/TelemetryLogEventSink.cs` (renamed from
 > `SignalRLogEventSink.cs` when the telemetry transport migrated to gRPC - see
 > [`../router/grpc-migration.md`](../router/grpc-migration.md)) is a custom `ILogEventSink` wired
 > into `Program.cs`'s Serilog pipeline (additive - it doesn't replace the existing `Console` sink);
 > each event is normalized to the DEBUG/INFO/WARN/ERROR/FATAL levels below and pushed as a
 > `LogLineEvent` over the same telemetry gRPC stream the routing telemetry uses, as the `log_line`
-> oneof case. `TotallyHotArcRouter.Gui.Services.LiveDataStore` receives it, buffers it (see
-> `TotallyHotArcRouter.Gui.Console.LogBuffer`, bounded to 1,000 lines), and `ConsoleTab.razor` renders it
+> oneof case. `TotallyHot.ArcRouter.Gui.Services.LiveDataStore` receives it, buffers it (see
+> `TotallyHot.ArcRouter.Gui.Console.LogBuffer`, bounded to 1,000 lines), and `ConsoleTab.razor` renders it
 > with the color mapping and Auto-Scroll/Smart-Disengage behavior specified below.
 
 A lightweight, real-time log monitoring component with color-coded severity levels and toggleable

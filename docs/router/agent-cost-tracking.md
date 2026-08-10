@@ -63,7 +63,7 @@ directly and never reads proxy-side storage directly. Every piece of this design
 `TotallyHotArcRouter` proxy process:
 
 - The SQLite database (`model_prices`, `usage_ledger`, `provider_cost_reconciliation`) is opened and
-  owned exclusively by the proxy. `TotallyHotArcRouter.Gui` never opens `agent_telemetry.db` itself, even
+  owned exclusively by the proxy. `TotallyHot.ArcRouter.Gui` never opens `agent_telemetry.db` itself, even
   though both processes typically run on the same machine as the same user and doing so would be
   technically possible - it reaches this data only through whatever the proxy chooses to expose (see
   [`../gui/governance-model-cards.md`](../gui/governance-model-cards.md) for the first proposed
@@ -195,7 +195,7 @@ SQLite is still the right call here anyway).
 ### 3.1 Schema initialization
 
 ```csharp
-namespace TotallyHotArcRouter.Telemetry.CostTracking;
+namespace TotallyHot.ArcRouter.Telemetry.CostTracking;
 
 /// <summary>
 /// Creates the cost-tracking SQLite schema if it doesn't already exist. Safe to call on every
@@ -240,7 +240,7 @@ public sealed class CostTrackingSchema
 ### 3.3 Usage ledger
 
 ```csharp
-namespace TotallyHotArcRouter.Telemetry.CostTracking;
+namespace TotallyHot.ArcRouter.Telemetry.CostTracking;
 
 public interface IUsageLedger
 {
@@ -292,7 +292,7 @@ New `IHostedService`, mirroring `ProxyHostedService`'s existing pattern of a bac
 registered via `services.AddHostedService(...)` in `ServiceCollectionExtensions.cs`:
 
 ```csharp
-namespace TotallyHotArcRouter.Telemetry.CostTracking;
+namespace TotallyHot.ArcRouter.Telemetry.CostTracking;
 
 public sealed class CostReconciliationHostedService : BackgroundService
 {

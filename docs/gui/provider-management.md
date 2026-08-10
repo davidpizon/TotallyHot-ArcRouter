@@ -20,7 +20,7 @@ flowchart LR
     subgraph gui["Governance tab (Providers sub-view)"]
         razor["ProvidersAdmin.razor"]
         store["ProviderAdminStore"]
-        client["ProviderAdminClient<br/>(TotallyHotArcRouter.Gui.Admin)"]
+        client["ProviderAdminClient<br/>(TotallyHot.ArcRouter.Gui.Admin)"]
         razor --> store --> client
     end
     subgraph proxy["Proxy (port 5001, localhost)"]
@@ -60,7 +60,7 @@ flowchart LR
   it's rediscovered, with no extra click. Both are enforced on the very next request via
   `IModelRouteResolver.IsModelEnabled` — a stopped or not-currently-upstream model is treated exactly
   like an unconfigured one for routing purposes.
-- **`TotallyHotArcRouter.Gui.Admin`** (plain `net10.0`) holds the DTOs and `ProviderAdminClient` HTTP logic,
+- **`TotallyHot.ArcRouter.Gui.Admin`** (plain `net10.0`) holds the DTOs and `ProviderAdminClient` HTTP logic,
   unit-tested in CI. **`ProviderAdminStore`** (MAUI) is the thin singleton the UI binds to, mirroring
   `LiveDataStore`.
 
@@ -149,16 +149,20 @@ than hidden in the dialog: the flag's state should be visible without opening an
 
 ## Security
 
-The `/admin/*` endpoints inherit the proxy's loopback-only, no-inbound-auth posture (see
-`ProxyMiddleware`'s header-handling notes). Because they read/write credentials, an **optional** shared
-token can be required: set `Management:Token` in configuration and every `/admin/*` request must then
-present a matching `X-Admin-Token` header (401 otherwise). Off by default.
+The `/admin/*` endpoints inherit the proxy's loopback-only posture, and are additionally gated by a
+shared token on every request — **always on, not configurable off**. `ManagementAccessToken.GetOrCreate`
+generates a cryptographically random per-user token on first run and persists it to
+`%LOCALAPPDATA%\TotallyHot.ArcRouter\management-token.txt` with an access-restricted ACL (Windows) /
+file mode 600 (POSIX), so only the current OS user can read it; the GUI reads the same file to attach
+it as `X-Admin-Token` on every call, verified server-side in constant time (`ManagementAccessToken.Verify`).
+There is no `Management:Token` configuration key — the token is never entered or stored in
+`appsettings.json`.
 
 ## Manual verification (Windows / MAUI)
 
 The MAUI Gui project is Windows-only and excluded from CI, so the UI is verified manually; all
 extractable logic (the `ProviderAdminClient` and the store/resolver) is covered by CI tests
-(`TotallyHotArcRouter.Gui.Admin.Tests`, `ProviderConfigStoreTests`, `ProviderAdminEndpointsTests`).
+(`TotallyHot.ArcRouter.Gui.Admin.Tests`, `ProviderConfigStoreTests`, `ProviderAdminEndpointsTests`).
 
 1. Start the proxy, then run the Gui. Open **Governance → Providers**.
 2. **Add** a provider with type *Ollama / LM Studio / llama.cpp*; confirm the base URL fills in and

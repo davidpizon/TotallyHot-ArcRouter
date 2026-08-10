@@ -27,7 +27,7 @@
 - **Logging** is Serilog structured logging with static message templates, per `AGENTS.md`.
 - New GUI work extends existing tabs/cards (the operator's decision); no new windows, so the
   `SettingsModal` window-shell contract is not triggered. Charts reuse the `EChart`/`ChartJson`
-  pattern; pure chart math goes in `TotallyHotArcRouter.Gui.Charts` so it stays unit-testable.
+  pattern; pure chart math goes in `TotallyHot.ArcRouter.Gui.Charts` so it stays unit-testable.
 
 ## Phase map
 

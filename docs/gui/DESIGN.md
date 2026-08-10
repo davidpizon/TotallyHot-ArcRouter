@@ -1,6 +1,6 @@
 # TotallyHotArcRouter.Gui Design System
 
-This is the authoritative design-system reference for `TotallyHotArcRouter.Gui`. It codifies the app's
+This is the authoritative design-system reference for `TotallyHot.ArcRouter.Gui`. It codifies the app's
 **existing, shipping** visual identity — every value below is pulled from
 [`wwwroot/css/app.css`](../../src/TotallyHotArcRouter.Gui/wwwroot/css/app.css) and the behavior described in
 [`dashboard.md`](dashboard.md) — it is not a redesign proposal. Motion — durations, easing, entrance/exit patterns — lives in its
@@ -361,38 +361,7 @@ reused for static elevation.
 
 ## 7. Inline Styles Policy & Refactoring Status
 
-### Refactoring Status
-**Complete.** All static and conditional inline styles have been extracted to CSS classes. The
-following classes have been added to support this, on top of the earlier round below:
-- `.ls-turn-card`, `.ls-turn-card-toggle`, `.ls-flex-auto`, `.ls-stat-strip-gap` — `TurnCard`/
-  `ConversationSummary` static chrome (the AgentColor-tinted background/border-left stays inline —
-  that part is genuinely data-driven, §7 exception 1)
-- `.ds-dashboard-ticker` — Dashboard ticker row border/background
-- `.ls-console-line` — `ConsoleTab` line wrapping (the per-level text color stays inline, §7
-  exception 1)
-- `.ls-drag-placeholder` — `PriceSourcesAdmin` reorder-arrow placeholder sizing
-- `.drag-enabled`/`.drag-disabled` cursor + `.drag-enabled.card-lifted` — replaced
-  `PriceSourcesAdmin`'s conditional `style="cursor:@cursor"` with class binding
-- `.ls-provider-budget-chart`, `.ls-provider-trend-chart` — `ProvidersAdmin` chart container sizing
-- `.ls-price-overrides-grid`, `.ls-governance-grid` — grid-template-columns for `PriceOverridesAdmin`/
-  `GovernanceModelCards`
-- `.ls-livestream-right-panel`, `.ls-model-distribution-panel` — panel sizing for `LiveStream`/
-  `ModelDistribution`
-
-Earlier round of classes:
-- `.ds-surface-base`, `.ds-surface-card-bordered`, `.ds-toolbar` — card and container styling
-- `.ds-divider`, `.ds-divider-subtle` — separator lines
-- `.ds-code-block` — code/payload block styling
-- `.tab-button` with `.active`/`.inactive` states — tab bar button styling
-- `.btn-state-active`, `.btn-state-inactive`, `.btn-metric-active`, `.btn-metric-inactive` — conditional button states
-
-Every remaining `style=` attribute in `TotallyHotArcRouter.Gui/Components` is one of the sanctioned
-exceptions: a per-agent/per-model color computed from backend data (`ColorUtils`, `m.Color`,
-`share.Color`, `AgentColor`), a log-level color (`LogLevelColorMapper`), a `--i` stagger-index custom
-property feeding the `.row-enter`/`.disclosure-enter` animation delay (§6/MOTION.md), or `Icon.razor`'s
-`Style` passthrough parameter (a generic per-instance API, unused by any current caller).
-
-## 7. Inline Styles Policy
+### Policy
 
 **Core Principle:** ALL styling belongs in CSS, not inline. Even conditional and animation styling must be in `.css` files via class binding or CSS variables—never `style="..."` attributes in markup.
 
@@ -433,6 +402,37 @@ property feeding the `.row-enter`/`.disclosure-enter` animation delay (§6/MOTIO
 - Tinted semantic surfaces (error/warning/success steps) — use `.ds-step-*` classes instead of inline color lists
 
 See §4.2's `.btn-*` classes and §4's `.overlay-backdrop` as the reference pattern — static styling belongs in CSS, dynamic behavior stays inline.
+
+### Refactoring Status
+**Complete.** All static and conditional inline styles have been extracted to CSS classes. The
+following classes have been added to support this, on top of the earlier round below:
+- `.ls-turn-card`, `.ls-turn-card-toggle`, `.ls-flex-auto`, `.ls-stat-strip-gap` — `TurnCard`/
+  `ConversationSummary` static chrome (the AgentColor-tinted background/border-left stays inline —
+  that part is genuinely data-driven, exception 1 above)
+- `.ds-dashboard-ticker` — Dashboard ticker row border/background
+- `.ls-console-line` — `ConsoleTab` line wrapping (the per-level text color stays inline, exception 1
+  above)
+- `.ls-drag-placeholder` — `PriceSourcesAdmin` reorder-arrow placeholder sizing
+- `.drag-enabled`/`.drag-disabled` cursor + `.drag-enabled.card-lifted` — replaced
+  `PriceSourcesAdmin`'s conditional `style="cursor:@cursor"` with class binding
+- `.ls-provider-budget-chart`, `.ls-provider-trend-chart` — `ProvidersAdmin` chart container sizing
+- `.ls-price-overrides-grid`, `.ls-governance-grid` — grid-template-columns for `PriceOverridesAdmin`/
+  `GovernanceModelCards`
+- `.ls-livestream-right-panel`, `.ls-model-distribution-panel` — panel sizing for `LiveStream`/
+  `ModelDistribution`
+
+Earlier round of classes:
+- `.ds-surface-base`, `.ds-surface-card-bordered`, `.ds-toolbar` — card and container styling
+- `.ds-divider`, `.ds-divider-subtle` — separator lines
+- `.ds-code-block` — code/payload block styling
+- `.tab-button` with `.active`/`.inactive` states — tab bar button styling
+- `.btn-state-active`, `.btn-state-inactive`, `.btn-metric-active`, `.btn-metric-inactive` — conditional button states
+
+Every remaining `style=` attribute in `TotallyHotArcRouter.Gui/Components` is one of the sanctioned
+exceptions: a per-agent/per-model color computed from backend data (`ColorUtils`, `m.Color`,
+`share.Color`, `AgentColor`), a log-level color (`LogLevelColorMapper`), a `--i` stagger-index custom
+property feeding the `.row-enter`/`.disclosure-enter` animation delay (§6/MOTION.md), or `Icon.razor`'s
+`Style` passthrough parameter (a generic per-instance API, unused by any current caller).
 
 ## 8. Do's and Don'ts
 

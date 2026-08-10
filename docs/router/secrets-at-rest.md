@@ -80,7 +80,7 @@ affect real request routing, which always resolves through the store.
 ## 6. The management token is deliberately not covered
 
 `management-token.txt` stays as it is. See
-[`signalr-hub-security.md`](signalr-hub-security.md) for the reasoning: `TotallyHotArcRouter.Gui.Admin`
+[`signalr-hub-security.md`](signalr-hub-security.md) for the reasoning: `TotallyHot.ArcRouter.Gui.Admin`
 deliberately does not reference the router project, and folding the token into the shared store would
 mean either duplicating it into `Gui.Admin` or introducing a shared assembly - a bigger change than
 warranted for the one secret in the inventory that is already ACL-restricted.

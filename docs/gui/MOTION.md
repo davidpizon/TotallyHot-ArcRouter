@@ -1,6 +1,6 @@
 # TotallyHotArcRouter.Gui Motion System
 
-The authoritative motion reference for `TotallyHotArcRouter.Gui`, companion to [`DESIGN.md`](DESIGN.md).
+The authoritative motion reference for `TotallyHot.ArcRouter.Gui`, companion to [`DESIGN.md`](DESIGN.md).
 
 Unlike `DESIGN.md` — which codifies the app's *existing* visual identity — this document is
 **prescriptive**. It defines the target motion system. Some of it ships today in
@@ -155,7 +155,7 @@ about.
 All snippets are CSS. Blazor conditionally renders these elements (`@if`), so entrance animations use
 `animation` (fires on mount) rather than `transition` (needs a pre-existing state to change from).
 
-### Panel Crossfade — *Proposed*
+### Panel Crossfade — *Coded and wired (§10) — not confirmed in UI*
 
 Tab switching. Non-directional per §2. The scale is deliberately tiny (0.995) — enough to feel like
 the panel settles rather than pops, small enough that dense text never appears to blur.
@@ -168,7 +168,7 @@ the panel settles rather than pops, small enough that dense text never appears t
 .panel-enter { animation: panel-enter var(--dur-default) var(--ease-out-expo); }
 ```
 
-### Overlay Rise — *Proposed*
+### Overlay Rise — *Coded and wired (§10) — not confirmed in UI*
 
 `SettingsModal`, `ProviderEditDialog`. The backdrop fades while the panel rises — two durations, one
 gesture. Exit shrinks slightly and fades fast; it does **not** retrace the entrance path downward.
@@ -187,7 +187,7 @@ markup silently opts out of it. See [`DESIGN.md`](DESIGN.md) §4.1.
 .overlay-panel    { animation: overlay-panel-enter    var(--dur-slow)    var(--ease-out-quart); }
 ```
 
-### Row Enter — *Proposed*
+### Row Enter — *Coded and wired on `ConversationCard` (§10) — not confirmed in UI; still Proposed on `TurnCard`*
 
 A new conversation or turn arriving from the live gRPC stream. Rows prepend (newest first), so the
 row moves *down* into place from `-4px`.
@@ -228,7 +228,7 @@ read the true value throughout.
 .value-tick { animation: value-tick 400ms var(--ease-out-quart); }
 ```
 
-### Disclosure Expand — *Proposed*
+### Disclosure Expand — *Coded and wired (§10) — not confirmed in UI*
 
 `TurnCard` expanding to show the routing-decision log. Animate `opacity` and `transform` on the
 revealed content; do **not** animate `height` — the payload blocks are variable-height and
@@ -356,11 +356,21 @@ Add to `app.css` below the compiled Tailwind blob:
 | Duration + easing tokens | `app.css` `:root` |
 | Bare `ease` → `var(--ease-standard)` | `.card-hover`, `.ls-divider`, input focus |
 | `.tab-indicator` actually applied (was dead CSS) | `Dashboard.razor` nav buttons |
+| `prefers-reduced-motion` block | `app.css` |
+
+### Coded and wired — not confirmed in UI
+
+Source review confirms these are correctly wired (right CSS, right Blazor markup, no conflicting
+rules found), but nobody has visually confirmed them running in the actual app. Possible reasons a
+build wouldn't show them: a stale build/install predating the CSS, or Windows' "Show animations"
+accessibility setting forcing `prefers-reduced-motion: reduce` (collapses all durations to 0.01ms).
+
+| Item | Where |
+|---|---|
 | Panel Crossfade on tab switch | `Dashboard.razor` — `@key`-ed wrapper in `<main>` |
 | Overlay Rise | `SettingsModal`, `ProviderEditDialog` |
 | Row Enter + first-mount stagger | `ConversationCard` via `LiveStream._listHasRendered` |
 | Disclosure Expand + causal-order stagger | `TurnCard` routing-decision log |
-| `prefers-reduced-motion` block | `app.css` |
 
 ### Not yet implemented
 

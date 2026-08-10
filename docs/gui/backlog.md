@@ -92,7 +92,7 @@ silently reopen the gap. `TelemetryAuthClientInterceptor` attaches the token cli
 design translated from a SignalR `AccessTokenProvider` to a gRPC interceptor/call credential, per that
 doc's own status banner.
 
-### ✅ 3. Anthropic Reported Usage section (per-provider card, non-enterprise accounts)
+### ✅ 3. Anthropic Reported Usage section (per-provider card, non-enterprise accounts) — code shipped, currently blocked on account tier
 
 **Shipped** — see
 [`docs/router/anthropic-reported-usage-plan.md`](../router/anthropic-reported-usage-plan.md) for the
@@ -167,7 +167,7 @@ ApexCharts to Apache ECharts**: `echarts.min.js` is vendored under `wwwroot/lib/
 and driven by `wwwroot/js/echarts-interop.js` through the reusable `Components/EChart.razor` host;
 `Blazor-ApexCharts-MAUI`, its `AddApexChartsMaui()` registration, and its CSS are gone, and Model
 Distribution's grouped-bar + donut charts were ported too. The pure, unit-tested
-`TotallyHotArcRouter.Gui.Charts.CostChartBuilder` (+ `CostChartBuilderTests`) builds each chart model and
+`TotallyHot.ArcRouter.Gui.Charts.CostChartBuilder` (+ `CostChartBuilderTests`) builds each chart model and
 derives every rich tooltip figure (baseline cost, per-step model split, cached/uncached tokens,
 context token counts, cold-start split) from the turn's existing fields; `ChartJson` serializes it and
 `ChartJsonTests` guards the C#↔JS field contract; `ChartPalette` (which `ColorUtils` now delegates to)
@@ -193,8 +193,8 @@ Fully specified in [`../router/grpc-migration.md`](../router/grpc-migration.md) 
 the doc's status banner): `Telemetry/TelemetryHub.cs` is deleted, `TelemetryGrpcService`/
 `TelemetryBroadcaster` replace it server-side, and `LiveDataStore.cs` now speaks gRPC via a
 `GrpcChannel` instead of a SignalR `HubConnection`. `src/Protos/telemetry.proto` is the shared
-contract, compiled independently into both `TotallyHotArcRouter` and `TotallyHotArcRouter.Gui.Telemetry` (not
-`TotallyHotArcRouter.Gui` itself - .NET MAUI's `SingleProject` build doesn't reliably run Grpc.Tools'
+contract, compiled independently into both `TotallyHotArcRouter` and `TotallyHot.ArcRouter.Gui.Telemetry` (not
+`TotallyHot.ArcRouter.Gui` itself - .NET MAUI's `SingleProject` build doesn't reliably run Grpc.Tools'
 codegen), closing the hand-synced-DTO drift risk that motivated this. See
 [`../router/telemetry.md`](../router/telemetry.md)'s "Transport: gRPC" section for the full mechanism.
 
@@ -222,9 +222,9 @@ proxy-side source noted here previously is closed by
 the transport migrated to gRPC - see the item above), a custom Serilog `ILogEventSink` that forwards
 every log event (additively, alongside the existing `Console` sink -
 `serilog-logging-guide.md` is otherwise unchanged) as a `LogLineEvent` over the same telemetry gRPC
-stream routing telemetry already uses. `TotallyHotArcRouter.Gui.Console` (+
+stream routing telemetry already uses. `TotallyHot.ArcRouter.Gui.Console` (+
 `.Tests`) hosts the reusable, unit-tested pieces (`LogLevelColorMapper`, `LogBuffer`), mirroring the
-`TotallyHotArcRouter.Gui.Charts` pattern; `LiveDataStore` and `Components/ConsoleTab.razor` wire it into
+`TotallyHot.ArcRouter.Gui.Charts` pattern; `LiveDataStore` and `Components/ConsoleTab.razor` wire it into
 the dashboard.
 
 ### ✅ Wire the dashboard to live TotallyHotArcRouter proxy telemetry, with real-time push updates
@@ -232,7 +232,7 @@ the dashboard.
 `src/TotallyHotArcRouter/Telemetry/` now captures per-request session/turn tracking, OpenAI/Anthropic
 token usage (streaming and non-streaming), and estimated cost, and pushes each request as a
 `RoutingTelemetryEvent` over a gRPC stream (`TelemetryService.StreamEvents`) as soon as it's
-forwarded — no polling. `TotallyHotArcRouter.Gui`'s `Services/LiveDataStore.cs` consumes this live, and the
+forwarded — no polling. `TotallyHot.ArcRouter.Gui`'s `Services/LiveDataStore.cs` consumes this live, and the
 Live Stream tab plus Cost Analytics' Token Compounding chart now render real conversations instead of
 `MockData`. Full pipeline, field-by-field data provenance, and what's still honestly defaulted
 (Routing ROI, Tool Steps, Context Buffer) vs. real (Time to First Token, Cache Hit Rate,
@@ -245,14 +245,14 @@ rather than adding polling first.
 
 Originally implemented in `CostAnalytics.razor` as a "Token Compounding by Conversation" panel: a
 conversation picker plus a two-series line chart (cumulative prompt tokens, cumulative completion
-tokens) per turn, built via `TotallyHotArcRouter.Gui.Charts.TokenCompoundingSeries.Build`. This is now the
+tokens) per turn, built via `TotallyHot.ArcRouter.Gui.Charts.TokenCompoundingSeries.Build`. This is now the
 `Tokens` metric (single-session scope) of the metric explorer; `TokenCompoundingSeries` itself
 remains in use for the `ConversationSummary` sparkline.
 
 ### ✅ Token-compounding sparkline on the conversation summary card
 
 Implemented in `ConversationSummary.razor`: a compact inline SVG polyline ("Trend" stat) showing
-per-turn total tokens, built via `TotallyHotArcRouter.Gui.Charts.TokenCompoundingSeries.BuildSparkline`
+per-turn total tokens, built via `TotallyHot.ArcRouter.Gui.Charts.TokenCompoundingSeries.BuildSparkline`
 and `SparklineLayout.Normalize`.
 
 ### ✅ Keyboard-accessible tooltips

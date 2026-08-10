@@ -13,9 +13,9 @@ the GUI. This is one of three management surfaces the router runs; see the table
 | 5002 | TLS gRPC | Telemetry stream + price-source admin | none (unchanged, out of scope here) |
 | 5003 | TLS HTTP (Streamable HTTP) | MCP management endpoint | Bearer token (same token as `/admin/*`) |
 
-The MCP endpoint (`TotallyHotArcRouter.Mcp.McpServer`, started by `McpHostedService`) is a small, standalone
-Kestrel host mirroring `TotallyHotArcRouter.Proxy.ProxyServer`'s dedicated TLS gRPC listener: it reuses the same
-self-signed `CN=localhost` certificate (`TotallyHotArcRouter.Telemetry.TelemetryTlsCertificate`) so there is one
+The MCP endpoint (`TotallyHot.ArcRouter.Mcp.McpServer`, started by `McpHostedService`) is a small, standalone
+Kestrel host mirroring `TotallyHot.ArcRouter.Proxy.ProxyServer`'s dedicated TLS gRPC listener: it reuses the same
+self-signed `CN=localhost` certificate (`TotallyHot.ArcRouter.Telemetry.TelemetryTlsCertificate`) so there is one
 trust story for every TLS management port, not a second one to configure. Like the gRPC listener, a
 certificate failure is non-essential: it's logged as a warning and the port simply doesn't bind, rather
 than failing the whole process.
@@ -30,7 +30,7 @@ Set `Enabled: false` to turn the endpoint off entirely.
 
 ## Authentication: one shared per-user token
 
-`TotallyHotArcRouter.Proxy.Management.ManagementAccessToken` generates (or loads) a single 32-byte random token
+`TotallyHot.ArcRouter.Proxy.Management.ManagementAccessToken` generates (or loads) a single 32-byte random token
 on first use and persists it to `%LOCALAPPDATA%\TotallyHotArcRouter\management-token.txt`. On Windows the file's
 ACL is broken from inheritance and rewritten to grant only the current Windows user; on POSIX the mode is
 set to `600`. This is the **same token** that now gates the REST `/admin/*` API by default (see below) -
@@ -46,7 +46,7 @@ a substitute for it - the trust model (same OS user, same machine, self-signed l
 pragmatic one `TelemetryTlsCertificate` documents for the gRPC port; see that class's remarks for the
 reasoning and its stated follow-up (thumbprint pinning) if a stronger boundary is ever needed.
 
-The GUI reads this same file (`TotallyHotArcRouter.Gui.Admin.ManagementTokenReader`) and sends it automatically;
+The GUI reads this same file (`TotallyHot.ArcRouter.Gui.Admin.ManagementTokenReader`) and sends it automatically;
 no manual configuration is needed on a machine where both processes run as the same user.
 
 ## REST `/admin/*` hardening (this change)
@@ -60,7 +60,7 @@ plain-HTTP base URL keeps working with zero changes.
 
 ## Shared core: one facade, two surfaces
 
-Both REST `/admin/*` and the MCP provider tools call the same `TotallyHotArcRouter.Proxy.Management.ManagementFacade`
+Both REST `/admin/*` and the MCP provider tools call the same `TotallyHot.ArcRouter.Proxy.Management.ManagementFacade`
 - the single place that projects, merges, and validates provider/model/budget state. This matters for two
 reasons:
 
@@ -79,7 +79,7 @@ reasons:
 All tools are read/write through the facade except price-source tools (which touch no credential material,
 so they call the underlying stores directly) and the telemetry tools (read-only aggregates).
 
-**Providers / models / budgets** (`TotallyHotArcRouter.Mcp.Tools.ProviderMcpTools`):
+**Providers / models / budgets** (`TotallyHot.ArcRouter.Mcp.Tools.ProviderMcpTools`):
 `list_providers`, `upsert_provider`, `remove_provider`, `upsert_model`, `remove_model`,
 `set_provider_budget`, `discover_models`.
 

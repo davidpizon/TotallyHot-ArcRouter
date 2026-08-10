@@ -1,6 +1,6 @@
 # TotallyHotArcRouter.Gui Dashboard
 
-This document describes the dashboard UI rendered inside `TotallyHotArcRouter.Gui`'s window
+This document describes the dashboard UI rendered inside `TotallyHot.ArcRouter.Gui`'s window
 (`src/TotallyHotArcRouter.Gui/Components/`). For the tray-app shell itself (tray icon, show/hide behavior,
 build/run instructions), see [`src/TotallyHotArcRouter.Gui/README.md`](../../src/TotallyHotArcRouter.Gui/README.md).
 
@@ -97,7 +97,7 @@ flowchart TD
      conversation that stays visible while the turn list scrolls. A title row (title, fallback badge
      when applicable, session ID + time range) above a one-line stat strip - Total Cost, Total Tokens,
      Avg ROI, Turns, and a **Trend** sparkline (inline SVG polyline, per-turn total tokens, built from
-     `TotallyHotArcRouter.Gui.Charts.SparklineLayout` - only rendered when the conversation has turns) - each
+     `TotallyHot.ArcRouter.Gui.Charts.SparklineLayout` - only rendered when the conversation has turns) - each
      stat with a tooltip explaining the metric.
    - Right panel, below (`TurnCard.razor`): the scrollable list of the conversation's turns as compact
      two-line cards, so many turns fit on screen. Each card's background and left border are tinted
@@ -130,7 +130,7 @@ flowchart TD
    session scope; one chart below plots the choice.
    - **Metric selector**: a pill row ranked 1-7 by business priority - Routing ROI, Turn Cost,
      Tokens, Tool Steps, Cache Hit, TTFT, Context Buffer (the `CostMetric` enum order in
-     `TotallyHotArcRouter.Gui.Charts.CostChartBuilder`).
+     `TotallyHot.ArcRouter.Gui.Charts.CostChartBuilder`).
    - **Time range**: Hour / Day / Week / Month / All - the window each chart's per-turn points are
      filtered to.
    - **Session scope**: a `<select>` of `All Sessions` plus each session in the corpus (live
@@ -144,9 +144,9 @@ flowchart TD
      segmented by the model that handled each stretch of steps; Cache Hit a stepped % line with a
      gradient track; TTFT a stepped latency line over per-model background zones with spikes pinned;
      Context Buffer a stepped % line with a fixed 90% threshold and pulsing breaches. Colors are
-     deterministic via `TotallyHotArcRouter.Gui.Charts.ChartPalette` (which `Utils/ColorUtils` now delegates
-     to). The chart models are built by `TotallyHotArcRouter.Gui.Charts.CostChartBuilder.Build` (pure,
-     unit-tested in `TotallyHotArcRouter.Gui.Charts.Tests`), serialized with `ChartJson`, and rendered
+     deterministic via `TotallyHot.ArcRouter.Gui.Charts.ChartPalette` (which `Utils/ColorUtils` now delegates
+     to). The chart models are built by `TotallyHot.ArcRouter.Gui.Charts.CostChartBuilder.Build` (pure,
+     unit-tested in `TotallyHot.ArcRouter.Gui.Charts.Tests`), serialized with `ChartJson`, and rendered
      through the shared `<EChart>` host + `wwwroot/js/echarts-interop.js`.
    - **Data source**: the corpus is the live conversation turns (real tokens/cost/TTFT/model/
      timestamp) **merged with** `MockData.BuildMetricHistory(now)` - a deterministic, timestamped
@@ -201,7 +201,7 @@ flowchart TD
    real-time, color-coded log stream: every Serilog log event the proxy emits, normalized to
    DEBUG/INFO/WARN/ERROR/FATAL and pushed over the telemetry gRPC stream's `log_line` case by
    `src/TotallyHotArcRouter/Telemetry/TelemetryLogEventSink.cs`, buffered client-side (1,000-line cap,
-   `TotallyHotArcRouter.Gui.Console.LogBuffer`) by `Services/LiveDataStore.cs`. A toolbar toggles
+   `TotallyHot.ArcRouter.Gui.Console.LogBuffer`) by `Services/LiveDataStore.cs`. A toolbar toggles
    Auto-Scroll (with "Smart-Disengage" - scrolling up with the wheel/trackpad switches it off, see
    `wwwroot/js/console-scroll.js`), copies every buffered line to the clipboard (MAUI's native
    `Clipboard`, with a briefly-shown "Copied!" confirmation), and clears the buffer. Unlike the other
@@ -212,8 +212,10 @@ flowchart TD
 
 Opened via the header's **Settings** button. A centered modal (dimmed/blurred backdrop, click-outside to
 close) with a "Destructive Actions Zone": **Reset Stats** and **Clear History** buttons, each requiring
-the user to type a literal confirmation word (`RESET` / `PURGE`) before the action button enables. No
-action is actually wired to real data yet - confirming just closes the modal.
+the user to type a literal confirmation word (`RESET` / `PURGE`) before the action button enables. Both
+actions call `LiveDataStore.ClearEvents()` to clear this session's live view; **Clear History**
+additionally clears the Console tab's log buffer. Neither touches the proxy's own durable history or
+any persisted configuration.
 
 This window is also the **reference pattern for every new GUI window** - its backdrop, panel, header,
 close glyph, and `OnClose` callback are what new modals/dialogs copy rather than restyle
@@ -275,7 +277,7 @@ of the Windows-only Gui project so it's unit-testable on any platform:
 - `SparklineLayout.Normalize(values, width, height, padding)` - scales a value series into SVG
   polyline points (largest value at the smallest Y, since SVG's Y axis grows downward).
 
-Covered by `TotallyHotArcRouter.Gui.Charts.Tests` (xUnit): empty/single-value/unsorted-input edge cases,
+Covered by `TotallyHot.ArcRouter.Gui.Charts.Tests` (xUnit): empty/single-value/unsorted-input edge cases,
 cumulative-sum correctness, and coordinate-normalization correctness (flat series, custom padding,
 value-to-Y direction). This is the one piece of Gui-adjacent logic actually verified in this repo's
 Linux CI/agent environment - see the note in "Known gaps" below about why the rest isn't.
@@ -287,25 +289,24 @@ These match the source design as received and are called out so they aren't mist
 - Model Distribution's time-range filter buttons and From/To inputs don't actually refilter the charts.
 - Governance's per-provider budget caps are persisted to SQLite and enforced live in routing (breached
   providers are skipped; an all-breached request gets a 402). Spend is real per-provider, current-month.
-- Settings modal's Reset/Clear actions don't affect any data - they just close the modal once confirmed.
 - Model Distribution's chart axis ranges (e.g. the 0-6M token scale) are pinned to fit the mock data;
   they'll need to become dynamic when real telemetry is wired in. (Cost Analytics' explorer already
   auto-scales its axes to whatever data is in range.)
 - The chart tooltips are custom dark-themed HTML built in `wwwroot/js/echarts-interop.js` to match the
   card styling; minor visual differences from the original React implementation are expected there.
 - The telemetry gRPC server address (`https://localhost:5002` - a dedicated TLS port, separate from
-  the plain-HTTP proxy port 5001) is hardcoded to the proxy's default port in
-  `Services/LiveDataStore.cs` - there's no settings UI yet to point the GUI at a
-  differently-configured proxy.
+  the plain-HTTP proxy port 5001) defaults to the proxy's default port but is configurable:
+  `GuiSettingsStore` persists it (`%LOCALAPPDATA%\TotallyHotArcRouter\gui-settings.json`), editable
+  from a field in `SettingsModal.razor`.
 - Several `ConversationTurn` fields have no live-data source and are shown as their "nothing to
   report" state (e.g. ROI/cache rate render as `—`) when viewing live conversations: Routing ROI,
   Tool Steps, Cache Hit Rate, and Context Buffer. See [`../router/telemetry.md`](../router/telemetry.md)'s
   field table for why each one, and Time to First Token / Request+Response text for the turn-level
   fields that *are* real in live mode.
 - **Verification limitation**: this repo's Linux CI/agent environment has no .NET SDK and cannot
-  install one (network policy blocks the installer), so `TotallyHotArcRouter.Gui`'s Razor/C# changes are
-  necessarily review-verified rather than compiled or run. The exceptions: `TotallyHotArcRouter.Gui.Charts`
-  and `TotallyHotArcRouter.Gui.Telemetry` (plain `net10.0` libraries, unit-tested - see above and
+  install one (network policy blocks the installer), so `TotallyHot.ArcRouter.Gui`'s Razor/C# changes are
+  necessarily review-verified rather than compiled or run. The exceptions: `TotallyHot.ArcRouter.Gui.Charts`
+  and `TotallyHot.ArcRouter.Gui.Telemetry` (plain `net10.0` libraries, unit-tested - see above and
   `../router/telemetry.md`) and `wwwroot/js/tooltips.js`'s keyboard-focus behavior, which was
   smoke-tested against a standalone HTML harness with Playwright/Chromium (both available in this
   environment independent of the .NET toolchain). `Services/LiveDataStore.cs` and

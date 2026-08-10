@@ -10,7 +10,7 @@
 ## Purpose
 
 `src/TotallyHotArcRouter/Telemetry/` captures per-request routing telemetry from the live traffic path
-and pushes it to connected clients (currently `TotallyHotArcRouter.Gui`) over gRPC, so the dashboard's
+and pushes it to connected clients (currently `TotallyHot.ArcRouter.Gui`) over gRPC, so the dashboard's
 Live Stream and Cost Analytics tabs can show real conversations instead of only `MockData`. See
 [`../gui/dashboard.md`](../gui/dashboard.md) for how the GUI consumes this, and
 [`../gui/backlog.md`](../gui/backlog.md) for the backlog items this closed out. The transport was
@@ -46,9 +46,8 @@ request, after the response has already been fully forwarded to the client:
 Both `RequestSummary` and `ResponseSummary` are truncated via `TextTruncator` (2,000 characters, with a
 trailing "…" marker) before being placed on the event, so a pathological input (a huge pasted file, a
 very long generated response) can't produce an outsized gRPC message. See
-[`signalr-hub-security.md`](signalr-hub-security.md) for the (proposed, not yet implemented, and now
-partly stale - see that doc's banner) security work this makes more important, since this is real
-prompt/response text now flowing over the stream.
+[`signalr-hub-security.md`](signalr-hub-security.md) for the shipped `ManagementAccessToken` gating
+that makes this safe, since this is real prompt/response text flowing over the stream.
 
 ### Session/conversation identification
 
@@ -295,14 +294,13 @@ password stored alongside it) bound to the dedicated gRPC port via Kestrel's `Us
 the client trusts it by subject name (`CN=localhost`) rather than a blanket accept-all or a pinned
 thumbprint - see [`grpc-migration.md`](grpc-migration.md)'s section 2 for the full story.
 
-**Security note:** authentication is still absent — bound to loopback only, not reachable from the
-network, but any local process can connect and receive every broadcast event with no credential
-check, including the real request/response text described above (not a hypothetical concern — see
-[`signalr-hub-security.md`](signalr-hub-security.md)'s "Why this matters" section, which still applies
-to the current gRPC transport even though that doc's code samples predate the migration and its TLS
-section is now partly moot - encryption in transit is real now, just via a different, simpler
-mechanism than that doc sketched for SignalR). See that doc for a proposed (not yet implemented)
-shared-secret/token authentication design, still needed regardless of transport.
+**Security note:** authentication is enforced — every call carries the `ManagementAccessToken` as
+per-call metadata, checked server-side by `TelemetryAuthInterceptor` and attached client-side by
+`TelemetryAuthClientInterceptor`, so a local process without the token cannot connect and receive
+broadcast events (including the real request/response text described above). See
+[`signalr-hub-security.md`](signalr-hub-security.md) for the design rationale that motivated this,
+kept there as historical SignalR-era context even though that doc's code samples predate the
+migration to gRPC.
 
 The same stream also carries a second, unrelated event stream for the GUI's Console tab: every
 Serilog log event, sent as the `log_line` oneof case by `TelemetryLogEventSink` (a custom
@@ -324,30 +322,30 @@ constructor injection. No post-start attachment step, and no narrow startup-race
 early request's telemetry event is silently dropped: publishing before any client has connected is
 still a safe no-op, simply because nothing is registered to write to yet.
 
-The wire message (`TotallyHotArcRouter.Telemetry.Contract.RoutingTelemetryEvent`, generated from
+The wire message (`TotallyHot.ArcRouter.Telemetry.Contract.RoutingTelemetryEvent`, generated from
 `src/Protos/telemetry.proto`) is compiled independently into both `TotallyHotArcRouter`
-(`GrpcServices="Server"`) and `TotallyHotArcRouter.Gui.Telemetry` (`GrpcServices="Client"`) from the same
+(`GrpcServices="Server"`) and `TotallyHot.ArcRouter.Gui.Telemetry` (`GrpcServices="Client"`) from the same
 file, so the two sides can never structurally drift the way the old hand-synced SignalR DTOs could.
-The client-side compile happens in `TotallyHotArcRouter.Gui.Telemetry` - a plain, non-MAUI project - rather
-than in `TotallyHotArcRouter.Gui` itself (which is where the generated types are actually *used*, via a
+The client-side compile happens in `TotallyHot.ArcRouter.Gui.Telemetry` - a plain, non-MAUI project - rather
+than in `TotallyHot.ArcRouter.Gui` itself (which is where the generated types are actually *used*, via a
 `ProjectReference`): .NET MAUI's `SingleProject` build doesn't reliably run Grpc.Tools' codegen (no
 `protoc` invocation happens at all, confirmed empirically - restore succeeds, the `.proto`'s path
-resolves, but nothing is generated), while `TotallyHotArcRouter.Gui.Telemetry`'s plain `Microsoft.NET.Sdk`
+resolves, but nothing is generated), while `TotallyHot.ArcRouter.Gui.Telemetry`'s plain `Microsoft.NET.Sdk`
 build has no such problem. See [`grpc-migration.md`](grpc-migration.md)'s section 4 for the full story.
 
-The GUI side still keeps `TotallyHotArcRouter.Gui.Telemetry.RoutingTelemetryEventDto`/
-`TotallyHotArcRouter.Gui.Console.LogLineDto` as separate, hand-written types, though — `TotallyHotArcRouter.Gui`'s
+The GUI side still keeps `TotallyHot.ArcRouter.Gui.Telemetry.RoutingTelemetryEventDto`/
+`TotallyHot.ArcRouter.Gui.Console.LogLineDto` as separate, hand-written types, though — `TotallyHot.ArcRouter.Gui`'s
 `LiveDataStore` maps the generated proto messages into them (handling proto3 `optional` field
 presence, the decimal-as-string cost encoding, and `Timestamp`↔`DateTimeOffset` conversion) rather
 than passing proto types straight through, specifically so `ConversationAggregator`/`LogBuffer` (the
 actual aggregation/buffering logic, still Windows-independent and unit-tested) stay decoupled from
-the wire message shape. `TotallyHotArcRouter.Gui.Console` still has no `Grpc`/`Google.Protobuf` dependency
-of its own; `TotallyHotArcRouter.Gui.Telemetry` now does, for the codegen reason above, not because its
+the wire message shape. `TotallyHot.ArcRouter.Gui.Console` still has no `Grpc`/`Google.Protobuf` dependency
+of its own; `TotallyHot.ArcRouter.Gui.Telemetry` now does, for the codegen reason above, not because its
 aggregation logic needs it.
 
 ## GUI consumption
 
-**Architecture principle: the GUI only ever talks to the TotallyHotArcRouter proxy.** `TotallyHotArcRouter.Gui`
+**Architecture principle: the GUI only ever talks to the TotallyHotArcRouter proxy.** `TotallyHot.ArcRouter.Gui`
 has no other integration surface, by design - it never calls an upstream provider (OpenAI, Anthropic,
 etc.) directly, and never reads proxy-side storage directly (e.g. opening a SQLite file on disk),
 even when both processes happen to run on the same machine as the same user and doing so would be
@@ -362,13 +360,13 @@ both call this out explicitly at the point they introduce a new surface, precise
 easy to accidentally design around the proxy instead of through it (e.g. having the GUI open the
 ledger's `.db` file directly, since it's "just a file on the same machine").
 
-`TotallyHotArcRouter.Gui.Telemetry.ConversationAggregator.Aggregate` (pure, unit-tested) groups a flat
+`TotallyHot.ArcRouter.Gui.Telemetry.ConversationAggregator.Aggregate` (pure, unit-tested) groups a flat
 list of `RoutingTelemetryEventDto`s into `LiveConversation`/`LiveConversationTurn` records by
 `SessionId`, ordering turns by `TurnNumber` and conversations by most-recently-active first.
 
-`TotallyHotArcRouter.Gui`'s `Services/LiveDataStore.cs` owns a `GrpcChannel` to `https://localhost:5002`
-(`ProxyServer.DefaultGrpcPort`, the dedicated TLS gRPC port - not the plain-HTTP proxy port 5001; not
-currently configurable — the GUI has no settings-persistence mechanism yet) and a
+`TotallyHot.ArcRouter.Gui`'s `Services/LiveDataStore.cs` owns a `GrpcChannel` to `https://localhost:5002`
+(`ProxyServer.DefaultGrpcPort`, the dedicated TLS gRPC port - not the plain-HTTP proxy port 5001;
+configurable via `GuiSettingsStore`, editable from `SettingsModal.razor`) and a
 `TelemetryService.TelemetryServiceClient` over it, accumulates every received
 event, and re-runs `ConversationAggregator.Aggregate` on the full accumulated list after each new
 event. It's registered as a singleton in `MauiProgram.cs`, started once from `Dashboard.razor`'s
@@ -431,8 +429,8 @@ input, and request/response summary pass-through - unaffected by the SignalR→g
 since it still operates on `RoutingTelemetryEventDto`, unchanged in shape (see "Transport: gRPC"
 above).
 
-`TotallyHotArcRouter.Gui`'s own `Services/LiveDataStore.cs` and `Services/LiveConversationMapper.cs` are
-**not** unit-tested: like the rest of `TotallyHotArcRouter.Gui` (Razor components, `MauiProgram.cs`,
+`TotallyHot.ArcRouter.Gui`'s own `Services/LiveDataStore.cs` and `Services/LiveConversationMapper.cs` are
+**not** unit-tested: like the rest of `TotallyHot.ArcRouter.Gui` (Razor components, `MauiProgram.cs`,
 `TrayWindowManager.cs`), they depend on Windows-only MAUI/Blazor types (or, for `LiveDataStore`,
 live `GrpcChannel` networking) and can't be built or tested in this repo's Linux environment. The
 logic they wrap is tested where it's actually portable (`ConversationAggregator`, above).

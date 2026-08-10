@@ -75,7 +75,7 @@ verified rather than assumed.
 | Criterion | Status | Notes |
 | --- | --- | --- |
 | Five principles reflected in DESIGN.md/MOTION.md | Done | See both docs' new "Status" callouts |
-| No conflicting guidance between DESIGN.md, MOTION.md, tab docs | Partial | DESIGN.md and MOTION.md reconciled; tab-specific docs (`cost-analytics-visualization-spec.md`, `console-tab-plan.md`, etc.) still reference some pre-adoption hex values in illustrative examples — flagged for cleanup, not blocking since the authoritative values live in DESIGN.md |
+| No conflicting guidance between DESIGN.md, MOTION.md, tab docs | Done | DESIGN.md and MOTION.md reconciled; swept `cost-analytics-visualization-spec.md`, `console-tab-plan.md`, `dashboard.md`, `governance-model-cards.md`, `secret-field.md` for pre-adoption hex values — none remain. `console-tab-plan.md`'s log-level hex values (`#A0A0A0`/`#4CAF50`/etc.) match `LogLevelColorMapper.cs` exactly; they're an intentional log-level convention, not stale chrome. |
 | Component behavior documented with semantic triggers | Done | DESIGN.md §4.2, MOTION.md §6-7 |
 
 ## Sign-off

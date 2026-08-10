@@ -32,7 +32,7 @@ estimate-once-broadcast-once-and-discard telemetry model.
 
 **This doc does not create an exception to [`telemetry.md`](../router/telemetry.md#gui-consumption)'s
 architecture principle: the GUI only ever talks to the TotallyHotArcRouter proxy.** It would be simpler, in
-the narrow sense of "fewer moving parts," for `TotallyHotArcRouter.Gui` to open
+the narrow sense of "fewer moving parts," for `TotallyHot.ArcRouter.Gui` to open
 `agent-cost-tracking.md`'s SQLite file directly and query `usage_ledger`/`model_prices` itself - both
 processes typically run on the same machine as the same OS user, so nothing would stop it technically.
 That is deliberately not this design. Every piece of data a model card needs - the configured model
@@ -294,7 +294,7 @@ configured") and hands it to every connecting client once. Spend-for-a-range is 
 That applies squarely here, and three things decide it:
 
 1. **The contract.** `src/Protos/telemetry.proto` is already compiled into both the proxy
-   (`GrpcServices="Server"`) and `TotallyHotArcRouter.Gui.Telemetry` (`GrpcServices="Client"`) from one file,
+   (`GrpcServices="Server"`) and `TotallyHot.ArcRouter.Gui.Telemetry` (`GrpcServices="Client"`) from one file,
    so the two sides **cannot** structurally drift — the exact failure the hand-synced SignalR DTOs
    invited before the migration. A REST endpoint reintroduces a hand-synced JSON contract for the one
    query, in a codebase that just finished removing them.

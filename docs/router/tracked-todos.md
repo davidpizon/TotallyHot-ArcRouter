@@ -12,7 +12,7 @@ and this is the nearer of the two repos' doc folders to where the work is being 
 | [1](#1-make-converttoolstoopenai-degrade-instead-of-throwing-on-toolmoderequired-with-multiple-tools) | Open | `spark-vscode-extension` | Make `convertToolsToOpenAI` degrade instead of throwing on `ToolMode.Required` with multiple tools |
 | [2](#2-write-tool-call-normalizationmd-design-doc) | ✅ Done | ArcRouter | Write `tool-call-normalization.md` design doc |
 | [3](#3-research-deepseek-tool-call-delimiters-and-register-a-deepseek-dialect) | Open | ArcRouter | Research DeepSeek tool-call delimiters and register a `deepseek` dialect |
-| [4](#4-add-test-coverage-for-zero-coverage-classes-in-TotallyHotArcRouter-and-TotallyHotArcRoutersandbox) | Open | ArcRouter | Add test coverage for zero-coverage classes in `TotallyHotArcRouter` and `TotallyHotArcRouter.Sandbox` |
+| [4](#4-add-test-coverage-for-zero-coverage-classes-in-TotallyHotArcRouter-and-TotallyHotArcRoutersandbox) | Open | ArcRouter | Add test coverage for zero-coverage classes in `TotallyHotArcRouter` and `TotallyHot.ArcRouter.Sandbox` |
 | [5](#5-get-a-human-review-of-phase-5s-three-design-decisions) | Open | ArcRouter | Get a human review of Phase 5's three design decisions |
 
 ---
@@ -213,7 +213,7 @@ is the one thing this attempt did establish.
 
 ---
 
-## #4 Add test coverage for zero-coverage classes in `TotallyHotArcRouter` and `TotallyHotArcRouter.Sandbox`
+## #4 Add test coverage for zero-coverage classes in `TotallyHotArcRouter` and `TotallyHot.ArcRouter.Sandbox`
 
 **Repo:** ArcRouter · **Status:** Open
 
@@ -221,34 +221,34 @@ is the one thing this attempt did establish.
 
 Verified locally that both non-GUI production assemblies currently clear AGENTS.md's 80%
 line-coverage bar as CI actually checks it (per-assembly via `reportgenerator` merging
-`TotallyHotArcRouter.Tests` + `TotallyHotArcRouter.Sandbox.Tests` cobertura reports, matching
+`TotallyHot.ArcRouter.Tests` + `TotallyHot.ArcRouter.Sandbox.Tests` cobertura reports, matching
 `.github/workflows/dotnet-ci.yml`'s "Check coverage threshold" step):
 
 - `TotallyHotArcRouter`: 84%
-- `TotallyHotArcRouter.Sandbox`: 80.1%
+- `TotallyHot.ArcRouter.Sandbox`: 80.1%
 
-Both pass today. But `TotallyHotArcRouter.Sandbox` is only 0.1 points above the line, and both assemblies
+Both pass today. But `TotallyHot.ArcRouter.Sandbox` is only 0.1 points above the line, and both assemblies
 carry classes sitting at exactly **0%** covered — none of which individually fail the per-assembly
 gate yet, but which are the reason the margin is thin rather than comfortable. A modest amount of new
-untested code, or a refactor that shifts lines between classes, could tip `TotallyHotArcRouter.Sandbox`
+untested code, or a refactor that shifts lines between classes, could tip `TotallyHot.ArcRouter.Sandbox`
 below 80% without anyone touching these classes directly.
 
 ### Classes at 0% coverage
 
 **`TotallyHotArcRouter`:**
-- `TotallyHotArcRouter.Hosting.PriceCatalogIngestionHostedService`
-- `TotallyHotArcRouter.Hosting.StartupHealthCheckHostedService`
-- `TotallyHotArcRouter.Mcp.McpHostedService`
-- `TotallyHotArcRouter.Mcp.McpServer`
-- `TotallyHotArcRouter.Proxy.EnvironmentVariableProvider`
-- `TotallyHotArcRouter.PriceCatalog.PriceSourceAdminGrpcService`
-- `TotallyHotArcRouter.Telemetry.ITelemetryPublisher` (likely just an interface with a default member —
+- `TotallyHot.ArcRouter.Hosting.PriceCatalogIngestionHostedService`
+- `TotallyHot.ArcRouter.Hosting.StartupHealthCheckHostedService`
+- `TotallyHot.ArcRouter.Mcp.McpHostedService`
+- `TotallyHot.ArcRouter.Mcp.McpServer`
+- `TotallyHot.ArcRouter.Proxy.EnvironmentVariableProvider`
+- `TotallyHot.ArcRouter.PriceCatalog.PriceSourceAdminGrpcService`
+- `TotallyHot.ArcRouter.Telemetry.ITelemetryPublisher` (likely just an interface with a default member —
   verify before writing tests; may not need any)
-- `TotallyHotArcRouter.Tools.RunVisibleTests`
+- `TotallyHot.ArcRouter.Tools.RunVisibleTests`
 
-**`TotallyHotArcRouter.Sandbox`:**
-- `TotallyHotArcRouter.Sandbox.Firecracker.FirecrackerMicroVmLauncher`
-- `TotallyHotArcRouter.Sandbox.Tier1.LinuxJailLauncher`
+**`TotallyHot.ArcRouter.Sandbox`:**
+- `TotallyHot.ArcRouter.Sandbox.Firecracker.FirecrackerMicroVmLauncher`
+- `TotallyHot.ArcRouter.Sandbox.Tier1.LinuxJailLauncher`
 
 ### What to do
 
@@ -276,7 +276,7 @@ below 80% without anyone touching these classes directly.
    the same way `.github/workflows/dotnet-ci.yml`'s "Check coverage threshold" step does — **not**
    the root-level aggregate `line-rate` a single project's own cobertura report shows. That aggregate
    double-counts an assembly pulled in transitively but barely exercised by a given test project (e.g.
-   `TotallyHotArcRouter.Tests` alone reports `TotallyHotArcRouter.Sandbox` at ~4% because it only loads that
+   `TotallyHot.ArcRouter.Tests` alone reports `TotallyHot.ArcRouter.Sandbox` at ~4% because it only loads that
    assembly as a side effect of a `ProjectReference`, not because it tests it) and understated the true
    combined number by roughly 13 points when this item was filed.
 
@@ -284,7 +284,7 @@ below 80% without anyone touching these classes directly.
 
 Every listed class (except `ITelemetryPublisher` if it turns out to need none) has non-zero,
 meaningful coverage. Both assemblies stay at or above 80% per the CI's own per-assembly check, with a
-clearer safety margin than the current 80.1% on `TotallyHotArcRouter.Sandbox`.
+clearer safety margin than the current 80.1% on `TotallyHot.ArcRouter.Sandbox`.
 
 ### Not urgent
 

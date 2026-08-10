@@ -87,7 +87,7 @@ public class ProxyMiddleware
 
 ### 3. RequestInterceptor
 - **JSON Parsing:** Extract `body.model` and `body.messages[].content` (for dimension inference)
-- **Routing Decision:** Call `TotallyHotArcRouter.Route(task)` to get `{ model, confidence, reasoning }`
+- **Routing Decision:** Call `TotallyHot.ArcRouter.Route(task)` to get `{ model, confidence, reasoning }`
 - **Request Mutation:** Rewrite `body.model` to selected model
 - **Context Preservation:** Maintain all other request fields (auth, parameters, etc.)
 
@@ -209,8 +209,8 @@ sequenceDiagram
   },
   "Logging": {
 	"LogLevel": {
-	  "TotallyHotArcRouter.Proxy": "Information",
-	  "TotallyHotArcRouter.Router": "Debug"
+	  "TotallyHot.ArcRouter.Proxy": "Information",
+	  "TotallyHot.ArcRouter.Router": "Debug"
 	}
   }
 }

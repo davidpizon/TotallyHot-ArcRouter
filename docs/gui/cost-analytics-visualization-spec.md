@@ -4,7 +4,7 @@
 > `Components/CostAnalytics.razor`, rendered with **Apache ECharts** (vendored under
 > `wwwroot/lib/echarts`, driven by `wwwroot/js/echarts-interop.js`) via the reusable `<EChart>` host.
 > The per-metric chart models are built by the pure, unit-tested
-> `TotallyHotArcRouter.Gui.Charts.CostChartBuilder`; the whole dashboard moved off ApexCharts to ECharts in
+> `TotallyHot.ArcRouter.Gui.Charts.CostChartBuilder`; the whole dashboard moved off ApexCharts to ECharts in
 > the same change (Model Distribution too). A few implementation notes on how the spec was realized:
 >
 > - **Layout / interaction.** The tab keeps its single **metric selector** (one chart on screen at a

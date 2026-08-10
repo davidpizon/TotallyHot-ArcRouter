@@ -1,6 +1,6 @@
 # Aspirational Design Adoption Plan
 
-This plan describes how to adopt the new aspirational GUI design principles across TotallyHotArcRouter.Gui in controlled phases while preserving release stability.
+This plan describes how to adopt the new aspirational GUI design principles across TotallyHot.ArcRouter.Gui in controlled phases while preserving release stability.
 
 ## Objective
 

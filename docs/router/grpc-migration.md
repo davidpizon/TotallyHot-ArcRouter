@@ -1,8 +1,8 @@
 # Migrate Telemetry Transport: SignalR → gRPC
 
 > **Status: Implemented, but narrower than this doc's original design.** `StreamEvents` (section 1-4
-> below) is real: `src/Protos/telemetry.proto`, `TotallyHotArcRouter.Telemetry.TelemetryBroadcaster`/
-> `TelemetryGrpcService`, and `TotallyHotArcRouter.Gui.Services.LiveDataStore`'s `GrpcChannel`-based client
+> below) is real: `src/Protos/telemetry.proto`, `TotallyHot.ArcRouter.Telemetry.TelemetryBroadcaster`/
+> `TelemetryGrpcService`, and `TotallyHot.ArcRouter.Gui.Services.LiveDataStore`'s `GrpcChannel`-based client
 > all exist and SignalR has been fully removed (`TelemetryHub.cs` deleted, `Microsoft.AspNetCore.SignalR`/
 > `.Client` package references gone) - see [`telemetry.md`](telemetry.md#transport-grpc). **`GetModelSpend`
 > (section 3.2) and the `ModelListEvent` oneof case were deliberately descoped**, not implemented: both
@@ -16,7 +16,7 @@
 > this doc's original design didn't anticipate: **.NET MAUI's `SingleProject` build doesn't reliably
 > run Grpc.Tools' codegen**, so `TotallyHotArcRouter.Gui.csproj` originally compiling the `.proto` directly
 > (as section 4 originally described) failed with `CS0234` and no `protoc` output at all. Fixed by
-> moving that compile to `TotallyHotArcRouter.Gui.Telemetry` instead - see section 4's note and "Known
+> moving that compile to `TotallyHot.ArcRouter.Gui.Telemetry` instead - see section 4's note and "Known
 > limitations" below. **A second real bug surfaced once the build actually ran**: unencrypted HTTP/2
 > (h2c, section 2 as originally written) failed 100% of the time on a managed/corporate machine with
 > the HTTP/2-level `HTTP_1_1_REQUIRED` error - consistent with something on the network path not
@@ -32,8 +32,8 @@ Nothing about SignalR is currently broken - this document exists because it's te
 and closes one real, already-documented pain point, not because of an urgent problem. Two honest
 motivations, and one important non-motivation:
 
-- **The hand-synced DTO problem is real today.** `TotallyHotArcRouter.Gui.Telemetry.RoutingTelemetryEventDto`
-  is an independent copy of `TotallyHotArcRouter.Telemetry.RoutingTelemetryEvent`, kept in sync *by hand*
+- **The hand-synced DTO problem is real today.** `TotallyHot.ArcRouter.Gui.Telemetry.RoutingTelemetryEventDto`
+  is an independent copy of `TotallyHot.ArcRouter.Telemetry.RoutingTelemetryEvent`, kept in sync *by hand*
   because the GUI project deliberately doesn't reference the proxy project (see both types' own doc
   comments). Every field added to one has to be remembered on the other - this repo has already had
   to edit both files together twice (the original record's full field set, then adding
@@ -98,14 +98,14 @@ cases that had a real SignalR-era predecessor to port (`routing_telemetry`, `log
 `ModelListEvent`/`ModelListEntry` and the `model_list` oneof case don't exist in the shipped file
 either. The full design below (including the descoped pieces) is kept as-is for reference and as a
 sketch for whoever picks either piece up later; `csharp_namespace` is also set explicitly to
-`TotallyHotArcRouter.Telemetry.Contract` in the shipped file (not shown below), to avoid colliding with the
-hand-written `TotallyHotArcRouter.Telemetry.RoutingTelemetryEvent`/`LogLineEvent` domain types of the same
+`TotallyHot.ArcRouter.Telemetry.Contract` in the shipped file (not shown below), to avoid colliding with the
+hand-written `TotallyHot.ArcRouter.Telemetry.RoutingTelemetryEvent`/`LogLineEvent` domain types of the same
 short name, and with the real `Grpc.Core`/`Grpc.AspNetCore` namespaces this code also imports.
 
 ```protobuf
 syntax = "proto3";
 
-package TotallyHotArcRouter.telemetry.v1;
+package TotallyHot.ArcRouter.telemetry.v1;
 
 import "google/protobuf/timestamp.proto";
 
@@ -365,8 +365,8 @@ instead of `from`/`to` query-string parameters on an HTTP GET. Blocked on `IUsag
 
 New `Grpc.Net.Client` + `Google.Protobuf` package references, plus a `Grpc.Tools`-driven `.proto`
 codegen build step (a genuinely new piece of this project's build - nothing here uses protoc today).
-**As shipped, these package references and the codegen step live in `TotallyHotArcRouter.Gui.Telemetry`,
-not `TotallyHotArcRouter.Gui`** - see the note right after the code sample below for why.
+**As shipped, these package references and the codegen step live in `TotallyHot.ArcRouter.Gui.Telemetry`,
+not `TotallyHot.ArcRouter.Gui`** - see the note right after the code sample below for why.
 
 ```csharp
 public sealed class LiveDataStore : IAsyncDisposable
@@ -418,19 +418,19 @@ compiles (a mismatched field is a build error in `MapToDto`, not silent drift), 
 types themselves remain hand-written.
 
 **Second, and not originally anticipated by this doc**: the client-side `.proto` compile does **not**
-happen in `TotallyHotArcRouter.Gui` itself, despite the section heading above and this doc's original
+happen in `TotallyHot.ArcRouter.Gui` itself, despite the section heading above and this doc's original
 "New `Grpc.Net.Client` + `Google.Protobuf` package references... in this project" framing. It's
-compiled in `TotallyHotArcRouter.Gui.Telemetry` instead (a plain, non-MAUI sibling project, already
-referenced by `TotallyHotArcRouter.Gui`), because **.NET MAUI's `SingleProject` build (`Microsoft.NET.Sdk.Razor`
+compiled in `TotallyHot.ArcRouter.Gui.Telemetry` instead (a plain, non-MAUI sibling project, already
+referenced by `TotallyHot.ArcRouter.Gui`), because **.NET MAUI's `SingleProject` build (`Microsoft.NET.Sdk.Razor`
 + `UseMaui=true`) does not reliably run Grpc.Tools' codegen target** - confirmed empirically, not
 theoretically: a full rebuild of `TotallyHotArcRouter.Gui.csproj` with a correctly-restored `Grpc.Tools`
 package reference and a correctly-resolving `<Protobuf>` item path produced zero `protoc`/`Protobuf`/
 `Grpc`-related build output at all, and no `obj/.../Protos/` generated-file output - the codegen
 target simply never ran, silently, with no warning or error. `TotallyHotArcRouter.csproj` (plain
 `Microsoft.NET.Sdk.Web`, no MAUI) has no such problem. Moving the `.proto` compile to
-`TotallyHotArcRouter.Gui.Telemetry` fixed it: `Grpc.Net.Client`/`Google.Protobuf` now reach
-`TotallyHotArcRouter.Gui` transitively through its existing `ProjectReference`, with no `Protobuf` item or
-Grpc package reference of `TotallyHotArcRouter.Gui`'s own needed. `TotallyHotArcRouter.Gui.Telemetry` does now
+`TotallyHot.ArcRouter.Gui.Telemetry` fixed it: `Grpc.Net.Client`/`Google.Protobuf` now reach
+`TotallyHot.ArcRouter.Gui` transitively through its existing `ProjectReference`, with no `Protobuf` item or
+Grpc package reference of `TotallyHot.ArcRouter.Gui`'s own needed. `TotallyHot.ArcRouter.Gui.Telemetry` does now
 carry a `Grpc`/`Google.Protobuf` dependency it didn't have before, purely for this build-tooling
 reason - `ConversationAggregator`'s own logic still has no gRPC awareness.
 
@@ -506,8 +506,8 @@ that signal isn't wired to anything yet in this sketch).
   originally compiled the `.proto` directly, per section 4's original design; that produced a
   `CS0234` ("the type or namespace name 'Telemetry' does not exist in the namespace 'TotallyHotArcRouter'")
   with zero `protoc`/`Grpc`/`Protobuf` output anywhere in the build log - the codegen target simply
-  never ran. Fixed by moving the client-side compile to `TotallyHotArcRouter.Gui.Telemetry` (plain,
-  non-MAUI, already referenced by `TotallyHotArcRouter.Gui`) - see section 4's note. Worth remembering for
+  never ran. Fixed by moving the client-side compile to `TotallyHot.ArcRouter.Gui.Telemetry` (plain,
+  non-MAUI, already referenced by `TotallyHot.ArcRouter.Gui`) - see section 4's note. Worth remembering for
   any *future* MAUI-hosted codegen tool in this repo, not just this one.
 - **Decimal-as-string is a convention, not a protobuf-enforced contract** - nothing stops a future
   field from being added as `double` by mistake; this needs to be a documented team convention (this
