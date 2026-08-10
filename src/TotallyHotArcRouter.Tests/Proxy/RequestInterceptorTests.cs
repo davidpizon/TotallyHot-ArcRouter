@@ -20,7 +20,7 @@ public class RequestInterceptorTests
     // InferLiveDimension's KeywordDimensionInferrer default (empty prompt) always resolves here -
     // matching the dimension RequestInterceptor's fallback ranking will read for these requests.
     private static readonly string DefaultLiveDimension =
-        RouterDimension.ToLiveKey("live:", RouterDimension.CodeGeneration);
+        RouterDimension.ToLiveKey(new SandboxOptions().LiveMemoryPrefix, RouterDimension.CodeGeneration);
 
     [Fact]
     public async Task InterceptRequestAsync_IncrementsCount_AndLogsStructuredMessage()

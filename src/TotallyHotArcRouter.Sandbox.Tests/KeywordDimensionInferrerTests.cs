@@ -19,7 +19,7 @@ public class KeywordDimensionInferrerTests
     [InlineData("Generate a REST endpoint", "code_generation")]
     [InlineData("", "code_generation")]
     [InlineData("Port this algorithm from Python to Go", "multi_language")]
-    [InlineData("Translate this snippet to JavaScript", "multi_language")]
+    [InlineData("Translate this Python snippet to JavaScript", "multi_language")]
     [InlineData("Rewrite this Ruby class in Kotlin", "multi_language")]
     public void Infer_ReturnsExpectedDimension(string prompt, string expected)
     {

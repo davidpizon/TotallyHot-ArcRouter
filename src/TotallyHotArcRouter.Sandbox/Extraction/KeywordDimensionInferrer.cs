@@ -83,19 +83,39 @@ public sealed class KeywordDimensionInferrer : IDimensionInferrer
     }
 
     /// <summary>Counts how many distinct entries of <see cref="LanguageNames"/> appear in the (already
-    /// lowercased) prompt - two or more is this heuristic's cross-language signal.</summary>
+    /// lowercased) prompt - two or more is this heuristic's cross-language signal. Requires word boundaries
+    /// to avoid false positives (e.g., "go" in regular prose, "java" inside "javascript").</summary>
     private static int CountDistinctLanguageMentions(string lowercasePrompt)
     {
         var count = 0;
         foreach (var name in LanguageNames)
         {
-            if (lowercasePrompt.Contains(name, StringComparison.Ordinal))
+            if (MatchesAsLanguageName(lowercasePrompt, name))
             {
                 count++;
             }
         }
 
         return count;
+    }
+
+    /// <summary>Checks if a language name appears as a whole word or hyphenated phrase, not as a substring.</summary>
+    private static bool MatchesAsLanguageName(string text, string languageName)
+    {
+        var index = 0;
+        while ((index = text.IndexOf(languageName, index, StringComparison.Ordinal)) >= 0)
+        {
+            var before = index == 0 || !char.IsLetterOrDigit(text[index - 1]);
+            var after = index + languageName.Length >= text.Length || !char.IsLetterOrDigit(text[index + languageName.Length]);
+            if (before && after)
+            {
+                return true;
+            }
+
+            index += languageName.Length;
+        }
+
+        return false;
     }
 }
 

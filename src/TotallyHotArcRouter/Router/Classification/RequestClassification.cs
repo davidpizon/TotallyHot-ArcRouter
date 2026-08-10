@@ -1,5 +1,7 @@
 namespace TotallyHot.ArcRouter.Router.Classification;
 
+using TotallyHot.ArcRouter.Sandbox;
+
 /// <summary>
 /// The Context leg's classification of a single request, per PLAN.md Phase H and the paper's context
 /// tuple <c>c_i = (p_i, d_i, H_&lt;i)</c> (research doc §"Notation"). Computed once, ahead of routing,
