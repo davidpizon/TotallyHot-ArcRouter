@@ -7,6 +7,7 @@ using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Proxy.Translation;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Router;
+using TotallyHot.ArcRouter.Router.Classification;
 using TotallyHot.ArcRouter.Sandbox.DependencyInjection;
 using TotallyHot.ArcRouter.Sandbox.Execution;
 using TotallyHot.ArcRouter.Telemetry;
@@ -73,6 +74,13 @@ namespace TotallyHot.ArcRouter.Hosting
                 .Configure<IConfiguration>((options, configuration) =>
                     configuration.GetSection(CircuitBreakerOptions.SectionName).Bind(options));
             services.AddSingleton<ICircuitBreaker, CircuitBreaker>();
+
+            // PLAN.md Phase H (the Context leg): classifies a request ahead of routing. Registered so
+            // later consumers (Phase I's IRoutingPolicy) can take it as a normal DI dependency; not
+            // registering IDimensionInferrer itself is deliberate - RequestInterceptor's own default
+            // (a fresh KeywordDimensionInferrer) is what HeuristicRequestClassifier's default also
+            // resolves to, keeping the two in lockstep without a shared registration to keep in sync.
+            services.AddSingleton<IRequestClassifier, HeuristicRequestClassifier>();
             services.AddSingleton<RequestInterceptor>();
 
             // Telemetry (live routing events broadcast to GUI dashboards over gRPC - see

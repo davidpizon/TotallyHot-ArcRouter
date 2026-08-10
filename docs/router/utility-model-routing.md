@@ -173,6 +173,22 @@ The critical structural point: **selection is decoupled from generation.** The e
   - `isUtility = true` when the alias is a utility alias **or** payload heuristics indicate a lightweight background call (small `max_tokens`, short/system-only prompt, title/intent-style system content). Heuristics are the signal in the mainAgent-mirrored path where the name is ambiguous.
   - `dimension` best-effort from prompt shape (reuse the paper's dimension taxonomy where practical); utility requests can map to a dedicated `"utility"` dimension.
 
+  > **Shipped (PLAN.md Phase H):** `IRequestClassifier` / `HeuristicRequestClassifier`
+  > (`src/TotallyHotArcRouter/Router/Classification/`) produces `{ Dimension, Difficulty, Language, IsUtility }`
+  > from the parsed request body, wired into `RequestInterceptor.InferLiveDimension` so every routing
+  > decision (auto-select and the unresolved-model fallback) runs the classifier ahead of routing rather
+  > than a raw dimension-only inferrer. `Dimension` delegates to the shared `IDimensionInferrer`
+  > (`KeywordDimensionInferrer`, now covering all nine research-doc §4.4 dimensions including
+  > `multi_language`) so the pre-route and post-response sandbox paths can never classify the same
+  > prompt differently. `IsUtility` uses this section's exact payload heuristics (small `max_tokens`,
+  > short prompt naming a title/summary/commit-message-style workflow) but is **not yet consumed by any
+  > routing decision** — that wiring, plus the dedicated `"utility"` dimension and the alias-based
+  > `isUtility` signal (B1), lands with B3/B4 below. `Difficulty` (`easy`/`medium`/`hard`, research doc's
+  > few-shot example vocabulary) is additional Phase H scope beyond this section's original `{ dimension,
+  > isUtility }` shape, added because PLAN.md's classifier contract also includes it for the
+  > LinUCB/LinTS one-hot context (§5's baselines) — it is likewise unconsumed until a later phase reads
+  > it.
+
 ### B3. Selection-only routing policy
 
 - Introduce `IRoutingPolicy` with `Task<string> SelectModelAsync(RoutingContext ctx, CancellationToken ct)` returning an **allowlisted `ModelName`** (never generates a response). This is the seam that makes smart routing compatible with the streaming reverse-proxy.

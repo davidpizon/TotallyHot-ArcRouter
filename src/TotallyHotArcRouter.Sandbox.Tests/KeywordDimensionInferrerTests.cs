@@ -18,6 +18,9 @@ public class KeywordDimensionInferrerTests
     [InlineData("Complete this function for me", "code_completion")]
     [InlineData("Generate a REST endpoint", "code_generation")]
     [InlineData("", "code_generation")]
+    [InlineData("Port this algorithm from Python to Go", "multi_language")]
+    [InlineData("Translate this snippet to JavaScript", "multi_language")]
+    [InlineData("Rewrite this Ruby class in Kotlin", "multi_language")]
     public void Infer_ReturnsExpectedDimension(string prompt, string expected)
     {
         Assert.Equal(expected, _inferrer.Infer(prompt, SandboxLanguage.Python));

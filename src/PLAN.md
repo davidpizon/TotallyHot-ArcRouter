@@ -16,8 +16,8 @@ severed at a single point.
 
 ```mermaid
 flowchart LR
-    subgraph CTX["Context — Phases H, J, K"]
-        CLS["IRequestClassifier<br/>dimension / difficulty / language<br/>MISSING"]
+    subgraph CTX["Context — Phases J, K"]
+        CLS["IRequestClassifier<br/>dimension / difficulty / language / isUtility<br/>SHIPPED (Phase H)"]
         MEM["Embedding-keyed Memory<br/>cosine kNN, k=10, thr 0.5, FIFO 20K<br/>MISSING"]
         PRIOR["DimensionBest prior<br/>MISSING"]
     end
@@ -74,8 +74,6 @@ Verified against the code:
   `RoutingOptionsTests` but read by no production code: configuration for a decision engine that was
   never built. Per D.3 of the research doc, dimension identity carries only ~27% of the oracle-choice
   entropy — the other ~73% is exactly what task-keyed memory exists to capture.
-- **Classification happens too late.** `KeywordDimensionInferrer` runs *post-response* inside the
-  sandbox, so no dimension is known at decision time.
 - **No oracle, no regret, no baselines.** Nothing computes `R_ij`, `CumReg`, `AvgPerf`, or `Perf/$`.
 - **The benchmark corpus is absent.** `data/`, `outputs/`, and `agentic-artifacts/` are referenced
   throughout `README.md` and `docs/HANDBOOK.md` but do not exist in this checkout.
@@ -125,22 +123,6 @@ constants that happen not to match.
   subsequent auto-select for a same-dimension prompt ranks by that score. Today that test fails.
 - Exit: an end-to-end test proves a verifier score written on request *N* changes the model selected
   on request *N+1*. Zero literal dimension strings outside the contract type.
-
-### Phase H: Request-time classification (the Context leg)
-
-- Add `IRequestClassifier` → `{ dimension, difficulty, language, isUtility }`, per
-  [`../docs/router/utility-model-routing.md`](../docs/router/utility-model-routing.md) §B2.
-- **Promote `KeywordDimensionInferrer` out of `TotallyHot.ArcRouter.Sandbox`** into a shared location
-  both the pre-route classifier and the post-response sandbox path consume. If the two ever infer
-  differently for the same prompt, Phase G's fix silently reopens — shared code is the structural
-  guarantee, not a convention.
-- Extend inference to the full nine single-turn dimensions of research-doc §4.4. The current inferrer
-  emits eight and has no `multi_language` branch at all; it also disambiguates only by keyword-check
-  order, so `code_generation` is reached solely as the fall-through default.
-- Classification is on the hot path: no network, no allocation-heavy scanning, bounded by prompt
-  length.
-- Exit: classifier unit-tested across all nine dimensions plus the utility shape; sandbox and
-  pre-route paths provably agree on a shared corpus of prompts.
 
 ### Phase I: Selection-only routing policy and the cost-aware reward (the Action leg)
 

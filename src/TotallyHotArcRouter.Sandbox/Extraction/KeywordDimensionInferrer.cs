@@ -6,10 +6,29 @@ namespace TotallyHot.ArcRouter.Sandbox.Extraction;
 /// </summary>
 public sealed class KeywordDimensionInferrer : IDimensionInferrer
 {
+    /// <summary>
+    /// Language names whose co-occurrence in a prompt (or an explicit porting phrase) signals a
+    /// cross-language task rather than a single-language one. Deliberately checked before every other
+    /// branch: <see cref="RouterDimension.MultiLanguage"/> is otherwise unreachable, since a prompt
+    /// naming two languages just as easily matches a later branch's keywords (e.g. "port this
+    /// algorithm from Python to Go" also contains "algorithm").
+    /// </summary>
+    private static readonly string[] LanguageNames =
+    [
+        "python", "javascript", "typescript", "c#", "csharp", "java", "go", "golang", "rust",
+        "c++", "ruby", "php", "kotlin", "swift",
+    ];
+
     /// <inheritdoc />
     public string Infer(string prompt, SandboxLanguage language)
     {
         var p = (prompt ?? string.Empty).ToLowerInvariant();
+
+        if (ContainsAny(p, "port to", "port from", "translate to", "translate from", "convert from", "rewrite in", "cross-language", "cross language") ||
+            CountDistinctLanguageMentions(p) >= 2)
+        {
+            return RouterDimension.MultiLanguage;
+        }
 
         if (ContainsAny(p, "fix", "bug", "error", "exception", "stack trace", "traceback", "doesn't work", "not working"))
         {
@@ -61,6 +80,22 @@ public sealed class KeywordDimensionInferrer : IDimensionInferrer
         }
 
         return false;
+    }
+
+    /// <summary>Counts how many distinct entries of <see cref="LanguageNames"/> appear in the (already
+    /// lowercased) prompt - two or more is this heuristic's cross-language signal.</summary>
+    private static int CountDistinctLanguageMentions(string lowercasePrompt)
+    {
+        var count = 0;
+        foreach (var name in LanguageNames)
+        {
+            if (lowercasePrompt.Contains(name, StringComparison.Ordinal))
+            {
+                count++;
+            }
+        }
+
+        return count;
     }
 }
 

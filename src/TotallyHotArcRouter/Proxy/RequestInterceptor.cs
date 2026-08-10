@@ -3,9 +3,9 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using TotallyHot.ArcRouter.Router;
+using TotallyHot.ArcRouter.Router.Classification;
 using TotallyHot.ArcRouter.Sandbox;
 using TotallyHot.ArcRouter.Sandbox.Extraction;
-using TotallyHot.ArcRouter.Telemetry;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -42,6 +42,7 @@ namespace TotallyHot.ArcRouter.Proxy
         private readonly RouterMemory? _routerMemory;
         private readonly ICircuitBreaker _circuitBreaker;
         private readonly IDimensionInferrer _dimensionInferrer;
+        private readonly IRequestClassifier _requestClassifier;
         private readonly string _liveMemoryPrefix;
 
         /// <summary>Number of requests seen by <see cref="InterceptRequestAsync"/> so far.</summary>
@@ -70,16 +71,21 @@ namespace TotallyHot.ArcRouter.Proxy
         /// successes/failures this class reads back when ranking candidates.
         /// </param>
         /// <param name="dimensionInferrer">
-        /// Infers the live dimension of the request in flight from its newest user message (PLAN.md Phase
-        /// G's stopgap until Phase H's <c>IRequestClassifier</c> exists). Defaults to a fresh
-        /// <see cref="KeywordDimensionInferrer"/> when omitted - the same heuristic the sandbox's
+        /// Infers the live dimension of the request in flight from its newest user message. Defaults to a
+        /// fresh <see cref="KeywordDimensionInferrer"/> when omitted - the same heuristic the sandbox's
         /// post-response path uses, so a request and its own later-observed score are classified
-        /// identically.
+        /// identically. Also the default <paramref name="requestClassifier"/>'s dimension source when
+        /// that parameter itself is omitted.
         /// </param>
         /// <param name="sandboxOptions">
         /// Optional source of <see cref="SandboxOptions.LiveMemoryPrefix"/>, which must match what
         /// <see cref="Router.RouterMemoryScoreObserver"/> writes under for <paramref name="routerMemory"/>
         /// lookups to ever hit. Defaults to <see cref="SandboxOptions"/>'s own default prefix when omitted.
+        /// </param>
+        /// <param name="requestClassifier">
+        /// PLAN.md Phase H's Context-leg classifier, run ahead of routing on every request. Defaults to a
+        /// <see cref="HeuristicRequestClassifier"/> built over <paramref name="dimensionInferrer"/> when
+        /// omitted, so its dimension output matches <see cref="InferLiveDimension"/>'s by construction.
         /// </param>
         /// <exception cref="InvalidOperationException">
         /// <paramref name="singleModelServingOptions"/> names a model that isn't configured.
@@ -91,7 +97,8 @@ namespace TotallyHot.ArcRouter.Proxy
             RouterMemory? routerMemory = null,
             ICircuitBreaker? circuitBreaker = null,
             IDimensionInferrer? dimensionInferrer = null,
-            IOptions<SandboxOptions>? sandboxOptions = null)
+            IOptions<SandboxOptions>? sandboxOptions = null,
+            IRequestClassifier? requestClassifier = null)
         {
             _logger = logger;
             _modelRouteResolver = modelRouteResolver;
@@ -100,6 +107,7 @@ namespace TotallyHot.ArcRouter.Proxy
             _circuitBreaker = circuitBreaker ?? new CircuitBreaker();
             _dimensionInferrer = dimensionInferrer ?? new KeywordDimensionInferrer();
             _liveMemoryPrefix = sandboxOptions?.Value.LiveMemoryPrefix ?? new SandboxOptions().LiveMemoryPrefix;
+            _requestClassifier = requestClassifier ?? new HeuristicRequestClassifier(_dimensionInferrer);
 
             if (_forcedModelName is not null &&
                 !modelRouteResolver.ListModels().Any(m => string.Equals(m.ModelName, _forcedModelName, StringComparison.OrdinalIgnoreCase)))
@@ -349,18 +357,15 @@ namespace TotallyHot.ArcRouter.Proxy
         }
 
         /// <summary>
-        /// Infers the live <see cref="RouterMemory"/> dimension for the request in flight, from its newest
-        /// user message - PLAN.md Phase G's stopgap classification until Phase H's
-        /// <c>IRequestClassifier</c> runs ahead of routing. Uses the same <see cref="IDimensionInferrer"/>
-        /// heuristic (and, by default, the exact same implementation) the sandbox's post-response path
-        /// uses, and composes the key through <see cref="RouterDimension.ToLiveKey"/> - the same
-        /// construction point <see cref="Router.RouterMemoryScoreObserver"/> uses to write a score - so the
-        /// two sides can never independently drift into a key mismatch.
+        /// Infers the live <see cref="RouterMemory"/> dimension for the request in flight - PLAN.md Phase
+        /// H's <see cref="IRequestClassifier"/>, run ahead of routing on every request. Composes the key
+        /// through <see cref="RouterDimension.ToLiveKey"/> - the same construction point
+        /// <see cref="Router.RouterMemoryScoreObserver"/> uses to write a score - so the two sides can
+        /// never independently drift into a key mismatch (PLAN.md Phase G).
         /// </summary>
         private string InferLiveDimension(JsonObject jsonObject)
         {
-            var prompt = RequestTextExtractor.ExtractNewestUserMessage(jsonObject) ?? string.Empty;
-            var dimension = _dimensionInferrer.Infer(prompt, SandboxLanguage.Unknown);
+            var dimension = _requestClassifier.Classify(jsonObject).Dimension;
             return RouterDimension.ToLiveKey(_liveMemoryPrefix, dimension);
         }
 
