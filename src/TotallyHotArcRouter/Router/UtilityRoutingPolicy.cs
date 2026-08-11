@@ -109,11 +109,11 @@ public sealed class UtilityRoutingPolicy : IRoutingPolicy
         // Degradation case 1: candidates with pricing but failed quality gate; pick cheapest.
         if (priced.Count > 0)
         {
+            var fallback = priced.OrderBy(x => x.Cost).First().Candidate.ModelName;
             _logger.LogWarning(
                 "All utility candidates failed quality gate for dimension '{Dimension}'; falling back to cheapest priced model '{Model}'.",
                 context.Dimension,
-                priced[0].Candidate.ModelName);
-            var fallback = priced.OrderBy(x => x.Cost).First().Candidate.ModelName;
+                fallback);
             return Task.FromResult(fallback);
         }
 

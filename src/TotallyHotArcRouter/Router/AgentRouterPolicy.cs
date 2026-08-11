@@ -24,8 +24,9 @@ public sealed class AgentRouterPolicy : IRoutingPolicy
         var decision = await _router.SelectModelAsync(context.Dimension, cancellationToken);
 
         // Ensure the selected model is in the candidates list to satisfy IRoutingPolicy contract.
+        // Use case-insensitive comparison to match ModelRouteResolver resolution behavior.
         var selectedModel = decision.SelectedModel;
-        if (context.Candidates.Any(c => c.ModelName == selectedModel))
+        if (context.Candidates.Any(c => c.ModelName.Equals(selectedModel, StringComparison.OrdinalIgnoreCase)))
         {
             return selectedModel;
         }

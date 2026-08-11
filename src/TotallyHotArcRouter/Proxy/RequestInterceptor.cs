@@ -404,7 +404,15 @@ namespace TotallyHot.ArcRouter.Proxy
                     var context = new RoutingContext(liveDimension, classification.IsUtility, candidates);
                     var selectedName = await _routingPolicy.SelectModelAsync(context, cancellationToken);
 
-                    if (_modelRouteResolver.TryResolve(selectedName, out var selectedRoute))
+                    // Validate that the policy returned a model from the eligible candidate set to enforce contract.
+                    var selectedInCandidates = candidates.Any(c => c.ModelName == selectedName);
+                    if (!selectedInCandidates)
+                    {
+                        _logger.LogWarning(
+                            "[INTERCEPTOR] Routing policy selected ineligible model '{Model}' not in candidate set; falling back to memory ranking.",
+                            SanitizeForLog(selectedName));
+                    }
+                    else if (_modelRouteResolver.TryResolve(selectedName, out var selectedRoute))
                     {
                         // docs/router/utility-model-routing.md §B5: the routing decision itself (dimension,
                         // isUtility, chosen model), logged through Serilog so it reaches the same telemetry
@@ -417,10 +425,12 @@ namespace TotallyHot.ArcRouter.Proxy
                             classification.IsUtility);
                         return selectedRoute;
                     }
-
-                    _logger.LogWarning(
-                        "[INTERCEPTOR] Routing policy selected unresolvable model '{Model}'; falling back to memory ranking.",
-                        SanitizeForLog(selectedName));
+                    else
+                    {
+                        _logger.LogWarning(
+                            "[INTERCEPTOR] Routing policy selected unresolvable model '{Model}'; falling back to memory ranking.",
+                            SanitizeForLog(selectedName));
+                    }
                 }
             }
 
