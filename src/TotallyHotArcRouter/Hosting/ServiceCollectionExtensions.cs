@@ -34,7 +34,7 @@ namespace TotallyHot.ArcRouter.Hosting
             // Core Router
             services.AddSingleton<IRouterMemoryStore, JsonRouterMemoryStore>();
             services.AddSingleton<RouterMemory>();
-            services.AddTransient<AgentAsARouter>();
+            services.AddSingleton<AgentAsARouter>();
 
             // Tools
             services.AddTransient<CheckSyntax>();

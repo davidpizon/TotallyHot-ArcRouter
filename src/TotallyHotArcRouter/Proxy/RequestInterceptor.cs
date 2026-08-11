@@ -398,14 +398,14 @@ namespace TotallyHot.ArcRouter.Proxy
         {
             if (_routingPolicy is not null)
             {
-                var candidates = BuildRoutingCandidates();
+                var candidates = BuildRoutingCandidates(liveDimension);
                 if (candidates.Count > 0)
                 {
                     var context = new RoutingContext(liveDimension, classification.IsUtility, candidates);
                     var selectedName = await _routingPolicy.SelectModelAsync(context, cancellationToken);
 
                     // Validate that the policy returned a model from the eligible candidate set to enforce contract.
-                    var selectedInCandidates = candidates.Any(c => c.ModelName == selectedName);
+                    var selectedInCandidates = candidates.Any(c => c.ModelName.Equals(selectedName, StringComparison.OrdinalIgnoreCase));
                     if (!selectedInCandidates)
                     {
                         _logger.LogWarning(
@@ -439,13 +439,25 @@ namespace TotallyHot.ArcRouter.Proxy
 
         /// <summary>
         /// Builds one <see cref="RoutingCandidate"/> per currently-eligible model (the same eligibility
-        /// rules <see cref="GetEligibleRoutes"/> applies for <see cref="RankEligibleModels"/>), for handing
-        /// to an <see cref="IRoutingPolicy"/>.
+        /// rules <see cref="GetEligibleRoutes"/> applies for <see cref="RankEligibleModels"/>), ranked by
+        /// <see cref="RouterMemory"/> score for better policy fallback behavior, for handing to an
+        /// <see cref="IRoutingPolicy"/>.
         /// </summary>
-        private List<RoutingCandidate> BuildRoutingCandidates() =>
-            GetEligibleRoutes([])
+        /// <param name="liveDimension">The request's live dimension key for score lookup.</param>
+        private List<RoutingCandidate> BuildRoutingCandidates(string liveDimension)
+        {
+            var candidates = GetEligibleRoutes([]);
+            if (_routerMemory is not null && candidates.Count > 0)
+            {
+                candidates = candidates
+                    .OrderByDescending(e => _routerMemory.GetAverageScore(liveDimension, e.ModelName))
+                    .ToList();
+            }
+
+            return candidates
                 .Select(e => new RoutingCandidate(e.Route.ModelName, e.Route.Provider, e.Route.IsFree))
                 .ToList();
+        }
 
         /// <summary>
         /// Ranks every currently-configured model other than <paramref name="excludeModelNames"/>, whose
