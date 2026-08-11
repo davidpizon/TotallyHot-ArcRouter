@@ -5,7 +5,7 @@ using Microsoft.Extensions.Options;
 namespace TotallyHot.ArcRouter.Router;
 
 /// <summary>
-/// Selects the best model for a given prompt from <see cref="RouterMemory"/>'s observed scores -
+/// Selects the best model for a given routing dimension from <see cref="RouterMemory"/>'s observed scores -
 /// selection-only, per PLAN.md Phase I: this class never invokes a model, it only chooses one. The general
 /// (non-utility) backing engine <see cref="AgentRouterPolicy"/> delegates to for the <c>agentic-router</c>
 /// alias (<c>docs/router/utility-model-routing.md</c> §B3's "General" case).
@@ -33,9 +33,9 @@ public class AgentAsARouter
     }
 
     /// <summary>
-    /// Selects the best available model for a prompt without invoking it.
+    /// Selects the best available model for a routing dimension without invoking it.
     /// </summary>
-    /// <param name="dimension">The dimension of the prompt (e.g., 'code_generation', 'translation').</param>
+    /// <param name="dimension">The routing dimension to select a model for (e.g., 'code_generation', 'translation').</param>
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <returns>A <see cref="RoutingDecision"/> describing the chosen model.</returns>
     public Task<RoutingDecision> SelectModelAsync(string dimension, CancellationToken cancellationToken = default)
