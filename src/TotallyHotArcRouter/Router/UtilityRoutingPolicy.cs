@@ -118,12 +118,24 @@ public sealed class UtilityRoutingPolicy : IRoutingPolicy
             return Task.FromResult(fallback);
         }
 
-        // Degradation case 2: no candidates have pricing; pick first.
+        // Degradation case 2: no candidates have pricing; pick by observed quality (still gated), with a
+        // deterministic tie-break so the outcome never depends on input ordering.
+        var qualityGated = scored
+            .Where(x => x.Quality is not double q || q >= _options.UtilityMinQualityScore)
+            .ToList();
+        var fallbackCandidates = qualityGated.Count > 0 ? qualityGated : scored;
+
+        var unpricedFallback = fallbackCandidates
+            .OrderByDescending(x => x.Quality ?? double.MinValue)
+            .ThenBy(x => x.Candidate.ModelName, StringComparer.Ordinal)
+            .First()
+            .Candidate.ModelName;
+
         _logger.LogError(
-            "No utility candidates have pricing for dimension '{Dimension}'; falling back to first candidate '{Model}'.",
+            "No utility candidates have pricing for dimension '{Dimension}'; falling back to best-observed-quality candidate '{Model}'.",
             context.Dimension,
-            context.Candidates[0].ModelName);
-        return Task.FromResult(context.Candidates[0].ModelName);
+            unpricedFallback);
+        return Task.FromResult(unpricedFallback);
     }
 
     /// <summary>

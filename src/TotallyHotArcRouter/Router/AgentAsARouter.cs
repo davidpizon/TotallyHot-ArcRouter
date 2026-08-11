@@ -40,9 +40,10 @@ public class AgentAsARouter
     /// <returns>A <see cref="RoutingDecision"/> describing the chosen model.</returns>
     public Task<RoutingDecision> SelectModelAsync(string dimension, CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Selecting model for dimension '{Dimension}'.", dimension);
-
+        ArgumentException.ThrowIfNullOrWhiteSpace(dimension);
         cancellationToken.ThrowIfCancellationRequested();
+
+        _logger.LogInformation("Selecting model for dimension '{Dimension}'.", dimension);
 
         // Exploration vs. Exploitation
         var decision = _options.EnableExploration && Random.Shared.NextDouble() < _options.ExplorationRate
