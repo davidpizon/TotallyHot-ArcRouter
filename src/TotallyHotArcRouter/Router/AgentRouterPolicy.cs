@@ -36,7 +36,11 @@ public sealed class AgentRouterPolicy : IRoutingPolicy
             return selectedModel;
         }
 
-        // Fallback to first candidate if selection is not eligible.
-        return context.Candidates[0].ModelName;
+        // Fallback when the selection is not eligible: pick deterministically by name so the outcome
+        // never depends on RoutingContext.Candidates' caller-supplied ordering.
+        return context.Candidates
+            .Select(c => c.ModelName)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .First();
     }
 }

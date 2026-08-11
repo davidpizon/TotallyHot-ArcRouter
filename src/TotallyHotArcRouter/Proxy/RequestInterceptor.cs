@@ -283,7 +283,7 @@ namespace TotallyHot.ArcRouter.Proxy
             {
                 // Docs/router/utility-model-routing.md's generalized fallback: outside forced single-model
                 // serving, an unresolved model name is a routing decision, not a hard error - accept the
-                // request and let TryAgenticallyRouteUnresolvedModel pick a real, allowlisted candidate.
+                // request and let ResolveAgenticRouteAsync pick a real, allowlisted candidate.
                 // Single-model serving keeps its existing eager-validated behavior untouched (never reaches
                 // here with _forcedModelName set, since it overrides modelName above before this check).
                 // A model that resolved but is stopped/not-currently-upstream (IsModelEnabled false) is

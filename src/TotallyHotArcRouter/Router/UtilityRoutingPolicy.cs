@@ -118,8 +118,9 @@ public sealed class UtilityRoutingPolicy : IRoutingPolicy
             return Task.FromResult(fallback);
         }
 
-        // Degradation case 2: no candidates have pricing; pick by observed quality (still gated), with a
-        // deterministic tie-break so the outcome never depends on input ordering.
+        // Degradation case 2: no candidates have pricing; pick by observed quality, preferring candidates
+        // that pass the quality gate but falling back to all scored candidates if that would exclude
+        // everyone. A deterministic tie-break ensures the outcome never depends on input ordering.
         var qualityGated = scored
             .Where(x => x.Quality is not double q || q >= _options.UtilityMinQualityScore)
             .ToList();

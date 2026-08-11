@@ -27,6 +27,10 @@ public class AgentAsARouter
         IOptions<RoutingOptions> options,
         RouterMemory memory)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(memory);
+
         _logger = logger;
         _options = options.Value;
         _memory = memory;
