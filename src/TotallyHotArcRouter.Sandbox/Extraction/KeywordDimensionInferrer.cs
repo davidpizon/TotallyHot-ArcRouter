@@ -99,7 +99,9 @@ public sealed class KeywordDimensionInferrer : IDimensionInferrer
         return count;
     }
 
-    /// <summary>Checks if a language name appears as a whole word or hyphenated phrase, not as a substring.</summary>
+    /// <summary>Checks if a language name appears as a whole word or hyphenated phrase, not as a substring.
+    /// "go" additionally requires language-like context (preceded by "to "/"in "/"from " and not immediately
+    /// followed by another word) to avoid matching the English verb, e.g. "to go faster".</summary>
     private static bool MatchesAsLanguageName(string text, string languageName)
     {
         var index = 0;
@@ -107,7 +109,7 @@ public sealed class KeywordDimensionInferrer : IDimensionInferrer
         {
             var before = index == 0 || !char.IsLetterOrDigit(text[index - 1]);
             var after = index + languageName.Length >= text.Length || !char.IsLetterOrDigit(text[index + languageName.Length]);
-            if (before && after)
+            if (before && after && (languageName != "go" || IsGoLanguageContext(text, index)))
             {
                 return true;
             }
@@ -116,6 +118,29 @@ public sealed class KeywordDimensionInferrer : IDimensionInferrer
         }
 
         return false;
+    }
+
+    /// <summary>Distinguishes "Go" the language from "go" the verb: requires an immediately preceding
+    /// "to "/"in "/"from " and no following word (i.e. the sentence ends there, or only punctuation follows).</summary>
+    private static bool IsGoLanguageContext(string text, int goIndex)
+    {
+        var precededByContextWord =
+            (goIndex >= 3 && text.AsSpan(goIndex - 3, 3).SequenceEqual("to ")) ||
+            (goIndex >= 3 && text.AsSpan(goIndex - 3, 3).SequenceEqual("in ")) ||
+            (goIndex >= 5 && text.AsSpan(goIndex - 5, 5).SequenceEqual("from "));
+
+        if (!precededByContextWord)
+        {
+            return false;
+        }
+
+        var i = goIndex + 2;
+        while (i < text.Length && !char.IsLetterOrDigit(text[i]))
+        {
+            i++;
+        }
+
+        return i >= text.Length;
     }
 }
 
