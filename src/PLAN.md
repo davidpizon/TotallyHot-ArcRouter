@@ -22,9 +22,9 @@ flowchart LR
         PRIOR["DimensionBest prior<br/>MISSING"]
     end
 
-    subgraph ACT["Action — Phases I, L, M"]
+    subgraph ACT["Action — Phases L, M"]
         ORC["Orchestrator<br/>weighted vote over 4 voters<br/>MISSING"]
-        POL["IRoutingPolicy.SelectModelAsync<br/>argmax e1*s + e2*k<br/>MISSING"]
+        POL["IRoutingPolicy.SelectModelAsync<br/>argmax e1*s + e2*k<br/>SHIPPED (Phase I)"]
     end
 
     subgraph FB["Feedback — SHIPPED"]
@@ -56,14 +56,18 @@ Verified against the code:
   wrote `live:<inferred_dimension>` but the fallback reader in
   [`TotallyHotArcRouter/Proxy/RequestInterceptor.cs`](TotallyHotArcRouter/Proxy/RequestInterceptor.cs)
   read the dead key `"unresolved-model-fallback"`. Accumulated feedback now influences routing decisions.
-- **There is no Action leg on the live path.** `AgentAsARouter` is registered
-  ([`TotallyHotArcRouter/Hosting/ServiceCollectionExtensions.cs:38`](TotallyHotArcRouter/Hosting/ServiceCollectionExtensions.cs))
-  but never invoked; its `IRouterModelClient` is `NotImplementedRouterModelClient`
-  ([`TotallyHotArcRouter/Program.cs:81`](TotallyHotArcRouter/Program.cs)). Its `ExploitAsync`
-  conflates *selecting* a model with *invoking* one, so it cannot be used by a streaming reverse proxy
-  as written.
-- **No cost term anywhere.** `IModelPriceCatalog` exists and is cache-backed for inline reads, but no
-  selection path consumes it. `RoutingOptions` has no `ε₁`/`ε₂`.
+- **The Action leg is on the live path (Phase I shipped).** `IRoutingPolicy`/`RoutingContext` exist
+  ([`TotallyHotArcRouter/Router/IRoutingPolicy.cs`](TotallyHotArcRouter/Router/IRoutingPolicy.cs)),
+  `CompositeRoutingPolicy` is the registered default, and `RequestInterceptor.ResolveAgenticRouteAsync`
+  consults it for the router alias and the unresolved-model fallback. `AgentAsARouter` is
+  selection-only (`SelectModelAsync`, no `IRouterModelClient`); `NotImplementedRouterModelClient` and
+  `RoutingResult` are deleted. See [`../docs/router/utility-model-routing.md`](../docs/router/utility-model-routing.md)
+  §B3-B5 for what shipped exactly as specified versus documented narrowing (no per-tier utility
+  weighting, no utility-side exploration, no dedicated utility feedback signal).
+- **The cost term is wired for utility traffic.** `UtilityRoutingPolicy` consumes
+  `IModelPriceCatalog.GetFreshPriceForRouting`; `RoutingOptions` has `Epsilon1`/`Epsilon2`/
+  `UtilityMinQualityScore`. The general (non-utility) path still has no cost term - `AgentRouterPolicy`
+  delegates to `AgentAsARouter`'s memory-only ranking, unchanged from before Phase I.
 - **Memory is dimension-hashed, not task-keyed.** `RouterMemory` stores
   `dimension → model → List<double>`. `VectorStoreRouterMemoryStore` computes Jaccard token overlap on
   the *dimension string*, not the task, and is wired to no decision. Three `RoutingOptions` knobs —
@@ -121,28 +125,6 @@ constants that happen not to match.
   the feedback loop reconnection.
 - Exit: Zero literal dimension strings outside the contract type. Every verifier score written on request
   *N* propagates to influence model selection on request *N+1*.
-
-### Phase I: Selection-only routing policy and the cost-aware reward (the Action leg)
-
-- Introduce `IRoutingPolicy.SelectModelAsync(RoutingContext, CancellationToken) → ModelName`. Selection
-  must be **decoupled from generation** so the existing streaming forward in `ProxyMiddleware` stays
-  untouched. Spec: [`../docs/router/utility-model-routing.md`](../docs/router/utility-model-routing.md) §B3.
-- **Refactor `AgentAsARouter` to selection-only.** Extract the choice logic from `ExploitAsync`/
-  `ExploreAsync` into a method returning a model name without calling `IRouterModelClient`. Once no
-  decision path invokes a model, `NotImplementedRouterModelClient`
-  ([`TotallyHotArcRouter/Program.cs:81`](TotallyHotArcRouter/Program.cs)) is deleted rather than
-  implemented.
-- Add `ε₁`/`ε₂` to `RoutingOptions`, defaulting to the paper's canonical `(1, -0.1)`, with per-tier
-  overrides for the utility aliases.
-- Wire the κ term to `IModelPriceCatalog.GetFreshPriceForRouting` — in-memory read only, never an
-  awaited fetch on the hot path. **Unpriced ≠ free:** a candidate with no price fresher than 24h is
-  excluded from cost ranking and reachable only via exploration; an `IsFree` provider is κ = 0 and is
-  exempt from the freshness gate. A catalog miss degrades to cold-start, never to a network call.
-- Quality gate: drop candidates below `UtilityMinQualityScore`. `s == null` is *unobserved*, not bad —
-  deliberately the inverse polarity of the price rule.
-- Exit: policy unit-tested against a stubbed catalog and in-memory memory for every case enumerated in
-  that doc's verification plan, including the `IsFree`-exempt-from-freshness case and the unpriced
-  exclusion. No SQLite or network in tests.
 
 ### Phase J: Embedding-keyed Memory
 

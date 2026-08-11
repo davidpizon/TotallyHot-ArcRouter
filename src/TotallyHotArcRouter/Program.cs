@@ -70,15 +70,6 @@ public static class Program
                 // value to reason about rather than depending on DI's "unregistered optional service"
                 // fallback.
                 services.AddSingleton(new SingleModelServingOptions { ForcedModelName = forcedModelName });
-
-                // AddTotallyHotArcRouter registers AgentAsARouter (Transient) but deliberately does not register
-                // IRouterModelClient, since it's meant to be context-specific. The proxy doesn't currently
-                // invoke AgentAsARouter at all, but Host.CreateDefaultBuilder enables
-                // ServiceProviderOptions.ValidateOnBuild in the Development environment, which eagerly
-                // validates every registered service's constructor dependencies at startup regardless of
-                // whether it's ever resolved. Register a placeholder that throws if actually invoked, rather
-                // than letting startup fail for a subsystem that isn't wired up yet.
-                services.AddSingleton<IRouterModelClient, NotImplementedRouterModelClient>();
             });
     }
 

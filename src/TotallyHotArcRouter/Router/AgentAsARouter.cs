@@ -5,59 +5,62 @@ using Microsoft.Extensions.Options;
 namespace TotallyHot.ArcRouter.Router;
 
 /// <summary>
-/// An intelligent router that selects the best model for a given prompt.
+/// Selects the best model for a given routing dimension from <see cref="RouterMemory"/>'s observed scores -
+/// selection-only, per PLAN.md Phase I: this class never invokes a model, it only chooses one. The general
+/// (non-utility) backing engine <see cref="AgentRouterPolicy"/> delegates to for the <c>agentic-router</c>
+/// alias (<c>docs/router/utility-model-routing.md</c> §B3's "General" case).
 /// </summary>
 public class AgentAsARouter
 {
     private readonly ILogger<AgentAsARouter> _logger;
     private readonly RoutingOptions _options;
-    private readonly IRouterModelClient _modelClient;
     private readonly RouterMemory _memory;
-    private readonly Random _random = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AgentAsARouter"/> class.
     /// </summary>
     /// <param name="logger">The logger.</param>
     /// <param name="options">The routing options.</param>
-    /// <param name="modelClient">The model client.</param>
     /// <param name="memory">The router memory.</param>
     public AgentAsARouter(
         ILogger<AgentAsARouter> logger,
         IOptions<RoutingOptions> options,
-        IRouterModelClient modelClient,
         RouterMemory memory)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(memory);
+
         _logger = logger;
         _options = options.Value;
-        _modelClient = modelClient;
         _memory = memory;
     }
 
     /// <summary>
-    /// Routes a prompt to the best available model.
+    /// Selects the best available model for a routing dimension without invoking it.
     /// </summary>
-    /// <param name="prompt">The prompt to route.</param>
-    /// <param name="dimension">The dimension of the prompt (e.g., 'code_generation', 'translation').</param>
+    /// <param name="dimension">The routing dimension to select a model for (e.g., 'code_generation', 'translation').</param>
     /// <param name="cancellationToken">A cancellation token.</param>
-    /// <returns>A <see cref="RoutingResult"/>.</returns>
-    public async Task<RoutingResult> RouteAsync(string prompt, string dimension, CancellationToken cancellationToken = default)
+    /// <returns>A <see cref="RoutingDecision"/> describing the chosen model.</returns>
+    public Task<RoutingDecision> SelectModelAsync(string dimension, CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Routing prompt for dimension '{Dimension}'.", dimension);
+        ArgumentException.ThrowIfNullOrWhiteSpace(dimension);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        _logger.LogInformation("Selecting model for dimension '{Dimension}'.", dimension);
 
         // Exploration vs. Exploitation
-        if (_options.EnableExploration && _random.NextDouble() < _options.ExplorationRate)
-        {
-            return await ExploreAsync(prompt, dimension, cancellationToken);
-        }
+        var decision = _options.EnableExploration && Random.Shared.NextDouble() < _options.ExplorationRate
+            ? SelectExploration(dimension)
+            : SelectExploitation(dimension);
 
-        return await ExploitAsync(prompt, dimension, cancellationToken);
+        return Task.FromResult(decision);
     }
 
     /// <summary>
-    /// Routes the prompt to the historically best-performing model for the dimension, falling back to the default model when no model has a historical score.
+    /// Selects the historically best-performing model for the dimension, falling back to the default model when no model has a historical score.
     /// </summary>
-    private async Task<RoutingResult> ExploitAsync(string prompt, string dimension, CancellationToken cancellationToken)
+    private RoutingDecision SelectExploitation(string dimension)
     {
         var models = _memory.GetModelsForDimension(dimension)
             .Select(model => new { Model = model, Score = _memory.GetAverageScore(dimension, model) })
@@ -66,72 +69,36 @@ public class AgentAsARouter
             .Select(m => m.Model)
             .ToList();
 
-        var candidateScores = models.ToDictionary(m => m, m => _memory.GetAverageScore(dimension, m) ?? 0);
-
         if (models.Count == 0)
         {
             _logger.LogWarning("No models with historical scores for dimension '{Dimension}'. Falling back to default model.", dimension);
-            var response = await _modelClient.GetResponseAsync(_options.DefaultModel, prompt, cancellationToken);
-            return new RoutingResult
-            {
-                Decision = RoutingDecision.CreateFallback(_options.DefaultModel),
-                Response = response
-            };
+            return RoutingDecision.CreateFallback(_options.DefaultModel);
         }
 
-        foreach (var model in models)
-        {
-            try
-            {
-                var response = await _modelClient.GetResponseAsync(model, prompt, cancellationToken);
-                var decision = new RoutingDecision(
-                    model,
-                    _memory.GetAverageScore(dimension, model) ?? 0,
-                    $"Selected best model based on historical performance (avg score: {_memory.GetAverageScore(dimension, model):F2}).",
-                    DateTimeOffset.UtcNow,
-                    candidateScores);
+        var candidateScores = models.ToDictionary(m => m, m => _memory.GetAverageScore(dimension, m) ?? 0);
+        var bestModel = models[0];
 
-                return new RoutingResult
-                {
-                    Decision = decision,
-                    Response = response
-                };
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Model '{Model}' failed to respond. Trying next best model.", model);
-            }
-        }
-
-        _logger.LogError("All models failed to respond for dimension '{Dimension}'. Falling back to default model.", dimension);
-        var fallbackResponse = await _modelClient.GetResponseAsync(_options.DefaultModel, prompt, cancellationToken);
-        return new RoutingResult
-        {
-            Decision = RoutingDecision.CreateFallback(_options.DefaultModel),
-            Response = fallbackResponse
-        };
+        return new RoutingDecision(
+            bestModel,
+            candidateScores[bestModel],
+            $"Selected best model based on historical performance (avg score: {candidateScores[bestModel]:F2}).",
+            DateTimeOffset.UtcNow,
+            candidateScores);
     }
 
     /// <summary>
-    /// Routes the prompt to a randomly selected supported model to gather new performance data with neutral confidence.
+    /// Selects a randomly chosen supported model to gather new performance data with neutral confidence.
     /// </summary>
-    private async Task<RoutingResult> ExploreAsync(string prompt, string dimension, CancellationToken cancellationToken)
+    private RoutingDecision SelectExploration(string dimension)
     {
-        var model = RouterConstants.SupportedModels[_random.Next(RouterConstants.SupportedModels.Count)];
+        var model = RouterConstants.SupportedModels[Random.Shared.Next(RouterConstants.SupportedModels.Count)];
         _logger.LogInformation("Exploring with model '{Model}' for dimension '{Dimension}'.", model, dimension);
 
-        var response = await _modelClient.GetResponseAsync(model, prompt, cancellationToken);
-        var decision = new RoutingDecision(
+        return new RoutingDecision(
             model,
             0.5, // Exploration has neutral confidence
             "Exploration: randomly selected model to gather new data.",
             DateTimeOffset.UtcNow);
-
-        return new RoutingResult
-        {
-            Decision = decision,
-            Response = response
-        };
     }
 
     /// <summary>
@@ -151,4 +118,3 @@ public class AgentAsARouter
         await _memory.AddScoreAsync(dimension, model, score);
     }
 }
-

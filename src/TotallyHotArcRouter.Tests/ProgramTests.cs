@@ -134,11 +134,11 @@ namespace TotallyHot.ArcRouter.Tests
                 .Build();
 
         // Regression test: Host.CreateDefaultBuilder enables ServiceProviderOptions.ValidateOnBuild (and
-        // ValidateScopes) only in the Development environment, so a missing/unresolvable dependency like
-        // IRouterModelClient is silently tolerated when CreateHostBuilder_BuildsSuccessfully runs in the
-        // default (non-Development) test environment, but throws eagerly at Build() time in Development.
-        // This reproduces Program.cs's ConfigureServices registrations directly under that stricter mode,
-        // without depending on ambient environment variables during test execution.
+        // ValidateScopes) only in the Development environment, so a missing/unresolvable dependency in
+        // AddTotallyHotArcRouter's graph is silently tolerated when CreateHostBuilder_BuildsSuccessfully
+        // runs in the default (non-Development) test environment, but throws eagerly at Build() time in
+        // Development. This reproduces Program.cs's ConfigureServices registrations directly under that
+        // stricter mode, without depending on ambient environment variables during test execution.
         [Fact]
         public void ConfigureServices_ProducesResolvableServiceGraph_UnderValidateOnBuild()
         {
@@ -149,7 +149,6 @@ namespace TotallyHot.ArcRouter.Tests
             services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
 
             services.AddTotallyHotArcRouter();
-            services.AddSingleton<IRouterModelClient, NotImplementedRouterModelClient>();
 
             using var provider = services.BuildServiceProvider(new ServiceProviderOptions
             {
@@ -158,6 +157,7 @@ namespace TotallyHot.ArcRouter.Tests
             });
 
             Assert.NotNull(provider.GetRequiredService<AgentAsARouter>());
+            Assert.NotNull(provider.GetRequiredService<IRoutingPolicy>());
         }
     }
 }

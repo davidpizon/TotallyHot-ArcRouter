@@ -34,9 +34,7 @@ namespace TotallyHot.ArcRouter.Hosting
             // Core Router
             services.AddSingleton<IRouterMemoryStore, JsonRouterMemoryStore>();
             services.AddSingleton<RouterMemory>();
-            // Note: IRouterModelClient is not registered here as it will be context-specific.
-            // It should be provided by a factory or a more specific DI scope.
-            services.AddTransient<AgentAsARouter>();
+            services.AddSingleton<AgentAsARouter>();
 
             // Tools
             services.AddTransient<CheckSyntax>();
@@ -81,6 +79,16 @@ namespace TotallyHot.ArcRouter.Hosting
             // (a fresh KeywordDimensionInferrer) is what HeuristicRequestClassifier's default also
             // resolves to, keeping the two in lockstep without a shared registration to keep in sync.
             services.AddSingleton<IRequestClassifier, HeuristicRequestClassifier>();
+
+            // PLAN.md Phase I (the Action leg, docs/router/utility-model-routing.md §B3-B4): selection-only
+            // routing for the agentic-router alias and the unresolved-model fallback. UtilityRoutingPolicy
+            // takes IModelPriceCatalog (registered later in this method - DI resolution order is
+            // independent of registration order, so this is safe). The two leaf policies are registered by
+            // concrete type so CompositeRoutingPolicy's constructor can resolve them directly, with only the
+            // composite exposed as IRoutingPolicy.
+            services.AddSingleton<UtilityRoutingPolicy>();
+            services.AddSingleton<AgentRouterPolicy>();
+            services.AddSingleton<IRoutingPolicy, CompositeRoutingPolicy>();
             services.AddSingleton<RequestInterceptor>();
 
             // Telemetry (live routing events broadcast to GUI dashboards over gRPC - see
