@@ -1,6 +1,6 @@
 # Utility-Model Routing under BYOK
 
-Status: **Plan / not yet implemented**
+Status: **Partial — Phase H (B1, B2) shipped; B3–B5 pending**
 Scope: **two repos** — the proxy (this repo) and the VS Code extension (`spark-vscode-extension`, published as `davidpizon.oai-compatible-copilot`).
 
 ## Context
@@ -98,9 +98,13 @@ The synthesis that satisfies both decisions:
 - When the fallback path is active, the proxy additionally recognizes dedicated **utility aliases** (`copilot-utility`, `copilot-utility-small`) as an *explicit* "this is utility, force the cheapest-tier policy" signal.
 - A lightweight **request classifier** (payload heuristics) lets the router recognize utility-shaped requests even in the mainAgent-mirrored path where the name is ambiguous.
 
-> Note: `agentic-router` is **not** in the proxy's `ModelList` today, so a default-config request (`oaicopilot.modelId = "agentic-router"`) would currently be rejected with HTTP 400. Introducing router-alias handling is therefore required for the out-of-the-box configuration to work at all — not merely a utility nicety.
+**Current implementation status:**
+- **Shipped (Phase H, B1–B2):** Router and utility alias recognition; `IRequestClassifier` producing `{ Dimension, Difficulty, Language, IsUtility }` from request payload.
+- **Pending (Phase I, B3–B5):** Cost-aware `UtilityRoutingPolicy` with the κ term, wiring into `RequestInterceptor`, and telemetry emission.
 
-> Interim state to reconcile: earlier in development a **static** `copilot-utility-small → claude-haiku-4-5-20251001` entry was added to `src/TotallyHotArcRouter/appsettings.json` and the live `bin/.../model-routing.json`. That hard-codes in config exactly the decision this plan moves into the router, so it should be **removed** once dynamic selection ships (keep it only until then, as a stopgap that stops the error).
+> Note: `agentic-router` is **not** in the proxy's `ModelList` today, so a default-config request (`oaicopilot.modelId = "agentic-router"`) would currently be rejected with HTTP 400. Introducing router-alias handling is therefore required for the out-of-the-box configuration to work at all — not merely a utility nicety. This is addressed by Phase H's alias recognition in `RequestInterceptor.TryAgenticallyRouteUnresolvedModel`.
+
+> **Interim state (currently live):** a **static** `copilot-utility-small → claude-haiku-4-5-20251001` entry exists in `src/TotallyHotArcRouter/appsettings.json` and the live `bin/.../model-routing.json`. That hard-codes the decision this plan moves into the router; it will be **removed** once Phase I's dynamic selection ships (keep it only until then, as a stopgap that stops the error).
 
 ## Architecture
 
@@ -190,6 +194,8 @@ The critical structural point: **selection is decoupled from generation.** The e
   > it.
 
 ### B3. Selection-only routing policy
+
+**Status: Pending (Phase I).** This section and B4–B5 describe the cost-aware routing policy that completes the feedback loop. Phase H (B1–B2) shipped the request classifier; the policy itself awaits Phase I.
 
 - Introduce `IRoutingPolicy` with `Task<string> SelectModelAsync(RoutingContext ctx, CancellationToken ct)` returning an **allowlisted `ModelName`** (never generates a response). This is the seam that makes smart routing compatible with the streaming reverse-proxy.
 

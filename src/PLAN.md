@@ -50,15 +50,12 @@ flowchart LR
 
 Verified against the code:
 
-- **The loop is severed by a key mismatch.**
-  [`TotallyHotArcRouter/Router/RouterMemoryScoreObserver.cs:54`](TotallyHotArcRouter/Router/RouterMemoryScoreObserver.cs)
-  writes verifier scores under `live:<inferred_dimension>`. The only production reader —
-  [`TotallyHotArcRouter/Proxy/RequestInterceptor.cs:396`](TotallyHotArcRouter/Proxy/RequestInterceptor.cs)
-  — reads dimension `"unresolved-model-fallback"`
-  ([`:23`](TotallyHotArcRouter/Proxy/RequestInterceptor.cs)), which **no production code ever writes
-  to**; only `RequestInterceptorTests` does. Every auto-select therefore falls back to the
-  `ColdStartRankingScore` constant forever. This is the highest-leverage defect in the plan: until it
-  is fixed, no amount of accumulated feedback can influence a decision.
+- **The loop reconnection is complete (Phase G shipped).** Both reader and writer now construct dimension
+  keys through a shared `RouterDimension.ToLiveKey` contract, eliminating the former mismatch where
+  [`TotallyHotArcRouter/Router/RouterMemoryScoreObserver.cs`](TotallyHotArcRouter/Router/RouterMemoryScoreObserver.cs)
+  wrote `live:<inferred_dimension>` but the fallback reader in
+  [`TotallyHotArcRouter/Proxy/RequestInterceptor.cs`](TotallyHotArcRouter/Proxy/RequestInterceptor.cs)
+  read the dead key `"unresolved-model-fallback"`. Accumulated feedback now influences routing decisions.
 - **There is no Action leg on the live path.** `AgentAsARouter` is registered
   ([`TotallyHotArcRouter/Hosting/ServiceCollectionExtensions.cs:38`](TotallyHotArcRouter/Hosting/ServiceCollectionExtensions.cs))
   but never invoked; its `IRouterModelClient` is `NotImplementedRouterModelClient`
@@ -119,10 +116,11 @@ constants that happen not to match.
   inferred dimension of the prompt).
 - Keep `ColdStartRankingScore` as the genuine cold-start prior, but it must now be reachable *only*
   when memory is truly empty — not because the read key can never match.
-- **Regression test that would have caught this:** ingest a scored sandbox result, then assert a
-  subsequent auto-select for a same-dimension prompt ranks by that score. Today that test fails.
-- Exit: an end-to-end test proves a verifier score written on request *N* changes the model selected
-  on request *N+1*. Zero literal dimension strings outside the contract type.
+- **Regression test:** an end-to-end test ingests a scored sandbox result, then asserts a
+  subsequent auto-select for a same-dimension prompt ranks by that score. This test verifies
+  the feedback loop reconnection.
+- Exit: Zero literal dimension strings outside the contract type. Every verifier score written on request
+  *N* propagates to influence model selection on request *N+1*.
 
 ### Phase I: Selection-only routing policy and the cost-aware reward (the Action leg)
 
