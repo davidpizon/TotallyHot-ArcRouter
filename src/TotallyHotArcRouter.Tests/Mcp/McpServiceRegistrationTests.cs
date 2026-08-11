@@ -48,7 +48,6 @@ public sealed class McpServiceRegistrationTests
         services.AddLogging();
         services.AddOptions();
         services.Configure<RoutingOptions>(_ => { });
-        services.AddSingleton<IRouterModelClient>(Moq.Mock.Of<IRouterModelClient>());
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
 
         services.AddTotallyHotArcRouter();
@@ -67,7 +66,6 @@ public sealed class McpServiceRegistrationTests
         services.AddLogging();
         services.AddOptions();
         services.Configure<RoutingOptions>(_ => { });
-        services.AddSingleton<IRouterModelClient>(Moq.Mock.Of<IRouterModelClient>());
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
 
         services.AddTotallyHotArcRouter();

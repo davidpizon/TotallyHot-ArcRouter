@@ -9,9 +9,8 @@ namespace TotallyHot.ArcRouter.Tests.Integration
     {
         // TODO: Add tests that cover the following scenarios:
         // 1. Routing decisions under various inputs (e.g., different prompts, contexts).
-        //    - Create an AgentAsARouter instance.
-        //    - Provide it with a mock IRouterModelClient.
-        //    - Call RouteAsync with different requests.
+        //    - Create an AgentAsARouter instance (selection-only; see AgentAsARouterTests).
+        //    - Call SelectModelAsync with different dimensions.
         //    - Assert that the returned RoutingDecision matches the expected outcome based on Python version's logic.
         //
         // 2. Epsilon-greedy exploration logic.

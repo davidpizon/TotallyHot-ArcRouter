@@ -28,10 +28,9 @@ public class RouterCompositionTests
         await router.ObserveAsync("code_gen", "gpt-5.4", 0.9);
         await router.ObserveAsync("code_gen", "qwen3-max", 0.7);
 
-        var result = await router.RouteAsync("prompt", "code_gen", TestContext.Current.CancellationToken);
+        var decision = await router.SelectModelAsync("code_gen", TestContext.Current.CancellationToken);
 
-        Assert.Equal("gpt-5.4", result.Decision.SelectedModel);
-        Assert.Equal("response:gpt-5.4", result.Response);
+        Assert.Equal("gpt-5.4", decision.SelectedModel);
     }
 
     [Fact]
@@ -45,10 +44,10 @@ public class RouterCompositionTests
 
         var router = provider.GetRequiredService<AgentAsARouter>();
 
-        var result = await router.RouteAsync("prompt", "unknown_dimension", TestContext.Current.CancellationToken);
+        var decision = await router.SelectModelAsync("unknown_dimension", TestContext.Current.CancellationToken);
 
-        Assert.Equal(RouterConstants.DefaultModel, result.Decision.SelectedModel);
-        Assert.Equal(RouterConstants.FallbackReason, result.Decision.Rationale);
+        Assert.Equal(RouterConstants.DefaultModel, decision.SelectedModel);
+        Assert.Equal(RouterConstants.FallbackReason, decision.Rationale);
     }
 
     [Fact]
@@ -59,6 +58,7 @@ public class RouterCompositionTests
         Assert.NotNull(provider.GetRequiredService<AgentAsARouter>());
         Assert.NotNull(provider.GetRequiredService<RouterMemory>());
         Assert.NotNull(provider.GetRequiredService<RequestInterceptor>());
+        Assert.NotNull(provider.GetRequiredService<IRoutingPolicy>());
     }
 
     private static ServiceProvider BuildProvider(RoutingOptions options)
@@ -66,17 +66,9 @@ public class RouterCompositionTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<IOptions<RoutingOptions>>(Options.Create(options));
-        services.AddSingleton<IRouterModelClient, StubRouterModelClient>();
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
         services.AddTotallyHotArcRouter();
 
         return services.BuildServiceProvider();
     }
-
-    private sealed class StubRouterModelClient : IRouterModelClient
-    {
-        public Task<string> GetResponseAsync(string model, string prompt, CancellationToken cancellationToken = default)
-            => Task.FromResult($"response:{model}");
-    }
 }
-

@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -44,6 +43,7 @@ namespace TotallyHot.ArcRouter.Proxy
         private readonly IDimensionInferrer _dimensionInferrer;
         private readonly IRequestClassifier _requestClassifier;
         private readonly string _liveMemoryPrefix;
+        private readonly IRoutingPolicy? _routingPolicy;
 
         /// <summary>Number of requests seen by <see cref="InterceptRequestAsync"/> so far.</summary>
         public int InterceptedRequestCount { get; private set; }
@@ -85,7 +85,13 @@ namespace TotallyHot.ArcRouter.Proxy
         /// <param name="requestClassifier">
         /// PLAN.md Phase H's Context-leg classifier, run ahead of routing on every request. Defaults to a
         /// <see cref="HeuristicRequestClassifier"/> built over <paramref name="dimensionInferrer"/> when
-        /// omitted, so its dimension output matches <see cref="InferLiveDimension"/>'s by construction.
+        /// omitted, so its dimension output matches <see cref="ResolveModelRouteAsync"/>'s classification by construction.
+        /// </param>
+        /// <param name="routingPolicy">
+        /// PLAN.md Phase I's Action leg (<c>docs/router/utility-model-routing.md</c> §B4): consulted, when
+        /// supplied, to pick the model for the router alias and the unresolved-model fallback instead of
+        /// the memory-only ranking <see cref="RankEligibleModels"/> otherwise falls back to. <see langword="null"/>
+        /// (the default) preserves the pre-Phase-I memory-only behavior exactly.
         /// </param>
         /// <exception cref="InvalidOperationException">
         /// <paramref name="singleModelServingOptions"/> names a model that isn't configured.
@@ -98,7 +104,8 @@ namespace TotallyHot.ArcRouter.Proxy
             ICircuitBreaker? circuitBreaker = null,
             IDimensionInferrer? dimensionInferrer = null,
             IOptions<SandboxOptions>? sandboxOptions = null,
-            IRequestClassifier? requestClassifier = null)
+            IRequestClassifier? requestClassifier = null,
+            IRoutingPolicy? routingPolicy = null)
         {
             _logger = logger;
             _modelRouteResolver = modelRouteResolver;
@@ -108,6 +115,7 @@ namespace TotallyHot.ArcRouter.Proxy
             _dimensionInferrer = dimensionInferrer ?? new KeywordDimensionInferrer();
             _liveMemoryPrefix = sandboxOptions?.Value.LiveMemoryPrefix ?? new SandboxOptions().LiveMemoryPrefix;
             _requestClassifier = requestClassifier ?? new HeuristicRequestClassifier(_dimensionInferrer);
+            _routingPolicy = routingPolicy;
 
             if (_forcedModelName is not null &&
                 !modelRouteResolver.ListModels().Any(m => string.Equals(m.ModelName, _forcedModelName, StringComparison.OrdinalIgnoreCase)))
@@ -221,7 +229,11 @@ namespace TotallyHot.ArcRouter.Proxy
             // PLAN.md Phase G: the dimension this request's own routing decision reads is the same one a
             // later-arriving sandbox score for this same prompt will be written under (RouterMemoryScoreObserver),
             // so a verifier score written on request N can actually change the model selected on request N+1.
-            var liveDimension = InferLiveDimension(jsonObject);
+            // PLAN.md Phase H/I: the classification is computed once here and reused both for the dimension
+            // key and for IsUtility, so the dimension key and the tier IRoutingPolicy sees can never
+            // be classified differently for the same request.
+            var classification = _requestClassifier.Classify(jsonObject);
+            var liveDimension = RouterDimension.ToLiveKey(_liveMemoryPrefix, classification.Dimension);
 
             var modelName = jsonObject["model"] is JsonValue modelValue && modelValue.TryGetValue<string>(out var value)
                 ? value
@@ -252,7 +264,8 @@ namespace TotallyHot.ArcRouter.Proxy
 
             if (isAutoSelectRequest)
             {
-                if (!TryAgenticallyRouteUnresolvedModel(liveDimension, out var autoSelectedRoute))
+                var autoSelectedRoute = await ResolveAgenticRouteAsync(classification, liveDimension, cancellationToken);
+                if (autoSelectedRoute is null)
                 {
                     // Same "everything is unavailable" condition the fallback path reports, but phrased for a
                     // caller who asked for auto-select rather than one who named a model we didn't recognize.
@@ -277,7 +290,11 @@ namespace TotallyHot.ArcRouter.Proxy
                 // treated identically to an unresolved name - same fallback, same rejection message - rather
                 // than silently routing to a model the operator just disabled or the endpoint stopped
                 // reporting.
-                if (_forcedModelName is null && TryAgenticallyRouteUnresolvedModel(liveDimension, out var agenticRoute))
+                var agenticRoute = _forcedModelName is null
+                    ? await ResolveAgenticRouteAsync(classification, liveDimension, cancellationToken)
+                    : null;
+
+                if (agenticRoute is not null)
                 {
                     _logger.LogInformation(
                         "[INTERCEPTOR] Unresolved model '{ModelName}' accepted and agentically routed to '{ResolvedModel}'.",
@@ -357,37 +374,68 @@ namespace TotallyHot.ArcRouter.Proxy
         }
 
         /// <summary>
-        /// Infers the live <see cref="RouterMemory"/> dimension for the request in flight - PLAN.md Phase
-        /// H's <see cref="IRequestClassifier"/>, run ahead of routing on every request. Composes the key
-        /// through <see cref="RouterDimension.ToLiveKey"/> - the same construction point
-        /// <see cref="Router.RouterMemoryScoreObserver"/> uses to write a score - so the two sides can
-        /// never independently drift into a key mismatch (PLAN.md Phase G).
+        /// Picks a real, allowlisted route to serve a request whose <c>model</c> didn't match any configured
+        /// entry - the generalized fallback in <c>docs/router/utility-model-routing.md</c> - and also to serve
+        /// a request that explicitly asked for auto-select via <see cref="AutoSelectModelName"/>.
         /// </summary>
-        private string InferLiveDimension(JsonObject jsonObject)
+        /// <remarks>
+        /// PLAN.md Phase I / <c>docs/router/utility-model-routing.md</c> §B4: when a routing policy is
+        /// configured (<see cref="_routingPolicy"/>), this builds a <see cref="RoutingContext"/> from every
+        /// currently-eligible candidate and lets it choose - cost-aware and quality-gated for utility
+        /// traffic, <see cref="AgentAsARouter"/>'s memory ranking otherwise. A policy pick that doesn't
+        /// resolve to a live route (e.g. it named a model outside the configured <c>ModelList</c>) degrades
+        /// to the memory-only ranking rather than failing the request. With no policy configured - the
+        /// pre-Phase-I default - this is exactly <see cref="RankEligibleModels"/>'s top pick, unchanged.
+        /// </remarks>
+        /// <param name="classification">The request's Phase H classification, from <see cref="ResolveModelRouteAsync"/>.</param>
+        /// <param name="liveDimension">The request's live dimension key, from <see cref="ResolveModelRouteAsync"/>.</param>
+        /// <param name="cancellationToken">A token to cancel the operation.</param>
+        /// <returns>The resolved route to serve the request with, or <see langword="null"/> when no eligible model is currently available.</returns>
+        private async Task<ResolvedModelRoute?> ResolveAgenticRouteAsync(
+            RequestClassification classification,
+            string liveDimension,
+            CancellationToken cancellationToken)
         {
-            var dimension = _requestClassifier.Classify(jsonObject).Dimension;
-            return RouterDimension.ToLiveKey(_liveMemoryPrefix, dimension);
+            if (_routingPolicy is not null)
+            {
+                var candidates = BuildRoutingCandidates();
+                if (candidates.Count > 0)
+                {
+                    var context = new RoutingContext(liveDimension, classification.IsUtility, candidates);
+                    var selectedName = await _routingPolicy.SelectModelAsync(context, cancellationToken);
+
+                    if (_modelRouteResolver.TryResolve(selectedName, out var selectedRoute))
+                    {
+                        // docs/router/utility-model-routing.md §B5: the routing decision itself (dimension,
+                        // isUtility, chosen model), logged through Serilog so it reaches the same telemetry
+                        // pipeline as every other structured routing log line (Program.cs's TelemetryLogEventSink
+                        // sink forwards every log event to connected dashboards, not just RoutingTelemetryEvent).
+                        _logger.LogInformation(
+                            "[INTERCEPTOR] Routing policy selected '{Model}' for dimension '{Dimension}' (isUtility={IsUtility}).",
+                            SanitizeForLog(selectedName),
+                            SanitizeForLog(liveDimension),
+                            classification.IsUtility);
+                        return selectedRoute;
+                    }
+
+                    _logger.LogWarning(
+                        "[INTERCEPTOR] Routing policy selected unresolvable model '{Model}'; falling back to memory ranking.",
+                        SanitizeForLog(selectedName));
+                }
+            }
+
+            return RankEligibleModels([], liveDimension).FirstOrDefault();
         }
 
         /// <summary>
-        /// Picks a real, allowlisted route to serve a request whose <c>model</c> didn't match any configured
-        /// entry - the generalized fallback in <c>docs/router/utility-model-routing.md</c> - and also to serve
-        /// a request that explicitly asked for auto-select via <see cref="AutoSelectModelName"/>. Delegates to
-        /// <see cref="RankEligibleModels"/> (no exclusions) and returns its top pick, so an unresolved name
-        /// can never land on a circuit-open target either.
+        /// Builds one <see cref="RoutingCandidate"/> per currently-eligible model (the same eligibility
+        /// rules <see cref="GetEligibleRoutes"/> applies for <see cref="RankEligibleModels"/>), for handing
+        /// to an <see cref="IRoutingPolicy"/>.
         /// </summary>
-        /// <param name="liveDimension">The request's inferred live dimension, from <see cref="InferLiveDimension"/>.</param>
-        /// <param name="route">The resolved route to serve the request with, when a candidate exists.</param>
-        /// <returns>
-        /// <see langword="true"/> if at least one eligible model is configured (so a route was chosen);
-        /// <see langword="false"/> when none is - either the allowlist is empty, every configured model's
-        /// circuit is currently open, or every configured model's provider is disabled.
-        /// </returns>
-        private bool TryAgenticallyRouteUnresolvedModel(string liveDimension, [NotNullWhen(true)] out ResolvedModelRoute? route)
-        {
-            route = RankEligibleModels([], liveDimension).FirstOrDefault();
-            return route is not null;
-        }
+        private List<RoutingCandidate> BuildRoutingCandidates() =>
+            GetEligibleRoutes([])
+                .Select(e => new RoutingCandidate(e.Route.ModelName, e.Route.Provider, e.Route.IsFree))
+                .ToList();
 
         /// <summary>
         /// Ranks every currently-configured model other than <paramref name="excludeModelNames"/>, whose
@@ -406,8 +454,22 @@ namespace TotallyHot.ArcRouter.Proxy
         /// order (LINQ's <c>OrderByDescending</c> is a stable sort).
         /// </summary>
         /// <param name="excludeModelNames">Model names to omit from the ranking (e.g. the primary already queued).</param>
-        /// <param name="liveDimension">The request's inferred live dimension, from <see cref="InferLiveDimension"/>.</param>
-        private List<ResolvedModelRoute> RankEligibleModels(IReadOnlyCollection<string> excludeModelNames, string liveDimension)
+        /// <param name="liveDimension">The request's inferred live dimension.</param>
+        private List<ResolvedModelRoute> RankEligibleModels(IReadOnlyCollection<string> excludeModelNames, string liveDimension) =>
+            GetEligibleRoutes(excludeModelNames)
+                .OrderByDescending(e => _routerMemory?.GetAverageScore(liveDimension, e.ModelName) ?? ColdStartRankingScore)
+                .Select(e => e.Route)
+                .ToList();
+
+        /// <summary>
+        /// The shared eligibility filter <see cref="RankEligibleModels"/> and <see cref="BuildRoutingCandidates"/>
+        /// both build on: every currently-configured model other than <paramref name="excludeModelNames"/>,
+        /// excluding any whose upstream target or provider is presently circuit-open, or whose provider or
+        /// model has been administratively disabled. See <see cref="RankEligibleModels"/>'s remarks for the
+        /// full rationale behind each check.
+        /// </summary>
+        /// <param name="excludeModelNames">Model names to omit from the result.</param>
+        private List<(string ModelName, ResolvedModelRoute Route)> GetEligibleRoutes(IReadOnlyCollection<string> excludeModelNames)
         {
             var excluded = new HashSet<string>(excludeModelNames, StringComparer.OrdinalIgnoreCase);
             var eligible = new List<(string ModelName, ResolvedModelRoute Route)>();
@@ -435,10 +497,7 @@ namespace TotallyHot.ArcRouter.Proxy
                 eligible.Add((candidate.ModelName, candidateRoute));
             }
 
-            return eligible
-                .OrderByDescending(e => _routerMemory?.GetAverageScore(liveDimension, e.ModelName) ?? ColdStartRankingScore)
-                .Select(e => e.Route)
-                .ToList();
+            return eligible;
         }
 
         /// <summary>

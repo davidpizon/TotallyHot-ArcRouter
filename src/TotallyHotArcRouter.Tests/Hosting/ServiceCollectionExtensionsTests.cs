@@ -32,6 +32,9 @@ public class ServiceCollectionExtensionsTests
         Assert.Contains(services, d => d.ServiceType == typeof(IModelRouteResolver) && d.ImplementationType == typeof(ModelRouteResolver) && d.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(services, d => d.ServiceType == typeof(RequestInterceptor) && d.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(services, d => d.ServiceType == typeof(ProxyMiddleware) && d.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(services, d => d.ServiceType == typeof(IRoutingPolicy) && d.ImplementationType == typeof(CompositeRoutingPolicy) && d.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(services, d => d.ServiceType == typeof(UtilityRoutingPolicy) && d.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(services, d => d.ServiceType == typeof(AgentRouterPolicy) && d.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(services, d => d.ServiceType == typeof(IHostedService));
     }
 
@@ -42,7 +45,6 @@ public class ServiceCollectionExtensionsTests
         services.AddLogging();
         services.AddOptions();
         services.Configure<RoutingOptions>(_ => { });
-        services.AddSingleton<IRouterModelClient, StubRouterModelClient>();
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
 
         services.AddTotallyHotArcRouter();
@@ -57,6 +59,7 @@ public class ServiceCollectionExtensionsTests
         Assert.NotNull(provider.GetRequiredService<RequestInterceptor>());
         Assert.NotNull(provider.GetRequiredService<ProxyMiddleware>());
         Assert.NotNull(provider.GetRequiredService<AgentAsARouter>());
+        Assert.NotNull(provider.GetRequiredService<IRoutingPolicy>());
     }
 
     [Fact]
@@ -66,7 +69,6 @@ public class ServiceCollectionExtensionsTests
         services.AddLogging();
         services.AddOptions();
         services.Configure<RoutingOptions>(_ => { });
-        services.AddSingleton<IRouterModelClient, StubRouterModelClient>();
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
 
         services.AddTotallyHotArcRouter();
@@ -83,7 +85,6 @@ public class ServiceCollectionExtensionsTests
         services.AddLogging();
         services.AddOptions();
         services.Configure<RoutingOptions>(_ => { });
-        services.AddSingleton<IRouterModelClient, StubRouterModelClient>();
 
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -110,12 +111,6 @@ public class ServiceCollectionExtensionsTests
     private sealed class StubEnvironmentVariableProvider(IReadOnlyDictionary<string, string> values) : IEnvironmentVariableProvider
     {
         public string? GetVariable(string name) => values.GetValueOrDefault(name);
-    }
-
-    private sealed class StubRouterModelClient : IRouterModelClient
-    {
-        public Task<string> GetResponseAsync(string model, string prompt, CancellationToken cancellationToken = default)
-            => Task.FromResult("ok");
     }
 }
 

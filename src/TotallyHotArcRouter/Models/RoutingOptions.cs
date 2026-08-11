@@ -55,6 +55,31 @@ public sealed class RoutingOptions
     public string MemoryPath { get; init; } = "router_memory.json";
 
     /// <summary>
+    /// Gets the quality weight ε₁ in the cost-aware reward <c>r = ε₁·s + ε₂·κ</c>
+    /// (research doc §"Notation"; <c>docs/router/utility-model-routing.md</c> §B3.5). Defaults to the
+    /// manuscript's canonical value.
+    /// </summary>
+    [Range(-100d, 100d)]
+    public double Epsilon1 { get; init; } = 1.0;
+
+    /// <summary>
+    /// Gets the cost weight ε₂ in the cost-aware reward <c>r = ε₁·s + ε₂·κ</c>. Negative by convention -
+    /// a higher κ (more expensive) lowers the reward. Defaults to the manuscript's canonical value.
+    /// </summary>
+    [Range(-100d, 100d)]
+    public double Epsilon2 { get; init; } = -0.1;
+
+    /// <summary>
+    /// Gets the minimum observed quality score <see cref="Router.UtilityRoutingPolicy"/> requires a
+    /// candidate to hold before it is eligible for cost-aware selection
+    /// (<c>docs/router/utility-model-routing.md</c> §B3.4). A candidate with no observed score yet
+    /// (<see langword="null"/>) is never dropped by this gate - unobserved is not the same as bad; only
+    /// a candidate that has been observed and scored below this floor is excluded.
+    /// </summary>
+    [Range(0d, 1d)]
+    public double UtilityMinQualityScore { get; init; } = 0.3;
+
+    /// <summary>
     /// Performs domain-level validation that is not fully expressible through data annotations.
     /// </summary>
     /// <exception cref="OptionsValidationException">Thrown when the routing option values are inconsistent.</exception>
