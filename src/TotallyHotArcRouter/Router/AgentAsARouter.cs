@@ -15,7 +15,6 @@ public class AgentAsARouter
     private readonly ILogger<AgentAsARouter> _logger;
     private readonly RoutingOptions _options;
     private readonly RouterMemory _memory;
-    private readonly Random _random = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AgentAsARouter"/> class.
@@ -46,7 +45,7 @@ public class AgentAsARouter
         cancellationToken.ThrowIfCancellationRequested();
 
         // Exploration vs. Exploitation
-        var decision = _options.EnableExploration && _random.NextDouble() < _options.ExplorationRate
+        var decision = _options.EnableExploration && Random.Shared.NextDouble() < _options.ExplorationRate
             ? SelectExploration(dimension)
             : SelectExploitation(dimension);
 
@@ -87,7 +86,7 @@ public class AgentAsARouter
     /// </summary>
     private RoutingDecision SelectExploration(string dimension)
     {
-        var model = RouterConstants.SupportedModels[_random.Next(RouterConstants.SupportedModels.Count)];
+        var model = RouterConstants.SupportedModels[Random.Shared.Next(RouterConstants.SupportedModels.Count)];
         _logger.LogInformation("Exploring with model '{Model}' for dimension '{Dimension}'.", model, dimension);
 
         return new RoutingDecision(

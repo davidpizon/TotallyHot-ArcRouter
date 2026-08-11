@@ -22,6 +22,15 @@ public sealed class AgentRouterPolicy : IRoutingPolicy
         ArgumentNullException.ThrowIfNull(context);
 
         var decision = await _router.SelectModelAsync(context.Dimension, cancellationToken);
-        return decision.SelectedModel;
+
+        // Ensure the selected model is in the candidates list to satisfy IRoutingPolicy contract.
+        var selectedModel = decision.SelectedModel;
+        if (context.Candidates.Any(c => c.ModelName == selectedModel))
+        {
+            return selectedModel;
+        }
+
+        // Fallback to first candidate if selection is not eligible.
+        return context.Candidates[0].ModelName;
     }
 }

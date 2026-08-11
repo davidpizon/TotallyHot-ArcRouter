@@ -77,39 +77,58 @@ public sealed class UtilityRoutingPolicy : IRoutingPolicy
             throw new InvalidOperationException("UtilityRoutingPolicy requires at least one candidate.");
         }
 
-        var ranked = context.Candidates
+        var scored = context.Candidates
             .Select(candidate => new
             {
                 Candidate = candidate,
                 Quality = _memory.GetAverageScore(context.Dimension, candidate.ModelName),
                 Cost = ResolveCost(candidate)
             })
+            .ToList();
+
+        var priced = scored
             // Unpriced: excluded from cost ranking entirely - it cannot be compared, not treated as free.
             .Where(x => x.Cost.HasValue)
+            .ToList();
+
+        var gated = priced
             // The quality gate (§B3.4): only an *observed* score below the floor is excluded.
             .Where(x => x.Quality is not double q || q >= _options.UtilityMinQualityScore)
             .ToList();
 
-        if (ranked.Count == 0)
+        // Best case: candidates that pass both pricing and quality gate.
+        if (gated.Count > 0)
         {
-            var fallback = context.Candidates[0].ModelName;
+            var selected = gated
+                .OrderByDescending(x => (_options.Epsilon1 * (x.Quality ?? 0)) + (_options.Epsilon2 * (double)x.Cost!.Value))
+                .First();
+
+            return Task.FromResult(selected.Candidate.ModelName);
+        }
+
+        // Degradation case 1: candidates with pricing but failed quality gate; pick cheapest.
+        if (priced.Count > 0)
+        {
             _logger.LogWarning(
-                "No utility candidate passed pricing/quality gating for dimension '{Dimension}'; falling back to '{Model}'.",
+                "All utility candidates failed quality gate for dimension '{Dimension}'; falling back to cheapest priced model '{Model}'.",
                 context.Dimension,
-                fallback);
+                priced[0].Candidate.ModelName);
+            var fallback = priced.OrderBy(x => x.Cost).First().Candidate.ModelName;
             return Task.FromResult(fallback);
         }
 
-        var selected = ranked
-            .OrderByDescending(x => (_options.Epsilon1 * (x.Quality ?? 0)) + (_options.Epsilon2 * (double)x.Cost!.Value))
-            .First();
-
-        return Task.FromResult(selected.Candidate.ModelName);
+        // Degradation case 2: no candidates have pricing; pick first.
+        _logger.LogError(
+            "No utility candidates have pricing for dimension '{Dimension}'; falling back to first candidate '{Model}'.",
+            context.Dimension,
+            context.Candidates[0].ModelName);
+        return Task.FromResult(context.Candidates[0].ModelName);
     }
 
     /// <summary>
-    /// Resolves candidate's blended per-token cost, or <see langword="null"/> when it is unpriced -
-    /// no fresh catalog row, and not flagged <see cref="RoutingCandidate.IsFree"/>.
+    /// Resolves candidate's blended cost in USD per 1,000,000 tokens (average of input and output rates),
+    /// or <see langword="null"/> when it is unpriced — no fresh catalog row, and not flagged
+    /// <see cref="RoutingCandidate.IsFree"/>.
     /// </summary>
     private decimal? ResolveCost(RoutingCandidate candidate)
     {
