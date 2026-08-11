@@ -92,22 +92,45 @@ public sealed class UtilityRoutingPolicy : IRoutingPolicy
             .Where(x => x.Cost.HasValue)
             .ToList();
 
-        var gated = priced
+        var qualityGated = scored
             // The quality gate (§B3.4): only an *observed* score below the floor is excluded.
             .Where(x => x.Quality is not double q || q >= _options.UtilityMinQualityScore)
             .ToList();
 
+        var pricedAndGated = qualityGated
+            .Where(x => x.Cost.HasValue)
+            .ToList();
+
         // Best case: candidates that pass both pricing and quality gate.
-        if (gated.Count > 0)
+        if (pricedAndGated.Count > 0)
         {
-            var selected = gated
+            var selected = pricedAndGated
                 .OrderByDescending(x => (_options.Epsilon1 * (x.Quality ?? 0)) + (_options.Epsilon2 * (double)x.Cost!.Value))
                 .First();
 
             return Task.FromResult(selected.Candidate.ModelName);
         }
 
-        // Degradation case 1: candidates with pricing but failed quality gate; pick cheapest.
+        // Degradation case 1: no priced candidate passes the quality gate, but an unpriced candidate does
+        // (§B3.4 - the gate is about not shipping a known-bad model, so a gate-passing candidate is
+        // preferred over a cheaper one that failed the gate, even without a price to rank it by).
+        // Every candidate here is necessarily unpriced, since a priced one would have landed in
+        // `pricedAndGated` above.
+        if (qualityGated.Count > 0)
+        {
+            var fallback = qualityGated
+                .OrderByDescending(x => x.Quality ?? 0)
+                .ThenBy(x => x.Candidate.ModelName, StringComparer.Ordinal)
+                .First()
+                .Candidate.ModelName;
+            _logger.LogWarning(
+                "No priced utility candidate passed the quality gate for dimension '{Dimension}'; falling back to unpriced gate-passing model '{Model}'.",
+                context.Dimension,
+                fallback);
+            return Task.FromResult(fallback);
+        }
+
+        // Degradation case 2: every candidate failed the quality gate; pick the cheapest priced one.
         if (priced.Count > 0)
         {
             var fallback = priced.OrderBy(x => x.Cost).First().Candidate.ModelName;
@@ -118,17 +141,11 @@ public sealed class UtilityRoutingPolicy : IRoutingPolicy
             return Task.FromResult(fallback);
         }
 
-        // Degradation case 2: no candidates have pricing; pick by observed quality, preferring candidates
-        // that pass the quality gate but falling back to all scored candidates if that would exclude
-        // everyone. A deterministic tie-break ensures the outcome never depends on input ordering.
-        var qualityGated = scored
-            .Where(x => x.Quality is not double q || q >= _options.UtilityMinQualityScore)
-            .ToList();
-        var fallbackCandidates = qualityGated.Count > 0 ? qualityGated : scored;
-
-        // Unobserved candidates default to a quality of 0, matching the reward's cold-start
-        // semantics (see the type-level remarks) rather than being penalized as worst-possible.
-        var unpricedFallback = fallbackCandidates
+        // Degradation case 3: no candidates have pricing and every candidate failed the quality gate;
+        // pick by observed quality alone. Unobserved candidates default to a quality of 0, matching the
+        // reward's cold-start semantics (see the type-level remarks) rather than being penalized as
+        // worst-possible. A deterministic tie-break ensures the outcome never depends on input ordering.
+        var unpricedFallback = scored
             .OrderByDescending(x => x.Quality ?? 0)
             .ThenBy(x => x.Candidate.ModelName, StringComparer.Ordinal)
             .First()

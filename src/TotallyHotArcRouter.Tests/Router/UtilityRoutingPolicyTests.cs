@@ -128,9 +128,10 @@ public class UtilityRoutingPolicyTests
     public async Task SelectModelAsync_NoPricingAvailable_UnobservedCandidateDefaultsToZeroQuality()
     {
         // No candidate is priced, so selection falls to the unpriced-fallback tie-break (degradation
-        // case 2). The floor is lowered so a negatively-scored observed candidate still clears the gate,
-        // isolating the ?? default: an unobserved candidate must rank as quality 0 - the same default the
-        // reward formula uses - not as worse than an observed negative score.
+        // case 1, since both candidates pass the lowered gate). The floor is lowered so a
+        // negatively-scored observed candidate still clears the gate, isolating the ?? default: an
+        // unobserved candidate must rank as quality 0 - the same default the reward formula uses - not
+        // as worse than an observed negative score.
         var options = Options.Create(new RoutingOptions { UtilityMinQualityScore = -1 });
         var memory = new RouterMemory();
         await memory.AddScoreAsync(Dimension, "bad-observed", -0.5);
@@ -138,6 +139,25 @@ public class UtilityRoutingPolicyTests
         var policy = new UtilityRoutingPolicy(new StubPriceCatalog(), memory, options, NullLogger<UtilityRoutingPolicy>.Instance);
 
         var selected = await policy.SelectModelAsync(Context("bad-observed", "unobserved"), TestContext.Current.CancellationToken);
+
+        Assert.Equal("unobserved", selected);
+    }
+
+    [Fact]
+    public async Task SelectModelAsync_PricedCandidateFailsGate_PrefersUnpricedGatePassingCandidate()
+    {
+        // "cheap-but-bad" is priced and would win degradation case 2's cheapest-priced fallback, but it
+        // fails the quality gate. "unobserved" is unpriced but passes the gate (never scored). Per
+        // §B3.4 the gate exists to keep a known-bad model out of rotation, so the gate-passing but
+        // unpriced candidate must win over the cheaper gate-failing one.
+        var catalog = new StubPriceCatalog();
+        catalog.SetPrice("cheap-but-bad", "openai", input: 1m, output: 1m);
+        var memory = new RouterMemory();
+        await memory.AddScoreAsync(Dimension, "cheap-but-bad", 0.05); // below the 0.3 default floor
+        // "unobserved" never scored and never priced - still preferred over a gate-failing priced model.
+        var policy = Build(catalog, memory);
+
+        var selected = await policy.SelectModelAsync(Context("cheap-but-bad", "unobserved"), TestContext.Current.CancellationToken);
 
         Assert.Equal("unobserved", selected);
     }
