@@ -70,7 +70,7 @@ public sealed class RoutingOptions
     public double Epsilon2 { get; init; } = -0.1;
 
     /// <summary>
-    /// Gets the minimum observed quality score <see cref="Router.UtilityRoutingPolicy"/> requires a
+    /// Gets the minimum observed quality score <see cref="TotallyHot.ArcRouter.Router.UtilityRoutingPolicy"/> requires a
     /// candidate to hold before it is eligible for cost-aware selection
     /// (<c>docs/router/utility-model-routing.md</c> §B3.4). A candidate with no observed score yet
     /// (<see langword="null"/>) is never dropped by this gate - unobserved is not the same as bad; only
