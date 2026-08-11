@@ -51,7 +51,7 @@ public sealed class RouterMemoryScoreObserver : IRouterScoreObserver
         }
 
         var score = Math.Clamp(result.UnifiedScore, 0.0, 1.0);
-        var dimension = _options.LiveMemoryPrefix + result.Dimension;
+        var dimension = RouterDimension.ToLiveKey(_options.LiveMemoryPrefix, result.Dimension);
 
         await _memory.AddScoreAsync(dimension, result.Model, score).ConfigureAwait(false);
 

@@ -251,7 +251,11 @@ internal static class ToolCallHistoryRenderer
                 continue;
             }
 
-            if (function[dialect.NameKey] is not JsonValue nameValue || !nameValue.TryGetValue<string>(out var name) || string.IsNullOrEmpty(name))
+            // The incoming history is always OpenAI-shaped regardless of dialect - the client speaks OpenAI
+            // and only the outgoing rendering below uses the dialect's own key names. Reading with
+            // dialect.NameKey/ArgumentsKey here would silently lose a prior call's arguments for any dialect
+            // whose ArgumentsKey differs from "arguments" (docs/router/backlog.md item 3).
+            if (function["name"] is not JsonValue nameValue || !nameValue.TryGetValue<string>(out var name) || string.IsNullOrEmpty(name))
             {
                 continue;
             }
@@ -265,7 +269,7 @@ internal static class ToolCallHistoryRenderer
             // sees a real nested object - the exact shape it was taught to emit - rather than a string full
             // of escaped quotes, which is both harder to read and unlike its own prior output. A value that
             // does not parse is written through as a string so a malformed history is still forwarded.
-            var argumentsText = (function[dialect.ArgumentsKey] as JsonValue)?.TryGetValue<string>(out var raw) == true ? raw : null;
+            var argumentsText = (function["arguments"] as JsonValue)?.TryGetValue<string>(out var raw) == true ? raw : null;
             JsonNode? argumentsNode = null;
             if (argumentsText is not null)
             {
@@ -282,7 +286,7 @@ internal static class ToolCallHistoryRenderer
             payloads.Add(new JsonObject
             {
                 [dialect.NameKey] = name,
-                [dialect.ArgumentsKey] = argumentsNode ?? function[dialect.ArgumentsKey]?.DeepClone() ?? new JsonObject(),
+                [dialect.ArgumentsKey] = argumentsNode ?? function["arguments"]?.DeepClone() ?? new JsonObject(),
             });
         }
 

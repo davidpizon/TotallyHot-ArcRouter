@@ -3,8 +3,10 @@ using System.Text.Json;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Router;
+using TotallyHot.ArcRouter.Sandbox;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
@@ -14,6 +16,12 @@ namespace TotallyHot.ArcRouter.Tests.Proxy;
 /// </summary>
 public class RequestInterceptorTests
 {
+    // These tests seed RouterMemory directly and never send a "messages" array, so
+    // InferLiveDimension's KeywordDimensionInferrer default (empty prompt) always resolves here -
+    // matching the dimension RequestInterceptor's fallback ranking will read for these requests.
+    private static readonly string DefaultLiveDimension =
+        RouterDimension.ToLiveKey(new SandboxOptions().LiveMemoryPrefix, RouterDimension.CodeGeneration);
+
     [Fact]
     public async Task InterceptRequestAsync_IncrementsCount_AndLogsStructuredMessage()
     {
@@ -130,10 +138,48 @@ public class RequestInterceptorTests
             ("gpt-5.4", "openai", "gpt-5.4"),
             ("kimi-k2.5", "moonshot", "kimi-k2.5"));
         var memory = new RouterMemory();
-        await memory.AddScoreAsync(RequestInterceptor.AgenticFallbackDimension, "gpt-5.4", 0.2);
-        await memory.AddScoreAsync(RequestInterceptor.AgenticFallbackDimension, "kimi-k2.5", 0.9);
+        await memory.AddScoreAsync(DefaultLiveDimension, "gpt-5.4", 0.2);
+        await memory.AddScoreAsync(DefaultLiveDimension, "kimi-k2.5", 0.9);
         var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver, routerMemory: memory);
         var context = CreateContextWithBody("""{"model":"agentic-router"}""");
+
+        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("kimi-k2.5", result.Route!.ModelName);
+    }
+
+    // PLAN.md Phase G's regression test: a verifier score written for one request must change which
+    // model a *later* same-dimension request auto-selects - the exact loop that was severed by the
+    // live: vs unresolved-model-fallback key mismatch (RouterMemoryScoreObserver wrote one key,
+    // RequestInterceptor read another, so they could never agree). Exercises the real observer and a
+    // real prompt-derived dimension end to end, rather than seeding RouterMemory directly.
+    [Fact]
+    public async Task ResolveModelRouteAsync_ScoreObservedForPriorRequest_ChangesNextSameDimensionAutoSelect()
+    {
+        var resolver = ModelRouteResolverTestFactory.CreateWithModelList(
+            ("gpt-5.4", "openai", "gpt-5.4"),
+            ("kimi-k2.5", "moonshot", "kimi-k2.5"));
+        var memory = new RouterMemory();
+        var observer = new RouterMemoryScoreObserver(
+            memory,
+            Options.Create(new SandboxOptions()),
+            Mock.Of<ILogger<RouterMemoryScoreObserver>>());
+        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver, routerMemory: memory);
+
+        // Request N: the sandbox scores a bug-fixing response from kimi-k2.5 highly, off the hot path.
+        await observer.ObserveAsync(
+            new SandboxResult
+            {
+                Model = "kimi-k2.5",
+                Dimension = RouterDimension.BugFixing,
+                UnifiedScore = 0.95,
+            },
+            TestContext.Current.CancellationToken);
+
+        // Request N+1: a new, same-dimension prompt ("fix this bug...") auto-selects.
+        var context = CreateContextWithBody(
+            """{"model":"auto","messages":[{"role":"user","content":"Please fix this bug in my code."}]}""");
 
         var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
 
@@ -154,8 +200,8 @@ public class RequestInterceptorTests
             ("gpt-5.4", "openai", "gpt-5.4"),
             ("kimi-k2.5", "moonshot", "kimi-k2.5-upstream"));
         var memory = new RouterMemory();
-        await memory.AddScoreAsync(RequestInterceptor.AgenticFallbackDimension, "gpt-5.4", 0.2);
-        await memory.AddScoreAsync(RequestInterceptor.AgenticFallbackDimension, "kimi-k2.5", 0.9);
+        await memory.AddScoreAsync(DefaultLiveDimension, "gpt-5.4", 0.2);
+        await memory.AddScoreAsync(DefaultLiveDimension, "kimi-k2.5", 0.9);
         var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver, routerMemory: memory);
         var context = CreateContextWithBody($$"""{"model":"{{requestedModel}}"}""");
 
@@ -178,8 +224,8 @@ public class RequestInterceptorTests
             ("auto", "openai", "some-literal-model"),
             ("kimi-k2.5", "moonshot", "kimi-k2.5"));
         var memory = new RouterMemory();
-        await memory.AddScoreAsync(RequestInterceptor.AgenticFallbackDimension, "auto", 0.2);
-        await memory.AddScoreAsync(RequestInterceptor.AgenticFallbackDimension, "kimi-k2.5", 0.9);
+        await memory.AddScoreAsync(DefaultLiveDimension, "auto", 0.2);
+        await memory.AddScoreAsync(DefaultLiveDimension, "kimi-k2.5", 0.9);
         var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver, routerMemory: memory);
         var context = CreateContextWithBody("""{"model":"auto"}""");
 
@@ -221,7 +267,7 @@ public class RequestInterceptorTests
             ("gpt-5.4", "openai", "gpt-5.4"),
             ("kimi-k2.5", "moonshot", "kimi-k2.5"));
         var memory = new RouterMemory();
-        await memory.AddScoreAsync(RequestInterceptor.AgenticFallbackDimension, "kimi-k2.5", 0.9);
+        await memory.AddScoreAsync(DefaultLiveDimension, "kimi-k2.5", 0.9);
         var interceptor = new RequestInterceptor(
             Mock.Of<ILogger<RequestInterceptor>>(),
             resolver,

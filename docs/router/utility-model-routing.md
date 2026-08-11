@@ -1,6 +1,6 @@
 # Utility-Model Routing under BYOK
 
-Status: **Plan / not yet implemented**
+Status: **Partial — Phase H (B1, B2) shipped; B3–B5 pending**
 Scope: **two repos** — the proxy (this repo) and the VS Code extension (`spark-vscode-extension`, published as `davidpizon.oai-compatible-copilot`).
 
 ## Context
@@ -41,7 +41,7 @@ This is the acceptance criterion for the whole utility path. Concretely, the pro
 1. **MUST NOT reject the request.** Today an unrecognized `model` is rejected with HTTP 400 by `RequestInterceptor.ResolveModelRouteAsync` (`src/TotallyHotArcRouter/Proxy/RequestInterceptor.cs`) → `ProxyMiddleware.WriteModelNotFoundResponseAsync` (`src/TotallyHotArcRouter/Proxy/ProxyMiddleware.cs`). A utility alias MUST bypass that allowlist rejection.
    > **Generalized statement of this decision — IMPLEMENTED (2026-07-25):** whenever the proxy is **not** running in single-model serving mode (`SingleModelServingOptions.ForcedModelName` unset — see the constructor validation in [`RequestInterceptor`](../../src/TotallyHotArcRouter/Proxy/RequestInterceptor.cs)) and the caller's `model` does not match any configured `ModelList` entry, the proxy accepts the request and hands it to agentic routing rather than rejecting it with 400. The router alias (`agentic-router`) and the utility aliases (`copilot-utility`, `copilot-utility-small`) are the two named shapes of "unresolved model" this plan enumerates, but the rule is general: *any* not-found model name, outside forced single-model mode, is a routing decision — not a hard error. Single-model serving is the one mode where an unconfigured name still fails, since it force-routes to one operator-chosen model by design (see `RequestInterceptor`'s constructor validation).
    >
-   > **What shipped, concretely** (`RequestInterceptor.TryAgenticallyRouteUnresolvedModel`, `RequestInterceptor.cs`): when `TryResolve` fails and single-model serving isn't forced, every currently-configured model (`IModelRouteResolver.ListModels()` — the pick can never escape the allowlist, satisfying requirement 4 below) is ranked by `RouterMemory.GetAverageScore` under a single fixed dimension (`RequestInterceptor.AgenticFallbackDimension = "unresolved-model-fallback"`), and the highest scorer wins; cold start (no scores yet, or no `RouterMemory` supplied) deterministically picks the first configured model. **This is intentionally the minimal slice, not the full plan**: there is no `RequestClassifier`, no per-tier (`copilot-utility` vs `copilot-utility-small`) weighting, and no cost signal (`IModelPriceCatalog`/κ) feeding the ranking — every unresolved name, utility or not, is scored identically under the one dimension. `UtilityRoutingPolicy` (requirement 3 below), the tier distinction, and the cost-aware selection remain the open follow-up work items 2–6 describe. Tests: `RequestInterceptorTests.cs` (`ResolveModelRouteAsync_UnknownModel_*`), `ProxyMiddlewareTests.InvokeAsync_UnknownModel_ModelsConfigured_AgenticallyRoutesToConfiguredModel_AndCallsUpstream`.
+   > **What shipped, concretely** (`RequestInterceptor.TryAgenticallyRouteUnresolvedModel`, `RequestInterceptor.cs`): when `TryResolve` fails and single-model serving isn't forced, every currently-configured model (`IModelRouteResolver.ListModels()` — the pick can never escape the allowlist, satisfying requirement 4 below) is ranked by `RouterMemory.GetAverageScore` under the request's live dimension and the highest scorer wins; cold start (no scores yet, or no `RouterMemory` supplied) treats the candidate as tied rather than worst, so it interleaves with scored models instead of always sinking to the bottom. The live dimension is no longer a single fixed key — `RequestInterceptor.InferLiveDimension` runs Phase H's `IRequestClassifier` (`HeuristicRequestClassifier` by default) ahead of every routing decision and composes the key from its `Dimension` via `RouterDimension.ToLiveKey`, so unresolved requests are ranked per-dimension like any other traffic. **This is still not the full plan**: there is no per-tier (`copilot-utility` vs `copilot-utility-small`) weighting and no cost signal (`IModelPriceCatalog`/κ) feeding the ranking — every unresolved name, utility or not, is scored under its classified dimension with no cost term. `UtilityRoutingPolicy` (requirement 3 below), the tier distinction, and the cost-aware selection remain the open follow-up work items 2–6 describe. Tests: `RequestInterceptorTests.cs` (`ResolveModelRouteAsync_UnknownModel_*`), `ProxyMiddlewareTests.InvokeAsync_UnknownModel_ModelsConfigured_AgenticallyRoutesToConfiguredModel_AndCallsUpstream`, `HeuristicRequestClassifierTests.cs`.
    >
    > **The reserved `auto` name — IMPLEMENTED (2026-07-29):** the fallback above is a *recovery* from a name we didn't recognize. `"model": "auto"` (matched case-insensitively, `RequestInterceptor.AutoSelectModelName`) is the way a client asks for that same selection **deliberately**. It skips the `ModelList` lookup entirely and runs the identical ranked auto-select, so `auto` needs no `ModelList` entry and — because the check precedes `TryResolve` — a configured model literally named `auto` cannot shadow it. Two consequences worth stating: single-model serving still wins (`_forcedModelName` overwrites `model` before the check, so a `--model`-forced proxy serves its one model and never auto-selects), and when no model is currently eligible (every provider stopped or every circuit open) the request fails with an auto-select-specific message instead of "unknown model". `auto` is deliberately **not** advertised by `GET /v1/models`, which lists only real routable models. Tests: `RequestInterceptorTests.ResolveModelRouteAsync_AutoModel_*`.
 2. **MUST NOT require a hand-authored `ModelList` entry** mapping the alias to a specific model. The alias is a *request for a decision*, not a static route. (This is exactly why the interim `copilot-utility-small → claude-haiku-4-5-20251001` entry is a stopgap to be removed — it satisfies #1 while violating #2.)
@@ -98,9 +98,13 @@ The synthesis that satisfies both decisions:
 - When the fallback path is active, the proxy additionally recognizes dedicated **utility aliases** (`copilot-utility`, `copilot-utility-small`) as an *explicit* "this is utility, force the cheapest-tier policy" signal.
 - A lightweight **request classifier** (payload heuristics) lets the router recognize utility-shaped requests even in the mainAgent-mirrored path where the name is ambiguous.
 
-> Note: `agentic-router` is **not** in the proxy's `ModelList` today, so a default-config request (`oaicopilot.modelId = "agentic-router"`) would currently be rejected with HTTP 400. Introducing router-alias handling is therefore required for the out-of-the-box configuration to work at all — not merely a utility nicety.
+**Current implementation status:**
+- **Shipped (Phase H, B1–B2):** Router and utility alias recognition; `IRequestClassifier` producing `{ Dimension, Difficulty, Language, IsUtility }` from request payload.
+- **Pending (Phase I, B3–B5):** Cost-aware `UtilityRoutingPolicy` with the κ term, wiring into `RequestInterceptor`, and telemetry emission.
 
-> Interim state to reconcile: earlier in development a **static** `copilot-utility-small → claude-haiku-4-5-20251001` entry was added to `src/TotallyHotArcRouter/appsettings.json` and the live `bin/.../model-routing.json`. That hard-codes in config exactly the decision this plan moves into the router, so it should be **removed** once dynamic selection ships (keep it only until then, as a stopgap that stops the error).
+> Note: `agentic-router` is **not** in the proxy's `ModelList` today, so a default-config request (`oaicopilot.modelId = "agentic-router"`) would currently be rejected with HTTP 400. Introducing router-alias handling is therefore required for the out-of-the-box configuration to work at all — not merely a utility nicety. This is addressed by Phase H's alias recognition in `RequestInterceptor.TryAgenticallyRouteUnresolvedModel`.
+
+> **Interim state (currently live):** a **static** `copilot-utility-small → claude-haiku-4-5-20251001` entry exists in `src/TotallyHotArcRouter/appsettings.json` and the live `bin/.../model-routing.json`. That hard-codes the decision this plan moves into the router; it will be **removed** once Phase I's dynamic selection ships (keep it only until then, as a stopgap that stops the error).
 
 ## Architecture
 
@@ -173,7 +177,25 @@ The critical structural point: **selection is decoupled from generation.** The e
   - `isUtility = true` when the alias is a utility alias **or** payload heuristics indicate a lightweight background call (small `max_tokens`, short/system-only prompt, title/intent-style system content). Heuristics are the signal in the mainAgent-mirrored path where the name is ambiguous.
   - `dimension` best-effort from prompt shape (reuse the paper's dimension taxonomy where practical); utility requests can map to a dedicated `"utility"` dimension.
 
+  > **Shipped (PLAN.md Phase H):** `IRequestClassifier` / `HeuristicRequestClassifier`
+  > (`src/TotallyHotArcRouter/Router/Classification/`) produces `{ Dimension, Difficulty, Language, IsUtility }`
+  > from the parsed request body, wired into `RequestInterceptor.InferLiveDimension` so every routing
+  > decision (auto-select and the unresolved-model fallback) runs the classifier ahead of routing rather
+  > than a raw dimension-only inferrer. `Dimension` delegates to the shared `IDimensionInferrer`
+  > (`KeywordDimensionInferrer`, now covering all nine research-doc §4.4 dimensions including
+  > `multi_language`) so the pre-route and post-response sandbox paths can never classify the same
+  > prompt differently. `IsUtility` uses this section's exact payload heuristics (small `max_tokens`,
+  > short prompt naming a title/summary/commit-message-style workflow) but is **not yet consumed by any
+  > routing decision** — that wiring, plus the dedicated `"utility"` dimension and the alias-based
+  > `isUtility` signal (B1), lands with B3/B4 below. `Difficulty` (`easy`/`medium`/`hard`, research doc's
+  > few-shot example vocabulary) is additional Phase H scope beyond this section's original `{ dimension,
+  > isUtility }` shape, added because PLAN.md's classifier contract also includes it for the
+  > LinUCB/LinTS one-hot context (§5's baselines) — it is likewise unconsumed until a later phase reads
+  > it.
+
 ### B3. Selection-only routing policy
+
+**Status: Pending (Phase I).** This section and B4–B5 describe the cost-aware routing policy that completes the feedback loop. Phase H (B1–B2) shipped the request classifier; the policy itself awaits Phase I.
 
 - Introduce `IRoutingPolicy` with `Task<string> SelectModelAsync(RoutingContext ctx, CancellationToken ct)` returning an **allowlisted `ModelName`** (never generates a response). This is the seam that makes smart routing compatible with the streaming reverse-proxy.
 

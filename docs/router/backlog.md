@@ -6,7 +6,7 @@ completed** records what has landed so the narrative reads top-to-bottom.
 
 ## Open
 
-### 1. `ManagementFacade` silently drops provider fields on write
+### ✅ 1. `ManagementFacade` silently drops provider fields on write — Resolved
 
 Two separate write paths in
 [`src/TotallyHotArcRouter/Proxy/Management/ManagementFacade.cs`](../../src/TotallyHotArcRouter/Proxy/Management/ManagementFacade.cs)
@@ -20,6 +20,17 @@ The loss is **durable, not just in-memory** — `IProviderConfigStore` persists 
 `model-routing.json` on every mutation (see
 [`../gui/provider-management.md`](../gui/provider-management.md)'s Architecture section), so a
 dropped field is written out as its default and is gone until someone hand-edits the file.
+
+> **Resolved.** `ProviderOptions` (`src/TotallyHotArcRouter/Models/ModelRoutingOptions.cs`) is now a
+> `record`. `MergeProvider` builds `var baseline = existing ?? new ProviderOptions(); return baseline
+> with { ...only the fields this request can actually change... }`, and `WithEnabled` is now
+> `source with { Enabled = enabled }` — both per the suggested fix below, so a newly added property
+> carries across by construction instead of by remembering to update two hand-maintained lists.
+> Covered by `src/TotallyHotArcRouter.Tests/Proxy/Management/ProviderOptionsPreservationTests.cs`,
+> including the reflection-based "no property silently dropped" guard
+> (`UpsertProvider_CarriesEveryPropertyItWasNotAskedToChange`,
+> `SetEnabled_CarriesEveryPropertyExceptEnabled`) plus targeted `EnableToolCallGuard` and `Aws*`
+> round-trip tests.
 
 #### 1a. `MergeProvider` drops `EnableToolCallGuard` and all four `Aws*` fields
 
@@ -110,7 +121,7 @@ override. Building the GUI surface now would be building it to delete it.
 > still absent from the GUI — deliberately, and now with the intended successor in place, so deleting the
 > flag is a self-contained follow-up rather than a blocked one.
 
-### 3. `ToolCallHistoryRenderer` reads OpenAI-shaped history with dialect-specific key names
+### ✅ 3. `ToolCallHistoryRenderer` reads OpenAI-shaped history with dialect-specific key names — Resolved
 
 [`ToolCallHistoryRenderer.RenderAssistantToolCalls`](../../src/TotallyHotArcRouter/Proxy/Translation/ToolCalling/ToolCallHistoryRenderer.cs)
 (~L254, L268) reads a prior assistant turn's tool calls using the *dialect's* key names:
@@ -141,6 +152,16 @@ The quirk predates the file: it was carried over verbatim when this code was ext
 `ToolCallEmulationRewriter` as a deliberately behavior-preserving refactor
 ([`tool-call-normalization.md`](tool-call-normalization.md) Phase 8), rather than fixed in place, so the
 extraction could be validated against the existing tests unchanged.
+
+> **Resolved**, per the suggested fix below: `RenderAssistantToolCalls` in
+> `src/TotallyHotArcRouter/Proxy/Translation/ToolCalling/ToolCallHistoryRenderer.cs` now reads
+> `function["name"]`/`function["arguments"]` (the fixed OpenAI names, including the fallback on the
+> arguments-parse-failure path) and only uses `dialect.NameKey`/`dialect.ArgumentsKey` when writing the
+> payload back out. Covered by
+> `src/TotallyHotArcRouter.Tests/Proxy/Translation/ToolCalling/ToolCallHistoryRendererTests.cs`: a
+> `Llama3Json`-dialect round trip (`ArgumentsKey = "parameters"`) now preserves a prior turn's
+> arguments instead of emitting an empty object, and `Emulated`/`Constrained` still round-trip
+> unchanged.
 
 #### Suggested fix
 
