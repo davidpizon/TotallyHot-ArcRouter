@@ -402,17 +402,34 @@ namespace TotallyHot.ArcRouter.Proxy
                 if (candidates.Count > 0)
                 {
                     var context = new RoutingContext(liveDimension, classification.IsUtility, candidates);
-                    var selectedName = await _routingPolicy.SelectModelAsync(context, cancellationToken);
+                    string? selectedName;
+                    try
+                    {
+                        selectedName = await _routingPolicy.SelectModelAsync(context, cancellationToken);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        // A misbehaving policy or one of its dependencies (e.g. the price catalog) must not
+                        // fail the request - degrade to the existing memory-ranking fallback below instead.
+                        _logger.LogWarning(
+                            ex,
+                            "[INTERCEPTOR] Routing policy threw while selecting a model; falling back to memory ranking.");
+                        selectedName = null;
+                    }
 
                     // Validate that the policy returned a model from the eligible candidate set to enforce contract.
-                    var selectedInCandidates = candidates.Any(c => c.ModelName.Equals(selectedName, StringComparison.OrdinalIgnoreCase));
+                    var selectedInCandidates = selectedName is not null
+                        && candidates.Any(c => c.ModelName.Equals(selectedName, StringComparison.OrdinalIgnoreCase));
                     if (!selectedInCandidates)
                     {
-                        _logger.LogWarning(
-                            "[INTERCEPTOR] Routing policy selected ineligible model '{Model}' not in candidate set; falling back to memory ranking.",
-                            SanitizeForLog(selectedName));
+                        if (selectedName is not null)
+                        {
+                            _logger.LogWarning(
+                                "[INTERCEPTOR] Routing policy selected ineligible model '{Model}' not in candidate set; falling back to memory ranking.",
+                                SanitizeForLog(selectedName));
+                        }
                     }
-                    else if (_modelRouteResolver.TryResolve(selectedName, out var selectedRoute))
+                    else if (_modelRouteResolver.TryResolve(selectedName!, out var selectedRoute))
                     {
                         // docs/router/utility-model-routing.md §B5: the routing decision itself (dimension,
                         // isUtility, chosen model), logged through Serilog so it reaches the same telemetry
@@ -420,7 +437,7 @@ namespace TotallyHot.ArcRouter.Proxy
                         // sink forwards every log event to connected dashboards, not just RoutingTelemetryEvent).
                         _logger.LogInformation(
                             "[INTERCEPTOR] Routing policy selected '{Model}' for dimension '{Dimension}' (isUtility={IsUtility}).",
-                            SanitizeForLog(selectedName),
+                            SanitizeForLog(selectedName!),
                             SanitizeForLog(liveDimension),
                             classification.IsUtility);
                         return selectedRoute;
@@ -429,7 +446,7 @@ namespace TotallyHot.ArcRouter.Proxy
                     {
                         _logger.LogWarning(
                             "[INTERCEPTOR] Routing policy selected unresolvable model '{Model}'; falling back to memory ranking.",
-                            SanitizeForLog(selectedName));
+                            SanitizeForLog(selectedName!));
                     }
                 }
             }
