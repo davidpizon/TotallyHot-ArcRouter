@@ -24,7 +24,7 @@ public sealed class KeywordDimensionInferrer : IDimensionInferrer
     {
         var p = (prompt ?? string.Empty).ToLowerInvariant();
 
-        if (ContainsAny(p, "port to", "port from", "translate to", "translate from", "convert from", "rewrite in", "cross-language", "cross language") ||
+        if (ContainsAny(p, "port to", "port from", "translate to", "translate from", "convert from", "cross-language", "cross language") ||
             CountDistinctLanguageMentions(p) >= 2)
         {
             return RouterDimension.MultiLanguage;

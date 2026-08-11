@@ -23,6 +23,7 @@ public class KeywordDimensionInferrerTests
     [InlineData("Rewrite this Ruby class in Kotlin", "multi_language")]
     [InlineData("I need this to go faster in Python", "code_generation")]
     [InlineData("Make this code go really fast", "code_generation")]
+    [InlineData("Rewrite this function in place to avoid the extra allocation", "code_generation")]
     public void Infer_ReturnsExpectedDimension(string prompt, string expected)
     {
         Assert.Equal(expected, _inferrer.Infer(prompt, SandboxLanguage.Python));
