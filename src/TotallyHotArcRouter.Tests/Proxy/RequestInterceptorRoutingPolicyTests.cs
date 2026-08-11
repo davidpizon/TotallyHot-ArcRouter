@@ -84,6 +84,30 @@ public class RequestInterceptorRoutingPolicyTests
     }
 
     [Fact]
+    public async Task ResolveModelRouteAsync_CandidatesRankedForPolicy_ColdStartOutranksLowScore()
+    {
+        var resolver = ModelRouteResolverTestFactory.CreateWithModelList(
+            ("low-scored", "openai", "low-scored"),
+            ("unscored", "moonshot", "unscored"));
+        var memory = new RouterMemory();
+        // Below the 0.5 cold-start ranking prior (see RequestInterceptor.ColdStartRankingScore).
+        await memory.AddScoreAsync(DefaultLiveDimension, "low-scored", 0.1);
+        var policy = new FakeRoutingPolicy("low-scored");
+        var interceptor = new RequestInterceptor(
+            Mock.Of<ILogger<RequestInterceptor>>(),
+            resolver,
+            routerMemory: memory,
+            routingPolicy: policy);
+        var context = CreateContextWithBody("""{"model":"agentic-router"}""");
+
+        await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(policy.LastContext);
+        Assert.Equal("unscored", policy.LastContext!.Candidates[0].ModelName);
+        Assert.Equal("low-scored", policy.LastContext.Candidates[1].ModelName);
+    }
+
+    [Fact]
     public async Task ResolveModelRouteAsync_ForcedSingleModel_NeverConsultsRoutingPolicy()
     {
         var resolver = ModelRouteResolverTestFactory.Create("gpt-5.4", "gpt-5.4-2026-01", "https://api.openai.com");

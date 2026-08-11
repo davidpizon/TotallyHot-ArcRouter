@@ -21,6 +21,11 @@ public sealed class AgentRouterPolicy : IRoutingPolicy
     {
         ArgumentNullException.ThrowIfNull(context);
 
+        if (context.Candidates.Count == 0)
+        {
+            throw new InvalidOperationException("AgentRouterPolicy requires at least one candidate.");
+        }
+
         var decision = await _router.SelectModelAsync(context.Dimension, cancellationToken);
 
         // Ensure the selected model is in the candidates list to satisfy IRoutingPolicy contract.

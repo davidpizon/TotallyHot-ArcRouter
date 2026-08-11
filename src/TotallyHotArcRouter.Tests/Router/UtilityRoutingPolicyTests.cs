@@ -124,6 +124,17 @@ public class UtilityRoutingPolicyTests
         Assert.Equal("unobserved", selected);
     }
 
+    [Fact]
+    public async Task SelectModelAsync_CancelledToken_ThrowsBeforeSelecting()
+    {
+        var policy = Build(new StubPriceCatalog(), new RouterMemory());
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => policy.SelectModelAsync(Context("only"), cts.Token));
+    }
+
     private static UtilityRoutingPolicy Build(IModelPriceCatalog catalog, RouterMemory memory) =>
         new(catalog, memory, Options.Create(new RoutingOptions()), NullLogger<UtilityRoutingPolicy>.Instance);
 

@@ -440,8 +440,9 @@ namespace TotallyHot.ArcRouter.Proxy
         /// <summary>
         /// Builds one <see cref="RoutingCandidate"/> per currently-eligible model (the same eligibility
         /// rules <see cref="GetEligibleRoutes"/> applies for <see cref="RankEligibleModels"/>), ranked by
-        /// <see cref="RouterMemory"/> score for better policy fallback behavior, for handing to an
-        /// <see cref="IRoutingPolicy"/>.
+        /// <see cref="RouterMemory"/> score - falling back to <see cref="ColdStartRankingScore"/> for a
+        /// candidate with no recorded score yet, matching <see cref="RankEligibleModels"/>'s cold-start
+        /// treatment - for better policy fallback behavior, for handing to an <see cref="IRoutingPolicy"/>.
         /// </summary>
         /// <param name="liveDimension">The request's live dimension key for score lookup.</param>
         private List<RoutingCandidate> BuildRoutingCandidates(string liveDimension)
@@ -450,7 +451,7 @@ namespace TotallyHot.ArcRouter.Proxy
             if (_routerMemory is not null && candidates.Count > 0)
             {
                 candidates = candidates
-                    .OrderByDescending(e => _routerMemory.GetAverageScore(liveDimension, e.ModelName))
+                    .OrderByDescending(e => _routerMemory.GetAverageScore(liveDimension, e.ModelName) ?? ColdStartRankingScore)
                     .ToList();
             }
 

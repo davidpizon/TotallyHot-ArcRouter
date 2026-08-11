@@ -71,6 +71,7 @@ public sealed class UtilityRoutingPolicy : IRoutingPolicy
     public Task<string> SelectModelAsync(RoutingContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
+        cancellationToken.ThrowIfCancellationRequested();
 
         if (context.Candidates.Count == 0)
         {
