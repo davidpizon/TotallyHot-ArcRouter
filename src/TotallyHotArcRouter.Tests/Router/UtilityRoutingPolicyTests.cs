@@ -125,6 +125,24 @@ public class UtilityRoutingPolicyTests
     }
 
     [Fact]
+    public async Task SelectModelAsync_NoPricingAvailable_UnobservedCandidateDefaultsToZeroQuality()
+    {
+        // No candidate is priced, so selection falls to the unpriced-fallback tie-break (degradation
+        // case 2). The floor is lowered so a negatively-scored observed candidate still clears the gate,
+        // isolating the ?? default: an unobserved candidate must rank as quality 0 - the same default the
+        // reward formula uses - not as worse than an observed negative score.
+        var options = Options.Create(new RoutingOptions { UtilityMinQualityScore = -1 });
+        var memory = new RouterMemory();
+        await memory.AddScoreAsync(Dimension, "bad-observed", -0.5);
+        // "unobserved" never scored - defaults to quality 0 per the type-level reward semantics.
+        var policy = new UtilityRoutingPolicy(new StubPriceCatalog(), memory, options, NullLogger<UtilityRoutingPolicy>.Instance);
+
+        var selected = await policy.SelectModelAsync(Context("bad-observed", "unobserved"), TestContext.Current.CancellationToken);
+
+        Assert.Equal("unobserved", selected);
+    }
+
+    [Fact]
     public async Task SelectModelAsync_CancelledToken_ThrowsBeforeSelecting()
     {
         var policy = Build(new StubPriceCatalog(), new RouterMemory());

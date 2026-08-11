@@ -126,8 +126,10 @@ public sealed class UtilityRoutingPolicy : IRoutingPolicy
             .ToList();
         var fallbackCandidates = qualityGated.Count > 0 ? qualityGated : scored;
 
+        // Unobserved candidates default to a quality of 0, matching the reward's cold-start
+        // semantics (see the type-level remarks) rather than being penalized as worst-possible.
         var unpricedFallback = fallbackCandidates
-            .OrderByDescending(x => x.Quality ?? double.MinValue)
+            .OrderByDescending(x => x.Quality ?? 0)
             .ThenBy(x => x.Candidate.ModelName, StringComparer.Ordinal)
             .First()
             .Candidate.ModelName;
