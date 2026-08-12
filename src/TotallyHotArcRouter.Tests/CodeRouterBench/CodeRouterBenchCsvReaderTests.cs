@@ -83,6 +83,17 @@ public class CodeRouterBenchCsvReaderTests
     }
 
     [Fact]
+    public void Read_RowMissingRequiredField_ThrowsFormatException()
+    {
+        var path = WriteFixture(
+            "task_id,dimension,model,score",
+            "t1,code_generation,claude-opus-4-6");
+
+        var ex = Assert.Throws<FormatException>(() => CodeRouterBenchCsvReader.Read(path));
+        Assert.Contains("row 2", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Read_MissingHeaderRow_ThrowsFormatException()
     {
         var path = Path.Combine(Path.GetTempPath(), $"crb-empty-{Guid.NewGuid():N}.csv");
