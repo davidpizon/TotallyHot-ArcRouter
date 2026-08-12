@@ -1,3 +1,4 @@
+using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.Mcp;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
@@ -179,6 +180,13 @@ namespace TotallyHot.ArcRouter.Hosting
                 .Configure<IConfiguration>((options, configuration) =>
                     configuration.GetSection(PriceCatalogOptions.SectionName).Bind(options));
             services.AddSingleton<PriceCatalogDatabase>();
+
+            // CodeRouterBench corpus (docs/router/coderouterbench-sqlite-migration-plan.md Phase 1): its
+            // own coderouterbench.db, separate from agent_telemetry.db - see BenchmarkDatabase's remarks.
+            // Reuses the StorageOptions registration above.
+            services.AddSingleton<BenchmarkDatabase>();
+            services.AddSingleton<BenchmarkFileLedger>();
+
             // Operator price-override store (docs/router/token-tracking-implementation-plan.md Phase 3 §5.7):
             // the resolution ladder's top rung. Registered before the resolver so the container injects it
             // into ConfigModelIdentityResolver's optional overrideStore parameter.
