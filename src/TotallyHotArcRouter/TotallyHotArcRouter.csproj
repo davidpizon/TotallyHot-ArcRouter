@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -28,7 +28,7 @@
     <!-- Grpc.AspNetCore already transitively brings in Grpc.Tools (it's a meta-package for exactly
          this: server + client + codegen), but it's referenced explicitly here too so the codegen
          dependency isn't implicit - matches TotallyHotArcRouter.Gui.csproj's explicit Grpc.Tools reference. -->
-    <PackageReference Include="AWSSDK.BedrockRuntime" Version="4.0.101" />
+    <PackageReference Include="AWSSDK.BedrockRuntime" Version="4.0.101.1" />
     <PackageReference Include="Grpc.AspNetCore" Version="2.83.0" />
     <PackageReference Include="Grpc.Tools" Version="2.83.0">
       <PrivateAssets>all</PrivateAssets>
@@ -38,11 +38,11 @@
     <!-- First database dependency in the repo: the model price catalog's SQLite store
          (docs/router/model-price-catalog.md). Nothing used a database before - router memory is a
          plain JSON file. -->
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.10" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.11" />
     <!-- Local, in-process BGE-large embedding inference for PLAN.md Phase J's task-embedding-keyed
          memory - no network hop inline with routing, no dependency on an operator having configured
          an embeddings-capable provider. -->
-    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.28.0" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.29.0" />
     <!-- WordPiece tokenizer matching BGE's BERT-family vocabulary; used by OnnxEmbeddingClient to
          turn task text into the token ids OnnxRuntime's InferenceSession expects. -->
     <PackageReference Include="FastBertTokenizer" Version="1.0.28" />
@@ -58,7 +58,7 @@
     <PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />
     <PackageReference Include="Serilog.Settings.Configuration" Version="10.0.1" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
-    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.10" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.11" />
   </ItemGroup>
 
   <ItemGroup>
