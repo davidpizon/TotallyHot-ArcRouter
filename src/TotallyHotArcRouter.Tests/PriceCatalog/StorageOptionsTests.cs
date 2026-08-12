@@ -2,7 +2,10 @@ using TotallyHot.ArcRouter.PriceCatalog;
 
 namespace TotallyHot.ArcRouter.Tests.PriceCatalog;
 
-/// <summary>Covers <see cref="StorageOptions.ResolveDatabasePath"/>'s cross-platform hardening.</summary>
+/// <summary>
+/// Covers <see cref="StorageOptions.ResolveDatabasePath"/> and <see cref="StorageOptions.ResolveBenchmarkDatabasePath"/>'s
+/// shared cross-platform hardening.
+/// </summary>
 public class StorageOptionsTests
 {
     [Fact]
@@ -36,6 +39,36 @@ public class StorageOptionsTests
         var absolute = Path.Combine(Path.GetTempPath(), "explicit.db");
 
         var resolved = new StorageOptions { DatabasePath = absolute }.ResolveDatabasePath();
+
+        Assert.Equal(absolute, resolved);
+    }
+
+    [Fact]
+    public void ResolveBenchmarkDatabasePath_Default_IsRootedWithNoUnexpandedTokens()
+    {
+        var resolved = new StorageOptions().ResolveBenchmarkDatabasePath();
+
+        Assert.True(Path.IsPathRooted(resolved));
+        Assert.DoesNotContain('%', resolved);
+        var doubledSeparator = new string(Path.DirectorySeparatorChar, 2);
+        Assert.DoesNotContain(doubledSeparator, resolved);
+    }
+
+    [Fact]
+    public void ResolveBenchmarkDatabasePath_BackslashRelativePath_NormalizesToPlatformSeparator()
+    {
+        var resolved = new StorageOptions { BenchmarkDatabasePath = @"data\coderouterbench.db" }.ResolveBenchmarkDatabasePath();
+
+        Assert.True(Path.IsPathRooted(resolved));
+        Assert.EndsWith($"data{Path.DirectorySeparatorChar}coderouterbench.db", resolved);
+    }
+
+    [Fact]
+    public void ResolveBenchmarkDatabasePath_AbsolutePath_IsReturnedAsIs()
+    {
+        var absolute = Path.Combine(Path.GetTempPath(), "explicit-benchmark.db");
+
+        var resolved = new StorageOptions { BenchmarkDatabasePath = absolute }.ResolveBenchmarkDatabasePath();
 
         Assert.Equal(absolute, resolved);
     }
