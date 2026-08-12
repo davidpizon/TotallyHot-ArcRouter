@@ -116,7 +116,11 @@ public sealed class BenchmarkDatabase
     /// <summary>Gets the resolved absolute path of the database file.</summary>
     public string DatabasePath => _databasePath;
 
-    private string ConnectionString => $"Data Source={_databasePath}";
+    private string ConnectionString => new SqliteConnectionStringBuilder
+    {
+        DataSource = _databasePath,
+        Mode = SqliteOpenMode.ReadWriteCreate,
+    }.ToString();
 
     /// <summary>
     /// Opens a connection to the database. The caller owns disposal.
