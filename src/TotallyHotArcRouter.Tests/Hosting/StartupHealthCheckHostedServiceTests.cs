@@ -1,7 +1,9 @@
 using TotallyHot.ArcRouter.Hosting;
+using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.PriceCatalog.Sources;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
+using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tests.PriceCatalog;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -44,7 +46,9 @@ public class StartupHealthCheckHostedServiceTests
             temp.CreateToolCallCapabilityStore(),
             ledger,
             temp.CreateRollupStore(),
-            Options.Create(new StorageOptions { UsageLedgerRetentionDays = retentionDays }));
+            Options.Create(new StorageOptions { UsageLedgerRetentionDays = retentionDays }),
+            CreateRouterMemoryDatabase(temp),
+            CreateEmbeddingMemory(temp));
 
         await service.StartAsync(TestContext.Current.CancellationToken);
 
@@ -79,7 +83,9 @@ public class StartupHealthCheckHostedServiceTests
             temp.CreateToolCallCapabilityStore(),
             ledger,
             temp.CreateRollupStore(),
-            Options.Create(new StorageOptions { UsageLedgerRetentionDays = retentionDays }));
+            Options.Create(new StorageOptions { UsageLedgerRetentionDays = retentionDays }),
+            CreateRouterMemoryDatabase(temp),
+            CreateEmbeddingMemory(temp));
 
         await service.StartAsync(TestContext.Current.CancellationToken);
 
@@ -103,6 +109,20 @@ public class StartupHealthCheckHostedServiceTests
             CostConfidence: CostConfidence.Unknown,
             OccurredAtUtc: occurredAtUtc,
             RequestId: requestId);
+
+    private static RouterMemoryDatabase CreateRouterMemoryDatabase(TempDatabase temp)
+    {
+        var directory = Path.GetDirectoryName(temp.Path_)!;
+        var dbPath = Path.Combine(directory, "router_embedding_memory.db");
+        return new RouterMemoryDatabase(Options.Create(new RoutingOptions { EmbeddingMemoryDatabasePath = dbPath }));
+    }
+
+    private static EmbeddingMemory CreateEmbeddingMemory(TempDatabase temp)
+    {
+        var database = CreateRouterMemoryDatabase(temp);
+        var store = new SqliteMemoryEntryStore(database);
+        return new EmbeddingMemory(store, Options.Create(new RoutingOptions()), NullLogger<EmbeddingMemory>.Instance);
+    }
 
     private static int CountRows(TempDatabase temp, string sessionSuffix)
     {

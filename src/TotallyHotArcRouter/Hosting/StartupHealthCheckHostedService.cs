@@ -33,6 +33,8 @@ public sealed class StartupHealthCheckHostedService : IHostedService
     private readonly IUsageLedger _usageLedger;
     private readonly IUsageRollupStore _rollupStore;
     private readonly StorageOptions _storageOptions;
+    private readonly Router.RouterMemoryDatabase _routerMemoryDatabase;
+    private readonly Router.EmbeddingMemory _embeddingMemory;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="StartupHealthCheckHostedService"/> class.
@@ -47,7 +49,9 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         ToolCallCapabilityStore toolCallCapabilityStore,
         IUsageLedger usageLedger,
         IUsageRollupStore rollupStore,
-        IOptions<StorageOptions> storageOptions)
+        IOptions<StorageOptions> storageOptions,
+        Router.RouterMemoryDatabase routerMemoryDatabase,
+        Router.EmbeddingMemory embeddingMemory)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(database);
@@ -59,6 +63,8 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         ArgumentNullException.ThrowIfNull(usageLedger);
         ArgumentNullException.ThrowIfNull(rollupStore);
         ArgumentNullException.ThrowIfNull(storageOptions);
+        ArgumentNullException.ThrowIfNull(routerMemoryDatabase);
+        ArgumentNullException.ThrowIfNull(embeddingMemory);
 
         _logger = logger;
         _database = database;
@@ -70,6 +76,8 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         _usageLedger = usageLedger;
         _rollupStore = rollupStore;
         _storageOptions = storageOptions.Value;
+        _routerMemoryDatabase = routerMemoryDatabase;
+        _embeddingMemory = embeddingMemory;
     }
 
     /// <inheritdoc />
@@ -187,6 +195,20 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Usage-rollup backfill failed; continuing startup.");
+        }
+
+        // Task-embedding-keyed memory (PLAN.md Phase J): ensure its own SQLite schema exists and load
+        // the working set, best-effort and log-only like every check above - Phase J's store is not yet
+        // on the routing decision path (Phase L wires the Orchestrator's memory_kNN voter to it), so a
+        // failure here must not block the proxy from binding its port.
+        try
+        {
+            _routerMemoryDatabase.EnsureCreated();
+            await _embeddingMemory.InitializeAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Embedding memory initialization failed; continuing startup.");
         }
 
         _logger.LogInformation("Startup pricing health checks complete.");

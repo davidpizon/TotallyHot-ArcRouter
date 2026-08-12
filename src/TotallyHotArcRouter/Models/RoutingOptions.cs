@@ -55,6 +55,28 @@ public sealed class RoutingOptions
     public string MemoryPath { get; init; } = "router_memory.json";
 
     /// <summary>
+    /// Gets the path to the SQLite database used for task-embedding-keyed memory persistence
+    /// (PLAN.md Phase J, research-doc §3.3), separate from the JSON dimension-averages file at
+    /// <see cref="MemoryPath"/>. Relative paths are resolved from the application base directory.
+    /// </summary>
+    [Required]
+    public string EmbeddingMemoryDatabasePath { get; init; } = "router_embedding_memory.db";
+
+    /// <summary>
+    /// Gets the cosine similarity a neighbor must meet to be returned from embedding-keyed kNN
+    /// retrieval. Defaults to research-doc §3.3's canonical value.
+    /// </summary>
+    [Range(-1d, 1d)]
+    public double EmbeddingSimilarityThreshold { get; init; } = 0.5;
+
+    /// <summary>
+    /// Gets the maximum number of entries embedding-keyed memory retains before evicting the oldest
+    /// (FIFO), per research-doc §3.3's canonical bound.
+    /// </summary>
+    [Range(1, 1_000_000)]
+    public int EmbeddingMemoryCapacity { get; init; } = 20_000;
+
+    /// <summary>
     /// Gets the quality weight ε₁ in the cost-aware reward <c>r = ε₁·s + ε₂·κ</c>
     /// (research doc §"Notation"; <c>docs/router/utility-model-routing.md</c> §B3.5). Defaults to the
     /// manuscript's canonical value.
@@ -107,6 +129,14 @@ public sealed class RoutingOptions
                 nameof(RoutingOptions),
                 typeof(RoutingOptions),
                 ["MemoryPath is required."]);
+        }
+
+        if (string.IsNullOrWhiteSpace(EmbeddingMemoryDatabasePath))
+        {
+            throw new OptionsValidationException(
+                nameof(RoutingOptions),
+                typeof(RoutingOptions),
+                ["EmbeddingMemoryDatabasePath is required."]);
         }
     }
 }

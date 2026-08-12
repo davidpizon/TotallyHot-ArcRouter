@@ -1,4 +1,7 @@
+using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 using System.Collections.Concurrent;
 
@@ -89,17 +92,31 @@ public class RouterMemoryTests
     [Fact]
     public async Task Persistence_WithSharedStore_SurvivesMemoryRecreation()
     {
-        var store = new VectorStoreRouterMemoryStore();
-        var firstMemory = new RouterMemory(store);
-        await firstMemory.AddScoreAsync("refactor", "model-c", 0.8);
-        await firstMemory.AddScoreAsync("refactor", "model-c", 1.0);
+        var tempPath = Path.Combine(Path.GetTempPath(), "arcrouter-tests", Guid.NewGuid().ToString("N"), "router_memory.json");
+        try
+        {
+            var store = new JsonRouterMemoryStore(
+                NullLogger<JsonRouterMemoryStore>.Instance,
+                Options.Create(new RoutingOptions { MemoryPath = tempPath }));
+            var firstMemory = new RouterMemory(store);
+            await firstMemory.AddScoreAsync("refactor", "model-c", 0.8);
+            await firstMemory.AddScoreAsync("refactor", "model-c", 1.0);
 
-        var secondMemory = new RouterMemory(store);
-        await secondMemory.InitializeAsync();
+            var secondMemory = new RouterMemory(store);
+            await secondMemory.InitializeAsync();
 
-        var average = secondMemory.GetAverageScore("refactor", "model-c");
-        Assert.NotNull(average);
-        Assert.Equal(0.9, average.Value, 3);
+            var average = secondMemory.GetAverageScore("refactor", "model-c");
+            Assert.NotNull(average);
+            Assert.Equal(0.9, average.Value, 3);
+        }
+        finally
+        {
+            var directory = Path.GetDirectoryName(tempPath);
+            if (directory is not null && Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
     }
 
     [Fact]

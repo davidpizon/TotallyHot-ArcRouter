@@ -25,6 +25,23 @@ public class RoutingOptionsTests
         Assert.Equal(1.0, options.Epsilon1, 3);
         Assert.Equal(-0.1, options.Epsilon2, 3);
         Assert.Equal(0.3, options.UtilityMinQualityScore, 3);
+        Assert.Equal("router_embedding_memory.db", options.EmbeddingMemoryDatabasePath);
+        Assert.Equal(0.5, options.EmbeddingSimilarityThreshold, 3);
+        Assert.Equal(20_000, options.EmbeddingMemoryCapacity);
+    }
+
+    /// <summary>
+    /// Verifies that a blank embedding memory database path is rejected.
+    /// </summary>
+    [Fact]
+    public void EnsureValid_Throws_WhenEmbeddingMemoryDatabasePathIsBlank()
+    {
+        var options = new RoutingOptions
+        {
+            EmbeddingMemoryDatabasePath = "   "
+        };
+
+        Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
     }
 
     /// <summary>
