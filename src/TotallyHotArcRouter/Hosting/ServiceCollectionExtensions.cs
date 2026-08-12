@@ -36,6 +36,22 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddSingleton<RouterMemory>();
             services.AddSingleton<AgentAsARouter>();
 
+            // PLAN.md Phase J: task-embedding-keyed memory. RouterMemoryDatabase owns a SQLite file
+            // separate from the price catalog's agent_telemetry.db (its own lifecycle/locking);
+            // StartupHealthCheckHostedService creates the schema and loads EmbeddingMemory's working set
+            // before Kestrel binds, mirroring the price-catalog startup checks.
+            services.AddOptions<EmbeddingOptions>()
+                .Configure<IConfiguration>((options, configuration) =>
+                    configuration.GetSection(EmbeddingOptions.SectionName).Bind(options));
+            services.AddOptions<RoutingOptions>()
+                .Configure<IConfiguration>((options, configuration) =>
+                    configuration.GetSection(RoutingOptions.SectionName).Bind(options));
+            services.AddHttpClient(nameof(Router.Embeddings.OnnxEmbeddingClient));
+            services.AddSingleton<Router.Embeddings.IEmbeddingClient, Router.Embeddings.OnnxEmbeddingClient>();
+            services.AddSingleton<RouterMemoryDatabase>();
+            services.AddSingleton<IMemoryEntryStore, SqliteMemoryEntryStore>();
+            services.AddSingleton<EmbeddingMemory>();
+
             // Tools
             services.AddTransient<CheckSyntax>();
             services.AddTransient<RunVisibleTests>();

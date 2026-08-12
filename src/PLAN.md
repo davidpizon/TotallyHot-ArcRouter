@@ -16,9 +16,9 @@ severed at a single point.
 
 ```mermaid
 flowchart LR
-    subgraph CTX["Context — Phases J, K"]
+    subgraph CTX["Context — Phase K"]
         CLS["IRequestClassifier<br/>dimension / difficulty / language / isUtility<br/>SHIPPED (Phase H)"]
-        MEM["Embedding-keyed Memory<br/>cosine kNN, k=10, thr 0.5, FIFO 20K<br/>MISSING"]
+        MEM["EmbeddingMemory<br/>cosine kNN, k=10, thr 0.5, FIFO 20K<br/>SHIPPED (Phase J)"]
         PRIOR["DimensionBest prior<br/>MISSING"]
     end
 
@@ -37,14 +37,13 @@ flowchart LR
     RI["RequestInterceptor ranker<br/>reads unresolved-model-fallback<br/>SHIPPED but reads a dead key"]
 
     CLS --> ORC
-    MEM --> ORC
+    MEM -.->|"Phase L wires the memory_kNN voter"| ORC
     PRIOR --> ORC
     ORC --> POL
     POL --> ING
     ING --> VER
     VER --> OBS
     OBS --> RM
-    RM -.->|"Phase G reconnects this"| MEM
     RM -.->|"reads a key nothing writes"| RI
 ```
 
@@ -68,13 +67,19 @@ Verified against the code:
   `IModelPriceCatalog.GetFreshPriceForRouting`; `RoutingOptions` has `Epsilon1`/`Epsilon2`/
   `UtilityMinQualityScore`. The general (non-utility) path still has no cost term - `AgentRouterPolicy`
   delegates to `AgentAsARouter`'s memory-only ranking, unchanged from before Phase I.
-- **Memory is dimension-hashed, not task-keyed.** `RouterMemory` stores
-  `dimension → model → List<double>`. `VectorStoreRouterMemoryStore` computes Jaccard token overlap on
-  the *dimension string*, not the task, and is wired to no decision. Three `RoutingOptions` knobs —
-  `MaxNeighborCount` (10), `MaxCandidates` (8), and `PolicyName` — are declared and asserted in
-  `RoutingOptionsTests` but read by no production code: configuration for a decision engine that was
-  never built. Per D.3 of the research doc, dimension identity carries only ~27% of the oracle-choice
-  entropy — the other ~73% is exactly what task-keyed memory exists to capture.
+- **Task-embedding-keyed memory exists but is not yet on the decision path (Phase J shipped).**
+  [`TotallyHotArcRouter/Router/Embeddings/OnnxEmbeddingClient.cs`](TotallyHotArcRouter/Router/Embeddings/OnnxEmbeddingClient.cs)
+  embeds task text locally via ONNX Runtime + BGE-large-en-v1.5 (model/tokenizer artifacts cached on
+  first use); [`TotallyHotArcRouter/Router/EmbeddingMemory.cs`](TotallyHotArcRouter/Router/EmbeddingMemory.cs)
+  holds the working set and answers cosine kNN queries (`RoutingOptions.EmbeddingSimilarityThreshold`
+  = 0.5, `MaxNeighborCount` = 10), evicting FIFO past `EmbeddingMemoryCapacity` (20,000), persisted via
+  [`TotallyHotArcRouter/Router/SqliteMemoryEntryStore.cs`](TotallyHotArcRouter/Router/SqliteMemoryEntryStore.cs)
+  in its own SQLite file. `VectorStoreRouterMemoryStore`'s Jaccard-over-dimension-strings similarity is
+  deleted. Nothing calls `EmbeddingMemory.FindNearest` yet - Phase L wires it in as the `memory_kNN`
+  voter. `RouterMemory`'s `dimension → model → List<double>` averages remain unchanged and become the
+  `dim_best` voter's backing store in that same phase. Per D.3 of the research doc, dimension identity
+  carries only ~27% of the oracle-choice entropy - the other ~73% is exactly what this task-keyed memory
+  exists to capture, once Phase L connects it to a decision.
 - **No oracle, no regret, no baselines.** Nothing computes `R_ij`, `CumReg`, `AvgPerf`, or `Perf/$`.
 - **The benchmark corpus is absent.** `data/`, `outputs/`, and `agentic-artifacts/` are referenced
   throughout `README.md` and `docs/HANDBOOK.md` but do not exist in this checkout.
@@ -125,32 +130,6 @@ constants that happen not to match.
   the feedback loop reconnection.
 - Exit: Zero literal dimension strings outside the contract type. Every verifier score written on request
   *N* propagates to influence model selection on request *N+1*.
-
-### Phase J: Embedding-keyed Memory
-
-Replaces dimension-hashed lookup with the paper's per-task vector store — the component that addresses
-the ~73% of routing signal dimension identity cannot express.
-
-- **Embeddings are local ONNX (BGE-large).** Add `IEmbeddingClient` with an in-process
-  `Microsoft.ML.OnnxRuntime` implementation. No network hop inline with routing, no dependency on an
-  operator having configured an embeddings-capable provider. Scope explicitly includes the tokenizer,
-  model-artifact acquisition/caching, and a documented cold-start path for a first run before the model
-  is present.
-- `MemoryEntry`: task embedding (key) → chosen model, observed score `s`, monetary cost `κ`, and the
-  Verifier trace, per research-doc §3.3.
-- Retrieval to the paper's parameters: cosine kNN, similarity threshold **0.5**, **k=10** (wire the
-  already-configured, currently-ignored `RoutingOptions.MaxNeighborCount`), **FIFO-bounded at 20,000
-  entries**, committed in-place after each loop.
-- Persist via SQLite — already a dependency (`PriceCatalogDatabase`) — with brute-force cosine over the
-  in-memory working set. At a 20K FIFO bound this is well inside the hot-path budget; a vector index is
-  not warranted and should not be introduced speculatively.
-- **Delete `VectorStoreRouterMemoryStore`.** Its Jaccard-over-dimension-strings similarity is not an
-  approximation of this design; keeping it invites a future caller to mistake it for one.
-- Keep `RouterMemory`'s dimension averages — they become the DimensionBest voter's backing store in
-  Phase L, not dead code.
-- Exit: kNN retrieval unit-tested for threshold, k, and FIFO eviction; a similar-task lookup returns
-  the model that previously succeeded on a near-duplicate prompt. Embedding + retrieval stays within
-  the 5-second heavy-test bound.
 
 ### Phase K: Restore CodeRouterBench
 
