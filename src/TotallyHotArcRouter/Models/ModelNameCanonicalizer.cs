@@ -28,8 +28,9 @@ namespace TotallyHot.ArcRouter.Models;
 /// </para>
 /// <para>
 /// There is no fuzzy stage and no alias table today: all eight CodeRouterBench dataset ids reach their
-/// configured <c>ModelName</c> by rule alone. An unrecognized id is returned normalized but otherwise
-/// unchanged rather than guessed at, per <c>docs/router/d3-alias-resolution.md</c>.
+/// configured <c>ModelName</c> by rule alone. An unrecognized id still goes through the same
+/// normalization (lowercasing, snapshot/version-suffix stripping, dot-to-dash version unification) as a
+/// recognized one - only the alias/fuzzy mapping is withheld, per <c>docs/router/d3-alias-resolution.md</c>.
 /// </para>
 /// </remarks>
 public static class ModelNameCanonicalizer

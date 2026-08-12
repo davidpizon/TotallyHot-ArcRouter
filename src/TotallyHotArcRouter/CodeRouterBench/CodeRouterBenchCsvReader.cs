@@ -112,7 +112,8 @@ public static class CodeRouterBenchCsvReader
 
     /// <summary>
     /// Splits one CSV line on commas, honoring double-quoted fields (which may themselves contain
-    /// commas) as the released tables' <c>cost_source</c> and task-id columns occasionally do.
+    /// commas) as the released tables' <c>cost_source</c> and task-id columns occasionally do, and
+    /// unescaping a doubled <c>""</c> inside a quoted field into a single literal quote.
     /// </summary>
     private static List<string> SplitLine(string line)
     {
@@ -120,11 +121,20 @@ public static class CodeRouterBenchCsvReader
         var current = new System.Text.StringBuilder();
         var inQuotes = false;
 
-        foreach (var c in line)
+        for (var i = 0; i < line.Length; i++)
         {
+            var c = line[i];
             if (c == '"')
             {
-                inQuotes = !inQuotes;
+                if (inQuotes && i + 1 < line.Length && line[i + 1] == '"')
+                {
+                    current.Append('"');
+                    i++;
+                }
+                else
+                {
+                    inQuotes = !inQuotes;
+                }
             }
             else if (c == ',' && !inQuotes)
             {

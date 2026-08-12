@@ -86,10 +86,10 @@ public class ModelNameCanonicalizerTests
             ModelNameCanonicalizer.Canonicalize(configuredModelName),
             ModelNameCanonicalizer.Canonicalize(datasetId));
 
-    // An id no rule recognizes is normalized but never guessed at - the "leave it unresolved rather than
-    // approximately mapped" rule from docs/router/d3-alias-resolution.md.
+    // An id no rule recognizes is still normalized but never guessed at - the "leave it unresolved rather
+    // than approximately mapped" rule from docs/router/d3-alias-resolution.md.
     [Fact]
-    public void Canonicalize_UnknownModel_PassesThroughNormalizedButUnchanged() =>
+    public void Canonicalize_UnknownModel_IsNormalizedButNotAliased() =>
         Assert.Equal("some-unknown-model", ModelNameCanonicalizer.Canonicalize("Some-Unknown-Model"));
 
     /// <summary>
