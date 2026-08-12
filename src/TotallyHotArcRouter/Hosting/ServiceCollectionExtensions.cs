@@ -43,6 +43,9 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddOptions<EmbeddingOptions>()
                 .Configure<IConfiguration>((options, configuration) =>
                     configuration.GetSection(EmbeddingOptions.SectionName).Bind(options));
+            services.AddOptions<RoutingOptions>()
+                .Configure<IConfiguration>((options, configuration) =>
+                    configuration.GetSection(RoutingOptions.SectionName).Bind(options));
             services.AddHttpClient(nameof(Router.Embeddings.OnnxEmbeddingClient));
             services.AddSingleton<Router.Embeddings.IEmbeddingClient, Router.Embeddings.OnnxEmbeddingClient>();
             services.AddSingleton<RouterMemoryDatabase>();

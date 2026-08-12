@@ -48,6 +48,7 @@ public sealed class OnnxEmbeddingClient : IEmbeddingClient, IAsyncDisposable
         ArgumentNullException.ThrowIfNull(logger);
 
         _options = options.Value;
+        _options.EnsureValid();
         _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
@@ -208,7 +209,12 @@ public sealed class OnnxEmbeddingClient : IEmbeddingClient, IAsyncDisposable
 
             File.Move(temporaryPath, destinationPath, overwrite: true);
         }
-        catch (Exception ex) when (ex is HttpRequestException or IOException or TaskCanceledException)
+        catch (OperationCanceledException)
+        {
+            File.Delete(temporaryPath);
+            throw;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException)
         {
             File.Delete(temporaryPath);
             _logger.LogError(

@@ -42,19 +42,43 @@ public sealed class EmbeddingMemory
 
     /// <summary>
     /// Loads the working set from the store. Must be called once before <see cref="FindNearest"/>
-    /// or <see cref="AddEntryAsync"/> reflect prior runs.
+    /// or <see cref="AddEntryAsync"/> reflect prior runs. Trims down to
+    /// <see cref="RoutingOptions.EmbeddingMemoryCapacity"/> oldest-first if the store holds more than
+    /// that (e.g. after a config change lowered the capacity, or a manual import), so the working set
+    /// and the store agree with the documented FIFO bound immediately, not only after the next append.
     /// </summary>
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         var loaded = await _store.LoadAllAsync(cancellationToken).ConfigureAwait(false);
 
+        List<MemoryEntry> evicted = [];
         lock (_syncLock)
         {
             _entries.Clear();
             _entries.AddRange(loaded);
+
+            var overflow = _entries.Count - _options.EmbeddingMemoryCapacity;
+            if (overflow > 0)
+            {
+                evicted = _entries.GetRange(0, overflow);
+                _entries.RemoveRange(0, overflow);
+            }
         }
 
-        _logger.LogInformation("Initialized embedding memory with {EntryCount} entries.", loaded.Count);
+        foreach (var evictedEntry in evicted)
+        {
+            await _store.DeleteAsync(evictedEntry.Id, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (evicted.Count > 0)
+        {
+            _logger.LogInformation(
+                "Trimmed {EvictedCount} oldest embedding memory entries on load to stay within the {Capacity}-entry FIFO bound.",
+                evicted.Count,
+                _options.EmbeddingMemoryCapacity);
+        }
+
+        _logger.LogInformation("Initialized embedding memory with {EntryCount} entries.", _entries.Count);
     }
 
     /// <summary>

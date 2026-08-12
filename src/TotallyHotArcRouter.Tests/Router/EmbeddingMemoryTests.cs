@@ -100,6 +100,28 @@ public class EmbeddingMemoryTests
         Assert.Equal("model-preexisting", match.Entry.ChosenModel);
     }
 
+    [Fact]
+    public async Task InitializeAsync_StoreOverCapacity_TrimsOldestAndDeletesFromStore()
+    {
+        var store = new FakeMemoryEntryStore();
+        for (var i = 0; i < 5; i++)
+        {
+            await store.AppendAsync(new MemoryEntry(0, UnitVector(1, 0, 0), $"model-{i}", 0.5, 0.01, null, DateTimeOffset.UtcNow), TestContext.Current.CancellationToken);
+        }
+
+        var memory = CreateMemory(store, similarityThreshold: -1.0, maxNeighborCount: 10, capacity: 3);
+        await memory.InitializeAsync(TestContext.Current.CancellationToken);
+
+        var remainingModels = store.Entries.Select(e => e.ChosenModel).ToList();
+        Assert.Equal(3, remainingModels.Count);
+        Assert.DoesNotContain("model-0", remainingModels);
+        Assert.DoesNotContain("model-1", remainingModels);
+        Assert.Contains("model-4", remainingModels);
+
+        var results = memory.FindNearest(UnitVector(1, 0, 0));
+        Assert.Equal(3, results.Count);
+    }
+
     private static EmbeddingMemory CreateMemory(
         IMemoryEntryStore store,
         double similarityThreshold,
