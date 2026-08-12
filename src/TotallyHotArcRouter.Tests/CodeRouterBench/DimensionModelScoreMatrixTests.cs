@@ -45,6 +45,35 @@ public class DimensionModelScoreMatrixTests
         Assert.Null(matrix.AverageScore("code_generation", "unknown-model"));
     }
 
+    // The Phase L access pattern: rows arrive in the dataset's spelling, but dim_best will look up by the
+    // configured ModelName. Both sides run through ModelNameCanonicalizer, so the lookup hits.
+    [Theory]
+    [InlineData("claude-opus-4.6")]
+    [InlineData("claude-opus-4-6")]
+    [InlineData("Claude-Opus-4.6")]
+    public void AverageScore_MatchesRows_AcrossModelIdSpellings(string queriedModel)
+    {
+        var matrix = DimensionModelScoreMatrix.FromRows([new("t1", "code_generation", "claude-opus-4-6", 1.0)]);
+
+        Assert.Equal(1.0, matrix.AverageScore("code_generation", queriedModel));
+    }
+
+    // Rows whose ids differ only in spelling name one model, so they must average together rather than
+    // occupy two cells.
+    [Fact]
+    public void FromRows_MergesRowsSpellingTheSameModelDifferently()
+    {
+        CodeRouterBenchResultRow[] rows =
+        [
+            new("t1", "code_generation", "MiniMax-M2.7", 1.0),
+            new("t2", "code_generation", "minimax-m2.7", 0.0),
+        ];
+
+        var matrix = DimensionModelScoreMatrix.FromRows(rows);
+
+        Assert.Equal(0.5, matrix.AverageScore("code_generation", "minimax-m2-7"));
+    }
+
     [Fact]
     public void FromRows_EmptyInput_ProducesMatrixWithNoEntries()
     {

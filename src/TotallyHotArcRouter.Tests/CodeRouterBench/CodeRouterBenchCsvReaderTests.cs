@@ -4,8 +4,21 @@ using TotallyHot.ArcRouter.Sandbox;
 namespace TotallyHot.ArcRouter.Tests.CodeRouterBench;
 
 /// <summary>Unit tests for <see cref="CodeRouterBenchCsvReader"/> against small, hand-written fixture CSVs.</summary>
-public class CodeRouterBenchCsvReaderTests
+public class CodeRouterBenchCsvReaderTests : IDisposable
 {
+    private readonly List<string> _fixturePaths = [];
+
+    public void Dispose()
+    {
+        foreach (var path in _fixturePaths)
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+    }
+
     [Fact]
     public void Read_ParsesRowsByHeaderColumnOrder_IgnoringExtraColumns()
     {
@@ -19,6 +32,34 @@ public class CodeRouterBenchCsvReaderTests
         Assert.Equal(2, rows.Count);
         Assert.Equal(new CodeRouterBenchResultRow("t1", "code_generation", "claude-opus-4-6", 1.0), rows[0]);
         Assert.Equal(new CodeRouterBenchResultRow("t2", "bug_fixing", "claude-opus-4-6", 0.0), rows[1]);
+    }
+
+    // The released tables spell several models differently from the router's own configuration, so the
+    // reader hands back the canonical comparison key rather than the CSV's own casing/separators.
+    [Theory]
+    [InlineData("MiniMax-M2.7", "minimax-m2-7")]
+    [InlineData("Qwen3-Max", "qwen3-max")]
+    [InlineData("claude-opus-4.6", "claude-opus-4-6")]
+    public void Read_CanonicalizesModelIds_ToTheRouterComparisonKey(string rawModel, string expected)
+    {
+        var path = WriteFixture(
+            "task_id,dimension,model,score",
+            $"t1,code_generation,{rawModel},1.0");
+
+        var rows = CodeRouterBenchCsvReader.Read(path);
+
+        Assert.Equal(expected, rows[0].Model);
+    }
+
+    [Fact]
+    public void Read_RowWithEmptyModel_ThrowsFormatException()
+    {
+        var path = WriteFixture(
+            "task_id,dimension,model,score",
+            "t1,code_generation,,1.0");
+
+        var ex = Assert.Throws<FormatException>(() => CodeRouterBenchCsvReader.Read(path));
+        Assert.Contains("row 2", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -109,10 +150,11 @@ public class CodeRouterBenchCsvReaderTests
         }
     }
 
-    private static string WriteFixture(params string[] lines)
+    private string WriteFixture(params string[] lines)
     {
         var path = Path.Combine(Path.GetTempPath(), $"crb-fixture-{Guid.NewGuid():N}.csv");
         File.WriteAllLines(path, lines);
+        _fixturePaths.Add(path);
         return path;
     }
 }

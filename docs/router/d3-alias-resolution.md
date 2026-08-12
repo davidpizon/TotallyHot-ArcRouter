@@ -82,6 +82,14 @@ catalog doc's [three consumers](model-price-catalog.md#the-three-consumers)).
 > **No schema migration.** `models`, `model_aliases`, and `model_prices` already carry everything below.
 > The change is ingest-resolution logic plus one lookup-key change.
 
+> **Where the normalization lives (2026-08-12):** the resolver's normalization stages moved into
+> `Models/ModelNameCanonicalizer.cs`, shared with the CodeRouterBench loader so the repository has one
+> implementation of "these two strings name the same model." The resolver still applies those stages
+> **one at a time** rather than calling `Canonicalize`: each rung below is defined by *which* stage it
+> needed, and that is what marks a price approximate. `Canonicalize` additionally unifies version
+> separators (`4.6` ≡ `4-6`), which would manufacture matches this ladder deliberately misses — so it is
+> confined to the offline benchmark loader, which has no rung ladder and no provider column.
+
 ### Slice 1 — `ModelIdentityResolver` (new) ✅ implemented
 
 A resolver seeded from `ModelRouting:ModelList` + `ModelRouting:Providers`. Given an aggregator

@@ -14,6 +14,10 @@ namespace TotallyHot.ArcRouter.CodeRouterBench;
 /// vocabulary says <see cref="Sandbox.RouterDimension.AlgorithmDesign"/> - see
 /// <see cref="CodeRouterBenchCsvReader.NormalizeDimension"/>.
 /// </param>
-/// <param name="Model">The backend model identifier, matching a <c>model</c> entry in <c>models.json</c>.</param>
+/// <param name="Model">
+/// The backend model identifier in canonical comparison form - the dataset's own <c>models.json</c>
+/// spelling mapped through <see cref="Models.ModelNameCanonicalizer.Canonicalize"/>, so that a row loaded
+/// from <c>MiniMax-M2.7</c> and a configured <c>ModelName</c> of <c>minimax-m2.7</c> compare equal.
+/// </param>
 /// <param name="Score">The recorded score for this task/model pair, in <c>[0, 1]</c>.</param>
 public sealed record CodeRouterBenchResultRow(string TaskId, string Dimension, string Model, double Score);

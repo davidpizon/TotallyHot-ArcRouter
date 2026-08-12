@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 
@@ -85,14 +84,11 @@ public interface IModelIdentityResolver
 /// </summary>
 public sealed class ConfigModelIdentityResolver : IModelIdentityResolver
 {
-    // Strips a trailing 8-digit dated snapshot suffix, e.g. "-20250929" off "claude-sonnet-4-5-20250929".
-    private static readonly Regex SnapshotSuffix = new(@"-\d{8}$", RegexOptions.Compiled);
-
-    // A small, fixed set of version/tier suffixes aggregators commonly append that a router's own
-    // ModelList entry never carries. Not exhaustive by design - an unrecognized suffix simply falls through
-    // to the next rung rather than being guessed at.
-    private static readonly Regex VersionSuffix = new(@"(-latest|-preview|-exp|-beta|:free)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
+    // The normalization stages live in ModelNameCanonicalizer so this resolver and the CodeRouterBench
+    // loader share one implementation. They are applied here one at a time rather than through
+    // ModelNameCanonicalizer.Canonicalize on purpose: each rung below is defined by *which* stage it
+    // needed, and that is what marks the resulting price approximate. Canonicalize would also unify
+    // version separators, which would manufacture matches this ladder currently (and deliberately) misses.
     private readonly IProviderConfigStore _configStore;
     private readonly ModelAliasOverrideStore? _overrideStore;
 
@@ -134,21 +130,21 @@ public sealed class ConfigModelIdentityResolver : IModelIdentityResolver
             }
         }
 
-        var provider = NormalizeProvider(aggregatorProvider);
-        var modelId = NormalizeModelId(aggregatorModelId, aggregatorProvider);
+        var provider = ModelNameCanonicalizer.NormalizeProvider(aggregatorProvider);
+        var modelId = ModelNameCanonicalizer.NormalizeBase(aggregatorModelId, aggregatorProvider);
 
         if (index.ByProviderAndModelId.TryGetValue((provider, modelId), out var exact))
         {
             return new IdentityResolution(exact, ResolutionRung.Exact);
         }
 
-        var snapshotStripped = SnapshotSuffix.Replace(modelId, string.Empty);
+        var snapshotStripped = ModelNameCanonicalizer.StripSnapshotSuffix(modelId);
         if (snapshotStripped != modelId && index.ByProviderAndStrippedModelId.TryGetValue((provider, snapshotStripped), out var snapshotMatch))
         {
             return new IdentityResolution(snapshotMatch, ResolutionRung.SnapshotSuffixStripped);
         }
 
-        var versionNormalized = VersionSuffix.Replace(SnapshotSuffix.Replace(modelId, string.Empty), string.Empty);
+        var versionNormalized = ModelNameCanonicalizer.StripVersionSuffix(snapshotStripped);
         if (versionNormalized != modelId && index.ByProviderAndVersionNormalizedModelId.TryGetValue((provider, versionNormalized), out var versionMatch))
         {
             return new IdentityResolution(versionMatch, ResolutionRung.VersionNormalized);
@@ -198,45 +194,24 @@ public sealed class ConfigModelIdentityResolver : IModelIdentityResolver
             }
 
             var identity = new ResolvedModelIdentity(entry.ModelName, entry.Provider);
-            var provider = NormalizeProvider(entry.Provider);
-            var modelId = NormalizeModelId(entry.ProviderModelId, entry.Provider);
+            var provider = ModelNameCanonicalizer.NormalizeProvider(entry.Provider);
+            var modelId = ModelNameCanonicalizer.NormalizeBase(entry.ProviderModelId, entry.Provider);
 
             // First entry wins on a duplicate key: two ModelNames mapping to one ambiguous cell should not
             // let the later one silently overwrite. ModelName itself is already unique (ModelRoutingOptions.EnsureValid).
             byModelName.TryAdd(entry.ModelName, identity);
             byProviderAndModelId.TryAdd((provider, modelId), identity);
 
-            var stripped = SnapshotSuffix.Replace(modelId, string.Empty);
+            var stripped = ModelNameCanonicalizer.StripSnapshotSuffix(modelId);
             byProviderAndStripped.TryAdd((provider, stripped), identity);
 
-            var versionNormalized = VersionSuffix.Replace(stripped, string.Empty);
+            var versionNormalized = ModelNameCanonicalizer.StripVersionSuffix(stripped);
             byProviderAndVersionNormalized.TryAdd((provider, versionNormalized), identity);
             byModelIdAnyProvider.TryAdd(versionNormalized, identity);
             byModelIdAnyProvider.TryAdd(modelId, identity);
         }
 
         return new ResolvedIndex(byModelName, byProviderAndModelId, byProviderAndStripped, byProviderAndVersionNormalized, byModelIdAnyProvider);
-    }
-
-    /// <summary>
-    /// Normalizes a provider name for use as a dictionary key by trimming whitespace and lowercasing.
-    /// </summary>
-    private static string NormalizeProvider(string provider) => provider.Trim().ToLowerInvariant();
-
-    /// <summary>
-    /// Normalizes a model id for use as a dictionary key: strips the source's own "provider/" prefix if
-    /// present, then lowercases the result.
-    /// </summary>
-    private static string NormalizeModelId(string modelId, string provider)
-    {
-        var trimmed = modelId.Trim();
-        var prefix = provider.Trim() + "/";
-        if (trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-        {
-            trimmed = trimmed[prefix.Length..];
-        }
-
-        return trimmed.ToLowerInvariant();
     }
 
     /// <summary>The rebuildable indexes <see cref="Build"/> derives from <see cref="ModelRoutingOptions"/>, one per resolution rung.</summary>

@@ -182,13 +182,21 @@ Prerequisite for the DimensionBest and logreg voters (Phase L) and the entire re
   baked into the released CSV rather than a parsing bug here. Full evidence in `data/README.md`. Exact
   per-cell parity is not pursued further, matching Phase N's own "ordering, not absolute parity"
   standard applied one phase earlier.
+- **Model-id canonicalization (added after Phase K shipped):** the released tables and the router's
+  configured `ModelName` vocabulary disagree on casing and version separators, so the loader maps the
+  `model` column through `Models/ModelNameCanonicalizer.cs`, which collapses every spelling of a model
+  onto one comparison key. It emits a *key*, never a name - the configured vocabulary is
+  operator-authored and internally inconsistent (`claude-opus-4.6` is dotted, `claude-opus-4-8` dashed),
+  so no rule can generate it. `ConfigModelIdentityResolver` shares the same normalization stages, applied
+  one at a time to keep its `ResolutionRung` ladder's approximate-match labeling intact.
 
 ### Phase L: The Orchestrator ensemble
 
 Four voters, weighted vote, argmax — research-doc §3.3 and A.1.
 
 - **`dim_best`** — DimensionBest lookup from the Phase K probing matrix, refined by live
-  `RouterMemory` averages.
+  `RouterMemory` averages. The matrix canonicalizes model ids on both ingest and lookup, so this voter
+  can query it with a configured `ModelName` directly.
 - **`memory_kNN`** — top-10 neighbors from Phase J, voting by neighbor-weighted observed reward.
 - **`logreg`** — TF-IDF → logistic regression trained on the probing set. Training and inference both
   in .NET; a checked-in trained model with a documented, reproducible training step.

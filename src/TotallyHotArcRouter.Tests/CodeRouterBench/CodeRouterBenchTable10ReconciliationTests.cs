@@ -38,6 +38,9 @@ public class CodeRouterBenchTable10ReconciliationTests
         "on demand, never checked in or fetched automatically by CI.";
 
     // research-doc Table 10, in AllDimensions order (CdGen, Algo, Bug, Comp, Refac, DS, Multi, Und, TstGn).
+    // Keys are kept in the spelling the published table uses (mixed case, dashed Anthropic versions) rather
+    // than the router's canonical form, so this stays a verbatim transcription of the source it reconciles
+    // against. DimensionModelScoreMatrix.AverageScore canonicalizes its model argument, so these resolve.
     private static readonly IReadOnlyDictionary<string, double[]> PublishedTable10 = new Dictionary<string, double[]>
     {
         ["claude-opus-4-6"] = [.315, .254, .717, .860, .607, .142, .408, .193, .392],

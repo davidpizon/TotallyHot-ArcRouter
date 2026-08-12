@@ -35,8 +35,13 @@ current `main`.
 
 `TotallyHot.ArcRouter.CodeRouterBench.CodeRouterBenchCsvReader` reads a `*_results_long.csv` into
 `CodeRouterBenchResultRow` values, normalizing the released `"algorithm"` dimension label onto
-`RouterDimension.AlgorithmDesign`. `DimensionModelScoreMatrix.FromRows` aggregates those into a
-dimension x model average-score matrix - the shape research-doc Table 10/11 publish.
+`RouterDimension.AlgorithmDesign`. It also maps the `model` column through
+`ModelNameCanonicalizer.Canonicalize`, because the released tables spell several models differently from
+the router's own `ModelRouting:ModelList` configuration (`MiniMax-M2.7` vs `minimax-m2.7`,
+`claude-opus-4-6` vs `claude-opus-4.6`); canonicalizing both sides onto a shared comparison key is what
+lets Phase L's `dim_best` query the matrix by a configured `ModelName`. `DimensionModelScoreMatrix.FromRows`
+aggregates those into a dimension x model average-score matrix - the shape research-doc Table 10/11
+publish - canonicalizing model ids on both ingest and lookup, so a query in any spelling resolves.
 `CodeRouterBenchTable10ReconciliationTests` (in `TotallyHotArcRouter.Tests/CodeRouterBench/`) checks a
 matrix built from the real, fetched probing split against the published Table 10; it skips itself when
 `data/coderouterbench/` is absent, matching the pattern `Integration/LiteLlmParityTests.cs` uses for its

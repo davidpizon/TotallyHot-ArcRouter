@@ -1,3 +1,4 @@
+using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Sandbox;
 
 namespace TotallyHot.ArcRouter.CodeRouterBench;
@@ -20,13 +21,16 @@ public static class CodeRouterBenchCsvReader
 
     /// <summary>
     /// Reads every data row of <paramref name="csvPath"/>, mapping its <c>dimension</c> column through
-    /// <see cref="NormalizeDimension"/> so callers can key results by <see cref="RouterDimension"/>'s
-    /// vocabulary directly.
+    /// <see cref="NormalizeDimension"/> and its <c>model</c> column through
+    /// <see cref="ModelNameCanonicalizer.Canonicalize"/>, so callers can key results by
+    /// <see cref="RouterDimension"/>'s vocabulary and by a configured <c>ModelName</c> directly - the
+    /// released tables spell several models differently from the router's own configuration
+    /// (<c>MiniMax-M2.7</c> vs <c>minimax-m2.7</c>, <c>claude-opus-4-6</c> vs <c>claude-opus-4.6</c>).
     /// </summary>
     /// <param name="csvPath">Path to a <c>*_results_long.csv</c> file.</param>
     /// <exception cref="FormatException">
     /// Thrown when the header is missing a required <c>task_id</c>, <c>dimension</c>, <c>model</c>, or
-    /// <c>score</c> column.
+    /// <c>score</c> column, or when a data row is short, has a non-numeric score, or has an empty model.
     /// </exception>
     public static IReadOnlyList<CodeRouterBenchResultRow> Read(string csvPath)
     {
@@ -70,10 +74,16 @@ public static class CodeRouterBenchCsvReader
                 throw new FormatException($"'{csvPath}' has a non-numeric score '{rawScore}' for task '{fields[taskIdIndex]}'.");
             }
 
+            var rawModel = fields[modelIndex];
+            if (string.IsNullOrWhiteSpace(rawModel))
+            {
+                throw new FormatException($"'{csvPath}' row {rowNumber} has an empty model.");
+            }
+
             rows.Add(new CodeRouterBenchResultRow(
                 TaskId: fields[taskIdIndex],
                 Dimension: NormalizeDimension(fields[dimensionIndex]),
-                Model: fields[modelIndex],
+                Model: ModelNameCanonicalizer.Canonicalize(rawModel),
                 Score: score));
         }
 

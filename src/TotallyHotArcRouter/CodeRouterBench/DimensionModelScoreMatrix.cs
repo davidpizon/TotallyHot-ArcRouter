@@ -1,3 +1,5 @@
+using TotallyHot.ArcRouter.Models;
+
 namespace TotallyHot.ArcRouter.CodeRouterBench;
 
 /// <summary>
@@ -19,6 +21,13 @@ public sealed class DimensionModelScoreMatrix
     /// sharing the same (dimension, model) pair.
     /// </summary>
     /// <param name="rows">The result rows to aggregate, typically from <see cref="CodeRouterBenchCsvReader.Read"/>.</param>
+    /// <remarks>
+    /// Model ids are keyed through <see cref="ModelNameCanonicalizer.Canonicalize"/> here as well as in
+    /// <see cref="AverageScore"/>. Canonicalizing on ingest rather than trusting the caller keeps the
+    /// matrix self-consistent whichever spelling its rows arrived in, which is what lets a Phase L
+    /// <c>dim_best</c> lookup pass a configured <c>ModelName</c> and hit rows the dataset stored under
+    /// its own spelling.
+    /// </remarks>
     public static DimensionModelScoreMatrix FromRows(IEnumerable<CodeRouterBenchResultRow> rows)
     {
         ArgumentNullException.ThrowIfNull(rows);
@@ -26,7 +35,7 @@ public sealed class DimensionModelScoreMatrix
         Dictionary<(string, string), (double Sum, int Count)> accumulators = [];
         foreach (var row in rows)
         {
-            var key = (row.Dimension, row.Model);
+            var key = (row.Dimension, ModelNameCanonicalizer.Canonicalize(row.Model));
             var (sum, count) = accumulators.TryGetValue(key, out var existing) ? existing : (0.0, 0);
             accumulators[key] = (sum + row.Score, count + 1);
         }
@@ -39,6 +48,11 @@ public sealed class DimensionModelScoreMatrix
     /// Gets the average score for <paramref name="dimension"/> x <paramref name="model"/>, or
     /// <see langword="null"/> when no row in the source data had that pair.
     /// </summary>
+    /// <param name="dimension">A <see cref="Sandbox.RouterDimension"/> key, matched verbatim.</param>
+    /// <param name="model">
+    /// Any spelling of a model id - a configured <c>ModelName</c> or the dataset's own - matched through
+    /// <see cref="ModelNameCanonicalizer.Canonicalize"/>.
+    /// </param>
     public double? AverageScore(string dimension, string model) =>
-        _averages.TryGetValue((dimension, model), out var average) ? average : null;
+        _averages.TryGetValue((dimension, ModelNameCanonicalizer.Canonicalize(model)), out var average) ? average : null;
 }
