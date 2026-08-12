@@ -41,17 +41,29 @@ public static class CodeRouterBenchCsvReader
         var dimensionIndex = RequireColumn(columns, "dimension", csvPath);
         var modelIndex = RequireColumn(columns, "model", csvPath);
         var scoreIndex = RequireColumn(columns, "score", csvPath);
+        var requiredFieldCount = Math.Max(
+            Math.Max(taskIdIndex, dimensionIndex),
+            Math.Max(modelIndex, scoreIndex)) + 1;
 
         List<CodeRouterBenchResultRow> rows = [];
         string? line;
+        var rowNumber = 1;
         while ((line = reader.ReadLine()) is not null)
         {
+            rowNumber++;
+
             if (line.Length == 0)
             {
                 continue;
             }
 
             var fields = SplitLine(line);
+            if (fields.Count < requiredFieldCount)
+            {
+                throw new FormatException(
+                    $"'{csvPath}' row {rowNumber} has {fields.Count} columns but requires at least {requiredFieldCount}.");
+            }
+
             rows.Add(new CodeRouterBenchResultRow(
                 TaskId: fields[taskIdIndex],
                 Dimension: NormalizeDimension(fields[dimensionIndex]),
