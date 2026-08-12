@@ -1,0 +1,19 @@
+namespace TotallyHot.ArcRouter.CodeRouterBench;
+
+/// <summary>
+/// A single task/model result row from one of the CodeRouterBench <c>*_results_long.csv</c> tables
+/// (PLAN.md Phase K) - restored on demand by <c>scripts/fetch-coderouterbench.sh</c> from
+/// <see href="https://huggingface.co/datasets/Lance1573/CodeRouterBench"/> into
+/// <c>data/coderouterbench/</c>. Carries only the columns the dimension x model score matrix needs;
+/// the source CSVs also carry cost and token columns, read separately once a consumer needs them.
+/// </summary>
+/// <param name="TaskId">The benchmark task identifier.</param>
+/// <param name="Dimension">
+/// The coding dimension key (research-doc §4.4), matching <see cref="Sandbox.RouterDimension"/>'s
+/// vocabulary except for <c>"algorithm"</c>, which the released CSVs use where the router's own
+/// vocabulary says <see cref="Sandbox.RouterDimension.AlgorithmDesign"/> - see
+/// <see cref="CodeRouterBenchCsvReader.NormalizeDimension"/>.
+/// </param>
+/// <param name="Model">The backend model identifier, matching a <c>model</c> entry in <c>models.json</c>.</param>
+/// <param name="Score">The recorded score for this task/model pair, in <c>[0, 1]</c>.</param>
+public sealed record CodeRouterBenchResultRow(string TaskId, string Dimension, string Model, double Score);

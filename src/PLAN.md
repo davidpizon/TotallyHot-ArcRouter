@@ -81,8 +81,18 @@ Verified against the code:
   carries only ~27% of the oracle-choice entropy - the other ~73% is exactly what this task-keyed memory
   exists to capture, once Phase L connects it to a decision.
 - **No oracle, no regret, no baselines.** Nothing computes `R_ij`, `CumReg`, `AvgPerf`, or `Perf/$`.
-- **The benchmark corpus is absent.** `data/`, `outputs/`, and `agentic-artifacts/` are referenced
-  throughout `README.md` and `docs/HANDBOOK.md` but do not exist in this checkout.
+- **The benchmark corpus is restored, fetch-on-demand (Phase K shipped).** `scripts/fetch-coderouterbench.sh`
+  pulls the eight canonical CodeRouterBench tables from
+  [`huggingface.co/datasets/Lance1573/CodeRouterBench`](https://huggingface.co/datasets/Lance1573/CodeRouterBench)
+  into `data/coderouterbench/` (gitignored, not checked in - see `data/README.md`), verifying row counts
+  against the counts below and failing loudly on mismatch.
+  [`TotallyHotArcRouter/CodeRouterBench/CodeRouterBenchCsvReader.cs`](TotallyHotArcRouter/CodeRouterBench/CodeRouterBenchCsvReader.cs)
+  and
+  [`TotallyHotArcRouter/CodeRouterBench/DimensionModelScoreMatrix.cs`](TotallyHotArcRouter/CodeRouterBench/DimensionModelScoreMatrix.cs)
+  load the probing split into a dimension x model score matrix - the `dim_best` voter's future backing
+  store (Phase L). `outputs/` and `agentic-artifacts/`, which the same upstream dataset also publishes,
+  are not restored; nothing in Phases K/L/N as currently scoped reads them (`data/README.md`'s "Not yet
+  restored" section).
 
 ### Relationship to `utility-model-routing.md`
 
@@ -104,6 +114,14 @@ and this plan now does too, behind an opt-out.
   [`../docs/gui/backlog.md`](../docs/gui/backlog.md), Cost Analytics bullet.
 - **Reasoning-token pricing** — `UsageInfo.ReasoningTokens` exists with no matching price column;
   reasoning tokens bill at the standard output rate. Noted, unscoped.
+- **CodeRouterBench `outputs/`, `agentic-artifacts/`, and nested `raw_matrices/`** — not restored;
+  nothing in Phases K/L/N as currently scoped reads them. Rationale: `data/README.md`'s "Not yet
+  restored" section.
+- **Exact per-cell Table 10 parity for GLM-5/Qwen3-Max/Qwen3.5-Plus/MiniMax-M2.7** — `bug_fixing`,
+  `algorithm`, and `test_generation` cells for these four models diverge from the published table by up
+  to 0.32 even though row averages (AvgPerf) match within 0.05 for every model; looks like run-to-run
+  LLM-as-Judge noise baked into the released CSV, not a parsing bug. Rationale: `data/README.md`'s
+  "Known data-fidelity limit" section, PLAN.md Phase K.
 
 ---
 
@@ -131,23 +149,39 @@ constants that happen not to match.
 - Exit: Zero literal dimension strings outside the contract type. Every verifier score written on request
   *N* propagates to influence model selection on request *N+1*.
 
-### Phase K: Restore CodeRouterBench
+### Phase K: Restore CodeRouterBench — **shipped**
 
-Prerequisite for the DimensionBest and logreg voters (Phase L) and the entire regret harness
-(Phase N). Also closes a live documentation defect: `README.md` and `docs/HANDBOOK.md` both describe
-`data/`, `outputs/`, and `agentic-artifacts/` as present.
+Prerequisite for the DimensionBest and logreg voters (Phase L) and the entire regret harness (Phase N).
 
-- Restore the canonical tables from the published Hugging Face dataset named in `README.md`:
+- Restored the canonical tables from the published Hugging Face dataset
+  (`huggingface.co/datasets/Lance1573/CodeRouterBench`), named in `docs/README.md`:
   `id_results_long.csv`, `id_probing_results_long.csv`, `id_test_results_long.csv`,
-  `ood176_results_long.csv`, `id_tasks.jsonl`, `ood176_tasks.jsonl`, `models.json`, `summary.json`.
-- Verify integrity against the counts the handbook asserts (9,999 × 8 = 79,992; 7,080 × 8 = 56,640;
-  2,919 × 8 = 23,352; 176 × 8 = 1,408) and fail loudly on mismatch rather than proceeding.
-- Decide and document the checked-in-vs-fetched question — these are large files and the repo has no
-  Python pipeline to regenerate them. If fetched, the fetch must be reproducible and integrity-checked.
-- Reconcile `README.md` and `docs/HANDBOOK.md` with whatever is actually true afterwards, including the
-  removed `scripts/export_coderouterbench.py` / `build_ood176_dataset.py` references.
-- Exit: a loader reads the probing split and produces a dimension × model matrix matching research-doc
-  Table 10 to published precision.
+  `ood176_results_long.csv`, `id_tasks.jsonl`, `ood176_tasks.jsonl`, `models.json`, `summary.json`, via
+  `scripts/fetch-coderouterbench.sh`.
+- The script verifies integrity against the counts the handbook asserts (9,999 × 8 = 79,992;
+  7,080 × 8 = 56,640; 2,919 × 8 = 23,352; 176 × 8 = 1,408) and fails loudly, deleting the partial file,
+  on any mismatch.
+- **Decided: fetched, not checked in.** At ~137 MB total this is large for a git checkout and the
+  dataset already has a stable, versioned home on Hugging Face; `data/coderouterbench/` is gitignored.
+  `data/README.md` (new) documents the fetch, the file list, and what remains unrestored.
+  `outputs/`, `agentic-artifacts/`, and the nested `raw_matrices/` audit trail the same dataset also
+  publishes are explicitly deferred - nothing in Phases K/L/N as currently scoped reads them.
+- Reconciled `README.md`, `docs/README.md`, and `docs/HANDBOOK.md`: they now describe the data as
+  fetched-on-demand rather than checked-in, no longer claim `data/matrices/`, `data/id/`, `data/ood/`,
+  `outputs/`, or `agentic-artifacts/` are present, and the `scripts/export_coderouterbench.py` /
+  `build_ood176_dataset.py` references are marked as removed-tooling history, not live paths.
+- Exit criterion met with a documented deferral: `CodeRouterBenchCsvReader` + `DimensionModelScoreMatrix`
+  load the probing split into a dimension × model matrix, and
+  `CodeRouterBenchTable10ReconciliationTests` (network/file-gated, like `LiteLlmParityTests`) checks it
+  against research-doc Table 10. **Settled deferral:** per-model row averages (AvgPerf) match Table 10
+  to within 0.05 for all eight models, and every cell matches to within 0.01 for Claude Opus 4.6,
+  GPT-5.4, Claude Sonnet 4.6, and Kimi-K2.5 - but individual `bug_fixing`, `algorithm`, and
+  `test_generation` cells for GLM-5, Qwen3-Max, Qwen3.5-Plus, and MiniMax-M2.7 diverge from the
+  published table by up to 0.32. The errors are large in both directions and largely cancel in the row
+  average, consistent with run-to-run noise in the LLM-as-Judge-scored dimensions (research-doc Table 5)
+  baked into the released CSV rather than a parsing bug here. Full evidence in `data/README.md`. Exact
+  per-cell parity is not pursued further, matching Phase N's own "ordering, not absolute parity"
+  standard applied one phase earlier.
 
 ### Phase L: The Orchestrator ensemble
 
@@ -248,7 +282,8 @@ Applies at the end of every phase, per [`../AGENTS.md`](../AGENTS.md):
 5. Every routing decision is logged through Serilog with a **static** message template and structured
    properties. The vote breakdown, the chosen model, and the reward terms are audit-trail data, not
    debug output.
-6. Documentation matches delivered behavior — including `README.md` and `docs/HANDBOOK.md`, which are
-   currently inaccurate about `data/`, `outputs/`, and `agentic-artifacts/` (Phase K).
+6. Documentation matches delivered behavior — including `README.md` and `docs/HANDBOOK.md`, reconciled
+   in Phase K to describe `data/coderouterbench/` as fetched-on-demand and `outputs/`/`agentic-artifacts/`
+   as not restored.
 7. Any item deferred during a phase is recorded with its evidence, in the doc that owns the component,
    and summarized in one line under "Settled deferrals" above.

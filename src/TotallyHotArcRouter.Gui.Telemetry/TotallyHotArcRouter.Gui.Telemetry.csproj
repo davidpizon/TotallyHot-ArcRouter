@@ -31,7 +31,7 @@
          SDK-style build context. Services/LiveDataStore.cs's using-alias for
          TotallyHotArcRouter.Telemetry.Contract now resolves through this project's compiled output instead
          of compiling the .proto directly. -->
-    <PackageReference Include="Grpc.Net.Client" Version="2.80.0" />
+    <PackageReference Include="Grpc.Net.Client" Version="2.83.0" />
     <PackageReference Include="Google.Protobuf" Version="3.35.1" />
     <PackageReference Include="Grpc.Tools" Version="2.83.0">
       <PrivateAssets>all</PrivateAssets>
