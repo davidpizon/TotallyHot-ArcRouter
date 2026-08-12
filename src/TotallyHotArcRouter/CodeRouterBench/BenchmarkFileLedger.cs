@@ -19,7 +19,7 @@ public sealed class BenchmarkFileLedger
         _database = database;
     }
 
-    /// <summary>Gets every recorded file sync, keyed by file name.</summary>
+    /// <summary>Gets every recorded file sync, ordered by file name.</summary>
     public IReadOnlyList<BenchmarkFileLedgerEntry> GetAll()
     {
         using var connection = _database.OpenConnection();
