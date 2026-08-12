@@ -84,7 +84,7 @@ public sealed class BenchmarkFileLedger
         command.Parameters.AddWithValue("$sizeBytes", entry.SizeBytes);
         command.Parameters.AddWithValue("$rowCount", entry.RowCount);
         command.Parameters.AddWithValue("$repoCommit", entry.RepoCommit);
-        command.Parameters.AddWithValue("$syncedAtUtc", entry.SyncedAtUtc.ToString("O", CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$syncedAtUtc", entry.SyncedAtUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
         command.ExecuteNonQuery();
     }
 
@@ -94,5 +94,6 @@ public sealed class BenchmarkFileLedger
         SizeBytes: reader.GetInt64(2),
         RowCount: reader.GetInt32(3),
         RepoCommit: reader.GetString(4),
-        SyncedAtUtc: DateTimeOffset.Parse(reader.GetString(5), CultureInfo.InvariantCulture));
+        SyncedAtUtc: DateTimeOffset.Parse(
+            reader.GetString(5), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind));
 }

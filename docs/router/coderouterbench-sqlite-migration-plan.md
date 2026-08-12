@@ -225,7 +225,7 @@ Notes on the shape:
 - `StorageOptions.BenchmarkDatabasePath`, defaulting to
   `%LOCALAPPDATA%\TotallyHot.ArcRouter\coderouterbench.db` and resolved through the existing
   `ResolveDatabasePath` logic (environment-token expansion, separator normalization, Linux fallback).
-- All seven data tables plus `benchmark_files` per the schema above.
+- All six data tables plus `benchmark_files` per the schema above.
 - `BenchmarkFileLedger` — read/write the per-file checksum rows.
 - DI registration.
 

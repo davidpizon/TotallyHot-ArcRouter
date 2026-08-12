@@ -182,7 +182,7 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddSingleton<PriceCatalogDatabase>();
 
             // CodeRouterBench corpus (docs/router/coderouterbench-sqlite-migration-plan.md Phase 1): its
-            // own coderouterbench.db, separate from agent_telemetry.db - see BenchmarkDatabase's remarks.
+            // own coderouterbench.db, separate from agent_telemetry.db - see BenchmarkDatabase's summary.
             // Reuses the StorageOptions registration above.
             services.AddSingleton<BenchmarkDatabase>();
             services.AddSingleton<BenchmarkFileLedger>();

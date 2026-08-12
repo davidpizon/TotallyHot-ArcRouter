@@ -28,7 +28,7 @@ public class BenchmarkDatabaseTests
     }
 
     [Fact]
-    public void EnsureCreated_CreatesAllEightTables()
+    public void EnsureCreated_CreatesAllSevenTables()
     {
         using var temp = new TempBenchmarkDatabase();
         temp.Database.EnsureCreated();
