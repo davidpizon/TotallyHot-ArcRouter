@@ -46,17 +46,23 @@ public static class CodeRouterBenchCsvReader
         string? line;
         while ((line = reader.ReadLine()) is not null)
         {
-            if (line.Length == 0)
+            if (string.IsNullOrWhiteSpace(line))
             {
                 continue;
             }
 
             var fields = SplitLine(line);
+            var rawScore = fields[scoreIndex];
+            if (!double.TryParse(rawScore, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var score))
+            {
+                throw new FormatException($"'{csvPath}' has a non-numeric score '{rawScore}' for task '{fields[taskIdIndex]}'.");
+            }
+
             rows.Add(new CodeRouterBenchResultRow(
                 TaskId: fields[taskIdIndex],
                 Dimension: NormalizeDimension(fields[dimensionIndex]),
                 Model: fields[modelIndex],
-                Score: double.Parse(fields[scoreIndex], System.Globalization.CultureInfo.InvariantCulture)));
+                Score: score));
         }
 
         return rows;
@@ -71,10 +77,15 @@ public static class CodeRouterBenchCsvReader
 
     private static int RequireColumn(IReadOnlyList<string> columns, string name, string csvPath)
     {
-        var index = columns.ToList().FindIndex(c => string.Equals(c, name, StringComparison.OrdinalIgnoreCase));
-        return index >= 0
-            ? index
-            : throw new FormatException($"'{csvPath}' is missing the required '{name}' column.");
+        for (var i = 0; i < columns.Count; i++)
+        {
+            if (string.Equals(columns[i], name, StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        throw new FormatException($"'{csvPath}' is missing the required '{name}' column.");
     }
 
     /// <summary>

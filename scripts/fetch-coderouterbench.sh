@@ -8,11 +8,15 @@
 # The data is fetched on demand rather than checked in: at ~137 MB it is large for a git checkout,
 # and the dataset already has a stable, versioned home on Hugging Face. Re-run this script any time
 # data/coderouterbench/ is missing or you want to refresh it from the dataset's current `main`.
+#
+# By default this tracks the dataset's `main` ref, which is not reproducible if upstream updates
+# in-place. Pass a specific commit/tag as the first argument (or set CODEROUTERBENCH_REF) to pin.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEST_DIR="$REPO_ROOT/data/coderouterbench"
-BASE_URL="https://huggingface.co/datasets/Lance1573/CodeRouterBench/resolve/main"
+REF="${1:-${CODEROUTERBENCH_REF:-main}}"
+BASE_URL="https://huggingface.co/datasets/Lance1573/CodeRouterBench/resolve/$REF"
 
 mkdir -p "$DEST_DIR"
 
@@ -47,11 +51,12 @@ for entry in "${FILES[@]}"; do
 
   case "$name" in
     *.csv)
-      # Data rows = total lines minus the header line.
-      actual_rows=$(($(wc -l < "$tmp") - 1))
+      # Data rows = total lines minus the header line. Uses awk's NR (not `wc -l`, which counts
+      # newline characters and would undercount by 1 if the file lacks a trailing newline).
+      actual_rows=$(($(awk 'END { print NR }' "$tmp") - 1))
       ;;
     *.jsonl)
-      actual_rows=$(wc -l < "$tmp")
+      actual_rows=$(awk 'END { print NR }' "$tmp")
       ;;
     *)
       actual_rows=0
