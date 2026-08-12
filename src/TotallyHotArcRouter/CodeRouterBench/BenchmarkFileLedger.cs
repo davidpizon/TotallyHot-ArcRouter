@@ -65,10 +65,23 @@ public sealed class BenchmarkFileLedger
     /// </summary>
     public void Upsert(BenchmarkFileLedgerEntry entry)
     {
-        ArgumentNullException.ThrowIfNull(entry);
-
         using var connection = _database.OpenConnection();
+        Upsert(entry, connection, transaction: null);
+    }
+
+    /// <summary>
+    /// Inserts or replaces the ledger row for <paramref name="entry"/>'s file using an existing
+    /// <paramref name="connection"/> (and optional <paramref name="transaction"/>) supplied by the caller,
+    /// so the table import and its ledger row can commit atomically instead of the ledger update racing
+    /// a separate connection.
+    /// </summary>
+    public void Upsert(BenchmarkFileLedgerEntry entry, SqliteConnection connection, SqliteTransaction? transaction)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        ArgumentNullException.ThrowIfNull(connection);
+
         using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO benchmark_files (file_name, published_oid, size_bytes, row_count, repo_commit, synced_at_utc)
             VALUES ($fileName, $publishedOid, $sizeBytes, $rowCount, $repoCommit, $syncedAtUtc)
