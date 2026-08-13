@@ -20,7 +20,7 @@ public sealed class DimensionModelScoreMatrix
     /// Builds the matrix by averaging <see cref="CodeRouterBenchResultRow.Score"/> over every row
     /// sharing the same (dimension, model) pair.
     /// </summary>
-    /// <param name="rows">The result rows to aggregate, typically from <see cref="CodeRouterBenchCsvReader.Read"/>.</param>
+    /// <param name="rows">The result rows to aggregate, typically from <see cref="CodeRouterBenchCsvReader.Read(string)"/>.</param>
     /// <remarks>
     /// Model ids are keyed through <see cref="ModelNameCanonicalizer.Canonicalize"/> here as well as in
     /// <see cref="AverageScore"/>. Canonicalizing on ingest rather than trusting the caller keeps the

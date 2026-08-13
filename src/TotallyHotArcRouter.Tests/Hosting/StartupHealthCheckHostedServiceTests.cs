@@ -1,3 +1,4 @@
+using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.Hosting;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
@@ -5,6 +6,7 @@ using TotallyHot.ArcRouter.PriceCatalog.Sources;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Telemetry;
+using TotallyHot.ArcRouter.Tests.CodeRouterBench;
 using TotallyHot.ArcRouter.Tests.PriceCatalog;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -48,7 +50,9 @@ public class StartupHealthCheckHostedServiceTests
             temp.CreateRollupStore(),
             Options.Create(new StorageOptions { UsageLedgerRetentionDays = retentionDays }),
             CreateRouterMemoryDatabase(temp),
-            CreateEmbeddingMemory(temp));
+            CreateEmbeddingMemory(temp),
+            CreateBenchmarkDatabase(temp),
+            CreateBenchmarkStatusService(temp));
 
         await service.StartAsync(TestContext.Current.CancellationToken);
 
@@ -85,7 +89,9 @@ public class StartupHealthCheckHostedServiceTests
             temp.CreateRollupStore(),
             Options.Create(new StorageOptions { UsageLedgerRetentionDays = retentionDays }),
             CreateRouterMemoryDatabase(temp),
-            CreateEmbeddingMemory(temp));
+            CreateEmbeddingMemory(temp),
+            CreateBenchmarkDatabase(temp),
+            CreateBenchmarkStatusService(temp));
 
         await service.StartAsync(TestContext.Current.CancellationToken);
 
@@ -122,6 +128,24 @@ public class StartupHealthCheckHostedServiceTests
         var database = CreateRouterMemoryDatabase(temp);
         var store = new SqliteMemoryEntryStore(database);
         return new EmbeddingMemory(store, Options.Create(new RoutingOptions()), NullLogger<EmbeddingMemory>.Instance);
+    }
+
+    private static BenchmarkDatabase CreateBenchmarkDatabase(TempDatabase temp)
+    {
+        var directory = Path.GetDirectoryName(temp.Path_)!;
+        var dbPath = Path.Combine(directory, "coderouterbench.db");
+        return new BenchmarkDatabase(Options.Create(new StorageOptions { BenchmarkDatabasePath = dbPath }));
+    }
+
+    // The probe's HttpClient always fails fast (no real network I/O), so RecheckAsync resolves to
+    // CheckFailed rather than hanging or reaching out to Hugging Face during this unrelated retention test.
+    private static BenchmarkDataStatusService CreateBenchmarkStatusService(TempDatabase temp)
+    {
+        var httpClient = new HttpClient(FakeHttpMessageHandler.AlwaysFails());
+        var probe = new BenchmarkChecksumProbe(httpClient, NullLogger<BenchmarkChecksumProbe>.Instance);
+        var ledger = new BenchmarkFileLedger(CreateBenchmarkDatabase(temp));
+        return new BenchmarkDataStatusService(
+            probe, ledger, Options.Create(new BenchmarkSyncOptions()), NullLogger<BenchmarkDataStatusService>.Instance);
     }
 
     private static int CountRows(TempDatabase temp, string sessionSuffix)
