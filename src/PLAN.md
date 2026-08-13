@@ -190,6 +190,25 @@ Prerequisite for the DimensionBest and logreg voters (Phase L) and the entire re
   so no rule can generate it. `ConfigModelIdentityResolver` shares the same normalization stages, applied
   one at a time to keep its `ResolutionRung` ladder's approximate-match labeling intact.
 
+### Phase K2: Move CodeRouterBench into SQLite — **planned, precedes Phase L**
+
+Supersedes Phase K's fetch-to-disk model. The corpus moves out of `data/coderouterbench/` and into its
+own `coderouterbench.db`, synchronized on demand from the same Hugging Face dataset and checked for
+staleness at every application start against the git blob SHA-1 the dataset publishes. A new
+Governance > Benchmark Data pane exposes the state as a single button ("Current" / "Update" /
+"Check Failed"), with an MCP tool and a `--sync-benchmark-data` CLI flag replacing
+`scripts/fetch-coderouterbench.sh` for headless use.
+
+Sequenced before Phase L on purpose: Phase L's `dim_best` voter and Phase N's regret harness are this
+data's consumers, and pointing them at a file loader first would mean writing that wiring twice.
+
+`id_results_long.csv` and `id_tasks.jsonl` are derived rather than stored — each is the verified exact
+union of its probing and test counterparts, discriminated by the `split` column already present in the
+data — which drops the sync from ~21.5 MB to ~11.7 MB and stored result rows from ~171k to ~91k.
+
+Full plan, schema, and phase breakdown:
+[`docs/router/coderouterbench-sqlite-migration-plan.md`](../docs/router/coderouterbench-sqlite-migration-plan.md).
+
 ### Phase L: The Orchestrator ensemble
 
 Four voters, weighted vote, argmax — research-doc §3.3 and A.1.

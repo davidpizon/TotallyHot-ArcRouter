@@ -1,9 +1,11 @@
 namespace TotallyHot.ArcRouter.PriceCatalog;
 
 /// <summary>
-/// Shared top-level storage configuration bound from the <c>Storage</c> section. Holds the single
-/// on-disk location of the SQLite database that the price catalog and the (future) usage ledger both
-/// open.
+/// Shared top-level storage configuration bound from the <c>Storage</c> section. Holds the on-disk
+/// locations of two separate SQLite databases: the operational database (<see cref="DatabasePath"/>)
+/// that the price catalog and the (future) usage ledger both open, and the CodeRouterBench corpus
+/// database (<see cref="BenchmarkDatabasePath"/>), a separate database written only during explicit
+/// sync operations.
 /// </summary>
 /// <remarks>
 /// The database path lives here rather than under <c>PriceCatalog</c> or <c>CostTracking</c> on purpose:
@@ -24,6 +26,15 @@ public sealed class StorageOptions
     /// directory, matching <c>SpendTracker</c>'s handling of its log path.
     /// </summary>
     public string DatabasePath { get; init; } = @"%LOCALAPPDATA%\TotallyHot.ArcRouter\agent_telemetry.db";
+
+    /// <summary>
+    /// Gets the CodeRouterBench corpus database's file path (docs/router/coderouterbench-sqlite-migration-plan.md).
+    /// May contain the same tokens and separators as <see cref="DatabasePath"/>, resolved by
+    /// <see cref="ResolveBenchmarkDatabasePath"/>. A separate file from <see cref="DatabasePath"/>: the
+    /// corpus is read-only, bulk, and freely re-downloadable, so it does not share a WAL writer lock or a
+    /// backup with the operational database.
+    /// </summary>
+    public string BenchmarkDatabasePath { get; init; } = @"%LOCALAPPDATA%\TotallyHot.ArcRouter\coderouterbench.db";
 
     /// <summary>
     /// Gets the number of days a <c>usage_ledger</c> row is retained before the startup health check's
@@ -62,9 +73,21 @@ public sealed class StorageOptions
     /// local-application-data folder for an unexpanded <c>%LOCALAPPDATA%</c> and rewrites backslashes to
     /// the platform separator, so the same default works on Windows and in the Linux container.
     /// </remarks>
-    public string ResolveDatabasePath()
+    public string ResolveDatabasePath() => ResolvePath(DatabasePath);
+
+    /// <summary>
+    /// Expands environment-variable tokens in <see cref="BenchmarkDatabasePath"/>, normalizes separators,
+    /// and returns an absolute path, via the same rules as <see cref="ResolveDatabasePath"/>.
+    /// </summary>
+    public string ResolveBenchmarkDatabasePath() => ResolvePath(BenchmarkDatabasePath);
+
+    /// <summary>
+    /// Shared expansion/normalization logic behind <see cref="ResolveDatabasePath"/> and
+    /// <see cref="ResolveBenchmarkDatabasePath"/> - see their remarks for why each substitution exists.
+    /// </summary>
+    private static string ResolvePath(string rawPath)
     {
-        var expanded = Environment.ExpandEnvironmentVariables(DatabasePath);
+        var expanded = Environment.ExpandEnvironmentVariables(rawPath);
 
         // Fall back to the platform's local-app-data folder if the token survived (LOCALAPPDATA unset),
         // rather than creating a file literally named "%LOCALAPPDATA%".
