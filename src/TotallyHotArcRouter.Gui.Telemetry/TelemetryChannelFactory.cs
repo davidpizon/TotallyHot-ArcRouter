@@ -62,7 +62,7 @@ public static class TelemetryChannelFactory
     /// </summary>
     /// <remarks>
     /// The trust boundary is "same machine, same OS user": the proxy persists this certificate under
-    /// <c>%LOCALAPPDATA%\TotallyHot.ArcRouter\</c> (see <c>TotallyHot.ArcRouter.Telemetry.TelemetryTlsCertificate</c>), and
+    /// <c>%LOCALAPPDATA%\TotallyHotArcRouter\</c> (see <c>TotallyHot.ArcRouter.Telemetry.TelemetryTlsCertificate</c>), and
     /// there is no CA that would issue a real certificate for a loopback address. Not a thumbprint pin - a
     /// future hardening could read that same <c>.pfx</c> and pin its exact public certificate.
     /// </remarks>

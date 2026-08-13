@@ -2,10 +2,10 @@ namespace TotallyHot.ArcRouter.CodeRouterBench;
 
 /// <summary>
 /// A single task/model result row from one of the CodeRouterBench <c>*_results_long.csv</c> tables
-/// (PLAN.md Phase K) - restored on demand by <c>scripts/fetch-coderouterbench.sh</c> from
-/// <see href="https://huggingface.co/datasets/Lance1573/CodeRouterBench"/> into
-/// <c>data/coderouterbench/</c>. Carries only the columns the dimension x model score matrix needs;
-/// the source CSVs also carry cost and token columns, read separately once a consumer needs them.
+/// (docs/router/coderouterbench-sqlite-migration-plan.md), synced on demand from
+/// <see href="https://huggingface.co/datasets/Lance1573/CodeRouterBench"/> into <c>benchmark_id_results</c>.
+/// Carries only the columns the dimension x model score matrix needs; the source CSVs also carry cost
+/// and token columns, read separately once a consumer needs them.
 /// </summary>
 /// <param name="TaskId">The benchmark task identifier.</param>
 /// <param name="Dimension">

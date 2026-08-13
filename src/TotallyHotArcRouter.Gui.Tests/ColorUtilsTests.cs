@@ -1,5 +1,5 @@
 using TotallyHot.ArcRouter.Gui.Utils;
-using FluentAssertions;
+using AwesomeAssertions;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 

@@ -4,19 +4,18 @@ Replaces the on-disk `data/coderouterbench/` CSV/JSONL corpus (PLAN.md Phase K) 
 database, synchronized on demand from the published Hugging Face dataset and kept honest by a
 checksum comparison run at every application start.
 
-**Status:** planned. **Ordering:** implement this *before* PLAN.md Phase L. Phase L's `dim_best` voter
-and Phase N's regret harness are the intended consumers of this data; retargeting them at a
-file-on-disk loader and then moving them to the database afterward would mean writing the same wiring
-twice.
+**Status:** shipped - all six phases complete. **Ordering:** implemented *before* PLAN.md Phase L, as
+planned - Phase L's `dim_best` voter and Phase N's regret harness are this data's intended consumers,
+and retargeting them at a file-on-disk loader first would have meant writing the same wiring twice.
 
 ## Why
 
-`scripts/fetch-coderouterbench.sh` restores the corpus as loose files into a gitignored directory. That
-works, but it puts the router's benchmark ground truth outside the application's own storage: there is
-no in-app way to see whether the data is present, no way to tell whether it is current, and no way to
-refresh it without dropping to a shell. Moving the corpus into SQLite makes it queryable, makes
-staleness visible and actionable from the Governance tab, and removes a bash dependency from a
-Windows-first application.
+`scripts/fetch-coderouterbench.sh` (now removed) restored the corpus as loose files into a gitignored
+directory. That worked, but it put the router's benchmark ground truth outside the application's own
+storage: there was no in-app way to see whether the data was present, no way to tell whether it was
+current, and no way to refresh it without dropping to a shell. Moving the corpus into SQLite makes it
+queryable, makes staleness visible and actionable from the Governance tab, and removes a bash dependency
+from a Windows-first application.
 
 ## Ground rules (apply to every phase)
 
@@ -31,7 +30,7 @@ Windows-first application.
   its port.
 - **Fail loudly on import.** A downloaded file whose recomputed checksum or row count disagrees with
   the published value is rejected, leaving the previous table and its recorded checksum untouched. This
-  mirrors what `fetch-coderouterbench.sh` does today with its row-count assertions.
+  mirrors what the now-removed `fetch-coderouterbench.sh` used to do with its row-count assertions.
 - Repository conventions apply as always: no build warnings, XML documentation on every public and
   protected member, Serilog with static message templates, structured logging of every sync outcome,
   tests alongside behavior changes, ≥80% coverage, no individual test over 5 seconds.
@@ -56,8 +55,8 @@ raw bytes as `SHA1("blob " + length + "\0" + bytes)`. One `GET` of
 `https://huggingface.co/api/datasets/Lance1573/CodeRouterBench/tree/main` returns it for every file at
 once, so the startup probe costs a single request regardless of file count.
 
-Hugging Face is canonical for both the checksum probe and the downloads, continuing what
-`fetch-coderouterbench.sh` already does. (The mirror at
+Hugging Face is canonical for both the checksum probe and the downloads, continuing what the
+now-removed `fetch-coderouterbench.sh` used to do. (The mirror at
 `github.com/LanceZPF/agent-as-a-router/tree/main/data/coderouterbench` carries byte-identical files with
 identical blob SHA-1s, and is a viable fallback if HF availability ever becomes a problem.)
 
@@ -207,18 +206,18 @@ Notes on the shape:
 
 ## Phase map
 
-| Phase | Deliverable |
-|---|---|
-| 1 | `coderouterbench.db`, schema, and the checksum ledger |
-| 2 | Checksum probe + sync service (download, verify, import) |
-| 3 | Startup wiring and sync state |
-| 4 | gRPC admin surface |
-| 5 | Governance → Benchmark Data pane |
-| 6 | Retarget consumers, MCP tool, CLI, and remove the CSV path |
+| Phase | Deliverable | Status |
+|---|---|---|
+| 1 | `coderouterbench.db`, schema, and the checksum ledger | shipped |
+| 2 | Checksum probe + sync service (download, verify, import) | shipped |
+| 3 | Startup wiring and sync state | shipped |
+| 4 | gRPC admin surface | shipped |
+| 5 | Governance → Benchmark Data pane | shipped |
+| 6 | Retarget consumers, MCP tool, CLI, and remove the CSV path | shipped |
 
 ---
 
-## Phase 1 — Database, schema, and checksum ledger
+## Phase 1 — Database, schema, and checksum ledger — shipped
 
 - `CodeRouterBench/BenchmarkDatabase.cs` — connection string, `EnsureCreated()`, WAL +
   `synchronous=NORMAL`, modeled on `RouterMemoryDatabase`.
@@ -233,7 +232,7 @@ Notes on the shape:
 test helper exists for the suite (the benchmark database needs its own, since `TempDatabase` wraps
 `PriceCatalogDatabase`).
 
-## Phase 2 — Checksum probe and sync service
+## Phase 2 — Checksum probe and sync service — shipped
 
 - `BenchmarkChecksumProbe` — one `GET` of the HF tree API, parsed into `{file_name → (oid, size)}`,
   plus the `X-Repo-Commit` of the resolved ref. Typed `HttpClient` via `IHttpClientFactory`, matching
@@ -245,7 +244,7 @@ test helper exists for the suite (the benchmark database needs its own, since `T
   leaving its table and ledger row untouched, and is reported in the outcome.
 - Importers: `CodeRouterBenchCsvReader` gains a stream/text overload so it parses downloaded bytes
   without a temp file; a JSONL importer and JSON importers for `models.json` / `summary.json`.
-- Row-count assertions retained from `fetch-coderouterbench.sh`: 56,640 / 23,352 / 1,408 / 7,080 / 2,919
+- Row-count assertions retained from the now-removed `fetch-coderouterbench.sh`: 56,640 / 23,352 / 1,408 / 7,080 / 2,919
   / 176, plus the derivation invariant (56,640 + 23,352 = 79,992; 7,080 + 2,919 = 9,999).
 - Progress reporting via `IProgress<BenchmarkSyncProgress>` (file name, stage, bytes, rows) so Phase 4
   can stream it.
@@ -253,7 +252,7 @@ test helper exists for the suite (the benchmark database needs its own, since `T
 **Exit:** a fake `HttpMessageHandler` drives a full sync against fixture bytes in under 5 seconds; a
 checksum mismatch, a truncated file, and a row-count mismatch each leave prior state intact.
 
-## Phase 3 — Startup wiring and sync state
+## Phase 3 — Startup wiring and sync state — shipped
 
 - `EnsureCreated()` called from `StartupHealthCheckHostedService.StartAsync`, alongside the existing
   `RouterMemoryDatabase` block and guarded the same way.
@@ -273,7 +272,7 @@ checksum mismatch, a truncated file, and a row-count mismatch each leave prior s
 **Exit:** all three states are reachable in tests with a faked probe; a probe that throws does not fail
 `StartAsync`.
 
-## Phase 4 — gRPC admin surface
+## Phase 4 — gRPC admin surface — shipped
 
 The GUI is MAUI/Blazor and reaches the proxy only over gRPC — it has no SQLite access — so the sync must
 be exposed as a service. New in `src/Protos/telemetry.proto`, mirroring `PriceSourceAdminService`:
@@ -293,7 +292,7 @@ per-file outcome, plus the aggregate state.
 **Exit:** service tests cover the status, recheck, and streaming-sync paths, including a sync that fails
 on one file and succeeds on the rest.
 
-## Phase 5 — Governance → Benchmark Data pane
+## Phase 5 — Governance → Benchmark Data pane — shipped
 
 - `Components/BenchmarkData.razor`, added as a fifth `GovView` in `Components/Governance.razor`
   (`Providers`, `Models`, `Price Sources`, `Price Overrides`, **`Benchmark Data`**).
@@ -310,7 +309,7 @@ on one file and succeeds on the rest.
 **Exit:** bUnit tests cover each button state, the in-progress state, per-file progress rendering, and
 the unreachable state.
 
-## Phase 6 — Retarget consumers, extra surfaces, and removal
+## Phase 6 — Retarget consumers, extra surfaces, and removal — shipped
 
 - `DimensionModelScoreMatrix` gains a database-backed source; `CodeRouterBenchCsvReader`'s file-path
   entry point is removed once nothing calls it.
@@ -336,8 +335,8 @@ with the tables empty *and* with them populated; coverage ≥80%.
 
 - **Automatic sync on startup.** Drift makes the button actionable; it does not trigger a ~12 MB
   download without consent.
-- **Pinning to a dataset commit by default.** The sync tracks `main`, as `fetch-coderouterbench.sh` does
-  today, and records the resolved `X-Repo-Commit` per file for traceability. A configuration key to pin a
+- **Pinning to a dataset commit by default.** The sync tracks `main`, as the now-removed
+  `fetch-coderouterbench.sh` used to, and records the resolved `X-Repo-Commit` per file for traceability. A configuration key to pin a
   specific ref is provided, replacing the script's `CODEROUTERBENCH_REF`.
 - **`outputs/`, `agentic-artifacts/`, and `raw_matrices/`.** Still unrestored, for the reasons Phase K
   settled: nothing in Phases K, L, or N reads them.

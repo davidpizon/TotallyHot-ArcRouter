@@ -2,15 +2,15 @@ using TotallyHot.ArcRouter.Gui.Components;
 using TotallyHot.ArcRouter.Gui.Services;
 using TotallyHot.ArcRouter.Gui.Telemetry;
 using Bunit;
-using FluentAssertions;
+using AwesomeAssertions;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
 /// <summary>
 /// Tests for <see cref="Governance"/>: a sub-view toggle between <see cref="ProvidersAdmin"/>,
-/// <see cref="GovernanceModelCards"/>, <see cref="PriceSourcesAdmin"/>, and <c>PriceOverridesAdmin</c>
-/// (Providers is the default). Each sub-view's own behavior is covered by its own test file; here they're
-/// only smoke-tested via the toggle.
+/// <see cref="GovernanceModelCards"/>, <see cref="PriceSourcesAdmin"/>, <c>PriceOverridesAdmin</c>, and
+/// <see cref="BenchmarkData"/> (Providers is the default). Each sub-view's own behavior is covered by its
+/// own test file; here they're only smoke-tested via the toggle.
 /// </summary>
 public sealed class GovernanceTests
 {
@@ -21,6 +21,7 @@ public sealed class GovernanceTests
         ctx.Services.AddSingleton(new ProviderAdminStore(managementAddress: "http://127.0.0.1:59994"));
         ctx.Services.AddSingleton(new UsageStore(managementAddress: "http://127.0.0.1:59989"));
         ctx.Services.AddSingleton(new PriceSourceStore(new StubPriceSourceAdminClient()));
+        ctx.Services.AddSingleton(new BenchmarkDataStore(new StubBenchmarkDataAdminClient()));
         return ctx;
     }
 
@@ -40,6 +41,19 @@ public sealed class GovernanceTests
             throw new NotSupportedException();
     }
 
+    /// <summary>Hangs forever, so the panel stays in its "loading" state for the toggle smoke test.</summary>
+    private sealed class StubBenchmarkDataAdminClient : IBenchmarkDataAdminClient
+    {
+        public Task<BenchmarkDataStatusInfo> GetStatusAsync(CancellationToken cancellationToken = default) =>
+            new TaskCompletionSource<BenchmarkDataStatusInfo>().Task;
+
+        public Task<BenchmarkDataStatusInfo> RecheckAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public IAsyncEnumerable<BenchmarkSyncEvent> SyncAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
+
     [Fact]
     public void Defaults_to_the_providers_sub_view()
     {
@@ -48,7 +62,7 @@ public sealed class GovernanceTests
         var cut = ctx.Render<Governance>();
 
         // The toggle offers every sub-view, and Providers (ProvidersAdmin) is mounted first.
-        cut.FindAll("button").Select(b => b.TextContent.Trim()).Should().Contain(["Providers", "Models", "Price Sources"]);
+        cut.FindAll("button").Select(b => b.TextContent.Trim()).Should().Contain(["Providers", "Models", "Price Sources", "Benchmark Data"]);
         cut.Markup.Should().Contain("Loading providers");
     }
 
@@ -82,6 +96,17 @@ public sealed class GovernanceTests
         cut.FindAll("button").First(b => b.TextContent.Trim() == "Price Sources").Click();
 
         cut.Markup.Should().Contain("Loading price sources");
+    }
+
+    [Fact]
+    public void Switching_to_the_benchmark_data_sub_view_renders_BenchmarkData()
+    {
+        using var ctx = NewContext();
+
+        var cut = ctx.Render<Governance>();
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Benchmark Data").Click();
+
+        cut.Markup.Should().Contain("Loading benchmark data status");
     }
 }
 

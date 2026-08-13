@@ -1,3 +1,4 @@
+using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Management;
@@ -21,8 +22,9 @@ namespace TotallyHot.ArcRouter.Hosting
         /// <summary>
         /// Constructs the underlying <see cref="ProxyServer"/> from its dependencies. Optional
         /// parameters (telemetry, provider config store, environment, management HTTP client/token, price
-        /// catalog services, the protected secret store's reader/writer) let callers omit pieces they don't
-        /// need wired up, mirroring <see cref="ProxyServer"/>'s own constructor.
+        /// catalog services, the protected secret store's reader/writer, CodeRouterBench corpus services)
+        /// let callers omit pieces they don't need wired up, mirroring <see cref="ProxyServer"/>'s own
+        /// constructor.
         /// </summary>
         public ProxyHostedService(
             ILogger<ProxyHostedService> logger,
@@ -45,7 +47,11 @@ namespace TotallyHot.ArcRouter.Hosting
             ModelAliasOverrideStore? modelAliasOverrideStore = null,
             IUsageRollupStore? usageRollupStore = null,
             ISecretWriter? secretWriter = null,
-            ISecretReader? secretReader = null)
+            ISecretReader? secretReader = null,
+            BenchmarkDataStatusService? benchmarkDataStatusService = null,
+            BenchmarkFileLedger? benchmarkFileLedger = null,
+            BenchmarkSyncService? benchmarkSyncService = null,
+            BenchmarkSyncOptions? benchmarkSyncOptions = null)
         {
             _logger = logger;
             _proxyServer = new ProxyServer(
@@ -68,7 +74,11 @@ namespace TotallyHot.ArcRouter.Hosting
                 modelAliasOverrideStore,
                 usageRollupStore,
                 secretWriter,
-                secretReader);
+                secretReader,
+                benchmarkDataStatusService,
+                benchmarkFileLedger,
+                benchmarkSyncService,
+                benchmarkSyncOptions);
         }
 
         /// <summary>

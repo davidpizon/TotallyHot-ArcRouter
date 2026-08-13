@@ -51,10 +51,10 @@ that makes this safe, since this is real prompt/response text flowing over the s
 
 ### Session/conversation identification
 
-`SessionIdResolver` mirrors the convention the vendored `claude-code-router` TypeScript project
-used (`resolveSessionId`/`extractSessionIdFromPayload`) rather than inventing a new one, in
-priority order. (That vendored source has since been removed from this repository; the convention
-lives on only in this .NET resolver.)
+`SessionIdResolver` mirrors the convention established by the upstream `claude-code-router`
+TypeScript project (`resolveSessionId`/`extractSessionIdFromPayload`) rather than inventing a new
+one, in priority order. That project is external to this repository; the convention is reimplemented
+here in .NET so clients that already emit these headers keep working unchanged.
 
 1. Header `x-claude-code-session-id`, then `x-claude-session-id`.
 2. Body field `session_id`, `sessionId`, `conversation_id`, `conversationId`, `chat_id`, `chatId`,

@@ -14,7 +14,7 @@ public static class ManagementTokenReader
 
     /// <summary>
     /// Reads the token from <paramref name="path"/> (or, when <see langword="null"/>, the default
-    /// <c>%LOCALAPPDATA%\TotallyHot.ArcRouter\management-token.txt</c>), or <see langword="null"/> when the file
+    /// <c>%LOCALAPPDATA%\TotallyHotArcRouter\management-token.txt</c>), or <see langword="null"/> when the file
     /// doesn't exist yet (e.g. the proxy has never started), is empty/whitespace, or can't be read. A
     /// caller that gets <see langword="null"/> here will see every <c>/admin/*</c> request come back 401
     /// until the proxy has run at least once to generate the file.
@@ -44,7 +44,7 @@ public static class ManagementTokenReader
         }
     }
 
-    /// <summary>Gets the default token file path: <c>%LOCALAPPDATA%\TotallyHot.ArcRouter\management-token.txt</c>.</summary>
+    /// <summary>Gets the default token file path: <c>%LOCALAPPDATA%\TotallyHotArcRouter\management-token.txt</c>.</summary>
     private static string DefaultPath() =>
         Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

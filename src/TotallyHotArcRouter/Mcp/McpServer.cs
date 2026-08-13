@@ -1,4 +1,5 @@
 using System.Net;
+using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.Mcp.Tools;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Management;
@@ -11,13 +12,15 @@ using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Mcp;
 
 /// <summary>
 /// Hosts the MCP (Model Context Protocol) management endpoint: a small, standalone Kestrel host - mirroring
 /// <see cref="TotallyHot.ArcRouter.Proxy.ProxyServer"/>'s dedicated TLS gRPC listener - that exposes
-/// <see cref="ProviderMcpTools"/>, <see cref="PriceSourceMcpTools"/>, and <see cref="TelemetryMcpTools"/>
+/// <see cref="ProviderMcpTools"/>, <see cref="PriceSourceMcpTools"/>, <see cref="TelemetryMcpTools"/>, and
+/// <see cref="BenchmarkDataMcpTools"/>
 /// over MCP's Streamable-HTTP transport on its own loopback port. Reuses
 /// <see cref="TotallyHot.ArcRouter.Telemetry.TelemetryTlsCertificate"/>'s self-signed <c>CN=localhost</c>
 /// certificate (one trust story for every TLS management port), and gates every request behind
@@ -43,6 +46,9 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
     /// <param name="priceLookup">The per-model price lookup.</param>
     /// <param name="providerBudgetStore">The per-provider budget/spend store.</param>
     /// <param name="spendTracker">The process-lifetime running spend tracker.</param>
+    /// <param name="benchmarkDataStatusService">The CodeRouterBench corpus freshness cache.</param>
+    /// <param name="benchmarkSyncService">The CodeRouterBench corpus sync service.</param>
+    /// <param name="benchmarkSyncOptions">The CodeRouterBench sync configuration (its dataset ref).</param>
     /// <param name="accessToken">The bearer token every request must present (see <see cref="ManagementAccessToken"/>).</param>
     /// <param name="port">The loopback TLS port to listen on. Defaults to <c>5003</c>.</param>
     public McpServer(
@@ -53,6 +59,9 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
         IModelPriceLookup priceLookup,
         ProviderBudgetStore providerBudgetStore,
         ISpendTracker spendTracker,
+        BenchmarkDataStatusService benchmarkDataStatusService,
+        BenchmarkSyncService benchmarkSyncService,
+        BenchmarkSyncOptions benchmarkSyncOptions,
         string accessToken,
         int port = 5003)
     {
@@ -63,6 +72,9 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
         ArgumentNullException.ThrowIfNull(priceLookup);
         ArgumentNullException.ThrowIfNull(providerBudgetStore);
         ArgumentNullException.ThrowIfNull(spendTracker);
+        ArgumentNullException.ThrowIfNull(benchmarkDataStatusService);
+        ArgumentNullException.ThrowIfNull(benchmarkSyncService);
+        ArgumentNullException.ThrowIfNull(benchmarkSyncOptions);
         ArgumentException.ThrowIfNullOrWhiteSpace(accessToken);
         ArgumentOutOfRangeException.ThrowIfNegative(port);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
@@ -106,16 +118,21 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
                     services.AddSingleton(priceLookup);
                     services.AddSingleton(providerBudgetStore);
                     services.AddSingleton(spendTracker);
+                    services.AddSingleton(benchmarkDataStatusService);
+                    services.AddSingleton(benchmarkSyncService);
+                    services.AddSingleton(Options.Create(benchmarkSyncOptions));
 
                     services.AddTransient<ProviderMcpTools>();
                     services.AddTransient<PriceSourceMcpTools>();
                     services.AddTransient<TelemetryMcpTools>();
+                    services.AddTransient<BenchmarkDataMcpTools>();
 
                     services.AddMcpServer()
                         .WithHttpTransport()
                         .WithTools<ProviderMcpTools>()
                         .WithTools<PriceSourceMcpTools>()
-                        .WithTools<TelemetryMcpTools>();
+                        .WithTools<TelemetryMcpTools>()
+                        .WithTools<BenchmarkDataMcpTools>();
                 });
 
                 webBuilder.Configure(app =>

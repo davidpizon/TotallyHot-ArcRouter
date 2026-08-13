@@ -137,6 +137,91 @@ message RefreshPriceSourcesResponse {
   PriceSchedule schedule = 4;
 }
 
+// The Governance → Benchmark Data panel's management plane: read the CodeRouterBench corpus's sync
+// freshness (docs/router/coderouterbench-sqlite-migration-plan.md, Phase 4), force a fresh checksum
+// probe, and run a sync with streamed per-file progress.
+//
+// Separate service, same shape as PriceSourceAdminService: unary reads/mutations plus one streaming RPC,
+// sharing the :5002 TLS loopback endpoint. No licensing constraint applies here (unlike price data) -
+// the corpus is public benchmark data - so file names, sizes, and row counts are carried freely.
+service BenchmarkDataAdminService {
+  // Returns the last-computed freshness state (cached in BenchmarkDataStatusService; never null once
+  // StartupHealthCheckHostedService's first startup probe has run) plus every file's ledger status.
+  rpc GetBenchmarkStatus (GetBenchmarkStatusRequest) returns (BenchmarkStatusResponse);
+
+  // Re-probes Hugging Face now and returns the recomputed state. Distinct from GetBenchmarkStatus so the
+  // panel's "Recheck" action is an explicit network call, not implied by every read.
+  rpc RecheckBenchmarkData (RecheckBenchmarkDataRequest) returns (BenchmarkStatusResponse);
+
+  // Downloads, verifies, and imports every file in BenchmarkFileSpec.All, streaming one
+  // BenchmarkSyncStreamEvent per stage transition so the panel can show live per-file progress through a
+  // ~12 MB download rather than sitting silent. The final message on the stream carries the aggregate
+  // status (mirroring RefreshPriceSourcesResponse's "full state after the mutation" convention) so the
+  // panel's button reflects the new state without a follow-up GetBenchmarkStatus call.
+  rpc SyncBenchmarkData (SyncBenchmarkDataRequest) returns (stream BenchmarkSyncStreamEvent);
+}
+
+message GetBenchmarkStatusRequest {}
+
+message RecheckBenchmarkDataRequest {}
+
+message SyncBenchmarkDataRequest {}
+
+enum BenchmarkDataState {
+  BENCHMARK_DATA_STATE_UNSPECIFIED = 0;
+  BENCHMARK_DATA_STATE_CURRENT = 1;
+  BENCHMARK_DATA_STATE_UPDATE = 2;
+  BENCHMARK_DATA_STATE_CHECK_FAILED = 3;
+}
+
+// One file's last-recorded sync, from BenchmarkFileLedger. A file that has never synced is present with
+// synced = false and the numeric/timestamp fields at their zero value - it is still listed, the same way
+// ListPriceSources always lists a disabled source, so the panel has a card to show "Update" against.
+message BenchmarkFile {
+  string file_name = 1;
+  bool synced = 2;
+  int64 size_bytes = 3;
+  int32 row_count = 4;
+  google.protobuf.Timestamp synced_at_utc = 5;
+}
+
+message BenchmarkStatusResponse {
+  BenchmarkDataState state = 1;
+  // The probe failure reason, set only when state is BENCHMARK_DATA_STATE_CHECK_FAILED.
+  optional string reason = 2;
+  google.protobuf.Timestamp checked_at_utc = 3;
+  // Every file BenchmarkFileSpec.All names, in that order - not only ones that have synced.
+  repeated BenchmarkFile files = 4;
+}
+
+enum BenchmarkSyncStage {
+  BENCHMARK_SYNC_STAGE_UNSPECIFIED = 0;
+  BENCHMARK_SYNC_STAGE_DOWNLOADING = 1;
+  BENCHMARK_SYNC_STAGE_VERIFYING = 2;
+  BENCHMARK_SYNC_STAGE_IMPORTING = 3;
+  BENCHMARK_SYNC_STAGE_COMPLETED = 4;
+  BENCHMARK_SYNC_STAGE_FAILED = 5;
+}
+
+// One file's progress update during a sync. Mirrors TotallyHot.ArcRouter.CodeRouterBench.BenchmarkSyncProgress.
+message BenchmarkSyncProgressEvent {
+  string file_name = 1;
+  BenchmarkSyncStage stage = 2;
+  optional int64 bytes_transferred = 3;
+  optional int32 rows_imported = 4;
+  // Set only on a BENCHMARK_SYNC_STAGE_FAILED event.
+  optional string error = 5;
+}
+
+// One message on the SyncBenchmarkData stream: either a per-file progress update, or - exactly once, as
+// the final message - the aggregate status after every file has been attempted.
+message BenchmarkSyncStreamEvent {
+  oneof event {
+    BenchmarkSyncProgressEvent progress = 1;
+    BenchmarkStatusResponse final_status = 2;
+  }
+}
+
 // Envelope: exactly one of these is set per message, matching SignalR's per-message-type dispatch
 // ("RoutingTelemetry" / "LogLine" client methods) with a single Protobuf idiom.
 message TelemetryEvent {

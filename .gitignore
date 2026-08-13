@@ -428,8 +428,3 @@ FodyWeavers.xsd
 *.msm
 *.msp
 /graphify-out/cache/ast
-
-# CodeRouterBench data (PLAN.md Phase K): fetched on demand by scripts/fetch-coderouterbench.sh from
-# https://huggingface.co/datasets/Lance1573/CodeRouterBench into data/coderouterbench/, not checked
-# in - see data/README.md. data/README.md itself is not ignored.
-/data/coderouterbench/

@@ -1,0 +1,194 @@
+@* Governance > Benchmark Data pane: shows the CodeRouterBench corpus's freshness relative to the
+   published Hugging Face dataset and lets the operator sync it on demand.
+   Talks to the proxy's BenchmarkDataAdminService gRPC API via the injected BenchmarkDataStore.
+
+   No licensing constraint applies here (unlike Price Sources/D5) - the corpus is public benchmark data -
+   so file names, sizes, and row counts are shown freely. *@
+@implements IDisposable
+@inject BenchmarkDataStore Store
+
+<div class="h-full overflow-y-auto pr-1">
+    @if (!Store.IsLoaded)
+    {
+        <div class="text-sm text-slate-500 p-4">Loading benchmark data status…</div>
+    }
+    else if (!Store.IsReachable)
+    {
+        <div class="rounded-lg p-4 space-y-2 ds-surface-card-critical">
+            <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
+                <Icon Name="alert-triangle" Size="14" /> Router unreachable
+            </div>
+            <div class="text-xs text-slate-400">
+                Could not reach <span class="font-mono">@TelemetryChannelFactory.DefaultServerAddress</span>. Is the proxy running?
+            </div>
+            @if (!string.IsNullOrEmpty(Store.LastError))
+            {
+                <div class="text-xs text-slate-500 font-mono">@Store.LastError</div>
+            }
+            <button @onclick="Reload" class="btn btn-ghost">
+                Retry
+            </button>
+        </div>
+    }
+    else
+    {
+        <div class="flex items-center justify-between mb-3 gap-2">
+            <span class="text-xs text-slate-500 uppercase tracking-widest">CodeRouterBench Corpus</span>
+            <button @onclick="RunAction"
+                    disabled="@(Store.IsSyncing || Store.Status?.State == BenchmarkDataAdminState.Current)"
+                    title="@(Store.Status?.Reason)"
+                    class="btn btn-secondary flex items-center gap-1.5">
+                <Icon Name="rotate-ccw" Size="13" />
+                @ActionLabel()
+            </button>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_opError))
+        {
+            <div class="mb-3 text-xs ds-alert-critical">
+                @_opError
+            </div>
+        }
+
+        @if (Store.Status is { } status)
+        {
+            @if (status.State == BenchmarkDataAdminState.CheckFailed && !string.IsNullOrEmpty(status.Reason))
+            {
+                <div class="mb-3 text-xs ds-alert-critical">
+                    Could not check for updates: @status.Reason
+                </div>
+            }
+
+            <div class="space-y-2.5">
+                @foreach (var file in status.Files)
+                {
+                    var progress = Store.SyncProgress.GetValueOrDefault(file.FileName);
+
+                    <div @key="file.FileName" class="rounded-lg p-3 space-y-1.5 ds-surface-card-draggable @(file.Synced ? "" : "ds-source-border-dim")">
+                        <div class="flex items-center justify-between gap-2">
+                            <span class="text-sm font-semibold @(file.Synced ? "state-enabled" : "state-disabled")">
+                                @file.FileName
+                            </span>
+                            <span class="text-xs @StageClass(progress)">@StageLabel(file, progress)</span>
+                        </div>
+                        <div class="flex items-center justify-between text-xs text-slate-500">
+                            <span>@DescribeSize(file, progress)</span>
+                            <span>@DescribeSyncedAt(file)</span>
+                        </div>
+                        @if (progress is { Stage: BenchmarkSyncStageInfo.Failed, Error: { } error })
+                        {
+                            <div class="rounded px-2 py-1.5 text-xs ds-outcome-critical">
+                                <span class="text-red-300">⚠️ @error</span>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private string? _opError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Store.Changed += OnStoreChanged;
+        await Store.LoadAsync();
+    }
+
+    private void OnStoreChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Store.Changed -= OnStoreChanged;
+
+    private async Task Reload()
+    {
+        _opError = null;
+        await Store.LoadAsync();
+    }
+
+    /// <summary>
+    /// The header button's label, reflecting the corpus's freshness state directly - "Current" once every
+    /// file matches the published tree, "Update" when at least one does not, "Check Failed" when the last
+    /// probe could not reach Hugging Face - and "Updating…" for the duration of a sync.
+    /// </summary>
+    private string ActionLabel()
+    {
+        if (Store.IsSyncing)
+        {
+            return "Updating…";
+        }
+
+        return Store.Status?.State switch
+        {
+            BenchmarkDataAdminState.Current => "Current",
+            BenchmarkDataAdminState.Update => "Update",
+            BenchmarkDataAdminState.CheckFailed => "Check Failed",
+            _ => "Check Failed",
+        };
+    }
+
+    /// <summary>
+    /// Runs the action the header button's current state implies: a stale corpus (Update) syncs; an
+    /// unknown freshness (CheckFailed, or no status yet) rechecks rather than downloading blind.
+    /// </summary>
+    private Task RunAction() =>
+        Store.Status?.State == BenchmarkDataAdminState.Update
+            ? RunAsync(() => Store.SyncAsync())
+            : RunAsync(() => Store.RecheckAsync());
+
+    private static string StageLabel(BenchmarkFileStatusInfo file, BenchmarkSyncProgressInfo? progress) => progress switch
+    {
+        { Stage: BenchmarkSyncStageInfo.Downloading } => "Downloading…",
+        { Stage: BenchmarkSyncStageInfo.Verifying } => "Verifying…",
+        { Stage: BenchmarkSyncStageInfo.Importing } => "Importing…",
+        { Stage: BenchmarkSyncStageInfo.Completed } => "Synced",
+        { Stage: BenchmarkSyncStageInfo.Failed } => "Failed",
+        _ => file.Synced ? "Synced" : "Not synced",
+    };
+
+    private static string StageClass(BenchmarkSyncProgressInfo? progress) => progress?.Stage switch
+    {
+        BenchmarkSyncStageInfo.Failed => "text-red-400",
+        BenchmarkSyncStageInfo.Completed => "text-emerald-400",
+        null => "text-slate-500",
+        _ => "text-slate-400",
+    };
+
+    private static string DescribeSize(BenchmarkFileStatusInfo file, BenchmarkSyncProgressInfo? progress)
+    {
+        if (progress is { RowsImported: { } rows })
+        {
+            return $"{rows:N0} rows";
+        }
+
+        if (progress is { BytesTransferred: { } bytes })
+        {
+            return $"{bytes / 1024.0 / 1024.0:0.#} MB downloaded";
+        }
+
+        return file.Synced ? $"{file.SizeBytes / 1024.0 / 1024.0:0.#} MB, {file.RowCount:N0} rows" : "Never synced";
+    }
+
+    private static string DescribeSyncedAt(BenchmarkFileStatusInfo file) =>
+        file.SyncedAtUtc is { } syncedAt ? $"Synced {syncedAt.ToLocalTime():g} local" : string.Empty;
+
+    /// <summary>
+    /// Runs a mutation, surfacing a failure in the inline error banner rather than letting it escape into
+    /// the renderer. Same wrapper shape as PriceSourcesAdmin's.
+    /// </summary>
+    private async Task<bool> RunAsync(Func<Task> operation)
+    {
+        _opError = null;
+        try
+        {
+            await operation();
+            return true;
+        }
+        catch (BenchmarkDataAdminException ex)
+        {
+            _opError = ex.Message;
+            return false;
+        }
+    }
+}

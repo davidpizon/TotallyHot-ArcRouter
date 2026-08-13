@@ -12,8 +12,9 @@ public sealed class BenchmarkSyncOptions
 
     /// <summary>
     /// Gets the dataset ref (branch, tag, or commit) the sync tracks. Defaults to <c>"main"</c>,
-    /// matching <c>fetch-coderouterbench.sh</c>'s default and its <c>CODEROUTERBENCH_REF</c> override -
-    /// see the migration plan's "Deliberately out of scope" section on pinning.
+    /// matching the now-removed <c>scripts/fetch-coderouterbench.sh</c>'s default and its
+    /// <c>CODEROUTERBENCH_REF</c> override - see the migration plan's "Deliberately out of scope" section
+    /// on pinning.
     /// </summary>
     public string DatasetRef { get; init; } = "main";
 }

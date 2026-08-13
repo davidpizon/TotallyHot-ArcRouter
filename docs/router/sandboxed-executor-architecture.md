@@ -15,9 +15,9 @@ The TotallyHotArcRouter framework's **Verifier** module produces *execution-grou
 information that each Context→Action→Feedback (C-A-F) loop contributes to `RouterMemory`
 (see [`docs/research/technical-reference.md`](../research/technical-reference.md) §3.3 and the
 paper's Eq. 8). In the **offline benchmark** that feedback comes from a Docker/Apptainer harness
-with ground-truth unit tests (SWE-bench images). That harness was part of the Python
-reproduction pipeline, which has since been removed from this repository; see
-[`docs/HANDBOOK.md`](../HANDBOOK.md) for what remains.
+with ground-truth unit tests (SWE-bench images). That harness belongs to the upstream reproduction
+pipeline and is not part of this repository; see
+[`docs/HANDBOOK.md`](../HANDBOOK.md) for what this repository covers.
 
 **Live proxy traffic has no ground-truth verifier.** When the .NET proxy
 (`Proxy/ProxyMiddleware.cs`) forwards a request and streams a response back, there is no held-out
@@ -571,8 +571,8 @@ integration tests behind the capability probe so CI on non-KVM runners still goe
 - [`docs/research/technical-reference.md`](../research/technical-reference.md) — Verifier (Eq. 8),
   C-A-F loop, reward weights `(ε₁, ε₂) = (1, −0.1)`, dimension taxonomy.
 - [`docs/research/paper-notes.md`](../research/paper-notes.md) — verification tool tiers, Memory design.
-- [`docs/HANDBOOK.md`](../HANDBOOK.md) — offline sandbox harness (Docker/Apptainer, now removed
-  along with the rest of the Python pipeline) this online executor complements.
+- [`docs/HANDBOOK.md`](../HANDBOOK.md) — offline sandbox harness (Docker/Apptainer, upstream only)
+  this online executor complements.
 - [`system-proxy-architecture.md`](./system-proxy-architecture.md),
   [`telemetry.md`](./telemetry.md) — the proxy + telemetry path this executor hooks into.
 - `AGENTS.md` — .NET 10 conventions, Serilog logging, Mermaid diagrams, 80% coverage, ≤ 5 s tests.

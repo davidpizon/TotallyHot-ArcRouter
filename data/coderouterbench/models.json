@@ -1,0 +1,65 @@
+{
+  "models": [
+    {
+      "input_per_1m": 5.0,
+      "model": "claude-opus-4-6",
+      "output_per_1m": 25.0,
+      "provider": "Anthropic",
+      "tier": "premium"
+    },
+    {
+      "input_per_1m": 3.0,
+      "model": "claude-sonnet-4-6",
+      "output_per_1m": 15.0,
+      "provider": "Anthropic",
+      "tier": "high"
+    },
+    {
+      "input_per_1m": 2.5,
+      "model": "gpt-5.4",
+      "output_per_1m": 15.0,
+      "provider": "OpenAI",
+      "tier": "high"
+    },
+    {
+      "_note": "pricing CNY-> USD",
+      "input_per_1m": 0.8,
+      "model": "glm-5",
+      "output_per_1m": 3.0,
+      "provider": "Zhipu",
+      "tier": "low"
+    },
+    {
+      "_note": "kimi-k2.5 pricing CNY-> USD",
+      "input_per_1m": 0.01,
+      "model": "kimi-k2.5",
+      "output_per_1m": 2.9,
+      "provider": "Moonshot",
+      "tier": "mid"
+    },
+    {
+      "_note": "pricing CNY-> USD",
+      "input_per_1m": 1.0,
+      "model": "MiniMax-M2.7",
+      "output_per_1m": 3.0,
+      "provider": "MiniMax",
+      "tier": "mid"
+    },
+    {
+      "_note": "qwen-max-latest pricing CNY-> USD",
+      "input_per_1m": 0.34,
+      "model": "Qwen3-Max",
+      "output_per_1m": 1.38,
+      "provider": "Alibaba",
+      "tier": "mid"
+    },
+    {
+      "_note": "pricing CNY-> USD",
+      "input_per_1m": 0.11,
+      "model": "qwen3.5-plus",
+      "output_per_1m": 0.66,
+      "provider": "Alibaba",
+      "tier": "low"
+    }
+  ]
+}

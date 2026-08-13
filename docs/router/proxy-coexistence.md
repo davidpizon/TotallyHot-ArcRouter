@@ -57,9 +57,9 @@ All TotallyHotArcRouter data is stored in an agent-neutral directory structure:
 
 | OS | TotallyHotArcRouter Data Directory |
 |-----|---|
-| **Windows** | `%APPDATA%\TotallyHotArcRouter\` |
-| **macOS** | `~/.acrouter/` |
-| **Linux** | `~/.acrouter/` |
+| **Windows** | `%LOCALAPPDATA%\TotallyHotArcRouter\` |
+| **macOS** | `~/.local/share/TotallyHotArcRouter/` |
+| **Linux** | `~/.local/share/TotallyHotArcRouter/` |
 
 **Claude Code Router (TypeScript/Electron) - Databases:**
 - `config.sqlite` – Application configuration and state

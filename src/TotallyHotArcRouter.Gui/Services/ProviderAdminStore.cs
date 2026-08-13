@@ -27,7 +27,7 @@ public sealed class ProviderAdminStore
     /// <param name="managementAddress">The proxy management origin; defaults to <see cref="DefaultManagementAddress"/>.</param>
     /// <param name="adminToken">
     /// Optional management token override; when null (the default), the token is read from the shared
-    /// <c>%LOCALAPPDATA%\TotallyHot.ArcRouter\management-token.txt</c> file the proxy generates (see
+    /// <c>%LOCALAPPDATA%\TotallyHotArcRouter\management-token.txt</c> file the proxy generates (see
     /// <see cref="ManagementTokenReader"/>). The REST <c>/admin/*</c> API requires this token by default.
     /// </param>
     /// <param name="transport">

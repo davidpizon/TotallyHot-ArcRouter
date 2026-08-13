@@ -6,9 +6,9 @@ using Microsoft.Extensions.Primitives;
 namespace TotallyHot.ArcRouter.Tests.Telemetry;
 
 /// <summary>
-/// Covers <see cref="SessionIdResolver"/>'s conventions, mirrored from
-/// <c>claude-code-router/src/server/gateway/claude-code-router-plugin.ts</c>'s <c>resolveSessionId</c>
-/// and <c>request-log-store.ts</c>'s <c>extractSessionIdFromPayload</c>.
+/// Covers <see cref="SessionIdResolver"/>'s header and body-field conventions, which follow the
+/// session-id convention established by the <c>claude-code-router</c> project so that clients
+/// already emitting those fields resolve correctly.
 /// </summary>
 public class SessionIdResolverTests
 {

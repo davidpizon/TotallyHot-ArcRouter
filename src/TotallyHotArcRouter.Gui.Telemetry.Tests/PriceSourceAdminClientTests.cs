@@ -1,5 +1,5 @@
 using TotallyHot.ArcRouter.Gui.Telemetry;
-using FluentAssertions;
+using AwesomeAssertions;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;

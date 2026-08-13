@@ -81,4 +81,59 @@ public class DimensionModelScoreMatrixTests
 
         Assert.Null(matrix.AverageScore("code_generation", "claude-opus-4-6"));
     }
+
+    [Fact]
+    public void FromDatabase_AveragesScores_FilteredToTheRequestedSplit()
+    {
+        using var temp = new TempBenchmarkDatabase();
+        temp.CreateLedger(); // schema only
+        InsertResult(temp, "t1", "probing", "code_generation", "claude-opus-4-6", 1.0);
+        InsertResult(temp, "t2", "probing", "code_generation", "claude-opus-4-6", 0.0);
+        // A different split's row for the same pair must not leak into the probing-split average.
+        InsertResult(temp, "t3", "id_test", "code_generation", "claude-opus-4-6", 1.0);
+
+        var matrix = DimensionModelScoreMatrix.FromDatabase(temp.Database, "probing");
+
+        Assert.Equal(0.5, matrix.AverageScore("code_generation", "claude-opus-4-6"));
+    }
+
+    [Fact]
+    public void FromDatabase_CanonicalizesModelIds_OnRead()
+    {
+        using var temp = new TempBenchmarkDatabase();
+        temp.CreateLedger();
+        InsertResult(temp, "t1", "probing", "code_generation", "MiniMax-M2.7", 1.0);
+
+        var matrix = DimensionModelScoreMatrix.FromDatabase(temp.Database, "probing");
+
+        Assert.Equal(1.0, matrix.AverageScore("code_generation", "minimax-m2.7"));
+    }
+
+    [Fact]
+    public void FromDatabase_UnknownSplit_ProducesMatrixWithNoEntries()
+    {
+        using var temp = new TempBenchmarkDatabase();
+        temp.CreateLedger();
+        InsertResult(temp, "t1", "probing", "code_generation", "claude-opus-4-6", 1.0);
+
+        var matrix = DimensionModelScoreMatrix.FromDatabase(temp.Database, "id_test");
+
+        Assert.Null(matrix.AverageScore("code_generation", "claude-opus-4-6"));
+    }
+
+    private static void InsertResult(TempBenchmarkDatabase temp, string taskId, string split, string dimension, string model, double score)
+    {
+        using var connection = temp.Database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO benchmark_id_results (task_id, split, source_split, dimension, model, score)
+            VALUES ($taskId, $split, $split, $dimension, $model, $score);
+            """;
+        command.Parameters.AddWithValue("$taskId", taskId);
+        command.Parameters.AddWithValue("$split", split);
+        command.Parameters.AddWithValue("$dimension", dimension);
+        command.Parameters.AddWithValue("$model", model);
+        command.Parameters.AddWithValue("$score", score);
+        command.ExecuteNonQuery();
+    }
 }

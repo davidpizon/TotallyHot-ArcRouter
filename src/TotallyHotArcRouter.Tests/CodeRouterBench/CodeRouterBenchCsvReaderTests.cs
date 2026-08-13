@@ -4,30 +4,15 @@ using TotallyHot.ArcRouter.Sandbox;
 namespace TotallyHot.ArcRouter.Tests.CodeRouterBench;
 
 /// <summary>Unit tests for <see cref="CodeRouterBenchCsvReader"/> against small, hand-written fixture CSVs.</summary>
-public class CodeRouterBenchCsvReaderTests : IDisposable
+public class CodeRouterBenchCsvReaderTests
 {
-    private readonly List<string> _fixturePaths = [];
-
-    public void Dispose()
-    {
-        foreach (var path in _fixturePaths)
-        {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-        }
-    }
-
     [Fact]
     public void Read_ParsesRowsByHeaderColumnOrder_IgnoringExtraColumns()
     {
-        var path = WriteFixture(
+        var rows = Read(
             "cost_usd,task_id,dimension,model,score",
             "0.001,t1,code_generation,claude-opus-4-6,1.0",
             "0.002,t2,bug_fixing,claude-opus-4-6,0.0");
-
-        var rows = CodeRouterBenchCsvReader.Read(path);
 
         Assert.Equal(2, rows.Count);
         Assert.Equal(new CodeRouterBenchResultRow("t1", "code_generation", "claude-opus-4-6", 1.0), rows[0]);
@@ -42,11 +27,9 @@ public class CodeRouterBenchCsvReaderTests : IDisposable
     [InlineData("claude-opus-4.6", "claude-opus-4-6")]
     public void Read_CanonicalizesModelIds_ToTheRouterComparisonKey(string rawModel, string expected)
     {
-        var path = WriteFixture(
+        var rows = Read(
             "task_id,dimension,model,score",
             $"t1,code_generation,{rawModel},1.0");
-
-        var rows = CodeRouterBenchCsvReader.Read(path);
 
         Assert.Equal(expected, rows[0].Model);
     }
@@ -54,22 +37,18 @@ public class CodeRouterBenchCsvReaderTests : IDisposable
     [Fact]
     public void Read_RowWithEmptyModel_ThrowsFormatException()
     {
-        var path = WriteFixture(
+        var ex = Assert.Throws<FormatException>(() => Read(
             "task_id,dimension,model,score",
-            "t1,code_generation,,1.0");
-
-        var ex = Assert.Throws<FormatException>(() => CodeRouterBenchCsvReader.Read(path));
+            "t1,code_generation,,1.0"));
         Assert.Contains("row 2", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public void Read_NormalizesAlgorithmDimension_ToRouterDimensionVocabulary()
     {
-        var path = WriteFixture(
+        var rows = Read(
             "task_id,dimension,model,score",
             "t1,algorithm,glm-5,0.5");
-
-        var rows = CodeRouterBenchCsvReader.Read(path);
 
         Assert.Equal(RouterDimension.AlgorithmDesign, rows[0].Dimension);
     }
@@ -77,11 +56,9 @@ public class CodeRouterBenchCsvReaderTests : IDisposable
     [Fact]
     public void Read_LeavesAlreadyCanonicalDimensions_Unchanged()
     {
-        var path = WriteFixture(
+        var rows = Read(
             "task_id,dimension,model,score",
             "t1,data_science,glm-5,0.5");
-
-        var rows = CodeRouterBenchCsvReader.Read(path);
 
         Assert.Equal(RouterDimension.DataScience, rows[0].Dimension);
     }
@@ -89,11 +66,9 @@ public class CodeRouterBenchCsvReaderTests : IDisposable
     [Fact]
     public void Read_HandlesQuotedFieldsContainingCommas()
     {
-        var path = WriteFixture(
+        var rows = Read(
             "task_id,dimension,model,score,cost_source",
             "t1,code_generation,claude-opus-4-6,1.0,\"token_log_pricing, fallback\"");
-
-        var rows = CodeRouterBenchCsvReader.Read(path);
 
         Assert.Equal("t1", rows[0].TaskId);
     }
@@ -101,13 +76,11 @@ public class CodeRouterBenchCsvReaderTests : IDisposable
     [Fact]
     public void Read_SkipsBlankLines()
     {
-        var path = WriteFixture(
+        var rows = Read(
             "task_id,dimension,model,score",
             "t1,code_generation,claude-opus-4-6,1.0",
             "",
             "t2,code_generation,claude-opus-4-6,0.0");
-
-        var rows = CodeRouterBenchCsvReader.Read(path);
 
         Assert.Equal(2, rows.Count);
     }
@@ -115,46 +88,30 @@ public class CodeRouterBenchCsvReaderTests : IDisposable
     [Fact]
     public void Read_MissingRequiredColumn_ThrowsFormatException()
     {
-        var path = WriteFixture(
+        var ex = Assert.Throws<FormatException>(() => Read(
             "task_id,model,score",
-            "t1,claude-opus-4-6,1.0");
-
-        var ex = Assert.Throws<FormatException>(() => CodeRouterBenchCsvReader.Read(path));
+            "t1,claude-opus-4-6,1.0"));
         Assert.Contains("dimension", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public void Read_RowMissingRequiredField_ThrowsFormatException()
     {
-        var path = WriteFixture(
+        var ex = Assert.Throws<FormatException>(() => Read(
             "task_id,dimension,model,score",
-            "t1,code_generation,claude-opus-4-6");
-
-        var ex = Assert.Throws<FormatException>(() => CodeRouterBenchCsvReader.Read(path));
+            "t1,code_generation,claude-opus-4-6"));
         Assert.Contains("row 2", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public void Read_MissingHeaderRow_ThrowsFormatException()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"crb-empty-{Guid.NewGuid():N}.csv");
-        File.WriteAllText(path, string.Empty);
-
-        try
-        {
-            Assert.Throws<FormatException>(() => CodeRouterBenchCsvReader.Read(path));
-        }
-        finally
-        {
-            File.Delete(path);
-        }
+        Assert.Throws<FormatException>(() => Read());
     }
 
-    private string WriteFixture(params string[] lines)
+    private static IReadOnlyList<CodeRouterBenchResultRow> Read(params string[] lines)
     {
-        var path = Path.Combine(Path.GetTempPath(), $"crb-fixture-{Guid.NewGuid():N}.csv");
-        File.WriteAllLines(path, lines);
-        _fixturePaths.Add(path);
-        return path;
+        using var reader = new StringReader(string.Join('\n', lines));
+        return CodeRouterBenchCsvReader.Read(reader, "fixture");
     }
 }

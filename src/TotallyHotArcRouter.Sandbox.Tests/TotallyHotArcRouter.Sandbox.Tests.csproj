@@ -17,7 +17,12 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="FluentAssertions" Version="8.10.0" />
+    <!-- AwesomeAssertions: the Apache-2.0 community fork of FluentAssertions. FluentAssertions 8.x moved to
+         the Xceed Community License, which permits non-commercial use only and restricts *use*, not just
+         redistribution - so it would constrain how this repository itself may be licensed and used. See
+         THIRD-PARTY-NOTICES.md. The assertion API is identical; only the root namespace differs
+         (`using AwesomeAssertions;`), which is why no test assertion needed rewriting. -->
+    <PackageReference Include="AwesomeAssertions" Version="9.5.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
     <PackageReference Include="Moq" Version="4.20.72" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
