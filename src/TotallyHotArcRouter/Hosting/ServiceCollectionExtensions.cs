@@ -187,6 +187,21 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddSingleton<BenchmarkDatabase>();
             services.AddSingleton<BenchmarkFileLedger>();
 
+            // Phase 2: the checksum probe and sync service share one named HttpClient, mirroring how
+            // OnnxEmbeddingClient above keeps IHttpClientFactory itself and creates a client per call -
+            // not a client created once and captured for the singleton's lifetime, which would opt these
+            // services out of the factory's handler lifetime rotation (DNS changes / connection refresh).
+            services.AddOptions<BenchmarkSyncOptions>()
+                .Configure<IConfiguration>((options, configuration) =>
+                    configuration.GetSection(BenchmarkSyncOptions.SectionName).Bind(options));
+            services.AddHttpClient(BenchmarkChecksumProbe.HttpClientName);
+            services.AddSingleton<BenchmarkChecksumProbe>();
+            services.AddSingleton<BenchmarkSyncService>();
+
+            // Phase 3: the cached Current/Update/CheckFailed state StartupHealthCheckHostedService
+            // computes at startup and the Governance panel's "Recheck" action recomputes on demand.
+            services.AddSingleton<BenchmarkDataStatusService>();
+
             // Operator price-override store (docs/router/token-tracking-implementation-plan.md Phase 3 §5.7):
             // the resolution ladder's top rung. Registered before the resolver so the container injects it
             // into ConfigModelIdentityResolver's optional overrideStore parameter.

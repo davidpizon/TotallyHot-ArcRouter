@@ -35,6 +35,8 @@ public sealed class StartupHealthCheckHostedService : IHostedService
     private readonly StorageOptions _storageOptions;
     private readonly Router.RouterMemoryDatabase _routerMemoryDatabase;
     private readonly Router.EmbeddingMemory _embeddingMemory;
+    private readonly CodeRouterBench.BenchmarkDatabase _benchmarkDatabase;
+    private readonly CodeRouterBench.BenchmarkDataStatusService _benchmarkStatusService;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="StartupHealthCheckHostedService"/> class.
@@ -51,7 +53,9 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         IUsageRollupStore rollupStore,
         IOptions<StorageOptions> storageOptions,
         Router.RouterMemoryDatabase routerMemoryDatabase,
-        Router.EmbeddingMemory embeddingMemory)
+        Router.EmbeddingMemory embeddingMemory,
+        CodeRouterBench.BenchmarkDatabase benchmarkDatabase,
+        CodeRouterBench.BenchmarkDataStatusService benchmarkStatusService)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(database);
@@ -65,6 +69,8 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         ArgumentNullException.ThrowIfNull(storageOptions);
         ArgumentNullException.ThrowIfNull(routerMemoryDatabase);
         ArgumentNullException.ThrowIfNull(embeddingMemory);
+        ArgumentNullException.ThrowIfNull(benchmarkDatabase);
+        ArgumentNullException.ThrowIfNull(benchmarkStatusService);
 
         _logger = logger;
         _database = database;
@@ -78,6 +84,8 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         _storageOptions = storageOptions.Value;
         _routerMemoryDatabase = routerMemoryDatabase;
         _embeddingMemory = embeddingMemory;
+        _benchmarkDatabase = benchmarkDatabase;
+        _benchmarkStatusService = benchmarkStatusService;
     }
 
     /// <inheritdoc />
@@ -209,6 +217,24 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Embedding memory initialization failed; continuing startup.");
+        }
+
+        // CodeRouterBench corpus freshness (docs/router/coderouterbench-sqlite-migration-plan.md, Phase
+        // 3): ensure its own SQLite schema exists and probe Hugging Face for the corpus's
+        // Current/Update/CheckFailed state, best-effort and log-only like every check above - a probe
+        // failure must never block the proxy from binding its port. BenchmarkDataStatusService.RecheckAsync
+        // already downgrades an expected probe failure to CheckFailed rather than throwing, so this
+        // try/catch is a backstop for EnsureCreated and any other unexpected failure from RecheckAsync.
+        // RecheckAsync does still throw OperationCanceledException for caller cancellation, though, and
+        // that must propagate rather than be logged as a startup failure.
+        try
+        {
+            _benchmarkDatabase.EnsureCreated();
+            await _benchmarkStatusService.RecheckAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "CodeRouterBench corpus initialization failed; continuing startup.");
         }
 
         _logger.LogInformation("Startup pricing health checks complete.");

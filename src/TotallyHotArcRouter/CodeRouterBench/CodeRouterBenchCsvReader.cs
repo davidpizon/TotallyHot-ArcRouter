@@ -37,14 +37,36 @@ public static class CodeRouterBenchCsvReader
         ArgumentException.ThrowIfNullOrWhiteSpace(csvPath);
 
         using var reader = new StreamReader(csvPath);
+        return Read(reader, csvPath);
+    }
 
-        var headerLine = reader.ReadLine() ?? throw new FormatException($"'{csvPath}' has no header row.");
+    /// <summary>
+    /// Reads every data row from an already-open <paramref name="reader"/> - what
+    /// <see cref="BenchmarkSyncService"/> uses so a freshly downloaded CSV can be parsed straight from
+    /// its in-memory bytes without ever touching a temp file. Column mapping and validation are
+    /// otherwise identical to the file-path overload.
+    /// </summary>
+    /// <param name="reader">An open reader positioned at the start of the CSV, header row included.</param>
+    /// <param name="sourceLabel">
+    /// A label identifying the source in exception messages (e.g. the originating file name), in place
+    /// of the file path the path-based overload reports.
+    /// </param>
+    /// <exception cref="FormatException">
+    /// Thrown when the header is missing a required <c>task_id</c>, <c>dimension</c>, <c>model</c>, or
+    /// <c>score</c> column, or when a data row is short, has a non-numeric score, or has an empty model.
+    /// </exception>
+    public static IReadOnlyList<CodeRouterBenchResultRow> Read(TextReader reader, string sourceLabel)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceLabel);
+
+        var headerLine = reader.ReadLine() ?? throw new FormatException($"'{sourceLabel}' has no header row.");
         var columns = SplitLine(headerLine);
 
-        var taskIdIndex = RequireColumn(columns, "task_id", csvPath);
-        var dimensionIndex = RequireColumn(columns, "dimension", csvPath);
-        var modelIndex = RequireColumn(columns, "model", csvPath);
-        var scoreIndex = RequireColumn(columns, "score", csvPath);
+        var taskIdIndex = RequireColumn(columns, "task_id", sourceLabel);
+        var dimensionIndex = RequireColumn(columns, "dimension", sourceLabel);
+        var modelIndex = RequireColumn(columns, "model", sourceLabel);
+        var scoreIndex = RequireColumn(columns, "score", sourceLabel);
         var requiredFieldCount = Math.Max(
             Math.Max(taskIdIndex, dimensionIndex),
             Math.Max(modelIndex, scoreIndex)) + 1;
@@ -65,19 +87,19 @@ public static class CodeRouterBenchCsvReader
             if (fields.Count < requiredFieldCount)
             {
                 throw new FormatException(
-                    $"'{csvPath}' row {rowNumber} has {fields.Count} columns but requires at least {requiredFieldCount}.");
+                    $"'{sourceLabel}' row {rowNumber} has {fields.Count} columns but requires at least {requiredFieldCount}.");
             }
 
             var rawScore = fields[scoreIndex];
             if (!double.TryParse(rawScore, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var score))
             {
-                throw new FormatException($"'{csvPath}' has a non-numeric score '{rawScore}' for task '{fields[taskIdIndex]}'.");
+                throw new FormatException($"'{sourceLabel}' has a non-numeric score '{rawScore}' for task '{fields[taskIdIndex]}'.");
             }
 
             var rawModel = fields[modelIndex];
             if (string.IsNullOrWhiteSpace(rawModel))
             {
-                throw new FormatException($"'{csvPath}' row {rowNumber} has an empty model.");
+                throw new FormatException($"'{sourceLabel}' row {rowNumber} has an empty model.");
             }
 
             rows.Add(new CodeRouterBenchResultRow(
@@ -113,9 +135,11 @@ public static class CodeRouterBenchCsvReader
     /// <summary>
     /// Splits one CSV line on commas, honoring double-quoted fields (which may themselves contain
     /// commas) as the released tables' <c>cost_source</c> and task-id columns occasionally do, and
-    /// unescaping a doubled <c>""</c> inside a quoted field into a single literal quote.
+    /// unescaping a doubled <c>""</c> inside a quoted field into a single literal quote. Internal (not
+    /// private) so the full-column DB importers under <see cref="BenchmarkSyncService"/> can reuse the
+    /// same quoting rules rather than duplicating them.
     /// </summary>
-    private static List<string> SplitLine(string line)
+    internal static List<string> SplitLine(string line)
     {
         List<string> fields = [];
         var current = new System.Text.StringBuilder();
