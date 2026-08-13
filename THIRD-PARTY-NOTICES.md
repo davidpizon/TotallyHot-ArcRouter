@@ -139,13 +139,13 @@ no obligation on downstream recipients of the application.
 
 ## 4. Data and models obtained at runtime (not redistributed)
 
-These are downloaded by the end user on first use and are not included in this repository or in any
-distributed artifact.
+These are downloaded onto the end user's machine on first use — into `%LOCALAPPDATA%`, never into the
+source tree — and are not committed to this repository or bundled into any distributed artifact.
 
 | Asset | Source | License |
 |---|---|---|
 | BGE-large-en-v1.5 ONNX model + tokenizer | Hugging Face, fetched by `OnnxEmbeddingClient` | The upstream model, `BAAI/bge-large-en-v1.5`, is **MIT** and explicitly permits commercial use. The ONNX conversion currently configured by default (`Xenova/bge-large-en-v1.5`) does not publish an explicit license tag; see the caveat below. |
-| CodeRouterBench benchmark tables | `huggingface.co/datasets/Lance1573/CodeRouterBench`, fetched by `scripts/fetch-coderouterbench.sh` | **MIT**, per the dataset card |
+| CodeRouterBench benchmark tables | `huggingface.co/datasets/Lance1573/CodeRouterBench`, synced on demand by `BenchmarkSyncService` into a local SQLite database — triggered from **Governance → Benchmark Data** in the GUI, the `sync_benchmark_data` MCP tool, or `TotallyHotArcRouter --sync-benchmark-data` | **MIT**, per the dataset card |
 
 > **Caveat — embedding model source.** `EmbeddingOptions.ModelUrl` defaults to the `Xenova/`
 > re-hosted ONNX conversion, whose model card carries no explicit license tag. The weights derive
