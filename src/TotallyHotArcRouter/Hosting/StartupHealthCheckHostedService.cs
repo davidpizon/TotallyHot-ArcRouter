@@ -223,9 +223,10 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         // 3): ensure its own SQLite schema exists and probe Hugging Face for the corpus's
         // Current/Update/CheckFailed state, best-effort and log-only like every check above - a probe
         // failure must never block the proxy from binding its port. BenchmarkDataStatusService.RecheckAsync
-        // already downgrades a probe failure to CheckFailed rather than throwing, so this try/catch only
-        // guards EnsureCreated. RecheckAsync does still throw OperationCanceledException for caller
-        // cancellation, though, and that must propagate rather than be logged as a startup failure.
+        // already downgrades an expected probe failure to CheckFailed rather than throwing, so this
+        // try/catch is a backstop for EnsureCreated and any other unexpected failure from RecheckAsync.
+        // RecheckAsync does still throw OperationCanceledException for caller cancellation, though, and
+        // that must propagate rather than be logged as a startup failure.
         try
         {
             _benchmarkDatabase.EnsureCreated();

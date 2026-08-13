@@ -30,7 +30,7 @@ internal sealed class HuggingFaceTreeEntry
 public sealed record BenchmarkPublishedFile(string PublishedOid, long Size);
 
 /// <summary>The result of one <see cref="BenchmarkChecksumProbe.FetchAsync"/> call.</summary>
-/// <param name="Files">Every published file's checksum and size, keyed by file name.</param>
+/// <param name="Files">Every published file's checksum and size, keyed by its dataset-relative path.</param>
 /// <param name="RepoCommit">The dataset commit the tree was resolved to.</param>
 public sealed record BenchmarkChecksumProbeResult(
     IReadOnlyDictionary<string, BenchmarkPublishedFile> Files,
@@ -48,7 +48,7 @@ public sealed class BenchmarkChecksumProbe
     public const string DatasetRepo = "Lance1573/CodeRouterBench";
 
     /// <summary>The named <see cref="HttpClient"/> registered for CodeRouterBench Hugging Face calls.</summary>
-    public const string HttpClientName = "BenchmarkSyncService";
+    public const string HttpClientName = "CodeRouterBenchHuggingFace";
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<BenchmarkChecksumProbe> _logger;
