@@ -6,10 +6,8 @@ directory (docs/router/coderouterbench-sqlite-migration-plan.md). The database i
 not checked in** - at ~12 MB transferred it is large for a git checkout, and the dataset already has a
 stable, versioned home on Hugging Face.
 
-Only this file is intended to live under `data/` going forward. The `data/coderouterbench/` folder that
-is still checked in here is an inert upstream snapshot kept for reference and offline inspection - no
-source file outside documentation reads it, and it is not the corpus the router consumes at runtime.
-Point tooling at the synced SQLite database described below, never at those files.
+This directory now holds only this file. `data/coderouterbench/` is gone: nothing outside documentation
+reads it, and `.gitignore` keeps it from being committed again if a stray fetch recreates it locally.
 
 ## Syncing
 

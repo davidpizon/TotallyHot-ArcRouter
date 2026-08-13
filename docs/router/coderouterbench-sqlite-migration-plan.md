@@ -322,8 +322,10 @@ the unreachable state.
 - **CLI** — a `--sync-benchmark-data` flag on the existing host, following the `--model` extraction
   pattern in `Program.cs`, which runs one sync and exits. This is what replaces the shell script for
   headless and CI machines; no new project.
-- **Removals:** `scripts/fetch-coderouterbench.sh`, the `data/coderouterbench/` entry in `.gitignore`,
-  and the directory's role in the build.
+- **Removals:** `scripts/fetch-coderouterbench.sh`, the `data/coderouterbench/` directory itself, and
+  the directory's role in the build. The `data/coderouterbench/` entry in `.gitignore` is deliberately
+  **kept** - an earlier revision of this plan called for dropping it, but with the corpus no longer
+  tracked the entry is the guard that stops a stray local fetch from being committed back in.
 - **Documentation:** `data/README.md` rewritten around the database (keeping its "Known data-fidelity
   limit" evidence, which is about the released data and remains true); `src/PLAN.md` Phase K annotated
   as superseded here; `docs/HANDBOOK.md` and `docs/README.md` reconciled.
