@@ -64,6 +64,11 @@ public sealed class BenchmarkSyncService
     /// <param name="progress">An optional progress reporter for streaming per-file status.</param>
     /// <param name="cancellationToken">A token to cancel the sync.</param>
     /// <exception cref="HttpRequestException">The checksum probe itself failed; no file was synced.</exception>
+    /// <exception cref="OperationCanceledException">
+    /// <paramref name="cancellationToken"/> was canceled while a file was downloading, importing, or being probed.
+    /// Unlike a per-file network or parse failure, caller cancellation aborts the whole sync rather than being
+    /// recorded as a failed <see cref="BenchmarkFileSyncOutcome"/>.
+    /// </exception>
     public async Task<BenchmarkSyncResult> SyncAsync(
         string datasetRef,
         IProgress<BenchmarkSyncProgress>? progress,
@@ -133,7 +138,9 @@ public sealed class BenchmarkSyncService
                 probeResult.RepoCommit);
             return new BenchmarkFileSyncOutcome(spec.FileName, Succeeded: true, rowCount, ErrorMessage: null);
         }
-        catch (Exception ex) when (ex is HttpRequestException or FormatException or TaskCanceledException or SqliteException)
+        catch (Exception ex) when (
+            (ex is HttpRequestException or FormatException or SqliteException) ||
+            (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
         {
             _logger.LogError(ex, "CodeRouterBench sync failed for {FileName}.", spec.FileName);
             progress?.Report(new BenchmarkSyncProgress(spec.FileName, BenchmarkSyncStage.Failed));

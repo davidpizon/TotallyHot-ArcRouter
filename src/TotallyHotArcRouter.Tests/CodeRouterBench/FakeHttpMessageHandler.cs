@@ -21,6 +21,10 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
     public static FakeHttpMessageHandler AlwaysFails(HttpStatusCode statusCode = HttpStatusCode.ServiceUnavailable) =>
         new(_ => new HttpResponseMessage(statusCode));
 
-    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-        Task.FromResult(_respond(request));
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var response = _respond(request);
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(response);
+    }
 }

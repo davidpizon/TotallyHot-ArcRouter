@@ -122,6 +122,20 @@ public class BenchmarkSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncAsync_CallerCancels_PropagatesInsteadOfRecordingAPerFileFailure()
+    {
+        using var temp = new TempBenchmarkDatabase();
+        using var cts = new CancellationTokenSource();
+        var service = CreateService(temp, Fixtures, repoCommit: "commit123", cancelDownloadsWith: cts);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => service.SyncAsync("main", progress: null, cts.Token));
+
+        var ledger = temp.CreateLedger();
+        Assert.Empty(ledger.GetAll());
+    }
+
+    [Fact]
     public async Task SyncAsync_ReportsCompletedProgressForEveryFile()
     {
         using var temp = new TempBenchmarkDatabase();
@@ -149,7 +163,8 @@ public class BenchmarkSyncServiceTests
         IReadOnlyDictionary<string, string> servedBodies,
         string repoCommit,
         IReadOnlyDictionary<string, string>? publishedFixtures = null,
-        string? omitFromTree = null)
+        string? omitFromTree = null,
+        CancellationTokenSource? cancelDownloadsWith = null)
     {
         var oidSourceBodies = publishedFixtures ?? servedBodies;
         var publishedOids = oidSourceBodies.ToDictionary(
@@ -175,6 +190,7 @@ public class BenchmarkSyncServiceTests
             }
 
             var fileName = path[(path.LastIndexOf('/') + 1)..];
+            cancelDownloadsWith?.Cancel();
             return servedBodies.TryGetValue(fileName, out var body)
                 ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8) }
                 : new HttpResponseMessage(HttpStatusCode.NotFound);

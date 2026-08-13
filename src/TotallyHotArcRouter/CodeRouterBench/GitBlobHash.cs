@@ -15,16 +15,18 @@ public static class GitBlobHash
     /// Computes the lowercase hex git blob SHA-1 of <paramref name="content"/>.
     /// </summary>
     /// <param name="content">The raw file bytes to hash.</param>
+#pragma warning disable CA5350 // SHA-1 is required here to match git/Hugging Face's blob OID algorithm, not for security.
     public static string Compute(byte[] content)
     {
         ArgumentNullException.ThrowIfNull(content);
 
         var header = Encoding.ASCII.GetBytes($"blob {content.Length}\0");
-        var buffer = new byte[header.Length + content.Length];
-        header.CopyTo(buffer, 0);
-        content.CopyTo(buffer, header.Length);
 
-        var hash = SHA1.HashData(buffer);
-        return Convert.ToHexStringLower(hash);
+        using var sha1 = SHA1.Create();
+        sha1.TransformBlock(header, 0, header.Length, outputBuffer: null, outputOffset: 0);
+        sha1.TransformFinalBlock(content, 0, content.Length);
+
+        return Convert.ToHexStringLower(sha1.Hash!);
     }
+#pragma warning restore CA5350
 }

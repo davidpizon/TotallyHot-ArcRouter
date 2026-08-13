@@ -69,6 +69,7 @@ public sealed class BenchmarkChecksumProbe
     /// <param name="datasetRef">The dataset ref to resolve, e.g. <c>"main"</c>.</param>
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <exception cref="HttpRequestException">The request failed or returned a non-success status.</exception>
+    /// <exception cref="System.Text.Json.JsonException">The response body was not a valid tree entry array.</exception>
     public async Task<BenchmarkChecksumProbeResult> FetchAsync(string datasetRef, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(datasetRef);

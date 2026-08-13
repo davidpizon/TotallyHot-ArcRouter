@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -72,12 +73,14 @@ public sealed class BenchmarkDataStatusService
     /// <summary>
     /// Probes Hugging Face for the currently published checksums, compares them against
     /// <see cref="BenchmarkFileLedger"/>, computes the resulting <see cref="BenchmarkDataState"/>, caches
-    /// it, and returns it. A probe failure is caught here and reported as
-    /// <see cref="BenchmarkDataState.CheckFailed"/> rather than thrown or silently treated as
-    /// <see cref="BenchmarkDataState.Current"/> - the "fail open at startup" ground rule in
-    /// docs/router/coderouterbench-sqlite-migration-plan.md.
+    /// it, and returns it. A probe failure - an unreachable host or a malformed tree response - is caught
+    /// here and reported as <see cref="BenchmarkDataState.CheckFailed"/> rather than thrown or silently
+    /// treated as <see cref="BenchmarkDataState.Current"/> - the "fail open at startup" ground rule in
+    /// docs/router/coderouterbench-sqlite-migration-plan.md. Caller cancellation is not a probe failure:
+    /// it propagates instead of being recorded as <see cref="BenchmarkDataState.CheckFailed"/>.
     /// </summary>
     /// <param name="cancellationToken">A token to cancel the probe.</param>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     public async Task<BenchmarkDataStatus> RecheckAsync(CancellationToken cancellationToken)
     {
         BenchmarkDataStatus status;
@@ -96,7 +99,9 @@ public sealed class BenchmarkDataStatusService
                 Reason: null,
                 DateTimeOffset.UtcNow);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        catch (Exception ex) when (
+            (ex is HttpRequestException or JsonException) ||
+            (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
         {
             _logger.LogWarning(ex, "CodeRouterBench checksum probe could not reach Hugging Face; corpus freshness is unknown.");
             status = new BenchmarkDataStatus(BenchmarkDataState.CheckFailed, ex.Message, DateTimeOffset.UtcNow);
