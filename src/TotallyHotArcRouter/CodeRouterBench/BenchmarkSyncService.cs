@@ -146,7 +146,8 @@ public sealed class BenchmarkSyncService
             return new BenchmarkFileSyncOutcome(spec.FileName, Succeeded: true, rowCount, ErrorMessage: null);
         }
         catch (Exception ex) when (
-            (ex is HttpRequestException or FormatException or SqliteException or System.Text.Json.JsonException) ||
+            (ex is HttpRequestException or FormatException or SqliteException or System.Text.Json.JsonException
+                or NotSupportedException or ArgumentException) ||
             (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
         {
             _logger.LogError(ex, "CodeRouterBench sync failed for {FileName}.", spec.FileName);
@@ -163,6 +164,8 @@ public sealed class BenchmarkSyncService
     /// </summary>
     /// <exception cref="FormatException">The imported row count did not match <see cref="BenchmarkFileSpec.ExpectedRowCount"/>.</exception>
     /// <exception cref="System.Text.Json.JsonException">A JSON or JSONL file's content was not valid JSON.</exception>
+    /// <exception cref="NotSupportedException"><paramref name="spec"/>'s <see cref="BenchmarkFileSpec.Kind"/> has no importer.</exception>
+    /// <exception cref="ArgumentException"><paramref name="spec"/>'s <see cref="BenchmarkFileSpec.Split"/> is required by its importer but null or blank.</exception>
     private int ImportAndRecord(BenchmarkFileSpec spec, byte[] bytes, string actualOid, string repoCommit)
     {
         using var connection = _database.OpenConnection();

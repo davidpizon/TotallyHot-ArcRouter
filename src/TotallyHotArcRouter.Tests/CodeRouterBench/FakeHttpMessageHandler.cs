@@ -14,6 +14,8 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
 
     public FakeHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> respond)
     {
+        ArgumentNullException.ThrowIfNull(respond);
+
         _respond = respond;
     }
 
@@ -23,8 +25,8 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
 
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        var response = _respond(request);
         cancellationToken.ThrowIfCancellationRequested();
+        var response = _respond(request);
         return Task.FromResult(response);
     }
 }
