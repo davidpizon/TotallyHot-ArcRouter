@@ -141,8 +141,8 @@ public class StartupHealthCheckHostedServiceTests
     // CheckFailed rather than hanging or reaching out to Hugging Face during this unrelated retention test.
     private static BenchmarkDataStatusService CreateBenchmarkStatusService(TempDatabase temp)
     {
-        var httpClient = new HttpClient(FakeHttpMessageHandler.AlwaysFails());
-        var probe = new BenchmarkChecksumProbe(httpClient, NullLogger<BenchmarkChecksumProbe>.Instance);
+        var probe = new BenchmarkChecksumProbe(
+            new FakeHttpClientFactory(FakeHttpMessageHandler.AlwaysFails()), NullLogger<BenchmarkChecksumProbe>.Instance);
         var ledger = new BenchmarkFileLedger(CreateBenchmarkDatabase(temp));
         return new BenchmarkDataStatusService(
             probe, ledger, Options.Create(new BenchmarkSyncOptions()), NullLogger<BenchmarkDataStatusService>.Instance);

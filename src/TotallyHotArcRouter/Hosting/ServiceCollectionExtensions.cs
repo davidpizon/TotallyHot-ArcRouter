@@ -188,21 +188,15 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddSingleton<BenchmarkFileLedger>();
 
             // Phase 2: the checksum probe and sync service share one named HttpClient, mirroring how
-            // OnnxEmbeddingClient above gets its client through IHttpClientFactory rather than a raw
-            // `new HttpClient()`.
+            // OnnxEmbeddingClient above keeps IHttpClientFactory itself and creates a client per call -
+            // not a client created once and captured for the singleton's lifetime, which would opt these
+            // services out of the factory's handler lifetime rotation (DNS changes / connection refresh).
             services.AddOptions<BenchmarkSyncOptions>()
                 .Configure<IConfiguration>((options, configuration) =>
                     configuration.GetSection(BenchmarkSyncOptions.SectionName).Bind(options));
-            services.AddHttpClient(nameof(BenchmarkSyncService));
-            services.AddSingleton(sp => new BenchmarkChecksumProbe(
-                sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(BenchmarkSyncService)),
-                sp.GetRequiredService<ILogger<BenchmarkChecksumProbe>>()));
-            services.AddSingleton(sp => new BenchmarkSyncService(
-                sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(BenchmarkSyncService)),
-                sp.GetRequiredService<BenchmarkChecksumProbe>(),
-                sp.GetRequiredService<BenchmarkDatabase>(),
-                sp.GetRequiredService<BenchmarkFileLedger>(),
-                sp.GetRequiredService<ILogger<BenchmarkSyncService>>()));
+            services.AddHttpClient(BenchmarkChecksumProbe.HttpClientName);
+            services.AddSingleton<BenchmarkChecksumProbe>();
+            services.AddSingleton<BenchmarkSyncService>();
 
             // Phase 3: the cached Current/Update/CheckFailed state StartupHealthCheckHostedService
             // computes at startup and the Governance panel's "Recheck" action recomputes on demand.

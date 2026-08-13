@@ -224,13 +224,14 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         // Current/Update/CheckFailed state, best-effort and log-only like every check above - a probe
         // failure must never block the proxy from binding its port. BenchmarkDataStatusService.RecheckAsync
         // already downgrades a probe failure to CheckFailed rather than throwing, so this try/catch only
-        // guards EnsureCreated.
+        // guards EnsureCreated. RecheckAsync does still throw OperationCanceledException for caller
+        // cancellation, though, and that must propagate rather than be logged as a startup failure.
         try
         {
             _benchmarkDatabase.EnsureCreated();
             await _benchmarkStatusService.RecheckAsync(cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex, "CodeRouterBench corpus initialization failed; continuing startup.");
         }

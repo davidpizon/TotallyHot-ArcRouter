@@ -16,7 +16,7 @@ public sealed class BenchmarkSyncService
 {
     private const string DownloadUrlTemplate = "https://huggingface.co/datasets/{0}/resolve/{1}/{2}";
 
-    private readonly HttpClient _httpClient;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly BenchmarkChecksumProbe _probe;
     private readonly BenchmarkDatabase _database;
     private readonly BenchmarkFileLedger _ledger;
@@ -24,7 +24,11 @@ public sealed class BenchmarkSyncService
     private readonly IReadOnlyList<BenchmarkFileSpec> _fileSpecs;
 
     /// <summary>Initializes a new instance of the <see cref="BenchmarkSyncService"/> class.</summary>
-    /// <param name="httpClient">The client used to download source files from Hugging Face.</param>
+    /// <param name="httpClientFactory">
+    /// Used to create a fresh <see cref="BenchmarkChecksumProbe.HttpClientName"/> client per file download,
+    /// mirroring <c>OnnxEmbeddingClient</c>'s pattern rather than capturing one factory-created client for
+    /// the singleton's lifetime (which would opt this service out of the factory's handler rotation).
+    /// </param>
     /// <param name="probe">Fetches the published checksums each downloaded file is verified against.</param>
     /// <param name="database">The corpus database files are imported into.</param>
     /// <param name="ledger">The per-file sync ledger, updated once a file's import commits.</param>
@@ -35,20 +39,20 @@ public sealed class BenchmarkSyncService
     /// satisfy the production manifest's five- and six-figure row-count assertions.
     /// </param>
     public BenchmarkSyncService(
-        HttpClient httpClient,
+        IHttpClientFactory httpClientFactory,
         BenchmarkChecksumProbe probe,
         BenchmarkDatabase database,
         BenchmarkFileLedger ledger,
         ILogger<BenchmarkSyncService> logger,
         IReadOnlyList<BenchmarkFileSpec>? fileSpecs = null)
     {
-        ArgumentNullException.ThrowIfNull(httpClient);
+        ArgumentNullException.ThrowIfNull(httpClientFactory);
         ArgumentNullException.ThrowIfNull(probe);
         ArgumentNullException.ThrowIfNull(database);
         ArgumentNullException.ThrowIfNull(ledger);
         ArgumentNullException.ThrowIfNull(logger);
 
-        _httpClient = httpClient;
+        _httpClientFactory = httpClientFactory;
         _probe = probe;
         _database = database;
         _ledger = ledger;
@@ -113,7 +117,8 @@ public sealed class BenchmarkSyncService
                 BenchmarkChecksumProbe.DatasetRepo,
                 Uri.EscapeDataString(datasetRef),
                 spec.FileName);
-            var bytes = await _httpClient.GetByteArrayAsync(url, cancellationToken).ConfigureAwait(false);
+            using var httpClient = _httpClientFactory.CreateClient(BenchmarkChecksumProbe.HttpClientName);
+            var bytes = await httpClient.GetByteArrayAsync(url, cancellationToken).ConfigureAwait(false);
             progress?.Report(new BenchmarkSyncProgress(spec.FileName, BenchmarkSyncStage.Downloading, bytes.LongLength));
 
             progress?.Report(new BenchmarkSyncProgress(spec.FileName, BenchmarkSyncStage.Verifying));

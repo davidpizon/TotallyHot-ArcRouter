@@ -196,10 +196,10 @@ public class BenchmarkSyncServiceTests
                 : new HttpResponseMessage(HttpStatusCode.NotFound);
         });
 
-        var httpClient = new HttpClient(handler);
-        var probe = new BenchmarkChecksumProbe(httpClient, NullLogger<BenchmarkChecksumProbe>.Instance);
+        var httpClientFactory = new FakeHttpClientFactory(handler);
+        var probe = new BenchmarkChecksumProbe(httpClientFactory, NullLogger<BenchmarkChecksumProbe>.Instance);
         var ledger = temp.CreateLedger();
         return new BenchmarkSyncService(
-            httpClient, probe, temp.Database, ledger, NullLogger<BenchmarkSyncService>.Instance, TestFileSpecs);
+            httpClientFactory, probe, temp.Database, ledger, NullLogger<BenchmarkSyncService>.Instance, TestFileSpecs);
     }
 }

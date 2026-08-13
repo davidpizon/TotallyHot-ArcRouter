@@ -76,5 +76,5 @@ public class BenchmarkChecksumProbeTests
         CreateProbe(new FakeHttpMessageHandler(respond));
 
     private static BenchmarkChecksumProbe CreateProbe(HttpMessageHandler handler) =>
-        new(new HttpClient(handler), NullLogger<BenchmarkChecksumProbe>.Instance);
+        new(new FakeHttpClientFactory(handler), NullLogger<BenchmarkChecksumProbe>.Instance);
 }

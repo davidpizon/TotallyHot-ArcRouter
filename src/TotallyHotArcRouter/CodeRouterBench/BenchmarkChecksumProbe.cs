@@ -47,18 +47,25 @@ public sealed class BenchmarkChecksumProbe
     /// <summary>The Hugging Face dataset repository id CodeRouterBench is published under.</summary>
     public const string DatasetRepo = "Lance1573/CodeRouterBench";
 
-    private readonly HttpClient _httpClient;
+    /// <summary>The named <see cref="HttpClient"/> registered for CodeRouterBench Hugging Face calls.</summary>
+    public const string HttpClientName = "BenchmarkSyncService";
+
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<BenchmarkChecksumProbe> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="BenchmarkChecksumProbe"/> class.</summary>
-    /// <param name="httpClient">The client used to reach Hugging Face.</param>
+    /// <param name="httpClientFactory">
+    /// Used to create a fresh <see cref="HttpClientName"/> client per call, mirroring
+    /// <c>OnnxEmbeddingClient</c>'s pattern rather than capturing one factory-created client for the
+    /// singleton's lifetime (which would opt this probe out of the factory's handler rotation).
+    /// </param>
     /// <param name="logger">The logger.</param>
-    public BenchmarkChecksumProbe(HttpClient httpClient, ILogger<BenchmarkChecksumProbe> logger)
+    public BenchmarkChecksumProbe(IHttpClientFactory httpClientFactory, ILogger<BenchmarkChecksumProbe> logger)
     {
-        ArgumentNullException.ThrowIfNull(httpClient);
+        ArgumentNullException.ThrowIfNull(httpClientFactory);
         ArgumentNullException.ThrowIfNull(logger);
 
-        _httpClient = httpClient;
+        _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
 
@@ -75,7 +82,8 @@ public sealed class BenchmarkChecksumProbe
         ArgumentException.ThrowIfNullOrWhiteSpace(datasetRef);
 
         var url = $"https://huggingface.co/api/datasets/{DatasetRepo}/tree/{Uri.EscapeDataString(datasetRef)}";
-        using var response = await _httpClient.GetAsync(url, cancellationToken).ConfigureAwait(false);
+        using var httpClient = _httpClientFactory.CreateClient(HttpClientName);
+        using var response = await httpClient.GetAsync(url, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
 
         var repoCommit = response.Headers.TryGetValues("X-Repo-Commit", out var values)

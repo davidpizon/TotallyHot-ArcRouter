@@ -123,8 +123,7 @@ public class BenchmarkDataStatusServiceTests
 
     private static BenchmarkDataStatusService CreateService(TempBenchmarkDatabase temp, HttpMessageHandler handler)
     {
-        var httpClient = new HttpClient(handler);
-        var probe = new BenchmarkChecksumProbe(httpClient, NullLogger<BenchmarkChecksumProbe>.Instance);
+        var probe = new BenchmarkChecksumProbe(new FakeHttpClientFactory(handler), NullLogger<BenchmarkChecksumProbe>.Instance);
         var ledger = new BenchmarkFileLedger(temp.Database);
         return new BenchmarkDataStatusService(
             probe, ledger, Options.Create(new BenchmarkSyncOptions()), NullLogger<BenchmarkDataStatusService>.Instance);
