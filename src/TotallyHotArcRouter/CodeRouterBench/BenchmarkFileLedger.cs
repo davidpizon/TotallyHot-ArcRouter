@@ -79,6 +79,12 @@ public sealed class BenchmarkFileLedger
     {
         ArgumentNullException.ThrowIfNull(entry);
         ArgumentNullException.ThrowIfNull(connection);
+        if (entry.SyncedAtUtc.Offset != TimeSpan.Zero)
+        {
+            throw new ArgumentException(
+                $"{nameof(entry.SyncedAtUtc)} must have a UTC (zero) offset, but was {entry.SyncedAtUtc.Offset}.",
+                nameof(entry));
+        }
 
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -97,7 +103,7 @@ public sealed class BenchmarkFileLedger
         command.Parameters.AddWithValue("$sizeBytes", entry.SizeBytes);
         command.Parameters.AddWithValue("$rowCount", entry.RowCount);
         command.Parameters.AddWithValue("$repoCommit", entry.RepoCommit);
-        command.Parameters.AddWithValue("$syncedAtUtc", entry.SyncedAtUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$syncedAtUtc", entry.SyncedAtUtc.ToString("O", CultureInfo.InvariantCulture));
         command.ExecuteNonQuery();
     }
 

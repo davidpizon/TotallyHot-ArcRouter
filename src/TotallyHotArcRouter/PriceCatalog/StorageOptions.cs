@@ -3,8 +3,9 @@ namespace TotallyHot.ArcRouter.PriceCatalog;
 /// <summary>
 /// Shared top-level storage configuration bound from the <c>Storage</c> section. Holds the on-disk
 /// locations of two separate SQLite databases: the operational database (<see cref="DatabasePath"/>)
-/// that the price catalog and the (future) usage ledger both open, and the read-only CodeRouterBench
-/// corpus database (<see cref="BenchmarkDatabasePath"/>).
+/// that the price catalog and the (future) usage ledger both open, and the CodeRouterBench corpus
+/// database (<see cref="BenchmarkDatabasePath"/>), a separate database written only during explicit
+/// sync operations.
 /// </summary>
 /// <remarks>
 /// The database path lives here rather than under <c>PriceCatalog</c> or <c>CostTracking</c> on purpose:

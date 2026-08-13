@@ -8,8 +8,8 @@ namespace TotallyHot.ArcRouter.CodeRouterBench;
 /// Owns the SQLite connection string and schema for the CodeRouterBench corpus
 /// (docs/router/coderouterbench-sqlite-migration-plan.md). A dedicated <c>coderouterbench.db</c> file,
 /// separate from <see cref="PriceCatalogDatabase"/>'s <c>agent_telemetry.db</c> and
-/// <see cref="Router.RouterMemoryDatabase"/>'s file: the corpus is read-only, bulk (~91k result rows),
-/// and freely re-downloadable from Hugging Face, so a sync (delete-and-replace) never contends for the
+/// <see cref="Router.RouterMemoryDatabase"/>'s file: the corpus is written only during explicit sync,
+/// bulk (~91k result rows), and freely re-downloadable from Hugging Face, so a sync (delete-and-replace) never contends for the
 /// price catalog's or router memory's WAL writer lock, and the corpus never bloats a backup of either
 /// operational database.
 /// </summary>
