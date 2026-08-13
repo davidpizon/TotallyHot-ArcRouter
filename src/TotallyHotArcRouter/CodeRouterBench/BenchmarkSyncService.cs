@@ -68,6 +68,8 @@ public sealed class BenchmarkSyncService
     /// <param name="progress">An optional progress reporter for streaming per-file status.</param>
     /// <param name="cancellationToken">A token to cancel the sync.</param>
     /// <exception cref="HttpRequestException">The checksum probe itself failed; no file was synced.</exception>
+    /// <exception cref="System.Text.Json.JsonException">The checksum probe's response body was not valid JSON; no file was synced.</exception>
+    /// <exception cref="NotSupportedException">The checksum probe's response content type was not supported for JSON deserialization; no file was synced.</exception>
     /// <exception cref="OperationCanceledException">
     /// <paramref name="cancellationToken"/> was canceled while a file was downloading, importing, or being probed.
     /// Unlike a per-file network or parse failure, caller cancellation aborts the whole sync rather than being
@@ -144,7 +146,7 @@ public sealed class BenchmarkSyncService
             return new BenchmarkFileSyncOutcome(spec.FileName, Succeeded: true, rowCount, ErrorMessage: null);
         }
         catch (Exception ex) when (
-            (ex is HttpRequestException or FormatException or SqliteException) ||
+            (ex is HttpRequestException or FormatException or SqliteException or System.Text.Json.JsonException) ||
             (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
         {
             _logger.LogError(ex, "CodeRouterBench sync failed for {FileName}.", spec.FileName);
@@ -159,7 +161,8 @@ public sealed class BenchmarkSyncService
     /// row-count mismatch throws before the transaction commits, so the whole import (table rows and
     /// ledger row alike) rolls back and the prior state is untouched.
     /// </summary>
-    /// <exception cref="FormatException">Parsing failed, or the imported row count did not match <see cref="BenchmarkFileSpec.ExpectedRowCount"/>.</exception>
+    /// <exception cref="FormatException">The imported row count did not match <see cref="BenchmarkFileSpec.ExpectedRowCount"/>.</exception>
+    /// <exception cref="System.Text.Json.JsonException">A JSON or JSONL file's content was not valid JSON.</exception>
     private int ImportAndRecord(BenchmarkFileSpec spec, byte[] bytes, string actualOid, string repoCommit)
     {
         using var connection = _database.OpenConnection();

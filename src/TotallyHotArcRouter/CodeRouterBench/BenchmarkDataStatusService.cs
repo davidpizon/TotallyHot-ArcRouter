@@ -100,7 +100,7 @@ public sealed class BenchmarkDataStatusService
                 DateTimeOffset.UtcNow);
         }
         catch (Exception ex) when (
-            (ex is HttpRequestException or JsonException) ||
+            (ex is HttpRequestException or JsonException or NotSupportedException) ||
             (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
         {
             _logger.LogWarning(ex, "CodeRouterBench checksum probe could not reach Hugging Face; corpus freshness is unknown.");

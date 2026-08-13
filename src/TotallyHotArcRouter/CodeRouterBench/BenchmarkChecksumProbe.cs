@@ -77,6 +77,7 @@ public sealed class BenchmarkChecksumProbe
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <exception cref="HttpRequestException">The request failed or returned a non-success status.</exception>
     /// <exception cref="System.Text.Json.JsonException">The response body was not a valid tree entry array.</exception>
+    /// <exception cref="NotSupportedException">The response's content type is not supported for JSON deserialization.</exception>
     public async Task<BenchmarkChecksumProbeResult> FetchAsync(string datasetRef, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(datasetRef);
