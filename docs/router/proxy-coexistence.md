@@ -53,13 +53,17 @@ flowchart TD
 
 **Database Storage Locations:**
 
-All TotallyHotArcRouter data is stored in an agent-neutral directory structure:
+TotallyHotArcRouter data is stored in an agent-neutral directory structure. Note that the defaults are
+currently **split across two sibling folders** - files written directly by the service and GUI use the
+`TotallyHotArcRouter` folder, while the paths bound through `StorageOptions`/`EmbeddingOptions`
+(`Storage:DatabasePath`, `Storage:BenchmarkDatabasePath`, `Embedding:ModelCacheDirectory`) default to
+`TotallyHot.ArcRouter`. Both are listed below so operators can find every file:
 
-| OS | TotallyHotArcRouter Data Directory |
-|-----|---|
-| **Windows** | `%LOCALAPPDATA%\TotallyHotArcRouter\` |
-| **macOS** | `~/.local/share/TotallyHotArcRouter/` |
-| **Linux** | `~/.local/share/TotallyHotArcRouter/` |
+| OS | Service/GUI data (proxy snapshot, certs, management token, GUI settings) | `StorageOptions`/`EmbeddingOptions` defaults (`agent_telemetry.db`, `coderouterbench.db`, model cache) |
+|-----|---|---|
+| **Windows** | `%LOCALAPPDATA%\TotallyHotArcRouter\` | `%LOCALAPPDATA%\TotallyHot.ArcRouter\` |
+| **macOS** | `~/.local/share/TotallyHotArcRouter/` | `~/.local/share/TotallyHot.ArcRouter/` |
+| **Linux** | `~/.local/share/TotallyHotArcRouter/` | `~/.local/share/TotallyHot.ArcRouter/` |
 
 **Claude Code Router (TypeScript/Electron) - Databases:**
 - `config.sqlite` – Application configuration and state

@@ -165,9 +165,12 @@ public sealed class BenchmarkDataAdminGrpcService : Contract.BenchmarkDataAdminS
     /// Bridges <see cref="BenchmarkSyncService"/>'s synchronous <see cref="IProgress{T}"/> callback onto
     /// the async gRPC response stream. Blocking on <c>WriteAsync</c> inside
     /// <see cref="Report"/> is safe here: ASP.NET Core Kestrel handlers run without a captured
-    /// <see cref="SynchronizationContext"/>, and <see cref="BenchmarkSyncService.SyncAsync"/> always awaits
-    /// between <see cref="IProgress{T}.Report"/> calls, so writes are never issued concurrently -
-    /// <see cref="IServerStreamWriter{T}"/>'s one hard constraint.
+    /// <see cref="SynchronizationContext"/>, so blocking cannot deadlock on a resumption context, and
+    /// <see cref="BenchmarkSyncService.SyncAsync"/> issues every <see cref="IProgress{T}.Report"/> call
+    /// sequentially from a single loop on one thread - each call returns before the next begins, so writes
+    /// are never issued concurrently, which is <see cref="IServerStreamWriter{T}"/>'s one hard constraint.
+    /// (Note that the calls are sequential, not necessarily separated by an <c>await</c>: some are
+    /// back-to-back around synchronous work such as the import step.)
     /// </summary>
     private sealed class StreamingSyncProgress : IProgress<BenchmarkSyncProgress>
     {
