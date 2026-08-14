@@ -73,6 +73,14 @@ public static class LogRegModelArtifactSerializer
             throw new FormatException("The logreg voter model document has an empty vocabulary.");
         }
 
+        if (artifact.Vocabulary.Any(string.IsNullOrWhiteSpace))
+        {
+            // A null/blank term would later become a Dictionary<string, int> key in LogRegVoter's
+            // vocabulary index, which throws ArgumentNullException (null) or silently collides with every
+            // other blank entry (whitespace) - reject it here as a format error instead.
+            throw new FormatException("The logreg voter model document's vocabulary contains a null or blank term.");
+        }
+
         if (artifact.Vocabulary.Distinct(StringComparer.Ordinal).Count() != artifact.Vocabulary.Count)
         {
             throw new FormatException("The logreg voter model document's vocabulary contains duplicate terms.");
@@ -93,6 +101,14 @@ public static class LogRegModelArtifactSerializer
 
         foreach (var (model, weights) in artifact.ClassWeights)
         {
+            if (weights is null)
+            {
+                // A JSON document can carry an explicit null value for a classWeights entry (e.g.
+                // "model-a": null); accessing weights.Length below would otherwise throw
+                // NullReferenceException instead of a controlled FormatException.
+                throw new FormatException($"The logreg voter model's weight vector for '{model}' is null.");
+            }
+
             if (weights.Length != artifact.Vocabulary.Count + 1)
             {
                 throw new FormatException(

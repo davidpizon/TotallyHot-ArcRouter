@@ -75,4 +75,30 @@ public class LogRegModelArtifactSerializerTests
 
         Assert.Throws<FormatException>(() => LogRegModelArtifactSerializer.Deserialize(json));
     }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("\"\"")]
+    [InlineData("\"   \"")]
+    public void Deserialize_VocabularyContainsNullOrBlankTerm_Throws(string vocabularyTermLiteral)
+    {
+        // A null/blank vocabulary term would otherwise become a Dictionary<string, int> key in
+        // LogRegVoter's vocabulary index - null throws ArgumentNullException, blank silently collides with
+        // every other blank entry - so it must be rejected here as a format error instead.
+        var json = $$"""
+            {"vocabulary":["bug",{{vocabularyTermLiteral}}],"inverseDocumentFrequency":[1.0,1.0],"classWeights":{},"isPlaceholder":true,"trainedFrom":"x"}
+            """;
+
+        Assert.Throws<FormatException>(() => LogRegModelArtifactSerializer.Deserialize(json));
+    }
+
+    [Fact]
+    public void Deserialize_ClassWeightsEntryIsNull_ThrowsFormatExceptionRatherThanNullReferenceException()
+    {
+        var json = """
+            {"vocabulary":["bug","algorithm"],"inverseDocumentFrequency":[1.0,1.0],"classWeights":{"model-a":null},"isPlaceholder":true,"trainedFrom":"x"}
+            """;
+
+        Assert.Throws<FormatException>(() => LogRegModelArtifactSerializer.Deserialize(json));
+    }
 }
