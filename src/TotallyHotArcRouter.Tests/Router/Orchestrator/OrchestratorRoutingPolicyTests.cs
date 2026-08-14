@@ -148,6 +148,24 @@ public class OrchestratorRoutingPolicyTests
     }
 
     [Fact]
+    public async Task DecideAsync_VoterPicksDifferentlyCasedModelName_CandidateScoresKeyUsesCanonicalCasing()
+    {
+        // Votes are matched against candidates case-insensitively, so a voter is free to echo back a
+        // different casing than the candidate list uses. CandidateScores keys must still come out in the
+        // candidate's own casing so they line up with context.Candidates and SelectedModel when enumerated.
+        var voters = new IRoutingVoter[] { new FakeVoter(VoterNames.DimBest, "KIMI-K2.5", confidence: 1.0) };
+        var policy = CreatePolicy(voters);
+        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi]);
+
+        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+
+        Assert.Equal("kimi-k2.5", decision.SelectedModel);
+        Assert.Contains("kimi-k2.5", decision.CandidateScores.Keys);
+        Assert.DoesNotContain("KIMI-K2.5", decision.CandidateScores.Keys);
+        Assert.Contains($"voter:{VoterNames.DimBest}:kimi-k2.5", decision.CandidateScores.Keys);
+    }
+
+    [Fact]
     public async Task DecideAsync_VoterConfidenceOutsideZeroToOne_IsClampedBeforeWeighting()
     {
         // A voter's Confidence is not itself range-validated (unlike RoutingDecision.Confidence), so the

@@ -131,7 +131,8 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
                 continue;
             }
 
-            if (!context.Candidates.Any(candidate => string.Equals(candidate.ModelName, vote.ModelName, StringComparison.OrdinalIgnoreCase)))
+            var candidateMatch = context.Candidates.FirstOrDefault(candidate => string.Equals(candidate.ModelName, vote.ModelName, StringComparison.OrdinalIgnoreCase));
+            if (candidateMatch is null)
             {
                 _logger.LogWarning(
                     "[ORCHESTRATOR] Voter {Voter} picked {Model}, which is not among the current candidates for dimension {Dimension}; treating as an abstention.",
@@ -140,6 +141,11 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
                     context.Dimension);
                 continue;
             }
+
+            // Voters may return a differently-cased model id than the candidate list (votes are matched
+            // case-insensitively above). Use the candidate's own casing for every key written below so
+            // CandidateScores stays consistent with context.Candidates and SelectedModel when enumerated.
+            var canonicalModelName = candidateMatch.ModelName;
 
             if (!double.IsFinite(vote.Confidence))
             {
@@ -156,15 +162,15 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
             var weight = GetVoterWeight(voter.Name);
             var contribution = weight * Math.Clamp(vote.Confidence, 0d, 1d);
 
-            candidateScores[$"{VoterKeyPrefix}{voter.Name}:{vote.ModelName}"] = contribution;
-            candidateScores[vote.ModelName!] = candidateScores.GetValueOrDefault(vote.ModelName!) + contribution;
+            candidateScores[$"{VoterKeyPrefix}{voter.Name}:{canonicalModelName}"] = contribution;
+            candidateScores[canonicalModelName] = candidateScores.GetValueOrDefault(canonicalModelName) + contribution;
             effectiveWeight += weight;
             participatingVoters++;
 
             _logger.LogInformation(
                 "[ORCHESTRATOR] Voter {Voter} picked {Model} with confidence {Confidence} and weight {Weight} (contribution {Contribution}).",
                 voter.Name,
-                vote.ModelName,
+                canonicalModelName,
                 vote.Confidence,
                 weight,
                 contribution);
