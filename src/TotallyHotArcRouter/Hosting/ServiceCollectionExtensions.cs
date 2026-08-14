@@ -53,6 +53,23 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddSingleton<IMemoryEntryStore, SqliteMemoryEntryStore>();
             services.AddSingleton<EmbeddingMemory>();
 
+            // PLAN.md Phase L: the Orchestrator ensemble - a self-contained, DI-registered component, NOT
+            // yet the registered IRoutingPolicy (CompositeRoutingPolicy keeps that role; swapping the
+            // Orchestrator in for live traffic by default is Phase M's job). BenchmarkDatabase is
+            // registered later in this method - safe, DI resolution order is independent of registration
+            // order. Voters are registered by concrete type (so tests/other consumers can depend on one
+            // directly) and again as IRoutingVoter (so OrchestratorRoutingPolicy's IEnumerable<IRoutingVoter>
+            // constructor parameter resolves every one of them).
+            services.AddSingleton<Router.Orchestrator.DimBestVoter>();
+            services.AddSingleton<Router.Orchestrator.MemoryKnnVoter>();
+            services.AddSingleton<Router.Orchestrator.LogRegVoter>();
+            services.AddSingleton<Router.Orchestrator.LlmRouterVoter>();
+            services.AddSingleton<Router.Orchestrator.IRoutingVoter>(sp => sp.GetRequiredService<Router.Orchestrator.DimBestVoter>());
+            services.AddSingleton<Router.Orchestrator.IRoutingVoter>(sp => sp.GetRequiredService<Router.Orchestrator.MemoryKnnVoter>());
+            services.AddSingleton<Router.Orchestrator.IRoutingVoter>(sp => sp.GetRequiredService<Router.Orchestrator.LogRegVoter>());
+            services.AddSingleton<Router.Orchestrator.IRoutingVoter>(sp => sp.GetRequiredService<Router.Orchestrator.LlmRouterVoter>());
+            services.AddSingleton<Router.Orchestrator.OrchestratorRoutingPolicy>();
+
             // Tools
             services.AddTransient<CheckSyntax>();
             services.AddTransient<RunVisibleTests>();

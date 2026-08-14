@@ -23,7 +23,7 @@ flowchart LR
     end
 
     subgraph ACT["Action — Phases L, M"]
-        ORC["Orchestrator<br/>weighted vote over 4 voters<br/>MISSING"]
+        ORC["Orchestrator<br/>weighted vote, 3/4 voters<br/>SHIPPED (Phase L) but not on the live path"]
         POL["IRoutingPolicy.SelectModelAsync<br/>argmax e1*s + e2*k<br/>SHIPPED (Phase I)"]
     end
 
@@ -38,6 +38,7 @@ flowchart LR
 
     CLS --> ORC
     MEM -.->|"Phase L wires the memory_kNN voter"| ORC
+    ORC -.->|"Phase M wires the Orchestrator onto the live path"| POL
     PRIOR --> ORC
     ORC --> POL
     POL --> ING
@@ -75,11 +76,12 @@ Verified against the code:
   = 0.5, `MaxNeighborCount` = 10), evicting FIFO past `EmbeddingMemoryCapacity` (20,000), persisted via
   [`TotallyHotArcRouter/Router/SqliteMemoryEntryStore.cs`](TotallyHotArcRouter/Router/SqliteMemoryEntryStore.cs)
   in its own SQLite file. `VectorStoreRouterMemoryStore`'s Jaccard-over-dimension-strings similarity is
-  deleted. Nothing calls `EmbeddingMemory.FindNearest` yet - Phase L wires it in as the `memory_kNN`
-  voter. `RouterMemory`'s `dimension → model → List<double>` averages remain unchanged and become the
-  `dim_best` voter's backing store in that same phase. Per D.3 of the research doc, dimension identity
-  carries only ~27% of the oracle-choice entropy - the other ~73% is exactly what this task-keyed memory
-  exists to capture, once Phase L connects it to a decision.
+  deleted. `EmbeddingMemory.FindNearest` is now called by Phase L's `MemoryKnnVoter`, and
+  `RouterMemory`'s `dimension → model → List<double>` averages are `DimBestVoter`'s backing store - but
+  neither is on the *live* routing decision path yet, since the Orchestrator itself isn't (Phase M).
+  Per D.3 of the research doc, dimension identity carries only ~27% of the oracle-choice entropy - the
+  other ~73% is exactly what this task-keyed memory exists to capture, once Phase M puts the Orchestrator
+  on the live path.
 - **No oracle, no regret, no baselines.** Nothing computes `R_ij`, `CumReg`, `AvgPerf`, or `Perf/$`.
 - **The benchmark corpus is restored, sync-on-demand into SQLite (Phase K shipped, superseded by Phase
   K2, also shipped).** Governance → Benchmark Data, the `sync_benchmark_data` MCP tool, or
@@ -215,52 +217,84 @@ data — which drops the sync from ~21.5 MB to ~11.7 MB and stored result rows f
 Full plan, schema, and phase breakdown:
 [`docs/router/coderouterbench-sqlite-migration-plan.md`](../docs/router/coderouterbench-sqlite-migration-plan.md).
 
-### Phase L: The Orchestrator ensemble
+### Phase L: The Orchestrator ensemble — **shipped (3 of 4 voters; `llm_router` deferred)**
 
-Four voters, weighted vote, argmax — research-doc §3.3 and A.1.
+Four voters, weighted vote, argmax — research-doc §3.3 and A.1. Shipped as a self-contained,
+DI-registered component: `OrchestratorRoutingPolicy` implements `IRoutingPolicy` and is registered in
+`AddTotallyHotArcRouter`, but it is **not** the registered `IRoutingPolicy` — `CompositeRoutingPolicy`
+keeps that role unchanged. Swapping the Orchestrator onto the live path for every request is Phase M's
+job, deliberately not this one's.
 
-- **`dim_best`** — DimensionBest lookup from the Phase K probing matrix, refined by live
-  `RouterMemory` averages. The matrix canonicalizes model ids on both ingest and lookup, so this voter
-  can query it with a configured `ModelName` directly.
-- **`memory_kNN`** — top-10 neighbors from Phase J, voting by neighbor-weighted observed reward.
-- **`logreg`** — TF-IDF → logistic regression trained on the probing set. Training and inference both
-  in .NET; a checked-in trained model with a documented, reproducible training step.
-- **`llm_router`** — **the paper's own fine-tuned Qwen3.5-0.8B, hosted locally via ONNX Runtime**
-  (`Microsoft.ML.OnnxRuntime`, the same dependency Phase J adds for embeddings), not a call to a
-  configured remote/hosted backend. This is a correction to this plan's earlier draft, which proposed
-  substituting "a configured cheap backend" because the stack "cannot host" the fine-tune — that
-  premise doesn't hold: Phase J already commits to in-process ONNX inference with local
-  model-artifact acquisition/caching, and a 0.8B causal LM is squarely in that same class of
-  local-model problem. Reusing a remote backend instead would be a static, network-dependent
-  substitute for the one voter the paper's central finding is *about* — see the information-deficit
-  result below — so it is the one voter this plan should least want to approximate.
-  - **Scope beyond Phase J.** Embedding inference is a single forward pass; this voter is
-    autoregressive generation (tokenizer, KV-cache, sampling, one forward pass per output token) over
-    the **+Perf-stats prompt** of research-doc Appendix B.3 — the ablation the paper measures at 47.74
-    AvgPerf, *above* DimensionBest (47.50), the entire information-deficit finding this voter exists to
-    reproduce. Scope explicitly includes: sourcing/exporting the fine-tuned Qwen3.5-0.8B weights to
-    ONNX (or the closest available fine-tune-compatible open checkpoint, documented if substituted),
-    the tokenizer, and a documented cold-start path for a first run before the model is present —
-    mirroring Phase J's cold-start requirement, not inventing a new one.
-  - Implement the four-step response-parsing fallback chain (JSON → fenced-block regex → model-name
-    match → default) verbatim; the paper shows a parser failure collapses a router to ~41.31.
-  - **Cost control:** invoke this voter only when the three local voters disagree. Record the
-    disagreement rate in telemetry so the trigger can be tuned against real traffic rather than guessed.
-    Generation latency (not network cost) is the resource being rationed here, so this gate matters even
-    though there is no remote spend to control.
-  - Must degrade to a three-voter vote — never to a hard failure — when the model artifact isn't
-    present yet, generation exceeds a configured time budget, or the parse chain exhausts. There is no
-    circuit breaker here (nothing remote to trip one): the failure modes are local-model-unavailable and
-    local-generation-timeout, not an unreachable backend.
-  - Stays within the 5-second heavy-test bound (AGENTS.md); if a full unquantized 0.8B decode can't
-    clear that bound in CI, gate the heavy path behind the same kind of fixture/environment gate Phase J
-    uses for its embedding-model load, per the Final Validation Gate's item 4.
-- Voter weights and per-voter enablement are configuration. Log the full vote breakdown (each voter's
-  pick, each weighted score, the argmax) into `RoutingDecision.CandidateScores` so the GUI's decision
-  log shows *why*, not just *what*.
-- Exit: a reproduction of the worked example in research-doc §3.3 — voters picking MiniMax-M2.7 / GLM-5
-  / Kimi-K2.5 / Kimi-K2.5 resolve to Kimi-K2.5 at 1.47 — passes as a unit test. Ensemble beats every
-  single voter on the Phase N harness.
+- **`dim_best`** (`Router/Orchestrator/DimBestVoter.cs`) — looks up `DimensionModelScoreMatrix`'s
+  probing-split prior (Phase K2's `BenchmarkDatabase`) for each candidate, preferring the live
+  `RouterMemory.GetAverageScore` for the same (dimension, model) pair when one exists and falling back
+  to the prior otherwise — live, execution-grounded feedback always wins once it exists. Tolerates an
+  unsynced corpus (checks `BenchmarkDatabase.DatabasePath` for existence before opening a connection, so
+  it never creates an empty database file as a side effect) by degrading to live-memory-only scoring,
+  matching `CodeRouterBenchTable10ReconciliationTests`'s own handling of the same condition.
+- **`memory_kNN`** (`Router/Orchestrator/MemoryKnnVoter.cs`) — calls `EmbeddingMemory.FindNearest`,
+  computes the similarity-weighted average observed score per model among the neighbors restricted to
+  current candidates, argmax. Abstains without a supplied task embedding or when no neighbor clears the
+  similarity threshold.
+- **`logreg`** (`Router/Orchestrator/LogRegVoter.cs` + `CodeRouterBench/LogRegTrainer.cs`) — TF-IDF over
+  a fixed vocabulary → a plain-C# one-vs-rest logistic regression (no external ML package), trained by
+  `LogRegTrainer.Train` against the Phase K2 probing split and checked in as
+  `CodeRouterBench/Resources/logreg_voter_model.json` (embedded resource). **Data-availability caveat:**
+  `coderouterbench.db` was not synced in the environment this phase was implemented in (it is
+  sync-on-demand per `data/README.md`, not checked in), so the checked-in artifact is a small, explicitly
+  `IsPlaceholder`-flagged hand-built stand-in that exercises the tokenize → TF-IDF → score → argmax →
+  abstain-without-text mechanics deterministically but carries no real predictive signal.
+  `LogRegTrainerReconciliationTests.Train_OnRealCorpus_ProducesAUsableArtifact` is the documented,
+  reproducible training step — self-skips like `CodeRouterBenchTable10ReconciliationTests` when the
+  corpus isn't synced; run it against a synced `coderouterbench.db` and serialize its output over the
+  placeholder to ship a real model.
+- **`llm_router`** (`Router/Orchestrator/LlmRouterVoter.cs`) — **deferred by agreement with the user
+  ahead of implementation**, scoped down from the paper's fine-tuned Qwen3.5-0.8B-via-ONNX voter
+  described below to a documented, always-abstaining stub. This exercises exactly the degrade path this
+  phase requires ("must degrade to a three-voter vote, never a hard failure, when the model artifact
+  isn't present") as the *normal* case rather than an edge case, and leaves the interface seam
+  (`IRoutingVoter`) plus a placeholder implementation for a future session. The original scope this stub
+  defers — sourcing/exporting the fine-tuned Qwen3.5-0.8B weights to ONNX (or a documented
+  fine-tune-compatible substitute), the tokenizer, autoregressive generation (KV-cache, sampling, one
+  forward pass per output token) over the **+Perf-stats prompt** of research-doc Appendix B.3, the
+  four-step response-parsing fallback chain (JSON → fenced-block regex → model-name match → default),
+  and the disagreement-gated invocation cost control — is recorded verbatim in
+  `Router/Orchestrator/LlmRouterVoter.cs`'s XML doc remarks for whoever picks it up next. Reusing a
+  remote backend instead of local ONNX inference remains explicitly rejected, per the original rationale
+  below.
+  - *(Original scope note, unaffected by the deferral above):* the paper's own fine-tuned Qwen3.5-0.8B
+    is hosted locally via ONNX Runtime (`Microsoft.ML.OnnxRuntime`, the same dependency Phase J adds for
+    embeddings), not a call to a configured remote/hosted backend — a correction to this plan's earlier
+    draft, which proposed substituting "a configured cheap backend" because the stack "cannot host" the
+    fine-tune. That premise doesn't hold: Phase J already commits to in-process ONNX inference with
+    local model-artifact acquisition/caching, and a 0.8B causal LM is squarely in that same class of
+    local-model problem. Reusing a remote backend instead would be a static, network-dependent
+    substitute for the one voter the paper's central finding is *about* (the ablation the paper measures
+    at 47.74 AvgPerf, *above* DimensionBest's 47.50) — so it is the one voter this plan should least want
+    to approximate.
+- Voter weights and per-voter enablement are configuration (`RoutingOptions.DimBestVoterWeight` /
+  `MemoryKnnVoterWeight` / `LogRegVoterWeight` / `LlmRouterVoterWeight` and matching `Enable*Voter`
+  flags). `OrchestratorRoutingPolicy` logs the full vote breakdown into `RoutingDecision.CandidateScores`:
+  a per-model aggregate weighted score (what argmax runs over) plus every individual non-abstaining vote
+  keyed `voter:{voterName}:{modelName}` — "each voter's pick, each weighted score, the argmax" — via
+  static-template Serilog logging alongside it.
+- Exit: `OrchestratorRoutingPolicyTests.DecideAsync_ResearchDocWorkedExample_ResolvesToKimiK25AtWeightedScore1_47`
+  reproduces research-doc §3.3's worked example — voters picking MiniMax-M2.7 / GLM-5 / Kimi-K2.5 /
+  Kimi-K2.5 resolve to Kimi-K2.5 at weighted score 1.47 — with fakes standing in for all four voters. The
+  default voter weights (`dim_best` = 0.9, `memory_kNN` = 0.57, `logreg` = 0.43, `llm_router` = 0.64) are
+  a documented implementation choice sized to reproduce this exact example (0.9 + 0.57 = 1.47), not a
+  value the research doc publishes independently — see `RoutingOptions.DimBestVoterWeight`'s XML doc.
+  "Ensemble beats every single voter on the Phase N harness" is **not yet measured** — Phase N's regret
+  harness does not exist yet, so this half of the original exit criterion carries forward to Phase N.
+
+**Settled deferral (added when Phase L shipped):** `llm_router` ships as an always-abstaining stub
+(`Router/Orchestrator/LlmRouterVoter.cs`), not the fine-tuned Qwen3.5-0.8B-via-ONNX voter originally
+scoped — agreed with the user ahead of implementation, given the scope (checkpoint sourcing/export,
+autoregressive generation, response parsing) versus this phase's time budget. The interface
+(`IRoutingVoter`) and a documented stub are in place; a future session fills in the real model. Separately,
+the checked-in `logreg` model artifact is a hand-built placeholder, not a real training run, because
+`coderouterbench.db` was not synced in the implementation environment — `LogRegTrainer` and
+`LogRegTrainerReconciliationTests` are the reproducible path to a real one once the corpus is synced.
 
 ### Phase M: Route all traffic (opt-out)
 

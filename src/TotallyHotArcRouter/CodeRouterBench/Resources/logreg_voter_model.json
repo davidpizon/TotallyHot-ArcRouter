@@ -1,0 +1,12 @@
+{
+  "vocabulary": ["bug", "fix", "error", "algorithm", "complexity", "optimi", "test", "assert", "refactor", "clean", "dataset", "analyze"],
+  "inverseDocumentFrequency": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+  "classWeights": {
+    "kimi-k2-5": [0.1, 2.0, 1.5, 1.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    "glm-5": [0.05, 0.0, 0.0, 0.0, 2.0, 1.5, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    "gpt-5-4": [0.05, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 1.5, 0.0, 0.0, 0.0, 0.0],
+    "minimax-m2-7": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 1.5, 0.0, 0.0]
+  },
+  "isPlaceholder": true,
+  "trainedFrom": "Hand-built placeholder (PLAN.md Phase L) - NOT trained on real CodeRouterBench data. coderouterbench.db was not synced in the implementation environment (see data/README.md). Regenerate via TotallyHot.ArcRouter.CodeRouterBench.LogRegTrainer.Train against a synced corpus and overwrite this file with its output to ship a real model."
+}
