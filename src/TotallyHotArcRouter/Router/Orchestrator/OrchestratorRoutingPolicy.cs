@@ -113,7 +113,12 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
 
         var votingContext = new VotingContext(context.Dimension, context.Candidates, taskEmbedding, taskText);
 
-        var candidateScores = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        // Kept in separate dictionaries - not one dictionary shared between aggregate scores (keyed by
+        // candidate.ModelName) and per-voter contributions (keyed "voter:{voterName}:{modelName}") - because
+        // a real candidate model can itself be named "voter:custom" (see the regression test for that), which
+        // would otherwise let a per-voter key collide with (and overwrite) that candidate's own aggregate score.
+        var aggregateScores = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        var voterBreakdown = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         var effectiveWeight = 0d;
         var participatingVoters = 0;
 
@@ -196,8 +201,8 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
 
             var contribution = weight * Math.Clamp(vote.Confidence, 0d, 1d);
 
-            candidateScores[$"{VoterKeyPrefix}{voter.Name}:{canonicalModelName}"] = contribution;
-            candidateScores[canonicalModelName] = candidateScores.GetValueOrDefault(canonicalModelName) + contribution;
+            voterBreakdown[$"{VoterKeyPrefix}{voter.Name}:{canonicalModelName}"] = contribution;
+            aggregateScores[canonicalModelName] = aggregateScores.GetValueOrDefault(canonicalModelName) + contribution;
             effectiveWeight += weight;
             participatingVoters++;
 
@@ -210,7 +215,7 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
                 contribution);
         }
 
-        // Selecting winners straight out of candidateScores by excluding the "voter:" prefix would
+        // Selecting winners straight out of aggregateScores by excluding the "voter:" prefix would
         // wrongly exclude a legitimate candidate model whose own name happens to start with "voter:",
         // and OrderByDescending alone leaves ties resolved by dictionary enumeration order (non-
         // deterministic). Restricting the search to context.Candidates and adding a deterministic
@@ -218,7 +223,7 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
         var best = context.Candidates
             .Select(candidate => (
                 Model: candidate.ModelName,
-                Score: candidateScores.TryGetValue(candidate.ModelName, out var score) ? (double?)score : null))
+                Score: aggregateScores.TryGetValue(candidate.ModelName, out var score) ? (double?)score : null))
             .Where(entry => entry.Score is not null)
             .OrderByDescending(entry => entry.Score!.Value)
             .ThenBy(entry => entry.Model, StringComparer.Ordinal)
@@ -230,6 +235,22 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
                 "[ORCHESTRATOR] Every voter abstained for dimension {Dimension}; falling back to the default model.",
                 context.Dimension);
             return RoutingDecision.CreateFallback(_options.DefaultModel);
+        }
+
+        // Merge the two dictionaries for the exposed CandidateScores breakdown, with aggregate scores taking
+        // priority - a per-voter breakdown key that happens to collide with a real candidate's aggregate key
+        // (e.g. a candidate literally named "voter:dim_best:kimi-k2.5") is dropped rather than allowed to
+        // overwrite that candidate's real aggregate score.
+        var candidateScores = new Dictionary<string, double>(aggregateScores, StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in voterBreakdown)
+        {
+            if (!candidateScores.TryAdd(key, value))
+            {
+                _logger.LogWarning(
+                    "[ORCHESTRATOR] Per-voter breakdown key {Key} collides with a candidate's aggregate score for dimension {Dimension}; dropping the breakdown entry.",
+                    key,
+                    context.Dimension);
+            }
         }
 
         var confidence = effectiveWeight > 0 ? Math.Clamp(best.Score!.Value / effectiveWeight, 0d, 1d) : 0d;

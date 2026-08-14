@@ -281,6 +281,29 @@ public class OrchestratorRoutingPolicyTests
     }
 
     [Fact]
+    public async Task DecideAsync_PerVoterBreakdownKeyCollidesWithARealCandidatesAggregateKey_AggregateScoreWins()
+    {
+        // A per-voter breakdown key is "voter:{voterName}:{modelName}" - here that's exactly
+        // "voter:dim_best:kimi-k2.5" from the first voter's pick. A second, real candidate is coincidentally
+        // named the same thing. Its own aggregate score (from the second voter) must survive in
+        // CandidateScores rather than being overwritten by the unrelated per-voter breakdown entry.
+        var collidingCandidate = new RoutingCandidate("voter:dim_best:kimi-k2.5", "openai", IsFree: false);
+        var voters = new IRoutingVoter[]
+        {
+            new FakeVoter(VoterNames.DimBest, "kimi-k2.5", confidence: 1.0),
+            new FakeVoter(VoterNames.MemoryKnn, "voter:dim_best:kimi-k2.5", confidence: 1.0),
+        };
+        var policy = CreatePolicy(voters);
+        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi, collidingCandidate]);
+
+        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+
+        Assert.Equal("kimi-k2.5", decision.SelectedModel);
+        Assert.Equal(0.9, decision.CandidateScores["kimi-k2.5"], precision: 6);
+        Assert.Equal(0.57, decision.CandidateScores["voter:dim_best:kimi-k2.5"], precision: 6);
+    }
+
+    [Fact]
     public async Task DecideAsync_VoterReturnsBlankModelName_TreatedAsAbstentionRatherThanFailingTheDecision()
     {
         // A non-null but blank ModelName still fails IsAbstain's null check, so it must be caught
