@@ -151,8 +151,9 @@ no obligation on downstream recipients of the application.
 
 ## 4. Data and models obtained at runtime (not redistributed)
 
-These are downloaded by the end user on first use and are not included in this repository or in any
-distributed artifact.
+These are downloaded onto the end user's machine on first use — by default into `%LOCALAPPDATA%` (the
+per-user local app data directory; the exact path is configurable), never into the source tree — and
+are not committed to this repository or bundled into any distributed artifact.
 
 | Asset | Source | License |
 |---|---|---|

@@ -149,17 +149,25 @@ public static class Program
 
     /// <summary>
     /// Extracts a bare boolean flag (no value) from <paramref name="args"/>, returning whether it was
-    /// present and the remaining arguments with it removed. Mirrors <see cref="ExtractModelArg"/>'s
+    /// present and the remaining arguments with every occurrence removed. Mirrors <see cref="ExtractModelArg"/>'s
     /// stripping behavior for the same reason: an unstripped flag would otherwise bind to a stray
     /// top-level configuration key via <see cref="Host.CreateDefaultBuilder(string[])"/>'s command-line
-    /// provider. Internal (not private) so <c>ProgramTests</c> can exercise the parsing directly - unlike
-    /// <see cref="ExtractModelArg"/>, this can't be covered indirectly through <see cref="CreateHostBuilder"/>,
-    /// since <see cref="Main"/> strips the flag before <see cref="CreateHostBuilder"/> ever sees it.
+    /// provider. All occurrences are stripped, not just the first, so a repeated flag can't leave a
+    /// leftover copy for that provider to bind. Internal (not private) so <c>ProgramTests</c> can exercise
+    /// the parsing directly - unlike <see cref="ExtractModelArg"/>, this can't be covered indirectly through
+    /// <see cref="CreateHostBuilder"/>, since <see cref="Main"/> strips the flag before
+    /// <see cref="CreateHostBuilder"/> ever sees it.
     /// </summary>
     internal static (bool Present, string[] RemainingArgs) ExtractFlag(string[] args, string flagName)
     {
-        var index = Array.FindIndex(args, arg => string.Equals(arg, flagName, StringComparison.OrdinalIgnoreCase));
-        return index < 0 ? (false, args) : (true, RemoveAt(args, index));
+        var present = args.Any(arg => string.Equals(arg, flagName, StringComparison.OrdinalIgnoreCase));
+        if (!present)
+        {
+            return (false, args);
+        }
+
+        var remaining = args.Where(arg => !string.Equals(arg, flagName, StringComparison.OrdinalIgnoreCase)).ToArray();
+        return (true, remaining);
     }
 
     /// <summary>

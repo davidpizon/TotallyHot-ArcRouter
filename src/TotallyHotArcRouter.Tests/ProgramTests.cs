@@ -200,6 +200,16 @@ namespace TotallyHot.ArcRouter.Tests
 
             Assert.True(present);
         }
+
+        [Fact]
+        public void ExtractFlag_RepeatedInArgs_StripsEveryOccurrence()
+        {
+            var (present, remaining) = Program.ExtractFlag(
+                ["--sync-benchmark-data", "--model", "gpt-5.4", "--sync-benchmark-data"], "--sync-benchmark-data");
+
+            Assert.True(present);
+            Assert.Equal(["--model", "gpt-5.4"], remaining);
+        }
     }
 }
 
