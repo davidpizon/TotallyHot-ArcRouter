@@ -129,6 +129,40 @@ public class OrchestratorRoutingPolicyTests
     }
 
     [Fact]
+    public async Task DecideAsync_VoterPicksAModelNotAmongCandidates_TreatedAsAbstention()
+    {
+        // A buggy voter (or a future implementation) that picks a model outside the current candidate set
+        // must not corrupt the decision - it degrades to an abstention like any other unusable vote.
+        var voters = new IRoutingVoter[]
+        {
+            new FakeVoter(VoterNames.DimBest, "not-a-candidate", confidence: 1.0),
+            new FakeVoter(VoterNames.LogReg, "kimi-k2.5", confidence: 1.0),
+        };
+        var policy = CreatePolicy(voters);
+        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi]);
+
+        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+
+        Assert.Equal("kimi-k2.5", decision.SelectedModel);
+        Assert.False(decision.CandidateScores.ContainsKey("not-a-candidate"));
+    }
+
+    [Fact]
+    public async Task DecideAsync_VoterConfidenceOutsideZeroToOne_IsClampedBeforeWeighting()
+    {
+        // A voter's Confidence is not itself range-validated (unlike RoutingDecision.Confidence), so the
+        // ensemble must clamp it before using it as a weight multiplier rather than trusting it verbatim.
+        var voters = new IRoutingVoter[] { new FakeVoter(VoterNames.DimBest, "kimi-k2.5", confidence: 5.0) };
+        var policy = CreatePolicy(voters);
+        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi]);
+
+        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+
+        Assert.Equal("kimi-k2.5", decision.SelectedModel);
+        Assert.Equal(0.9, decision.CandidateScores["kimi-k2.5"], precision: 6);
+    }
+
+    [Fact]
     public async Task DecideAsync_NoCandidates_Throws()
     {
         var policy = CreatePolicy([]);

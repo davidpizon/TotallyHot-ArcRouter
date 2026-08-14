@@ -131,8 +131,18 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
                 continue;
             }
 
+            if (!context.Candidates.Any(candidate => string.Equals(candidate.ModelName, vote.ModelName, StringComparison.OrdinalIgnoreCase)))
+            {
+                _logger.LogWarning(
+                    "[ORCHESTRATOR] Voter {Voter} picked {Model}, which is not among the current candidates for dimension {Dimension}; treating as an abstention.",
+                    voter.Name,
+                    vote.ModelName,
+                    context.Dimension);
+                continue;
+            }
+
             var weight = GetVoterWeight(voter.Name);
-            var contribution = weight * vote.Confidence;
+            var contribution = weight * Math.Clamp(vote.Confidence, 0d, 1d);
 
             candidateScores[$"{VoterKeyPrefix}{voter.Name}:{vote.ModelName}"] = contribution;
             candidateScores[vote.ModelName!] = candidateScores.GetValueOrDefault(vote.ModelName!) + contribution;
