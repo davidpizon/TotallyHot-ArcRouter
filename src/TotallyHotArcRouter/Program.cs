@@ -36,10 +36,9 @@ public static class Program
             // configuration provider as a stray "sync-benchmark-data" key.
             var (runBenchmarkDataSync, remainingArgs) = ExtractFlag(args, "--sync-benchmark-data");
 
-            // Scoped with `using` so the host is disposed on every exit path - including the
-            // --sync-benchmark-data early return and the catch below. Skipping disposal there would
-            // leak the DI container's HttpMessageHandler pipelines and open file handles, and skip
-            // the flush/cleanup that disposable singletons do on shutdown.
+            // `using` (not a bare local) so the sync path below, which returns without ever calling
+            // RunAsync, still disposes the container and everything singleton-scoped in it - SQLite
+            // connections and HttpClient handlers among them - rather than leaving that to process exit.
             using var host = CreateHostBuilder(remainingArgs).Build();
 
             if (runBenchmarkDataSync)
@@ -54,6 +53,12 @@ public static class Program
         catch (Exception ex)
         {
             Log.Fatal(ex, "TotallyHot.ArcRouter host terminated unexpectedly.");
+
+            // Without this the process exits 0 after a fatal error, reporting success to whatever launched
+            // it. That matters most on the --sync-benchmark-data path, whose own partial-failure branch
+            // already sets this: a CI script checking the exit code would otherwise see an exception-killed
+            // sync as a clean one. Assigned rather than returned so the finally below still flushes the log.
+            Environment.ExitCode = 1;
         }
         finally
         {

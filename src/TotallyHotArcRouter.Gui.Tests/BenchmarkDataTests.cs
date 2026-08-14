@@ -127,6 +127,48 @@ public sealed class BenchmarkDataTests
     }
 
     [Fact]
+    public void The_unreachable_state_names_no_endpoint_when_the_store_cannot_know_one()
+    {
+        // A store built over a caller-supplied client has no endpoint of its own, so naming the default
+        // address would assert an endpoint this client may never have been pointed at.
+        using var ctx = NewContext(new FakeClient
+        {
+            StatusError = new BenchmarkDataAdminException("the router is not reachable.", isUnavailable: true),
+        });
+
+        var cut = ctx.Render<BenchmarkData>();
+
+        cut.Markup.Should().Contain("Could not reach the router.");
+        cut.Markup.Should().NotContain(TelemetryChannelFactory.DefaultServerAddress);
+    }
+
+    [Fact]
+    public void The_store_reports_the_endpoint_it_was_pointed_at()
+    {
+        // Constructing a channel does not connect, so this stays offline; the panel reads this property to
+        // name the address it actually failed to reach.
+        using var store = new BenchmarkDataStore(logger: null, serverAddress: "https://localhost:65111");
+
+        store.ServerAddress.Should().Be("https://localhost:65111");
+    }
+
+    [Fact]
+    public void A_rejected_status_load_shows_the_rejection_rather_than_the_unreachable_state()
+    {
+        // The router answered - it just refused - so "Router unreachable" would both misstate the cause
+        // and replace the panel that has to carry the actual reason.
+        using var ctx = NewContext(new FakeClient
+        {
+            StatusError = new BenchmarkDataAdminException("Could not read the benchmark data status: database is locked."),
+        });
+
+        var cut = ctx.Render<BenchmarkData>();
+
+        cut.Markup.Should().NotContain("Router unreachable");
+        cut.Markup.Should().Contain("database is locked");
+    }
+
+    [Fact]
     public void A_rejected_recheck_keeps_the_panel_on_screen()
     {
         var client = new FakeClient(BenchmarkDataAdminState.CheckFailed, Reason: "boom")

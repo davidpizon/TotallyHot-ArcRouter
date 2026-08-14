@@ -1,6 +1,7 @@
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Sandbox;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Tests.CodeRouterBench;
@@ -42,13 +43,41 @@ public class CodeRouterBenchTable10ReconciliationTests
     private static BenchmarkDatabase OpenRealDatabase() =>
         new(Options.Create(new StorageOptions()));
 
+    /// <summary>
+    /// Whether the real corpus has probing-split rows, decided without writing anything.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately no <c>EnsureCreated</c>: this points at the user's actual <c>%LOCALAPPDATA%</c> corpus,
+    /// not a temp fixture, so creating the schema here would leave an empty <c>coderouterbench.db</c> (and
+    /// its directory) behind on every machine that runs the suite without ever having synced - a confusing
+    /// artifact produced by a test that then skips. An absent file is simply "not populated". The file is
+    /// checked before opening because SQLite creates a database on connect, which would reintroduce the
+    /// same side effect by another route.
+    /// </remarks>
     private static bool ProbingSplitIsPopulated(BenchmarkDatabase database)
     {
-        database.EnsureCreated();
-        using var connection = database.OpenConnection();
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM benchmark_id_results WHERE split = 'probing';";
-        return Convert.ToInt64(command.ExecuteScalar()) > 0;
+        if (!File.Exists(database.DatabasePath))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var connection = database.OpenConnection();
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT COUNT(*) FROM benchmark_id_results WHERE split = 'probing';";
+            return Convert.ToInt64(command.ExecuteScalar()) > 0;
+        }
+        catch (SqliteException)
+        {
+            // Opening is inside the try, not just the query: this is the real user database, so on a
+            // developer machine it may be locked by a running proxy, or left corrupt or half-written by an
+            // interrupted sync. Microsoft.Data.Sqlite surfaces all of those - SQLITE_BUSY, SQLITE_NOTADB,
+            // SQLITE_CANTOPEN, and a missing table alike - as SqliteException, from Open() as readily as
+            // from ExecuteScalar(). Every one of them means "no corpus to reconcile against", which is a
+            // skip; none of them is a reason to fail the whole test run.
+            return false;
+        }
     }
 
     // research-doc Table 10, in AllDimensions order (CdGen, Algo, Bug, Comp, Refac, DS, Multi, Und, TstGn).

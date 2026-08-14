@@ -70,6 +70,27 @@ public class BenchmarkDataAdminClientTests
         unsynced.SyncedAtUtc.Should().BeNull();
     }
 
+    [Theory]
+    [InlineData(Contract.BenchmarkDataState.Current, BenchmarkDataAdminState.Current)]
+    [InlineData(Contract.BenchmarkDataState.Update, BenchmarkDataAdminState.Update)]
+    [InlineData(Contract.BenchmarkDataState.CheckFailed, BenchmarkDataAdminState.CheckFailed)]
+    // Unspecified is what the service emits for a state it could not map, and stands in for any value
+    // added to the contract after this build. It must not read as Update: the panel offers a sync against
+    // that state, so an unmapped value would invite a blind download of the whole corpus.
+    [InlineData(Contract.BenchmarkDataState.Unspecified, BenchmarkDataAdminState.CheckFailed)]
+    [InlineData((Contract.BenchmarkDataState)99, BenchmarkDataAdminState.CheckFailed)]
+    public async Task GetStatusAsync_maps_unknown_states_to_check_failed(
+        Contract.BenchmarkDataState wireState,
+        BenchmarkDataAdminState expected)
+    {
+        var stub = new StubClient { StatusResponse = new Contract.BenchmarkStatusResponse { State = wireState } };
+        using var client = new BenchmarkDataAdminClient(stub);
+
+        var status = await client.GetStatusAsync(TestContext.Current.CancellationToken);
+
+        status.State.Should().Be(expected);
+    }
+
     [Fact]
     public async Task GetStatusAsync_with_no_reason_maps_to_null()
     {

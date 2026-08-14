@@ -24,10 +24,10 @@ public sealed class BenchmarkDataStore : IDisposable
         string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
     {
         _logger = logger;
-        ServerAddress = serverAddress;
         var client = new BenchmarkDataAdminClient(serverAddress);
         _client = client;
         _ownedClient = client;
+        ServerAddress = serverAddress;
     }
 
     /// <summary>
@@ -35,23 +35,21 @@ public sealed class BenchmarkDataStore : IDisposable
     /// client. The seam tests use to drive the store without a live proxy; the caller owns the client's
     /// lifetime.
     /// </summary>
-    public BenchmarkDataStore(
-        IBenchmarkDataAdminClient client,
-        ILogger<BenchmarkDataStore>? logger = null,
-        string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
+    public BenchmarkDataStore(IBenchmarkDataAdminClient client, ILogger<BenchmarkDataStore>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(client);
         _client = client;
         _ownedClient = null;
         _logger = logger;
-        ServerAddress = serverAddress;
     }
 
     /// <summary>
-    /// The proxy's gRPC endpoint this store talks to, so the UI can report the actual address it tried
-    /// rather than assuming <see cref="TelemetryChannelFactory.DefaultServerAddress"/>.
+    /// The proxy endpoint this store's client talks to, so the unreachable state can name the address it
+    /// actually failed to reach rather than assuming the default. <see langword="null"/> when constructed
+    /// over a caller-supplied client, whose endpoint this store has no way to know - the panel falls back
+    /// to a generic message there instead of naming an endpoint that may be wrong.
     /// </summary>
-    public string ServerAddress { get; }
+    public string? ServerAddress { get; }
 
     /// <summary>The corpus's last-known freshness status, or <see langword="null"/> before the first load.</summary>
     public BenchmarkDataStatusInfo? Status { get; private set; }
@@ -81,10 +79,16 @@ public sealed class BenchmarkDataStore : IDisposable
     public event Action? Changed;
 
     /// <summary>
-    /// Loads the corpus's cached status. Connection failures are swallowed and surfaced via
-    /// <see cref="IsReachable"/>/<see cref="LastError"/> rather than thrown, so the tab renders an
-    /// "unreachable" state instead of crashing when the proxy isn't running.
+    /// Loads the corpus's cached status. Failures are swallowed and surfaced via
+    /// <see cref="IsReachable"/>/<see cref="LastError"/> rather than thrown, so the tab renders an error
+    /// state instead of crashing when the proxy isn't running.
     /// </summary>
+    /// <remarks>
+    /// Only a connectivity failure clears <see cref="IsReachable"/>, the same split
+    /// <see cref="RecordFailure"/> applies to mutations: a status call the router *answered* with a
+    /// rejection has to keep the panel's normal layout and show the rejection, because collapsing it into
+    /// the "Router unreachable" state both misstates the cause and hides the message that explains it.
+    /// </remarks>
     public async Task LoadAsync(CancellationToken cancellationToken = default)
     {
         try
@@ -95,7 +99,7 @@ public sealed class BenchmarkDataStore : IDisposable
         }
         catch (BenchmarkDataAdminException ex)
         {
-            IsReachable = false;
+            IsReachable = !ex.IsUnavailable;
             LastError = ex.Message;
             _logger?.LogWarning(ex, "Failed to load the benchmark data status from the router.");
         }

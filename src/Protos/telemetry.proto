@@ -174,9 +174,12 @@ enum BenchmarkDataState {
   BENCHMARK_DATA_STATE_CHECK_FAILED = 3;
 }
 
-// One file's last-recorded sync, from BenchmarkFileLedger. A file that has never synced is present with
-// synced = false and the numeric/timestamp fields at their zero value - it is still listed, the same way
-// ListPriceSources always lists a disabled source, so the panel has a card to show "Update" against.
+// One file's last-recorded sync, from BenchmarkFileLedger. A file that has never synced is still listed -
+// the same way ListPriceSources always lists a disabled source, so the panel has a card to show "Update"
+// against - with synced = false and size_bytes/row_count at their proto3 zero value. synced_at_utc is the
+// exception: it is a message field, which the service leaves unset rather than zeroing, so it arrives
+// *absent*, not as an epoch timestamp. Consumers must null-check it (the C# client maps it through
+// `?.ToDateTimeOffset()`) instead of reading 1970 as a real sync time.
 message BenchmarkFile {
   string file_name = 1;
   bool synced = 2;

@@ -8,14 +8,24 @@ TotallyHot Arc Router itself is licensed under the GNU Affero General Public Lic
 (see [`LICENSE.exceptions.md`](LICENSE.exceptions.md)). Nothing in this file alters the license of
 this project; each component below remains under its own license.
 
-**License summary of everything shipped:** MIT, Apache-2.0, and BSD-3-Clause only, with one exception -
-a single build- and test-time only package (`Microsoft.VisualStudio.Azure.Containers.Tools.Targets`) is
-under the Microsoft Software License Terms; it supplies MSBuild targets, ships in no distributed
-artifact, and is not redistributable as a standalone offering. No copyleft (GPL/LGPL/AGPL/MPL/EPL)
-dependency is used, so no third-party license compels the licensing choice made for this project.
-Separately, §2 below covers Microsoft platform prerequisites (WebView2, Windows App SDK) that the
-Windows GUI requires at runtime but that this project does not redistribute; those remain under
-Microsoft's own terms and are outside this shipped-component summary.
+**License summary of everything this project redistributes** (§1 - the components that ship inside the
+router service, the MAUI GUI, or the published installer): MIT, Apache-2.0, and BSD-3-Clause only.
+
+Two categories fall outside that summary because this project does not redistribute them:
+
+- **Microsoft platform prerequisites** (§2 - Edge WebView2 Runtime, Windows App SDK) are governed by
+  Microsoft's own license terms. End users obtain them from Microsoft; the AGPL §7 additional
+  permission in [`LICENSE.exceptions.md`](LICENSE.exceptions.md) covers linking against them.
+- **One build- and test-time only package**
+  (`Microsoft.VisualStudio.Azure.Containers.Tools.Targets`, §3) is under the Microsoft Software
+  License Terms. It supplies MSBuild targets, ships in no distributed artifact, and is not
+  redistributable as a standalone offering.
+
+Data and models fetched at runtime (§4) are likewise not redistributed and are listed with their own
+licenses there.
+
+Across every category, no copyleft (GPL/LGPL/AGPL/MPL/EPL) dependency is used, so no third-party
+license compels the licensing choice made for this project.
 
 ---
 
@@ -39,7 +49,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 | Serilog.Sinks.Console | 6.1.1 | Copyright Serilog Contributors |
 | Grpc.AspNetCore | 2.83.0 | Copyright The gRPC Authors |
 | Grpc.Net.Client | 2.83.0 | Copyright The gRPC Authors |
-| Grpc.Tools (build-time codegen) | 2.83.0 | Copyright The gRPC Authors |
 | AWSSDK.BedrockRuntime | 4.0.101.1 | Copyright Amazon.com, Inc. or its affiliates |
 | ModelContextProtocol | 2.1.0 | Copyright the ModelContextProtocol C# SDK authors |
 | ModelContextProtocol.AspNetCore | 2.1.0 | Copyright the ModelContextProtocol C# SDK authors |
@@ -119,6 +128,7 @@ no obligation on downstream recipients of the application.
 
 | Component | Version | License |
 |---|---|---|
+| Grpc.Tools (protobuf/gRPC codegen; `PrivateAssets=all`, so it flows to no consumer and ships in no artifact) | 2.83.0 | Apache-2.0 |
 | xunit.v3 | 3.2.2 | Apache-2.0 |
 | xunit.runner.visualstudio | 3.1.5 | Apache-2.0 |
 | Grpc.Core.Testing | 2.46.6 | Apache-2.0 |
@@ -147,7 +157,7 @@ source tree — and are not committed to this repository or bundled into any dis
 | Asset | Source | License |
 |---|---|---|
 | BGE-large-en-v1.5 ONNX model + tokenizer | Hugging Face, fetched by `OnnxEmbeddingClient` | The upstream model, `BAAI/bge-large-en-v1.5`, is **MIT** and explicitly permits commercial use. The ONNX conversion currently configured by default (`Xenova/bge-large-en-v1.5`) does not publish an explicit license tag; see the caveat below. |
-| CodeRouterBench benchmark tables | `huggingface.co/datasets/Lance1573/CodeRouterBench`, synced on demand by `BenchmarkSyncService` into a local SQLite database — triggered from **Governance → Benchmark Data** in the GUI, the `sync_benchmark_data` MCP tool, or `TotallyHotArcRouter --sync-benchmark-data` | **MIT**, per the dataset card |
+| CodeRouterBench benchmark tables | `huggingface.co/datasets/Lance1573/CodeRouterBench`, synced into the local SQLite database by `BenchmarkSyncService` (Governance → Benchmark Data, the MCP sync tool, or `--sync-benchmark-data`) | **MIT**, per the dataset card |
 
 > **Caveat — embedding model source.** `EmbeddingOptions.ModelUrl` defaults to the `Xenova/`
 > re-hosted ONNX conversion, whose model card carries no explicit license tag. The weights derive

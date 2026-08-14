@@ -18,8 +18,17 @@
             <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
                 <Icon Name="alert-triangle" Size="14" /> Router unreachable
             </div>
+            @* The store's own endpoint, not the default constant: naming an address the client was never
+               pointed at is worse than naming none while diagnosing a connectivity failure. *@
             <div class="text-xs text-slate-400">
-                Could not reach <span class="font-mono">@Store.ServerAddress</span>. Is the proxy running?
+                @if (Store.ServerAddress is { Length: > 0 } serverAddress)
+                {
+                    <text>Could not reach <span class="font-mono">@serverAddress</span>. Is the proxy running?</text>
+                }
+                else
+                {
+                    <text>Could not reach the router. Is the proxy running?</text>
+                }
             </div>
             @if (!string.IsNullOrEmpty(Store.LastError))
             {
@@ -43,10 +52,12 @@
             </button>
         </div>
 
-        @if (!string.IsNullOrEmpty(_opError))
+        @* Store.LastError covers a status load the router answered with a rejection: reachable, so the
+           layout above stays, but the reason still has to be shown somewhere. *@
+        @if (ErrorMessage() is { Length: > 0 } errorMessage)
         {
             <div class="mb-3 text-xs ds-alert-critical">
-                @_opError
+                @errorMessage
             </div>
         }
 
@@ -100,6 +111,12 @@
     }
 
     private void OnStoreChanged() => InvokeAsync(StateHasChanged);
+
+    /// <summary>
+    /// The inline banner's text: the last mutation's rejection if there is one, otherwise the last load's.
+    /// Both are cleared by the next successful call, so a stale message never outlives the failure.
+    /// </summary>
+    private string? ErrorMessage() => _opError ?? Store.LastError;
 
     public void Dispose() => Store.Changed -= OnStoreChanged;
 
