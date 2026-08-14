@@ -58,6 +58,12 @@ public static class LogRegTrainer
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(vocabularySize, 0);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(epochs, 0);
 
+        if (!File.Exists(database.DatabasePath))
+        {
+            throw new InvalidOperationException(
+                $"The CodeRouterBench corpus database was not found at '{database.DatabasePath}' - is the corpus synced?");
+        }
+
         var examples = LoadTrainingExamples(database, split);
         if (examples.Count == 0)
         {

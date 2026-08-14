@@ -48,6 +48,18 @@ public static class LogRegModelArtifactSerializer
             throw new FormatException("The logreg voter model document has an empty vocabulary.");
         }
 
+        if (dto.Vocabulary.Distinct(StringComparer.Ordinal).Count() != dto.Vocabulary.Count)
+        {
+            throw new FormatException("The logreg voter model document's vocabulary contains duplicate terms.");
+        }
+
+        if (dto.InverseDocumentFrequency.Count != dto.Vocabulary.Count)
+        {
+            throw new FormatException(
+                $"The logreg voter model document's inverseDocumentFrequency has length " +
+                $"{dto.InverseDocumentFrequency.Count}, expected {dto.Vocabulary.Count} (one per vocabulary term).");
+        }
+
         foreach (var (model, weights) in dto.ClassWeights)
         {
             if (weights.Length != dto.Vocabulary.Count + 1)

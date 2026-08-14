@@ -156,14 +156,6 @@ public sealed class RoutingOptions
     /// <exception cref="OptionsValidationException">Thrown when the routing option values are inconsistent.</exception>
     public void EnsureValid()
     {
-        if (!EnableDimBestVoter && !EnableMemoryKnnVoter && !EnableLogRegVoter && !EnableLlmRouterVoter)
-        {
-            throw new OptionsValidationException(
-                nameof(RoutingOptions),
-                typeof(RoutingOptions),
-                ["At least one Orchestrator voter must be enabled."]);
-        }
-
         if (!RouterConstants.SupportedModels.Contains(DefaultModel, StringComparer.OrdinalIgnoreCase))
         {
             throw new OptionsValidationException(
