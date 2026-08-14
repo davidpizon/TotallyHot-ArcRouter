@@ -281,6 +281,25 @@ public class OrchestratorRoutingPolicyTests
     }
 
     [Fact]
+    public async Task DecideAsync_VoterReturnsBlankModelName_TreatedAsAbstentionRatherThanFailingTheDecision()
+    {
+        // A non-null but blank ModelName still fails IsAbstain's null check, so it must be caught
+        // separately - otherwise it reaches ModelNameCanonicalizer.Canonicalize, which throws on
+        // whitespace and would hard-fail the whole decision.
+        var voters = new IRoutingVoter[]
+        {
+            new FakeVoter(VoterNames.DimBest, "   ", confidence: 1.0),
+            new FakeVoter(VoterNames.LogReg, "kimi-k2.5", confidence: 1.0),
+        };
+        var policy = CreatePolicy(voters);
+        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi]);
+
+        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+
+        Assert.Equal("kimi-k2.5", decision.SelectedModel);
+    }
+
+    [Fact]
     public async Task DecideAsync_NoCandidates_Throws()
     {
         var policy = CreatePolicy([]);

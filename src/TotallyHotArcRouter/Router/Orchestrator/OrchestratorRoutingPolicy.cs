@@ -131,6 +131,18 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
                 continue;
             }
 
+            if (string.IsNullOrWhiteSpace(vote.ModelName))
+            {
+                // ModelName is non-null (IsAbstain already returned false) but Canonicalize below throws
+                // on whitespace - a misbehaving voter must degrade to an abstention here, not hard-fail
+                // the whole decision.
+                _logger.LogWarning(
+                    "[ORCHESTRATOR] Voter {Voter} returned a blank model name for dimension {Dimension}; treating as an abstention.",
+                    voter.Name,
+                    context.Dimension);
+                continue;
+            }
+
             // Canonicalize tolerates cosmetic spelling differences (casing, "." vs "-" version
             // punctuation) but keeps a dated snapshot distinct from its rolling base model, so a voter
             // that picks a specific pinned release is never silently credited to a different one.
