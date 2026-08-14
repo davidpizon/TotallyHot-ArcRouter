@@ -66,6 +66,32 @@ public class LogRegTrainerTests
         Assert.Throws<InvalidOperationException>(() => LogRegTrainer.Train(temp.Database, "probing"));
     }
 
+    [Theory]
+    [InlineData(0d)]
+    [InlineData(-0.5)]
+    public void Train_NonPositiveLearningRate_Throws(double learningRate)
+    {
+        using var temp = new TempBenchmarkDatabase();
+        temp.Database.EnsureCreated();
+        InsertTask(temp.Database, "t1", "probing", "bug_fixing", "fix the bug");
+        InsertResult(temp.Database, "t1", "probing", "bug_fixing", "model-a", 0.9);
+
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => LogRegTrainer.Train(temp.Database, "probing", learningRate: learningRate));
+    }
+
+    [Fact]
+    public void Train_NegativeL2Regularization_Throws()
+    {
+        using var temp = new TempBenchmarkDatabase();
+        temp.Database.EnsureCreated();
+        InsertTask(temp.Database, "t1", "probing", "bug_fixing", "fix the bug");
+        InsertResult(temp.Database, "t1", "probing", "bug_fixing", "model-a", 0.9);
+
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => LogRegTrainer.Train(temp.Database, "probing", l2Regularization: -0.001));
+    }
+
     /// <summary>
     /// Regression test for the naive <c>1/(1+exp(-z))</c> form, which overflows <c>exp(-z)</c> to
     /// <see cref="double.PositiveInfinity"/> for very negative z. The stable form must stay finite and

@@ -60,6 +60,12 @@ public static class LogRegModelArtifactSerializer
                 $"{dto.InverseDocumentFrequency.Count}, expected {dto.Vocabulary.Count} (one per vocabulary term).");
         }
 
+        if (dto.InverseDocumentFrequency.Any(value => !double.IsFinite(value)))
+        {
+            throw new FormatException(
+                "The logreg voter model document's inverseDocumentFrequency contains a non-finite value (NaN or Infinity).");
+        }
+
         foreach (var (model, weights) in dto.ClassWeights)
         {
             if (weights.Length != dto.Vocabulary.Count + 1)
@@ -67,6 +73,12 @@ public static class LogRegModelArtifactSerializer
                 throw new FormatException(
                     $"The logreg voter model's weight vector for '{model}' has length {weights.Length}, " +
                     $"expected {dto.Vocabulary.Count + 1} (vocabulary size + 1 bias term).");
+            }
+
+            if (weights.Any(value => !double.IsFinite(value)))
+            {
+                throw new FormatException(
+                    $"The logreg voter model's weight vector for '{model}' contains a non-finite value (NaN or Infinity).");
             }
         }
 

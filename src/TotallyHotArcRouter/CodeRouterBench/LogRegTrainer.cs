@@ -57,6 +57,8 @@ public static class LogRegTrainer
         ArgumentException.ThrowIfNullOrWhiteSpace(split);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(vocabularySize, 0);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(epochs, 0);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(learningRate, 0);
+        ArgumentOutOfRangeException.ThrowIfNegative(l2Regularization);
 
         if (!File.Exists(database.DatabasePath))
         {

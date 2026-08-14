@@ -141,6 +141,18 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
                 continue;
             }
 
+            if (!double.IsFinite(vote.Confidence))
+            {
+                // Math.Clamp does not sanitize NaN/±Infinity - a non-finite confidence would otherwise
+                // poison contribution (and everything summed from it) with NaN.
+                _logger.LogWarning(
+                    "[ORCHESTRATOR] Voter {Voter} returned a non-finite confidence ({Confidence}) for dimension {Dimension}; treating as an abstention.",
+                    voter.Name,
+                    vote.Confidence,
+                    context.Dimension);
+                continue;
+            }
+
             var weight = GetVoterWeight(voter.Name);
             var contribution = weight * Math.Clamp(vote.Confidence, 0d, 1d);
 

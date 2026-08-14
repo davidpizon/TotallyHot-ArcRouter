@@ -162,6 +162,29 @@ public class OrchestratorRoutingPolicyTests
         Assert.Equal(0.9, decision.CandidateScores["kimi-k2.5"], precision: 6);
     }
 
+    [Theory]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    [InlineData(double.NegativeInfinity)]
+    public async Task DecideAsync_VoterConfidenceIsNonFinite_TreatedAsAbstentionRatherThanPoisoningTheScore(double confidence)
+    {
+        // Math.Clamp does not sanitize NaN/Infinity, so a non-finite confidence must be caught before it
+        // can turn contribution (and everything summed from it) into NaN.
+        var voters = new IRoutingVoter[]
+        {
+            new FakeVoter(VoterNames.DimBest, "minimax-m2.7", confidence),
+            new FakeVoter(VoterNames.LogReg, "kimi-k2.5", confidence: 1.0),
+        };
+        var policy = CreatePolicy(voters);
+        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi, MiniMax]);
+
+        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+
+        Assert.Equal("kimi-k2.5", decision.SelectedModel);
+        Assert.False(double.IsNaN(decision.Confidence));
+        Assert.False(decision.CandidateScores.ContainsKey("minimax-m2.7"));
+    }
+
     [Fact]
     public async Task DecideAsync_TiedWeightedScores_BreaksTieDeterministicallyByModelName()
     {
