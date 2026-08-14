@@ -53,6 +53,12 @@ public static class Program
         catch (Exception ex)
         {
             Log.Fatal(ex, "TotallyHot.ArcRouter host terminated unexpectedly.");
+
+            // Without this the process exits 0 after a fatal error, reporting success to whatever launched
+            // it. That matters most on the --sync-benchmark-data path, whose own partial-failure branch
+            // already sets this: a CI script checking the exit code would otherwise see an exception-killed
+            // sync as a clean one. Assigned rather than returned so the finally below still flushes the log.
+            Environment.ExitCode = 1;
         }
         finally
         {
