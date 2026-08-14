@@ -49,10 +49,20 @@ public sealed class LogRegVoter : IRoutingVoter
     /// </summary>
     /// <param name="logger">The logger.</param>
     /// <param name="model">The model artifact to score against.</param>
+    /// <exception cref="FormatException">
+    /// <paramref name="model"/> fails <see cref="LogRegModelArtifactSerializer.Validate"/> - e.g. a
+    /// vocabulary/IDF length mismatch, a duplicate vocabulary term, a wrong-length class-weight vector, or
+    /// a non-finite IDF/weight value. Validating here, not just in
+    /// <see cref="LogRegModelArtifactSerializer.Deserialize"/>, keeps this constructor's callers - which
+    /// may build a <see cref="LogRegModelArtifact"/> directly rather than through <c>Deserialize</c> - from
+    /// installing a malformed artifact that would otherwise throw <see cref="IndexOutOfRangeException"/>
+    /// later in <see cref="ComputeTfIdf"/>.
+    /// </exception>
     public LogRegVoter(ILogger<LogRegVoter> logger, LogRegModelArtifact model)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(model);
+        LogRegModelArtifactSerializer.Validate(model);
 
         _logger = logger;
         _model = model;
@@ -92,7 +102,10 @@ public sealed class LogRegVoter : IRoutingVoter
         var scored = new List<(string Model, double Score)>();
         foreach (var candidate in context.Candidates)
         {
-            var key = ModelNameCanonicalizer.Canonicalize(candidate.ModelName);
+            // Passing candidate.Provider strips only that candidate's own provider prefix, so a
+            // legitimately slashed model id is never mistaken for an unprefixed one and mapped to the
+            // wrong class-weight entry.
+            var key = ModelNameCanonicalizer.Canonicalize(candidate.ModelName, candidate.Provider);
             if (!_model.ClassWeights.TryGetValue(key, out var weights))
             {
                 continue;

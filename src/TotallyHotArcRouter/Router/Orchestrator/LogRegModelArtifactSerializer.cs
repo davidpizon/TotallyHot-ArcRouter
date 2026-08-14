@@ -43,36 +43,61 @@ public static class LogRegModelArtifactSerializer
         var dto = JsonSerializer.Deserialize<Dto>(json, Options)
             ?? throw new FormatException("The logreg voter model document deserialized to null.");
 
-        if (dto.Vocabulary.Count == 0)
+        var artifact = new LogRegModelArtifact(
+            dto.Vocabulary,
+            dto.InverseDocumentFrequency,
+            dto.ClassWeights,
+            dto.IsPlaceholder,
+            dto.TrainedFrom);
+        Validate(artifact);
+        return artifact;
+    }
+
+    /// <summary>
+    /// Validates <paramref name="artifact"/>'s structural invariants - vocabulary non-empty and
+    /// duplicate-free, <c>InverseDocumentFrequency</c> matching the vocabulary length with only finite
+    /// values, and every class weight vector matching <c>Vocabulary.Count + 1</c> (bias + one per term)
+    /// with only finite values. Shared by <see cref="Deserialize"/> and <see cref="LogRegVoter"/>'s
+    /// model-artifact constructor, since the latter can receive an artifact built directly rather than
+    /// through <see cref="Deserialize"/> - either path must reject a malformed artifact before it can
+    /// throw <see cref="IndexOutOfRangeException"/> later during scoring.
+    /// </summary>
+    /// <param name="artifact">The artifact to validate.</param>
+    /// <exception cref="FormatException">The artifact violates one of the invariants above.</exception>
+    public static void Validate(LogRegModelArtifact artifact)
+    {
+        ArgumentNullException.ThrowIfNull(artifact);
+
+        if (artifact.Vocabulary.Count == 0)
         {
             throw new FormatException("The logreg voter model document has an empty vocabulary.");
         }
 
-        if (dto.Vocabulary.Distinct(StringComparer.Ordinal).Count() != dto.Vocabulary.Count)
+        if (artifact.Vocabulary.Distinct(StringComparer.Ordinal).Count() != artifact.Vocabulary.Count)
         {
             throw new FormatException("The logreg voter model document's vocabulary contains duplicate terms.");
         }
 
-        if (dto.InverseDocumentFrequency.Count != dto.Vocabulary.Count)
+        if (artifact.InverseDocumentFrequency.Count != artifact.Vocabulary.Count)
         {
             throw new FormatException(
                 $"The logreg voter model document's inverseDocumentFrequency has length " +
-                $"{dto.InverseDocumentFrequency.Count}, expected {dto.Vocabulary.Count} (one per vocabulary term).");
+                $"{artifact.InverseDocumentFrequency.Count}, expected {artifact.Vocabulary.Count} (one per vocabulary term).");
         }
 
-        if (dto.InverseDocumentFrequency.Any(value => !double.IsFinite(value)))
+        if (artifact.InverseDocumentFrequency.Any(value => !double.IsFinite(value)))
         {
             throw new FormatException(
                 "The logreg voter model document's inverseDocumentFrequency contains a non-finite value (NaN or Infinity).");
         }
 
-        foreach (var (model, weights) in dto.ClassWeights)
+        foreach (var (model, weights) in artifact.ClassWeights)
         {
-            if (weights.Length != dto.Vocabulary.Count + 1)
+            if (weights.Length != artifact.Vocabulary.Count + 1)
             {
                 throw new FormatException(
                     $"The logreg voter model's weight vector for '{model}' has length {weights.Length}, " +
-                    $"expected {dto.Vocabulary.Count + 1} (vocabulary size + 1 bias term).");
+                    $"expected {artifact.Vocabulary.Count + 1} (vocabulary size + 1 bias term).");
             }
 
             if (weights.Any(value => !double.IsFinite(value)))
@@ -81,13 +106,6 @@ public static class LogRegModelArtifactSerializer
                     $"The logreg voter model's weight vector for '{model}' contains a non-finite value (NaN or Infinity).");
             }
         }
-
-        return new LogRegModelArtifact(
-            dto.Vocabulary,
-            dto.InverseDocumentFrequency,
-            dto.ClassWeights,
-            dto.IsPlaceholder,
-            dto.TrainedFrom);
     }
 
     private sealed class Dto

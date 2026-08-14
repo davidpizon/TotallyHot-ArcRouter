@@ -1,6 +1,8 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.CodeRouterBench;
+using TotallyHot.ArcRouter.Sandbox;
 
 namespace TotallyHot.ArcRouter.Router.Orchestrator;
 
@@ -34,6 +36,7 @@ public sealed class DimBestVoter : IRoutingVoter
     private readonly BenchmarkDatabase _database;
     private readonly RouterMemory _routerMemory;
     private readonly ILogger<DimBestVoter> _logger;
+    private readonly string _liveMemoryPrefix;
     private readonly object _matrixLock = new();
     private DimensionModelScoreMatrix? _matrix;
     private bool _matrixLoadAttempted;
@@ -44,21 +47,41 @@ public sealed class DimBestVoter : IRoutingVoter
     /// <param name="database">The CodeRouterBench corpus database backing the probing-set prior.</param>
     /// <param name="routerMemory">Live per-dimension score averages, preferred over the prior when present.</param>
     /// <param name="logger">The logger.</param>
-    public DimBestVoter(BenchmarkDatabase database, RouterMemory routerMemory, ILogger<DimBestVoter> logger)
+    /// <param name="sandboxOptions">
+    /// Carries the live-memory prefix (<see cref="SandboxOptions.LiveMemoryPrefix"/>) used to recover the
+    /// bare <see cref="RouterDimension"/> key from <see cref="VotingContext.Dimension"/> before querying
+    /// the probing-set prior - see <see cref="VoteAsync"/>'s remarks.
+    /// </param>
+    public DimBestVoter(
+        BenchmarkDatabase database,
+        RouterMemory routerMemory,
+        ILogger<DimBestVoter> logger,
+        IOptions<SandboxOptions> sandboxOptions)
     {
         ArgumentNullException.ThrowIfNull(database);
         ArgumentNullException.ThrowIfNull(routerMemory);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(sandboxOptions);
 
         _database = database;
         _routerMemory = routerMemory;
         _logger = logger;
+        _liveMemoryPrefix = sandboxOptions.Value.LiveMemoryPrefix;
     }
 
     /// <inheritdoc />
     public string Name => VoterNames.DimBest;
 
     /// <inheritdoc />
+    /// <remarks>
+    /// <see cref="VotingContext.Dimension"/> is the <em>live</em> <see cref="RouterMemory"/> key (typically
+    /// <c>"live:" + dimension</c>, via <see cref="RouterDimension.ToLiveKey"/>), which is exactly what the
+    /// live-memory lookup below needs. <see cref="DimensionModelScoreMatrix.AverageScore"/> instead expects
+    /// the bare, unprefixed <see cref="RouterDimension"/> key it was built from - passing the live-prefixed
+    /// key there would never match a row, silently degrading this voter to live-memory-only. The prior
+    /// lookup below strips <see cref="_liveMemoryPrefix"/> back off first so both sources are queried under
+    /// their own convention.
+    /// </remarks>
     public Task<VoterVote> VoteAsync(VotingContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -66,12 +89,16 @@ public sealed class DimBestVoter : IRoutingVoter
 
         EnsureMatrixLoaded();
 
+        var priorDimension = context.Dimension.StartsWith(_liveMemoryPrefix, StringComparison.Ordinal)
+            ? context.Dimension[_liveMemoryPrefix.Length..]
+            : context.Dimension;
+
         string? bestModel = null;
         var bestScore = double.NegativeInfinity;
         foreach (var candidate in context.Candidates)
         {
             var live = _routerMemory.GetAverageScore(context.Dimension, candidate.ModelName);
-            var blended = live ?? _matrix?.AverageScore(context.Dimension, candidate.ModelName);
+            var blended = live ?? _matrix?.AverageScore(priorDimension, candidate.ModelName);
             if (blended is null)
             {
                 continue;

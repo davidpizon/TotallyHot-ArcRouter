@@ -89,4 +89,20 @@ public class LogRegVoterTests
 
         Assert.Equal("logreg", voter.Name);
     }
+
+    [Fact]
+    public void Constructor_ArtifactHasMismatchedInverseDocumentFrequencyLength_ThrowsFormatException()
+    {
+        // The model-artifact constructor bypasses LogRegModelArtifactSerializer.Deserialize, so it must
+        // validate structural invariants itself rather than letting a malformed artifact reach
+        // ComputeTfIdf's index arithmetic and throw IndexOutOfRangeException later, mid-vote.
+        var invalidModel = new LogRegModelArtifact(
+            Vocabulary: ["bug", "algorithm"],
+            InverseDocumentFrequency: [1.0],
+            ClassWeights: new Dictionary<string, double[]> { ["model-bug"] = [0.0, 5.0, 0.0] },
+            IsPlaceholder: true,
+            TrainedFrom: "unit test fixture");
+
+        Assert.Throws<FormatException>(() => new LogRegVoter(NullLogger<LogRegVoter>.Instance, invalidModel));
+    }
 }

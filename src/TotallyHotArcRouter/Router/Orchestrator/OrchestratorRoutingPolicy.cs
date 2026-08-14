@@ -145,11 +145,13 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
 
             // Canonicalize tolerates cosmetic spelling differences (casing, "." vs "-" version
             // punctuation) but keeps a dated snapshot distinct from its rolling base model, so a voter
-            // that picks a specific pinned release is never silently credited to a different one.
+            // that picks a specific pinned release is never silently credited to a different one. Passing
+            // candidate.Provider strips only that candidate's own provider prefix, so a legitimately
+            // slashed model id (e.g. "meta-llama/llama-3.1") is never mistaken for an unprefixed one.
             var candidateMatch = context.Candidates.FirstOrDefault(candidate =>
                 string.Equals(
-                    ModelNameCanonicalizer.Canonicalize(candidate.ModelName),
-                    ModelNameCanonicalizer.Canonicalize(vote.ModelName!),
+                    ModelNameCanonicalizer.Canonicalize(candidate.ModelName, candidate.Provider),
+                    ModelNameCanonicalizer.Canonicalize(vote.ModelName!, candidate.Provider),
                     StringComparison.Ordinal));
             if (candidateMatch is null)
             {
@@ -179,6 +181,19 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
             }
 
             var weight = GetVoterWeight(voter.Name);
+            if (weight <= 0d)
+            {
+                // A non-positive weight contributes nothing but would still count as a "participating"
+                // voter below, letting an all-zero-weight configuration deterministically pick a model
+                // via the tie-break with no effective ensemble weight behind it. Degrade to an abstention
+                // instead so that configuration falls back to the default model like a fully-abstained one.
+                _logger.LogInformation(
+                    "[ORCHESTRATOR] Voter {Voter} has a non-positive weight ({Weight}); treating as an abstention.",
+                    voter.Name,
+                    weight);
+                continue;
+            }
+
             var contribution = weight * Math.Clamp(vote.Confidence, 0d, 1d);
 
             candidateScores[$"{VoterKeyPrefix}{voter.Name}:{canonicalModelName}"] = contribution;

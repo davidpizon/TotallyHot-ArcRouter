@@ -83,6 +83,28 @@ public class MemoryKnnVoterTests
         Assert.Equal("model-a", vote.ModelName);
     }
 
+    [Fact]
+    public async Task VoteAsync_TiedSimilarityWeightedAverages_BreaksTieDeterministicallyByModelName()
+    {
+        // model-b and model-a end up with identical similarity-weighted averages (same score, same exact-
+        // match similarity). Plain ">" comparison over Dictionary enumeration order would leave the winner
+        // unspecified; the fix must resolve this the same way every run.
+        var memory = CreateMemory();
+        await memory.InitializeAsync(TestContext.Current.CancellationToken);
+        await memory.AddEntryAsync([1f, 0f, 0f], "model-b", 0.6, 0.01, null, TestContext.Current.CancellationToken);
+        await memory.AddEntryAsync([1f, 0f, 0f], "model-a", 0.6, 0.01, null, TestContext.Current.CancellationToken);
+
+        var voter = new MemoryKnnVoter(memory);
+        var context = new VotingContext(
+            "live:code_generation",
+            [new RoutingCandidate("model-a", "openai", IsFree: false), new RoutingCandidate("model-b", "openai", IsFree: false)],
+            TaskEmbedding: [1f, 0f, 0f]);
+
+        var vote = await voter.VoteAsync(context, TestContext.Current.CancellationToken);
+
+        Assert.Equal("model-a", vote.ModelName);
+    }
+
     private static EmbeddingMemory CreateMemory() =>
         new(new FakeMemoryEntryStore(), Options.Create(new RoutingOptions { EmbeddingSimilarityThreshold = 0.5 }), NullLogger<EmbeddingMemory>.Instance);
 

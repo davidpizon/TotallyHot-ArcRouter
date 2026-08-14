@@ -300,6 +300,46 @@ public class OrchestratorRoutingPolicyTests
     }
 
     [Fact]
+    public async Task DecideAsync_AllParticipatingVotersHaveNonPositiveWeight_FallsBackToDefaultModel()
+    {
+        // A zero (or negative) weight still lets its voter through IsVoterEnabled, but contributing
+        // nothing while still counting toward participatingVoters would let an all-zero-weight
+        // configuration deterministically "win" a candidate via the tie-break with no effective ensemble
+        // weight behind it. It must instead degrade the same way a fully-abstained vote does.
+        var voters = new IRoutingVoter[] { new FakeVoter(VoterNames.DimBest, "kimi-k2.5", confidence: 1.0) };
+        var policy = new OrchestratorRoutingPolicy(
+            voters,
+            Options.Create(new RoutingOptions { DefaultModel = "kimi-k2.5", DimBestVoterWeight = 0d }),
+            NullLogger<OrchestratorRoutingPolicy>.Instance);
+        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi]);
+
+        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(RouterConstants.FallbackReason, decision.Rationale);
+        Assert.Equal(0, decision.Confidence);
+    }
+
+    [Fact]
+    public async Task DecideAsync_CandidateModelNameContainsSlashNotMatchingItsOwnProvider_NotConflatedWithADifferentCandidate()
+    {
+        // Canonicalizing with provider=null strips ANY leading "segment/", so two distinct candidates -
+        // one whose ModelName legitimately contains a slash unrelated to its own Provider, and one with no
+        // slash at all - could collapse onto the same comparison key and let a vote for the bare name match
+        // whichever candidate happened to be listed first. Canonicalizing with the matched candidate's own
+        // Provider must keep them distinct.
+        var llamaViaOpenRouter = new RoutingCandidate("meta-llama/llama-3.1", "openrouter", IsFree: false);
+        var bareLlama = new RoutingCandidate("llama-3.1", "some-other-provider", IsFree: false);
+        var voters = new IRoutingVoter[] { new FakeVoter(VoterNames.DimBest, "llama-3.1", confidence: 1.0) };
+        var policy = CreatePolicy(voters, defaultModel: "llama-3.1");
+        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [llamaViaOpenRouter, bareLlama]);
+
+        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+
+        Assert.Equal("llama-3.1", decision.SelectedModel);
+        Assert.False(decision.CandidateScores.ContainsKey("meta-llama/llama-3.1"));
+    }
+
+    [Fact]
     public async Task DecideAsync_NoCandidates_Throws()
     {
         var policy = CreatePolicy([]);

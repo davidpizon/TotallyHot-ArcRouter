@@ -57,9 +57,11 @@ public sealed class MemoryKnnVoter : IRoutingVoter
             weightTotals[entry.ChosenModel] = weightTotals.GetValueOrDefault(entry.ChosenModel) + similarity;
         }
 
+        // Iterate in a fixed key order so a tie between two models' weighted averages resolves
+        // deterministically (by model name) rather than by Dictionary's unspecified enumeration order.
         string? bestModel = null;
         var bestAverage = double.NegativeInfinity;
-        foreach (var (model, weightTotal) in weightTotals)
+        foreach (var (model, weightTotal) in weightTotals.OrderBy(entry => entry.Key, StringComparer.Ordinal))
         {
             var average = weightedSums[model] / weightTotal;
             if (average > bestAverage)
