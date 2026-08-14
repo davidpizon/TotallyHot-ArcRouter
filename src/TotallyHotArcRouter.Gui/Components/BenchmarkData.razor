@@ -43,10 +43,12 @@
             </button>
         </div>
 
-        @if (!string.IsNullOrEmpty(_opError))
+        @* Store.LastError covers a status load the router answered with a rejection: reachable, so the
+           layout above stays, but the reason still has to be shown somewhere. *@
+        @if (ErrorMessage() is { Length: > 0 } errorMessage)
         {
             <div class="mb-3 text-xs ds-alert-critical">
-                @_opError
+                @errorMessage
             </div>
         }
 
@@ -98,6 +100,12 @@
     }
 
     private void OnStoreChanged() => InvokeAsync(StateHasChanged);
+
+    /// <summary>
+    /// The inline banner's text: the last mutation's rejection if there is one, otherwise the last load's.
+    /// Both are cleared by the next successful call, so a stale message never outlives the failure.
+    /// </summary>
+    private string? ErrorMessage() => _opError ?? Store.LastError;
 
     public void Dispose() => Store.Changed -= OnStoreChanged;
 

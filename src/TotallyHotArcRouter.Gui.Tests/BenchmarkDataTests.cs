@@ -127,6 +127,22 @@ public sealed class BenchmarkDataTests
     }
 
     [Fact]
+    public void A_rejected_status_load_shows_the_rejection_rather_than_the_unreachable_state()
+    {
+        // The router answered - it just refused - so "Router unreachable" would both misstate the cause
+        // and replace the panel that has to carry the actual reason.
+        using var ctx = NewContext(new FakeClient
+        {
+            StatusError = new BenchmarkDataAdminException("Could not read the benchmark data status: database is locked."),
+        });
+
+        var cut = ctx.Render<BenchmarkData>();
+
+        cut.Markup.Should().NotContain("Router unreachable");
+        cut.Markup.Should().Contain("database is locked");
+    }
+
+    [Fact]
     public void A_rejected_recheck_keeps_the_panel_on_screen()
     {
         var client = new FakeClient(BenchmarkDataAdminState.CheckFailed, Reason: "boom")

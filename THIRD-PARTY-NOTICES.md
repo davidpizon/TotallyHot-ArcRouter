@@ -8,11 +8,23 @@ TotallyHot Arc Router itself is licensed under the GNU Affero General Public Lic
 (see [`LICENSE.exceptions.md`](LICENSE.exceptions.md)). Nothing in this file alters the license of
 this project; each component below remains under its own license.
 
-**License summary of everything shipped or referenced:** MIT, Apache-2.0, and BSD-3-Clause only, with
-one exception - a single build- and test-time only package
-(`Microsoft.VisualStudio.Azure.Containers.Tools.Targets`) is under the Microsoft Software License
-Terms; it supplies MSBuild targets, ships in no distributed artifact, and is not redistributable as a
-standalone offering. No copyleft (GPL/LGPL/AGPL/MPL/EPL) dependency is used, so no third-party
+**License summary of everything this project redistributes** (§1 - the components that ship inside the
+router service, the MAUI GUI, or the published installer): MIT, Apache-2.0, and BSD-3-Clause only.
+
+Two categories fall outside that summary because this project does not redistribute them:
+
+- **Microsoft platform prerequisites** (§2 - Edge WebView2 Runtime, Windows App SDK) are governed by
+  Microsoft's own license terms. End users obtain them from Microsoft; the AGPL §7 additional
+  permission in [`LICENSE.exceptions.md`](LICENSE.exceptions.md) covers linking against them.
+- **One build- and test-time only package**
+  (`Microsoft.VisualStudio.Azure.Containers.Tools.Targets`, §3) is under the Microsoft Software
+  License Terms. It supplies MSBuild targets, ships in no distributed artifact, and is not
+  redistributable as a standalone offering.
+
+Data and models fetched at runtime (§4) are likewise not redistributed and are listed with their own
+licenses there.
+
+Across every category, no copyleft (GPL/LGPL/AGPL/MPL/EPL) dependency is used, so no third-party
 license compels the licensing choice made for this project.
 
 ---
@@ -145,7 +157,7 @@ distributed artifact.
 | Asset | Source | License |
 |---|---|---|
 | BGE-large-en-v1.5 ONNX model + tokenizer | Hugging Face, fetched by `OnnxEmbeddingClient` | The upstream model, `BAAI/bge-large-en-v1.5`, is **MIT** and explicitly permits commercial use. The ONNX conversion currently configured by default (`Xenova/bge-large-en-v1.5`) does not publish an explicit license tag; see the caveat below. |
-| CodeRouterBench benchmark tables | `huggingface.co/datasets/Lance1573/CodeRouterBench`, fetched by `scripts/fetch-coderouterbench.sh` | **MIT**, per the dataset card |
+| CodeRouterBench benchmark tables | `huggingface.co/datasets/Lance1573/CodeRouterBench`, synced into the local SQLite database by `BenchmarkSyncService` (Governance → Benchmark Data, the MCP sync tool, or `--sync-benchmark-data`) | **MIT**, per the dataset card |
 
 > **Caveat — embedding model source.** `EmbeddingOptions.ModelUrl` defaults to the `Xenova/`
 > re-hosted ONNX conversion, whose model card carries no explicit license tag. The weights derive

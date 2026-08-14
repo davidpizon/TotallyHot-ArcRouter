@@ -35,7 +35,11 @@ public static class Program
             // CreateHostBuilder for the same reason --model is, so it never reaches the command-line
             // configuration provider as a stray "sync-benchmark-data" key.
             var (runBenchmarkDataSync, remainingArgs) = ExtractFlag(args, "--sync-benchmark-data");
-            var host = CreateHostBuilder(remainingArgs).Build();
+
+            // `using` (not a bare local) so the sync path below, which returns without ever calling
+            // RunAsync, still disposes the container and everything singleton-scoped in it - SQLite
+            // connections and HttpClient handlers among them - rather than leaving that to process exit.
+            using var host = CreateHostBuilder(remainingArgs).Build();
 
             if (runBenchmarkDataSync)
             {

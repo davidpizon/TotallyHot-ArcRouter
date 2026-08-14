@@ -70,10 +70,16 @@ public sealed class BenchmarkDataStore : IDisposable
     public event Action? Changed;
 
     /// <summary>
-    /// Loads the corpus's cached status. Connection failures are swallowed and surfaced via
-    /// <see cref="IsReachable"/>/<see cref="LastError"/> rather than thrown, so the tab renders an
-    /// "unreachable" state instead of crashing when the proxy isn't running.
+    /// Loads the corpus's cached status. Failures are swallowed and surfaced via
+    /// <see cref="IsReachable"/>/<see cref="LastError"/> rather than thrown, so the tab renders an error
+    /// state instead of crashing when the proxy isn't running.
     /// </summary>
+    /// <remarks>
+    /// Only a connectivity failure clears <see cref="IsReachable"/>, the same split
+    /// <see cref="RecordFailure"/> applies to mutations: a status call the router *answered* with a
+    /// rejection has to keep the panel's normal layout and show the rejection, because collapsing it into
+    /// the "Router unreachable" state both misstates the cause and hides the message that explains it.
+    /// </remarks>
     public async Task LoadAsync(CancellationToken cancellationToken = default)
     {
         try
@@ -84,7 +90,7 @@ public sealed class BenchmarkDataStore : IDisposable
         }
         catch (BenchmarkDataAdminException ex)
         {
-            IsReachable = false;
+            IsReachable = !ex.IsUnavailable;
             LastError = ex.Message;
             _logger?.LogWarning(ex, "Failed to load the benchmark data status from the router.");
         }
