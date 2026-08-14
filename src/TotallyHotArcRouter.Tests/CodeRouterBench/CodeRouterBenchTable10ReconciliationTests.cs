@@ -61,17 +61,21 @@ public class CodeRouterBenchTable10ReconciliationTests
             return false;
         }
 
-        using var connection = database.OpenConnection();
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM benchmark_id_results WHERE split = 'probing';";
-
         try
         {
+            using var connection = database.OpenConnection();
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT COUNT(*) FROM benchmark_id_results WHERE split = 'probing';";
             return Convert.ToInt64(command.ExecuteScalar()) > 0;
         }
         catch (SqliteException)
         {
-            // A database file left by an interrupted sync can exist without the table. Unpopulated, not broken.
+            // Opening is inside the try, not just the query: this is the real user database, so on a
+            // developer machine it may be locked by a running proxy, or left corrupt or half-written by an
+            // interrupted sync. Microsoft.Data.Sqlite surfaces all of those - SQLITE_BUSY, SQLITE_NOTADB,
+            // SQLITE_CANTOPEN, and a missing table alike - as SqliteException, from Open() as readily as
+            // from ExecuteScalar(). Every one of them means "no corpus to reconcile against", which is a
+            // skip; none of them is a reason to fail the whole test run.
             return false;
         }
     }
