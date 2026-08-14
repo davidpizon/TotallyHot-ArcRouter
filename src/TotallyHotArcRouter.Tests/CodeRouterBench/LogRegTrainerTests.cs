@@ -1,3 +1,4 @@
+using System.Reflection;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Orchestrator;
@@ -63,6 +64,27 @@ public class LogRegTrainerTests
         temp.Database.EnsureCreated();
 
         Assert.Throws<InvalidOperationException>(() => LogRegTrainer.Train(temp.Database, "probing"));
+    }
+
+    /// <summary>
+    /// Regression test for the naive <c>1/(1+exp(-z))</c> form, which overflows <c>exp(-z)</c> to
+    /// <see cref="double.PositiveInfinity"/> for very negative z. The stable form must stay finite and
+    /// converge to the correct 0/1 limits at both extremes.
+    /// </summary>
+    [Theory]
+    [InlineData(-1000d, 0d)]
+    [InlineData(1000d, 1d)]
+    [InlineData(0d, 0.5d)]
+    public void Sigmoid_ExtremeInputs_StaysFiniteAndConvergesToCorrectLimit(double z, double expected)
+    {
+        var method = typeof(LogRegTrainer).GetMethod("Sigmoid", BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new InvalidOperationException("LogRegTrainer.Sigmoid was not found via reflection.");
+
+        var result = (double)method.Invoke(null, [z])!;
+
+        Assert.False(double.IsNaN(result));
+        Assert.False(double.IsInfinity(result));
+        Assert.Equal(expected, result, precision: 6);
     }
 
     private static void InsertTask(BenchmarkDatabase database, string taskId, string split, string dimension, string prompt)

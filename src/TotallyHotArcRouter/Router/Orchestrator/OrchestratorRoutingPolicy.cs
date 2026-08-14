@@ -158,10 +158,18 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
                 contribution);
         }
 
-        var best = candidateScores
-            .Where(kvp => !kvp.Key.StartsWith(VoterKeyPrefix, StringComparison.Ordinal))
-            .OrderByDescending(kvp => kvp.Value)
-            .Select(kvp => (Model: kvp.Key, Score: (double?)kvp.Value))
+        // Selecting winners straight out of candidateScores by excluding the "voter:" prefix would
+        // wrongly exclude a legitimate candidate model whose own name happens to start with "voter:",
+        // and OrderByDescending alone leaves ties resolved by dictionary enumeration order (non-
+        // deterministic). Restricting the search to context.Candidates and adding a deterministic
+        // tie-break by model name avoids both.
+        var best = context.Candidates
+            .Select(candidate => (
+                Model: candidate.ModelName,
+                Score: candidateScores.TryGetValue(candidate.ModelName, out var score) ? (double?)score : null))
+            .Where(entry => entry.Score is not null)
+            .OrderByDescending(entry => entry.Score!.Value)
+            .ThenBy(entry => entry.Model, StringComparer.Ordinal)
             .FirstOrDefault();
 
         if (participatingVoters == 0 || best.Model is null)

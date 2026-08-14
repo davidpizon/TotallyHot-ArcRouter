@@ -163,6 +163,49 @@ public class OrchestratorRoutingPolicyTests
     }
 
     [Fact]
+    public async Task DecideAsync_TiedWeightedScores_BreaksTieDeterministicallyByModelName()
+    {
+        // Two single-voter picks at equal weight/confidence tie exactly. OrderByDescending alone would
+        // leave the winner dependent on Dictionary<TKey,TValue> enumeration order; the explicit
+        // ThenBy(model name) tie-break must make this reproducible instead.
+        var voters = new IRoutingVoter[]
+        {
+            new FakeVoter(VoterNames.DimBest, "minimax-m2.7", confidence: 1.0),
+            new FakeVoter(VoterNames.MemoryKnn, "glm-5", confidence: 1.0),
+        };
+        var policy = new OrchestratorRoutingPolicy(
+            voters,
+            Options.Create(new RoutingOptions
+            {
+                DefaultModel = "kimi-k2.5",
+                DimBestVoterWeight = 0.5,
+                MemoryKnnVoterWeight = 0.5,
+            }),
+            NullLogger<OrchestratorRoutingPolicy>.Instance);
+        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [MiniMax, Glm]);
+
+        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+
+        Assert.Equal("glm-5", decision.SelectedModel);
+    }
+
+    [Fact]
+    public async Task DecideAsync_CandidateModelNameStartsWithVoterPrefix_StillEligibleToWin()
+    {
+        // The argmax must select only from context.Candidates rather than filtering candidateScores keys
+        // by a "voter:" prefix - a real candidate model named "voter:custom" would otherwise be wrongly
+        // excluded from its own win.
+        var prefixedCandidate = new RoutingCandidate("voter:custom", "openai", IsFree: false);
+        var voters = new IRoutingVoter[] { new FakeVoter(VoterNames.DimBest, "voter:custom", confidence: 1.0) };
+        var policy = CreatePolicy(voters);
+        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [prefixedCandidate]);
+
+        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+
+        Assert.Equal("voter:custom", decision.SelectedModel);
+    }
+
+    [Fact]
     public async Task DecideAsync_NoCandidates_Throws()
     {
         var policy = CreatePolicy([]);

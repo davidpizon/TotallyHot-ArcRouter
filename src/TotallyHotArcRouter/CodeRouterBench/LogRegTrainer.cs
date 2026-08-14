@@ -276,5 +276,10 @@ public static class LogRegTrainer
         return weights;
     }
 
-    private static double Sigmoid(double z) => 1.0 / (1.0 + Math.Exp(-z));
+    // The naive 1/(1+exp(-z)) form overflows exp(-z) to Infinity for very negative z, which combined
+    // elsewhere with a zero can produce NaN. Evaluating exp() on -|z| instead keeps its argument
+    // non-positive, so it can only underflow to 0 (safe), never overflow to Infinity.
+    private static double Sigmoid(double z) => z >= 0
+        ? 1.0 / (1.0 + Math.Exp(-z))
+        : Math.Exp(z) / (1.0 + Math.Exp(z));
 }
