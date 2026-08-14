@@ -55,8 +55,11 @@ distribute it — or run a modified version as a network service — you must ma
 your corresponding source available under the same terms.
 
 Third-party components are attributed in
-[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md). Every dependency is MIT,
-Apache-2.0, or BSD-3-Clause; none imposes copyleft on this project.
+[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md). Every dependency this
+project redistributes is MIT, Apache-2.0, or BSD-3-Clause. The Microsoft
+platform components above are prerequisites obtained from Microsoft under
+Microsoft's own terms, not redistributed here. Either way, no dependency
+imposes copyleft on this project.
 
 Copyright © 2026 David Pizon.
 
