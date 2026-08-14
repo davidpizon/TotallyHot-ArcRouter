@@ -24,7 +24,10 @@ namespace TotallyHot.ArcRouter.Models;
 /// exact match from a snapshot-stripped one precisely <em>by which stage was needed</em>, and that
 /// distinction is what marks a resolved price approximate. Only callers that want the whole pipeline
 /// - such as the offline CodeRouterBench loader, which has no rung ladder and no provider column -
-/// should call <see cref="Canonicalize"/>.
+/// should call <see cref="Canonicalize"/>. Callers for whom a dated snapshot is a genuinely different,
+/// non-interchangeable model - not an approximate stand-in for its base - should call
+/// <see cref="CanonicalizeSpelling"/> instead, which normalizes only cosmetic spelling (case, provider
+/// prefix, version separator) and leaves snapshot/version-tier suffixes untouched.
 /// </para>
 /// <para>
 /// There is no fuzzy stage and no alias table today: all eight CodeRouterBench dataset ids reach their
@@ -136,11 +139,34 @@ public static class ModelNameCanonicalizer
     /// <remarks>
     /// Intended for callers that compare ids and nothing else. It is <em>not</em> appropriate where the
     /// difference between an exact and an approximate match carries meaning, because it discards which
-    /// stage did the work; see the remarks on <see cref="ModelNameCanonicalizer"/>.
+    /// stage did the work; see the remarks on <see cref="ModelNameCanonicalizer"/>. It is also
+    /// <em>not</em> appropriate where a dated snapshot must stay distinct from its rolling base model -
+    /// use <see cref="CanonicalizeSpelling"/> for that instead, since this method deliberately conflates
+    /// the two so a benchmark's snapshotted dataset id can still resolve to its unsnapshotted configured
+    /// <c>ModelName</c>.
     /// </remarks>
     public static string Canonicalize(string modelId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
         return UnifyVersionSeparators(StripVersionSuffix(StripSnapshotSuffix(NormalizeBase(modelId))));
+    }
+
+    /// <summary>
+    /// Runs only the spelling-normalization stages - <see cref="NormalizeBase"/> and
+    /// <see cref="UnifyVersionSeparators"/> - producing a key for callers that must keep a dated snapshot
+    /// or version/tier suffix distinct from its base model.
+    /// </summary>
+    /// <param name="modelId">Any spelling of a model id, from config, a provider, or a voter's own pick.</param>
+    /// <param name="provider">Forwarded to <see cref="NormalizeBase"/> to strip a matching provider prefix.</param>
+    /// <remarks>
+    /// Unlike <see cref="Canonicalize"/>, this never strips <see cref="StripSnapshotSuffix"/> or
+    /// <see cref="StripVersionSuffix"/> - <c>claude-opus-4.6-20250929</c> and <c>claude-opus-4.6</c> pin
+    /// different, non-interchangeable releases and must not collapse onto one key here, even though
+    /// <c>claude-opus-4.6</c> and <c>claude-opus-4-6</c> (same release, different punctuation) still should.
+    /// </remarks>
+    public static string CanonicalizeSpelling(string modelId, string? provider = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
+        return UnifyVersionSeparators(NormalizeBase(modelId, provider));
     }
 }

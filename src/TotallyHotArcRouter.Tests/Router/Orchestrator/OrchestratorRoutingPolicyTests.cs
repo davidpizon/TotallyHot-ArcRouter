@@ -166,6 +166,40 @@ public class OrchestratorRoutingPolicyTests
     }
 
     [Fact]
+    public async Task DecideAsync_VoterPicksDottedVersionSeparatorVariantOfCandidateModelName_MatchesTheCandidate()
+    {
+        // Matching tolerates a "." vs "-" version separator (cosmetic spelling only) - the candidate list
+        // spells this model "claude-opus-4-6", and a voter returning the dotted "claude-opus-4.6" still
+        // means the exact same, interchangeable model.
+        var opus = new RoutingCandidate("claude-opus-4-6", "anthropic", IsFree: false);
+        var voters = new IRoutingVoter[] { new FakeVoter(VoterNames.DimBest, "claude-opus-4.6", confidence: 1.0) };
+        var policy = CreatePolicy(voters);
+        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [opus]);
+
+        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+
+        Assert.Equal("claude-opus-4-6", decision.SelectedModel);
+        Assert.Contains("claude-opus-4-6", decision.CandidateScores.Keys);
+    }
+
+    [Fact]
+    public async Task DecideAsync_VoterPicksDatedSnapshotOfCandidateModelName_TreatedAsADistinctModelAndAbstained()
+    {
+        // A dated snapshot pins a specific, non-interchangeable release: "claude-opus-4.6-20250929" is not
+        // the same model as "claude-opus-4-6" and must not be treated as a match, unlike the purely
+        // cosmetic casing/separator differences covered above.
+        var opus = new RoutingCandidate("claude-opus-4-6", "anthropic", IsFree: false);
+        var voters = new IRoutingVoter[] { new FakeVoter(VoterNames.DimBest, "claude-opus-4.6-20250929", confidence: 1.0) };
+        var policy = CreatePolicy(voters, defaultModel: "claude-opus-4-6");
+        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [opus]);
+
+        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+
+        Assert.False(decision.CandidateScores.ContainsKey("claude-opus-4-6"));
+        Assert.False(decision.CandidateScores.ContainsKey("claude-opus-4.6-20250929"));
+    }
+
+    [Fact]
     public async Task DecideAsync_VoterConfidenceOutsideZeroToOne_IsClampedBeforeWeighting()
     {
         // A voter's Confidence is not itself range-validated (unlike RoutingDecision.Confidence), so the

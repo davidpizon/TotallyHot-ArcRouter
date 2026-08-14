@@ -131,7 +131,14 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
                 continue;
             }
 
-            var candidateMatch = context.Candidates.FirstOrDefault(candidate => string.Equals(candidate.ModelName, vote.ModelName, StringComparison.OrdinalIgnoreCase));
+            // ModelNameCanonicalizer.CanonicalizeSpelling (not Canonicalize) - a dated snapshot pins a
+            // specific, non-interchangeable release, so it must not collapse onto its base model here the
+            // way Canonicalize deliberately does for benchmark dataset ids.
+            var candidateMatch = context.Candidates.FirstOrDefault(candidate =>
+                string.Equals(
+                    ModelNameCanonicalizer.CanonicalizeSpelling(candidate.ModelName),
+                    ModelNameCanonicalizer.CanonicalizeSpelling(vote.ModelName!),
+                    StringComparison.Ordinal));
             if (candidateMatch is null)
             {
                 _logger.LogWarning(
@@ -142,9 +149,9 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
                 continue;
             }
 
-            // Voters may return a differently-cased model id than the candidate list (votes are matched
-            // case-insensitively above). Use the candidate's own casing for every key written below so
-            // CandidateScores stays consistent with context.Candidates and SelectedModel when enumerated.
+            // CanonicalizeSpelling's output is a comparison key, not a name it would be safe to store or
+            // return - use the matched candidate's own configured ModelName for every key written below
+            // so CandidateScores stays consistent with context.Candidates and SelectedModel when enumerated.
             var canonicalModelName = candidateMatch.ModelName;
 
             if (!double.IsFinite(vote.Confidence))

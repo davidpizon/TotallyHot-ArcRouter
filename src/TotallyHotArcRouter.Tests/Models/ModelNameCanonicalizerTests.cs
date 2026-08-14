@@ -67,6 +67,34 @@ public class ModelNameCanonicalizerTests
     public void Canonicalize_CollapsesEverySpellingOntoOneKey(string modelId, string expected) =>
         Assert.Equal(expected, ModelNameCanonicalizer.Canonicalize(modelId));
 
+    [Theory]
+    [InlineData("claude-opus-4-6", null, "claude-opus-4-6")]
+    [InlineData("claude-opus-4.6", null, "claude-opus-4-6")]
+    [InlineData("Claude-Opus-4.6", null, "claude-opus-4-6")]
+    [InlineData("openai/GPT-4o", "openai", "gpt-4o")]
+    public void CanonicalizeSpelling_NormalizesCosmeticSpellingOnly(string modelId, string? provider, string expected) =>
+        Assert.Equal(expected, ModelNameCanonicalizer.CanonicalizeSpelling(modelId, provider));
+
+    /// <summary>
+    /// Unlike <see cref="ModelNameCanonicalizer.Canonicalize"/>, a dated snapshot must never collapse onto
+    /// its base model here - the two pin different, non-interchangeable releases.
+    /// </summary>
+    [Fact]
+    public void CanonicalizeSpelling_DoesNotCollapseADatedSnapshotOntoItsBaseModel() =>
+        Assert.NotEqual(
+            ModelNameCanonicalizer.CanonicalizeSpelling("claude-opus-4.6"),
+            ModelNameCanonicalizer.CanonicalizeSpelling("claude-opus-4.6-20250929"));
+
+    /// <summary>
+    /// Unlike <see cref="ModelNameCanonicalizer.Canonicalize"/>, a version/tier suffix (e.g. "-latest")
+    /// must never be stripped here, since it can denote a different rolling target than the base id.
+    /// </summary>
+    [Fact]
+    public void CanonicalizeSpelling_DoesNotStripAVersionTierSuffix() =>
+        Assert.NotEqual(
+            ModelNameCanonicalizer.CanonicalizeSpelling("gpt-4o"),
+            ModelNameCanonicalizer.CanonicalizeSpelling("gpt-4o-latest"));
+
     /// <summary>
     /// The pairing this whole type exists for: the eight ids the CodeRouterBench tables ship and the
     /// <c>ModelName</c> the router is configured with must be the same key, or Phase L's <c>dim_best</c>
