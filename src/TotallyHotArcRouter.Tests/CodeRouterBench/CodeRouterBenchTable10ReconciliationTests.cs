@@ -1,15 +1,20 @@
 using TotallyHot.ArcRouter.CodeRouterBench;
+using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Sandbox;
+using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Tests.CodeRouterBench;
 
 /// <summary>
-/// Reconciles a <see cref="DimensionModelScoreMatrix"/> built from the real, fetched probing split
-/// against research-doc Table 10 (PLAN.md Phase K's exit criterion). Skips itself via
-/// <see cref="Assert.SkipUnless"/> when <c>data/coderouterbench/id_probing_results_long.csv</c> is
-/// absent - run <c>scripts/fetch-coderouterbench.sh</c> first (see <c>data/README.md</c>) - the same
-/// pattern <see cref="Integration.LiteLlmParityTests"/> uses for its sidecar dependency, since "data not
-/// fetched" is an expected, non-broken state in CI and on most contributors' machines.
+/// Reconciles a <see cref="DimensionModelScoreMatrix"/> built from the real, synced probing split against
+/// research-doc Table 10 (PLAN.md Phase K's exit criterion, retargeted to the database in
+/// docs/router/coderouterbench-sqlite-migration-plan.md Phase 6). Skips itself via
+/// <see cref="Assert.SkipUnless"/> when <c>benchmark_id_results</c> has no <c>probing</c>-split rows -
+/// sync the corpus first (Governance → Benchmark Data, the <c>sync_benchmark_data</c> MCP tool, or
+/// <c>--sync-benchmark-data</c>) - the same pattern <see cref="Integration.LiteLlmParityTests"/> uses for
+/// its sidecar dependency, since "data not synced" is an expected, non-broken state in CI and on most
+/// contributors' machines.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -29,13 +34,51 @@ namespace TotallyHot.ArcRouter.Tests.CodeRouterBench;
 [Trait("Category", "Integration")]
 public class CodeRouterBenchTable10ReconciliationTests
 {
-    private static readonly string ProbingCsvPath = Path.Combine(
-        AppContext.BaseDirectory, "..", "..", "..", "..", "..", "data", "coderouterbench", "id_probing_results_long.csv");
-
     private const string SkipReason =
-        "data/coderouterbench/id_probing_results_long.csv not present - run " +
-        "scripts/fetch-coderouterbench.sh first (see data/README.md). CodeRouterBench data is fetched " +
-        "on demand, never checked in or fetched automatically by CI.";
+        "benchmark_id_results has no 'probing'-split rows - sync the CodeRouterBench corpus first " +
+        "(Governance -> Benchmark Data, the sync_benchmark_data MCP tool, or --sync-benchmark-data). " +
+        "The corpus is synced on demand, never populated automatically by CI.";
+
+    /// <summary>The real, installed corpus database - not a temp fixture. See the class summary.</summary>
+    private static BenchmarkDatabase OpenRealDatabase() =>
+        new(Options.Create(new StorageOptions()));
+
+    /// <summary>
+    /// Whether the real corpus has probing-split rows, decided without writing anything.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately no <c>EnsureCreated</c>: this points at the user's actual <c>%LOCALAPPDATA%</c> corpus,
+    /// not a temp fixture, so creating the schema here would leave an empty <c>coderouterbench.db</c> (and
+    /// its directory) behind on every machine that runs the suite without ever having synced - a confusing
+    /// artifact produced by a test that then skips. An absent file is simply "not populated". The file is
+    /// checked before opening because SQLite creates a database on connect, which would reintroduce the
+    /// same side effect by another route.
+    /// </remarks>
+    private static bool ProbingSplitIsPopulated(BenchmarkDatabase database)
+    {
+        if (!File.Exists(database.DatabasePath))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var connection = database.OpenConnection();
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT COUNT(*) FROM benchmark_id_results WHERE split = 'probing';";
+            return Convert.ToInt64(command.ExecuteScalar()) > 0;
+        }
+        catch (SqliteException)
+        {
+            // Opening is inside the try, not just the query: this is the real user database, so on a
+            // developer machine it may be locked by a running proxy, or left corrupt or half-written by an
+            // interrupted sync. Microsoft.Data.Sqlite surfaces all of those - SQLITE_BUSY, SQLITE_NOTADB,
+            // SQLITE_CANTOPEN, and a missing table alike - as SqliteException, from Open() as readily as
+            // from ExecuteScalar(). Every one of them means "no corpus to reconcile against", which is a
+            // skip; none of them is a reason to fail the whole test run.
+            return false;
+        }
+    }
 
     // research-doc Table 10, in AllDimensions order (CdGen, Algo, Bug, Comp, Refac, DS, Multi, Und, TstGn).
     // Keys are kept in the spelling the published table uses (mixed case, dashed Anthropic versions) rather
@@ -59,9 +102,10 @@ public class CodeRouterBenchTable10ReconciliationTests
     [Fact]
     public void ProbingSplitMatrix_RowAverages_MatchTable10AvgPerf()
     {
-        Assert.SkipUnless(File.Exists(ProbingCsvPath), SkipReason);
+        var database = OpenRealDatabase();
+        Assert.SkipUnless(ProbingSplitIsPopulated(database), SkipReason);
 
-        var matrix = DimensionModelScoreMatrix.FromRows(CodeRouterBenchCsvReader.Read(ProbingCsvPath));
+        var matrix = DimensionModelScoreMatrix.FromDatabase(database, "probing");
 
         foreach (var (model, published) in PublishedTable10)
         {
@@ -81,9 +125,10 @@ public class CodeRouterBenchTable10ReconciliationTests
     [Fact]
     public void ProbingSplitMatrix_EveryCell_MatchesTable10_ForCleanModels()
     {
-        Assert.SkipUnless(File.Exists(ProbingCsvPath), SkipReason);
+        var database = OpenRealDatabase();
+        Assert.SkipUnless(ProbingSplitIsPopulated(database), SkipReason);
 
-        var matrix = DimensionModelScoreMatrix.FromRows(CodeRouterBenchCsvReader.Read(ProbingCsvPath));
+        var matrix = DimensionModelScoreMatrix.FromDatabase(database, "probing");
 
         foreach (var model in CleanModels)
         {

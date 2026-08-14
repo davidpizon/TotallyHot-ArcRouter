@@ -277,7 +277,7 @@ ENTRYPOINT ["./TotallyHotArcRouter"]
 - **HTTPS/MITMTests:** Certificate handling, encrypted traffic
 - **SystemProxyTests:** OS integration (Windows only)
 - **LatencyTests:** Verify <5ms overhead
-- **RegressionTests:** Compare with Python baseline routing decisions
+- **RegressionTests:** Compare against the upstream published baseline routing decisions
 
 ### Example Test
 ```csharp
@@ -327,7 +327,7 @@ public async Task ProxyMiddleware_RewritesModelField_PreservesOtherFields()
 
 ## References
 
-- **Reference Implementation:** `cc-switch/src-tauri/src/proxy/server.rs`, `cc-switch/src-tauri/src/proxy/TotallyHotArcRouter.rs`
+- **Reference Implementation:** the proxy module of the external [`cc-switch`](https://github.com/farion1231/cc-switch) project (Rust/Tauri), studied as a design precedent — no code from it is used here
 - **Design Pattern:** System Proxy Interception (HTTP MITM)
 - **Standard Protocol:** HTTP/1.1 with optional HTTPS (with MITM certificates)
 - **Configuration:** ASP.NET Core Options Pattern + appsettings.json

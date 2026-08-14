@@ -49,6 +49,9 @@ public static class MauiProgram
         // Backs the Governance tab's price-source panel. A singleton for the same reason, sharing the TLS
         // gRPC port (5002) with LiveDataStore. See Services/PriceSourceStore.cs.
         builder.Services.AddSingleton<PriceSourceStore>();
+        // Backs the Governance tab's Benchmark Data panel. A singleton for the same reason, sharing the
+        // TLS gRPC port (5002) with LiveDataStore and PriceSourceStore. See Services/BenchmarkDataStore.cs.
+        builder.Services.AddSingleton<BenchmarkDataStore>();
         // Backs the Model Distribution / Cost Analytics history / header ticker's real data (Phase 4,
         // §5.15). A singleton so its range-keyed cache survives tab switches; talks to the proxy's
         // /admin/usage API (port 5001), same as ProviderAdminStore. See Services/UsageStore.cs.

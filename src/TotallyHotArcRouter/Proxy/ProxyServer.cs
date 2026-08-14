@@ -146,7 +146,20 @@ namespace TotallyHot.ArcRouter.Proxy
         /// <c>POST /admin/providers/{key}/discover-models</c> can still authenticate a provider whose
         /// credential lives in the store. Defaults to <see langword="null"/>.
         /// </param>
-        public ProxyServer(ILogger<ProxyServer> logger, ProxyMiddleware proxyMiddleware, int port = 5001, TelemetryBroadcaster? telemetryBroadcaster = null, int grpcPort = DefaultGrpcPort, IProviderConfigStore? providerConfigStore = null, IEnvironmentVariableProvider? environment = null, HttpClient? managementHttpClient = null, string? managementToken = null, PriceSourceToggleStore? priceSourceToggleStore = null, PriceCatalogIngestionService? priceCatalogIngestionService = null, PriceCatalogOptions? priceCatalogOptions = null, ProviderBudgetStore? providerBudgetStore = null, ProviderEndpointScanner? endpointScanner = null, ToolCallCapabilityStore? toolCallCapabilityStore = null, PriceCatalogRepository? priceCatalogRepository = null, ModelAliasOverrideStore? modelAliasOverrideStore = null, IUsageRollupStore? usageRollupStore = null, ISecretWriter? secretWriter = null, ISecretReader? secretReader = null)
+        /// <param name="benchmarkDataStatusService">
+        /// Optional CodeRouterBench freshness cache. When supplied together with
+        /// <paramref name="benchmarkFileLedger"/> and <paramref name="benchmarkSyncService"/>,
+        /// <see cref="CodeRouterBench.BenchmarkDataAdminGrpcService"/> is mapped onto the TLS
+        /// <paramref name="grpcPort"/> so the Governance UI's Benchmark Data panel can read the corpus's
+        /// sync state, recheck it, and run a sync. Defaults to <see langword="null"/> (panel API absent).
+        /// </param>
+        /// <param name="benchmarkFileLedger">Optional per-file sync ledger. See <paramref name="benchmarkDataStatusService"/>.</param>
+        /// <param name="benchmarkSyncService">Optional sync service backing the panel's sync action. See <paramref name="benchmarkDataStatusService"/>.</param>
+        /// <param name="benchmarkSyncOptions">
+        /// Optional CodeRouterBench sync configuration. Only its <c>DatasetRef</c> is used here, to drive
+        /// the panel's sync action. Defaults to <see cref="CodeRouterBench.BenchmarkSyncOptions"/>'s own defaults.
+        /// </param>
+        public ProxyServer(ILogger<ProxyServer> logger, ProxyMiddleware proxyMiddleware, int port = 5001, TelemetryBroadcaster? telemetryBroadcaster = null, int grpcPort = DefaultGrpcPort, IProviderConfigStore? providerConfigStore = null, IEnvironmentVariableProvider? environment = null, HttpClient? managementHttpClient = null, string? managementToken = null, PriceSourceToggleStore? priceSourceToggleStore = null, PriceCatalogIngestionService? priceCatalogIngestionService = null, PriceCatalogOptions? priceCatalogOptions = null, ProviderBudgetStore? providerBudgetStore = null, ProviderEndpointScanner? endpointScanner = null, ToolCallCapabilityStore? toolCallCapabilityStore = null, PriceCatalogRepository? priceCatalogRepository = null, ModelAliasOverrideStore? modelAliasOverrideStore = null, IUsageRollupStore? usageRollupStore = null, ISecretWriter? secretWriter = null, ISecretReader? secretReader = null, CodeRouterBench.BenchmarkDataStatusService? benchmarkDataStatusService = null, CodeRouterBench.BenchmarkFileLedger? benchmarkFileLedger = null, CodeRouterBench.BenchmarkSyncService? benchmarkSyncService = null, CodeRouterBench.BenchmarkSyncOptions? benchmarkSyncOptions = null)
         {
             ArgumentNullException.ThrowIfNull(logger);
             ArgumentNullException.ThrowIfNull(proxyMiddleware);
@@ -253,6 +266,17 @@ namespace TotallyHot.ArcRouter.Proxy
                             // unresolvable and fail on the first call, not at startup.
                             services.AddSingleton(Options.Create(priceCatalogOptions ?? new PriceCatalogOptions()));
                         }
+
+                        // Same reasoning again: the CodeRouterBench singletons live in the outer container,
+                        // so BenchmarkDataAdminGrpcService can only be constructed here if they are handed
+                        // across explicitly. Registered as a trio - the service needs all three.
+                        if (benchmarkDataStatusService is not null && benchmarkFileLedger is not null && benchmarkSyncService is not null)
+                        {
+                            services.AddSingleton(benchmarkDataStatusService);
+                            services.AddSingleton(benchmarkFileLedger);
+                            services.AddSingleton(benchmarkSyncService);
+                            services.AddSingleton(Options.Create(benchmarkSyncOptions ?? new CodeRouterBench.BenchmarkSyncOptions()));
+                        }
                     });
 
                     webBuilder.Configure(app =>
@@ -273,6 +297,13 @@ namespace TotallyHot.ArcRouter.Proxy
                             if (priceSourceToggleStore is not null && priceCatalogIngestionService is not null)
                             {
                                 endpoints.MapGrpcService<PriceSourceAdminGrpcService>();
+                            }
+
+                            // The Governance UI's Benchmark Data panel API. Shares the TLS gRPC port with
+                            // the telemetry stream and price-source admin service.
+                            if (benchmarkDataStatusService is not null && benchmarkFileLedger is not null && benchmarkSyncService is not null)
+                            {
+                                endpoints.MapGrpcService<CodeRouterBench.BenchmarkDataAdminGrpcService>();
                             }
 
                             // The Governance UI's provider/credential/model management API. Only mapped

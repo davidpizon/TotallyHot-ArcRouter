@@ -1,6 +1,6 @@
 using TotallyHot.ArcRouter.Gui.Components;
 using Bunit;
-using FluentAssertions;
+using AwesomeAssertions;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 

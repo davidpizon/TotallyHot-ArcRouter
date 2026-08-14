@@ -32,23 +32,30 @@
             <PriceSourcesAdmin />
         </div>
     }
-    else
+    else if (_view == GovView.PriceOverrides)
     {
         <div class="flex-1 min-h-0">
             <PriceOverridesAdmin />
         </div>
     }
+    else
+    {
+        <div class="flex-1 min-h-0">
+            <BenchmarkData />
+        </div>
+    }
 </div>
 
 @code {
-    private enum GovView { Providers, Models, PriceSources, PriceOverrides }
+    private enum GovView { Providers, Models, PriceSources, PriceOverrides, BenchmarkData }
 
     private static readonly (GovView View, string Label)[] Views =
     [
         (GovView.Providers, "Providers"),
         (GovView.Models, "Models"),
         (GovView.PriceSources, "Price Sources"),
-        (GovView.PriceOverrides, "Price Overrides")
+        (GovView.PriceOverrides, "Price Overrides"),
+        (GovView.BenchmarkData, "Benchmark Data")
     ];
 
     private GovView _view = GovView.Providers;

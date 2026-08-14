@@ -159,6 +159,47 @@ namespace TotallyHot.ArcRouter.Tests
             Assert.NotNull(provider.GetRequiredService<AgentAsARouter>());
             Assert.NotNull(provider.GetRequiredService<IRoutingPolicy>());
         }
+
+        // --sync-benchmark-data (docs/router/coderouterbench-sqlite-migration-plan.md Phase 6): a bare
+        // boolean flag Main strips before CreateHostBuilder ever sees it, so - unlike --model - this can't
+        // be covered indirectly through CreateHostBuilder; ExtractFlag is exercised directly instead.
+        [Fact]
+        public void ExtractFlag_Present_ReturnsTrueAndStripsTheFlag()
+        {
+            var (present, remaining) = Program.ExtractFlag(["--sync-benchmark-data"], "--sync-benchmark-data");
+
+            Assert.True(present);
+            Assert.Empty(remaining);
+        }
+
+        [Fact]
+        public void ExtractFlag_PresentAmongOtherArgs_StripsOnlyTheFlag()
+        {
+            var (present, remaining) = Program.ExtractFlag(
+                ["--model", "gpt-5.4", "--sync-benchmark-data"], "--sync-benchmark-data");
+
+            Assert.True(present);
+            Assert.Equal(["--model", "gpt-5.4"], remaining);
+        }
+
+        [Fact]
+        public void ExtractFlag_Absent_ReturnsFalseAndLeavesArgsUnchanged()
+        {
+            var args = new[] { "--model", "gpt-5.4" };
+
+            var (present, remaining) = Program.ExtractFlag(args, "--sync-benchmark-data");
+
+            Assert.False(present);
+            Assert.Same(args, remaining);
+        }
+
+        [Fact]
+        public void ExtractFlag_IsCaseInsensitive()
+        {
+            var (present, _) = Program.ExtractFlag(["--Sync-Benchmark-Data"], "--sync-benchmark-data");
+
+            Assert.True(present);
+        }
     }
 }
 

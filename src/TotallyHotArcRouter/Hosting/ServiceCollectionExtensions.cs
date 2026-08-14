@@ -362,7 +362,12 @@ namespace TotallyHot.ArcRouter.Hosting
                     modelAliasOverrideStore: sp.GetRequiredService<ModelAliasOverrideStore>(),
                     usageRollupStore: sp.GetRequiredService<IUsageRollupStore>(),
                     secretWriter: sp.GetRequiredService<ISecretWriter>(),
-                    secretReader: sp.GetRequiredService<ISecretReader>());
+                    secretReader: sp.GetRequiredService<ISecretReader>(),
+                    // Backs the Governance > Benchmark Data panel's gRPC API (Phase 4).
+                    benchmarkDataStatusService: sp.GetRequiredService<BenchmarkDataStatusService>(),
+                    benchmarkFileLedger: sp.GetRequiredService<BenchmarkFileLedger>(),
+                    benchmarkSyncService: sp.GetRequiredService<BenchmarkSyncService>(),
+                    benchmarkSyncOptions: sp.GetRequiredService<IOptions<BenchmarkSyncOptions>>().Value);
             });
 
             return services;

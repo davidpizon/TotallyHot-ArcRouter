@@ -17,7 +17,7 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// connection until decrypted. See docs/router/grpc-migration.md's "Transport" section.
 /// </summary>
 /// <remarks>
-/// Persisted under <c>%LOCALAPPDATA%\TotallyHot.ArcRouter\</c> (the same per-user directory
+/// Persisted under <c>%LOCALAPPDATA%\TotallyHotArcRouter\</c> (the same per-user directory
 /// docs/router/signalr-hub-security.md proposed for this exact purpose) as a password-protected
 /// <c>.pfx</c>, with the random runtime password stored alongside it - so the certificate survives
 /// process restarts instead of being regenerated (and thus needing the client to re-trust a new one)

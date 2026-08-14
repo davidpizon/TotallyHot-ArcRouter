@@ -14,7 +14,8 @@ namespace TotallyHot.ArcRouter.CodeRouterBench;
 /// </param>
 /// <param name="ExpectedRowCount">
 /// The exact data-row count this file must contain, asserted after parsing and before the import
-/// transaction commits - carried over from <c>fetch-coderouterbench.sh</c>'s row-count assertions.
+/// transaction commits - matching the row-count assertions the now-removed
+/// <c>scripts/fetch-coderouterbench.sh</c> used to run.
 /// <see langword="null"/> for files with no fixed row count (<c>models.json</c>, <c>summary.json</c>).
 /// </param>
 public sealed record BenchmarkFileSpec(string FileName, BenchmarkFileKind Kind, string? Split, int? ExpectedRowCount)

@@ -1,3 +1,4 @@
+using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Telemetry;
@@ -25,6 +26,9 @@ public sealed class McpHostedService : IHostedService, IAsyncDisposable
     private readonly IModelPriceLookup _priceLookup;
     private readonly ProviderBudgetStore _providerBudgetStore;
     private readonly ISpendTracker _spendTracker;
+    private readonly BenchmarkDataStatusService _benchmarkDataStatusService;
+    private readonly BenchmarkSyncService _benchmarkSyncService;
+    private readonly BenchmarkSyncOptions _benchmarkSyncOptions;
 
     private McpServer? _server;
 
@@ -40,7 +44,10 @@ public sealed class McpHostedService : IHostedService, IAsyncDisposable
         PriceCatalogIngestionService priceCatalogIngestionService,
         IModelPriceLookup priceLookup,
         ProviderBudgetStore providerBudgetStore,
-        ISpendTracker spendTracker)
+        ISpendTracker spendTracker,
+        BenchmarkDataStatusService benchmarkDataStatusService,
+        BenchmarkSyncService benchmarkSyncService,
+        IOptions<BenchmarkSyncOptions> benchmarkSyncOptions)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(mcpServerLogger);
@@ -51,6 +58,9 @@ public sealed class McpHostedService : IHostedService, IAsyncDisposable
         ArgumentNullException.ThrowIfNull(priceLookup);
         ArgumentNullException.ThrowIfNull(providerBudgetStore);
         ArgumentNullException.ThrowIfNull(spendTracker);
+        ArgumentNullException.ThrowIfNull(benchmarkDataStatusService);
+        ArgumentNullException.ThrowIfNull(benchmarkSyncService);
+        ArgumentNullException.ThrowIfNull(benchmarkSyncOptions);
 
         _logger = logger;
         _mcpServerLogger = mcpServerLogger;
@@ -61,6 +71,9 @@ public sealed class McpHostedService : IHostedService, IAsyncDisposable
         _priceLookup = priceLookup;
         _providerBudgetStore = providerBudgetStore;
         _spendTracker = spendTracker;
+        _benchmarkDataStatusService = benchmarkDataStatusService;
+        _benchmarkSyncService = benchmarkSyncService;
+        _benchmarkSyncOptions = benchmarkSyncOptions.Value;
     }
 
     /// <summary>
@@ -95,6 +108,9 @@ public sealed class McpHostedService : IHostedService, IAsyncDisposable
                 _priceLookup,
                 _providerBudgetStore,
                 _spendTracker,
+                _benchmarkDataStatusService,
+                _benchmarkSyncService,
+                _benchmarkSyncOptions,
                 accessToken,
                 _options.Port);
 

@@ -7,8 +7,8 @@
 
 TotallyHot Arc Router routes coding tasks to different backend models under a
 performance-cost tradeoff. This repository contains the .NET (C#)
-implementation of the router plus a fetch script for the CodeRouterBench data
-used by this project.
+implementation of the router, which syncs the CodeRouterBench data it uses
+into a local SQLite database on demand.
 
 For the full CodeRouterBench dataset and paper, see the
 [Hugging Face dataset](https://huggingface.co/datasets/Lance1573/CodeRouterBench)
@@ -16,16 +16,18 @@ and [arXiv:2606.22902](https://arxiv.org/abs/2606.22902).
 
 ## Data
 
-CodeRouterBench is a task-by-model benchmark release. The Python reproduction
-pipeline that generated it is no longer part of this repository, and the
-tables themselves are fetched on demand rather than checked in - run
-`scripts/fetch-coderouterbench.sh` to restore them into `data/coderouterbench/`
-(see [`../data/README.md`](../data/README.md) for what it fetches and verifies):
+CodeRouterBench is a task-by-model benchmark release published upstream by Zhou
+et al. The tables are synced on demand into `coderouterbench.db` rather than
+checked in - via Governance → Benchmark Data, the `sync_benchmark_data` MCP
+tool, or `TotallyHotArcRouter --sync-benchmark-data`
+(see [`../data/README.md`](../data/README.md) and
+[`router/coderouterbench-sqlite-migration-plan.md`](router/coderouterbench-sqlite-migration-plan.md)
+for what it syncs and verifies):
 
-- `data/coderouterbench/id_results_long.csv`: 9,999 ID tasks x 8 models.
-- `data/coderouterbench/ood176_results_long.csv`: 176 OOD tasks x 8 models.
-- `data/coderouterbench/id_tasks.jsonl` and `ood176_tasks.jsonl`: task metadata.
-- `data/coderouterbench/models.json`: canonical backend models and USD pricing.
+- `benchmark_id_results` (`split='probing'` union `split='id_test'`): 9,999 ID tasks x 8 models.
+- `benchmark_ood_results`: 176 OOD tasks x 8 models.
+- `benchmark_id_tasks` and `benchmark_ood_tasks`: task metadata.
+- `benchmark_models`: canonical backend models and USD pricing.
 
 `outputs/` and `agentic-artifacts/` are not restored yet - see
 [`../data/README.md`](../data/README.md)'s "Not yet restored" section.
@@ -35,9 +37,8 @@ tables themselves are fetched on demand rather than checked in - run
 ```text
 src/TotallyHotArcRouter*/             .NET router implementation, GUI, sandbox, tests
 docs/                           Design docs and handbook
-scripts/                        Data-fetch scripts (not a build/test pipeline)
 
-data/coderouterbench/           CodeRouterBench tables, fetched on demand (gitignored)
+%LOCALAPPDATA%\TotallyHot.ArcRouter\coderouterbench.db   CodeRouterBench tables, synced on demand
 ```
 
 ## Citation

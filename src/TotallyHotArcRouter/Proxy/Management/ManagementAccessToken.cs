@@ -11,7 +11,7 @@ namespace TotallyHot.ArcRouter.Proxy.Management;
 /// one on every launch.
 /// </summary>
 /// <remarks>
-/// Persisted under <c>%LOCALAPPDATA%\TotallyHot.ArcRouter\management-token.txt</c>, the same per-user directory
+/// Persisted under <c>%LOCALAPPDATA%\TotallyHotArcRouter\management-token.txt</c>, the same per-user directory
 /// the telemetry certificate uses. Unlike the certificate, this file is access-restricted on write - a
 /// bearer token is the whole credential (there is no separate password protecting it the way the
 /// certificate's <c>.pfx</c> has), so an ACL that keeps other local accounts from reading it is the only
@@ -31,7 +31,7 @@ public static class ManagementAccessToken
     /// </summary>
     /// <param name="path">
     /// The token file path, or <see langword="null"/> for the default
-    /// <c>%LOCALAPPDATA%\TotallyHot.ArcRouter\management-token.txt</c>.
+    /// <c>%LOCALAPPDATA%\TotallyHotArcRouter\management-token.txt</c>.
     /// </param>
     public static string GetOrCreate(string? path = null)
     {
@@ -88,7 +88,7 @@ public static class ManagementAccessToken
         "TotallyHot.ArcRouter.ManagementAccessToken." + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(tokenPath)))[..32];
 
     /// <summary>
-    /// Gets the default token file path (<c>%LOCALAPPDATA%\TotallyHot.ArcRouter\management-token.txt</c>), the
+    /// Gets the default token file path (<c>%LOCALAPPDATA%\TotallyHotArcRouter\management-token.txt</c>), the
     /// same per-user directory <see cref="TotallyHot.ArcRouter.Telemetry.TelemetryTlsCertificate"/> uses.
     /// </summary>
     public static string DefaultPath() =>

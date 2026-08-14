@@ -20,37 +20,19 @@ public static class CodeRouterBenchCsvReader
         };
 
     /// <summary>
-    /// Reads every data row of <paramref name="csvPath"/>, mapping its <c>dimension</c> column through
-    /// <see cref="NormalizeDimension"/> and its <c>model</c> column through
+    /// Reads every data row from an already-open <paramref name="reader"/>, mapping its <c>dimension</c>
+    /// column through <see cref="NormalizeDimension"/> and its <c>model</c> column through
     /// <see cref="ModelNameCanonicalizer.Canonicalize"/>, so callers can key results by
     /// <see cref="RouterDimension"/>'s vocabulary and by a configured <c>ModelName</c> directly - the
     /// released tables spell several models differently from the router's own configuration
     /// (<c>MiniMax-M2.7</c> vs <c>minimax-m2.7</c>, <c>claude-opus-4-6</c> vs <c>claude-opus-4.6</c>).
-    /// </summary>
-    /// <param name="csvPath">Path to a <c>*_results_long.csv</c> file.</param>
-    /// <exception cref="FormatException">
-    /// Thrown when the header is missing a required <c>task_id</c>, <c>dimension</c>, <c>model</c>, or
-    /// <c>score</c> column, or when a data row is short, has a non-numeric score, or has an empty model.
-    /// </exception>
-    public static IReadOnlyList<CodeRouterBenchResultRow> Read(string csvPath)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(csvPath);
-
-        using var reader = new StreamReader(csvPath);
-        return Read(reader, csvPath);
-    }
-
-    /// <summary>
-    /// Reads every data row from an already-open <paramref name="reader"/> - what
-    /// <see cref="BenchmarkSyncService"/> uses so a freshly downloaded CSV can be parsed straight from
-    /// its in-memory bytes without ever touching a temp file. Column mapping and validation are
-    /// otherwise identical to the file-path overload.
+    /// Deliberately has no file-path overload (docs/router/coderouterbench-sqlite-migration-plan.md's
+    /// ground rules): the database is the only source once a sync has run, so this class exists to parse
+    /// bytes - typically a freshly downloaded file's, or a stream over a test fixture - never to open a
+    /// file on disk itself.
     /// </summary>
     /// <param name="reader">An open reader positioned at the start of the CSV, header row included.</param>
-    /// <param name="sourceLabel">
-    /// A label identifying the source in exception messages (e.g. the originating file name), in place
-    /// of the file path the path-based overload reports.
-    /// </param>
+    /// <param name="sourceLabel">A label identifying the source in exception messages (e.g. the originating file name).</param>
     /// <exception cref="FormatException">
     /// Thrown when the header is missing a required <c>task_id</c>, <c>dimension</c>, <c>model</c>, or
     /// <c>score</c> column, or when a data row is short, has a non-numeric score, or has an empty model.

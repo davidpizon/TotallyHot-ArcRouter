@@ -3,7 +3,7 @@ using TotallyHot.ArcRouter.Gui.Telemetry;
 using Grpc.Core;
 using Grpc.Core.Interceptors;
 using Grpc.Core.Testing;
-using FluentAssertions;
+using AwesomeAssertions;
 
 namespace TotallyHot.ArcRouter.Gui.Telemetry.Tests;
 

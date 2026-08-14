@@ -76,7 +76,7 @@ public sealed class ManagementTokenReaderTests
     [Fact]
     public void TryRead_NoPathOverride_UsesDefaultLocalAppDataLocation()
     {
-        // No override means the real %LOCALAPPDATA%\TotallyHot.ArcRouter\management-token.txt is consulted; this
+        // No override means the real %LOCALAPPDATA%\TotallyHotArcRouter\management-token.txt is consulted; this
         // just exercises the default-path branch without asserting a specific outcome (the file may or may
         // not exist on the machine running the test).
         var token = ManagementTokenReader.TryRead();

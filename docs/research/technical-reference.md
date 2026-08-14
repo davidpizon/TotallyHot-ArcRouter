@@ -1,5 +1,12 @@
 # Agentic Model Routing for Coding Tasks
-**arXiv:2606.22902v3 — Full Technical Reference**
+**arXiv:2606.22902v3 — Implementation Reading Notes**
+
+> **Third-party work.** This document summarizes a paper written by Pengfei Zhou et al. (see Authors
+> below) as an implementation aid for TotallyHot Arc Router. It is **not** the work of this project,
+> and it is not a substitute for the paper. The paper remains the copyright of its authors and is
+> distributed under arXiv's own license terms; read the original at
+> <https://arxiv.org/abs/2606.22902>. Figures, tables, and derivations reproduced here are
+> attributed to that paper throughout.
 
 ---
 

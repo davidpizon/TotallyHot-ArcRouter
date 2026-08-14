@@ -81,18 +81,17 @@ Verified against the code:
   carries only ~27% of the oracle-choice entropy - the other ~73% is exactly what this task-keyed memory
   exists to capture, once Phase L connects it to a decision.
 - **No oracle, no regret, no baselines.** Nothing computes `R_ij`, `CumReg`, `AvgPerf`, or `Perf/$`.
-- **The benchmark corpus is restored, fetch-on-demand (Phase K shipped).** `scripts/fetch-coderouterbench.sh`
-  pulls the eight canonical CodeRouterBench tables from
+- **The benchmark corpus is restored, sync-on-demand into SQLite (Phase K shipped, superseded by Phase
+  K2, also shipped).** Governance → Benchmark Data, the `sync_benchmark_data` MCP tool, or
+  `--sync-benchmark-data` sync the eight canonical CodeRouterBench tables from
   [`huggingface.co/datasets/Lance1573/CodeRouterBench`](https://huggingface.co/datasets/Lance1573/CodeRouterBench)
-  into `data/coderouterbench/` (gitignored, not checked in - see `data/README.md`), verifying row counts
-  against the counts below and failing loudly on mismatch.
-  [`TotallyHotArcRouter/CodeRouterBench/CodeRouterBenchCsvReader.cs`](TotallyHotArcRouter/CodeRouterBench/CodeRouterBenchCsvReader.cs)
-  and
-  [`TotallyHotArcRouter/CodeRouterBench/DimensionModelScoreMatrix.cs`](TotallyHotArcRouter/CodeRouterBench/DimensionModelScoreMatrix.cs)
-  load the probing split into a dimension x model score matrix - the `dim_best` voter's future backing
-  store (Phase L). `outputs/` and `agentic-artifacts/`, which the same upstream dataset also publishes,
-  are not restored; nothing in Phases K/L/N as currently scoped reads them (`data/README.md`'s "Not yet
-  restored" section).
+  into `coderouterbench.db` (not checked in - see `data/README.md`), verifying each file's git blob
+  SHA-1 checksum and row count and failing loudly on mismatch.
+  [`TotallyHotArcRouter/CodeRouterBench/DimensionModelScoreMatrix.cs`](TotallyHotArcRouter/CodeRouterBench/DimensionModelScoreMatrix.cs)'s
+  `FromDatabase` loads a split into a dimension x model score matrix - the `dim_best` voter's future
+  backing store (Phase L). `outputs/` and `agentic-artifacts/`, which the same upstream dataset also
+  publishes, are not restored; nothing in Phases K/L/N as currently scoped reads them (`data/README.md`'s
+  "Not yet restored" section).
 
 ### Relationship to `utility-model-routing.md`
 
@@ -149,7 +148,12 @@ constants that happen not to match.
 - Exit: Zero literal dimension strings outside the contract type. Every verifier score written on request
   *N* propagates to influence model selection on request *N+1*.
 
-### Phase K: Restore CodeRouterBench — **shipped**
+### Phase K: Restore CodeRouterBench — **shipped, superseded by Phase K2**
+
+Historical record of the original fetch-to-disk shape. Phase K2 below replaced every mechanism this
+section describes (`scripts/fetch-coderouterbench.sh`, `data/coderouterbench/`,
+`CodeRouterBenchCsvReader`'s file-path entry point) with the SQLite sync; nothing in the codebase still
+does what this section says. Left as-is for the reasoning trail, not as current behavior.
 
 Prerequisite for the DimensionBest and logreg voters (Phase L) and the entire regret harness (Phase N).
 
@@ -190,17 +194,19 @@ Prerequisite for the DimensionBest and logreg voters (Phase L) and the entire re
   so no rule can generate it. `ConfigModelIdentityResolver` shares the same normalization stages, applied
   one at a time to keep its `ResolutionRung` ladder's approximate-match labeling intact.
 
-### Phase K2: Move CodeRouterBench into SQLite — **planned, precedes Phase L**
+### Phase K2: Move CodeRouterBench into SQLite — **shipped, precedes Phase L**
 
-Supersedes Phase K's fetch-to-disk model. The corpus moves out of `data/coderouterbench/` and into its
+Supersedes Phase K's fetch-to-disk model. The corpus moved out of `data/coderouterbench/` and into its
 own `coderouterbench.db`, synchronized on demand from the same Hugging Face dataset and checked for
-staleness at every application start against the git blob SHA-1 the dataset publishes. A new
-Governance > Benchmark Data pane exposes the state as a single button ("Current" / "Update" /
-"Check Failed"), with an MCP tool and a `--sync-benchmark-data` CLI flag replacing
-`scripts/fetch-coderouterbench.sh` for headless use.
+staleness at every application start against the git blob SHA-1 the dataset publishes. A Governance >
+Benchmark Data pane exposes the state as a single button ("Current" / "Update" / "Check Failed"), with
+`sync_benchmark_data`/`get_benchmark_data_status` MCP tools and a `--sync-benchmark-data` CLI flag
+replacing the now-removed `scripts/fetch-coderouterbench.sh` for headless use.
 
 Sequenced before Phase L on purpose: Phase L's `dim_best` voter and Phase N's regret harness are this
-data's consumers, and pointing them at a file loader first would mean writing that wiring twice.
+data's consumers, and pointing them at a file loader first would have meant writing that wiring twice.
+`DimensionModelScoreMatrix.FromDatabase` is that backing store's read path; `FromRows` remains for
+in-memory aggregation (e.g. tests) but nothing production reads a file path anymore.
 
 `id_results_long.csv` and `id_tasks.jsonl` are derived rather than stored — each is the verified exact
 union of its probing and test counterparts, discriminated by the `split` column already present in the

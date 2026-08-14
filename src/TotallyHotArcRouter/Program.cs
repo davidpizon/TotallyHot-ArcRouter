@@ -1,9 +1,12 @@
+using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.Hosting;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Serilog;
 
 namespace TotallyHot.ArcRouter;
@@ -27,13 +30,35 @@ public static class Program
 
         try
         {
-            var host = CreateHostBuilder(args).Build();
+            // Headless/CI replacement for scripts/fetch-coderouterbench.sh
+            // (docs/router/coderouterbench-sqlite-migration-plan.md Phase 6): stripped before
+            // CreateHostBuilder for the same reason --model is, so it never reaches the command-line
+            // configuration provider as a stray "sync-benchmark-data" key.
+            var (runBenchmarkDataSync, remainingArgs) = ExtractFlag(args, "--sync-benchmark-data");
+
+            // `using` (not a bare local) so the sync path below, which returns without ever calling
+            // RunAsync, still disposes the container and everything singleton-scoped in it - SQLite
+            // connections and HttpClient handlers among them - rather than leaving that to process exit.
+            using var host = CreateHostBuilder(remainingArgs).Build();
+
+            if (runBenchmarkDataSync)
+            {
+                await RunBenchmarkDataSyncAsync(host.Services);
+                return;
+            }
+
             Log.Information("TotallyHot.ArcRouter host created.");
             await host.RunAsync();
         }
         catch (Exception ex)
         {
             Log.Fatal(ex, "TotallyHot.ArcRouter host terminated unexpectedly.");
+
+            // Without this the process exits 0 after a fatal error, reporting success to whatever launched
+            // it. That matters most on the --sync-benchmark-data path, whose own partial-failure branch
+            // already sets this: a CI script checking the exit code would otherwise see an exception-killed
+            // sync as a clean one. Assigned rather than returned so the finally below still flushes the log.
+            Environment.ExitCode = 1;
         }
         finally
         {
@@ -121,6 +146,68 @@ public static class Program
     /// </summary>
     private static string[] RemoveAt(string[] args, int index) =>
         args.Where((_, i) => i != index).ToArray();
+
+    /// <summary>
+    /// Extracts a bare boolean flag (no value) from <paramref name="args"/>, returning whether it was
+    /// present and the remaining arguments with it removed. Mirrors <see cref="ExtractModelArg"/>'s
+    /// stripping behavior for the same reason: an unstripped flag would otherwise bind to a stray
+    /// top-level configuration key via <see cref="Host.CreateDefaultBuilder(string[])"/>'s command-line
+    /// provider. Internal (not private) so <c>ProgramTests</c> can exercise the parsing directly - unlike
+    /// <see cref="ExtractModelArg"/>, this can't be covered indirectly through <see cref="CreateHostBuilder"/>,
+    /// since <see cref="Main"/> strips the flag before <see cref="CreateHostBuilder"/> ever sees it.
+    /// </summary>
+    internal static (bool Present, string[] RemainingArgs) ExtractFlag(string[] args, string flagName)
+    {
+        var index = Array.FindIndex(args, arg => string.Equals(arg, flagName, StringComparison.OrdinalIgnoreCase));
+        return index < 0 ? (false, args) : (true, RemoveAt(args, index));
+    }
+
+    /// <summary>
+    /// Runs one CodeRouterBench corpus sync to completion and logs a per-file summary, replacing
+    /// <c>scripts/fetch-coderouterbench.sh</c> for headless and CI machines
+    /// (docs/router/coderouterbench-sqlite-migration-plan.md Phase 6). Does not start Kestrel or any
+    /// hosted service - <paramref name="services"/> is resolved directly from the built (but not started)
+    /// host, and the process exits once the sync completes. Sets a non-zero
+    /// <see cref="Environment.ExitCode"/> when any file failed, so a CI script can detect it.
+    /// </summary>
+    private static async Task RunBenchmarkDataSyncAsync(IServiceProvider services)
+    {
+        var logger = services.GetRequiredService<ILogger<BenchmarkSyncService>>();
+        var database = services.GetRequiredService<BenchmarkDatabase>();
+        database.EnsureCreated();
+
+        var syncService = services.GetRequiredService<BenchmarkSyncService>();
+        var datasetRef = services.GetRequiredService<IOptions<BenchmarkSyncOptions>>().Value.DatasetRef;
+
+        var result = await syncService.SyncAsync(datasetRef, progress: null, CancellationToken.None);
+
+        var failed = result.Files.Where(file => !file.Succeeded).ToList();
+        foreach (var file in result.Files)
+        {
+            if (file.Succeeded)
+            {
+                logger.LogInformation("Synced {FileName}: {RowCount} row(s).", file.FileName, file.RowCount);
+            }
+            else
+            {
+                logger.LogError("Failed to sync {FileName}: {Reason}", file.FileName, file.ErrorMessage);
+            }
+        }
+
+        if (failed.Count > 0)
+        {
+            logger.LogError(
+                "CodeRouterBench sync completed with {FailedCount} of {TotalCount} file(s) failed at commit {RepoCommit}.",
+                failed.Count, result.Files.Count, result.RepoCommit);
+            Environment.ExitCode = 1;
+        }
+        else
+        {
+            logger.LogInformation(
+                "CodeRouterBench sync completed: {FileCount} file(s) synced at commit {RepoCommit}.",
+                result.Files.Count, result.RepoCommit);
+        }
+    }
 }
 
 

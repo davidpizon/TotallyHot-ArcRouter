@@ -19,11 +19,10 @@ public interface ISessionIdResolver
 }
 
 /// <summary>
-/// Default <see cref="ISessionIdResolver"/>. Mirrors the session-id resolution convention already
-/// used by this repo's <c>claude-code-router</c> (<c>resolveSessionId</c> in
-/// <c>claude-code-router/src/server/gateway/claude-code-router-plugin.ts</c>) and
-/// <c>request-log-store.ts</c>'s <c>extractSessionIdFromPayload</c>, rather than inventing a new
-/// convention: real IDE/CLI clients already send one of these.
+/// Default <see cref="ISessionIdResolver"/>. Follows the session-id resolution convention
+/// established by the <c>claude-code-router</c> project rather than inventing a new one: real
+/// IDE/CLI clients already send one of these headers or body fields, so matching the existing
+/// convention is what makes them work unchanged.
 /// </summary>
 public sealed class SessionIdResolver : ISessionIdResolver
 {

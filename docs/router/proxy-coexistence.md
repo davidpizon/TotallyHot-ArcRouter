@@ -53,13 +53,24 @@ flowchart TD
 
 **Database Storage Locations:**
 
-All TotallyHotArcRouter data is stored in an agent-neutral directory structure:
+TotallyHotArcRouter data is stored in an agent-neutral directory structure. Note that the defaults are
+currently **split across two sibling folders** - files written directly by the service and GUI use the
+`TotallyHotArcRouter` folder, while the paths bound through `StorageOptions`/`EmbeddingOptions`
+(`Storage:DatabasePath`, `Storage:BenchmarkDatabasePath`, `Embedding:ModelCacheDirectory`) default to
+`TotallyHot.ArcRouter`. Both are listed below so operators can find every file:
 
-| OS | TotallyHotArcRouter Data Directory |
-|-----|---|
-| **Windows** | `%APPDATA%\TotallyHotArcRouter\` |
-| **macOS** | `~/.acrouter/` |
-| **Linux** | `~/.acrouter/` |
+| OS | Service/GUI data (proxy snapshot, certs, management token, GUI settings) | `StorageOptions`/`EmbeddingOptions` defaults (`agent_telemetry.db`, `coderouterbench.db`, model cache) |
+|-----|---|---|
+| **Windows** | `%LOCALAPPDATA%\TotallyHotArcRouter\` | `%LOCALAPPDATA%\TotallyHot.ArcRouter\` |
+| **macOS** | `~/Library/Application Support/TotallyHotArcRouter/` | `~/Library/Application Support/TotallyHot.ArcRouter/` |
+| **Linux** | `~/.local/share/TotallyHotArcRouter/` | `~/.local/share/TotallyHot.ArcRouter/` |
+
+Every row above is `Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)` plus the
+folder name, so the paths follow whatever that API resolves to per platform rather than being hardcoded.
+The macOS row is `~/Library/Application Support`, not the `~/.local/share` it would have been on .NET 7
+and earlier: [.NET 8 changed `LocalApplicationData` on macOS to `NSApplicationSupportDirectory`](https://learn.microsoft.com/dotnet/core/compatibility/core-libraries/8.0/getfolderpath-unix),
+and this project targets .NET 10. Linux is unchanged - still `XDG_DATA_HOME`, defaulting to
+`~/.local/share`.
 
 **Claude Code Router (TypeScript/Electron) - Databases:**
 - `config.sqlite` – Application configuration and state
