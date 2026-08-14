@@ -24,6 +24,7 @@ public sealed class BenchmarkDataStore : IDisposable
         string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
     {
         _logger = logger;
+        ServerAddress = serverAddress;
         var client = new BenchmarkDataAdminClient(serverAddress);
         _client = client;
         _ownedClient = client;
@@ -34,13 +35,23 @@ public sealed class BenchmarkDataStore : IDisposable
     /// client. The seam tests use to drive the store without a live proxy; the caller owns the client's
     /// lifetime.
     /// </summary>
-    public BenchmarkDataStore(IBenchmarkDataAdminClient client, ILogger<BenchmarkDataStore>? logger = null)
+    public BenchmarkDataStore(
+        IBenchmarkDataAdminClient client,
+        ILogger<BenchmarkDataStore>? logger = null,
+        string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
     {
         ArgumentNullException.ThrowIfNull(client);
         _client = client;
         _ownedClient = null;
         _logger = logger;
+        ServerAddress = serverAddress;
     }
+
+    /// <summary>
+    /// The proxy's gRPC endpoint this store talks to, so the UI can report the actual address it tried
+    /// rather than assuming <see cref="TelemetryChannelFactory.DefaultServerAddress"/>.
+    /// </summary>
+    public string ServerAddress { get; }
 
     /// <summary>The corpus's last-known freshness status, or <see langword="null"/> before the first load.</summary>
     public BenchmarkDataStatusInfo? Status { get; private set; }

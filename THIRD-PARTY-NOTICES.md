@@ -8,12 +8,14 @@ TotallyHot Arc Router itself is licensed under the GNU Affero General Public Lic
 (see [`LICENSE.exceptions.md`](LICENSE.exceptions.md)). Nothing in this file alters the license of
 this project; each component below remains under its own license.
 
-**License summary of everything shipped or referenced:** MIT, Apache-2.0, and BSD-3-Clause only, with
-one exception - a single build- and test-time only package
-(`Microsoft.VisualStudio.Azure.Containers.Tools.Targets`) is under the Microsoft Software License
-Terms; it supplies MSBuild targets, ships in no distributed artifact, and is not redistributable as a
-standalone offering. No copyleft (GPL/LGPL/AGPL/MPL/EPL) dependency is used, so no third-party
-license compels the licensing choice made for this project.
+**License summary of everything shipped:** MIT, Apache-2.0, and BSD-3-Clause only, with one exception -
+a single build- and test-time only package (`Microsoft.VisualStudio.Azure.Containers.Tools.Targets`) is
+under the Microsoft Software License Terms; it supplies MSBuild targets, ships in no distributed
+artifact, and is not redistributable as a standalone offering. No copyleft (GPL/LGPL/AGPL/MPL/EPL)
+dependency is used, so no third-party license compels the licensing choice made for this project.
+Separately, §2 below covers Microsoft platform prerequisites (WebView2, Windows App SDK) that the
+Windows GUI requires at runtime but that this project does not redistribute; those remain under
+Microsoft's own terms and are outside this shipped-component summary.
 
 ---
 

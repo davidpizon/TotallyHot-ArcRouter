@@ -19,7 +19,7 @@
                 <Icon Name="alert-triangle" Size="14" /> Router unreachable
             </div>
             <div class="text-xs text-slate-400">
-                Could not reach <span class="font-mono">@TelemetryChannelFactory.DefaultServerAddress</span>. Is the proxy running?
+                Could not reach <span class="font-mono">@Store.ServerAddress</span>. Is the proxy running?
             </div>
             @if (!string.IsNullOrEmpty(Store.LastError))
             {
