@@ -226,12 +226,20 @@ public sealed class BenchmarkDataAdminClient : IBenchmarkDataAdminClient, IDispo
                     wire.Progress.HasError ? wire.Progress.Error : null),
                 FinalStatus: null);
 
-    /// <summary>Maps the wire freshness state onto the client's enum.</summary>
+    /// <summary>
+    /// Maps the wire freshness state onto the client's enum. Every defined value is mapped explicitly and
+    /// anything else - <c>BENCHMARK_DATA_STATE_UNSPECIFIED</c>, which the service emits for a state it
+    /// cannot map, or a value added to the contract after this build - degrades to
+    /// <see cref="BenchmarkDataAdminState.CheckFailed"/>: the panel turns an unknown freshness into a
+    /// recheck, whereas defaulting to <see cref="BenchmarkDataAdminState.Update"/> would let the operator
+    /// start a blind multi-hundred-megabyte sync off a state nobody actually asserted.
+    /// </summary>
     private static BenchmarkDataAdminState MapState(Contract.BenchmarkDataState state) => state switch
     {
         Contract.BenchmarkDataState.Current => BenchmarkDataAdminState.Current,
+        Contract.BenchmarkDataState.Update => BenchmarkDataAdminState.Update,
         Contract.BenchmarkDataState.CheckFailed => BenchmarkDataAdminState.CheckFailed,
-        _ => BenchmarkDataAdminState.Update,
+        _ => BenchmarkDataAdminState.CheckFailed,
     };
 
     /// <summary>Maps the wire sync stage onto the client's enum.</summary>

@@ -49,7 +49,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 | Serilog.Sinks.Console | 6.1.1 | Copyright Serilog Contributors |
 | Grpc.AspNetCore | 2.83.0 | Copyright The gRPC Authors |
 | Grpc.Net.Client | 2.83.0 | Copyright The gRPC Authors |
-| Grpc.Tools (build-time codegen) | 2.83.0 | Copyright The gRPC Authors |
 | AWSSDK.BedrockRuntime | 4.0.101.1 | Copyright Amazon.com, Inc. or its affiliates |
 | ModelContextProtocol | 2.1.0 | Copyright the ModelContextProtocol C# SDK authors |
 | ModelContextProtocol.AspNetCore | 2.1.0 | Copyright the ModelContextProtocol C# SDK authors |
@@ -129,6 +128,7 @@ no obligation on downstream recipients of the application.
 
 | Component | Version | License |
 |---|---|---|
+| Grpc.Tools (protobuf/gRPC codegen; `PrivateAssets=all`, so it flows to no consumer and ships in no artifact) | 2.83.0 | Apache-2.0 |
 | xunit.v3 | 3.2.2 | Apache-2.0 |
 | xunit.runner.visualstudio | 3.1.5 | Apache-2.0 |
 | Grpc.Core.Testing | 2.46.6 | Apache-2.0 |

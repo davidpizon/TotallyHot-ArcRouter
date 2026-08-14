@@ -27,6 +27,7 @@ public sealed class BenchmarkDataStore : IDisposable
         var client = new BenchmarkDataAdminClient(serverAddress);
         _client = client;
         _ownedClient = client;
+        ServerAddress = serverAddress;
     }
 
     /// <summary>
@@ -41,6 +42,14 @@ public sealed class BenchmarkDataStore : IDisposable
         _ownedClient = null;
         _logger = logger;
     }
+
+    /// <summary>
+    /// The proxy endpoint this store's client talks to, so the unreachable state can name the address it
+    /// actually failed to reach rather than assuming the default. <see langword="null"/> when constructed
+    /// over a caller-supplied client, whose endpoint this store has no way to know - the panel falls back
+    /// to a generic message there instead of naming an endpoint that may be wrong.
+    /// </summary>
+    public string? ServerAddress { get; }
 
     /// <summary>The corpus's last-known freshness status, or <see langword="null"/> before the first load.</summary>
     public BenchmarkDataStatusInfo? Status { get; private set; }
