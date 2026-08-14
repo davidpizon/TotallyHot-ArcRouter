@@ -197,7 +197,10 @@ Notes on the shape:
 - **`benchmark_models.canonical_key`** is populated through `Models/ModelNameCanonicalizer.cs` on ingest,
   matching how `DimensionModelScoreMatrix` already canonicalizes on both ingest and lookup. The released
   spellings (`MiniMax-M2.7`, `claude-opus-4-6`) differ from the router's configured `ModelName`
-  vocabulary, and this is what lets a lookup in either spelling resolve.
+  vocabulary, and this is what lets a lookup in either spelling resolve. Canonicalization normalizes
+  *spelling* only — a dated snapshot such as `claude-opus-4.6-20250929` stays distinct from its rolling
+  base model rather than merging into one score cell; see
+  [`model-identity-canonicalization.md`](model-identity-canonicalization.md).
 - **Indexes:** `benchmark_id_results(dimension, model)` for the `dim_best` matrix build,
   `benchmark_id_results(split)` for split-scoped reads, and `(task_id)` on both result tables.
 - **No migration framework.** `EnsureCreated()` runs `CREATE TABLE IF NOT EXISTS`, with additive column

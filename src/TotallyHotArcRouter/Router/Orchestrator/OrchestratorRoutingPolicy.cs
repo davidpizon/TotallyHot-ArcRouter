@@ -131,13 +131,13 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
                 continue;
             }
 
-            // ModelNameCanonicalizer.CanonicalizeSpelling (not Canonicalize) - a dated snapshot pins a
-            // specific, non-interchangeable release, so it must not collapse onto its base model here the
-            // way Canonicalize deliberately does for benchmark dataset ids.
+            // Canonicalize tolerates cosmetic spelling differences (casing, "." vs "-" version
+            // punctuation) but keeps a dated snapshot distinct from its rolling base model, so a voter
+            // that picks a specific pinned release is never silently credited to a different one.
             var candidateMatch = context.Candidates.FirstOrDefault(candidate =>
                 string.Equals(
-                    ModelNameCanonicalizer.CanonicalizeSpelling(candidate.ModelName),
-                    ModelNameCanonicalizer.CanonicalizeSpelling(vote.ModelName!),
+                    ModelNameCanonicalizer.Canonicalize(candidate.ModelName),
+                    ModelNameCanonicalizer.Canonicalize(vote.ModelName!),
                     StringComparison.Ordinal));
             if (candidateMatch is null)
             {
@@ -149,9 +149,9 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
                 continue;
             }
 
-            // CanonicalizeSpelling's output is a comparison key, not a name it would be safe to store or
-            // return - use the matched candidate's own configured ModelName for every key written below
-            // so CandidateScores stays consistent with context.Candidates and SelectedModel when enumerated.
+            // Canonicalize's output is a comparison key, not a name it would be safe to store or return -
+            // use the matched candidate's own configured ModelName for every key written below so
+            // CandidateScores stays consistent with context.Candidates and SelectedModel when enumerated.
             var canonicalModelName = candidateMatch.ModelName;
 
             if (!double.IsFinite(vote.Confidence))
