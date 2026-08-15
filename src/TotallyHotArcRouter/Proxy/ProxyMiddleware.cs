@@ -90,6 +90,11 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     private readonly ToolCallNormalizerFactory _toolCallNormalizerFactory;
     private readonly Router.Embeddings.PendingTaskEmbeddingCache? _pendingTaskEmbeddingCache;
 
+    // The rate the router's own tokens are charged at (see RoutingOptions.SelfHostedRouterPricePerMillionTokens).
+    // Read once at construction rather than per request: it is a static amortization figure, not a catalog
+    // price that a background ingestion cycle can refresh underneath us.
+    private readonly decimal _selfHostedRouterPricePerMillionTokens;
+
     // True only when no factory was supplied and this instance built its own fallback - in that case
     // ProxyMiddleware is the sole owner of that factory's lifetime and must dispose it (it caches AWS SDK
     // clients and implements IDisposable; see BedrockRuntimeClientFactory's remarks). When a factory is
@@ -143,6 +148,14 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// <see cref="RequestInterceptor.ResolveModelRouteAsync"/> runs before it. Defaults to
     /// <see langword="null"/> (no entries recorded), so existing callers/tests are unaffected.
     /// </param>
+    /// <param name="routingOptions">
+    /// Supplies <see cref="Models.RoutingOptions.SelfHostedRouterPricePerMillionTokens"/>, the rate the
+    /// router's own token consumption is charged at when published on
+    /// <see cref="Telemetry.RoutingTelemetryEvent.RouterCostUsd"/>. When <see langword="null"/> (direct
+    /// construction outside DI) the compiled-in default applies, so the figure is still real rather than
+    /// suppressed - unlike the optional collaborators above, there is no "unavailable" state for a static
+    /// amortization rate.
+    /// </param>
     public ProxyMiddleware(
         ILogger<ProxyMiddleware> logger,
         RequestInterceptor interceptor,
@@ -163,7 +176,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         ToolCallNormalizerFactory? toolCallNormalizerFactory = null,
         IRateLimitHeaderCapture? rateLimitCapture = null,
         IUsageLedger? usageLedger = null,
-        Router.Embeddings.PendingTaskEmbeddingCache? pendingTaskEmbeddingCache = null)
+        Router.Embeddings.PendingTaskEmbeddingCache? pendingTaskEmbeddingCache = null,
+        IOptions<Models.RoutingOptions>? routingOptions = null)
     {
         _logger = logger;
         _interceptor = interceptor;
@@ -188,6 +202,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         _circuitBreaker = circuitBreaker ?? new CircuitBreaker();
         _toolCallNormalizerFactory = toolCallNormalizerFactory ?? new ToolCallNormalizerFactory();
         _pendingTaskEmbeddingCache = pendingTaskEmbeddingCache;
+        _selfHostedRouterPricePerMillionTokens =
+            routingOptions?.Value.SelfHostedRouterPricePerMillionTokens ?? new Models.RoutingOptions().SelfHostedRouterPricePerMillionTokens;
 
         if (bedrockClientFactory is null)
         {
@@ -411,7 +427,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // exactly like an HTTP outage does.
             if (translator is IBedrockPayloadTranslator bedrockTranslator)
             {
-                if (await InvokeBedrockAsync(context, route, bedrockTranslator, rewrittenBody, requestedModelName, isFallback, hasNextCandidate, nextProviderDiffers, resolution.TaskEmbedding))
+                if (await InvokeBedrockAsync(context, route, bedrockTranslator, rewrittenBody, requestedModelName, isFallback, hasNextCandidate, nextProviderDiffers, resolution.TaskEmbedding, resolution.RouterTokens))
                 {
                     return;
                 }
@@ -809,7 +825,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                     // ResponseTextExtractor pick the right parser per request instead of assuming one shape per
                     // provider, which broke once "anthropic" became dual-mode.
                     var telemetryShapeProvider = translator is not null ? "openai" : route.Provider;
-                    await PublishTelemetryAsync(context, route, requestedModelName, isFallback, telemetryShapeProvider, rewrittenBody, capturedResponseBytes, nativeResponseBytes, isStreaming, latencyToHeadersMs, totalDurationMs, statusCode, context.RequestAborted, responseMessage.Headers, tailScanner, resolution.TaskEmbedding);
+                    await PublishTelemetryAsync(context, route, requestedModelName, isFallback, telemetryShapeProvider, rewrittenBody, capturedResponseBytes, nativeResponseBytes, isStreaming, latencyToHeadersMs, totalDurationMs, statusCode, context.RequestAborted, responseMessage.Headers, tailScanner, resolution.TaskEmbedding, resolution.RouterTokens);
                 }
                 catch (Exception ex)
                 {
@@ -953,13 +969,14 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// different provider, since a same-provider backup shares the identical broken credential.
     /// </param>
     /// <param name="taskEmbedding">The request's task embedding (see <see cref="ModelRouteResolutionResult.TaskEmbedding"/>), forwarded to <see cref="PublishTelemetryAsync"/>.</param>
+    /// <param name="routerTokens">The router's own token consumption for this request (see <see cref="ModelRouteResolutionResult.RouterTokens"/>), forwarded to <see cref="PublishTelemetryAsync"/>.</param>
     /// <returns>
     /// <see langword="true"/> if a response was written to the client (success, or a failure with no
     /// eligible next candidate) - the caller's cascade is over. <see langword="false"/> if the SDK call
     /// failed before anything was written and a next candidate should be tried - the caller should
     /// <c>continue</c> its loop.
     /// </returns>
-    private async Task<bool> InvokeBedrockAsync(HttpContext context, ResolvedModelRoute route, IBedrockPayloadTranslator translator, byte[] rewrittenBody, string requestedModelName, bool isFallback, bool hasNextCandidate, bool nextProviderDiffers, float[]? taskEmbedding)
+    private async Task<bool> InvokeBedrockAsync(HttpContext context, ResolvedModelRoute route, IBedrockPayloadTranslator translator, byte[] rewrittenBody, string requestedModelName, bool isFallback, bool hasNextCandidate, bool nextProviderDiffers, float[]? taskEmbedding, int routerTokens)
     {
         var circuitTarget = CircuitBreakerTargetKey.FromRoute(route);
         var nativeRequestBody = translator.TranslateRequest(rewrittenBody);
@@ -1106,7 +1123,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // its streaming chunks aren't SSE-framed, so the same capture approach doesn't apply. Always
             // null here - telemetry falls back to parsing the translated "openai"-shaped bytes, unchanged
             // from before this plan.
-            await PublishTelemetryAsync(context, route, requestedModelName, isFallback, "openai", rewrittenBody, capturedResponseBytes, nativeResponseBytes: null, isStreamingRequest, latencyToHeadersMs, totalDurationMs, StatusCodes.Status200OK, context.RequestAborted, upstreamHeaders: null, tailScanner: tailScanner, taskEmbedding: taskEmbedding);
+            await PublishTelemetryAsync(context, route, requestedModelName, isFallback, "openai", rewrittenBody, capturedResponseBytes, nativeResponseBytes: null, isStreamingRequest, latencyToHeadersMs, totalDurationMs, StatusCodes.Status200OK, context.RequestAborted, upstreamHeaders: null, tailScanner: tailScanner, taskEmbedding: taskEmbedding, routerTokens: routerTokens);
         }
         catch (Exception ex)
         {
@@ -1240,7 +1257,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         CancellationToken cancellationToken,
         System.Net.Http.Headers.HttpResponseHeaders? upstreamHeaders = null,
         IncrementalUsageScanner? tailScanner = null,
-        float[]? taskEmbedding = null)
+        float[]? taskEmbedding = null,
+        int routerTokens = 0)
     {
         var requestBody = TryParseJsonObject(rewrittenRequestBody);
         var resolvedSessionId = _sessionIdResolver.Resolve(context.Request.Headers, requestBody);
@@ -1489,6 +1507,12 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             _pendingTaskEmbeddingCache?.Set(correlationId, taskEmbedding);
         }
 
+        // What routing this request cost us, charged at the self-hosted rate (research-doc §5.1: TotTok is
+        // router + model, so routing overhead is the router's to carry). Kept separate from
+        // estimatedCostUsd - which is what the upstream provider charged - because a savings figure has to
+        // be net of this, and folding the two together would make that impossible to unwind downstream.
+        var routerCostUsd = routerTokens / 1_000_000m * _selfHostedRouterPricePerMillionTokens;
+
         var telemetryEvent = new RoutingTelemetryEvent(
             SessionId: sessionId,
             TurnNumber: turnNumber,
@@ -1510,7 +1534,9 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             CostConfidence: costConfidence,
             RequestSummary: requestSummary,
             ResponseSummary: responseSummary,
-            CorrelationId: correlationId);
+            CorrelationId: correlationId,
+            RouterTokens: routerTokens,
+            RouterCostUsd: routerCostUsd);
 
         await _telemetryPublisher.PublishAsync(telemetryEvent, cancellationToken);
 

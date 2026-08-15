@@ -93,10 +93,10 @@ public class ProxyMiddlewarePendingEmbeddingTests
         Assert.Equal(0, pendingCache.Count);
     }
 
-    private sealed class FakeEmbeddingClient(float[] embedding) : IEmbeddingClient
+    private sealed class FakeEmbeddingClient(float[] embedding, int tokenCount = 0) : IEmbeddingClient
     {
-        public Task<float[]> EmbedAsync(string text, CancellationToken cancellationToken = default) =>
-            Task.FromResult(embedding);
+        public Task<EmbeddingResult> EmbedAsync(string text, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new EmbeddingResult(embedding, tokenCount));
     }
 
     private sealed class DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler) : HttpMessageHandler

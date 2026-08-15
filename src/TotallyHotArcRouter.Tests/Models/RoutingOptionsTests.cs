@@ -31,6 +31,48 @@ public class RoutingOptionsTests
     }
 
     /// <summary>
+    /// Verifies the Always-<i>m</i> baseline is undeclared by default and that the router's own tokens are
+    /// charged at research-doc §5.1's canonical self-hosted rate.
+    /// </summary>
+    [Fact]
+    public void Defaults_DeclareNoAlwaysBaselineAndUseTheManuscriptSelfHostedRate()
+    {
+        var options = new RoutingOptions();
+
+        // Null, not a guessed model: an auto-picked baseline would manufacture a savings figure the
+        // operator never chose. See AlwaysBaselineModel's remarks.
+        Assert.Null(options.AlwaysBaselineModel);
+        Assert.Equal(0.054m, options.SelfHostedRouterPricePerMillionTokens);
+    }
+
+    /// <summary>
+    /// Verifies that a present-but-blank Always-<i>m</i> baseline is rejected rather than silently read as
+    /// "no baseline declared".
+    /// </summary>
+    [Fact]
+    public void EnsureValid_Throws_WhenAlwaysBaselineModelIsBlank()
+    {
+        var options = new RoutingOptions
+        {
+            AlwaysBaselineModel = "   "
+        };
+
+        Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
+    }
+
+    /// <summary>
+    /// Verifies that omitting the Always-<i>m</i> baseline entirely is valid - declaring no baseline is a
+    /// supported configuration, not an incomplete one.
+    /// </summary>
+    [Fact]
+    public void EnsureValid_Succeeds_WhenAlwaysBaselineModelIsOmitted()
+    {
+        var options = new RoutingOptions();
+
+        options.EnsureValid();
+    }
+
+    /// <summary>
     /// Verifies that a blank embedding memory database path is rejected.
     /// </summary>
     [Fact]

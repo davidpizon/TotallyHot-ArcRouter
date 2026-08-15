@@ -123,7 +123,7 @@ public class RequestInterceptorEmbeddingTests
             // Never completes on its own; only the budget's linked cancellation can end this call - the
             // very behavior under test.
             await Task.Delay(Timeout.InfiniteTimeSpan, ct);
-            return [1f];
+            return new EmbeddingResult([1f], TokenCount: 1);
         });
         var warmupState = new EmbeddingWarmupState();
         warmupState.MarkWarm();
@@ -152,19 +152,19 @@ public class RequestInterceptorEmbeddingTests
 
     private sealed class FakeEmbeddingClient : IEmbeddingClient
     {
-        private readonly Func<string, CancellationToken, Task<float[]>> _embed;
+        private readonly Func<string, CancellationToken, Task<EmbeddingResult>> _embed;
 
-        public FakeEmbeddingClient(Func<string, float[]> embed) : this((text, _) => Task.FromResult(embed(text)))
+        public FakeEmbeddingClient(Func<string, float[]> embed) : this((text, _) => Task.FromResult(new EmbeddingResult(embed(text), TokenCount: 0)))
         {
         }
 
-        public FakeEmbeddingClient(Func<string, CancellationToken, Task<float[]>> embed) => _embed = embed;
+        public FakeEmbeddingClient(Func<string, CancellationToken, Task<EmbeddingResult>> embed) => _embed = embed;
 
         public int CallCount { get; private set; }
 
         public string? LastText { get; private set; }
 
-        public Task<float[]> EmbedAsync(string text, CancellationToken cancellationToken = default)
+        public Task<EmbeddingResult> EmbedAsync(string text, CancellationToken cancellationToken = default)
         {
             CallCount++;
             LastText = text;

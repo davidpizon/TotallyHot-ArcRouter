@@ -12,6 +12,10 @@ public interface IEmbeddingClient
     /// </summary>
     /// <param name="text">The task text to embed.</param>
     /// <param name="cancellationToken">A cancellation token.</param>
-    /// <returns>A unit-normalized embedding vector, so a plain dot product between two results equals their cosine similarity.</returns>
-    Task<float[]> EmbedAsync(string text, CancellationToken cancellationToken = default);
+    /// <returns>
+    /// The embedding vector together with the token count the model consumed producing it - see
+    /// <see cref="EmbeddingResult"/> for why the token count travels with the vector rather than being
+    /// discarded.
+    /// </returns>
+    Task<EmbeddingResult> EmbedAsync(string text, CancellationToken cancellationToken = default);
 }

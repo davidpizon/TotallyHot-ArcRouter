@@ -267,6 +267,14 @@ message RoutingTelemetryEvent {
   // Phase 3, §5.6). optional (not a plain field) only so an old client, which has no such enum member to
   // default to, can distinguish "not sent" from any real value - though every writer always sets it.
   optional string cost_confidence = 20;
+  // The router's own token consumption for this request (embedding inference today), and its USD cost at
+  // Routing:SelfHostedRouterPricePerMillionTokens. Carried so a dashboard can report savings net of what
+  // routing itself cost - research-doc §5.1 charges router tokens into TotTok alongside model tokens.
+  // Both are `optional` purely for presence tracking against an older writer that sends neither; a
+  // receiver treats absence as zero, which is also what a writer sends when no embedding was computed.
+  // router_cost_usd is decimal-as-string for the same precision reason as estimated_cost_usd above.
+  optional int32 router_tokens = 21;
+  optional string router_cost_usd = 22;
 }
 
 message LogLineEvent {

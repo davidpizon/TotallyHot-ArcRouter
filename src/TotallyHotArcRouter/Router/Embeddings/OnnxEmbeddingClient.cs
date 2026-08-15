@@ -54,7 +54,7 @@ public sealed class OnnxEmbeddingClient : IEmbeddingClient, IAsyncDisposable
     }
 
     /// <inheritdoc />
-    public async Task<float[]> EmbedAsync(string text, CancellationToken cancellationToken = default)
+    public async Task<EmbeddingResult> EmbedAsync(string text, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(text);
 
@@ -74,7 +74,13 @@ public sealed class OnnxEmbeddingClient : IEmbeddingClient, IAsyncDisposable
         }
     }
 
-    private float[] RunInference(string text)
+    /// <summary>
+    /// Runs one forward pass, returning the pooled vector plus the tokenized sequence length - the
+    /// router's own token consumption for this request (see <see cref="EmbeddingResult.TokenCount"/>).
+    /// The count is taken after <c>Encode</c> has applied <see cref="EmbeddingOptions.MaxTokens"/>
+    /// truncation, so it is what the model actually processed rather than what the caller submitted.
+    /// </summary>
+    private EmbeddingResult RunInference(string text)
     {
         var (inputIds, attentionMask, tokenTypeIds) = _tokenizer!.Encode(text, _options.MaxTokens, null);
         var sequenceLength = inputIds.Length;
@@ -115,7 +121,7 @@ public sealed class OnnxEmbeddingClient : IEmbeddingClient, IAsyncDisposable
         }
 
         Normalize(embedding);
-        return embedding;
+        return new EmbeddingResult(embedding, sequenceLength);
     }
 
     private static void Normalize(float[] vector)

@@ -42,6 +42,7 @@ request, after the response has already been fully forwarded to the client:
 | `StatusCode`, `TimestampUtc` | The forwarded response's status code; capture time |
 | `RequestSummary` | `RequestTextExtractor`, the newest user message's text from the request body's `messages` array (not the whole resent history); `null` if there's no user message or its content isn't text |
 | `ResponseSummary` | `ResponseTextExtractor` (see below), the assistant's reply text; `null` if the provider is unsupported or no text was extractable (e.g. a tool-only response) |
+| `RouterTokens`, `RouterCostUsd` | The router's *own* consumption for this request: the embedding model's tokenized sequence length (`EmbeddingResult.TokenCount`, threaded through `ModelRouteResolutionResult.RouterTokens`), priced at `Routing:SelfHostedRouterPricePerMillionTokens`. Never `null` — `0` means the router genuinely spent nothing (no embedding client, still warming up, budget exceeded, or no extractable task text), which is a measurement rather than a gap. See [Router overhead](#router-overhead) |
 
 Both `RequestSummary` and `ResponseSummary` are truncated via `TextTruncator` (2,000 characters, with a
 trailing "…" marker) before being placed on the event, so a pathological input (a huge pasted file, a
@@ -263,6 +264,34 @@ rate-limit header snapshots/history. A **per-request** usage ledger still doesn'
 [`token-tracking-improvements.md`](token-tracking-improvements.md) §5.2/§5.8 (executed by
 [`token-tracking-implementation-plan.md`](token-tracking-implementation-plan.md)) for the adopted,
 current version of it.
+
+### Router overhead
+
+`EstimatedCostUsd` is what the **upstream provider** charged. `RouterCostUsd` is what **routing itself**
+cost, and the two are deliberately separate fields rather than one summed number.
+
+The research doc charges the router's own consumption against the router: §5.1 defines `TotTok` as
+"total input + output token consumption (**router** + model)", and prices locally-served router tokens
+at `$0.054/M` from H100 amortization and measured throughput (§B.3.2). That rate is the default of
+`Routing:SelfHostedRouterPricePerMillionTokens`; an operator running different hardware overrides it.
+It deliberately does **not** come from the price catalog — that catalog holds published *provider*
+prices, and locally-served inference has no provider to publish one.
+
+Today the only router-side token consumer is `OnnxEmbeddingClient`: the BGE forward pass on the request
+path (`docs/router/live-feedback-learning-plan.md` Phase 2b). `LlmRouterVoter` still abstains, so it
+contributes nothing yet; when it gains a real model artifact its tokens belong in the same field, which
+is why the field is named for the router rather than for embeddings.
+
+Keeping the halves separate is what lets a savings figure be reported **net**: a router that saves
+$0.08 by downshifting a turn but burns $0.01 deciding has saved $0.07, and only a consumer that can see
+both numbers can say so. Summing them at the source would make that unrecoverable downstream.
+
+> **Not yet wired:** nothing computes a baseline cost, so no savings figure exists to be net *of*. The
+> Always-*m* reference point that would supply one is configured by `Routing:AlwaysBaselineModel`
+> (research-doc Table 4's "Single-Model (Always-*m*) … Reference performance floor"), which is declared
+> but not yet read by any consumer — it is deliberately operator-set rather than auto-derived from the
+> priciest configured model. `RouterCostUsd` is recorded now so that the accounting is already correct
+> whenever that consumer lands. See [`../gui/backlog.md`](../gui/backlog.md)'s Routing ROI item.
 
 ## Transport: gRPC
 

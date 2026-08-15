@@ -172,8 +172,8 @@ public class StartupHealthCheckHostedServiceTests
 
     private sealed class FakeEmbeddingClient(bool succeed) : IEmbeddingClient
     {
-        public Task<float[]> EmbedAsync(string text, CancellationToken cancellationToken = default) =>
-            succeed ? Task.FromResult<float[]>([1f]) : throw new InvalidOperationException("embedding backend unavailable");
+        public Task<EmbeddingResult> EmbedAsync(string text, CancellationToken cancellationToken = default) =>
+            succeed ? Task.FromResult(new EmbeddingResult([1f], TokenCount: 1)) : throw new InvalidOperationException("embedding backend unavailable");
     }
 
     private static UsageLedgerEntry MakeEntry(string requestId, DateTimeOffset occurredAtUtc) =>

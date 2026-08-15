@@ -92,6 +92,45 @@ public sealed class RoutingOptions
     public double Epsilon2 { get; init; } = -0.1;
 
     /// <summary>
+    /// Gets the client-facing model name (a <c>ModelRouting:ModelList[].ModelName</c> entry) that stands in
+    /// as the <b>Always-<i>m</i></b> baseline when reporting what routing cost versus not routing at all -
+    /// research-doc Table 4's "Single-Model (Always-<i>m</i>): Fixed model regardless of context. Reference
+    /// performance floor." <see langword="null"/> (the default) means no baseline is declared and no
+    /// savings figure is reported.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately operator-declared rather than auto-derived. Picking the most expensive configured model
+    /// automatically would manufacture a flattering number nobody agreed to, and would silently inflate
+    /// every time a pricier model joined the list; the paper's Always-<i>m</i> is a reference point chosen
+    /// up front, not an artifact of the model pool.
+    /// <para>
+    /// Only consulted for requests where the client named no real model of its own (the
+    /// <c>auto</c>/<c>agentic-router</c>/unresolved-name paths). When the client did name a model and the
+    /// router substituted a different one, that named model is the honest counterfactual and is used
+    /// instead - no configuration needed.
+    /// </para>
+    /// </remarks>
+    public string? AlwaysBaselineModel { get; init; }
+
+    /// <summary>
+    /// Gets the USD price per 1,000,000 tokens charged for the router's <em>own</em> token consumption,
+    /// which today is local ONNX embedding inference
+    /// (<see cref="Router.Embeddings.OnnxEmbeddingClient"/>). Defaults to research-doc §5.1's canonical
+    /// self-hosted rate of <c>$0.054/M</c>, derived there from H100 amortization and measured throughput
+    /// (§B.3.2).
+    /// </summary>
+    /// <remarks>
+    /// This exists because the paper's <c>TotTok</c> is explicitly "input + output token consumption
+    /// (<b>router</b> + model)" - routing overhead is charged against the router, not hidden. Without it a
+    /// savings figure would be gross rather than net, flattering the router by exactly the amount it spends
+    /// deciding. Not sourced from the price catalog: that catalog holds published <em>provider</em> prices,
+    /// and locally-served inference has no provider to publish one - the rate is an amortization the
+    /// operator owns.
+    /// </remarks>
+    [Range(0d, 1000d)]
+    public decimal SelfHostedRouterPricePerMillionTokens { get; init; } = 0.054m;
+
+    /// <summary>
     /// Gets the minimum observed quality score <see cref="TotallyHot.ArcRouter.Router.UtilityRoutingPolicy"/> requires a
     /// candidate to hold before it is eligible for cost-aware selection
     /// (<c>docs/router/utility-model-routing.md</c> §B3.4). A candidate with no observed score yet
@@ -216,6 +255,17 @@ public sealed class RoutingOptions
                 nameof(RoutingOptions),
                 typeof(RoutingOptions),
                 ["EmbeddingMemoryDatabasePath is required."]);
+        }
+
+        // Null means "no Always-m baseline declared" and is valid; a present-but-blank value is not - it
+        // reads as a configured baseline while naming no model, which would silently report no savings
+        // rather than surfacing the typo.
+        if (AlwaysBaselineModel is not null && string.IsNullOrWhiteSpace(AlwaysBaselineModel))
+        {
+            throw new OptionsValidationException(
+                nameof(RoutingOptions),
+                typeof(RoutingOptions),
+                ["AlwaysBaselineModel must name a model when set; omit it entirely to declare no baseline."]);
         }
     }
 }

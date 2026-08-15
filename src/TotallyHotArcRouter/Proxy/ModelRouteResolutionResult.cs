@@ -66,12 +66,13 @@ public sealed record RouteCandidate(
 /// </summary>
 public sealed record ModelRouteResolutionResult
 {
-    private ModelRouteResolutionResult(bool isSuccess, IReadOnlyList<RouteCandidate>? candidates, string? errorMessage, float[]? taskEmbedding)
+    private ModelRouteResolutionResult(bool isSuccess, IReadOnlyList<RouteCandidate>? candidates, string? errorMessage, float[]? taskEmbedding, int routerTokens)
     {
         IsSuccess = isSuccess;
         Candidates = candidates ?? [];
         ErrorMessage = errorMessage;
         TaskEmbedding = taskEmbedding;
+        RouterTokens = routerTokens;
     }
 
     /// <summary>
@@ -116,6 +117,16 @@ public sealed record ModelRouteResolutionResult
     /// </summary>
     public float[]? TaskEmbedding { get; }
 
+    /// <summary>
+    /// Gets the tokens the router consumed resolving this request - the embedding model's sequence length
+    /// when <see cref="TaskEmbedding"/> was computed, and <c>0</c> when it was not. Carried alongside the
+    /// embedding for the same reason: <c>ProxyMiddleware</c> is where telemetry is published, and this is
+    /// the only path from the point the cost is incurred to the point it can be reported. Charging it into
+    /// the request's telemetry is what lets a savings figure be net rather than gross (research-doc §5.1's
+    /// <c>TotTok</c> = router + model).
+    /// </summary>
+    public int RouterTokens { get; }
+
     // A single-route Success(route, rewrittenBody) overload used to sit here. It was unreachable - every
     // caller goes through the candidate-list overload below, because even a no-fallback resolution builds
     // its one candidate through RequestInterceptor.BuildCandidate - and it constructed a RouteCandidate
@@ -128,8 +139,9 @@ public sealed record ModelRouteResolutionResult
     /// </summary>
     /// <param name="candidates">The ordered candidate list; must contain at least the primary route.</param>
     /// <param name="taskEmbedding">See <see cref="TaskEmbedding"/>.</param>
+    /// <param name="routerTokens">See <see cref="RouterTokens"/>.</param>
     /// <exception cref="ArgumentException"><paramref name="candidates"/> is empty - a success must have at least the primary route, since <see cref="Route"/>/<see cref="RewrittenBody"/> index the first candidate.</exception>
-    public static ModelRouteResolutionResult Success(IReadOnlyList<RouteCandidate> candidates, float[]? taskEmbedding = null)
+    public static ModelRouteResolutionResult Success(IReadOnlyList<RouteCandidate> candidates, float[]? taskEmbedding = null, int routerTokens = 0)
     {
         ArgumentNullException.ThrowIfNull(candidates);
         if (candidates.Count == 0)
@@ -137,13 +149,18 @@ public sealed record ModelRouteResolutionResult
             throw new ArgumentException("A successful resolution must contain at least the primary route candidate.", nameof(candidates));
         }
 
-        return new(true, candidates, null, taskEmbedding);
+        return new(true, candidates, null, taskEmbedding, routerTokens);
     }
 
     /// <summary>
     /// Creates a failed resolution result.
     /// </summary>
+    /// <remarks>
+    /// Reports zero router tokens even though resolution may have embedded the request before failing: a
+    /// failed resolution never reaches <c>ProxyMiddleware.PublishTelemetryAsync</c>, so there is no event
+    /// for the figure to appear on and no savings denominator it could distort.
+    /// </remarks>
     public static ModelRouteResolutionResult Failure(string errorMessage) =>
-        new(false, null, errorMessage, null);
+        new(false, null, errorMessage, null, 0);
 }
 

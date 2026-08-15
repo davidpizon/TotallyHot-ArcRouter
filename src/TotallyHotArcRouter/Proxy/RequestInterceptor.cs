@@ -265,7 +265,13 @@ namespace TotallyHot.ArcRouter.Proxy
             // auto-select/unresolved-model paths below), so embedding-keyed memory keeps accumulating
             // regardless of which IRoutingPolicy is configured.
             var taskText = RequestTextExtractor.ExtractNewestUserMessage(jsonObject);
-            var taskEmbedding = await TryComputeEmbeddingAsync(taskText, cancellationToken).ConfigureAwait(false);
+            var embedding = await TryComputeEmbeddingAsync(taskText, cancellationToken).ConfigureAwait(false);
+            var taskEmbedding = embedding?.Vector;
+
+            // The router's own consumption for this request, carried on every success below so telemetry
+            // can report savings net of what routing cost (research-doc §5.1's TotTok = router + model).
+            // Zero when no embedding was computed - a real measurement of "the router spent nothing".
+            var routerTokens = embedding?.TokenCount ?? 0;
             var routingSignals = new RoutingSignals(taskText, taskEmbedding);
 
             var modelName = jsonObject["model"] is JsonValue modelValue && modelValue.TryGetValue<string>(out var value)
@@ -403,7 +409,7 @@ namespace TotallyHot.ArcRouter.Proxy
                 }
             }
 
-            return ModelRouteResolutionResult.Success(candidates, taskEmbedding);
+            return ModelRouteResolutionResult.Success(candidates, taskEmbedding, routerTokens);
         }
 
         /// <summary>
@@ -415,7 +421,7 @@ namespace TotallyHot.ArcRouter.Proxy
         /// <see langword="null"/> rather than failing the request; embedding-dependent voters simply abstain
         /// and routing proceeds exactly as it did before this parameter existed.
         /// </summary>
-        private async Task<float[]?> TryComputeEmbeddingAsync(string? taskText, CancellationToken cancellationToken)
+        private async Task<EmbeddingResult?> TryComputeEmbeddingAsync(string? taskText, CancellationToken cancellationToken)
         {
             if (_embeddingClient is null || _embeddingWarmupState is not { IsWarm: true } || string.IsNullOrWhiteSpace(taskText))
             {

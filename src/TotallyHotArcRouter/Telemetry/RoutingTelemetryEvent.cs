@@ -53,6 +53,22 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// A stable id for this routed request (currently <c>{SessionId}:{TurnNumber}</c>). Links this event to a
 /// later off-path sandbox signal (see <c>SandboxSignalEvent</c>), or <see langword="null"/> when not set.
 /// </param>
+/// <param name="RouterTokens">
+/// Tokens the <b>router itself</b> consumed deciding where to send this request - today the embedding
+/// model's tokenized sequence length (see <c>Router.Embeddings.EmbeddingResult</c>). <c>0</c> is a real
+/// measurement, not a missing one: it means no embedding was computed for this request (no embedding
+/// client configured, still warming up, budget exceeded, or no extractable task text), so the router
+/// genuinely spent nothing.
+/// </param>
+/// <param name="RouterCostUsd">
+/// USD cost of <paramref name="RouterTokens"/> at
+/// <see cref="TotallyHot.ArcRouter.Models.RoutingOptions.SelfHostedRouterPricePerMillionTokens"/>.
+/// Recorded separately from <paramref name="EstimatedCostUsd"/> rather than folded into it, because the
+/// two answer different questions - what the request cost upstream, versus what routing it cost us - and
+/// only their sum is the honest denominator for a savings figure (research-doc §5.1 charges router tokens
+/// into <c>TotTok</c>). Never <see langword="null"/>: unlike a provider price, this rate is always known,
+/// so zero tokens yield a known zero rather than an unknown.
+/// </param>
 public sealed record RoutingTelemetryEvent(
     string SessionId,
     int TurnNumber,
@@ -74,5 +90,7 @@ public sealed record RoutingTelemetryEvent(
     CostConfidence CostConfidence = CostConfidence.Unknown,
     string? RequestSummary = null,
     string? ResponseSummary = null,
-    string? CorrelationId = null);
+    string? CorrelationId = null,
+    int RouterTokens = 0,
+    decimal RouterCostUsd = 0m);
 
