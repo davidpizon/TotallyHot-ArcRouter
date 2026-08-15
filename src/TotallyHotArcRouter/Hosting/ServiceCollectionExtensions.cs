@@ -49,6 +49,7 @@ namespace TotallyHot.ArcRouter.Hosting
                     configuration.GetSection(RoutingOptions.SectionName).Bind(options));
             services.AddHttpClient(nameof(Router.Embeddings.OnnxEmbeddingClient));
             services.AddSingleton<Router.Embeddings.IEmbeddingClient, Router.Embeddings.OnnxEmbeddingClient>();
+            services.AddSingleton<Router.Embeddings.EmbeddingWarmupState>();
             services.AddSingleton<RouterMemoryDatabase>();
             services.AddSingleton<IMemoryEntryStore, SqliteMemoryEntryStore>();
             services.AddSingleton<EmbeddingMemory>();
@@ -178,10 +179,17 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddSingleton<TelemetryPublisher>();
             services.AddSingleton<ITelemetryPublisher>(sp => sp.GetRequiredService<TelemetryPublisher>());
 
-            // Sandboxed executor (off-path, best-effort). The router-memory observer adapter is registered
-            // before AddSandbox so it wins over the library's Null default (which uses TryAdd). Live scores
-            // are written under a separate dimension namespace - see RouterMemoryScoreObserver.
-            services.AddSingleton<IRouterScoreObserver, RouterMemoryScoreObserver>();
+            // Sandboxed executor (off-path, best-effort). IRouterScoreObserver resolves to a single
+            // implementation, so a CompositeRouterScoreObserver fans each scored result out to both
+            // RouterMemoryScoreObserver (live dim_best scores) and EmbeddingMemoryScoreObserver
+            // (docs/router/live-feedback-learning-plan.md Phase 2c: memory_entries writes). Registered
+            // before AddSandbox so it wins over the library's Null default (which uses TryAdd).
+            services.AddSingleton<Router.Embeddings.PendingTaskEmbeddingCache>();
+            services.AddSingleton<RouterMemoryScoreObserver>();
+            services.AddSingleton<Router.EmbeddingMemoryScoreObserver>();
+            services.AddSingleton<IRouterScoreObserver>(sp => new Router.CompositeRouterScoreObserver(
+                [sp.GetRequiredService<RouterMemoryScoreObserver>(), sp.GetRequiredService<Router.EmbeddingMemoryScoreObserver>()],
+                sp.GetRequiredService<ILogger<Router.CompositeRouterScoreObserver>>()));
             services.AddSandbox();
 
             services.AddSingleton<ProxyMiddleware>();

@@ -37,6 +37,12 @@ public sealed class StartupHealthCheckHostedService : IHostedService
     private readonly Router.EmbeddingMemory _embeddingMemory;
     private readonly CodeRouterBench.BenchmarkDatabase _benchmarkDatabase;
     private readonly CodeRouterBench.BenchmarkDataStatusService _benchmarkStatusService;
+    private readonly Router.Embeddings.IEmbeddingClient? _embeddingClient;
+    private readonly Router.Embeddings.EmbeddingWarmupState? _embeddingWarmupState;
+
+    // A short, fixed string is enough to force the one-time artifact download and model load; its content
+    // is never read back or stored, only its side effect (warming _session/_tokenizer) matters.
+    private const string EmbeddingWarmupText = "embedding warm-up";
 
     /// <summary>
     /// Initializes a new instance of the <see cref="StartupHealthCheckHostedService"/> class.
@@ -55,7 +61,9 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         Router.RouterMemoryDatabase routerMemoryDatabase,
         Router.EmbeddingMemory embeddingMemory,
         CodeRouterBench.BenchmarkDatabase benchmarkDatabase,
-        CodeRouterBench.BenchmarkDataStatusService benchmarkStatusService)
+        CodeRouterBench.BenchmarkDataStatusService benchmarkStatusService,
+        Router.Embeddings.IEmbeddingClient? embeddingClient = null,
+        Router.Embeddings.EmbeddingWarmupState? embeddingWarmupState = null)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(database);
@@ -86,6 +94,8 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         _embeddingMemory = embeddingMemory;
         _benchmarkDatabase = benchmarkDatabase;
         _benchmarkStatusService = benchmarkStatusService;
+        _embeddingClient = embeddingClient;
+        _embeddingWarmupState = embeddingWarmupState;
     }
 
     /// <inheritdoc />
@@ -217,6 +227,25 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Embedding memory initialization failed; continuing startup.");
+        }
+
+        // Embedding client warm-up (docs/router/live-feedback-learning-plan.md Phase 2b): forces the
+        // one-time ~1.3 GB model/tokenizer download and load here, off the request path, rather than on a
+        // request's first embedding call. Best-effort and log-only like every check above - a failure (no
+        // network access, disk full) leaves EmbeddingWarmupState.IsWarm false, which RequestInterceptor
+        // reads to skip embedding entirely rather than block a request on a cold download.
+        if (_embeddingClient is not null && _embeddingWarmupState is not null)
+        {
+            try
+            {
+                await _embeddingClient.EmbedAsync(EmbeddingWarmupText, cancellationToken).ConfigureAwait(false);
+                _embeddingWarmupState.MarkWarm();
+                _logger.LogInformation("Embedding client warm-up complete.");
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "Embedding client warm-up failed; embedding-dependent routing signals will be unavailable until it succeeds.");
+            }
         }
 
         // CodeRouterBench corpus freshness (docs/router/coderouterbench-sqlite-migration-plan.md, Phase

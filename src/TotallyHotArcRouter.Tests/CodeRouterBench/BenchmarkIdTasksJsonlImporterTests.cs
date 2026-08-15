@@ -31,6 +31,45 @@ public class BenchmarkIdTasksJsonlImporterTests
     }
 
     [Fact]
+    public void Import_ReadsSourceSplitProperty_NotSplitProperty()
+    {
+        using var temp = new TempBenchmarkDatabase();
+        temp.Database.EnsureCreated();
+
+        // "split" here is the probing/id_test discriminator (already captured by the split column, and
+        // deliberately given a decoy value); "source_split" is the train/val/test distinction this column
+        // must round-trip.
+        var jsonl = """{"task_id":"t1","split":"probing","source_split":"train","dimension":"code_generation"}""" + "\n";
+
+        using var connection = temp.Database.OpenConnection();
+        using var transaction = connection.BeginTransaction();
+        BenchmarkIdTasksJsonlImporter.Import(new StringReader(jsonl), "probing", connection, transaction);
+        transaction.Commit();
+
+        using var readCommand = connection.CreateCommand();
+        readCommand.CommandText = "SELECT source_split FROM benchmark_id_tasks WHERE task_id = 't1';";
+        Assert.Equal("train", (string)readCommand.ExecuteScalar()!);
+    }
+
+    [Fact]
+    public void Import_MissingSourceSplitProperty_FallsBackToSplitArgument()
+    {
+        using var temp = new TempBenchmarkDatabase();
+        temp.Database.EnsureCreated();
+
+        var jsonl = """{"task_id":"t1","dimension":"code_generation"}""" + "\n";
+
+        using var connection = temp.Database.OpenConnection();
+        using var transaction = connection.BeginTransaction();
+        BenchmarkIdTasksJsonlImporter.Import(new StringReader(jsonl), "id_test", connection, transaction);
+        transaction.Commit();
+
+        using var readCommand = connection.CreateCommand();
+        readCommand.CommandText = "SELECT source_split FROM benchmark_id_tasks WHERE task_id = 't1';";
+        Assert.Equal("id_test", (string)readCommand.ExecuteScalar()!);
+    }
+
+    [Fact]
     public void Import_SecondCallForSameSplit_ReplacesPriorRows()
     {
         using var temp = new TempBenchmarkDatabase();

@@ -39,7 +39,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void AddTotallyHotArcRouter_ResolvesRegisteredServices_WithSupportingDependencies()
+    public async Task AddTotallyHotArcRouter_ResolvesRegisteredServices_WithSupportingDependencies()
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -49,7 +49,11 @@ public class ServiceCollectionExtensionsTests
 
         services.AddTotallyHotArcRouter();
 
-        using var provider = services.BuildServiceProvider();
+        // await using, not using: RequestInterceptor now (docs/router/live-feedback-learning-plan.md Phase
+        // 2b) takes IEmbeddingClient in its constructor, so resolving it below also constructs
+        // OnnxEmbeddingClient, which implements only IAsyncDisposable - a synchronous Dispose() on this
+        // scope would throw when it reached that singleton.
+        await using var provider = services.BuildServiceProvider();
 
         Assert.NotNull(provider.GetRequiredService<RouterMemory>());
         Assert.NotNull(provider.GetRequiredService<CheckSyntax>());

@@ -83,10 +83,20 @@ public static class BenchmarkModelsJsonImporter
     }
 
     /// <summary>
-    /// Walks the document's models, whichever of the two accepted shapes it is in.
+    /// Walks the document's models, whichever of the three accepted shapes it is in: a bare object keyed
+    /// by model id, a bare array of per-model objects, or either of those wrapped in a single-key
+    /// <c>{"models": ...}</c> envelope - the shape the published <c>models.json</c> actually uses.
     /// </summary>
     private static IEnumerable<(string ModelId, JsonElement Element)> EnumerateModels(JsonElement root)
     {
+        if (root.ValueKind == JsonValueKind.Object &&
+            root.TryGetProperty("models", out var envelope) &&
+            root.EnumerateObject().Count() == 1 &&
+            (envelope.ValueKind == JsonValueKind.Array || envelope.ValueKind == JsonValueKind.Object))
+        {
+            root = envelope;
+        }
+
         switch (root.ValueKind)
         {
             case JsonValueKind.Object:

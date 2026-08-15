@@ -37,6 +37,15 @@ public sealed class StorageOptions
     public string BenchmarkDatabasePath { get; init; } = @"%LOCALAPPDATA%\TotallyHot.ArcRouter\coderouterbench.db";
 
     /// <summary>
+    /// Gets the trained <c>logreg</c> voter model artifact's file path
+    /// (docs/router/live-feedback-learning-plan.md Phase 3). May contain the same tokens and separators
+    /// as <see cref="DatabasePath"/>, resolved by <see cref="ResolveLogRegModelPath"/>. Per-installation
+    /// and never checked in: it is derived from the operator's own synced corpus and live traffic, unlike
+    /// the deleted placeholder this replaces (Phase 6).
+    /// </summary>
+    public string LogRegModelPath { get; init; } = @"%LOCALAPPDATA%\TotallyHot.ArcRouter\logreg_voter_model.json";
+
+    /// <summary>
     /// Gets the number of days a <c>usage_ledger</c> row is retained before the startup health check's
     /// retention sweep deletes it, keyed on the row's <c>occurred_at_utc</c>. Defaults to 370 - a year plus
     /// slack, matching the token-monitor plan's bounded-archive discipline (long enough for annual
@@ -80,6 +89,12 @@ public sealed class StorageOptions
     /// and returns an absolute path, via the same rules as <see cref="ResolveDatabasePath"/>.
     /// </summary>
     public string ResolveBenchmarkDatabasePath() => ResolvePath(BenchmarkDatabasePath);
+
+    /// <summary>
+    /// Expands environment-variable tokens in <see cref="LogRegModelPath"/>, normalizes separators, and
+    /// returns an absolute path, via the same rules as <see cref="ResolveDatabasePath"/>.
+    /// </summary>
+    public string ResolveLogRegModelPath() => ResolvePath(LogRegModelPath);
 
     /// <summary>
     /// Shared expansion/normalization logic behind <see cref="ResolveDatabasePath"/> and

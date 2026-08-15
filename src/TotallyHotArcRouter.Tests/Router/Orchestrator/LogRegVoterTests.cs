@@ -1,33 +1,37 @@
+using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Orchestrator;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Tests.Router.Orchestrator;
 
 /// <summary>
-/// Covers <see cref="LogRegVoter"/>'s tokenize -> TF-IDF -> score -> argmax mechanics against a small,
-/// deterministic model artifact (not the checked-in placeholder, so these assertions do not depend on its
-/// contents).
+/// Covers <see cref="LogRegVoter"/>'s embedding dot-product scoring and abstention rules
+/// (docs/router/live-feedback-learning-plan.md Phase 3): no artifact, no embedding, and a dimension
+/// mismatch must each abstain cleanly rather than throw; a small deterministic artifact must select the
+/// expected candidate restricted to the current candidate set.
 /// </summary>
 public class LogRegVoterTests
 {
-    // Vocabulary: [bug, algorithm]. model-bug fires hard on "bug"; model-algo fires hard on "algorithm".
-    private static readonly LogRegModelArtifact TestModel = new(
-        Vocabulary: ["bug", "algorithm"],
-        InverseDocumentFrequency: [1.0, 1.0],
+    // 2-dimensional "embedding": model-x fires on the first component, model-y on the second.
+    private static readonly EmbeddingLogRegModelArtifact TestModel = new(
+        EmbeddingDimension: 2,
         ClassWeights: new Dictionary<string, double[]>
         {
-            ["model-bug"] = [0.0, 5.0, 0.0],
-            ["model-algo"] = [0.0, 0.0, 5.0],
+            ["model-x"] = [0.0, 5.0, 0.0],
+            ["model-y"] = [0.0, 0.0, 5.0],
         },
-        IsPlaceholder: true,
-        TrainedFrom: "unit test fixture");
+        TrainedFrom: "unit test fixture",
+        BootstrapTaskCount: 176,
+        MemoryEntryCount: 0);
 
     [Fact]
-    public async Task VoteAsync_NoTaskText_Abstains()
+    public async Task VoteAsync_NoTaskEmbedding_Abstains()
     {
         var voter = new LogRegVoter(NullLogger<LogRegVoter>.Instance, TestModel);
-        var context = new VotingContext("live:bug_fixing", [new RoutingCandidate("model-bug", "openai", IsFree: false)]);
+        var context = new VotingContext("live:bug_fixing", [new RoutingCandidate("model-x", "openai", IsFree: false)]);
 
         var vote = await voter.VoteAsync(context, TestContext.Current.CancellationToken);
 
@@ -35,18 +39,18 @@ public class LogRegVoterTests
     }
 
     [Fact]
-    public async Task VoteAsync_TextDominatedByOneVocabularyTerm_PicksMatchingClass()
+    public async Task VoteAsync_EmbeddingDominatedByOneComponent_PicksMatchingClass()
     {
         var voter = new LogRegVoter(NullLogger<LogRegVoter>.Instance, TestModel);
         var context = new VotingContext(
             "live:bug_fixing",
-            [new RoutingCandidate("model-bug", "openai", IsFree: false), new RoutingCandidate("model-algo", "openai", IsFree: false)],
-            TaskText: "There is a bug, a bug, a very bad bug.");
+            [new RoutingCandidate("model-x", "openai", IsFree: false), new RoutingCandidate("model-y", "openai", IsFree: false)],
+            TaskEmbedding: [1.0f, 0.0f]);
 
         var vote = await voter.VoteAsync(context, TestContext.Current.CancellationToken);
 
         Assert.False(vote.IsAbstain);
-        Assert.Equal("model-bug", vote.ModelName);
+        Assert.Equal("model-x", vote.ModelName);
         Assert.InRange(vote.Confidence, 0d, 1d);
     }
 
@@ -54,16 +58,16 @@ public class LogRegVoterTests
     public async Task VoteAsync_RestrictsToCurrentCandidates()
     {
         var voter = new LogRegVoter(NullLogger<LogRegVoter>.Instance, TestModel);
-        // Text screams "algorithm", but model-algo is not an eligible candidate right now.
+        // The embedding favors model-y, but it is not an eligible candidate right now.
         var context = new VotingContext(
             "live:algorithm",
-            [new RoutingCandidate("model-bug", "openai", IsFree: false)],
-            TaskText: "algorithm algorithm algorithm complexity");
+            [new RoutingCandidate("model-x", "openai", IsFree: false)],
+            TaskEmbedding: [0.0f, 1.0f]);
 
         var vote = await voter.VoteAsync(context, TestContext.Current.CancellationToken);
 
         Assert.False(vote.IsAbstain);
-        Assert.Equal("model-bug", vote.ModelName);
+        Assert.Equal("model-x", vote.ModelName);
     }
 
     [Fact]
@@ -73,7 +77,7 @@ public class LogRegVoterTests
         var context = new VotingContext(
             "live:bug_fixing",
             [new RoutingCandidate("some-other-model", "openai", IsFree: false)],
-            TaskText: "bug bug bug");
+            TaskEmbedding: [1.0f, 0.0f]);
 
         var vote = await voter.VoteAsync(context, TestContext.Current.CancellationToken);
 
@@ -81,28 +85,89 @@ public class LogRegVoterTests
     }
 
     [Fact]
-    public void EmbeddedModel_LoadsAndValidatesSuccessfully()
+    public async Task VoteAsync_EmbeddingDimensionMismatch_Abstains()
     {
-        // Constructing with the default (embedded-resource) constructor exercises
-        // LoadEmbeddedModel/LogRegModelArtifactSerializer against the real checked-in placeholder.
-        var voter = new LogRegVoter(NullLogger<LogRegVoter>.Instance);
+        var voter = new LogRegVoter(NullLogger<LogRegVoter>.Instance, TestModel);
+        var context = new VotingContext(
+            "live:bug_fixing",
+            [new RoutingCandidate("model-x", "openai", IsFree: false)],
+            // TestModel was trained at dimension 2; this embedding is 3-dimensional.
+            TaskEmbedding: [1.0f, 0.0f, 0.0f]);
 
-        Assert.Equal("logreg", voter.Name);
+        var vote = await voter.VoteAsync(context, TestContext.Current.CancellationToken);
+
+        Assert.True(vote.IsAbstain);
     }
 
     [Fact]
-    public void Constructor_ArtifactHasMismatchedInverseDocumentFrequencyLength_ThrowsFormatException()
+    public async Task VoteAsync_NoArtifactOnDisk_AbstainsCleanlyWithoutThrowing()
     {
-        // The model-artifact constructor bypasses LogRegModelArtifactSerializer.Deserialize, so it must
-        // validate structural invariants itself rather than letting a malformed artifact reach
-        // ComputeTfIdf's index arithmetic and throw IndexOutOfRangeException later, mid-vote.
-        var invalidModel = new LogRegModelArtifact(
-            Vocabulary: ["bug", "algorithm"],
-            InverseDocumentFrequency: [1.0],
-            ClassWeights: new Dictionary<string, double[]> { ["model-bug"] = [0.0, 5.0, 0.0] },
-            IsPlaceholder: true,
-            TrainedFrom: "unit test fixture");
+        var storageOptions = Options.Create(new StorageOptions
+        {
+            LogRegModelPath = Path.Combine(Path.GetTempPath(), "arcrouter-tests", Guid.NewGuid().ToString("N"), "logreg_voter_model.json"),
+        });
+        var voter = new LogRegVoter(NullLogger<LogRegVoter>.Instance, storageOptions);
+        var context = new VotingContext(
+            "live:bug_fixing",
+            [new RoutingCandidate("model-x", "openai", IsFree: false)],
+            TaskEmbedding: [1.0f, 0.0f]);
+
+        var vote = await voter.VoteAsync(context, TestContext.Current.CancellationToken);
+
+        Assert.True(vote.IsAbstain);
+    }
+
+    [Fact]
+    public async Task VoteAsync_ArtifactWrittenAfterConstruction_IsPickedUpOnlyAfterReload()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "arcrouter-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "logreg_voter_model.json");
+        var storageOptions = Options.Create(new StorageOptions { LogRegModelPath = path });
+        var voter = new LogRegVoter(NullLogger<LogRegVoter>.Instance, storageOptions);
+        var context = new VotingContext(
+            "live:bug_fixing",
+            [new RoutingCandidate("model-x", "openai", IsFree: false)],
+            TaskEmbedding: [1.0f, 0.0f]);
+
+        // First vote: no file yet, so the voter both abstains and caches "no model".
+        Assert.True((await voter.VoteAsync(context, TestContext.Current.CancellationToken)).IsAbstain);
+
+        File.WriteAllText(path, EmbeddingLogRegModelArtifactSerializer.Serialize(TestModel));
+
+        // Without Reload(), the cached "no model" result is reused - the artifact is not picked up mid-run.
+        Assert.True((await voter.VoteAsync(context, TestContext.Current.CancellationToken)).IsAbstain);
+
+        voter.Reload();
+
+        var voteAfterReload = await voter.VoteAsync(context, TestContext.Current.CancellationToken);
+        Assert.False(voteAfterReload.IsAbstain);
+        Assert.Equal("model-x", voteAfterReload.ModelName);
+
+        Directory.Delete(directory, recursive: true);
+    }
+
+    [Fact]
+    public void Constructor_ArtifactHasMismatchedWeightVectorLength_ThrowsFormatException()
+    {
+        // The model-artifact constructor bypasses EmbeddingLogRegModelArtifactSerializer.Deserialize, so
+        // it must validate structural invariants itself rather than letting a malformed artifact reach the
+        // scoring loop's index arithmetic and throw IndexOutOfRangeException later, mid-vote.
+        var invalidModel = new EmbeddingLogRegModelArtifact(
+            EmbeddingDimension: 2,
+            ClassWeights: new Dictionary<string, double[]> { ["model-x"] = [0.0, 5.0] }, // needs length 3
+            TrainedFrom: "unit test fixture",
+            BootstrapTaskCount: 0,
+            MemoryEntryCount: 0);
 
         Assert.Throws<FormatException>(() => new LogRegVoter(NullLogger<LogRegVoter>.Instance, invalidModel));
+    }
+
+    [Fact]
+    public void Name_IsLogReg()
+    {
+        var voter = new LogRegVoter(NullLogger<LogRegVoter>.Instance, TestModel);
+
+        Assert.Equal(VoterNames.LogReg, voter.Name);
     }
 }

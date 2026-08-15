@@ -82,8 +82,11 @@ public static class BenchmarkIdTasksJsonlImporter
                 throw new FormatException($"Tasks JSONL line {lineNumber} is missing a string 'dimension'.");
             }
 
-            var sourceSplit = root.TryGetProperty("split", out var splitElement) && splitElement.ValueKind == JsonValueKind.String
-                ? splitElement.GetString()!
+            // Upstream's "source_split" carries the train/val/test distinction this column is documented to
+            // hold; "split" is the probing/id_test discriminator already captured by the split column. Only
+            // fall back to the split argument when source_split is genuinely absent from the row.
+            var sourceSplit = root.TryGetProperty("source_split", out var sourceSplitElement) && sourceSplitElement.ValueKind == JsonValueKind.String
+                ? sourceSplitElement.GetString()!
                 : split;
 
             taskIdParam.Value = taskIdElement.GetString()!;

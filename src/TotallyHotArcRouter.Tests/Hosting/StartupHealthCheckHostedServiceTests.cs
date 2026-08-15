@@ -5,6 +5,7 @@ using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.PriceCatalog.Sources;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Router;
+using TotallyHot.ArcRouter.Router.Embeddings;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tests.CodeRouterBench;
 using TotallyHot.ArcRouter.Tests.PriceCatalog;
@@ -98,6 +99,81 @@ public class StartupHealthCheckHostedServiceTests
         // A 0/negative retention window must never be treated as "cutoff = now", which would wipe out
         // every row instead of leaving the ledger untouched.
         Assert.Equal(1, CountRows(temp, "recent"));
+    }
+
+    [Fact]
+    public async Task StartAsync_EmbeddingClientConfigured_WarmsUpAndMarksStateWarm()
+    {
+        using var temp = new TempDatabase();
+        var service = CreateMinimalService(temp, out _, embeddingClient: new FakeEmbeddingClient(succeed: true), out var warmupState);
+
+        await service.StartAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(warmupState!.IsWarm);
+    }
+
+    [Fact]
+    public async Task StartAsync_EmbeddingClientThrows_LeavesStateNotWarm_AndDoesNotThrow()
+    {
+        using var temp = new TempDatabase();
+        var service = CreateMinimalService(temp, out _, embeddingClient: new FakeEmbeddingClient(succeed: false), out var warmupState);
+
+        await service.StartAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(warmupState!.IsWarm);
+    }
+
+    [Fact]
+    public async Task StartAsync_NoEmbeddingClientConfigured_DoesNotThrow()
+    {
+        using var temp = new TempDatabase();
+        var service = CreateMinimalService(temp, out _, embeddingClient: null, out var warmupState);
+
+        await service.StartAsync(TestContext.Current.CancellationToken);
+
+        Assert.Null(warmupState);
+    }
+
+    /// <summary>
+    /// Builds a service with every dependency minimally stubbed, for tests that only care about the
+    /// embedding warm-up step and would otherwise have to repeat every other constructor argument.
+    /// </summary>
+    private static StartupHealthCheckHostedService CreateMinimalService(
+        TempDatabase temp,
+        out PriceCatalogRepository repository,
+        IEmbeddingClient? embeddingClient,
+        out EmbeddingWarmupState? warmupState)
+    {
+        repository = temp.CreateRepository();
+        var ledger = temp.CreateUsageLedger();
+        var registry = Mock.Of<IPriceSourceRegistry>(r => r.EnabledClients == Array.Empty<IPriceSourceClient>());
+        var ingestionService = new PriceCatalogIngestionService(
+            registry, repository, temp.CreateToggleStore(repository), NullLogger<PriceCatalogIngestionService>.Instance);
+        warmupState = embeddingClient is null ? null : new EmbeddingWarmupState();
+
+        return new StartupHealthCheckHostedService(
+            NullLogger<StartupHealthCheckHostedService>.Instance,
+            temp.Database,
+            repository,
+            ingestionService,
+            temp.CreateToggleStore(repository),
+            temp.CreateBudgetStore(repository),
+            temp.CreateToolCallCapabilityStore(),
+            ledger,
+            temp.CreateRollupStore(),
+            Options.Create(new StorageOptions()),
+            CreateRouterMemoryDatabase(temp),
+            CreateEmbeddingMemory(temp),
+            CreateBenchmarkDatabase(temp),
+            CreateBenchmarkStatusService(temp),
+            embeddingClient,
+            warmupState);
+    }
+
+    private sealed class FakeEmbeddingClient(bool succeed) : IEmbeddingClient
+    {
+        public Task<float[]> EmbedAsync(string text, CancellationToken cancellationToken = default) =>
+            succeed ? Task.FromResult<float[]>([1f]) : throw new InvalidOperationException("embedding backend unavailable");
     }
 
     private static UsageLedgerEntry MakeEntry(string requestId, DateTimeOffset occurredAtUtc) =>

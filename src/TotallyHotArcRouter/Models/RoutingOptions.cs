@@ -133,6 +133,36 @@ public sealed class RoutingOptions
     [Range(0d, 100d)]
     public double LlmRouterVoterWeight { get; init; } = 0.64;
 
+    /// <summary>
+    /// Gets the maximum time, in milliseconds, <see cref="Proxy.RequestInterceptor"/> waits for
+    /// <see cref="Router.Embeddings.IEmbeddingClient.EmbedAsync"/> before giving up and routing without an
+    /// embedding (docs/router/live-feedback-learning-plan.md Phase 2b). The routing hot path must never
+    /// block on learning: a warm ONNX forward pass is single-digit milliseconds, so this default leaves
+    /// generous headroom for transient contention on <c>OnnxEmbeddingClient</c>'s inference semaphore
+    /// without letting a stuck embedding call stall the request it was computed for.
+    /// </summary>
+    [Range(1, 60_000)]
+    public int EmbeddingBudgetMs { get; init; } = 250;
+
+    /// <summary>
+    /// Gets the maximum number of entries <see cref="Router.Embeddings.PendingTaskEmbeddingCache"/> holds
+    /// before evicting the oldest (FIFO) - docs/router/live-feedback-learning-plan.md Phase 2c. Bridges a
+    /// request's task embedding (computed on the request path) to its later-arriving verifier score
+    /// (correlated only by <see cref="TotallyHot.ArcRouter.Sandbox.SandboxResult.RequestCorrelationId"/>);
+    /// bounded so an operator who disables the sandbox (scores never arrive) cannot grow this unboundedly.
+    /// </summary>
+    [Range(1, 1_000_000)]
+    public int PendingEmbeddingCacheCapacity { get; init; } = 2_000;
+
+    /// <summary>
+    /// Gets how long, in seconds, <see cref="Router.Embeddings.PendingTaskEmbeddingCache"/> retains an
+    /// entry before it expires unclaimed - a score that never arrives (sandbox disabled, evaluation
+    /// dropped, request aborted) must not hold its slot forever. Default comfortably exceeds a sandboxed
+    /// evaluation's expected turnaround.
+    /// </summary>
+    [Range(1, 86_400)]
+    public int PendingEmbeddingCacheTtlSeconds { get; init; } = 300;
+
     /// <summary>Gets whether the <c>dim_best</c> voter participates in the Orchestrator's vote.</summary>
     public bool EnableDimBestVoter { get; init; } = true;
 

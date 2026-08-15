@@ -66,11 +66,12 @@ public sealed record RouteCandidate(
 /// </summary>
 public sealed record ModelRouteResolutionResult
 {
-    private ModelRouteResolutionResult(bool isSuccess, IReadOnlyList<RouteCandidate>? candidates, string? errorMessage)
+    private ModelRouteResolutionResult(bool isSuccess, IReadOnlyList<RouteCandidate>? candidates, string? errorMessage, float[]? taskEmbedding)
     {
         IsSuccess = isSuccess;
         Candidates = candidates ?? [];
         ErrorMessage = errorMessage;
+        TaskEmbedding = taskEmbedding;
     }
 
     /// <summary>
@@ -103,6 +104,18 @@ public sealed record ModelRouteResolutionResult
     /// </summary>
     public string? ErrorMessage { get; }
 
+    /// <summary>
+    /// Gets the request's task embedding, computed on the request path under a time budget
+    /// (docs/router/live-feedback-learning-plan.md Phase 2b), or <see langword="null"/> when it was not
+    /// computed (no embedding client configured, still warming up, budget exceeded, or the request had no
+    /// extractable text). Carried through so <c>ProxyMiddleware</c> can hand it to
+    /// <c>Router.Embeddings.PendingTaskEmbeddingCache</c> once the request's correlation id is known -
+    /// <see cref="TotallyHot.ArcRouter.Proxy.RequestInterceptor.ResolveModelRouteAsync"/> computes the
+    /// embedding but does not itself know the correlation id (it is only assigned later, alongside session
+    /// and turn resolution).
+    /// </summary>
+    public float[]? TaskEmbedding { get; }
+
     // A single-route Success(route, rewrittenBody) overload used to sit here. It was unreachable - every
     // caller goes through the candidate-list overload below, because even a no-fallback resolution builds
     // its one candidate through RequestInterceptor.BuildCandidate - and it constructed a RouteCandidate
@@ -113,8 +126,10 @@ public sealed record ModelRouteResolutionResult
     /// <summary>
     /// Creates a successful resolution result from an ordered candidate list (primary first, then fallbacks).
     /// </summary>
+    /// <param name="candidates">The ordered candidate list; must contain at least the primary route.</param>
+    /// <param name="taskEmbedding">See <see cref="TaskEmbedding"/>.</param>
     /// <exception cref="ArgumentException"><paramref name="candidates"/> is empty - a success must have at least the primary route, since <see cref="Route"/>/<see cref="RewrittenBody"/> index the first candidate.</exception>
-    public static ModelRouteResolutionResult Success(IReadOnlyList<RouteCandidate> candidates)
+    public static ModelRouteResolutionResult Success(IReadOnlyList<RouteCandidate> candidates, float[]? taskEmbedding = null)
     {
         ArgumentNullException.ThrowIfNull(candidates);
         if (candidates.Count == 0)
@@ -122,13 +137,13 @@ public sealed record ModelRouteResolutionResult
             throw new ArgumentException("A successful resolution must contain at least the primary route candidate.", nameof(candidates));
         }
 
-        return new(true, candidates, null);
+        return new(true, candidates, null, taskEmbedding);
     }
 
     /// <summary>
     /// Creates a failed resolution result.
     /// </summary>
     public static ModelRouteResolutionResult Failure(string errorMessage) =>
-        new(false, null, errorMessage);
+        new(false, null, errorMessage, null);
 }
 

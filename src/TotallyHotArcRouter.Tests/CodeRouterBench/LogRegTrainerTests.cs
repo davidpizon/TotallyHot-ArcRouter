@@ -1,8 +1,6 @@
 using System.Reflection;
 using TotallyHot.ArcRouter.CodeRouterBench;
-using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Orchestrator;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace TotallyHot.ArcRouter.Tests.CodeRouterBench;
 
@@ -11,12 +9,15 @@ namespace TotallyHot.ArcRouter.Tests.CodeRouterBench;
 /// <see cref="BenchmarkDatabase"/> - two clearly-separable classes over a tiny vocabulary, enough to
 /// verify the tokenize -> vocabulary -> TF-IDF -> gradient-descent -> argmax pipeline produces a usable
 /// <see cref="LogRegModelArtifact"/> without depending on the real, multi-hundred-MB synced corpus (see
-/// <see cref="LogRegTrainerReconciliationTests"/> for that).
+/// <see cref="LogRegTrainerReconciliationTests"/> for that). Scores the artifact directly rather than
+/// through <see cref="Router.Orchestrator.LogRegVoter"/> - docs/router/live-feedback-learning-plan.md
+/// Phase 3 repurposed that voter to score embeddings; <see cref="LogRegModelArtifact"/>'s TF-IDF shape now
+/// only feeds the Phase N static comparison baseline this trainer produces.
 /// </summary>
 public class LogRegTrainerTests
 {
     [Fact]
-    public async Task Train_SeparableSyntheticCorpus_LearnsToDistinguishTheTwoClasses()
+    public void Train_SeparableSyntheticCorpus_LearnsToDistinguishTheTwoClasses()
     {
         using var temp = new TempBenchmarkDatabase();
         temp.Database.EnsureCreated();
@@ -39,22 +40,48 @@ public class LogRegTrainerTests
         Assert.Contains("model-bug", artifact.ClassWeights.Keys);
         Assert.Contains("model-algo", artifact.ClassWeights.Keys);
 
-        var voter = new LogRegVoter(NullLogger<LogRegVoter>.Instance, artifact);
-        var candidates = new[]
+        Assert.Equal("model-bug", Argmax(artifact, "another bug causing an error"));
+        Assert.Equal("model-algo", Argmax(artifact, "reduce the algorithm's complexity"));
+    }
+
+    /// <summary>Scores every class in <paramref name="artifact"/> against <paramref name="text"/>'s TF-IDF vector and returns the argmax class.</summary>
+    private static string Argmax(LogRegModelArtifact artifact, string text)
+    {
+        var vocabularyIndex = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (var i = 0; i < artifact.Vocabulary.Count; i++)
         {
-            new RoutingCandidate("model-bug", "openai", IsFree: false),
-            new RoutingCandidate("model-algo", "openai", IsFree: false),
-        };
+            vocabularyIndex[artifact.Vocabulary[i]] = i;
+        }
 
-        var bugVote = await voter.VoteAsync(
-            new VotingContext("bug_fixing", candidates, TaskText: "another bug causing an error"),
-            TestContext.Current.CancellationToken);
-        var algoVote = await voter.VoteAsync(
-            new VotingContext("algorithm", candidates, TaskText: "reduce the algorithm's complexity"),
-            TestContext.Current.CancellationToken);
+        var tokens = LogRegTextTokenizer.Tokenize(text);
+        var counts = new Dictionary<int, int>();
+        foreach (var token in tokens)
+        {
+            if (vocabularyIndex.TryGetValue(token, out var index))
+            {
+                counts[index] = counts.GetValueOrDefault(index) + 1;
+            }
+        }
 
-        Assert.Equal("model-bug", bugVote.ModelName);
-        Assert.Equal("model-algo", algoVote.ModelName);
+        string? bestClass = null;
+        var bestScore = double.NegativeInfinity;
+        foreach (var (model, weights) in artifact.ClassWeights)
+        {
+            var score = weights[0];
+            foreach (var (index, count) in counts)
+            {
+                var termFrequency = (double)count / tokens.Count;
+                score += weights[index + 1] * termFrequency * artifact.InverseDocumentFrequency[index];
+            }
+
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestClass = model;
+            }
+        }
+
+        return bestClass ?? throw new InvalidOperationException("No class scored.");
     }
 
     [Fact]

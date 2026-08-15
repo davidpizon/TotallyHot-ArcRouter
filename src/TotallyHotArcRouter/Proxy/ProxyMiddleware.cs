@@ -88,6 +88,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     private readonly IRateLimitHeaderCapture _rateLimitCapture;
     private readonly ICircuitBreaker _circuitBreaker;
     private readonly ToolCallNormalizerFactory _toolCallNormalizerFactory;
+    private readonly Router.Embeddings.PendingTaskEmbeddingCache? _pendingTaskEmbeddingCache;
 
     // True only when no factory was supplied and this instance built its own fallback - in that case
     // ProxyMiddleware is the sole owner of that factory's lifetime and must dispose it (it caches AWS SDK
@@ -134,6 +135,14 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// <param name="toolCallNormalizerFactory">Optional per-request tool-call normalization (<c>docs/router/tool-call-normalization.md</c> Phase 4), consulted for any candidate with no other translator registered: it decides from the (provider, model) capability row and whether the request carried <c>tools</c> whether the response needs a dialect scan at all, and rewrites a dialect-framed tool call into a real <c>tool_calls</c> shape. Replaces the provider-wide echo guard of <c>unified-api-translation.md</c> §4.5. In the real app this is always supplied via DI (a shared singleton reading the capability store); when omitted (direct construction outside DI), this instance builds a store-less one - so a tools-carrying request is still normalized with the union of dialects, but nothing is classified or persisted, mirroring <paramref name="circuitBreaker"/>'s "behaviorally inert when defaulted" pattern.</param>
     /// <param name="rateLimitCapture">Optional capture for upstream <c>anthropic-ratelimit-*</c> response headers (<c>docs/router/anthropic-reported-usage-plan.md</c> §5), invoked as soon as each attempt's response headers arrive. Defaults to a no-op, so existing callers/tests are unaffected.</param>
     /// <param name="usageLedger">Optional durable usage ledger (<c>docs/router/token-tracking-implementation-plan.md</c> Phase 2), recorded to immediately after <paramref name="budgetStore"/> on the request path. When <see langword="null"/> (e.g. tests constructing this type directly), no ledger row is written - the rest of telemetry is unaffected.</param>
+    /// <param name="pendingTaskEmbeddingCache">
+    /// Optional bridge (docs/router/live-feedback-learning-plan.md Phase 2c) between
+    /// <see cref="RequestInterceptor"/>'s Phase 2b embedding computation and the request's
+    /// later-arriving verifier score, which is only correlated by the id computed below alongside session
+    /// and turn resolution - the earliest point that id is actually known, since
+    /// <see cref="RequestInterceptor.ResolveModelRouteAsync"/> runs before it. Defaults to
+    /// <see langword="null"/> (no entries recorded), so existing callers/tests are unaffected.
+    /// </param>
     public ProxyMiddleware(
         ILogger<ProxyMiddleware> logger,
         RequestInterceptor interceptor,
@@ -153,7 +162,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         ICircuitBreaker? circuitBreaker = null,
         ToolCallNormalizerFactory? toolCallNormalizerFactory = null,
         IRateLimitHeaderCapture? rateLimitCapture = null,
-        IUsageLedger? usageLedger = null)
+        IUsageLedger? usageLedger = null,
+        Router.Embeddings.PendingTaskEmbeddingCache? pendingTaskEmbeddingCache = null)
     {
         _logger = logger;
         _interceptor = interceptor;
@@ -177,6 +187,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         _rateLimitCapture = rateLimitCapture ?? NullRateLimitHeaderCapture.Instance;
         _circuitBreaker = circuitBreaker ?? new CircuitBreaker();
         _toolCallNormalizerFactory = toolCallNormalizerFactory ?? new ToolCallNormalizerFactory();
+        _pendingTaskEmbeddingCache = pendingTaskEmbeddingCache;
 
         if (bedrockClientFactory is null)
         {
@@ -400,7 +411,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // exactly like an HTTP outage does.
             if (translator is IBedrockPayloadTranslator bedrockTranslator)
             {
-                if (await InvokeBedrockAsync(context, route, bedrockTranslator, rewrittenBody, requestedModelName, isFallback, hasNextCandidate, nextProviderDiffers))
+                if (await InvokeBedrockAsync(context, route, bedrockTranslator, rewrittenBody, requestedModelName, isFallback, hasNextCandidate, nextProviderDiffers, resolution.TaskEmbedding))
                 {
                     return;
                 }
@@ -798,7 +809,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                     // ResponseTextExtractor pick the right parser per request instead of assuming one shape per
                     // provider, which broke once "anthropic" became dual-mode.
                     var telemetryShapeProvider = translator is not null ? "openai" : route.Provider;
-                    await PublishTelemetryAsync(context, route, requestedModelName, isFallback, telemetryShapeProvider, rewrittenBody, capturedResponseBytes, nativeResponseBytes, isStreaming, latencyToHeadersMs, totalDurationMs, statusCode, context.RequestAborted, responseMessage.Headers, tailScanner);
+                    await PublishTelemetryAsync(context, route, requestedModelName, isFallback, telemetryShapeProvider, rewrittenBody, capturedResponseBytes, nativeResponseBytes, isStreaming, latencyToHeadersMs, totalDurationMs, statusCode, context.RequestAborted, responseMessage.Headers, tailScanner, resolution.TaskEmbedding);
                 }
                 catch (Exception ex)
                 {
@@ -941,13 +952,14 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// named local, used the same way: a credential failure is only worth retrying against a genuinely
     /// different provider, since a same-provider backup shares the identical broken credential.
     /// </param>
+    /// <param name="taskEmbedding">The request's task embedding (see <see cref="ModelRouteResolutionResult.TaskEmbedding"/>), forwarded to <see cref="PublishTelemetryAsync"/>.</param>
     /// <returns>
     /// <see langword="true"/> if a response was written to the client (success, or a failure with no
     /// eligible next candidate) - the caller's cascade is over. <see langword="false"/> if the SDK call
     /// failed before anything was written and a next candidate should be tried - the caller should
     /// <c>continue</c> its loop.
     /// </returns>
-    private async Task<bool> InvokeBedrockAsync(HttpContext context, ResolvedModelRoute route, IBedrockPayloadTranslator translator, byte[] rewrittenBody, string requestedModelName, bool isFallback, bool hasNextCandidate, bool nextProviderDiffers)
+    private async Task<bool> InvokeBedrockAsync(HttpContext context, ResolvedModelRoute route, IBedrockPayloadTranslator translator, byte[] rewrittenBody, string requestedModelName, bool isFallback, bool hasNextCandidate, bool nextProviderDiffers, float[]? taskEmbedding)
     {
         var circuitTarget = CircuitBreakerTargetKey.FromRoute(route);
         var nativeRequestBody = translator.TranslateRequest(rewrittenBody);
@@ -1094,7 +1106,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // its streaming chunks aren't SSE-framed, so the same capture approach doesn't apply. Always
             // null here - telemetry falls back to parsing the translated "openai"-shaped bytes, unchanged
             // from before this plan.
-            await PublishTelemetryAsync(context, route, requestedModelName, isFallback, "openai", rewrittenBody, capturedResponseBytes, nativeResponseBytes: null, isStreamingRequest, latencyToHeadersMs, totalDurationMs, StatusCodes.Status200OK, context.RequestAborted, upstreamHeaders: null, tailScanner: tailScanner);
+            await PublishTelemetryAsync(context, route, requestedModelName, isFallback, "openai", rewrittenBody, capturedResponseBytes, nativeResponseBytes: null, isStreamingRequest, latencyToHeadersMs, totalDurationMs, StatusCodes.Status200OK, context.RequestAborted, upstreamHeaders: null, tailScanner: tailScanner, taskEmbedding: taskEmbedding);
         }
         catch (Exception ex)
         {
@@ -1227,7 +1239,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         int statusCode,
         CancellationToken cancellationToken,
         System.Net.Http.Headers.HttpResponseHeaders? upstreamHeaders = null,
-        IncrementalUsageScanner? tailScanner = null)
+        IncrementalUsageScanner? tailScanner = null,
+        float[]? taskEmbedding = null)
     {
         var requestBody = TryParseJsonObject(rewrittenRequestBody);
         var resolvedSessionId = _sessionIdResolver.Resolve(context.Request.Headers, requestBody);
@@ -1466,6 +1479,15 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         // A stable id shared by this telemetry event and any off-path sandbox signal derived from the same
         // response, so a dashboard can join the two.
         var correlationId = FormattableString.Invariant($"{sessionId}:{turnNumber}");
+
+        // docs/router/live-feedback-learning-plan.md Phase 2c: this is the earliest point the correlation
+        // id a later-arriving SandboxResult carries is actually known - RequestInterceptor.ResolveModelRouteAsync
+        // computed taskEmbedding well before session/turn resolution ran, so it could not key this itself.
+        // Recorded here, immediately once both halves exist, rather than passed to RequestInterceptor.
+        if (taskEmbedding is not null)
+        {
+            _pendingTaskEmbeddingCache?.Set(correlationId, taskEmbedding);
+        }
 
         var telemetryEvent = new RoutingTelemetryEvent(
             SessionId: sessionId,

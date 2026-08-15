@@ -77,22 +77,34 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
 
     /// <inheritdoc />
     /// <remarks>
-    /// Delegates to <see cref="DecideAsync"/> with no task embedding/text - <see cref="RoutingContext"/>
-    /// does not carry either today (PLAN.md Phase L's stated scope). Callers who have a task embedding or
-    /// text should call <see cref="DecideAsync"/> directly so <see cref="MemoryKnnVoter"/> and
-    /// <see cref="LogRegVoter"/> can participate instead of abstaining.
+    /// Delegates to the <see cref="RoutingSignals"/> overload of this method with no signals, which in
+    /// turn calls <see cref="DecideAsync"/> with no task embedding/text. Callers who have a task embedding
+    /// or text should use the <see cref="RoutingSignals"/> overload (as <see cref="Proxy.RequestInterceptor"/>
+    /// does - docs/router/live-feedback-learning-plan.md Phase 2a) or call <see cref="DecideAsync"/>
+    /// directly, so <see cref="MemoryKnnVoter"/> and <see cref="LogRegVoter"/> can participate instead of
+    /// abstaining.
     /// </remarks>
-    public async Task<string> SelectModelAsync(RoutingContext context, CancellationToken cancellationToken = default)
+    public Task<string> SelectModelAsync(RoutingContext context, CancellationToken cancellationToken = default) =>
+        SelectModelAsync(context, signals: null, cancellationToken);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Forwards <paramref name="signals"/>' <see cref="RoutingSignals.TaskEmbedding"/> and
+    /// <see cref="RoutingSignals.TaskText"/> to <see cref="DecideAsync"/> in place of the hardcoded nulls
+    /// the no-signals overload passes, so <see cref="MemoryKnnVoter"/> and <see cref="LogRegVoter"/> can
+    /// participate in a live routing decision (docs/router/live-feedback-learning-plan.md Phase 2a).
+    /// </remarks>
+    public async Task<string> SelectModelAsync(RoutingContext context, RoutingSignals? signals, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
-        var decision = await DecideAsync(context, taskEmbedding: null, taskText: null, cancellationToken).ConfigureAwait(false);
+        var decision = await DecideAsync(context, signals?.TaskEmbedding, signals?.TaskText, cancellationToken).ConfigureAwait(false);
         return decision.SelectedModel;
     }
 
     /// <summary>
     /// Runs every enabled voter and returns the full weighted-vote decision, including the vote breakdown -
     /// the entry point tests and any future caller that has a task embedding/text should use instead of
-    /// <see cref="SelectModelAsync"/>.
+    /// <see cref="SelectModelAsync(RoutingContext, CancellationToken)"/>.
     /// </summary>
     /// <param name="context">The dimension and eligible candidates to select from.</param>
     /// <param name="taskEmbedding">The task's embedding, if available, for <see cref="MemoryKnnVoter"/>.</param>
