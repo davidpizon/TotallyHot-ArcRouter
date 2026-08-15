@@ -467,8 +467,11 @@ namespace TotallyHot.ArcRouter.Proxy
         /// <param name="liveDimension">The request's live dimension key, from <see cref="ResolveModelRouteAsync"/>.</param>
         /// <param name="signals">
         /// The request's task text/embedding (docs/router/live-feedback-learning-plan.md Phase 2a), passed
-        /// to <see cref="IRoutingPolicy.SelectModelAsync(RoutingContext, RoutingSignals?, CancellationToken)"/>
-        /// so <c>MemoryKnnVoter</c>/<c>LogRegVoter</c> can vote instead of abstaining.
+        /// to <see cref="IRoutingPolicy.SelectModelAsync(RoutingContext, RoutingSignals?, CancellationToken)"/>.
+        /// Whether this reaches <c>MemoryKnnVoter</c>/<c>LogRegVoter</c> depends on <see cref="_routingPolicy"/>'s
+        /// concrete type: only a policy that overrides the <see cref="RoutingSignals"/> overload (currently
+        /// <c>OrchestratorRoutingPolicy</c>) forwards it into voting - the interface's default implementation
+        /// silently discards it, and the live-registered <c>CompositeRoutingPolicy</c> does not override it.
         /// </param>
         /// <param name="cancellationToken">A token to cancel the operation.</param>
         /// <returns>The resolved route to serve the request with, or <see langword="null"/> when no eligible model is currently available.</returns>
