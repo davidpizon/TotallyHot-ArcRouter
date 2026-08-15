@@ -1,10 +1,13 @@
 # Live Feedback Learning Plan
 
-Makes the router actually learn from its own traffic. Today exactly one of four Orchestrator voters
-participates in a live routing decision; the other three abstain on every real request because the
-data they need is never computed. This plan wires the feedback capture that was designed but never
+Makes the router actually learn from its own traffic. Before this plan, exactly one of four Orchestrator
+voters participated in a live routing decision; the other three abstained on every real request because
+the data they need was never computed. This plan wires the feedback capture that was designed but never
 connected, then rebuilds the `logreg` voter around it so the router improves from what it has already
-served rather than from a frozen artifact.
+served rather than from a frozen artifact. Phases 1-3 (below) computed that missing data and shipped an
+embedding-backed `logreg`, but they only reach `OrchestratorRoutingPolicy`, which is not the policy
+registered for live traffic today (`CompositeRoutingPolicy`, dispatching to `UtilityRoutingPolicy` /
+`AgentRouterPolicy`, is) — see the "Live status today" table below for the current, post-merge picture.
 
 **Status:** in progress — Phases 1-3 shipped (importer defect repair, feedback-capture wiring, and the
 embedding-backed `logreg` voter); Phases 4-6 (training/retrain, admin surface, TF-IDF relocation) are
@@ -16,34 +19,33 @@ measures voter quality; measuring voters that structurally cannot fire would pro
 
 `docs/router/coderouterbench-sqlite-migration-plan.md` shipped the corpus into SQLite so Phase L's
 voters would have ground truth to read. Phase L then shipped three of four voters. Both are accurate
-about what they built. Neither noticed that the production entry point never passes those voters their
-inputs:
+about what they built. Neither noticed that the production entry point never passed those voters their
+inputs. Before Phase 2a, `OrchestratorRoutingPolicy`'s no-signals overload hardcoded both arguments away:
 
 ```csharp
-// OrchestratorRoutingPolicy.cs:88 - the IRoutingPolicy method RequestInterceptor actually calls
+// OrchestratorRoutingPolicy.cs, pre-Phase-2a - the only overload RequestInterceptor could call
 var decision = await DecideAsync(context, taskEmbedding: null, taskText: null, cancellationToken);
 ```
 
-Both arguments are hardcoded `null`. `DecideAsync`'s own documentation describes itself as the entry
-point for "tests and any future caller that has a task embedding/text" — the wiring was left as
-future work and no consumer arrived.
+`DecideAsync`'s own documentation describes itself as the entry point for "tests and any future caller
+that has a task embedding/text" — the wiring was left as future work and no consumer arrived. Phases
+1-3 below fixed this for `OrchestratorRoutingPolicy` specifically: it now has a `RoutingSignals`
+overload that forwards `signals.TaskEmbedding`/`signals.TaskText` into `DecideAsync` instead of hardcoded
+nulls. That is not, by itself, the same as fixing it for live traffic — see the table below.
 
 | Voter | Needs | Live status today |
 |---|---|---|
 | `dim_best` | `RouterMemory` scores | **Working** — `RouterMemoryScoreObserver` writes `live:`-prefixed scores through the sandbox |
-| `memory_kNN` | `VotingContext.TaskEmbedding` | **Always abstains** — embedding is always `null` |
-| `logreg` | `VotingContext.TaskText` | **Always abstains** — text is always `null` |
+| `memory_kNN` | `VotingContext.TaskEmbedding` | **Reachable only via `OrchestratorRoutingPolicy`** — `RequestInterceptor` now computes and passes `RoutingSignals`, but the live-registered policy (`CompositeRoutingPolicy` → `UtilityRoutingPolicy`/`AgentRouterPolicy`) doesn't override the signals overload, so it still abstains on live traffic today |
+| `logreg` | `VotingContext.TaskText` | **Reachable only via `OrchestratorRoutingPolicy`** — same gap as `memory_kNN`; embedding-backed, but not on the live routing path yet |
 | `llm_router` | — | Deferred stub (Phase L, by agreement) |
 
-The gap compounds: `EmbeddingMemory.AddEntryAsync` — the only writer of the `memory_entries` table —
-**has no production caller at all**. `IEmbeddingClient` is registered in DI
-(`Hosting/ServiceCollectionExtensions.cs:51`) and injected into nothing. So the router's per-task
-memory is always empty outside tests, which means `memory_kNN` would abstain even if it *were* handed
-an embedding.
-
-That is the real reason `logreg` has never had a trained model — more fundamental than the missing
-upstream prompt text documented in Phase L's deferral note. There is no observation loop to train
-from, because nothing observes.
+`EmbeddingMemory.AddEntryAsync` — the writer of the `memory_entries` table — now has a production
+caller: `EmbeddingMemoryScoreObserver` writes entries via `PendingTaskEmbeddingCache`, and
+`RequestInterceptor` optionally computes embeddings through `IEmbeddingClient` (budgeted, warm-up
+guarded). So the observation loop this section originally said didn't exist now does — the remaining
+gap is that `OrchestratorRoutingPolicy`, the only policy that reads those signals back out for voting,
+isn't the policy wired in for live requests (see `Hosting/ServiceCollectionExtensions.cs:126`).
 
 ## What we are actually able to train on
 
