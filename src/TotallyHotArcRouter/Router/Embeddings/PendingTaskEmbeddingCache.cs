@@ -86,13 +86,10 @@ public sealed class PendingTaskEmbeddingCache
 
         lock (_lock)
         {
+            // EvictExpiredAndStale performs a full sweep, so no remaining entry is expired afterward.
             EvictExpiredAndStale();
 
-            // A re-Set on an already-present key (Set_SameCorrelationIdTwice_DoesNotDuplicateInsertionOrder)
-            // refreshes the entry's expiry without moving its queue position, so EvictExpiredAndStale's
-            // prefix-scan invariant ("insertion order is also TTL order") can no longer be trusted here -
-            // check the entry's own expiry rather than relying solely on the sweep above.
-            if (_entries.Remove(correlationId, out var entry) && entry.ExpiresAtUtc > _timeProvider.GetUtcNow())
+            if (_entries.Remove(correlationId, out var entry))
             {
                 embedding = entry.Embedding;
                 return true;
@@ -105,27 +102,29 @@ public sealed class PendingTaskEmbeddingCache
 
     /// <summary>
     /// Drops expired entries and any stale queue entries left behind by a prior <see cref="TryTake"/> or
-    /// capacity eviction. Must be called under <see cref="_lock"/>. Insertion order is also TTL order (a
-    /// fixed TTL applied at insertion time), so this is a simple prefix scan, not a full sweep.
+    /// capacity eviction. Must be called under <see cref="_lock"/>. A re-<see cref="Set"/> on an existing
+    /// key refreshes that entry's expiry without moving its queue position, so insertion order can no
+    /// longer be trusted as TTL order - this is a full bounded sweep (each queued key visited once, live
+    /// keys re-enqueued) rather than a prefix scan that stops at the first unexpired entry.
     /// </summary>
     private void EvictExpiredAndStale()
     {
         var now = _timeProvider.GetUtcNow();
-        while (_insertionOrder.Count > 0)
+        var remaining = _insertionOrder.Count;
+        for (var i = 0; i < remaining; i++)
         {
-            var key = _insertionOrder.Peek();
+            var key = _insertionOrder.Dequeue();
             if (!_entries.TryGetValue(key, out var entry))
             {
-                _insertionOrder.Dequeue();
                 continue;
             }
 
             if (entry.ExpiresAtUtc > now)
             {
-                break;
+                _insertionOrder.Enqueue(key);
+                continue;
             }
 
-            _insertionOrder.Dequeue();
             _entries.Remove(key);
         }
     }

@@ -82,6 +82,27 @@ public class PendingTaskEmbeddingCacheTests
     }
 
     [Fact]
+    public void EvictExpiredAndStale_ExpiredEntryBehindARefreshedHead_IsStillEvicted()
+    {
+        var clock = new ManualTimeProvider(DateTimeOffset.UtcNow);
+        var cache = Create(ttlSeconds: 5, capacity: 100, timeProvider: clock);
+
+        cache.Set("corr-1", [1f]);
+        cache.Set("corr-2", [2f]);
+
+        clock.Advance(TimeSpan.FromSeconds(3));
+        cache.Set("corr-1", [3f]); // Refreshes corr-1's expiry without moving it ahead of corr-2 in the queue.
+
+        clock.Advance(TimeSpan.FromSeconds(3)); // corr-2 (TTL from t=0) is now expired; corr-1 (TTL from t=3) is not.
+        cache.Set("corr-3", [4f]); // Any Set/TryTake call sweeps - corr-2 must not survive behind corr-1's refreshed head.
+
+        Assert.Equal(2, cache.Count);
+        Assert.False(cache.TryTake("corr-2", out _));
+        Assert.True(cache.TryTake("corr-1", out var refreshed));
+        Assert.Equal(3f, refreshed![0]);
+    }
+
+    [Fact]
     public void Set_SameCorrelationIdTwice_DoesNotDuplicateInsertionOrder()
     {
         var cache = Create(capacity: 1);
