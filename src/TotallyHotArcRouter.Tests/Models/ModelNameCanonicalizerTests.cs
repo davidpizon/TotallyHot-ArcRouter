@@ -57,15 +57,38 @@ public class ModelNameCanonicalizerTests
         Assert.Equal(expected, ModelNameCanonicalizer.UnifyVersionSeparators(modelId));
 
     [Theory]
-    [InlineData("claude-opus-4-6", "claude-opus-4-6")]
-    [InlineData("claude-opus-4.6", "claude-opus-4-6")]
-    [InlineData("Claude-Opus-4.6", "claude-opus-4-6")]
-    [InlineData("MiniMax-M2.7", "minimax-m2-7")]
-    [InlineData("Qwen3-Max", "qwen3-max")]
-    [InlineData("gpt-5.4", "gpt-5-4")]
-    [InlineData("anthropic/claude-sonnet-4-6-20250929", "claude-sonnet-4-6")]
-    public void Canonicalize_CollapsesEverySpellingOntoOneKey(string modelId, string expected) =>
-        Assert.Equal(expected, ModelNameCanonicalizer.Canonicalize(modelId));
+    [InlineData("claude-opus-4-6", null, "claude-opus-4-6")]
+    [InlineData("claude-opus-4.6", null, "claude-opus-4-6")]
+    [InlineData("Claude-Opus-4.6", null, "claude-opus-4-6")]
+    [InlineData("MiniMax-M2.7", null, "minimax-m2-7")]
+    [InlineData("Qwen3-Max", null, "qwen3-max")]
+    [InlineData("gpt-5.4", null, "gpt-5-4")]
+    [InlineData("anthropic/claude-sonnet-4-6", null, "claude-sonnet-4-6")]
+    [InlineData("openai/GPT-4o", "openai", "gpt-4o")]
+    public void Canonicalize_CollapsesEverySpellingOntoOneKey(string modelId, string? provider, string expected) =>
+        Assert.Equal(expected, ModelNameCanonicalizer.Canonicalize(modelId, provider));
+
+    /// <summary>
+    /// The decision recorded in <c>docs/router/model-identity-canonicalization.md</c>: a dated snapshot
+    /// pins one immutable release while its base id is a rolling pointer, so the two must never share an
+    /// identity key - collapsing them would silently merge two models' benchmark scores into one cell.
+    /// </summary>
+    [Fact]
+    public void Canonicalize_DoesNotCollapseADatedSnapshotOntoItsBaseModel() =>
+        Assert.NotEqual(
+            ModelNameCanonicalizer.Canonicalize("claude-opus-4.6"),
+            ModelNameCanonicalizer.Canonicalize("claude-opus-4.6-20250929"));
+
+    /// <summary>
+    /// A version/tier suffix likewise denotes a different rolling target than the bare id, so it is never
+    /// stripped when forming an identity key. <see cref="ModelNameCanonicalizer.StripVersionSuffix"/>
+    /// remains available to the price-resolution ladder, which labels the resulting match approximate.
+    /// </summary>
+    [Fact]
+    public void Canonicalize_DoesNotStripAVersionTierSuffix() =>
+        Assert.NotEqual(
+            ModelNameCanonicalizer.Canonicalize("gpt-4o"),
+            ModelNameCanonicalizer.Canonicalize("gpt-4o-latest"));
 
     /// <summary>
     /// The pairing this whole type exists for: the eight ids the CodeRouterBench tables ship and the
@@ -106,7 +129,7 @@ public class ModelNameCanonicalizerTests
         Assert.NotEmpty(modelNames);
 
         var collisions = modelNames
-            .GroupBy(ModelNameCanonicalizer.Canonicalize, StringComparer.Ordinal)
+            .GroupBy(name => ModelNameCanonicalizer.Canonicalize(name), StringComparer.Ordinal)
             .Where(group => group.Count() > 1)
             .Select(group => $"{group.Key} <- {string.Join(", ", group)}")
             .ToList();

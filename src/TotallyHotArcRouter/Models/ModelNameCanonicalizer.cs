@@ -19,18 +19,31 @@ namespace TotallyHot.ArcRouter.Models;
 /// inventing a name that is not in the configuration.
 /// </para>
 /// <para>
-/// The stages are exposed individually because <see cref="PriceCatalog.ConfigModelIdentityResolver"/>
-/// applies them one at a time: its <see cref="PriceCatalog.ResolutionRung"/> ladder distinguishes an
-/// exact match from a snapshot-stripped one precisely <em>by which stage was needed</em>, and that
-/// distinction is what marks a resolved price approximate. Only callers that want the whole pipeline
-/// - such as the offline CodeRouterBench loader, which has no rung ladder and no provider column -
-/// should call <see cref="Canonicalize"/>.
+/// <b>Spelling, not identity.</b> <see cref="Canonicalize"/> normalizes only <em>cosmetic</em> spelling -
+/// case, a leading <c>provider/</c> qualifier, and <c>4.6</c> vs <c>4-6</c> version punctuation. It does
+/// <em>not</em> strip a dated snapshot or a version/tier suffix, because those change <em>which model</em>
+/// is named: <c>claude-opus-4.6-20250929</c> pins one immutable release and <c>claude-opus-4.6</c> is a
+/// rolling pointer, and treating them as one key would silently merge two models' scores into a single
+/// cell. See <c>docs/router/model-identity-canonicalization.md</c> for the evidence behind this decision.
+/// </para>
+/// <para>
+/// The stages remain exposed individually because <see cref="PriceCatalog.ConfigModelIdentityResolver"/>
+/// applies them one at a time, and <em>there</em> snapshot stripping is legitimate: its
+/// <see cref="PriceCatalog.ResolutionRung"/> ladder distinguishes an exact match from a snapshot-stripped
+/// one precisely <em>by which stage was needed</em>, and that distinction is what marks a resolved price
+/// approximate. That is the dividing line this type is built around - an approximation that is
+/// <em>labeled</em> (a price falling back to its base model's rate) is acceptable, while one that is
+/// <em>silent</em> (a benchmark score or a routing vote resolving to a different release than the one
+/// named) is not. Only the labeled path may call <see cref="StripSnapshotSuffix"/> or
+/// <see cref="StripVersionSuffix"/>.
 /// </para>
 /// <para>
 /// There is no fuzzy stage and no alias table today: all eight CodeRouterBench dataset ids reach their
-/// configured <c>ModelName</c> by rule alone. An unrecognized id still goes through the same
-/// normalization (lowercasing, snapshot/version-suffix stripping, dot-to-dash version unification) as a
+/// configured <c>ModelName</c> through spelling normalization alone. An unrecognized id still goes through
+/// the same normalization (lowercasing, provider-prefix stripping, dot-to-dash version unification) as a
 /// recognized one - only the alias/fuzzy mapping is withheld, per <c>docs/router/d3-alias-resolution.md</c>.
+/// An id that genuinely names no configured model is therefore left unresolved rather than approximately
+/// mapped, which is the visible failure the same document prescribes.
 /// </para>
 /// </remarks>
 public static class ModelNameCanonicalizer
@@ -128,19 +141,31 @@ public static class ModelNameCanonicalizer
     }
 
     /// <summary>
-    /// Runs every stage in order - <see cref="NormalizeBase"/>, <see cref="StripSnapshotSuffix"/>,
-    /// <see cref="StripVersionSuffix"/>, <see cref="UnifyVersionSeparators"/> - producing the key that
-    /// all spellings of one model share.
+    /// Runs the spelling-normalization stages - <see cref="NormalizeBase"/> then
+    /// <see cref="UnifyVersionSeparators"/> - producing the key that every <em>spelling</em> of one model
+    /// shares. This is the identity key for benchmark score lookups, routing votes, and anywhere else two
+    /// model ids are compared for sameness.
     /// </summary>
-    /// <param name="modelId">Any spelling of a model id, from config, a provider, or a dataset.</param>
+    /// <param name="modelId">Any spelling of a model id, from config, a provider, a dataset, or a voter.</param>
+    /// <param name="provider">Forwarded to <see cref="NormalizeBase"/> to strip a matching provider prefix.</param>
     /// <remarks>
-    /// Intended for callers that compare ids and nothing else. It is <em>not</em> appropriate where the
-    /// difference between an exact and an approximate match carries meaning, because it discards which
-    /// stage did the work; see the remarks on <see cref="ModelNameCanonicalizer"/>.
+    /// <para>
+    /// Deliberately does <em>not</em> run <see cref="StripSnapshotSuffix"/> or
+    /// <see cref="StripVersionSuffix"/>. <c>claude-opus-4.6</c> and <c>claude-opus-4-6</c> are one model
+    /// written two ways and do collapse here; <c>claude-opus-4.6-20250929</c> is a different, pinned
+    /// release and does not. All eight CodeRouterBench dataset ids reach their configured
+    /// <c>ModelName</c> under these two stages alone, so the stripping bought nothing on that path while
+    /// risking a silent score merge - see <c>docs/router/model-identity-canonicalization.md</c>.
+    /// </para>
+    /// <para>
+    /// Not appropriate where the difference between an exact and an approximate match carries meaning,
+    /// because it discards which stage did the work; <see cref="PriceCatalog.ConfigModelIdentityResolver"/>
+    /// applies the stages individually for that reason.
+    /// </para>
     /// </remarks>
-    public static string Canonicalize(string modelId)
+    public static string Canonicalize(string modelId, string? provider = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
-        return UnifyVersionSeparators(StripVersionSuffix(StripSnapshotSuffix(NormalizeBase(modelId))));
+        return UnifyVersionSeparators(NormalizeBase(modelId, provider));
     }
 }
