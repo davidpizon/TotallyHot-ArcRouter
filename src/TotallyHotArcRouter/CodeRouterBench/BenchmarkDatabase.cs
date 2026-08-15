@@ -277,7 +277,13 @@ public sealed class BenchmarkDatabase
                 continue;
             }
 
-            sourceSplitParam.Value = sourceSplitElement.GetString()!;
+            var sourceSplitValue = sourceSplitElement.GetString();
+            if (sourceSplitValue is not ("train" or "val" or "test"))
+            {
+                continue;
+            }
+
+            sourceSplitParam.Value = sourceSplitValue;
             taskIdParam.Value = taskId;
             update.ExecuteNonQuery();
             repairedCount++;

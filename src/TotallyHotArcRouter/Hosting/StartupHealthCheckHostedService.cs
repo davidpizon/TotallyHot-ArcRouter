@@ -287,7 +287,7 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "Embedding client warm-up failed; embedding-dependent routing signals will be unavailable until it succeeds.");
+            _logger.LogWarning(ex, "Embedding client warm-up failed; embedding-dependent routing signals will be unavailable for the rest of this process's lifetime (warm-up is not retried).");
         }
     }
 }

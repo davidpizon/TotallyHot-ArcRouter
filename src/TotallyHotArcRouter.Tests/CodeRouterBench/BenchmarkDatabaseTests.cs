@@ -182,6 +182,27 @@ public class BenchmarkDatabaseTests
         Assert.Equal("train", (string)readCommand.ExecuteScalar()!);
     }
 
+    [Fact]
+    public void EnsureCreated_IdTasksSourceSplitInRawJsonIsInvalidValue_LeavesRowUntouched()
+    {
+        using var temp = new TempBenchmarkDatabase();
+        temp.Database.EnsureCreated();
+
+        InsertIdTaskRow(
+            temp.Database,
+            taskId: "t1",
+            split: "probing",
+            badSourceSplit: "probing",
+            rawJson: """{"task_id":"t1","split":"probing","source_split":"not_a_real_split","dimension":"code_generation"}""");
+
+        temp.Database.EnsureCreated();
+
+        using var connection = temp.Database.OpenConnection();
+        using var readCommand = connection.CreateCommand();
+        readCommand.CommandText = "SELECT source_split FROM benchmark_id_tasks WHERE task_id = 't1';";
+        Assert.Equal("probing", (string)readCommand.ExecuteScalar()!);
+    }
+
     private static void InsertGarbageModelsRow(BenchmarkDatabase database, string arrayJson)
     {
         using var connection = database.OpenConnection();
