@@ -108,6 +108,7 @@ public class StartupHealthCheckHostedServiceTests
         var service = CreateMinimalService(temp, out _, embeddingClient: new FakeEmbeddingClient(succeed: true), out var warmupState);
 
         await service.StartAsync(TestContext.Current.CancellationToken);
+        await service.EmbeddingWarmupTask!;
 
         Assert.True(warmupState!.IsWarm);
     }
@@ -119,6 +120,7 @@ public class StartupHealthCheckHostedServiceTests
         var service = CreateMinimalService(temp, out _, embeddingClient: new FakeEmbeddingClient(succeed: false), out var warmupState);
 
         await service.StartAsync(TestContext.Current.CancellationToken);
+        await service.EmbeddingWarmupTask!;
 
         Assert.False(warmupState!.IsWarm);
     }
@@ -132,6 +134,7 @@ public class StartupHealthCheckHostedServiceTests
         await service.StartAsync(TestContext.Current.CancellationToken);
 
         Assert.Null(warmupState);
+        Assert.Null(service.EmbeddingWarmupTask);
     }
 
     /// <summary>

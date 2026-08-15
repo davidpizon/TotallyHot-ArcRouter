@@ -235,14 +235,19 @@ public sealed class BenchmarkDatabase
     // columns are keyed the same way in the broken state, so any row whose source_split is not one of the
     // three valid values is repairable from its own raw_json - no re-download needed. Rows whose raw_json
     // never carried a source_split property (already covered by the importer's own split-argument
-    // fallback) are left untouched, matching what a correct import would have produced for them.
+    // fallback) can never be repaired this way, so the query itself excludes them via json_extract rather
+    // than fetching them into badRows every startup only to skip them in the loop below.
     private void RepairIdTasksSourceSplit(SqliteConnection connection)
     {
         List<(string TaskId, string RawJson)> badRows = [];
         using (var select = connection.CreateCommand())
         {
             select.CommandText =
-                "SELECT task_id, raw_json FROM benchmark_id_tasks WHERE source_split NOT IN ('train', 'val', 'test');";
+                """
+                SELECT task_id, raw_json FROM benchmark_id_tasks
+                WHERE source_split NOT IN ('train', 'val', 'test')
+                  AND json_extract(raw_json, '$.source_split') IS NOT NULL;
+                """;
             using var reader = select.ExecuteReader();
             while (reader.Read())
             {
