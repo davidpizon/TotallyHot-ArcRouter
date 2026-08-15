@@ -74,6 +74,14 @@ public static class EmbeddingLogRegModelArtifactSerializer
                 $"The logreg voter model document's embeddingDimension is {artifact.EmbeddingDimension}, must be positive.");
         }
 
+        if (artifact.ClassWeights is null)
+        {
+            // A JSON document can carry an explicit null for the whole classWeights property (e.g.
+            // "classWeights": null); the Dto's property initializer only covers a missing property, not
+            // an explicit null, so this can reach here despite ClassWeights being non-nullable.
+            throw new FormatException("The logreg voter model document's classWeights is null.");
+        }
+
         foreach (var (model, weights) in artifact.ClassWeights)
         {
             if (weights is null)

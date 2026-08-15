@@ -75,6 +75,14 @@ public class EmbeddingLogRegModelArtifactSerializerTests
     }
 
     [Fact]
+    public void Deserialize_ClassWeightsIsNull_ThrowsFormatExceptionRatherThanNullReferenceException()
+    {
+        var json = """{"embeddingDimension":2,"classWeights":null,"trainedFrom":"x","bootstrapTaskCount":0,"memoryEntryCount":0}""";
+
+        Assert.Throws<FormatException>(() => EmbeddingLogRegModelArtifactSerializer.Deserialize(json));
+    }
+
+    [Fact]
     public void Deserialize_NullDocument_Throws()
     {
         Assert.Throws<FormatException>(() => EmbeddingLogRegModelArtifactSerializer.Deserialize("null"));
