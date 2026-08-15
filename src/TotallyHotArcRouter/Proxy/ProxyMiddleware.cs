@@ -1489,7 +1489,11 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             EmitUsageMetrics(route.Provider, requestedModel, promptTokens, completionTokens, cacheCreationTokens, cacheReadTokens, estimatedCostUsd);
         }
 
-        var requestSummary = TextTruncator.Truncate(RequestTextExtractor.ExtractNewestUserMessage(requestBody));
+        // Extracted once and reused below for the sandbox-ingress prompt - both read the same newest-user-
+        // message text off the same already-parsed requestBody, so a second walk of its messages array
+        // would just repeat the first.
+        var newestUserMessage = RequestTextExtractor.ExtractNewestUserMessage(requestBody);
+        var requestSummary = TextTruncator.Truncate(newestUserMessage);
         var responseSummary = _responseTextExtractor.TryExtractText(usageShapeProvider, isStreaming, usageShapeBytes, out var responseText)
             ? TextTruncator.Truncate(responseText)
             : null;
@@ -1545,10 +1549,9 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         // the already-extracted (untruncated) response text so no second copy of the body is made.
         if (_sandboxIngress is not null && !string.IsNullOrEmpty(responseText))
         {
-            var newestUserMessage = RequestTextExtractor.ExtractNewestUserMessage(requestBody) ?? string.Empty;
             _sandboxIngress.TryIngest(new SandboxIngestContext(
                 ResponseText: responseText,
-                Prompt: newestUserMessage,
+                Prompt: newestUserMessage ?? string.Empty,
                 Model: requestedModel,
                 CorrelationId: correlationId,
                 SessionId: sessionId));

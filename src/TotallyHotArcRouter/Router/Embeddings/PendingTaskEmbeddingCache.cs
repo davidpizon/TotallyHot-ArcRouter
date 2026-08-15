@@ -88,7 +88,11 @@ public sealed class PendingTaskEmbeddingCache
         {
             EvictExpiredAndStale();
 
-            if (_entries.Remove(correlationId, out var entry))
+            // A re-Set on an already-present key (Set_SameCorrelationIdTwice_DoesNotDuplicateInsertionOrder)
+            // refreshes the entry's expiry without moving its queue position, so EvictExpiredAndStale's
+            // prefix-scan invariant ("insertion order is also TTL order") can no longer be trusted here -
+            // check the entry's own expiry rather than relying solely on the sweep above.
+            if (_entries.Remove(correlationId, out var entry) && entry.ExpiresAtUtc > _timeProvider.GetUtcNow())
             {
                 embedding = entry.Embedding;
                 return true;

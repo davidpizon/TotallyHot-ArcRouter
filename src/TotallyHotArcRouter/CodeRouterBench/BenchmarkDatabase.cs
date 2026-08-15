@@ -201,6 +201,22 @@ public sealed class BenchmarkDatabase
             return;
         }
 
+        // The broken state this repairs has exactly one benchmark_models row - the garbage 'models' row -
+        // per the class comment above. A model legitimately named 'models' alongside other rows
+        // (BenchmarkModelsJsonImporterTests.Import_ObjectShapeWithLiteralModelsKeyAmongOthers) must not
+        // trigger this path, since Import's delete-and-reimport would wipe those other rows too.
+        long totalRowCount;
+        using (var count = connection.CreateCommand())
+        {
+            count.CommandText = "SELECT COUNT(*) FROM benchmark_models;";
+            totalRowCount = (long)count.ExecuteScalar()!;
+        }
+
+        if (totalRowCount != 1)
+        {
+            return;
+        }
+
         using var transaction = connection.BeginTransaction();
         // BenchmarkModelsJsonImporter.Import replaces every existing benchmark_models row; in the broken
         // state described above, the garbage 'models' row is the only row in the table, so this is exactly

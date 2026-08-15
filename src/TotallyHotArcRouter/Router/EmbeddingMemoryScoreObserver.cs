@@ -39,12 +39,8 @@ public sealed class EmbeddingMemoryScoreObserver : IRouterScoreObserver
     {
         ArgumentNullException.ThrowIfNull(result);
 
-        if (string.IsNullOrEmpty(result.Model))
-        {
-            _logger.LogDebug("Sandbox result has no model attribution; skipping embedding-memory observation.");
-            return;
-        }
-
+        // TryTake runs first, unconditionally consuming the pending-cache slot, so a result with no model
+        // attribution still drains its entry instead of leaving it to age out via TTL/capacity eviction.
         if (string.IsNullOrEmpty(result.RequestCorrelationId) ||
             !_pendingCache.TryTake(result.RequestCorrelationId, out var embedding) ||
             embedding is null)
@@ -52,6 +48,12 @@ public sealed class EmbeddingMemoryScoreObserver : IRouterScoreObserver
             _logger.LogDebug(
                 "No pending task embedding for correlation {CorrelationId}; skipping embedding-memory observation.",
                 result.RequestCorrelationId);
+            return;
+        }
+
+        if (string.IsNullOrEmpty(result.Model))
+        {
+            _logger.LogDebug("Sandbox result has no model attribution; skipping embedding-memory observation.");
             return;
         }
 
