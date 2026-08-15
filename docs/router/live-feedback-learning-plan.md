@@ -6,7 +6,9 @@ data they need is never computed. This plan wires the feedback capture that was 
 connected, then rebuilds the `logreg` voter around it so the router improves from what it has already
 served rather than from a frozen artifact.
 
-**Status:** proposed — no phase started. **Ordering:** before PLAN.md Phase N. Phase N's regret harness
+**Status:** in progress — Phases 1-3 shipped (importer defect repair, feedback-capture wiring, and the
+embedding-backed `logreg` voter); Phases 4-6 (training/retrain, admin surface, TF-IDF relocation) are
+still proposed. **Ordering:** before PLAN.md Phase N. Phase N's regret harness
 measures voter quality; measuring voters that structurally cannot fire would produce a benchmark of
 `dim_best` wearing an ensemble's name.
 
@@ -124,14 +126,14 @@ flowchart LR
 
 ## Phase map
 
-| Phase | Deliverable | Depends on |
-|---|---|---|
-| 1 | Fix two importer defects; repair affected rows in place | — |
-| 2 | Wire feedback capture: prompt text, embeddings, `memory_entries` writes | — |
-| 3 | Embedding-backed `logreg` voter reading a local artifact | 2 |
-| 4 | Training: OOD bootstrap + continual retrain from memory | 1, 3 |
-| 5 | gRPC admin surface + Governance pane + CLI flag | 4 |
-| 6 | Relocate TF-IDF machinery to the Phase N harness; delete the placeholder | 3 |
+| Phase | Deliverable | Depends on | Status |
+|---|---|---|---|
+| 1 | Fix two importer defects; repair affected rows in place | — | Shipped |
+| 2 | Wire feedback capture: prompt text, embeddings, `memory_entries` writes | — | Shipped |
+| 3 | Embedding-backed `logreg` voter reading a local artifact | 2 | Shipped |
+| 4 | Training: OOD bootstrap + continual retrain from memory | 1, 3 | Proposed |
+| 5 | gRPC admin surface + Governance pane + CLI flag | 4 | Proposed |
+| 6 | Relocate TF-IDF machinery to the Phase N harness; delete the placeholder | 3 | Proposed |
 
 ---
 
