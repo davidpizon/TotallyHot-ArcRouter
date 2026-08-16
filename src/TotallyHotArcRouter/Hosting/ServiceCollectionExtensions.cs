@@ -49,9 +49,14 @@ namespace TotallyHot.ArcRouter.Hosting
             // piecemeal by several singletons (AgentAsARouter, JsonRouterMemoryStore, RequestInterceptor),
             // none of which is guaranteed to be constructed eagerly; ValidateOnStart guarantees the check
             // runs during host startup regardless of which of those paths is actually exercised.
+            // ValidateDataAnnotations() enforces the [Range]/[Required] attributes on individual properties
+            // (e.g. EmbeddingBudgetMs) that EnsureValid's hand-written checks don't cover - the two are
+            // complementary, not redundant: EnsureValid checks cross-property invariants annotations can't
+            // express, ValidateDataAnnotations checks the per-property bounds EnsureValid doesn't repeat.
             services.AddOptions<RoutingOptions>()
                 .Configure<IConfiguration>((options, configuration) =>
                     configuration.GetSection(RoutingOptions.SectionName).Bind(options))
+                .ValidateDataAnnotations()
                 .Validate(options =>
                 {
                     options.EnsureValid();
