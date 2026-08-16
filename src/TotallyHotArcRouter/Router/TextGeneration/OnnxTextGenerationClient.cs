@@ -197,7 +197,9 @@ public sealed class OnnxTextGenerationClient : ITextGenerationClient, IAsyncDisp
             destinationPath,
             sourceUrl);
 
-        var temporaryPath = destinationPath + ".download";
+        // A GUID-suffixed temp name, not a fixed "<destination>.download" - this lazy downloader and a
+        // concurrent LlmRouterModelSyncService sync for the same file must not race on the same temp path.
+        var temporaryPath = $"{destinationPath}.{Guid.NewGuid():N}.download";
         try
         {
             using var httpClient = _httpClientFactory.CreateClient(nameof(OnnxTextGenerationClient));

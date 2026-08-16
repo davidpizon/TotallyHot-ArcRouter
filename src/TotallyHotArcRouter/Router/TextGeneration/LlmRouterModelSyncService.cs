@@ -142,7 +142,10 @@ public sealed class LlmRouterModelSyncService
             }
         }
 
-        var temporaryPath = destinationPath + ".download";
+        // A GUID-suffixed temp name, not a fixed "<destination>.download" - two concurrent downloads of
+        // the same file (two admin clients clicking Update, or a sync overlapping the lazy
+        // OnnxTextGenerationClient fallback) must not race on the same temp path.
+        var temporaryPath = $"{destinationPath}.{Guid.NewGuid():N}.download";
         try
         {
             progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Downloading));
