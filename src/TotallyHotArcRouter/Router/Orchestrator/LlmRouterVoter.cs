@@ -96,6 +96,13 @@ public sealed class LlmRouterVoter : IRoutingVoter
             var prompt = BuildPrompt(context.Dimension, context.Candidates, context.TaskText);
             response = await _generationClient.GenerateAsync(prompt, cancellationToken).ConfigureAwait(false);
         }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // The generation client's own timeout fired, not the caller's token - degrade to an
+            // abstention per this method's contract instead of propagating a timeout as a failure.
+            _logger.LogWarning("[LLM_ROUTER] Generation timed out; abstaining.");
+            return VoterVote.Abstain(Name);
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex, "[LLM_ROUTER] Generation failed; abstaining.");

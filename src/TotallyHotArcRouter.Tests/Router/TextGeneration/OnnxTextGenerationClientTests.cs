@@ -35,6 +35,7 @@ public class OnnxTextGenerationClientTests
         var cacheDirectory = options.ResolveModelCacheDirectory();
         return File.Exists(Path.Combine(cacheDirectory, "genai_config.json")) &&
             File.Exists(Path.Combine(cacheDirectory, "tokenizer.json")) &&
+            File.Exists(Path.Combine(cacheDirectory, "tokenizer_config.json")) &&
             File.Exists(Path.Combine(cacheDirectory, "model.onnx")) &&
             (options.ModelOnnxDataUrl is null || File.Exists(Path.Combine(cacheDirectory, "model.onnx.data")));
     }

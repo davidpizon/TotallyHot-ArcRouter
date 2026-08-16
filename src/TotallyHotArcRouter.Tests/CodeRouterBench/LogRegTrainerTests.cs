@@ -177,7 +177,14 @@ public class LogRegTrainerTests
         using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO benchmark_ood_results (task_id, source_split, bench, dimension, model, resolved, cost_usd)
-            VALUES ($taskId, 'test', 'test-bench', 'bug_fixing', $model, $resolved, $costUsd);
+            VALUES (
+                $taskId,
+                'test',
+                'test-bench',
+                (SELECT dimension FROM benchmark_ood_tasks WHERE task_id = $taskId),
+                $model,
+                $resolved,
+                $costUsd);
             """;
         command.Parameters.AddWithValue("$taskId", taskId);
         command.Parameters.AddWithValue("$model", model);
