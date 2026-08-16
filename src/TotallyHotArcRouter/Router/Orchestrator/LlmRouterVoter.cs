@@ -46,8 +46,11 @@ public sealed class LlmRouterVoter : IRoutingVoter
     private const double CodeBlockParseConfidence = 0.75;
     private const double NameMatchConfidence = 0.5;
 
+    // Greedy body capture: a non-greedy one stops at the first '}', truncating valid JSON whenever the
+    // model's object has more than one field (e.g. a "reasoning" string containing its own '}') or a
+    // nested object. Greedy backtracks to the last '}' before the closing fence instead.
     private static readonly Regex FencedCodeBlockPattern = new(
-        @"```(?:json)?\s*(?<body>\{.*?\})\s*```",
+        @"```(?:json)?\s*(?<body>\{.*\})\s*```",
         RegexOptions.Singleline | RegexOptions.Compiled,
         TimeSpan.FromMilliseconds(200));
 
@@ -161,12 +164,25 @@ public sealed class LlmRouterVoter : IRoutingVoter
             return new VoterVote(Name, fencedMatch, CodeBlockParseConfidence);
         }
 
+        // When the response mentions more than one candidate (common when it restates the candidate
+        // list before committing to one), the last-mentioned name is taken as the pick - it tracks the
+        // response's own content instead of candidates' fixed list order, which would otherwise silently
+        // prefer whichever candidate happens to sort first regardless of what the model actually said.
+        string? lastMentioned = null;
+        var lastMentionedIndex = -1;
         foreach (var candidate in candidates)
         {
-            if (response.Contains(candidate.ModelName, StringComparison.OrdinalIgnoreCase))
+            var index = response.LastIndexOf(candidate.ModelName, StringComparison.OrdinalIgnoreCase);
+            if (index > lastMentionedIndex)
             {
-                return new VoterVote(Name, candidate.ModelName, NameMatchConfidence);
+                lastMentionedIndex = index;
+                lastMentioned = candidate.ModelName;
             }
+        }
+
+        if (lastMentioned is not null)
+        {
+            return new VoterVote(Name, lastMentioned, NameMatchConfidence);
         }
 
         _logger.LogInformation("[LLM_ROUTER] Could not parse a candidate model from the generated response; abstaining.");
