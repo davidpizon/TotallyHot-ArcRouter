@@ -132,6 +132,34 @@ public sealed class LlmRouterModelOverrideStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task SetBaseUrlAsync_UrlsDifferingOnlyByPathCasing_ProduceDifferentSlugs()
+    {
+        var store = CreateStore(DefaultOptions());
+
+        await store.SetBaseUrlAsync("https://huggingface.co/Some-Org/Some-Model/resolve/main/subfolder", TestContext.Current.CancellationToken);
+        var firstSlug = store.Snapshot.Override.CacheDirectorySlug;
+
+        await store.SetBaseUrlAsync("https://huggingface.co/some-org/some-model/resolve/main/subfolder", TestContext.Current.CancellationToken);
+        var secondSlug = store.Snapshot.Override.CacheDirectorySlug;
+
+        Assert.NotEqual(firstSlug, secondSlug);
+    }
+
+    [Fact]
+    public async Task SetBaseUrlAsync_UrlsDifferingOnlyByHostCasing_ProduceSameSlug()
+    {
+        var store = CreateStore(DefaultOptions());
+
+        await store.SetBaseUrlAsync("https://HuggingFace.co/some-org/some-model/resolve/main/subfolder", TestContext.Current.CancellationToken);
+        var firstSlug = store.Snapshot.Override.CacheDirectorySlug;
+
+        await store.SetBaseUrlAsync("https://huggingface.co/some-org/some-model/resolve/main/subfolder", TestContext.Current.CancellationToken);
+        var secondSlug = store.Snapshot.Override.CacheDirectorySlug;
+
+        Assert.Equal(firstSlug, secondSlug);
+    }
+
+    [Fact]
     public async Task Constructor_FileHasTamperedSlug_RecomputesSlugFromBaseUrl_IgnoringPersistedValue()
     {
         const string baseUrl = "https://huggingface.co/some-org/some-model/resolve/main/subfolder";

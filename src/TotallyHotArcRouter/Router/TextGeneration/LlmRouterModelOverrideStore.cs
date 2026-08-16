@@ -237,13 +237,20 @@ public sealed class LlmRouterModelOverrideStore : ILlmRouterModelOverrideStore, 
 
     /// <summary>
     /// Computes a stable, filesystem-safe cache-directory name for a base URL: the first 16 hex
-    /// characters of the SHA-256 hash of its lowercased form. Deliberately opaque rather than a sanitized
-    /// version of the URL itself, since an arbitrary Hugging Face URL can contain characters that are not
-    /// safe path segments on every platform.
+    /// characters of the SHA-256 hash of its scheme/host normalized form. Deliberately opaque rather
+    /// than a sanitized version of the URL itself, since an arbitrary Hugging Face URL can contain
+    /// characters that are not safe path segments on every platform.
     /// </summary>
     private static string ComputeSlug(string baseUrl)
     {
-        var bytes = Encoding.UTF8.GetBytes(baseUrl.ToLowerInvariant());
+        var uri = new Uri(baseUrl, UriKind.Absolute);
+
+        // Only scheme and host are case-insensitive per RFC 3986; Uri already normalizes those to
+        // lowercase in GetLeftPart(UriPartial.Authority). The path is preserved as authored - lowercasing
+        // it too could collide two distinct model folders that differ only by path casing.
+        var normalized = uri.GetLeftPart(UriPartial.Authority) + uri.PathAndQuery;
+
+        var bytes = Encoding.UTF8.GetBytes(normalized);
         var hash = SHA256.HashData(bytes);
         return Convert.ToHexStringLower(hash)[..16];
     }
