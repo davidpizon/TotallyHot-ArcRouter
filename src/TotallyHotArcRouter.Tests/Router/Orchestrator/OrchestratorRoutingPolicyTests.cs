@@ -1,6 +1,7 @@
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Orchestrator;
+using TotallyHot.ArcRouter.Router.TextGeneration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -99,14 +100,16 @@ public class OrchestratorRoutingPolicyTests
     [Fact]
     public async Task DecideAsync_LlmRouterAbstains_DegradesToThreeVoterVote()
     {
-        // llm_router always abstains in this phase (LlmRouterVoter) - this is the exact "no model
-        // artifact yet" degrade path PLAN.md Phase L requires: the ensemble still resolves cleanly.
+        // llm_router abstains here because no task text is supplied (taskText: null below) - this is
+        // the exact "voter has nothing to go on" degrade path PLAN.md Phase L requires: the ensemble
+        // still resolves cleanly with three voters. NeverCalledTextGenerationClient asserts the voter
+        // never even reaches the generation client for a text-less context.
         var voters = new IRoutingVoter[]
         {
             new FakeVoter(VoterNames.DimBest, "kimi-k2.5", confidence: 1.0),
             new FakeVoter(VoterNames.MemoryKnn, "kimi-k2.5", confidence: 1.0),
             new FakeVoter(VoterNames.LogReg, "glm-5", confidence: 1.0),
-            new LlmRouterVoter(),
+            new LlmRouterVoter(new NeverCalledTextGenerationClient(), NullLogger<LlmRouterVoter>.Instance),
         };
         var policy = CreatePolicy(voters);
         var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Glm, Kimi]);
@@ -120,7 +123,7 @@ public class OrchestratorRoutingPolicyTests
     [Fact]
     public async Task DecideAsync_EveryVoterAbstains_FallsBackToDefaultModel()
     {
-        var voters = new IRoutingVoter[] { new LlmRouterVoter() };
+        var voters = new IRoutingVoter[] { new LlmRouterVoter(new NeverCalledTextGenerationClient(), NullLogger<LlmRouterVoter>.Instance) };
         var policy = CreatePolicy(voters, defaultModel: "kimi-k2.5");
         var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi]);
 
@@ -452,5 +455,16 @@ public class OrchestratorRoutingPolicyTests
 
         public Task<VoterVote> VoteAsync(VotingContext context, CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("Simulated voter failure.");
+    }
+
+    /// <summary>
+    /// A <see cref="ITextGenerationClient"/> that fails the test if ever invoked - used to construct a
+    /// real <see cref="LlmRouterVoter"/> in tests that expect it to abstain before reaching generation
+    /// (e.g. no task text supplied), asserting that early-abstain path actually short-circuits.
+    /// </summary>
+    private sealed class NeverCalledTextGenerationClient : ITextGenerationClient
+    {
+        public Task<string> GenerateAsync(string prompt, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("LlmRouterVoter should have abstained before calling the generation client.");
     }
 }

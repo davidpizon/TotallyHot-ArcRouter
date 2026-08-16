@@ -38,7 +38,7 @@ nulls. That is not, by itself, the same as fixing it for live traffic — see th
 | `dim_best` | `RouterMemory` scores | **Working** — `RouterMemoryScoreObserver` writes `live:`-prefixed scores through the sandbox |
 | `memory_kNN` | `VotingContext.TaskEmbedding` | **Reachable only via `OrchestratorRoutingPolicy`** — `RequestInterceptor` now computes and passes `RoutingSignals`, but the live-registered policy (`CompositeRoutingPolicy` → `UtilityRoutingPolicy`/`AgentRouterPolicy`) doesn't override the signals overload, so it still abstains on live traffic today |
 | `logreg` | `VotingContext.TaskText` | **Reachable only via `OrchestratorRoutingPolicy`** — same gap as `memory_kNN`; embedding-backed, but not on the live routing path yet |
-| `llm_router` | — | Deferred stub (Phase L, by agreement) |
+| `llm_router` | `VotingContext.TaskText` | **Reachable only via `OrchestratorRoutingPolicy`** — same gap as `memory_kNN`/`logreg`; prompts a local ONNX GenAI instruct model (a documented substitute for the paper's unpublished fine-tuned checkpoint - see `LlmRouterVoter`'s remarks), but not on the live routing path yet |
 
 `EmbeddingMemory.AddEntryAsync` — the writer of the `memory_entries` table — now has a production
 caller: `EmbeddingMemoryScoreObserver` writes entries via `PendingTaskEmbeddingCache`, and

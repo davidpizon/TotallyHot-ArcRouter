@@ -165,9 +165,11 @@ public sealed class RoutingOptions
 
     /// <summary>
     /// Gets the <c>llm_router</c> voter's fixed weight in the Orchestrator's weighted vote. See
-    /// <see cref="DimBestVoterWeight"/>'s remarks for the worked-example derivation. Currently moot in
-    /// practice - <see cref="Router.Orchestrator.LlmRouterVoter"/> always abstains until a future phase
-    /// fills in its model artifact - but kept configurable so that phase needs no options change.
+    /// <see cref="DimBestVoterWeight"/>'s remarks for the worked-example derivation.
+    /// <see cref="Router.Orchestrator.LlmRouterVoter"/> is a prompted off-the-shelf small instruct
+    /// model, not the paper's fine-tuned checkpoint (see its own remarks for that settled deferral) -
+    /// it still abstains whenever <see cref="LlmRouterOptions"/>'s model artifacts are missing or
+    /// the task has no prompt text to route on.
     /// </summary>
     [Range(0d, 100d)]
     public double LlmRouterVoterWeight { get; init; } = 0.64;
@@ -212,10 +214,10 @@ public sealed class RoutingOptions
     public bool EnableLogRegVoter { get; init; } = true;
 
     /// <summary>
-    /// Gets whether the <c>llm_router</c> voter participates in the Orchestrator's vote. Enabled by default
-    /// even though the voter currently always abstains (no model artifact yet) - disabling it changes
-    /// nothing observable today, but flipping it off is how a future phase's real implementation gets
-    /// excluded without a code change if ever needed.
+    /// Gets whether the <c>llm_router</c> voter participates in the Orchestrator's vote. Enabled by
+    /// default; the voter still abstains cleanly on its own whenever its model artifacts are unavailable,
+    /// so this flag is only needed to exclude it entirely (e.g. to save the generation latency/cost) even
+    /// when the model is otherwise usable.
     /// </summary>
     public bool EnableLlmRouterVoter { get; init; } = true;
 
