@@ -254,7 +254,16 @@ public sealed class LiveDataStore : IAsyncDisposable
         CacheReadTokens: e.HasCacheReadTokens ? e.CacheReadTokens : null,
         RequestSummary: e.HasRequestSummary ? e.RequestSummary : null,
         ResponseSummary: e.HasResponseSummary ? e.ResponseSummary : null,
-        CostConfidence: e.HasCostConfidence ? e.CostConfidence : null);
+        CostConfidence: e.HasCostConfidence ? e.CostConfidence : null,
+        // Absent means an older proxy that predates router-cost accounting, which is reported as zero
+        // overhead rather than as an unknown - the same value a current proxy sends when it computed no
+        // embedding for the request.
+        RouterTokens: e.HasRouterTokens ? e.RouterTokens : 0,
+        // TryParse, not Parse: a malformed value from a mixed-version or non-router writer on the
+        // telemetry stream must degrade to 0m rather than take down live rendering for every event.
+        RouterCostUsd: e.HasRouterCostUsd && decimal.TryParse(e.RouterCostUsd, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var routerCostUsd)
+            ? routerCostUsd
+            : 0m);
 
     /// <summary>Converts a gRPC-contract <see cref="Contract.LogLineEvent"/> into the store's <see cref="LogLineDto"/>.</summary>
     private static LogLineDto MapToDto(Contract.LogLineEvent e) => new(

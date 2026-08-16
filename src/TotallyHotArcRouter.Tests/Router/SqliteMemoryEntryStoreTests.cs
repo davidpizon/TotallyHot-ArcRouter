@@ -91,7 +91,20 @@ public class SqliteMemoryEntryStoreTests : IDisposable
 
     public void Dispose()
     {
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        // ClearPool (scoped to this test's own connection string), not the process-global ClearAllPools:
+        // under xUnit's parallel test execution, ClearAllPools can tear down a pooled native sqlite3
+        // handle out from under a completely different test's in-flight query, surfacing as a spurious
+        // ObjectDisposedException there.
+        try
+        {
+            using var connection = _database.OpenConnection();
+            Microsoft.Data.Sqlite.SqliteConnection.ClearPool(connection);
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException)
+        {
+            // Best-effort cleanup; a database mid-teardown on a busy CI box is not a test failure.
+        }
+
         try
         {
             if (Directory.Exists(_tempDirectory))

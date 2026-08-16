@@ -1,86 +1,85 @@
-using System.Reflection;
-using Microsoft.Extensions.Logging;
+using System.Text.Json;
 using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.PriceCatalog;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Router.Orchestrator;
 
 /// <summary>
-/// The <c>logreg</c> voter (PLAN.md Phase L): TF-IDF features over the task text, scored against a
-/// checked-in one-vs-rest logistic-regression model (<see cref="LogRegModelArtifact"/>), argmax restricted
-/// to <see cref="VotingContext.Candidates"/>.
+/// The <c>logreg</c> voter (docs/router/live-feedback-learning-plan.md Phase 3): scores
+/// <see cref="VotingContext.TaskEmbedding"/> against a locally-trained one-vs-rest logistic-regression
+/// model (<see cref="EmbeddingLogRegModelArtifact"/>) via a dense dot product, argmax restricted to
+/// <see cref="VotingContext.Candidates"/>.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Data-availability caveat (see PLAN.md Phase L's deferral note):</b> the checked-in
-/// <c>CodeRouterBench/Resources/logreg_voter_model.json</c> is, as of this phase, a small hand-built
-/// placeholder rather than a real training run - the CodeRouterBench corpus is synced on demand
-/// (<c>data/README.md</c>) and was not present in the environment this phase was implemented in. It is
-/// marked <see cref="LogRegModelArtifact.IsPlaceholder"/> and exercises this class's tokenize → TF-IDF →
-/// score → argmax → restrict-to-candidates → abstain-without-text mechanics deterministically, but its
-/// weights carry no real predictive signal. <see cref="CodeRouterBench.LogRegTrainer"/> is the documented,
-/// reproducible training step - run it against a synced <c>coderouterbench.db</c> and replace the checked-in
-/// JSON with its output to ship a real model.
+/// <b>Replaces the TF-IDF-over-text design.</b> PLAN.md Phase L's original <c>logreg</c> scored a sparse
+/// TF-IDF vector over the task's prompt text against a checked-in placeholder artifact
+/// (<see cref="LogRegModelArtifact"/>) - abandoned because CodeRouterBench publishes no task text for the
+/// ID splits it was meant to train from (docs/router/live-feedback-learning-plan.md's "What we are
+/// actually able to train on"). The embedding is always available once Phase 2 computes one, so this
+/// voter scores that instead; <see cref="LogRegModelArtifact"/>/<see cref="LogRegTextTokenizer"/>/
+/// <see cref="CodeRouterBench.LogRegTrainer"/> remain in the tree only as Phase N's static comparison
+/// baseline (Phase 6 relocates them out of this namespace).
+/// </para>
+/// <para>
+/// <b>No placeholder, ever.</b> The model artifact is per-installation, trained from the operator's own
+/// synced corpus and live traffic (Phase 4), and never checked in. With no artifact present - the honest
+/// state for a fresh install before any training has run - this voter abstains rather than shipping a
+/// fake stand-in, per the plan's "never fabricate training data" ground rule.
 /// </para>
 /// </remarks>
 public sealed class LogRegVoter : IRoutingVoter
 {
-    private const string EmbeddedResourceName = "TotallyHot.ArcRouter.CodeRouterBench.Resources.logreg_voter_model.json";
-
-    private static readonly Lazy<LogRegModelArtifact> EmbeddedModel = new(LoadEmbeddedModel);
-
     private readonly ILogger<LogRegVoter> _logger;
-    private readonly LogRegModelArtifact _model;
-    private readonly IReadOnlyDictionary<string, int> _vocabularyIndex;
+    private readonly string _modelPath;
+    private readonly object _loadLock = new();
+
+    private bool _loadAttempted;
+    private EmbeddingLogRegModelArtifact? _model;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="LogRegVoter"/> class using the checked-in embedded
-    /// model artifact.
+    /// Initializes a new instance of the <see cref="LogRegVoter"/> class, resolving the model artifact's
+    /// path from <see cref="StorageOptions.LogRegModelPath"/>. The artifact is loaded lazily on first
+    /// vote, not in this constructor - so a missing file never fails DI startup.
     /// </summary>
     /// <param name="logger">The logger.</param>
-    public LogRegVoter(ILogger<LogRegVoter> logger)
-        : this(logger, EmbeddedModel.Value)
+    /// <param name="storageOptions">Supplies the model artifact's file path.</param>
+    public LogRegVoter(ILogger<LogRegVoter> logger, IOptions<StorageOptions> storageOptions)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(storageOptions);
+
+        _logger = logger;
+        _modelPath = storageOptions.Value.ResolveLogRegModelPath();
     }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LogRegVoter"/> class with an explicit model artifact -
-    /// the seam tests use to exercise this voter against a small, deterministic model without depending on
-    /// the checked-in resource.
+    /// the seam tests use to exercise this voter against a small, deterministic model without touching
+    /// disk.
     /// </summary>
     /// <param name="logger">The logger.</param>
     /// <param name="model">The model artifact to score against.</param>
     /// <exception cref="FormatException">
-    /// <paramref name="model"/> fails <see cref="LogRegModelArtifactSerializer.Validate"/> - e.g. a
-    /// vocabulary/IDF length mismatch, a duplicate vocabulary term, a wrong-length class-weight vector, or
-    /// a non-finite IDF/weight value. Validating here, not just in
-    /// <see cref="LogRegModelArtifactSerializer.Deserialize"/>, keeps this constructor's callers - which
-    /// may build a <see cref="LogRegModelArtifact"/> directly rather than through <c>Deserialize</c> - from
-    /// installing a malformed artifact that would otherwise throw <see cref="IndexOutOfRangeException"/>
-    /// later in <see cref="ComputeTfIdf"/>.
+    /// <paramref name="model"/> fails <see cref="EmbeddingLogRegModelArtifactSerializer.Validate"/> - e.g.
+    /// a wrong-length class-weight vector or a non-finite weight value. Validating here, not just in
+    /// <see cref="EmbeddingLogRegModelArtifactSerializer.Deserialize"/>, keeps this constructor's callers -
+    /// which may build an <see cref="EmbeddingLogRegModelArtifact"/> directly rather than through
+    /// <c>Deserialize</c> - from installing a malformed artifact that would otherwise throw
+    /// <see cref="IndexOutOfRangeException"/> later while scoring.
     /// </exception>
-    public LogRegVoter(ILogger<LogRegVoter> logger, LogRegModelArtifact model)
+    public LogRegVoter(ILogger<LogRegVoter> logger, EmbeddingLogRegModelArtifact model)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(model);
-        LogRegModelArtifactSerializer.Validate(model);
+        EmbeddingLogRegModelArtifactSerializer.Validate(model);
 
         _logger = logger;
+        _modelPath = string.Empty;
         _model = model;
-
-        var index = new Dictionary<string, int>(model.Vocabulary.Count, StringComparer.Ordinal);
-        for (var i = 0; i < model.Vocabulary.Count; i++)
-        {
-            index[model.Vocabulary[i]] = i;
-        }
-
-        _vocabularyIndex = index;
-
-        if (model.IsPlaceholder)
-        {
-            _logger.LogInformation(
-                "logreg voter loaded a placeholder model ({TrainedFrom}); scores carry no real predictive signal.",
-                model.TrainedFrom);
-        }
+        _loadAttempted = true;
     }
 
     /// <inheritdoc />
@@ -92,29 +91,46 @@ public sealed class LogRegVoter : IRoutingVoter
         ArgumentNullException.ThrowIfNull(context);
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (string.IsNullOrWhiteSpace(context.TaskText))
+        var model = GetModel();
+        if (model is null)
         {
             return Task.FromResult(VoterVote.Abstain(Name));
         }
 
-        var tfidf = ComputeTfIdf(context.TaskText);
+        if (context.TaskEmbedding is null)
+        {
+            return Task.FromResult(VoterVote.Abstain(Name));
+        }
 
+        if (context.TaskEmbedding.Length != model.EmbeddingDimension)
+        {
+            // A silent index mismatch (scoring a 768-dim embedding against 1024-dim weights) would be far
+            // worse than an abstention - see the type-level remarks on why this artifact is never a
+            // placeholder someone might trust anyway.
+            _logger.LogWarning(
+                "logreg voter received a {ActualDimension}-dimensional embedding but its model was trained at {ExpectedDimension}; abstaining.",
+                context.TaskEmbedding.Length,
+                model.EmbeddingDimension);
+            return Task.FromResult(VoterVote.Abstain(Name));
+        }
+
+        var embedding = context.TaskEmbedding;
         var scored = new List<(string Model, double Score)>();
         foreach (var candidate in context.Candidates)
         {
             // Passing candidate.Provider strips only that candidate's own provider prefix, so a
             // legitimately slashed model id is never mistaken for an unprefixed one and mapped to the
-            // wrong class-weight entry.
+            // wrong class-weight entry - the same convention the TF-IDF predecessor used.
             var key = ModelNameCanonicalizer.Canonicalize(candidate.ModelName, candidate.Provider);
-            if (!_model.ClassWeights.TryGetValue(key, out var weights))
+            if (!model.ClassWeights.TryGetValue(key, out var weights))
             {
                 continue;
             }
 
             var score = weights[0]; // bias
-            foreach (var (index, value) in tfidf)
+            for (var i = 0; i < embedding.Length; i++)
             {
-                score += weights[index + 1] * value;
+                score += weights[i + 1] * embedding[i];
             }
 
             scored.Add((candidate.ModelName, score));
@@ -145,48 +161,61 @@ public sealed class LogRegVoter : IRoutingVoter
     }
 
     /// <summary>
-    /// Tokenizes <paramref name="text"/> and computes a sparse TF-IDF vector restricted to vocabulary
-    /// terms actually present - the same sparse representation <see cref="CodeRouterBench.LogRegTrainer"/>
-    /// trains against, since a task's text touches only a small fraction of a low-thousands vocabulary.
+    /// Forces the next <see cref="VoteAsync"/> call to reload the model artifact from disk, discarding
+    /// any cached copy - called after a retrain completes (docs/router/live-feedback-learning-plan.md
+    /// Phase 4/5) so a freshly-trained artifact takes effect without restarting the process. A no-op for
+    /// an instance constructed with an explicit in-memory artifact (the test seam constructor), since
+    /// there is no disk path to reload from.
     /// </summary>
-    private IReadOnlyList<(int Index, double Value)> ComputeTfIdf(string text)
+    public void Reload()
     {
-        var tokens = LogRegTextTokenizer.Tokenize(text);
-        if (tokens.Count == 0)
+        if (string.IsNullOrEmpty(_modelPath))
         {
-            return [];
+            return;
         }
 
-        var counts = new Dictionary<int, int>();
-        foreach (var token in tokens)
+        lock (_loadLock)
         {
-            if (_vocabularyIndex.TryGetValue(token, out var index))
-            {
-                counts[index] = counts.GetValueOrDefault(index) + 1;
-            }
+            _loadAttempted = false;
+            _model = null;
         }
-
-        var result = new List<(int, double)>(counts.Count);
-        foreach (var (index, count) in counts)
-        {
-            var termFrequency = (double)count / tokens.Count;
-            result.Add((index, termFrequency * _model.InverseDocumentFrequency[index]));
-        }
-
-        return result;
     }
 
-    /// <summary>Loads and validates the checked-in model artifact embedded as a build resource.</summary>
-    /// <exception cref="InvalidOperationException">The embedded resource is missing.</exception>
-    private static LogRegModelArtifact LoadEmbeddedModel()
+    private EmbeddingLogRegModelArtifact? GetModel()
     {
-        var assembly = Assembly.GetExecutingAssembly();
-        using var stream = assembly.GetManifestResourceStream(EmbeddedResourceName)
-            ?? throw new InvalidOperationException(
-                $"Embedded logreg voter model resource '{EmbeddedResourceName}' was not found in {assembly.FullName}.");
+        lock (_loadLock)
+        {
+            if (_loadAttempted)
+            {
+                return _model;
+            }
 
-        using var reader = new StreamReader(stream);
-        var json = reader.ReadToEnd();
-        return LogRegModelArtifactSerializer.Deserialize(json);
+            _loadAttempted = true;
+            _model = TryLoadFromDisk();
+            return _model;
+        }
+    }
+
+    private EmbeddingLogRegModelArtifact? TryLoadFromDisk()
+    {
+        if (!File.Exists(_modelPath))
+        {
+            _logger.LogDebug("No logreg voter model found at {Path}; voter will abstain until one is trained.", _modelPath);
+            return null;
+        }
+
+        try
+        {
+            var json = File.ReadAllText(_modelPath);
+            var model = EmbeddingLogRegModelArtifactSerializer.Deserialize(json);
+            _logger.LogInformation(
+                "Loaded logreg voter model from {Path} (trained from: {TrainedFrom}).", _modelPath, model.TrainedFrom);
+            return model;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException or JsonException)
+        {
+            _logger.LogWarning(ex, "Failed to load logreg voter model from {Path}; voter will abstain.", _modelPath);
+            return null;
+        }
     }
 }

@@ -1,4 +1,6 @@
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.PriceCatalog;
 
@@ -102,15 +104,22 @@ public sealed class BenchmarkDatabase
         """;
 
     private readonly string _databasePath;
+    private readonly ILogger<BenchmarkDatabase>? _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="BenchmarkDatabase"/> class.
     /// </summary>
     /// <param name="storageOptions">The shared storage options containing the benchmark database path.</param>
-    public BenchmarkDatabase(IOptions<StorageOptions> storageOptions)
+    /// <param name="logger">
+    /// Logs a summary when <see cref="EnsureCreated"/> repairs rows written by either of the two now-fixed
+    /// importer defects (docs/router/live-feedback-learning-plan.md Phase 1). Optional so existing direct
+    /// construction (e.g. test helpers) keeps compiling; repairs still run silently without it.
+    /// </param>
+    public BenchmarkDatabase(IOptions<StorageOptions> storageOptions, ILogger<BenchmarkDatabase>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(storageOptions);
         _databasePath = storageOptions.Value.ResolveBenchmarkDatabasePath();
+        _logger = logger;
     }
 
     /// <summary>Gets the resolved absolute path of the database file.</summary>
@@ -164,6 +173,149 @@ public sealed class BenchmarkDatabase
             schema.ExecuteNonQuery();
         }
 
+        // Best-effort hygiene, not core schema creation: a failure here (a SQLite build without the
+        // json_extract function, a row whose raw_json is unexpectedly malformed, a transient DB/IO error)
+        // must not make EnsureCreated itself throw and abort startup - callers like
+        // Program.RunBenchmarkDataSyncAsync call EnsureCreated with no try/catch of their own.
+        try
+        {
+            RepairModelsEnvelopeRow(connection);
+        }
+        catch (Exception ex) when (ex is SqliteException or JsonException or InvalidOperationException)
+        {
+            _logger?.LogWarning(ex, "Skipped the benchmark_models 'models' envelope repair after it failed.");
+        }
+
+        try
+        {
+            RepairIdTasksSourceSplit(connection);
+        }
+        catch (Exception ex) when (ex is SqliteException or JsonException or InvalidOperationException)
+        {
+            _logger?.LogWarning(ex, "Skipped the benchmark_id_tasks source_split repair after it failed.");
+        }
+
         return alreadyExisted;
+    }
+
+    // Repairs docs/router/live-feedback-learning-plan.md Phase 1a in place: a database imported before
+    // BenchmarkModelsJsonImporter unwrapped the {"models": [...]} envelope has exactly one
+    // benchmark_models row, keyed 'models', whose raw_json is the entire published models array. Both the
+    // bad state and its fix are re-derivable from that one row's raw_json - no re-download needed. A
+    // correctly-imported database has no row keyed 'models' (a real model id never collides with the
+    // envelope's own wrapper key - see BenchmarkModelsJsonImporterTests'
+    // Import_ObjectShapeWithLiteralModelsKeyAmongOthers test for why that distinction is safe), so this is
+    // a no-op there.
+    private void RepairModelsEnvelopeRow(SqliteConnection connection)
+    {
+        string? rawJson;
+        using (var select = connection.CreateCommand())
+        {
+            select.CommandText = "SELECT raw_json FROM benchmark_models WHERE model = 'models';";
+            rawJson = select.ExecuteScalar() as string;
+        }
+
+        if (rawJson is null)
+        {
+            return;
+        }
+
+        // The broken state this repairs has exactly one benchmark_models row - the garbage 'models' row -
+        // per the class comment above. A model legitimately named 'models' alongside other rows
+        // (BenchmarkModelsJsonImporterTests.Import_ObjectShapeWithLiteralModelsKeyAmongOthers) must not
+        // trigger this path, since Import's delete-and-reimport would wipe those other rows too.
+        long totalRowCount;
+        using (var count = connection.CreateCommand())
+        {
+            count.CommandText = "SELECT COUNT(*) FROM benchmark_models;";
+            totalRowCount = (long)count.ExecuteScalar()!;
+        }
+
+        if (totalRowCount != 1)
+        {
+            return;
+        }
+
+        using var transaction = connection.BeginTransaction();
+        // BenchmarkModelsJsonImporter.Import replaces every existing benchmark_models row; in the broken
+        // state described above, the garbage 'models' row is the only row in the table, so this is exactly
+        // the delete-and-reimport the repair needs.
+        var repairedCount = BenchmarkModelsJsonImporter.Import(rawJson, connection, transaction);
+        transaction.Commit();
+
+        _logger?.LogInformation(
+            "Repaired the benchmark_models 'models' envelope defect: replaced 1 garbage row with {RepairedCount} model row(s).",
+            repairedCount);
+    }
+
+    // Repairs docs/router/live-feedback-learning-plan.md Phase 1b in place: a database imported before
+    // BenchmarkIdTasksJsonlImporter read "source_split" has that column holding the same
+    // probing/id_test value as the split column, instead of upstream's train/val/test distinction. Both
+    // columns are keyed the same way in the broken state, so any row whose source_split is not one of the
+    // three valid values is repairable from its own raw_json - no re-download needed. Rows whose raw_json
+    // never carried a source_split property (already covered by the importer's own split-argument
+    // fallback) can never be repaired this way, so the query itself excludes them via json_extract rather
+    // than fetching them into badRows every startup only to skip them in the loop below.
+    private void RepairIdTasksSourceSplit(SqliteConnection connection)
+    {
+        List<(string TaskId, string RawJson)> badRows = [];
+        using (var select = connection.CreateCommand())
+        {
+            select.CommandText =
+                """
+                SELECT task_id, raw_json FROM benchmark_id_tasks
+                WHERE source_split NOT IN ('train', 'val', 'test')
+                  AND json_extract(raw_json, '$.source_split') IS NOT NULL;
+                """;
+            using var reader = select.ExecuteReader();
+            while (reader.Read())
+            {
+                badRows.Add((reader.GetString(0), reader.GetString(1)));
+            }
+        }
+
+        if (badRows.Count == 0)
+        {
+            return;
+        }
+
+        using var transaction = connection.BeginTransaction();
+        using var update = connection.CreateCommand();
+        update.Transaction = transaction;
+        update.CommandText = "UPDATE benchmark_id_tasks SET source_split = $sourceSplit WHERE task_id = $taskId;";
+        var sourceSplitParam = update.Parameters.Add("$sourceSplit", SqliteType.Text);
+        var taskIdParam = update.Parameters.Add("$taskId", SqliteType.Text);
+
+        var repairedCount = 0;
+        foreach (var (taskId, rawJson) in badRows)
+        {
+            using var document = JsonDocument.Parse(rawJson);
+            if (!document.RootElement.TryGetProperty("source_split", out var sourceSplitElement) ||
+                sourceSplitElement.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            var sourceSplitValue = sourceSplitElement.GetString();
+            if (sourceSplitValue is not ("train" or "val" or "test"))
+            {
+                continue;
+            }
+
+            sourceSplitParam.Value = sourceSplitValue;
+            taskIdParam.Value = taskId;
+            update.ExecuteNonQuery();
+            repairedCount++;
+        }
+
+        transaction.Commit();
+
+        if (repairedCount > 0)
+        {
+            _logger?.LogInformation(
+                "Repaired the benchmark_id_tasks source_split defect: corrected {RepairedCount} of {CandidateCount} affected row(s) from raw_json.",
+                repairedCount,
+                badRows.Count);
+        }
     }
 }

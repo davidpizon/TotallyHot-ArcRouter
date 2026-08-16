@@ -37,6 +37,13 @@ public sealed class StartupHealthCheckHostedService : IHostedService
     private readonly Router.EmbeddingMemory _embeddingMemory;
     private readonly CodeRouterBench.BenchmarkDatabase _benchmarkDatabase;
     private readonly CodeRouterBench.BenchmarkDataStatusService _benchmarkStatusService;
+    private readonly Router.Embeddings.IEmbeddingClient? _embeddingClient;
+    private readonly Router.Embeddings.EmbeddingWarmupState? _embeddingWarmupState;
+    private Task? _embeddingWarmupTask;
+
+    // A short, fixed string is enough to force the one-time artifact download and model load; its content
+    // is never read back or stored, only its side effect (warming _session/_tokenizer) matters.
+    private const string EmbeddingWarmupText = "embedding warm-up";
 
     /// <summary>
     /// Initializes a new instance of the <see cref="StartupHealthCheckHostedService"/> class.
@@ -55,7 +62,9 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         Router.RouterMemoryDatabase routerMemoryDatabase,
         Router.EmbeddingMemory embeddingMemory,
         CodeRouterBench.BenchmarkDatabase benchmarkDatabase,
-        CodeRouterBench.BenchmarkDataStatusService benchmarkStatusService)
+        CodeRouterBench.BenchmarkDataStatusService benchmarkStatusService,
+        Router.Embeddings.IEmbeddingClient? embeddingClient = null,
+        Router.Embeddings.EmbeddingWarmupState? embeddingWarmupState = null)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(database);
@@ -86,6 +95,8 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         _embeddingMemory = embeddingMemory;
         _benchmarkDatabase = benchmarkDatabase;
         _benchmarkStatusService = benchmarkStatusService;
+        _embeddingClient = embeddingClient;
+        _embeddingWarmupState = embeddingWarmupState;
     }
 
     /// <inheritdoc />
@@ -219,6 +230,19 @@ public sealed class StartupHealthCheckHostedService : IHostedService
             _logger.LogWarning(ex, "Embedding memory initialization failed; continuing startup.");
         }
 
+        // Embedding client warm-up (docs/router/live-feedback-learning-plan.md Phase 2b): forces the
+        // one-time ~1.3 GB model/tokenizer download and load, off the request path, rather than on a
+        // request's first embedding call. Started here but deliberately NOT awaited: a cold download can
+        // take minutes, and awaiting it would delay Kestrel binding its port, contradicting every other
+        // check's "never block startup" contract. Runs independently of the startup cancellation token so
+        // a host-startup timeout can't abandon a partially-downloaded artifact; failure (no network access,
+        // disk full) leaves EmbeddingWarmupState.IsWarm false, which RequestInterceptor reads to skip
+        // embedding entirely rather than block a request on a cold download.
+        if (_embeddingClient is not null && _embeddingWarmupState is not null)
+        {
+            _embeddingWarmupTask = WarmUpEmbeddingClientAsync(_embeddingClient, _embeddingWarmupState);
+        }
+
         // CodeRouterBench corpus freshness (docs/router/coderouterbench-sqlite-migration-plan.md, Phase
         // 3): ensure its own SQLite schema exists and probe Hugging Face for the corpus's
         // Current/Update/CheckFailed state, best-effort and log-only like every check above - a probe
@@ -242,5 +266,29 @@ public sealed class StartupHealthCheckHostedService : IHostedService
 
     /// <inheritdoc />
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    /// <summary>
+    /// The background embedding client warm-up task started by <see cref="StartAsync"/>, or
+    /// <see langword="null"/> if no embedding client was configured. <see cref="StartAsync"/> does not
+    /// await this task itself (see the comment at its call site); exposed internally so tests can await it
+    /// deterministically instead of racing the fire-and-forget warm-up.
+    /// </summary>
+    internal Task? EmbeddingWarmupTask => _embeddingWarmupTask;
+
+    private async Task WarmUpEmbeddingClientAsync(
+        Router.Embeddings.IEmbeddingClient embeddingClient,
+        Router.Embeddings.EmbeddingWarmupState embeddingWarmupState)
+    {
+        try
+        {
+            await embeddingClient.EmbedAsync(EmbeddingWarmupText).ConfigureAwait(false);
+            embeddingWarmupState.MarkWarm();
+            _logger.LogInformation("Embedding client warm-up complete.");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Embedding client warm-up failed; embedding-dependent routing signals will be unavailable for the rest of this process's lifetime (warm-up is not retried).");
+        }
+    }
 }
 

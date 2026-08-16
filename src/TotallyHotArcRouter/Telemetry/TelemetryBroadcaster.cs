@@ -123,6 +123,13 @@ public sealed class TelemetryBroadcaster
             TotalDurationMs = e.TotalDurationMs,
             StatusCode = e.StatusCode,
             TimestampUtc = Timestamp.FromDateTimeOffset(e.TimestampUtc),
+
+            // Always set, unlike the optional fields below: the router's own consumption is a known
+            // measurement even when it is zero (see RoutingTelemetryEvent.RouterTokens), so there is no
+            // "absent" case to represent - writing them unconditionally keeps a zero on the wire as a
+            // stated zero rather than something a receiver has to infer.
+            RouterTokens = e.RouterTokens,
+            RouterCostUsd = e.RouterCostUsd.ToString(CultureInfo.InvariantCulture),
         };
 
         if (e.PromptTokens is int promptTokens)

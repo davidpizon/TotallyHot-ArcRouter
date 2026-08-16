@@ -50,6 +50,100 @@ public class BenchmarkModelsJsonImporterTests
     }
 
     [Fact]
+    public void Import_ObjectWrappedInModelsEnvelope_UnwrapsAndInsertsOneRowPerModel()
+    {
+        using var temp = new TempBenchmarkDatabase();
+        temp.Database.EnsureCreated();
+
+        var json = """
+            {
+              "models": [
+                { "model": "claude-opus-4-6", "provider": "anthropic", "tier": "flagship", "input_per_1m": 15.0, "output_per_1m": 75.0 },
+                { "model": "gpt-6", "provider": "openai" },
+                { "model": "gemini-3-pro", "provider": "google" },
+                { "model": "grok-5", "provider": "xai" },
+                { "model": "MiniMax-M2.7", "provider": "minimax" },
+                { "model": "glm-5", "provider": "zhipu" },
+                { "model": "kimi-k2.5", "provider": "moonshot" },
+                { "model": "deepseek-v4", "provider": "deepseek" }
+              ]
+            }
+            """;
+
+        using var connection = temp.Database.OpenConnection();
+        using var transaction = connection.BeginTransaction();
+        var rowCount = BenchmarkModelsJsonImporter.Import(json, connection, transaction);
+        transaction.Commit();
+
+        Assert.Equal(8, rowCount);
+
+        using var readCommand = connection.CreateCommand();
+        readCommand.CommandText = "SELECT provider, input_per_1m, output_per_1m FROM benchmark_models WHERE model = 'claude-opus-4-6';";
+        using var reader = readCommand.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.Equal("anthropic", reader.GetString(0));
+        Assert.Equal(15.0, reader.GetDouble(1));
+        Assert.Equal(75.0, reader.GetDouble(2));
+    }
+
+    [Fact]
+    public void Import_ObjectMapWrappedInModelsEnvelope_UnwrapsAndInsertsOneRowPerModel()
+    {
+        using var temp = new TempBenchmarkDatabase();
+        temp.Database.EnsureCreated();
+
+        var json = """
+            {
+              "models": {
+                "claude-opus-4-6": { "provider": "anthropic", "input_per_1m": 15.0 }
+              }
+            }
+            """;
+
+        using var connection = temp.Database.OpenConnection();
+        using var transaction = connection.BeginTransaction();
+        var rowCount = BenchmarkModelsJsonImporter.Import(json, connection, transaction);
+        transaction.Commit();
+
+        Assert.Equal(1, rowCount);
+
+        using var readCommand = connection.CreateCommand();
+        readCommand.CommandText = "SELECT provider, input_per_1m FROM benchmark_models WHERE model = 'claude-opus-4-6';";
+        using var reader = readCommand.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.Equal("anthropic", reader.GetString(0));
+        Assert.Equal(15.0, reader.GetDouble(1));
+    }
+
+    [Fact]
+    public void Import_ObjectShapeWithLiteralModelsKeyAmongOthers_TreatsModelsAsAnOrdinaryModelName()
+    {
+        using var temp = new TempBenchmarkDatabase();
+        temp.Database.EnsureCreated();
+
+        // The envelope unwrap only fires for a *single-key* object literally named "models" - if "models"
+        // is one entry among several real model entries, it is an ordinary (if oddly-named) model id, not
+        // an envelope, and must not be unwrapped.
+        var json = """
+            {
+              "models": { "provider": "acme" },
+              "other-model": { "provider": "other" }
+            }
+            """;
+
+        using var connection = temp.Database.OpenConnection();
+        using var transaction = connection.BeginTransaction();
+        var rowCount = BenchmarkModelsJsonImporter.Import(json, connection, transaction);
+        transaction.Commit();
+
+        Assert.Equal(2, rowCount);
+
+        using var readCommand = connection.CreateCommand();
+        readCommand.CommandText = "SELECT COUNT(*) FROM benchmark_models WHERE model = 'models';";
+        Assert.Equal(1L, (long)readCommand.ExecuteScalar()!);
+    }
+
+    [Fact]
     public void Import_SecondCall_ReplacesEveryPriorRow()
     {
         using var temp = new TempBenchmarkDatabase();

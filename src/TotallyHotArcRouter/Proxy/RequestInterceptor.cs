@@ -1,10 +1,13 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Classification;
+using TotallyHot.ArcRouter.Router.Embeddings;
 using TotallyHot.ArcRouter.Sandbox;
 using TotallyHot.ArcRouter.Sandbox.Extraction;
+using TotallyHot.ArcRouter.Telemetry;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -44,6 +47,9 @@ namespace TotallyHot.ArcRouter.Proxy
         private readonly IRequestClassifier _requestClassifier;
         private readonly string _liveMemoryPrefix;
         private readonly IRoutingPolicy? _routingPolicy;
+        private readonly IEmbeddingClient? _embeddingClient;
+        private readonly EmbeddingWarmupState? _embeddingWarmupState;
+        private readonly int _embeddingBudgetMs;
 
         /// <summary>Number of requests seen by <see cref="InterceptRequestAsync"/> so far.</summary>
         public int InterceptedRequestCount { get; private set; }
@@ -96,6 +102,17 @@ namespace TotallyHot.ArcRouter.Proxy
         /// <exception cref="InvalidOperationException">
         /// <paramref name="singleModelServingOptions"/> names a model that isn't configured.
         /// </exception>
+        /// <param name="embeddingClient">
+        /// Computes the request's task embedding for embedding-dependent voters (Phase 2b). Optional; when
+        /// absent, or before <paramref name="embeddingWarmupState"/> reports warm, requests route with no
+        /// embedding exactly as before this parameter existed.
+        /// </param>
+        /// <param name="embeddingWarmupState">
+        /// Reports whether <paramref name="embeddingClient"/> has completed its one-time model download and
+        /// load. Embedding is skipped (not awaited) until this is warm, so a request never triggers the
+        /// cold ~1.3 GB download inline.
+        /// </param>
+        /// <param name="routingOptions">Supplies <see cref="RoutingOptions.EmbeddingBudgetMs"/>.</param>
         public RequestInterceptor(
             ILogger<RequestInterceptor> logger,
             IModelRouteResolver modelRouteResolver,
@@ -105,7 +122,10 @@ namespace TotallyHot.ArcRouter.Proxy
             IDimensionInferrer? dimensionInferrer = null,
             IOptions<SandboxOptions>? sandboxOptions = null,
             IRequestClassifier? requestClassifier = null,
-            IRoutingPolicy? routingPolicy = null)
+            IRoutingPolicy? routingPolicy = null,
+            IEmbeddingClient? embeddingClient = null,
+            EmbeddingWarmupState? embeddingWarmupState = null,
+            IOptions<RoutingOptions>? routingOptions = null)
         {
             _logger = logger;
             _modelRouteResolver = modelRouteResolver;
@@ -116,6 +136,9 @@ namespace TotallyHot.ArcRouter.Proxy
             _liveMemoryPrefix = sandboxOptions?.Value.LiveMemoryPrefix ?? new SandboxOptions().LiveMemoryPrefix;
             _requestClassifier = requestClassifier ?? new HeuristicRequestClassifier(_dimensionInferrer);
             _routingPolicy = routingPolicy;
+            _embeddingClient = embeddingClient;
+            _embeddingWarmupState = embeddingWarmupState;
+            _embeddingBudgetMs = routingOptions?.Value.EmbeddingBudgetMs ?? new RoutingOptions().EmbeddingBudgetMs;
 
             if (_forcedModelName is not null &&
                 !modelRouteResolver.ListModels().Any(m => string.Equals(m.ModelName, _forcedModelName, StringComparison.OrdinalIgnoreCase)))
@@ -235,6 +258,24 @@ namespace TotallyHot.ArcRouter.Proxy
             var classification = _requestClassifier.Classify(jsonObject);
             var liveDimension = RouterDimension.ToLiveKey(_liveMemoryPrefix, classification.Dimension);
 
+            // Phase 2a/2b (docs/router/live-feedback-learning-plan.md): the same newest-user-message text
+            // HeuristicRequestClassifier already extracted internally, re-extracted here via the same shared
+            // TotallyHot.ArcRouter.Telemetry.RequestTextExtractor - no new parsing rules - so MemoryKnnVoter
+            // and LogRegVoter can vote instead of abstaining. Computed once, for every request (not only the
+            // auto-select/unresolved-model paths below), so embedding-keyed memory keeps accumulating
+            // regardless of which IRoutingPolicy is configured.
+            var taskText = RequestTextExtractor.ExtractNewestUserMessage(jsonObject);
+            var embedding = await TryComputeEmbeddingAsync(taskText, cancellationToken).ConfigureAwait(false);
+            var taskEmbedding = embedding?.Vector;
+
+            // The router's own consumption for this request, carried on every success below so telemetry
+            // can report savings net of what routing cost (research-doc §5.1's TotTok = router + model).
+            // Zero when no embedding was computed - a real measurement of "the router spent nothing".
+            var routerTokens = embedding?.TokenCount ?? 0;
+            var routingSignals = taskText is null && taskEmbedding is null
+                ? null
+                : new RoutingSignals(taskText, taskEmbedding);
+
             var modelName = jsonObject["model"] is JsonValue modelValue && modelValue.TryGetValue<string>(out var value)
                 ? value
                 : null;
@@ -264,7 +305,7 @@ namespace TotallyHot.ArcRouter.Proxy
 
             if (isAutoSelectRequest)
             {
-                var autoSelectedRoute = await ResolveAgenticRouteAsync(classification, liveDimension, cancellationToken);
+                var autoSelectedRoute = await ResolveAgenticRouteAsync(classification, liveDimension, routingSignals, cancellationToken);
                 if (autoSelectedRoute is null)
                 {
                     // Same "everything is unavailable" condition the fallback path reports, but phrased for a
@@ -291,7 +332,7 @@ namespace TotallyHot.ArcRouter.Proxy
                 // than silently routing to a model the operator just disabled or the endpoint stopped
                 // reporting.
                 var agenticRoute = _forcedModelName is null
-                    ? await ResolveAgenticRouteAsync(classification, liveDimension, cancellationToken)
+                    ? await ResolveAgenticRouteAsync(classification, liveDimension, routingSignals, cancellationToken)
                     : null;
 
                 if (agenticRoute is not null)
@@ -370,7 +411,48 @@ namespace TotallyHot.ArcRouter.Proxy
                 }
             }
 
-            return ModelRouteResolutionResult.Success(candidates);
+            return ModelRouteResolutionResult.Success(candidates, taskEmbedding, routerTokens);
+        }
+
+        /// <summary>
+        /// Computes <paramref name="taskText"/>'s embedding under <see cref="RoutingOptions.EmbeddingBudgetMs"/>,
+        /// or returns <see langword="null"/> without attempting the call when there is no client, no text,
+        /// or the client has not finished its one-time warm-up (docs/router/live-feedback-learning-plan.md
+        /// Phase 2b) - the routing hot path must never trigger the cold ~1.3 GB model download inline, and
+        /// must never block on learning. A timeout or any other failure is logged at warning and degrades to
+        /// <see langword="null"/> rather than failing the request; embedding-dependent voters simply abstain
+        /// and routing proceeds exactly as it did before this parameter existed.
+        /// </summary>
+        private async Task<EmbeddingResult?> TryComputeEmbeddingAsync(string? taskText, CancellationToken cancellationToken)
+        {
+            if (_embeddingClient is null || _embeddingWarmupState is not { IsWarm: true } || string.IsNullOrWhiteSpace(taskText))
+            {
+                return null;
+            }
+
+            using var budgetCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+            try
+            {
+                // Inside the try, not before it: a misconfigured EmbeddingBudgetMs (e.g. negative - RoutingOptions'
+                // [Range(1, 60_000)] is data-annotation metadata only and is never enforced by EnsureValid or the
+                // options pipeline) would otherwise turn CancelAfter's ArgumentOutOfRangeException into a hard
+                // request failure instead of the clean abstention this method exists to guarantee.
+                budgetCts.CancelAfter(TimeSpan.FromMilliseconds(_embeddingBudgetMs));
+                return await _embeddingClient.EmbedAsync(taskText, budgetCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogWarning(
+                    "[INTERCEPTOR] Embedding computation exceeded the {BudgetMs}ms budget; routing without an embedding.",
+                    _embeddingBudgetMs);
+                return null;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "[INTERCEPTOR] Embedding computation failed; routing without an embedding.");
+                return null;
+            }
         }
 
         /// <summary>
@@ -389,11 +471,22 @@ namespace TotallyHot.ArcRouter.Proxy
         /// </remarks>
         /// <param name="classification">The request's Phase H classification, from <see cref="ResolveModelRouteAsync"/>.</param>
         /// <param name="liveDimension">The request's live dimension key, from <see cref="ResolveModelRouteAsync"/>.</param>
+        /// <param name="signals">
+        /// The request's task text/embedding (docs/router/live-feedback-learning-plan.md Phase 2a), or
+        /// <see langword="null"/> when neither was available for this request, passed to
+        /// <see cref="IRoutingPolicy.SelectModelAsync(RoutingContext, RoutingSignals?, CancellationToken)"/>.
+        /// Whether a non-null value reaches <c>MemoryKnnVoter</c>/<c>LogRegVoter</c> depends on
+        /// <see cref="_routingPolicy"/>'s concrete type: only a policy that overrides the
+        /// <see cref="RoutingSignals"/> overload (currently <c>OrchestratorRoutingPolicy</c>) forwards it
+        /// into voting - the interface's default implementation silently discards it, and the
+        /// live-registered <c>CompositeRoutingPolicy</c> does not override it.
+        /// </param>
         /// <param name="cancellationToken">A token to cancel the operation.</param>
         /// <returns>The resolved route to serve the request with, or <see langword="null"/> when no eligible model is currently available.</returns>
         private async Task<ResolvedModelRoute?> ResolveAgenticRouteAsync(
             RequestClassification classification,
             string liveDimension,
+            RoutingSignals? signals,
             CancellationToken cancellationToken)
         {
             if (_routingPolicy is not null)
@@ -405,7 +498,7 @@ namespace TotallyHot.ArcRouter.Proxy
                     string? selectedName;
                     try
                     {
-                        selectedName = await _routingPolicy.SelectModelAsync(context, cancellationToken);
+                        selectedName = await _routingPolicy.SelectModelAsync(context, signals, cancellationToken);
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {

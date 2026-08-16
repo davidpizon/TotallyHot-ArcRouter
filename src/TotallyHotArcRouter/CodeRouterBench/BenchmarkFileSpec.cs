@@ -16,7 +16,8 @@ namespace TotallyHot.ArcRouter.CodeRouterBench;
 /// The exact data-row count this file must contain, asserted after parsing and before the import
 /// transaction commits - matching the row-count assertions the now-removed
 /// <c>scripts/fetch-coderouterbench.sh</c> used to run.
-/// <see langword="null"/> for files with no fixed row count (<c>models.json</c>, <c>summary.json</c>).
+/// <see langword="null"/> for files with no fixed row count. None currently use <see langword="null"/>:
+/// <c>models.json</c> publishes exactly 8 model entries and <c>summary.json</c> exactly 5 keys.
 /// </param>
 public sealed record BenchmarkFileSpec(string FileName, BenchmarkFileKind Kind, string? Split, int? ExpectedRowCount)
 {
@@ -34,7 +35,7 @@ public sealed record BenchmarkFileSpec(string FileName, BenchmarkFileKind Kind, 
         new("id_probing_tasks.jsonl", BenchmarkFileKind.IdTasksJsonl, "probing", 7_080),
         new("id_test_tasks.jsonl", BenchmarkFileKind.IdTasksJsonl, "id_test", 2_919),
         new("ood176_tasks.jsonl", BenchmarkFileKind.OodTasksJsonl, null, 176),
-        new("models.json", BenchmarkFileKind.ModelsJson, null, null),
-        new("summary.json", BenchmarkFileKind.SummaryJson, null, null),
+        new("models.json", BenchmarkFileKind.ModelsJson, null, 8),
+        new("summary.json", BenchmarkFileKind.SummaryJson, null, 5),
     ];
 }

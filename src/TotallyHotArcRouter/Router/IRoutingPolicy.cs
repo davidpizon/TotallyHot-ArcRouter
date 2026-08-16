@@ -13,4 +13,20 @@ public interface IRoutingPolicy
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <returns>The selected candidate's <see cref="RoutingCandidate.ModelName"/>.</returns>
     Task<string> SelectModelAsync(RoutingContext context, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Chooses a model for the given routing context, with <paramref name="signals"/> (prompt text and/or
+    /// embedding) available for policies that can use them - docs/router/live-feedback-learning-plan.md
+    /// Phase 2a. The default implementation ignores <paramref name="signals"/> and delegates to
+    /// <see cref="SelectModelAsync(RoutingContext, CancellationToken)"/>, so every existing
+    /// <see cref="IRoutingPolicy"/> implementation and caller keeps compiling and behaving exactly as
+    /// before without opting in; only <see cref="Orchestrator.OrchestratorRoutingPolicy"/> overrides this
+    /// to actually use the signals.
+    /// </summary>
+    /// <param name="context">The candidates and classification signal to select from.</param>
+    /// <param name="signals">Out-of-band signals about the request, or <see langword="null"/> if none are available.</param>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    /// <returns>The selected candidate's <see cref="RoutingCandidate.ModelName"/>.</returns>
+    Task<string> SelectModelAsync(RoutingContext context, RoutingSignals? signals, CancellationToken cancellationToken = default) =>
+        SelectModelAsync(context, cancellationToken);
 }

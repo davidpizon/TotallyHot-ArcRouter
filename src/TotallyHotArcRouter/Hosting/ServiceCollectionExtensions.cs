@@ -44,11 +44,28 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddOptions<EmbeddingOptions>()
                 .Configure<IConfiguration>((options, configuration) =>
                     configuration.GetSection(EmbeddingOptions.SectionName).Bind(options));
+            // EnsureValid() is enforced here (rather than by a consuming component's constructor, this
+            // options type's usual pattern - see e.g. CircuitBreaker's) because RoutingOptions is read
+            // piecemeal by several singletons (AgentAsARouter, JsonRouterMemoryStore, RequestInterceptor),
+            // none of which is guaranteed to be constructed eagerly; ValidateOnStart guarantees the check
+            // runs during host startup regardless of which of those paths is actually exercised.
+            // ValidateDataAnnotations() enforces the [Range]/[Required] attributes on individual properties
+            // (e.g. EmbeddingBudgetMs) that EnsureValid's hand-written checks don't cover - the two are
+            // complementary, not redundant: EnsureValid checks cross-property invariants annotations can't
+            // express, ValidateDataAnnotations checks the per-property bounds EnsureValid doesn't repeat.
             services.AddOptions<RoutingOptions>()
                 .Configure<IConfiguration>((options, configuration) =>
-                    configuration.GetSection(RoutingOptions.SectionName).Bind(options));
+                    configuration.GetSection(RoutingOptions.SectionName).Bind(options))
+                .ValidateDataAnnotations()
+                .Validate(options =>
+                {
+                    options.EnsureValid();
+                    return true;
+                })
+                .ValidateOnStart();
             services.AddHttpClient(nameof(Router.Embeddings.OnnxEmbeddingClient));
             services.AddSingleton<Router.Embeddings.IEmbeddingClient, Router.Embeddings.OnnxEmbeddingClient>();
+            services.AddSingleton<Router.Embeddings.EmbeddingWarmupState>();
             services.AddSingleton<RouterMemoryDatabase>();
             services.AddSingleton<IMemoryEntryStore, SqliteMemoryEntryStore>();
             services.AddSingleton<EmbeddingMemory>();
@@ -178,10 +195,17 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddSingleton<TelemetryPublisher>();
             services.AddSingleton<ITelemetryPublisher>(sp => sp.GetRequiredService<TelemetryPublisher>());
 
-            // Sandboxed executor (off-path, best-effort). The router-memory observer adapter is registered
-            // before AddSandbox so it wins over the library's Null default (which uses TryAdd). Live scores
-            // are written under a separate dimension namespace - see RouterMemoryScoreObserver.
-            services.AddSingleton<IRouterScoreObserver, RouterMemoryScoreObserver>();
+            // Sandboxed executor (off-path, best-effort). IRouterScoreObserver resolves to a single
+            // implementation, so a CompositeRouterScoreObserver fans each scored result out to both
+            // RouterMemoryScoreObserver (live dim_best scores) and EmbeddingMemoryScoreObserver
+            // (docs/router/live-feedback-learning-plan.md Phase 2c: memory_entries writes). Registered
+            // before AddSandbox so it wins over the library's Null default (which uses TryAdd).
+            services.AddSingleton<Router.Embeddings.PendingTaskEmbeddingCache>();
+            services.AddSingleton<RouterMemoryScoreObserver>();
+            services.AddSingleton<Router.EmbeddingMemoryScoreObserver>();
+            services.AddSingleton<IRouterScoreObserver>(sp => new Router.CompositeRouterScoreObserver(
+                [sp.GetRequiredService<RouterMemoryScoreObserver>(), sp.GetRequiredService<Router.EmbeddingMemoryScoreObserver>()],
+                sp.GetRequiredService<ILogger<Router.CompositeRouterScoreObserver>>()));
             services.AddSandbox();
 
             services.AddSingleton<ProxyMiddleware>();

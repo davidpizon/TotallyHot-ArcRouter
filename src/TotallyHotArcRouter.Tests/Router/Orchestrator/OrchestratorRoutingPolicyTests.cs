@@ -60,6 +60,42 @@ public class OrchestratorRoutingPolicyTests
         Assert.Equal("kimi-k2.5", selected);
     }
 
+    /// <summary>
+    /// docs/router/live-feedback-learning-plan.md Phase 2a: the <see cref="RoutingSignals"/> overload
+    /// must actually reach the voters via <see cref="VotingContext"/>, not just accept and drop the
+    /// parameter.
+    /// </summary>
+    [Fact]
+    public async Task SelectModelAsync_WithSignals_ForwardsTaskTextAndEmbeddingToVoters()
+    {
+        var recordingVoter = new RecordingVoter(VoterNames.DimBest, "kimi-k2.5");
+        var policy = CreatePolicy([recordingVoter]);
+        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi]);
+        var embedding = new float[] { 1f, 2f, 3f };
+        var signals = new RoutingSignals("refactor this function", embedding);
+
+        var selected = await policy.SelectModelAsync(context, signals, TestContext.Current.CancellationToken);
+
+        Assert.Equal("kimi-k2.5", selected);
+        Assert.NotNull(recordingVoter.LastContext);
+        Assert.Equal("refactor this function", recordingVoter.LastContext!.TaskText);
+        Assert.Same(embedding, recordingVoter.LastContext.TaskEmbedding);
+    }
+
+    [Fact]
+    public async Task SelectModelAsync_NoSignals_ForwardsNullTaskTextAndEmbedding()
+    {
+        var recordingVoter = new RecordingVoter(VoterNames.DimBest, "kimi-k2.5");
+        var policy = CreatePolicy([recordingVoter]);
+        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi]);
+
+        await policy.SelectModelAsync(context, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(recordingVoter.LastContext);
+        Assert.Null(recordingVoter.LastContext!.TaskText);
+        Assert.Null(recordingVoter.LastContext.TaskEmbedding);
+    }
+
     [Fact]
     public async Task DecideAsync_LlmRouterAbstains_DegradesToThreeVoterVote()
     {
@@ -395,6 +431,19 @@ public class OrchestratorRoutingPolicyTests
 
         public Task<VoterVote> VoteAsync(VotingContext context, CancellationToken cancellationToken = default) =>
             Task.FromResult(new VoterVote(Name, modelName, confidence));
+    }
+
+    private sealed class RecordingVoter(string name, string modelName) : IRoutingVoter
+    {
+        public string Name { get; } = name;
+
+        public VotingContext? LastContext { get; private set; }
+
+        public Task<VoterVote> VoteAsync(VotingContext context, CancellationToken cancellationToken = default)
+        {
+            LastContext = context;
+            return Task.FromResult(new VoterVote(Name, modelName, Confidence: 1.0));
+        }
     }
 
     private sealed class ThrowingVoter(string name) : IRoutingVoter

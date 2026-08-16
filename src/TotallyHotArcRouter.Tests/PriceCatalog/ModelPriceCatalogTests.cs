@@ -176,8 +176,14 @@ public class ModelPriceCatalogTests
 
         // Pooled connections keep the file handle open even after the row above is committed, so the
         // directory delete below would otherwise fail with "file in use" rather than exercising the fault
-        // this test is after.
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        // this test is after. ClearPool (scoped to this test's own connection string), not the
+        // process-global ClearAllPools, which under xUnit's parallel execution can tear down a pooled
+        // native sqlite3 handle out from under a completely different test's in-flight query.
+        using (var connection = temp.Database.OpenConnection())
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearPool(connection);
+        }
+
         Directory.Delete(Path.GetDirectoryName(temp.Path_)!, recursive: true);
 
         Assert.Null(catalog.GetBestPriceForModel(Key, PriceContext.Standard));

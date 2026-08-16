@@ -16,7 +16,9 @@ public class TelemetryBroadcasterTests
         string? requestSummary = "What's the weather?",
         string? responseSummary = "It's sunny.",
         int? cacheCreationTokens = 30,
-        int? cacheReadTokens = 500) => new(
+        int? cacheReadTokens = 500,
+        int routerTokens = 64,
+        decimal routerCostUsd = 0.000003456m) => new(
         SessionId: "sess-1",
         TurnNumber: 3,
         IsSessionSynthesized: false,
@@ -35,7 +37,9 @@ public class TelemetryBroadcasterTests
         CacheCreationTokens: cacheCreationTokens,
         CacheReadTokens: cacheReadTokens,
         RequestSummary: requestSummary,
-        ResponseSummary: responseSummary);
+        ResponseSummary: responseSummary,
+        RouterTokens: routerTokens,
+        RouterCostUsd: routerCostUsd);
 
     private static SandboxSignalEvent SampleSignal(int? exitCode = 0) => new(
         CorrelationId: "corr-1",
@@ -119,6 +123,30 @@ public class TelemetryBroadcasterTests
         Assert.Equal(telemetryEvent.ResponseSummary, wire.ResponseSummary);
         Assert.True(wire.HasCostConfidence);
         Assert.Equal(telemetryEvent.CostConfidence.ToString(), wire.CostConfidence);
+        Assert.True(wire.HasRouterTokens);
+        Assert.Equal(telemetryEvent.RouterTokens, wire.RouterTokens);
+        Assert.True(wire.HasRouterCostUsd);
+        Assert.Equal(telemetryEvent.RouterCostUsd, decimal.Parse(wire.RouterCostUsd, CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    public async Task Publish_ZeroRouterOverhead_IsStatedOnTheWireRatherThanOmitted()
+    {
+        // Zero router tokens is a measurement ("the router spent nothing on this request"), not an absent
+        // value, so it must arrive as a set field. If it were omitted, a receiver could not tell it apart
+        // from an older proxy that never reported router cost - and the difference matters, because one
+        // means net savings equal gross and the other means net savings are unknown.
+        var broadcaster = new TelemetryBroadcaster();
+        var channel = Channel.CreateUnbounded<Contract.TelemetryEvent>();
+        broadcaster.Register(channel.Writer);
+
+        broadcaster.Publish(SampleEvent(routerTokens: 0, routerCostUsd: 0m));
+
+        var wire = (await ReadOneAsync(channel.Reader)).RoutingTelemetry;
+        Assert.True(wire.HasRouterTokens);
+        Assert.Equal(0, wire.RouterTokens);
+        Assert.True(wire.HasRouterCostUsd);
+        Assert.Equal(0m, decimal.Parse(wire.RouterCostUsd, CultureInfo.InvariantCulture));
     }
 
     [Fact]
