@@ -68,7 +68,9 @@ public sealed class LlmRouterModelStore : IDisposable
 
     /// <summary>
     /// Every file's live progress during a sync, keyed by file name and refreshed as events stream in.
-    /// Cleared at the start of each sync. Empty outside of a running sync.
+    /// Cleared at the start of each sync and on a successful <see cref="SetBaseUrlAsync"/>. Not cleared
+    /// when a sync finishes - the terminal (including Failed) events remain so the panel can keep
+    /// rendering per-file errors after <see cref="IsSyncing"/> goes false.
     /// </summary>
     public IReadOnlyDictionary<string, LlmRouterModelSyncProgressInfo> SyncProgress => _syncProgress;
 
@@ -121,6 +123,9 @@ public sealed class LlmRouterModelStore : IDisposable
             throw;
         }
 
+        // The new model's files share the old model's file names (genai_config.json, model.onnx, ...),
+        // so a leftover progress entry from the previous model would otherwise be misread as this one's.
+        _syncProgress = [];
         IsReachable = true;
         IsLoaded = true;
         LastError = null;

@@ -91,6 +91,14 @@ public sealed class LlmRouterModelAdminGrpcService : Contract.LlmRouterModelAdmi
 
         var response = new Contract.LlmRouterModelStatusResponse { BaseUrl = activeOverride.BaseUrl };
 
+        // Only trust the recorded verification state when it was produced by a sync of this same
+        // model - otherwise a prior model's leftover record could misreport this model's files as
+        // checksum-verified after a switch.
+        var lastVerification = _syncService.LastVerification;
+        var verifiedFiles = string.Equals(lastVerification.BaseUrl, activeOverride.BaseUrl, StringComparison.Ordinal)
+            ? lastVerification.Files
+            : null;
+
         var allSynced = true;
         foreach (var fileName in LlmRouterModelFiles.All)
         {
@@ -105,12 +113,18 @@ public sealed class LlmRouterModelAdminGrpcService : Contract.LlmRouterModelAdmi
                     Synced = true,
                     SizeBytes = fileInfo.Length,
                     SyncedAtUtc = Timestamp.FromDateTime(fileInfo.LastWriteTimeUtc),
-                    ChecksumVerified = _syncService.LastVerifiedFiles.GetValueOrDefault(fileName),
+                    ChecksumVerified = verifiedFiles?.GetValueOrDefault(fileName) ?? false,
                 });
             }
             else
             {
-                allSynced = false;
+                // A missing optional file (model.onnx.data absent because the export inlines its
+                // weights) doesn't mean the model is out of date - only a missing required file does.
+                if (!LlmRouterModelFiles.IsOptional(fileName))
+                {
+                    allSynced = false;
+                }
+
                 response.Files.Add(new Contract.LlmRouterModelFile { FileName = fileName, Synced = false });
             }
         }

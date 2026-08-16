@@ -223,13 +223,22 @@ public sealed class LlmRouterModelOverrideStore : ILlmRouterModelOverrideStore, 
         }
     }
 
-    /// <summary>Validates and normalizes a candidate base URL: absolute, no trailing slash.</summary>
-    /// <exception cref="ArgumentException"><paramref name="baseUrl"/> is not an absolute URI.</exception>
+    /// <summary>Validates and normalizes a candidate base URL: absolute HTTP(S), no query/fragment, no trailing slash.</summary>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="baseUrl"/> is not an absolute HTTP(S) URI, or carries a query string or fragment
+    /// that would corrupt the artifact URLs later formed by appending a file name.
+    /// </exception>
     private static string NormalizeBaseUrl(string baseUrl)
     {
-        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out _))
+        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
         {
-            throw new ArgumentException($"'{baseUrl}' must be an absolute URI.", nameof(baseUrl));
+            throw new ArgumentException($"'{baseUrl}' must be an absolute http or https URI.", nameof(baseUrl));
+        }
+
+        if (!string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment))
+        {
+            throw new ArgumentException(
+                $"'{baseUrl}' must not contain a query string or fragment.", nameof(baseUrl));
         }
 
         return baseUrl.TrimEnd('/');

@@ -326,7 +326,16 @@
 
     private Task RunVoterAction() => RunVoterAsync(() => VoterStore.SyncAsync());
 
-    private Task SwitchModel() => RunVoterAsync(() => VoterStore.SetBaseUrlAsync(_baseUrlDraft));
+    private async Task SwitchModel()
+    {
+        // The router normalizes the URL (e.g. trims a trailing slash), so after a successful switch
+        // re-sync the draft from the returned status - otherwise the draft can keep differing from
+        // VoterStore.Status.BaseUrl, leaving the Switch button enabled for a no-op resubmit.
+        if (await RunVoterAsync(() => VoterStore.SetBaseUrlAsync(_baseUrlDraft)))
+        {
+            _baseUrlDraft = VoterStore.Status?.BaseUrl ?? _baseUrlDraft;
+        }
+    }
 
     private static string VoterStageLabel(LlmRouterModelFileStatusInfo file, LlmRouterModelSyncProgressInfo? progress) => progress switch
     {

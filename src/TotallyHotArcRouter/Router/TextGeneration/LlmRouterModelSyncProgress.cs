@@ -36,3 +36,12 @@ public sealed record LlmRouterModelFileSyncOutcome(
 /// <param name="BaseUrl">The base URL the sync ran against (the active override at the time the sync started).</param>
 /// <param name="Files">Every file's individual outcome, one per <see cref="LlmRouterModelFiles.All"/> entry.</param>
 public sealed record LlmRouterModelSyncResult(string BaseUrl, IReadOnlyList<LlmRouterModelFileSyncOutcome> Files);
+
+/// <summary>
+/// The most recent checksum-verification outcome recorded by <see cref="LlmRouterModelSyncService"/>,
+/// paired with the base URL it was for so a caller can tell whether it still applies to the
+/// currently-active model.
+/// </summary>
+/// <param name="BaseUrl">The base URL the recorded sync ran against.</param>
+/// <param name="Files">Whether each file was checksum-verified during that sync, keyed by file name.</param>
+public sealed record LlmRouterModelVerificationSnapshot(string BaseUrl, IReadOnlyDictionary<string, bool> Files);

@@ -18,8 +18,8 @@ public sealed class LlmRouterModelSyncService
     private readonly ILlmRouterModelOverrideStore _overrideStore;
     private readonly ILogger<LlmRouterModelSyncService> _logger;
 
-    private volatile IReadOnlyDictionary<string, bool> _lastVerifiedFiles =
-        new Dictionary<string, bool>(StringComparer.Ordinal);
+    private volatile LlmRouterModelVerificationSnapshot _lastVerification =
+        new(BaseUrl: string.Empty, Files: new Dictionary<string, bool>(StringComparer.Ordinal));
 
     /// <summary>Initializes a new instance of the <see cref="LlmRouterModelSyncService"/> class.</summary>
     /// <param name="httpClientFactory">
@@ -48,12 +48,13 @@ public sealed class LlmRouterModelSyncService
 
     /// <summary>
     /// Whether each file was checksum-verified during the most recent <see cref="SyncAsync"/> call, keyed
-    /// by file name. There is no persisted ledger for this (unlike <see cref="BenchmarkFileLedger"/>) -
-    /// this is a best-effort, in-memory record of the last sync only, reset on restart and irrespective
-    /// of which model it was for. <see cref="LlmRouterModelAdminGrpcService"/> uses it to report
-    /// <c>checksum_verified</c> on a status read that follows a sync in the same process lifetime.
+    /// by file name, together with the base URL of the model that sync was for. There is no persisted
+    /// ledger for this (unlike <see cref="BenchmarkFileLedger"/>) - this is a best-effort, in-memory
+    /// record of the last sync only, reset on restart. The base URL lets
+    /// <see cref="LlmRouterModelAdminGrpcService"/> discard this record when the active model has since
+    /// switched, instead of misreporting a stale sync's verification state as belonging to the new model.
     /// </summary>
-    public IReadOnlyDictionary<string, bool> LastVerifiedFiles => _lastVerifiedFiles;
+    public LlmRouterModelVerificationSnapshot LastVerification => _lastVerification;
 
     /// <summary>
     /// Syncs every file in <see cref="LlmRouterModelFiles.All"/> for the model that is active when this
@@ -88,7 +89,9 @@ public sealed class LlmRouterModelSyncService
                 .ConfigureAwait(false));
         }
 
-        _lastVerifiedFiles = outcomes.ToDictionary(o => o.FileName, o => o.ChecksumVerified, StringComparer.Ordinal);
+        _lastVerification = new LlmRouterModelVerificationSnapshot(
+            activeOverride.BaseUrl,
+            outcomes.ToDictionary(o => o.FileName, o => o.ChecksumVerified, StringComparer.Ordinal));
 
         return new LlmRouterModelSyncResult(activeOverride.BaseUrl, outcomes);
     }
@@ -181,8 +184,11 @@ public sealed class LlmRouterModelSyncService
             SafeDelete(temporaryPath);
             throw;
         }
-        catch (Exception ex) when (ex is HttpRequestException or IOException)
+        catch (Exception ex)
         {
+            // Isolate this file's failure per the class-level contract: any failure short of caller
+            // cancellation (HttpRequestException, IOException, UnauthorizedAccessException, etc.) is
+            // reported in this file's outcome rather than aborting the whole sync.
             _logger.LogError(ex, "llm_router model sync failed for {FileName}.", fileName);
             progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Failed));
             SafeDelete(temporaryPath);

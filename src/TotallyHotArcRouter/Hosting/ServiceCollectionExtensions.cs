@@ -87,10 +87,10 @@ namespace TotallyHot.ArcRouter.Hosting
 
             // The Governance > Benchmark Data panel's "Local Voter Model" section: lets the operator
             // switch llm_router's active model by URL and proactively (re-)sync its files, instead of
-            // only the lazy first-use download OnnxTextGenerationClient itself falls back to. The override
-            // store is registered before OnnxTextGenerationClient above resolves it (DI resolution order
-            // is independent of registration order, but the seed-validation failure this store can throw
-            // belongs conceptually with the LlmRouterOptions block it seeds from).
+            // only the lazy first-use download OnnxTextGenerationClient itself falls back to. Registered
+            // here, right after OnnxTextGenerationClient, purely for readability - DI resolution order is
+            // independent of registration order - because the seed-validation failure this store can
+            // throw belongs conceptually with the LlmRouterOptions block it seeds from.
             services.AddOptions<Router.TextGeneration.LlmRouterModelOverrideStoreOptions>()
                 .Configure<IConfiguration>((options, configuration) =>
                     configuration.GetSection(Router.TextGeneration.LlmRouterModelOverrideStoreOptions.SectionName).Bind(options));

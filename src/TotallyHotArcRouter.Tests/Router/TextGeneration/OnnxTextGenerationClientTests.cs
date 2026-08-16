@@ -39,14 +39,17 @@ public class OnnxTextGenerationClientTests
         }));
 
     /// <summary>
-    /// Reports whether every artifact <see cref="OnnxTextGenerationClient"/> needs is already on disk, in
-    /// <paramref name="overrideStore"/>'s active model's cache directory. Skipping on a partial cache
-    /// keeps a load failure out of the suite as a skip rather than a red test.
+    /// Reports whether every required artifact <see cref="OnnxTextGenerationClient"/> needs is already on
+    /// disk, in <paramref name="overrideStore"/>'s active model's cache directory. Skipping on a partial
+    /// cache keeps a load failure out of the suite as a skip rather than a red test. A missing
+    /// <see cref="LlmRouterModelFiles.IsOptional"/> file doesn't count as partial - inlined-weight exports
+    /// legitimately never have model.onnx.data.
     /// </summary>
     private static bool ModelIsCached(ILlmRouterModelOverrideStore overrideStore)
     {
         var cacheDirectory = overrideStore.Snapshot.Override.ResolveCacheDirectory();
-        return LlmRouterModelFiles.All.All(fileName => File.Exists(Path.Combine(cacheDirectory, fileName)));
+        return LlmRouterModelFiles.All.All(fileName =>
+            File.Exists(Path.Combine(cacheDirectory, fileName)) || LlmRouterModelFiles.IsOptional(fileName));
     }
 
     /// <summary>

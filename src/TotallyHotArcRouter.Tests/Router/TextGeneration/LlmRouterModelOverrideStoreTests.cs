@@ -80,6 +80,37 @@ public sealed class LlmRouterModelOverrideStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task SetBaseUrlAsync_NonHttpScheme_Throws()
+    {
+        var store = CreateStore(DefaultOptions());
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => store.SetBaseUrlAsync("file:///some/local/path", TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task SetBaseUrlAsync_WithQueryString_Throws()
+    {
+        var store = CreateStore(DefaultOptions());
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => store.SetBaseUrlAsync(
+                "https://huggingface.co/some-org/some-model/resolve/main/subfolder?download=true",
+                TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task SetBaseUrlAsync_WithFragment_Throws()
+    {
+        var store = CreateStore(DefaultOptions());
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => store.SetBaseUrlAsync(
+                "https://huggingface.co/some-org/some-model/resolve/main/subfolder#section",
+                TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task SetBaseUrlAsync_PersistsAtomically_LeavesNoTemporaryFileBehind()
     {
         var store = CreateStore(DefaultOptions());

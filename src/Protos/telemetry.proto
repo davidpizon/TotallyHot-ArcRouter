@@ -235,9 +235,11 @@ message BenchmarkSyncStreamEvent {
 // model-switch mutation the corpus has no equivalent of), and keeping them separate means a client that
 // only cares about one doesn't pull in messages for the other.
 service LlmRouterModelAdminService {
-  // Returns the currently active base URL and every file's cache status. "Current" means all 5 files are
-  // present locally (checksum-verified where possible) - the base URL is a fixed pin, not a rolling ref,
-  // so there is no remote freshness check to run, unlike BenchmarkDataAdminService's Recheck.
+  // Returns the currently active base URL and every file's cache status. "Current" means every required
+  // file is present locally (checksum-verified where possible); model.onnx.data is optional and its
+  // absence alone doesn't make the model non-current, since some exports inline its weights into
+  // model.onnx. The base URL is a fixed pin, not a rolling ref, so there is no remote freshness check to
+  // run, unlike BenchmarkDataAdminService's Recheck.
   rpc GetLlmRouterModelStatus (GetLlmRouterModelStatusRequest) returns (LlmRouterModelStatusResponse);
 
   // Persists a new base URL as the active model. Does not download - the panel calls SyncLlmRouterModel
@@ -267,8 +269,9 @@ message LlmRouterModelFile {
   int64 size_bytes = 3;
   google.protobuf.Timestamp synced_at_utc = 4;
   // True when the sync verified this file's checksum against Hugging Face's models-tree API; false when
-  // the URL wasn't in the expected Hugging Face shape or the API call failed, in which case only
-  // existence/size were checked.
+  // the URL wasn't in the expected Hugging Face shape, the API call failed, or the file simply hasn't
+  // been checksum-verified by a sync in this process's lifetime - in which case only the file's local
+  // existence and size are known.
   bool checksum_verified = 5;
 }
 
