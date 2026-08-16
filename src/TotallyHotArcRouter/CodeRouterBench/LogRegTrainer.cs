@@ -141,7 +141,11 @@ public static class LogRegTrainer
                 var model = ModelNameCanonicalizer.Canonicalize(reader.GetString(1));
                 var costUsd = reader.IsDBNull(2) ? double.PositiveInfinity : reader.GetDouble(2);
 
-                if (!bestResolverPerTask.TryGetValue(taskId, out var current) || costUsd < current.CostUsd)
+                // Ties (equal cost, including two NULL-cost resolvers) break on canonicalized model name
+                // so the winner never depends on SQLite's unspecified row enumeration order.
+                if (!bestResolverPerTask.TryGetValue(taskId, out var current) ||
+                    costUsd < current.CostUsd ||
+                    (costUsd == current.CostUsd && string.CompareOrdinal(model, current.Model) < 0))
                 {
                     bestResolverPerTask[taskId] = (model, costUsd);
                 }

@@ -1,7 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router.TextGeneration;
 
@@ -109,7 +108,18 @@ public sealed class LlmRouterVoter : IRoutingVoter
             return VoterVote.Abstain(Name);
         }
 
-        return ParseResponse(response, context.Candidates);
+        try
+        {
+            return ParseResponse(response, context.Candidates);
+        }
+        catch (RegexMatchTimeoutException ex)
+        {
+            // The fenced-code-block regex hit its 200ms timeout - degrade to an abstention like any
+            // other unparseable response, per this method's contract, rather than letting a
+            // pathological response string fail the whole routing decision.
+            _logger.LogWarning(ex, "[LLM_ROUTER] Response parsing timed out; abstaining.");
+            return VoterVote.Abstain(Name);
+        }
     }
 
     /// <summary>

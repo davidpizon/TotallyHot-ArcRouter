@@ -74,7 +74,14 @@ namespace TotallyHot.ArcRouter.Hosting
             // download-once-cache-forever shape as EmbeddingOptions/OnnxEmbeddingClient above.
             services.AddOptions<LlmRouterOptions>()
                 .Configure<IConfiguration>((options, configuration) =>
-                    configuration.GetSection(LlmRouterOptions.SectionName).Bind(options));
+                    configuration.GetSection(LlmRouterOptions.SectionName).Bind(options))
+                .ValidateDataAnnotations()
+                .Validate(options =>
+                {
+                    options.EnsureValid();
+                    return true;
+                })
+                .ValidateOnStart();
             services.AddHttpClient(nameof(Router.TextGeneration.OnnxTextGenerationClient));
             services.AddSingleton<Router.TextGeneration.ITextGenerationClient, Router.TextGeneration.OnnxTextGenerationClient>();
 
