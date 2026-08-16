@@ -46,4 +46,29 @@ public class GitBlobHashTests
 
         Assert.NotEqual(a, b);
     }
+
+    [Fact]
+    public void Compute_Stream_MatchesByteArrayOverload()
+    {
+        // The streaming overload exists purely so a large download doesn't have to be buffered into
+        // memory first - it must produce byte-for-byte the same digest as the in-memory overload.
+        var content = Encoding.UTF8.GetBytes("hello\n");
+        using var stream = new MemoryStream(content);
+
+        var streamed = GitBlobHash.Compute(stream, content.LongLength);
+
+        Assert.Equal(GitBlobHash.Compute(content), streamed);
+    }
+
+    [Fact]
+    public void Compute_Stream_LongerThanInternalBufferSize_MatchesByteArrayOverload()
+    {
+        // Exercises the read loop across more than one internal buffer's worth of data.
+        var content = Encoding.UTF8.GetBytes(new string('x', 200_000));
+        using var stream = new MemoryStream(content);
+
+        var streamed = GitBlobHash.Compute(stream, content.LongLength);
+
+        Assert.Equal(GitBlobHash.Compute(content), streamed);
+    }
 }

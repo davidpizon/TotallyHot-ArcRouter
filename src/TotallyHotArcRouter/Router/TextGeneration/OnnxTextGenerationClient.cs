@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -34,6 +35,7 @@ public sealed class OnnxTextGenerationClient : ITextGenerationClient, IAsyncDisp
 
     private Model? _model;
     private Tokenizer? _tokenizer;
+    private int _loadedOverrideVersion = -1;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="OnnxTextGenerationClient"/> class.
@@ -118,7 +120,8 @@ public sealed class OnnxTextGenerationClient : ITextGenerationClient, IAsyncDisp
 
     private async Task EnsureInitializedAsync(CancellationToken cancellationToken)
     {
-        if (_model is not null && _tokenizer is not null)
+        var snapshot = _overrideStore.Snapshot;
+        if (_model is not null && _tokenizer is not null && _loadedOverrideVersion == snapshot.Version)
         {
             return;
         }
@@ -126,12 +129,32 @@ public sealed class OnnxTextGenerationClient : ITextGenerationClient, IAsyncDisp
         await _initLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_model is not null && _tokenizer is not null)
+            snapshot = _overrideStore.Snapshot;
+            if (_model is not null && _tokenizer is not null && _loadedOverrideVersion == snapshot.Version)
             {
                 return;
             }
 
-            var activeOverride = _overrideStore.Snapshot.Override;
+            if (_model is not null || _tokenizer is not null)
+            {
+                // A model switch landed after this instance already loaded one: swap it out under the
+                // inference lock too, so a generation in flight (which only holds _inferenceLock, not
+                // _initLock) never reads a disposed Model/Tokenizer.
+                await _inferenceLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    _tokenizer?.Dispose();
+                    _tokenizer = null;
+                    _model?.Dispose();
+                    _model = null;
+                }
+                finally
+                {
+                    _inferenceLock.Release();
+                }
+            }
+
+            var activeOverride = snapshot.Override;
             var cacheDirectory = activeOverride.ResolveCacheDirectory();
             Directory.CreateDirectory(cacheDirectory);
 
@@ -144,6 +167,7 @@ public sealed class OnnxTextGenerationClient : ITextGenerationClient, IAsyncDisp
             var model = new Model(cacheDirectory);
             _tokenizer = new Tokenizer(model);
             _model = model;
+            _loadedOverrideVersion = snapshot.Version;
 
             _logger.LogInformation("Loaded llm_router ONNX GenAI model from {CacheDirectory}.", cacheDirectory);
         }
@@ -156,7 +180,9 @@ public sealed class OnnxTextGenerationClient : ITextGenerationClient, IAsyncDisp
     /// <summary>
     /// Downloads an artifact to <paramref name="fileName"/> inside <paramref name="cacheDirectory"/> if
     /// it is not already present - the documented cold-start path for a first run before the model has
-    /// been cached locally. Mirrors <c>OnnxEmbeddingClient.EnsureArtifactCachedAsync</c>.
+    /// been cached locally. Mirrors <c>OnnxEmbeddingClient.EnsureArtifactCachedAsync</c>. A no-op when
+    /// <paramref name="fileName"/> is <see cref="LlmRouterModelFiles.IsOptional"/> and 404s: some exports
+    /// inline all weights in <c>model.onnx</c> and never publish a separate external-data file.
     /// </summary>
     private async Task EnsureArtifactCachedAsync(string cacheDirectory, string fileName, string sourceUrl, CancellationToken cancellationToken)
     {
@@ -177,6 +203,16 @@ public sealed class OnnxTextGenerationClient : ITextGenerationClient, IAsyncDisp
             using var httpClient = _httpClientFactory.CreateClient(nameof(OnnxTextGenerationClient));
             using var response = await httpClient.GetAsync(sourceUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
                 .ConfigureAwait(false);
+
+            if (response.StatusCode == HttpStatusCode.NotFound && LlmRouterModelFiles.IsOptional(fileName))
+            {
+                _logger.LogInformation(
+                    "llm_router optional artifact {FileName} not published at {SourceUrl}; the model's weights are presumably inlined in model.onnx.",
+                    fileName,
+                    sourceUrl);
+                return;
+            }
+
             response.EnsureSuccessStatusCode();
 
             await using (var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false))

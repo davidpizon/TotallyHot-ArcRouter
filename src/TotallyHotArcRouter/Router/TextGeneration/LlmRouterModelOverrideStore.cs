@@ -263,8 +263,13 @@ public sealed class LlmRouterModelOverrideStore : ILlmRouterModelOverrideStore, 
             Directory.CreateDirectory(directoryPath);
         }
 
+        // Write-then-rename: a crash or interruption mid-write leaves only the ".tmp" file incomplete,
+        // never the file _snapshot claims is on disk, matching this store's "persist first, then
+        // publish" consistency intent above.
+        var temporaryPath = _filePath + ".tmp";
         var json = JsonSerializer.Serialize(value, SerializerOptions);
-        await File.WriteAllTextAsync(_filePath, json, cancellationToken).ConfigureAwait(false);
+        await File.WriteAllTextAsync(temporaryPath, json, cancellationToken).ConfigureAwait(false);
+        File.Move(temporaryPath, _filePath, overwrite: true);
     }
 
     // Mirrors LlmRouterOptions' own %LOCALAPPDATA% expansion (that type has no public path-only helper

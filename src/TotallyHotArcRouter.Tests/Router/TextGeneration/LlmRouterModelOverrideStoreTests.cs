@@ -80,6 +80,17 @@ public sealed class LlmRouterModelOverrideStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task SetBaseUrlAsync_PersistsAtomically_LeavesNoTemporaryFileBehind()
+    {
+        var store = CreateStore(DefaultOptions());
+
+        await store.SetBaseUrlAsync("https://huggingface.co/some-org/some-model/resolve/main/subfolder", TestContext.Current.CancellationToken);
+
+        Assert.True(File.Exists(_tempPath));
+        Assert.False(File.Exists(_tempPath + ".tmp"));
+    }
+
+    [Fact]
     public async Task SetBaseUrlAsync_ThenReconstructed_LoadsPersistedOverride()
     {
         var store = CreateStore(DefaultOptions());

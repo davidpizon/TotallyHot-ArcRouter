@@ -117,6 +117,54 @@ public sealed class LlmRouterModelSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncAsync_ModelOnnxDataMissing_SkipsOptionalFileWithoutFailing()
+    {
+        // An export that inlines all weights in model.onnx never publishes model.onnx.data at all - a
+        // 404 for that one file must not fail the sync (LlmRouterModelFiles.IsOptional), unlike a 404
+        // for any of the other four files.
+        using var scope = new TempOverrideScope();
+        var service = CreateService(scope.OverrideStore, request =>
+        {
+            if (request.RequestUri!.ToString() == TreeApiUrl)
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            return request.RequestUri.Segments[^1] == LlmRouterModelFiles.ModelOnnxDataFileName
+                ? new HttpResponseMessage(HttpStatusCode.NotFound)
+                : ServeFixture(request);
+        });
+
+        var result = await service.SyncAsync(progress: null, TestContext.Current.CancellationToken);
+
+        Assert.All(result.Files, outcome => Assert.True(outcome.Succeeded, $"{outcome.FileName}: {outcome.ErrorMessage}"));
+        var cacheDirectory = scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory();
+        Assert.False(File.Exists(Path.Combine(cacheDirectory, LlmRouterModelFiles.ModelOnnxDataFileName)));
+    }
+
+    [Fact]
+    public async Task SyncAsync_NonOptionalFileMissing_FailsThatFile()
+    {
+        using var scope = new TempOverrideScope();
+        var service = CreateService(scope.OverrideStore, request =>
+        {
+            if (request.RequestUri!.ToString() == TreeApiUrl)
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            return request.RequestUri.Segments[^1] == "model.onnx"
+                ? new HttpResponseMessage(HttpStatusCode.NotFound)
+                : ServeFixture(request);
+        });
+
+        var result = await service.SyncAsync(progress: null, TestContext.Current.CancellationToken);
+
+        var failed = result.Files.Single(f => f.FileName == "model.onnx");
+        Assert.False(failed.Succeeded);
+    }
+
+    [Fact]
     public async Task SyncAsync_WritesFilesIntoTheOverrideOwnCacheDirectory()
     {
         using var scope = new TempOverrideScope();

@@ -1,3 +1,4 @@
+using System.Net;
 using Microsoft.Extensions.Logging;
 using TotallyHot.ArcRouter.CodeRouterBench;
 
@@ -116,27 +117,55 @@ public sealed class LlmRouterModelSyncService
             progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Downloading));
             var url = $"{baseUrl}/{fileName}";
             using var httpClient = _httpClientFactory.CreateClient(LlmRouterModelChecksumProbe.HttpClientName);
-            var bytes = await httpClient.GetByteArrayAsync(url, cancellationToken).ConfigureAwait(false);
-            progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Downloading, bytes.LongLength));
+            using var response = await httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (response.StatusCode == HttpStatusCode.NotFound && LlmRouterModelFiles.IsOptional(fileName))
+            {
+                progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Completed));
+                _logger.LogInformation(
+                    "llm_router optional model file {FileName} is not published at {Url}; skipping (the model's weights are presumably inlined in model.onnx).",
+                    fileName,
+                    url);
+                return new LlmRouterModelFileSyncOutcome(fileName, Succeeded: true, ChecksumVerified: false, ErrorMessage: null);
+            }
+
+            response.EnsureSuccessStatusCode();
+
+            // Stream straight to a temp file rather than buffering the whole artifact in memory - a
+            // llm_router file (especially model.onnx.data) can run hundreds of MB.
+            await using (var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false))
+            await using (var destination = File.Create(temporaryPath))
+            {
+                await source.CopyToAsync(destination, cancellationToken).ConfigureAwait(false);
+            }
+
+            var downloadedLength = new FileInfo(temporaryPath).Length;
+            progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Downloading, downloadedLength));
 
             var checksumVerified = false;
             if (probeResult is not null && probeResult.Files.TryGetValue(fileName, out var published))
             {
                 progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Verifying));
-                var actualOid = GitBlobHash.Compute(bytes);
+                string actualOid;
+                await using (var hashStream = File.OpenRead(temporaryPath))
+                {
+                    actualOid = GitBlobHash.Compute(hashStream, downloadedLength);
+                }
+
                 if (!string.Equals(actualOid, published.PublishedOid, StringComparison.OrdinalIgnoreCase))
                 {
                     var mismatchMessage =
                         $"Checksum mismatch for '{fileName}': expected {published.PublishedOid}, computed {actualOid}.";
                     _logger.LogError("llm_router model sync rejected {FileName}: {Reason}", fileName, mismatchMessage);
                     progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Failed));
+                    SafeDelete(temporaryPath);
                     return new LlmRouterModelFileSyncOutcome(fileName, Succeeded: false, ChecksumVerified: false, mismatchMessage);
                 }
 
                 checksumVerified = true;
             }
 
-            await File.WriteAllBytesAsync(temporaryPath, bytes, cancellationToken).ConfigureAwait(false);
             File.Move(temporaryPath, destinationPath, overwrite: true);
 
             progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Completed));
@@ -167,9 +196,11 @@ public sealed class LlmRouterModelSyncService
         {
             File.Delete(path);
         }
-        catch (IOException)
+        catch (Exception)
         {
-            // Best-effort cleanup of a partial download; a failure here doesn't change the sync outcome.
+            // Best-effort cleanup of a partial download; a failure here (IOException,
+            // UnauthorizedAccessException, or anything else File.Delete can throw) doesn't change the
+            // sync outcome.
         }
     }
 }

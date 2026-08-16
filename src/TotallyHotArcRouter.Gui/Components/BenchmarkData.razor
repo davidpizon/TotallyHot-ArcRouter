@@ -134,7 +134,8 @@
                 <div class="mb-3 flex items-center gap-2">
                     <input @bind="_baseUrlDraft" @bind:event="oninput"
                            class="ds-input flex-1 text-xs font-mono"
-                           placeholder="Model base URL (Hugging Face resolve folder)" />
+                           placeholder="Model base URL (Hugging Face resolve folder)"
+                           aria-label="Model base URL (Hugging Face resolve folder)" />
                     <button @onclick="SwitchModel"
                             disabled="@(VoterStore.IsSyncing || string.IsNullOrWhiteSpace(_baseUrlDraft) || _baseUrlDraft == VoterStore.Status?.BaseUrl)"
                             class="btn btn-secondary">
