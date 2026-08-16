@@ -191,6 +191,18 @@ public sealed class LlmRouterModelOverrideStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task SetBaseUrlAsync_HostCasingAndDefaultPort_NormalizesBaseUrl()
+    {
+        var store = CreateStore(DefaultOptions());
+
+        await store.SetBaseUrlAsync(
+            "https://HuggingFace.co:443/some-org/some-model/resolve/main/subfolder", TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            "https://huggingface.co/some-org/some-model/resolve/main/subfolder", store.Snapshot.Override.BaseUrl);
+    }
+
+    [Fact]
     public async Task Constructor_FileHasTamperedSlug_RecomputesSlugFromBaseUrl_IgnoringPersistedValue()
     {
         const string baseUrl = "https://huggingface.co/some-org/some-model/resolve/main/subfolder";

@@ -98,6 +98,33 @@ public sealed class LlmRouterModelChecksumProbeTests
         Assert.Null(result);
     }
 
+    [Fact]
+    public async Task TryFetchAsync_RefContainsEncodedSlash_EscapesExactlyOnce()
+    {
+        HttpRequestMessage? capturedRequest = null;
+        var probe = CreateProbe(request =>
+        {
+            capturedRequest = request;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(TreeJson, Encoding.UTF8, "application/json"),
+            };
+        });
+
+        // A ref like "refs/heads/feature/x" arrives from Uri.AbsolutePath already percent-encoded
+        // (refs%2Fheads%2Ffeature%2Fx) as a single path segment. Escaping it again would turn "%2F" into
+        // "%252F" and 404 against the real API.
+        var baseUrl = "https://huggingface.co/some-org/some-repo/resolve/refs%2Fheads%2Ffeature%2Fx/sub dir";
+
+        var result = await probe.TryFetchAsync(baseUrl, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result);
+        Assert.NotNull(capturedRequest);
+        Assert.Equal(
+            "https://huggingface.co/api/models/some-org/some-repo/tree/refs%2Fheads%2Ffeature%2Fx/sub%20dir",
+            capturedRequest.RequestUri!.AbsoluteUri);
+    }
+
     private static LlmRouterModelChecksumProbe CreateProbe(Func<HttpRequestMessage, HttpResponseMessage> respond) =>
         CreateProbe(new FakeHttpMessageHandler(respond));
 

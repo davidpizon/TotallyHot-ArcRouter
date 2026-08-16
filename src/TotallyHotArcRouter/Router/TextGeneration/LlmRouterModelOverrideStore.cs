@@ -223,7 +223,10 @@ public sealed class LlmRouterModelOverrideStore : ILlmRouterModelOverrideStore, 
         }
     }
 
-    /// <summary>Validates and normalizes a candidate base URL: absolute HTTP(S), no query/fragment, no trailing slash.</summary>
+    /// <summary>
+    /// Validates and normalizes a candidate base URL: absolute HTTP(S), no query/fragment, no trailing
+    /// slash, scheme/host lowercased and default port dropped.
+    /// </summary>
     /// <exception cref="ArgumentException">
     /// <paramref name="baseUrl"/> is not an absolute HTTP(S) URI, or carries a query string or fragment
     /// that would corrupt the artifact URLs later formed by appending a file name.
@@ -241,7 +244,12 @@ public sealed class LlmRouterModelOverrideStore : ILlmRouterModelOverrideStore, 
                 $"'{baseUrl}' must not contain a query string or fragment.", nameof(baseUrl));
         }
 
-        return baseUrl.TrimEnd('/');
+        // Rebuild from the parsed Uri rather than trimming the raw input string, so URLs that are
+        // semantically identical but differ only in scheme/host casing or an explicit default port (e.g.
+        // "https://HuggingFace.co:443/x" vs "https://huggingface.co/x") normalize to the same value -
+        // matching what ComputeSlug already assumes about scheme/host normalization. The path segment is
+        // preserved exactly as authored: per ComputeSlug's remarks, path casing is significant.
+        return uri.GetLeftPart(UriPartial.Authority) + uri.AbsolutePath.TrimEnd('/');
     }
 
     /// <summary>

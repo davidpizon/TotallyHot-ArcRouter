@@ -95,9 +95,10 @@ public sealed class LlmRouterModelChecksumProbe
             return null;
         }
 
+        var escapedRef = EscapeUriSegment(modelRef);
         var apiUrl = string.IsNullOrEmpty(pathPrefix)
-            ? $"https://huggingface.co/api/models/{owner}/{repo}/tree/{Uri.EscapeDataString(modelRef)}"
-            : $"https://huggingface.co/api/models/{owner}/{repo}/tree/{Uri.EscapeDataString(modelRef)}/{pathPrefix}";
+            ? $"https://huggingface.co/api/models/{owner}/{repo}/tree/{escapedRef}"
+            : $"https://huggingface.co/api/models/{owner}/{repo}/tree/{escapedRef}/{EscapePathPrefix(pathPrefix)}";
 
         try
         {
@@ -139,6 +140,19 @@ public sealed class LlmRouterModelChecksumProbe
             return null;
         }
     }
+
+    /// <summary>
+    /// Re-escapes a single URI path segment taken from <see cref="Uri.AbsolutePath"/> for use in a
+    /// freshly composed URL. <see cref="Uri.AbsolutePath"/> segments are already percent-encoded, so
+    /// escaping them again (as the original code did for <c>modelRef</c>) would double-escape - e.g. a
+    /// ref containing an encoded slash (<c>%2F</c>) would become <c>%252F</c> and the API call would
+    /// 404. Unescaping first undoes that existing encoding before re-escaping exactly once.
+    /// </summary>
+    private static string EscapeUriSegment(string segment) => Uri.EscapeDataString(Uri.UnescapeDataString(segment));
+
+    /// <summary>Re-escapes every slash-separated segment of a model-relative path prefix, individually.</summary>
+    private static string EscapePathPrefix(string pathPrefix) =>
+        string.Join('/', pathPrefix.Split('/').Select(EscapeUriSegment));
 
     /// <summary>
     /// Parses <c>https://huggingface.co/{owner}/{repo}/resolve/{ref}/{path...}</c> into its components.
