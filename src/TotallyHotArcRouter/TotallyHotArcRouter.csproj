@@ -46,6 +46,10 @@
     <!-- WordPiece tokenizer matching BGE's BERT-family vocabulary; used by OnnxEmbeddingClient to
          turn task text into the token ids OnnxRuntime's InferenceSession expects. -->
     <PackageReference Include="FastBertTokenizer" Version="1.0.28" />
+    <!-- Autoregressive generation (KV-cache, greedy sampling, tokenization) for the llm_router voter's
+         local ONNX-hosted small instruct model (PLAN.md Phase L) - owns exactly the generation-loop
+         complexity the plain Microsoft.ML.OnnxRuntime session above would otherwise require hand-rolling. -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI" Version="0.15.2" />
     <PackageReference Include="ModelContextProtocol" Version="2.2.0" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
     <!-- Pin the native SQLite bundle above the version Microsoft.Data.Sqlite pulls transitively:
@@ -72,13 +76,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\TotallyHotArcRouter.Sandbox\TotallyHotArcRouter.Sandbox.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <!-- PLAN.md Phase L: the logreg voter's checked-in TF-IDF + logistic-regression model. Embedded
-         (rather than CopyToOutputDirectory) so LogRegVoter's default constructor loads it via
-         Assembly.GetManifestResourceStream regardless of the process's working directory. -->
-    <EmbeddedResource Include="CodeRouterBench\Resources\logreg_voter_model.json" />
   </ItemGroup>
 
 </Project>

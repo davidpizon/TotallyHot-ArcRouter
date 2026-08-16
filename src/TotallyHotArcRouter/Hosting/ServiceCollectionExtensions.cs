@@ -70,6 +70,21 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddSingleton<IMemoryEntryStore, SqliteMemoryEntryStore>();
             services.AddSingleton<EmbeddingMemory>();
 
+            // llm_router voter's local ONNX GenAI text-generation model (PLAN.md Phase L) - same
+            // download-once-cache-forever shape as EmbeddingOptions/OnnxEmbeddingClient above.
+            services.AddOptions<LlmRouterOptions>()
+                .Configure<IConfiguration>((options, configuration) =>
+                    configuration.GetSection(LlmRouterOptions.SectionName).Bind(options))
+                .ValidateDataAnnotations()
+                .Validate(options =>
+                {
+                    options.EnsureValid();
+                    return true;
+                })
+                .ValidateOnStart();
+            services.AddHttpClient(nameof(Router.TextGeneration.OnnxTextGenerationClient));
+            services.AddSingleton<Router.TextGeneration.ITextGenerationClient, Router.TextGeneration.OnnxTextGenerationClient>();
+
             // PLAN.md Phase L: the Orchestrator ensemble - a self-contained, DI-registered component, NOT
             // yet the registered IRoutingPolicy (CompositeRoutingPolicy keeps that role; swapping the
             // Orchestrator in for live traffic by default is Phase M's job). BenchmarkDatabase is

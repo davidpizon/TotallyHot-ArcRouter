@@ -277,10 +277,12 @@ at `$0.054/M` from H100 amortization and measured throughput (§B.3.2). That rat
 It deliberately does **not** come from the price catalog — that catalog holds published *provider*
 prices, and locally-served inference has no provider to publish one.
 
-Today the only router-side token consumer is `OnnxEmbeddingClient`: the BGE forward pass on the request
-path (`docs/router/live-feedback-learning-plan.md` Phase 2b). `LlmRouterVoter` still abstains, so it
-contributes nothing yet; when it gains a real model artifact its tokens belong in the same field, which
-is why the field is named for the router rather than for embeddings.
+Today the only metered router-side token consumer is `OnnxEmbeddingClient`: the BGE forward pass on the
+request path (`docs/router/live-feedback-learning-plan.md` Phase 2b). `LlmRouterVoter` now runs its own
+local ONNX GenAI generation whenever it has task text to route on, but that generation's token cost is
+not yet metered into `RouterCostUsd` - a further, still-open deferral (distinct from the earlier "no
+model artifact at all" gap this paragraph used to describe). When that metering lands, its tokens belong
+in the same field, which is why the field is named for the router rather than for embeddings.
 
 Keeping the halves separate is what lets a savings figure be reported **net**: a router that saves
 $0.08 by downshifting a turn but burns $0.01 deciding has saved $0.07, and only a consumer that can see

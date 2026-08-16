@@ -217,7 +217,7 @@ data — which drops the sync from ~21.5 MB to ~11.7 MB and stored result rows f
 Full plan, schema, and phase breakdown:
 [`docs/router/coderouterbench-sqlite-migration-plan.md`](../docs/router/coderouterbench-sqlite-migration-plan.md).
 
-### Phase L: The Orchestrator ensemble — **shipped (3 of 4 voters; `llm_router` deferred)**
+### Phase L: The Orchestrator ensemble — **shipped (4 of 4 voters; `llm_router` is a documented substitute, not the paper's voter)**
 
 Four voters, weighted vote, argmax — research-doc §3.3 and A.1. Shipped as a self-contained,
 DI-registered component: `OrchestratorRoutingPolicy` implements `IRoutingPolicy` and is registered in
@@ -236,9 +236,18 @@ job, deliberately not this one's.
   computes the similarity-weighted average observed score per model among the neighbors restricted to
   current candidates, argmax. Abstains without a supplied task embedding or when no neighbor clears the
   similarity threshold.
-- **`logreg`** (`Router/Orchestrator/LogRegVoter.cs` + `CodeRouterBench/LogRegTrainer.cs`) — TF-IDF over
-  a fixed vocabulary → a plain-C# one-vs-rest logistic regression (no external ML package), trained by
-  `LogRegTrainer.Train` against the Phase K2 probing split and checked in as
+- **`logreg`** — **historical record; superseded by `docs/router/live-feedback-learning-plan.md` Phase 3
+  and Phase 6.** `Router/Orchestrator/LogRegVoter.cs` now scores `VotingContext.TaskEmbedding` against an
+  `EmbeddingLogRegModelArtifact`, not the TF-IDF design described below. `CodeRouterBench/LogRegTrainer.cs`
+  remains only as Phase N's static comparison baseline and no longer trains against the Phase K2 probing
+  split — CodeRouterBench never publishes task text for the ID splits (`id_probing_tasks.jsonl`/
+  `id_test_tasks.jsonl` carry only `task_id`/`split`/`source_split`/`dimension`), so it trains from the OOD
+  split instead, the only one with published `prompt` text. There is no checked-in placeholder artifact
+  anymore (`CodeRouterBench/Resources/logreg_voter_model.json` was deleted — it had no remaining consumer).
+  Nothing in the paragraph below reflects current behavior; kept for the reasoning trail.
+
+  ~~TF-IDF over a fixed vocabulary → a plain-C# one-vs-rest logistic regression (no external ML package),
+  trained by `LogRegTrainer.Train` against the Phase K2 probing split and checked in as
   `CodeRouterBench/Resources/logreg_voter_model.json` (embedded resource). **Data-availability caveat:**
   `coderouterbench.db` was not synced in the environment this phase was implemented in (it is
   sync-on-demand per `data/README.md`, not checked in), so the checked-in artifact is a small, explicitly
@@ -247,31 +256,27 @@ job, deliberately not this one's.
   `LogRegTrainerReconciliationTests.Train_OnRealCorpus_ProducesAUsableArtifact` is the documented,
   reproducible training step — self-skips like `CodeRouterBenchTable10ReconciliationTests` when the
   corpus isn't synced; run it against a synced `coderouterbench.db` and serialize its output over the
-  placeholder to ship a real model.
-- **`llm_router`** (`Router/Orchestrator/LlmRouterVoter.cs`) — **deferred by agreement with the user
-  ahead of implementation**, scoped down from the paper's fine-tuned Qwen3.5-0.8B-via-ONNX voter
-  described below to a documented, always-abstaining stub. This exercises exactly the degrade path this
-  phase requires ("must degrade to a three-voter vote, never a hard failure, when the model artifact
-  isn't present") as the *normal* case rather than an edge case, and leaves the interface seam
-  (`IRoutingVoter`) plus a placeholder implementation for a future session. The original scope this stub
-  defers — sourcing/exporting the fine-tuned Qwen3.5-0.8B weights to ONNX (or a documented
-  fine-tune-compatible substitute), the tokenizer, autoregressive generation (KV-cache, sampling, one
-  forward pass per output token) over the **+Perf-stats prompt** of research-doc Appendix B.3, the
-  four-step response-parsing fallback chain (JSON → fenced-block regex → model-name match → default),
-  and the disagreement-gated invocation cost control — is recorded verbatim in
-  `Router/Orchestrator/LlmRouterVoter.cs`'s XML doc remarks for whoever picks it up next. Reusing a
-  remote backend instead of local ONNX inference remains explicitly rejected, per the original rationale
-  below.
-  - *(Original scope note, unaffected by the deferral above):* the paper's own fine-tuned Qwen3.5-0.8B
-    is hosted locally via ONNX Runtime (`Microsoft.ML.OnnxRuntime`, the same dependency Phase J adds for
-    embeddings), not a call to a configured remote/hosted backend — a correction to this plan's earlier
-    draft, which proposed substituting "a configured cheap backend" because the stack "cannot host" the
-    fine-tune. That premise doesn't hold: Phase J already commits to in-process ONNX inference with
-    local model-artifact acquisition/caching, and a 0.8B causal LM is squarely in that same class of
-    local-model problem. Reusing a remote backend instead would be a static, network-dependent
-    substitute for the one voter the paper's central finding is *about* (the ablation the paper measures
-    at 47.74 AvgPerf, *above* DimensionBest's 47.50) — so it is the one voter this plan should least want
-    to approximate.
+  placeholder to ship a real model.~~
+- **`llm_router`** (`Router/Orchestrator/LlmRouterVoter.cs`) — **real, but a documented substitute for
+  the paper's voter, agreed with the user ahead of implementation.** The paper's own fine-tuned
+  Qwen3.5-0.8B checkpoint was never published anywhere (confirmed by search before implementation
+  began), so it cannot be hosted regardless of runtime choice. This voter instead prompts a small,
+  off-the-shelf, *un*-fine-tuned instruct model (Qwen2.5-0.5B-Instruct) locally via ONNX Runtime GenAI
+  (`Microsoft.ML.OnnxRuntimeGenAI` — owns KV-cache/sampling internally, so no hand-rolled
+  autoregressive-generation loop was needed), using research-doc Appendix B.3's **zero-shot** prompt
+  (not the few-shot or +Perf-stats variants — those need oracle-labeled example curation from
+  CodeRouterBench, a materially separate project) and a three-stage response-parsing fallback chain
+  (JSON → fenced-block regex → model-name match; the paper's fourth stage, a hardcoded fallback model,
+  becomes an abstention instead — see `LlmRouterVoter`'s remarks for why). No disagreement-gated
+  invocation cost control — it runs on every decision like the other three voters, gated only by
+  `RoutingOptions.EnableLlmRouterVoter`/`LlmRouterVoterWeight`. The default model artifact source
+  (`Models/LlmRouterOptions.cs`) is a community-maintained Hugging Face export, not an official
+  Microsoft one, pinned to its CPU build (`cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4`) because
+  that repository publishes nothing at its root — every artifact sits under a per-execution-provider
+  subfolder, and the graph's ~862 MB of weights are external, so `model.onnx.data` is a required
+  download, not an optional one. If it ever stops resolving, the voter just abstains permanently — the exact
+  "must degrade to a three-voter vote, never a hard failure, when the model artifact isn't present"
+  path this phase originally required, still exercised, just no longer the *only* path this voter takes.
 - Voter weights and per-voter enablement are configuration (`RoutingOptions.DimBestVoterWeight` /
   `MemoryKnnVoterWeight` / `LogRegVoterWeight` / `LlmRouterVoterWeight` and matching `Enable*Voter`
   flags). `OrchestratorRoutingPolicy` logs the full vote breakdown into `RoutingDecision.CandidateScores`:
@@ -287,14 +292,18 @@ job, deliberately not this one's.
   "Ensemble beats every single voter on the Phase N harness" is **not yet measured** — Phase N's regret
   harness does not exist yet, so this half of the original exit criterion carries forward to Phase N.
 
-**Settled deferral (added when Phase L shipped):** `llm_router` ships as an always-abstaining stub
-(`Router/Orchestrator/LlmRouterVoter.cs`), not the fine-tuned Qwen3.5-0.8B-via-ONNX voter originally
-scoped — agreed with the user ahead of implementation, given the scope (checkpoint sourcing/export,
-autoregressive generation, response parsing) versus this phase's time budget. The interface
-(`IRoutingVoter`) and a documented stub are in place; a future session fills in the real model. Separately,
-the checked-in `logreg` model artifact is a hand-built placeholder, not a real training run, because
-`coderouterbench.db` was not synced in the implementation environment — `LogRegTrainer` and
-`LogRegTrainerReconciliationTests` are the reproducible path to a real one once the corpus is synced.
+**Settled deferral (updated when `llm_router` was filled in):** `llm_router` prompts an off-the-shelf,
+un-fine-tuned small instruct model (Qwen2.5-0.5B-Instruct via ONNX Runtime GenAI), not the paper's
+fine-tuned Qwen3.5-0.8B checkpoint — that checkpoint was never published, so no implementation choice
+could have reproduced it; this is the plan's own documented escape hatch for exactly that situation,
+agreed with the user ahead of implementation. Sub-deferrals carried forward with it: zero-shot prompting
+only (no few-shot examples, no +Perf-stats ablation variant), no disagreement-gated invocation, and a
+community-sourced (not officially Microsoft-published) default model artifact URL — see
+`LlmRouterVoter`'s and `LlmRouterOptions`'s remarks for the full reasoning on each. The `logreg`
+placeholder-artifact deferral this paragraph originally recorded is resolved and superseded by
+`docs/router/live-feedback-learning-plan.md` (Phases 1-3, 6): the live voter no longer reads a checked-in
+artifact at all (it scores task embeddings, abstaining cleanly with none present), and `LogRegTrainer` /
+`LogRegTrainerReconciliationTests` now train Phase N's static comparison baseline from the OOD split.
 
 ### Phase M: Route all traffic (opt-out)
 

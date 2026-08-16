@@ -5,10 +5,9 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// Phase 3): one one-vs-rest logistic-regression weight vector per candidate model class, scored as a
 /// dense dot product against the task embedding rather than the sparse TF-IDF walk
 /// <see cref="LogRegModelArtifact"/> used. Trained per-installation from the operator's own synced corpus
-/// and live traffic (docs/router/live-feedback-learning-plan.md Phase 4) and never checked in - unlike
-/// the checked-in TF-IDF placeholder (<see cref="LogRegModelArtifact"/>, still embedded from
-/// <c>CodeRouterBench/Resources/logreg_voter_model.json</c> for that older voter) this replaces, an
-/// absent embedding-backed artifact is a normal, honest state (<see cref="LogRegVoter"/> simply
+/// and live traffic (docs/router/live-feedback-learning-plan.md Phase 4) and never checked in - the
+/// TF-IDF placeholder this replaces has been deleted outright rather than kept checked in, since an
+/// absent embedding-backed artifact is already a normal, honest state (<see cref="LogRegVoter"/> simply
 /// abstains) rather than something to ship a stand-in for.
 /// </summary>
 /// <param name="EmbeddingDimension">
