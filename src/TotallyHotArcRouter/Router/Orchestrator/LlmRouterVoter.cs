@@ -46,8 +46,12 @@ public sealed class LlmRouterVoter : IRoutingVoter
     private const double CodeBlockParseConfidence = 0.75;
     private const double NameMatchConfidence = 0.5;
 
+    // The body excludes any run of three backticks, so a plain-greedy `.*}` can't backtrack past this
+    // block's own closing fence into a later fenced block (which would splice two blocks' text together
+    // into invalid JSON). Within that bound it still matches greedily, so a "reasoning" string containing
+    // its own '}' or a nested object no longer truncates the capture the way a naive non-greedy body did.
     private static readonly Regex FencedCodeBlockPattern = new(
-        @"```(?:json)?\s*(?<body>\{.*?\})\s*```",
+        @"```(?:json)?\s*(?<body>\{(?:[^`]|`(?!``))*\})\s*```",
         RegexOptions.Singleline | RegexOptions.Compiled,
         TimeSpan.FromMilliseconds(200));
 
@@ -161,12 +165,35 @@ public sealed class LlmRouterVoter : IRoutingVoter
             return new VoterVote(Name, fencedMatch, CodeBlockParseConfidence);
         }
 
+        // When the response mentions more than one candidate (common when it restates the candidate
+        // list before committing to one), the last-mentioned name is taken as the pick - it tracks the
+        // response's own content instead of candidates' fixed list order, which would otherwise silently
+        // prefer whichever candidate happens to sort first regardless of what the model actually said.
+        // Ties (same start index) happen when one candidate's name is a prefix of another's, e.g.
+        // "llama3" vs "llama3-70b-bedrock": a response containing only the longer name still matches
+        // "llama3" at that same position. Break such ties toward the longer name, since it is the more
+        // specific (and only fully-supported-by-the-text) match.
+        string? lastMentioned = null;
+        var lastMentionedIndex = -1;
         foreach (var candidate in candidates)
         {
-            if (response.Contains(candidate.ModelName, StringComparison.OrdinalIgnoreCase))
+            var index = response.LastIndexOf(candidate.ModelName, StringComparison.OrdinalIgnoreCase);
+            if (index < 0)
             {
-                return new VoterVote(Name, candidate.ModelName, NameMatchConfidence);
+                continue;
             }
+
+            if (index > lastMentionedIndex ||
+                (index == lastMentionedIndex && lastMentioned is not null && candidate.ModelName.Length > lastMentioned.Length))
+            {
+                lastMentionedIndex = index;
+                lastMentioned = candidate.ModelName;
+            }
+        }
+
+        if (lastMentioned is not null)
+        {
+            return new VoterVote(Name, lastMentioned, NameMatchConfidence);
         }
 
         _logger.LogInformation("[LLM_ROUTER] Could not parse a candidate model from the generated response; abstaining.");
