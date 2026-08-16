@@ -251,8 +251,14 @@ public sealed class LlmRouterModelOverrideStore : ILlmRouterModelOverrideStore, 
     private LlmRouterModelOverride LoadFromFile()
     {
         var json = File.ReadAllText(_filePath);
-        return JsonSerializer.Deserialize<LlmRouterModelOverride>(json)
+        var loaded = JsonSerializer.Deserialize<LlmRouterModelOverride>(json)
             ?? throw new InvalidOperationException($"llm_router model override file '{_filePath}' deserialized to null.");
+
+        // Recompute the slug from BaseUrl rather than trust the persisted value: a corrupted or
+        // hand-edited file could otherwise smuggle a CacheDirectorySlug containing path separators or
+        // ".." that redirects ResolveCacheDirectory() outside the shared models root.
+        var normalized = NormalizeBaseUrl(loaded.BaseUrl);
+        return new LlmRouterModelOverride(normalized, ComputeSlug(normalized));
     }
 
     private async Task PersistAsync(LlmRouterModelOverride value, CancellationToken cancellationToken)

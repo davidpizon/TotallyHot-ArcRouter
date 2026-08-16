@@ -131,6 +131,24 @@ public sealed class LlmRouterModelOverrideStoreTests : IDisposable
         Assert.NotEqual(firstSlug, secondSlug);
     }
 
+    [Fact]
+    public async Task Constructor_FileHasTamperedSlug_RecomputesSlugFromBaseUrl_IgnoringPersistedValue()
+    {
+        const string baseUrl = "https://huggingface.co/some-org/some-model/resolve/main/subfolder";
+
+        // Legitimately produced by SetBaseUrlAsync, so we know exactly what slug should come back.
+        var reference = CreateStore(DefaultOptions());
+        await reference.SetBaseUrlAsync(baseUrl, TestContext.Current.CancellationToken);
+        var expectedSlug = reference.Snapshot.Override.CacheDirectorySlug;
+
+        // Now hand-tamper the persisted file with a path-traversal slug and reload.
+        File.WriteAllText(_tempPath, $$"""{"BaseUrl":"{{baseUrl}}","CacheDirectorySlug":"../../evil"}""");
+        var store = CreateStore(DefaultOptions());
+
+        Assert.Equal(baseUrl, store.Snapshot.Override.BaseUrl);
+        Assert.Equal(expectedSlug, store.Snapshot.Override.CacheDirectorySlug);
+    }
+
     public void Dispose()
     {
         if (File.Exists(_tempPath))
