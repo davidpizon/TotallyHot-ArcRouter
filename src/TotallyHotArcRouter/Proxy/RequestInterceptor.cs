@@ -431,10 +431,14 @@ namespace TotallyHot.ArcRouter.Proxy
             }
 
             using var budgetCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            budgetCts.CancelAfter(TimeSpan.FromMilliseconds(_embeddingBudgetMs));
 
             try
             {
+                // Inside the try, not before it: a misconfigured EmbeddingBudgetMs (e.g. negative - RoutingOptions'
+                // [Range(1, 60_000)] is data-annotation metadata only and is never enforced by EnsureValid or the
+                // options pipeline) would otherwise turn CancelAfter's ArgumentOutOfRangeException into a hard
+                // request failure instead of the clean abstention this method exists to guarantee.
+                budgetCts.CancelAfter(TimeSpan.FromMilliseconds(_embeddingBudgetMs));
                 return await _embeddingClient.EmbedAsync(taskText, budgetCts.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
