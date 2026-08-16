@@ -44,9 +44,20 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddOptions<EmbeddingOptions>()
                 .Configure<IConfiguration>((options, configuration) =>
                     configuration.GetSection(EmbeddingOptions.SectionName).Bind(options));
+            // EnsureValid() is enforced here (rather than by a consuming component's constructor, this
+            // options type's usual pattern - see e.g. CircuitBreaker's) because RoutingOptions is read
+            // piecemeal by several singletons (AgentAsARouter, JsonRouterMemoryStore, RequestInterceptor),
+            // none of which is guaranteed to be constructed eagerly; ValidateOnStart guarantees the check
+            // runs during host startup regardless of which of those paths is actually exercised.
             services.AddOptions<RoutingOptions>()
                 .Configure<IConfiguration>((options, configuration) =>
-                    configuration.GetSection(RoutingOptions.SectionName).Bind(options));
+                    configuration.GetSection(RoutingOptions.SectionName).Bind(options))
+                .Validate(options =>
+                {
+                    options.EnsureValid();
+                    return true;
+                })
+                .ValidateOnStart();
             services.AddHttpClient(nameof(Router.Embeddings.OnnxEmbeddingClient));
             services.AddSingleton<Router.Embeddings.IEmbeddingClient, Router.Embeddings.OnnxEmbeddingClient>();
             services.AddSingleton<Router.Embeddings.EmbeddingWarmupState>();

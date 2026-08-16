@@ -6,8 +6,10 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// dense dot product against the task embedding rather than the sparse TF-IDF walk
 /// <see cref="LogRegModelArtifact"/> used. Trained per-installation from the operator's own synced corpus
 /// and live traffic (docs/router/live-feedback-learning-plan.md Phase 4) and never checked in - unlike
-/// the deleted TF-IDF placeholder this replaces, an absent artifact is a normal, honest state
-/// (<see cref="LogRegVoter"/> simply abstains) rather than something to ship a stand-in for.
+/// the checked-in TF-IDF placeholder (<see cref="LogRegModelArtifact"/>, still embedded from
+/// <c>CodeRouterBench/Resources/logreg_voter_model.json</c> for that older voter) this replaces, an
+/// absent embedding-backed artifact is a normal, honest state (<see cref="LogRegVoter"/> simply
+/// abstains) rather than something to ship a stand-in for.
 /// </summary>
 /// <param name="EmbeddingDimension">
 /// The embedding dimension this artifact was trained at (e.g. BGE-large's 1024). Changing
