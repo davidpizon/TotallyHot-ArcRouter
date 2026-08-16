@@ -173,8 +173,27 @@ public sealed class BenchmarkDatabase
             schema.ExecuteNonQuery();
         }
 
-        RepairModelsEnvelopeRow(connection);
-        RepairIdTasksSourceSplit(connection);
+        // Best-effort hygiene, not core schema creation: a failure here (a SQLite build without the
+        // json_extract function, a row whose raw_json is unexpectedly malformed, a transient DB/IO error)
+        // must not make EnsureCreated itself throw and abort startup - callers like
+        // Program.RunBenchmarkDataSyncAsync call EnsureCreated with no try/catch of their own.
+        try
+        {
+            RepairModelsEnvelopeRow(connection);
+        }
+        catch (Exception ex) when (ex is SqliteException or JsonException or InvalidOperationException)
+        {
+            _logger?.LogWarning(ex, "Skipped the benchmark_models 'models' envelope repair after it failed.");
+        }
+
+        try
+        {
+            RepairIdTasksSourceSplit(connection);
+        }
+        catch (Exception ex) when (ex is SqliteException or JsonException or InvalidOperationException)
+        {
+            _logger?.LogWarning(ex, "Skipped the benchmark_id_tasks source_split repair after it failed.");
+        }
 
         return alreadyExisted;
     }
