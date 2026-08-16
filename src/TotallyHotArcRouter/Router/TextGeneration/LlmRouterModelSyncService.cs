@@ -108,10 +108,38 @@ public sealed class LlmRouterModelSyncService
         if (File.Exists(destinationPath))
         {
             // Already cached from a prior sync (or the lazy OnnxTextGenerationClient fallback); an
-            // explicit "Update" only fills in what's missing, mirroring the lazy loader's own
-            // File.Exists skip rather than re-downloading a multi-hundred-megabyte file on every click.
-            progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Completed));
-            return new LlmRouterModelFileSyncOutcome(fileName, Succeeded: true, ChecksumVerified: false, ErrorMessage: null);
+            // explicit "Update" only fills in what's missing rather than re-downloading a
+            // multi-hundred-megabyte file on every click. But when a published checksum is available,
+            // verify the cached bytes against it first - a corrupted or tampered cached file must not be
+            // silently reported as succeeded - and fall through to re-download on a mismatch instead of
+            // trusting stale bytes.
+            if (probeResult is not null && probeResult.Files.TryGetValue(fileName, out var cachedPublished))
+            {
+                progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Verifying));
+                var cachedLength = new FileInfo(destinationPath).Length;
+                string cachedOid;
+                await using (var hashStream = File.OpenRead(destinationPath))
+                {
+                    cachedOid = GitBlobHash.Compute(hashStream, cachedLength);
+                }
+
+                if (string.Equals(cachedOid, cachedPublished.PublishedOid, StringComparison.OrdinalIgnoreCase))
+                {
+                    progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Completed));
+                    return new LlmRouterModelFileSyncOutcome(fileName, Succeeded: true, ChecksumVerified: true, ErrorMessage: null);
+                }
+
+                _logger.LogWarning(
+                    "llm_router cached model file {FileName} failed checksum verification (expected {ExpectedOid}, computed {ActualOid}); re-downloading.",
+                    fileName,
+                    cachedPublished.PublishedOid,
+                    cachedOid);
+            }
+            else
+            {
+                progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Completed));
+                return new LlmRouterModelFileSyncOutcome(fileName, Succeeded: true, ChecksumVerified: false, ErrorMessage: null);
+            }
         }
 
         var temporaryPath = destinationPath + ".download";

@@ -117,6 +117,55 @@ public sealed class LlmRouterModelSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncAsync_ExistingFileMatchesPublishedChecksum_SkipsDownload_ReportsCompletedVerified()
+    {
+        using var scope = new TempOverrideScope();
+        Directory.CreateDirectory(scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory());
+        var existingPath = Path.Combine(scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory(), "genai_config.json");
+        await File.WriteAllTextAsync(existingPath, Fixtures["genai_config.json"], TestContext.Current.CancellationToken);
+
+        var downloadedFileNames = new List<string>();
+        var service = CreateService(scope.OverrideStore, request =>
+        {
+            if (request.RequestUri!.ToString() == TreeApiUrl)
+            {
+                return ServeTree();
+            }
+
+            downloadedFileNames.Add(request.RequestUri.Segments[^1]);
+            return ServeFixture(request);
+        });
+
+        var result = await service.SyncAsync(progress: null, TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain("genai_config.json", downloadedFileNames);
+        var outcome = result.Files.Single(f => f.FileName == "genai_config.json");
+        Assert.True(outcome.Succeeded);
+        Assert.True(outcome.ChecksumVerified);
+    }
+
+    [Fact]
+    public async Task SyncAsync_ExistingFileFailsPublishedChecksum_RedownloadsAndReplacesIt()
+    {
+        using var scope = new TempOverrideScope();
+        Directory.CreateDirectory(scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory());
+        var existingPath = Path.Combine(scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory(), "genai_config.json");
+        // The cached file's bytes don't match what the tree API publishes for this file - simulating
+        // corruption or tampering since it was last synced.
+        await File.WriteAllTextAsync(existingPath, "corrupted-cached-bytes", TestContext.Current.CancellationToken);
+
+        var service = CreateService(scope.OverrideStore, request =>
+            request.RequestUri!.ToString() == TreeApiUrl ? ServeTree() : ServeFixture(request));
+
+        var result = await service.SyncAsync(progress: null, TestContext.Current.CancellationToken);
+
+        var outcome = result.Files.Single(f => f.FileName == "genai_config.json");
+        Assert.True(outcome.Succeeded, outcome.ErrorMessage);
+        Assert.True(outcome.ChecksumVerified);
+        Assert.Equal(Fixtures["genai_config.json"], await File.ReadAllTextAsync(existingPath, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task SyncAsync_ModelOnnxDataMissing_SkipsOptionalFileWithoutFailing()
     {
         // An export that inlines all weights in model.onnx never publishes model.onnx.data at all - a
