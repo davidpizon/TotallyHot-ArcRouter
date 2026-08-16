@@ -236,8 +236,9 @@ message BenchmarkSyncStreamEvent {
 // only cares about one doesn't pull in messages for the other.
 service LlmRouterModelAdminService {
   // Returns the currently active base URL and every file's cache status. "Current" means every required
-  // file is present locally (checksum-verified where possible); model.onnx.data is optional and its
-  // absence alone doesn't make the model non-current, since some exports inline its weights into
+  // file is present locally, independent of checksum verification (tracked separately per file via
+  // checksum_verified, and only for the most recent in-process sync); model.onnx.data is optional and
+  // its absence alone doesn't make the model non-current, since some exports inline its weights into
   // model.onnx. The base URL is a fixed pin, not a rolling ref, so there is no remote freshness check to
   // run, unlike BenchmarkDataAdminService's Recheck.
   rpc GetLlmRouterModelStatus (GetLlmRouterModelStatusRequest) returns (LlmRouterModelStatusResponse);

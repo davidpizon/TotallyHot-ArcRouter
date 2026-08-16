@@ -43,10 +43,13 @@ public sealed record LlmRouterModelChecksumProbeResult(IReadOnlyDictionary<strin
 /// folder by URL.
 /// </summary>
 /// <remarks>
-/// Unlike <see cref="CodeRouterBench.BenchmarkChecksumProbe.FetchAsync"/>, this never throws: an
-/// arbitrary, operator-supplied URL is not guaranteed to be a Hugging Face URL at all, let alone one the
-/// API answers successfully, so <see cref="LlmRouterModelSyncService"/> must be able to fall back to
-/// existence/size-only verification rather than failing the whole sync over an unverifiable model source.
+/// Unlike <see cref="CodeRouterBench.BenchmarkChecksumProbe.FetchAsync"/>, this never throws for a
+/// probe-side failure: an arbitrary, operator-supplied URL is not guaranteed to be a Hugging Face URL at
+/// all, let alone one the API answers successfully, so <see cref="LlmRouterModelSyncService"/> must be
+/// able to fall back to existence/size-only verification rather than failing the whole sync over an
+/// unverifiable model source. Caller cancellation is the one exception - it still propagates as
+/// <see cref="OperationCanceledException"/>, matching <see cref="LlmRouterModelSyncService.SyncAsync"/>'s
+/// cancellation contract.
 /// </remarks>
 public sealed class LlmRouterModelChecksumProbe
 {
@@ -74,8 +77,9 @@ public sealed class LlmRouterModelChecksumProbe
 
     /// <summary>
     /// Attempts to fetch every published file's checksum under <paramref name="baseUrl"/>'s model folder.
-    /// Returns <see langword="null"/> - never throws - when <paramref name="baseUrl"/> is not a
-    /// recognized Hugging Face model resolve URL, or the API call fails for any reason.
+    /// Returns <see langword="null"/> - rather than throwing - when <paramref name="baseUrl"/> is not a
+    /// recognized Hugging Face model resolve URL, or the API call fails for any reason other than caller
+    /// cancellation, which still propagates as <see cref="OperationCanceledException"/>.
     /// </summary>
     /// <param name="baseUrl">The model folder URL, e.g. <c>https://huggingface.co/{owner}/{repo}/resolve/{ref}/{path}</c>.</param>
     /// <param name="cancellationToken">A token to cancel the request.</param>
