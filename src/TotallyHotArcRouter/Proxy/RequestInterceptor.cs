@@ -272,7 +272,9 @@ namespace TotallyHot.ArcRouter.Proxy
             // can report savings net of what routing cost (research-doc §5.1's TotTok = router + model).
             // Zero when no embedding was computed - a real measurement of "the router spent nothing".
             var routerTokens = embedding?.TokenCount ?? 0;
-            var routingSignals = new RoutingSignals(taskText, taskEmbedding);
+            var routingSignals = taskText is null && taskEmbedding is null
+                ? null
+                : new RoutingSignals(taskText, taskEmbedding);
 
             var modelName = jsonObject["model"] is JsonValue modelValue && modelValue.TryGetValue<string>(out var value)
                 ? value
@@ -466,19 +468,21 @@ namespace TotallyHot.ArcRouter.Proxy
         /// <param name="classification">The request's Phase H classification, from <see cref="ResolveModelRouteAsync"/>.</param>
         /// <param name="liveDimension">The request's live dimension key, from <see cref="ResolveModelRouteAsync"/>.</param>
         /// <param name="signals">
-        /// The request's task text/embedding (docs/router/live-feedback-learning-plan.md Phase 2a), passed
-        /// to <see cref="IRoutingPolicy.SelectModelAsync(RoutingContext, RoutingSignals?, CancellationToken)"/>.
-        /// Whether this reaches <c>MemoryKnnVoter</c>/<c>LogRegVoter</c> depends on <see cref="_routingPolicy"/>'s
-        /// concrete type: only a policy that overrides the <see cref="RoutingSignals"/> overload (currently
-        /// <c>OrchestratorRoutingPolicy</c>) forwards it into voting - the interface's default implementation
-        /// silently discards it, and the live-registered <c>CompositeRoutingPolicy</c> does not override it.
+        /// The request's task text/embedding (docs/router/live-feedback-learning-plan.md Phase 2a), or
+        /// <see langword="null"/> when neither was available for this request, passed to
+        /// <see cref="IRoutingPolicy.SelectModelAsync(RoutingContext, RoutingSignals?, CancellationToken)"/>.
+        /// Whether a non-null value reaches <c>MemoryKnnVoter</c>/<c>LogRegVoter</c> depends on
+        /// <see cref="_routingPolicy"/>'s concrete type: only a policy that overrides the
+        /// <see cref="RoutingSignals"/> overload (currently <c>OrchestratorRoutingPolicy</c>) forwards it
+        /// into voting - the interface's default implementation silently discards it, and the
+        /// live-registered <c>CompositeRoutingPolicy</c> does not override it.
         /// </param>
         /// <param name="cancellationToken">A token to cancel the operation.</param>
         /// <returns>The resolved route to serve the request with, or <see langword="null"/> when no eligible model is currently available.</returns>
         private async Task<ResolvedModelRoute?> ResolveAgenticRouteAsync(
             RequestClassification classification,
             string liveDimension,
-            RoutingSignals signals,
+            RoutingSignals? signals,
             CancellationToken cancellationToken)
         {
             if (_routingPolicy is not null)
