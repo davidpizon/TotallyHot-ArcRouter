@@ -328,31 +328,43 @@ repository's window contract (`docs/gui/DESIGN.md` §4.1).
 **Exit:** service tests cover status, streaming retrain, and a retrain that declines on insufficient
 data; bUnit tests cover each button state, in-progress rendering, and the unreachable state.
 
-## Phase 6 — Relocate the TF-IDF machinery; delete the placeholder
+## Phase 6 — Relocate the TF-IDF machinery; delete the placeholder — **partially shipped**
 
 `LogRegTrainer`, `LogRegTextTokenizer`, `LogRegModelArtifact`, and `LogRegModelArtifactSerializer` stop
 serving the live voter but remain the natural implementation of Phase N's static LogReg comparison
-baseline (research-doc Table 4). Move them into a Phase-N-facing namespace rather than deleting and
-re-implementing later.
+baseline (research-doc Table 4).
 
-- Delete `CodeRouterBench/Resources/logreg_voter_model.json` and its `EmbeddedResource` entry in the
-  csproj. The hand-built placeholder has no remaining consumer, and leaving a fake model in the tree
-  invites someone to trust it.
+Shipped:
+
+- Deleted `CodeRouterBench/Resources/logreg_voter_model.json` and its `EmbeddedResource` entry in the
+  csproj. The hand-built placeholder had no remaining consumer, and leaving a fake model in the tree
+  invited someone to trust it.
 - `LogRegTrainer.TryExtractPrompt`'s `prompt`-field assumption is corrected to reflect reality: ID task
-  rows have no text, so the trainer's only viable text source is the OOD split.
-- `LogRegTrainerReconciliationTests` currently **throws** rather than skipping on a fully-synced corpus,
-  because its guard checks `benchmark_id_results` for probing rows while the failure is missing text in
-  `benchmark_id_tasks`. Retarget it at whatever corpus the relocated baseline actually trains from, and
-  make the guard test the condition that actually gates the run.
+  rows have no text, so `LogRegTrainer.Train` now reads exclusively from `benchmark_ood_tasks` /
+  `benchmark_ood_results` - the only split with published task text. Labels come from `resolved = 1`
+  (tie-broken by lowest `cost_usd`), since the OOD schema carries no `score` column; a task no model
+  resolved has no well-defined winner and is excluded rather than assigned an arbitrary label.
+- `LogRegTrainerReconciliationTests` no longer **throws** on a fully-synced corpus - its guard now checks
+  `benchmark_ood_results` for `resolved = 1` rows (the exact condition `Train` needs), not
+  `benchmark_id_results` for probing rows. Verified against the real synced corpus: the test runs (not
+  skipped) and produces a real artifact.
+
+Still open:
+
+- **Namespace relocation.** `LogRegTrainer`/`LogRegTextTokenizer`/`LogRegModelArtifact`/
+  `LogRegModelArtifactSerializer` still live in their original namespaces (`CodeRouterBench` and
+  `Router.Orchestrator`) rather than a dedicated Phase-N-facing one. Purely organizational - deferred to
+  land alongside Phase N itself rather than as a standalone rename.
 
 **Recorded deferral — the paper's LogReg baseline is not exactly reproducible.** Table 4's LogReg is
 TF-IDF over probing-split task text; that text is not published. The honest reconstruction trains on
 the 176 OOD prompts instead and is labeled as such wherever its numbers appear. Per the repository's
 standard, publish what was obtained and name the deviation rather than implying parity.
 
-**Exit:** no live routing code references the TF-IDF path; the placeholder resource is gone from the
-tree and the csproj; the reconciliation test skips or passes but never throws on either a synced or
-unsynced corpus; full suite passes with `memory_entries` empty *and* populated.
+**Exit:** no live routing code references the TF-IDF path (done); the placeholder resource is gone from
+the tree and the csproj (done); the reconciliation test skips or passes but never throws on either a
+synced or unsynced corpus (done); full suite passes with `memory_entries` empty *and* populated (done);
+namespace relocation (open, tracked above).
 
 ## Deliberately out of scope
 

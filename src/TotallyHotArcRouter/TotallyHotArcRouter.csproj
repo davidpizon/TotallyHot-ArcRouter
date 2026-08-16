@@ -74,12 +74,5 @@
     <ProjectReference Include="..\TotallyHotArcRouter.Sandbox\TotallyHotArcRouter.Sandbox.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <!-- PLAN.md Phase L: the logreg voter's checked-in TF-IDF + logistic-regression model. Embedded
-         (rather than CopyToOutputDirectory) so LogRegVoter's default constructor loads it via
-         Assembly.GetManifestResourceStream regardless of the process's working directory. -->
-    <EmbeddedResource Include="CodeRouterBench\Resources\logreg_voter_model.json" />
-  </ItemGroup>
-
 </Project>
 

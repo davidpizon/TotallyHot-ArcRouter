@@ -12,7 +12,8 @@ namespace TotallyHot.ArcRouter.Tests.CodeRouterBench;
 /// <see cref="LogRegTrainerReconciliationTests"/> for that). Scores the artifact directly rather than
 /// through <see cref="Router.Orchestrator.LogRegVoter"/> - docs/router/live-feedback-learning-plan.md
 /// Phase 3 repurposed that voter to score embeddings; <see cref="LogRegModelArtifact"/>'s TF-IDF shape now
-/// only feeds the Phase N static comparison baseline this trainer produces.
+/// only feeds the Phase N static comparison baseline this trainer produces, trained from the OOD split -
+/// the only split CodeRouterBench publishes task text for (see <see cref="LogRegTrainer"/>'s remarks).
 /// </summary>
 public class LogRegTrainerTests
 {
@@ -22,19 +23,19 @@ public class LogRegTrainerTests
         using var temp = new TempBenchmarkDatabase();
         temp.Database.EnsureCreated();
 
-        // 20 "bug" tasks labeled by model-bug's higher score, 20 "algorithm" tasks labeled by model-algo's.
+        // 20 "bug" tasks resolved only by model-bug, 20 "algorithm" tasks resolved only by model-algo.
         for (var i = 0; i < 20; i++)
         {
-            InsertTask(temp.Database, $"bug-{i}", "probing", "bug_fixing", "There is a bug and an error to fix.");
-            InsertResult(temp.Database, $"bug-{i}", "probing", "bug_fixing", "model-bug", 0.9);
-            InsertResult(temp.Database, $"bug-{i}", "probing", "bug_fixing", "model-algo", 0.1);
+            InsertTask(temp.Database, $"bug-{i}", "bug_fixing", "There is a bug and an error to fix.");
+            InsertResult(temp.Database, $"bug-{i}", "model-bug", resolved: true, costUsd: 0.01);
+            InsertResult(temp.Database, $"bug-{i}", "model-algo", resolved: false, costUsd: 0.01);
 
-            InsertTask(temp.Database, $"algo-{i}", "probing", "algorithm", "Optimize this algorithm for lower complexity.");
-            InsertResult(temp.Database, $"algo-{i}", "probing", "algorithm", "model-algo", 0.9);
-            InsertResult(temp.Database, $"algo-{i}", "probing", "algorithm", "model-bug", 0.1);
+            InsertTask(temp.Database, $"algo-{i}", "algorithm", "Optimize this algorithm for lower complexity.");
+            InsertResult(temp.Database, $"algo-{i}", "model-algo", resolved: true, costUsd: 0.01);
+            InsertResult(temp.Database, $"algo-{i}", "model-bug", resolved: false, costUsd: 0.01);
         }
 
-        var artifact = LogRegTrainer.Train(temp.Database, "probing", vocabularySize: 50, epochs: 200, learningRate: 0.5);
+        var artifact = LogRegTrainer.Train(temp.Database, vocabularySize: 50, epochs: 200, learningRate: 0.5);
 
         Assert.False(artifact.IsPlaceholder);
         Assert.Contains("model-bug", artifact.ClassWeights.Keys);
@@ -85,12 +86,28 @@ public class LogRegTrainerTests
     }
 
     [Fact]
-    public void Train_EmptySplit_Throws()
+    public void Train_EmptyCorpus_Throws()
     {
         using var temp = new TempBenchmarkDatabase();
         temp.Database.EnsureCreated();
 
-        Assert.Throws<InvalidOperationException>(() => LogRegTrainer.Train(temp.Database, "probing"));
+        Assert.Throws<InvalidOperationException>(() => LogRegTrainer.Train(temp.Database));
+    }
+
+    /// <summary>
+    /// A task where no model resolved it has no well-defined winner and must be excluded from training
+    /// rather than assigned an arbitrary label - the same "no fabricated labels" rule the trainer's
+    /// remarks document.
+    /// </summary>
+    [Fact]
+    public void Train_NoModelResolvesTheOnlyTask_Throws()
+    {
+        using var temp = new TempBenchmarkDatabase();
+        temp.Database.EnsureCreated();
+        InsertTask(temp.Database, "t1", "bug_fixing", "fix the bug");
+        InsertResult(temp.Database, "t1", "model-a", resolved: false, costUsd: 0.01);
+
+        Assert.Throws<InvalidOperationException>(() => LogRegTrainer.Train(temp.Database));
     }
 
     [Theory]
@@ -100,11 +117,11 @@ public class LogRegTrainerTests
     {
         using var temp = new TempBenchmarkDatabase();
         temp.Database.EnsureCreated();
-        InsertTask(temp.Database, "t1", "probing", "bug_fixing", "fix the bug");
-        InsertResult(temp.Database, "t1", "probing", "bug_fixing", "model-a", 0.9);
+        InsertTask(temp.Database, "t1", "bug_fixing", "fix the bug");
+        InsertResult(temp.Database, "t1", "model-a", resolved: true, costUsd: 0.01);
 
         Assert.Throws<ArgumentOutOfRangeException>(
-            () => LogRegTrainer.Train(temp.Database, "probing", learningRate: learningRate));
+            () => LogRegTrainer.Train(temp.Database, learningRate: learningRate));
     }
 
     [Fact]
@@ -112,11 +129,11 @@ public class LogRegTrainerTests
     {
         using var temp = new TempBenchmarkDatabase();
         temp.Database.EnsureCreated();
-        InsertTask(temp.Database, "t1", "probing", "bug_fixing", "fix the bug");
-        InsertResult(temp.Database, "t1", "probing", "bug_fixing", "model-a", 0.9);
+        InsertTask(temp.Database, "t1", "bug_fixing", "fix the bug");
+        InsertResult(temp.Database, "t1", "model-a", resolved: true, costUsd: 0.01);
 
         Assert.Throws<ArgumentOutOfRangeException>(
-            () => LogRegTrainer.Train(temp.Database, "probing", l2Regularization: -0.001));
+            () => LogRegTrainer.Train(temp.Database, l2Regularization: -0.001));
     }
 
     /// <summary>
@@ -140,34 +157,32 @@ public class LogRegTrainerTests
         Assert.Equal(expected, result, precision: 6);
     }
 
-    private static void InsertTask(BenchmarkDatabase database, string taskId, string split, string dimension, string prompt)
+    private static void InsertTask(BenchmarkDatabase database, string taskId, string dimension, string prompt)
     {
         using var connection = database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO benchmark_id_tasks (task_id, split, source_split, dimension, raw_json)
-            VALUES ($taskId, $split, $split, $dimension, $rawJson);
+            INSERT INTO benchmark_ood_tasks (task_id, source_split, bench, dimension, raw_json)
+            VALUES ($taskId, 'test', 'test-bench', $dimension, $rawJson);
             """;
         command.Parameters.AddWithValue("$taskId", taskId);
-        command.Parameters.AddWithValue("$split", split);
         command.Parameters.AddWithValue("$dimension", dimension);
         command.Parameters.AddWithValue("$rawJson", $$"""{"task_id":"{{taskId}}","prompt":"{{prompt}}"}""");
         command.ExecuteNonQuery();
     }
 
-    private static void InsertResult(BenchmarkDatabase database, string taskId, string split, string dimension, string model, double score)
+    private static void InsertResult(BenchmarkDatabase database, string taskId, string model, bool resolved, double costUsd)
     {
         using var connection = database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO benchmark_id_results (task_id, split, source_split, dimension, model, score)
-            VALUES ($taskId, $split, $split, $dimension, $model, $score);
+            INSERT INTO benchmark_ood_results (task_id, source_split, bench, dimension, model, resolved, cost_usd)
+            VALUES ($taskId, 'test', 'test-bench', 'bug_fixing', $model, $resolved, $costUsd);
             """;
         command.Parameters.AddWithValue("$taskId", taskId);
-        command.Parameters.AddWithValue("$split", split);
-        command.Parameters.AddWithValue("$dimension", dimension);
         command.Parameters.AddWithValue("$model", model);
-        command.Parameters.AddWithValue("$score", score);
+        command.Parameters.AddWithValue("$resolved", resolved ? 1 : 0);
+        command.Parameters.AddWithValue("$costUsd", costUsd);
         command.ExecuteNonQuery();
     }
 }

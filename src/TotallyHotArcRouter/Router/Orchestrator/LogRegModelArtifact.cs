@@ -1,13 +1,14 @@
 namespace TotallyHot.ArcRouter.Router.Orchestrator;
 
 /// <summary>
-/// A trained (or placeholder) <c>logreg</c> voter model: a fixed TF-IDF vocabulary plus one one-vs-rest
+/// Phase N's static <c>logreg</c> comparison baseline (research-doc Table 4), produced by
+/// <see cref="CodeRouterBench.LogRegTrainer"/>: a fixed TF-IDF vocabulary plus one one-vs-rest
 /// logistic-regression weight vector per candidate model class, keyed through
 /// <see cref="Models.ModelNameCanonicalizer.Canonicalize"/> so the class keys match
 /// <see cref="CodeRouterBench.DimensionModelScoreMatrix"/>'s convention for the same reason - the
 /// CodeRouterBench dataset's model spellings differ from the router's configured <c>ModelName</c>
-/// vocabulary. Serialized to/from <c>CodeRouterBench/Resources/logreg_voter_model.json</c> by
-/// <see cref="LogRegVoter"/> (read) and <see cref="CodeRouterBench.LogRegTrainer"/> (write).
+/// vocabulary. This TF-IDF-over-text design no longer backs the live <c>logreg</c> voter - see
+/// <see cref="LogRegVoter"/>'s remarks for why it was replaced by <see cref="EmbeddingLogRegModelArtifact"/>.
 /// </summary>
 /// <param name="Vocabulary">
 /// The fixed vocabulary, in the index order every weight vector and <paramref name="InverseDocumentFrequency"/>
@@ -23,8 +24,7 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// </param>
 /// <param name="IsPlaceholder">
 /// Whether this artifact is a small, hand-built stand-in rather than a real training run over the synced
-/// CodeRouterBench probing split (PLAN.md Phase L's documented data-availability caveat) - never claim a
-/// placeholder artifact represents trained accuracy.
+/// CodeRouterBench OOD split - never claim a placeholder artifact represents trained accuracy.
 /// </param>
 /// <param name="TrainedFrom">
 /// A human-readable description of how this artifact was produced - the split, task count, vocabulary

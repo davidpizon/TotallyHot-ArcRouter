@@ -5,29 +5,38 @@ using TotallyHot.ArcRouter.Router.Orchestrator;
 namespace TotallyHot.ArcRouter.CodeRouterBench;
 
 /// <summary>
-/// The <c>logreg</c> voter's offline training step (PLAN.md Phase L): reads the CodeRouterBench probing
-/// split from a synced <see cref="BenchmarkDatabase"/>, builds a fixed TF-IDF vocabulary, and trains one
-/// one-vs-rest logistic-regression classifier per model via plain batch gradient descent - no external ML
-/// package, matching the phase's "training and inference both in .NET" requirement.
+/// Phase N's static <c>logreg</c> comparison baseline (research-doc Table 4): reads the CodeRouterBench
+/// OOD split from a synced <see cref="BenchmarkDatabase"/>, builds a fixed TF-IDF vocabulary, and trains
+/// one one-vs-rest logistic-regression classifier per model via plain batch gradient descent - no external
+/// ML package, matching PLAN.md Phase L's "training and inference both in .NET" requirement.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>To reproduce a real model:</b> sync the corpus (Governance → Benchmark Data, the
-/// <c>sync_benchmark_data</c> MCP tool, or <c>TotallyHotArcRouter --sync-benchmark-data</c>), then call
-/// <see cref="Train"/> against the resulting <see cref="BenchmarkDatabase"/> and write the result through
-/// <see cref="LogRegModelArtifactSerializer.Serialize"/> to
-/// <c>src/TotallyHotArcRouter/CodeRouterBench/Resources/logreg_voter_model.json</c>, replacing the checked-in
-/// placeholder. <c>src/TotallyHotArcRouter.Tests/CodeRouterBench/LogRegTrainerReconciliationTests.cs</c> exercises
-/// exactly this path (self-skipping when the corpus isn't synced, mirroring
+/// <b>Why OOD, not the ID splits:</b> this trainer originally targeted the probing split, but
+/// <c>id_probing_tasks.jsonl</c>/<c>id_test_tasks.jsonl</c> publish only <c>task_id</c>/<c>split</c>/
+/// <c>source_split</c>/<c>dimension</c> - no task text, for every one of their 9,999 rows. That is a
+/// permanent property of the released dataset, not a sync defect (see
+/// docs/router/live-feedback-learning-plan.md's "What we are actually able to train on"). The 176-task OOD
+/// split is the only source that publishes a <c>prompt</c> field, so it is the only corpus this trainer can
+/// build TF-IDF features from. <b>Recorded deferral:</b> research-doc Table 4's LogReg baseline is TF-IDF
+/// over probing-split text; since that text isn't published, this is an honest reconstruction trained on the
+/// 176 OOD prompts instead, not an exact reproduction - callers should label results accordingly rather than
+/// implying parity.
+/// </para>
+/// <para>
+/// <b>To reproduce:</b> sync the corpus (Governance → Benchmark Data, the <c>sync_benchmark_data</c> MCP
+/// tool, or <c>TotallyHotArcRouter --sync-benchmark-data</c>), then call <see cref="Train"/> against the
+/// resulting <see cref="BenchmarkDatabase"/>.
+/// <c>src/TotallyHotArcRouter.Tests/CodeRouterBench/LogRegTrainerReconciliationTests.cs</c> exercises exactly
+/// this path (self-skipping when the corpus isn't synced, mirroring
 /// <c>CodeRouterBenchTable10ReconciliationTests</c>) and doubles as the runnable reproduction recipe - see its
 /// <c>Train_OnRealCorpus_ProducesAUsableArtifact</c> test for the exact call.
 /// </para>
 /// <para>
-/// <b>Labeling:</b> each task's label is the model with the highest observed score for that task in the
-/// requested split (an intra-task argmax over <c>benchmark_id_results</c>, joined to
-/// <c>benchmark_id_tasks</c> by <c>task_id</c>). <b>Task text:</b> extracted from each task row's
-/// <c>raw_json</c> under the <c>prompt</c> property - the field name OOD task records are documented to
-/// carry (docs/router/coderouterbench-sqlite-migration-plan.md); a task row missing that property is
+/// <b>Labeling:</b> each task's label is the model that resolved it (<c>benchmark_ood_results.resolved = 1</c>),
+/// tie-broken by the lowest <c>cost_usd</c> among the models that resolved it; a task no model resolved has no
+/// well-defined winner and is excluded rather than assigned an arbitrary label. <b>Task text:</b> extracted
+/// from each OOD task row's <c>raw_json</c> under the <c>prompt</c> property; a row missing that property is
 /// skipped rather than failing the whole run, since the schema is "verbatim JSON preserved, not a pinned
 /// column set" by design.
 /// </para>
@@ -35,26 +44,24 @@ namespace TotallyHot.ArcRouter.CodeRouterBench;
 public static class LogRegTrainer
 {
     /// <summary>
-    /// Trains a <see cref="LogRegModelArtifact"/> from <paramref name="database"/>'s <paramref name="split"/>.
+    /// Trains a <see cref="LogRegModelArtifact"/> from <paramref name="database"/>'s OOD split - the only
+    /// split CodeRouterBench publishes task text for.
     /// </summary>
     /// <param name="database">The synced CodeRouterBench corpus to train from.</param>
-    /// <param name="split">The <c>split</c> value to train on - <c>"probing"</c> by default, per PLAN.md Phase L.</param>
     /// <param name="vocabularySize">The vocabulary size, by descending document frequency.</param>
     /// <param name="epochs">The number of full passes over the training set per class.</param>
     /// <param name="learningRate">The gradient-descent step size.</param>
     /// <param name="l2Regularization">The L2 penalty applied to non-bias weights each epoch.</param>
     /// <returns>A trained, non-placeholder <see cref="LogRegModelArtifact"/>.</returns>
-    /// <exception cref="InvalidOperationException">The split has no usable (task, label) pairs to train from.</exception>
+    /// <exception cref="InvalidOperationException">The OOD split has no usable (task, label) pairs to train from.</exception>
     public static LogRegModelArtifact Train(
         BenchmarkDatabase database,
-        string split = "probing",
         int vocabularySize = 2000,
         int epochs = 50,
         double learningRate = 0.5,
         double l2Regularization = 0.001)
     {
         ArgumentNullException.ThrowIfNull(database);
-        ArgumentException.ThrowIfNullOrWhiteSpace(split);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(vocabularySize, 0);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(epochs, 0);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(learningRate, 0);
@@ -66,11 +73,12 @@ public static class LogRegTrainer
                 $"The CodeRouterBench corpus database was not found at '{database.DatabasePath}' - is the corpus synced?");
         }
 
-        var examples = LoadTrainingExamples(database, split);
+        var examples = LoadTrainingExamples(database);
         if (examples.Count == 0)
         {
             throw new InvalidOperationException(
-                $"No (task text, label) pairs could be built from split '{split}' - is the corpus synced?");
+                "No (task text, label) pairs could be built from the OOD split - is the corpus synced, " +
+                "and does at least one model resolve at least one OOD task?");
         }
 
         var (vocabulary, idf) = BuildVocabulary(examples, vocabularySize);
@@ -92,20 +100,19 @@ public static class LogRegTrainer
             idf,
             classWeights,
             IsPlaceholder: false,
-            TrainedFrom: $"split='{split}', tasks={examples.Count}, vocabulary={vocabulary.Count}, classes={classes.Count}, trained {DateTimeOffset.UtcNow:O}");
+            TrainedFrom: $"split='ood', tasks={examples.Count}, vocabulary={vocabulary.Count}, classes={classes.Count}, trained {DateTimeOffset.UtcNow:O}");
     }
 
     private sealed record TrainingExample(string Text, string Label);
 
-    private static List<TrainingExample> LoadTrainingExamples(BenchmarkDatabase database, string split)
+    private static List<TrainingExample> LoadTrainingExamples(BenchmarkDatabase database)
     {
         using var connection = database.OpenConnection();
 
         var taskText = new Dictionary<string, string>(StringComparer.Ordinal);
         using (var tasksCommand = connection.CreateCommand())
         {
-            tasksCommand.CommandText = "SELECT task_id, raw_json FROM benchmark_id_tasks WHERE split = $split;";
-            tasksCommand.Parameters.AddWithValue("$split", split);
+            tasksCommand.CommandText = "SELECT task_id, raw_json FROM benchmark_ood_tasks;";
             using var reader = tasksCommand.ExecuteReader();
             while (reader.Read())
             {
@@ -119,21 +126,24 @@ public static class LogRegTrainer
             }
         }
 
-        var bestScorePerTask = new Dictionary<string, (string Model, double Score)>(StringComparer.Ordinal);
+        // The winning label per task: the resolving model with the lowest cost, among models that
+        // resolved it. A task no model resolved has no well-defined winner and is left out of
+        // bestResolverPerTask entirely, so LoadTrainingExamples' join below naturally excludes it.
+        var bestResolverPerTask = new Dictionary<string, (string Model, double CostUsd)>(StringComparer.Ordinal);
         using (var resultsCommand = connection.CreateCommand())
         {
-            resultsCommand.CommandText = "SELECT task_id, model, score FROM benchmark_id_results WHERE split = $split;";
-            resultsCommand.Parameters.AddWithValue("$split", split);
+            resultsCommand.CommandText =
+                "SELECT task_id, model, cost_usd FROM benchmark_ood_results WHERE resolved = 1;";
             using var reader = resultsCommand.ExecuteReader();
             while (reader.Read())
             {
                 var taskId = reader.GetString(0);
                 var model = ModelNameCanonicalizer.Canonicalize(reader.GetString(1));
-                var score = reader.GetDouble(2);
+                var costUsd = reader.IsDBNull(2) ? double.PositiveInfinity : reader.GetDouble(2);
 
-                if (!bestScorePerTask.TryGetValue(taskId, out var current) || score > current.Score)
+                if (!bestResolverPerTask.TryGetValue(taskId, out var current) || costUsd < current.CostUsd)
                 {
-                    bestScorePerTask[taskId] = (model, score);
+                    bestResolverPerTask[taskId] = (model, costUsd);
                 }
             }
         }
@@ -141,7 +151,7 @@ public static class LogRegTrainer
         var examples = new List<TrainingExample>();
         foreach (var (taskId, text) in taskText)
         {
-            if (bestScorePerTask.TryGetValue(taskId, out var best))
+            if (bestResolverPerTask.TryGetValue(taskId, out var best))
             {
                 examples.Add(new TrainingExample(text, best.Model));
             }
