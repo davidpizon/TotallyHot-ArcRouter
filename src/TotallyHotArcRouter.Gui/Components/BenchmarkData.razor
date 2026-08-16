@@ -6,6 +6,7 @@
    so file names, sizes, and row counts are shown freely. *@
 @implements IDisposable
 @inject BenchmarkDataStore Store
+@inject LlmRouterModelStore VoterStore
 
 <div class="h-full overflow-y-auto pr-1">
     @if (!Store.IsLoaded)
@@ -98,19 +99,114 @@
                 }
             </div>
         }
+
+        @* Local Voter Model: the llm_router ONNX voter's 5 files. Unlike the corpus above, the base URL
+           is user-editable - the operator can switch to a different Hugging Face model folder here. *@
+        <div class="mt-6">
+            <div class="flex items-center justify-between mb-3 gap-2">
+                <span class="text-xs text-slate-500 uppercase tracking-widest">Local Voter Model</span>
+                <button @onclick="RunVoterAction"
+                        disabled="@(VoterStore.IsSyncing || VoterStore.Status?.Current == true)"
+                        class="btn btn-secondary flex items-center gap-1.5">
+                    <Icon Name="rotate-ccw" Size="13" />
+                    @VoterActionLabel()
+                </button>
+            </div>
+
+            @if (!VoterStore.IsLoaded)
+            {
+                <div class="text-sm text-slate-500 p-4">Loading local voter model status…</div>
+            }
+            else if (!VoterStore.IsReachable)
+            {
+                <div class="rounded-lg p-4 space-y-2 ds-surface-card-critical">
+                    <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
+                        <Icon Name="alert-triangle" Size="14" /> Router unreachable
+                    </div>
+                    @if (!string.IsNullOrEmpty(VoterStore.LastError))
+                    {
+                        <div class="text-xs text-slate-500 font-mono">@VoterStore.LastError</div>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="mb-3 flex items-center gap-2">
+                    <input @bind="_baseUrlDraft" @bind:event="oninput"
+                           class="ds-input flex-1 text-xs font-mono"
+                           placeholder="Model base URL (Hugging Face resolve folder)" />
+                    <button @onclick="SwitchModel"
+                            disabled="@(VoterStore.IsSyncing || string.IsNullOrWhiteSpace(_baseUrlDraft) || _baseUrlDraft == VoterStore.Status?.BaseUrl)"
+                            class="btn btn-secondary">
+                        Switch
+                    </button>
+                </div>
+
+                @if (VoterErrorMessage() is { Length: > 0 } voterErrorMessage)
+                {
+                    <div class="mb-3 text-xs ds-alert-critical">
+                        @voterErrorMessage
+                    </div>
+                }
+
+                @if (VoterStore.Status is { } voterStatus)
+                {
+                    <div class="space-y-2.5">
+                        @foreach (var file in voterStatus.Files)
+                        {
+                            var progress = VoterStore.SyncProgress.GetValueOrDefault(file.FileName);
+
+                            <div @key="file.FileName" class="rounded-lg p-3 space-y-1.5 ds-surface-card-draggable @(file.Synced ? "" : "ds-source-border-dim")">
+                                <div class="flex items-center justify-between gap-2">
+                                    <span class="text-sm font-semibold @(file.Synced ? "state-enabled" : "state-disabled")">
+                                        @file.FileName
+                                    </span>
+                                    <span class="text-xs @VoterStageClass(progress)">@VoterStageLabel(file, progress)</span>
+                                </div>
+                                <div class="flex items-center justify-between text-xs text-slate-500">
+                                    <span>@VoterDescribeSize(file, progress)</span>
+                                    <span>@VoterDescribeSyncedAt(file)</span>
+                                </div>
+                                @if (file.Synced)
+                                {
+                                    <div class="text-xs @(file.ChecksumVerified ? "text-emerald-400" : "text-slate-500")">
+                                        @(file.ChecksumVerified ? "Verified" : "Unverified")
+                                    </div>
+                                }
+                                @if (progress is { Stage: LlmRouterModelSyncStageInfo.Failed, Error: { } voterError })
+                                {
+                                    <div class="rounded px-2 py-1.5 text-xs ds-outcome-critical">
+                                        <span class="flex items-center gap-1.5 text-red-300">
+                                            <span aria-hidden="true"><Icon Name="alert-triangle" Size="12" /></span> @voterError
+                                        </span>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            }
+        </div>
     }
 </div>
 
 @code {
     private string? _opError;
+    private string? _voterOpError;
+    private string _baseUrlDraft = string.Empty;
 
     protected override async Task OnInitializedAsync()
     {
         Store.Changed += OnStoreChanged;
+        VoterStore.Changed += OnVoterStoreChanged;
         await Store.LoadAsync();
+        await VoterStore.LoadAsync();
+        _baseUrlDraft = VoterStore.Status?.BaseUrl ?? string.Empty;
     }
 
     private void OnStoreChanged() => InvokeAsync(StateHasChanged);
+
+    private void OnVoterStoreChanged() => InvokeAsync(StateHasChanged);
 
     /// <summary>
     /// The inline banner's text: the last mutation's rejection if there is one, otherwise the last load's.
@@ -118,7 +214,14 @@
     /// </summary>
     private string? ErrorMessage() => _opError ?? Store.LastError;
 
-    public void Dispose() => Store.Changed -= OnStoreChanged;
+    /// <summary>Same convention as <see cref="ErrorMessage"/>, for the Local Voter Model section's own store.</summary>
+    private string? VoterErrorMessage() => _voterOpError ?? VoterStore.LastError;
+
+    public void Dispose()
+    {
+        Store.Changed -= OnStoreChanged;
+        VoterStore.Changed -= OnVoterStoreChanged;
+    }
 
     private async Task Reload()
     {
@@ -207,6 +310,65 @@
         catch (BenchmarkDataAdminException ex)
         {
             _opError = ex.Message;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The Local Voter Model header button's label: "Current" once every file is cached, "Update"
+    /// otherwise, "Updating…" for the duration of a sync. Unlike <see cref="ActionLabel"/>, there is no
+    /// "Check Failed" state - the base URL is a fixed pin, not a rolling ref, so there is nothing to
+    /// recheck against.
+    /// </summary>
+    private string VoterActionLabel() =>
+        VoterStore.IsSyncing ? "Updating…" : VoterStore.Status?.Current == true ? "Current" : "Update";
+
+    private Task RunVoterAction() => RunVoterAsync(() => VoterStore.SyncAsync());
+
+    private Task SwitchModel() => RunVoterAsync(() => VoterStore.SetBaseUrlAsync(_baseUrlDraft));
+
+    private static string VoterStageLabel(LlmRouterModelFileStatusInfo file, LlmRouterModelSyncProgressInfo? progress) => progress switch
+    {
+        { Stage: LlmRouterModelSyncStageInfo.Downloading } => "Downloading…",
+        { Stage: LlmRouterModelSyncStageInfo.Verifying } => "Verifying…",
+        { Stage: LlmRouterModelSyncStageInfo.Completed } => "Synced",
+        { Stage: LlmRouterModelSyncStageInfo.Failed } => "Failed",
+        _ => file.Synced ? "Synced" : "Not synced",
+    };
+
+    private static string VoterStageClass(LlmRouterModelSyncProgressInfo? progress) => progress?.Stage switch
+    {
+        LlmRouterModelSyncStageInfo.Failed => "text-red-400",
+        LlmRouterModelSyncStageInfo.Completed => "text-emerald-400",
+        null => "text-slate-500",
+        _ => "text-slate-400",
+    };
+
+    private static string VoterDescribeSize(LlmRouterModelFileStatusInfo file, LlmRouterModelSyncProgressInfo? progress)
+    {
+        if (progress is { BytesTransferred: { } bytes })
+        {
+            return $"{bytes / 1024.0 / 1024.0:0.#} MB downloaded";
+        }
+
+        return file.Synced ? $"{file.SizeBytes / 1024.0 / 1024.0:0.#} MB" : "Never synced";
+    }
+
+    private static string VoterDescribeSyncedAt(LlmRouterModelFileStatusInfo file) =>
+        file.SyncedAtUtc is { } syncedAt ? $"Synced {syncedAt.ToLocalTime():g} local" : string.Empty;
+
+    /// <summary>Same wrapper shape as <see cref="RunAsync"/>, for the Local Voter Model section's own store.</summary>
+    private async Task<bool> RunVoterAsync(Func<Task> operation)
+    {
+        _voterOpError = null;
+        try
+        {
+            await operation();
+            return true;
+        }
+        catch (LlmRouterModelAdminException ex)
+        {
+            _voterOpError = ex.Message;
             return false;
         }
     }

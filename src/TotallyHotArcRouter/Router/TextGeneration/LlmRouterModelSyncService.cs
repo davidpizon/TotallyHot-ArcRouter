@@ -1,0 +1,175 @@
+using Microsoft.Extensions.Logging;
+using TotallyHot.ArcRouter.CodeRouterBench;
+
+namespace TotallyHot.ArcRouter.Router.TextGeneration;
+
+/// <summary>
+/// Downloads, and checksum-verifies where possible, every file in <see cref="LlmRouterModelFiles.All"/>
+/// for the llm_router voter's currently active model (docs/router - Governance → Benchmark Data panel's
+/// "Local Voter Model" section). Each file is handled independently: a download failure or checksum
+/// mismatch aborts that file only, reported in the returned outcome rather than thrown - the same
+/// per-file-isolation convention <see cref="BenchmarkSyncService"/> uses for the CodeRouterBench corpus.
+/// </summary>
+public sealed class LlmRouterModelSyncService
+{
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly LlmRouterModelChecksumProbe _probe;
+    private readonly ILlmRouterModelOverrideStore _overrideStore;
+    private readonly ILogger<LlmRouterModelSyncService> _logger;
+
+    private volatile IReadOnlyDictionary<string, bool> _lastVerifiedFiles =
+        new Dictionary<string, bool>(StringComparer.Ordinal);
+
+    /// <summary>Initializes a new instance of the <see cref="LlmRouterModelSyncService"/> class.</summary>
+    /// <param name="httpClientFactory">
+    /// Used to create a fresh <see cref="LlmRouterModelChecksumProbe.HttpClientName"/> client per file
+    /// download, mirroring <see cref="BenchmarkSyncService"/>'s pattern.
+    /// </param>
+    /// <param name="probe">Attempts to fetch published checksums each downloaded file is verified against, when the model's URL supports it.</param>
+    /// <param name="overrideStore">The active model whose files this service downloads.</param>
+    /// <param name="logger">The logger.</param>
+    public LlmRouterModelSyncService(
+        IHttpClientFactory httpClientFactory,
+        LlmRouterModelChecksumProbe probe,
+        ILlmRouterModelOverrideStore overrideStore,
+        ILogger<LlmRouterModelSyncService> logger)
+    {
+        ArgumentNullException.ThrowIfNull(httpClientFactory);
+        ArgumentNullException.ThrowIfNull(probe);
+        ArgumentNullException.ThrowIfNull(overrideStore);
+        ArgumentNullException.ThrowIfNull(logger);
+
+        _httpClientFactory = httpClientFactory;
+        _probe = probe;
+        _overrideStore = overrideStore;
+        _logger = logger;
+    }
+
+    /// <summary>
+    /// Whether each file was checksum-verified during the most recent <see cref="SyncAsync"/> call, keyed
+    /// by file name. There is no persisted ledger for this (unlike <see cref="BenchmarkFileLedger"/>) -
+    /// this is a best-effort, in-memory record of the last sync only, reset on restart and irrespective
+    /// of which model it was for. <see cref="LlmRouterModelAdminGrpcService"/> uses it to report
+    /// <c>checksum_verified</c> on a status read that follows a sync in the same process lifetime.
+    /// </summary>
+    public IReadOnlyDictionary<string, bool> LastVerifiedFiles => _lastVerifiedFiles;
+
+    /// <summary>
+    /// Syncs every file in <see cref="LlmRouterModelFiles.All"/> for the model that is active when this
+    /// call starts, reporting per-file progress through <paramref name="progress"/> when supplied.
+    /// </summary>
+    /// <remarks>
+    /// The active override is read once, at the start of the call, into a stable local value - not
+    /// re-read per file - so a model switch that lands mid-sync cannot cause this call to write some
+    /// files into one model's cache directory and the rest into another's.
+    /// </remarks>
+    /// <param name="progress">An optional progress reporter for streaming per-file status.</param>
+    /// <param name="cancellationToken">A token to cancel the sync.</param>
+    /// <exception cref="OperationCanceledException">
+    /// <paramref name="cancellationToken"/> was canceled while a file was downloading or being verified.
+    /// Unlike a per-file network or checksum failure, caller cancellation aborts the whole sync rather
+    /// than being recorded as a failed <see cref="LlmRouterModelFileSyncOutcome"/>.
+    /// </exception>
+    public async Task<LlmRouterModelSyncResult> SyncAsync(
+        IProgress<LlmRouterModelSyncProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        var activeOverride = _overrideStore.Snapshot.Override;
+        var cacheDirectory = activeOverride.ResolveCacheDirectory();
+        Directory.CreateDirectory(cacheDirectory);
+
+        var probeResult = await _probe.TryFetchAsync(activeOverride.BaseUrl, cancellationToken).ConfigureAwait(false);
+
+        List<LlmRouterModelFileSyncOutcome> outcomes = [];
+        foreach (var fileName in LlmRouterModelFiles.All)
+        {
+            outcomes.Add(await SyncFileAsync(activeOverride.BaseUrl, cacheDirectory, fileName, probeResult, progress, cancellationToken)
+                .ConfigureAwait(false));
+        }
+
+        _lastVerifiedFiles = outcomes.ToDictionary(o => o.FileName, o => o.ChecksumVerified, StringComparer.Ordinal);
+
+        return new LlmRouterModelSyncResult(activeOverride.BaseUrl, outcomes);
+    }
+
+    private async Task<LlmRouterModelFileSyncOutcome> SyncFileAsync(
+        string baseUrl,
+        string cacheDirectory,
+        string fileName,
+        LlmRouterModelChecksumProbeResult? probeResult,
+        IProgress<LlmRouterModelSyncProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        var destinationPath = Path.Combine(cacheDirectory, fileName);
+        if (File.Exists(destinationPath))
+        {
+            // Already cached from a prior sync (or the lazy OnnxTextGenerationClient fallback); an
+            // explicit "Update" only fills in what's missing, mirroring the lazy loader's own
+            // File.Exists skip rather than re-downloading a multi-hundred-megabyte file on every click.
+            progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Completed));
+            return new LlmRouterModelFileSyncOutcome(fileName, Succeeded: true, ChecksumVerified: false, ErrorMessage: null);
+        }
+
+        var temporaryPath = destinationPath + ".download";
+        try
+        {
+            progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Downloading));
+            var url = $"{baseUrl}/{fileName}";
+            using var httpClient = _httpClientFactory.CreateClient(LlmRouterModelChecksumProbe.HttpClientName);
+            var bytes = await httpClient.GetByteArrayAsync(url, cancellationToken).ConfigureAwait(false);
+            progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Downloading, bytes.LongLength));
+
+            var checksumVerified = false;
+            if (probeResult is not null && probeResult.Files.TryGetValue(fileName, out var published))
+            {
+                progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Verifying));
+                var actualOid = GitBlobHash.Compute(bytes);
+                if (!string.Equals(actualOid, published.PublishedOid, StringComparison.OrdinalIgnoreCase))
+                {
+                    var mismatchMessage =
+                        $"Checksum mismatch for '{fileName}': expected {published.PublishedOid}, computed {actualOid}.";
+                    _logger.LogError("llm_router model sync rejected {FileName}: {Reason}", fileName, mismatchMessage);
+                    progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Failed));
+                    return new LlmRouterModelFileSyncOutcome(fileName, Succeeded: false, ChecksumVerified: false, mismatchMessage);
+                }
+
+                checksumVerified = true;
+            }
+
+            await File.WriteAllBytesAsync(temporaryPath, bytes, cancellationToken).ConfigureAwait(false);
+            File.Move(temporaryPath, destinationPath, overwrite: true);
+
+            progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Completed));
+            _logger.LogInformation(
+                "llm_router model sync downloaded {FileName} from {Url} (checksum verified: {ChecksumVerified}).",
+                fileName,
+                url,
+                checksumVerified);
+            return new LlmRouterModelFileSyncOutcome(fileName, Succeeded: true, checksumVerified, ErrorMessage: null);
+        }
+        catch (OperationCanceledException)
+        {
+            SafeDelete(temporaryPath);
+            throw;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException)
+        {
+            _logger.LogError(ex, "llm_router model sync failed for {FileName}.", fileName);
+            progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Failed));
+            SafeDelete(temporaryPath);
+            return new LlmRouterModelFileSyncOutcome(fileName, Succeeded: false, ChecksumVerified: false, ex.Message);
+        }
+    }
+
+    private static void SafeDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (IOException)
+        {
+            // Best-effort cleanup of a partial download; a failure here doesn't change the sync outcome.
+        }
+    }
+}

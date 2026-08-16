@@ -37,6 +37,12 @@ public sealed class LlmRouterOptions
     // throughout this repo's model-cache-directory options.
     private const string LocalAppDataToken = "%LOCALAPPDATA%";
 
+    // The shared parent of every llm_router model's cache directory. ModelCacheDirectory's default value
+    // above is this root plus this build's own subpath; LlmRouterModelOverrideStore resolves a distinct
+    // leaf directory per model URL under this same root, so switching models never mixes one model's
+    // files with another's.
+    private const string ModelsRootDirectory = @"%LOCALAPPDATA%\TotallyHot.ArcRouter\models";
+
     // The execution-provider build the default URLs below pin. Kept as a single constant so the five
     // artifact URLs can never drift onto different builds - mixing, say, a cuda-fp16 model.onnx with a
     // cpu genai_config.json produces a load failure that reads like a corrupt download.
@@ -142,9 +148,18 @@ public sealed class LlmRouterOptions
     /// <see cref="EmbeddingOptions.ResolveModelCacheDirectory"/>'s handling of the same
     /// <c>%LOCALAPPDATA%</c> token.
     /// </summary>
-    public string ResolveModelCacheDirectory()
+    public string ResolveModelCacheDirectory() => ResolvePath(ModelCacheDirectory);
+
+    /// <summary>
+    /// Expands and returns the shared parent directory every llm_router model's cache directory lives
+    /// under, mirroring <see cref="ResolveModelCacheDirectory"/>'s <c>%LOCALAPPDATA%</c> handling. A
+    /// per-model override resolves its own cache directory as a subdirectory of this root.
+    /// </summary>
+    public static string ResolveModelsRootDirectory() => ResolvePath(ModelsRootDirectory);
+
+    private static string ResolvePath(string path)
     {
-        var expanded = Environment.ExpandEnvironmentVariables(ModelCacheDirectory);
+        var expanded = Environment.ExpandEnvironmentVariables(path);
 
         if (expanded.Contains(LocalAppDataToken, StringComparison.OrdinalIgnoreCase))
         {

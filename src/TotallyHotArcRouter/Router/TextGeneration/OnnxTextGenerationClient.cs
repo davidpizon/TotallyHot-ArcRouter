@@ -9,10 +9,11 @@ namespace TotallyHot.ArcRouter.Router.TextGeneration;
 /// <summary>
 /// A local, in-process <see cref="ITextGenerationClient"/> backed by ONNX Runtime GenAI
 /// (<c>Microsoft.ML.OnnxRuntimeGenAI</c>), for the <c>llm_router</c> voter (PLAN.md Phase L). The
-/// model artifacts are downloaded once into <see cref="LlmRouterOptions.ModelCacheDirectory"/> on
-/// first use and reused on every subsequent run; there is no network call on the routing hot path
-/// once cached. See <see cref="LlmRouterOptions"/>'s remarks for why the default model is a
-/// community-sourced, off-the-shelf instruct model rather than the paper's own fine-tuned checkpoint.
+/// model artifacts are downloaded once into the active model's cache directory (see
+/// <see cref="ILlmRouterModelOverrideStore"/>) on first use and reused on every subsequent run; there
+/// is no network call on the routing hot path once cached. See <see cref="LlmRouterOptions"/>'s remarks
+/// for why the default model is a community-sourced, off-the-shelf instruct model rather than the
+/// paper's own fine-tuned checkpoint.
 /// </summary>
 /// <remarks>
 /// Greedy decoding only (matching research-doc §B.2's <c>T=0</c> configuration) - ONNX Runtime GenAI
@@ -25,6 +26,7 @@ namespace TotallyHot.ArcRouter.Router.TextGeneration;
 public sealed class OnnxTextGenerationClient : ITextGenerationClient, IAsyncDisposable
 {
     private readonly LlmRouterOptions _options;
+    private readonly ILlmRouterModelOverrideStore _overrideStore;
     private readonly ILogger<OnnxTextGenerationClient> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly SemaphoreSlim _initLock = new(1, 1);
@@ -36,20 +38,32 @@ public sealed class OnnxTextGenerationClient : ITextGenerationClient, IAsyncDisp
     /// <summary>
     /// Initializes a new instance of the <see cref="OnnxTextGenerationClient"/> class.
     /// </summary>
-    /// <param name="options">The llm_router model configuration.</param>
+    /// <param name="options">
+    /// The llm_router model's non-URL configuration (<see cref="LlmRouterOptions.MaxNewTokens"/>,
+    /// <see cref="LlmRouterOptions.GenerationTimeoutMs"/>). The model's artifact URLs and cache directory
+    /// are read from <paramref name="overrideStore"/> instead - see that parameter's remarks.
+    /// </param>
+    /// <param name="overrideStore">
+    /// The llm_router voter's active model. Always has a value: seeded from <paramref name="options"/> on
+    /// first run if the Governance panel's "Local Voter Model" section has never switched models, so this
+    /// client's behavior is unchanged for an installation that never uses that panel.
+    /// </param>
     /// <param name="httpClientFactory">Used to download model artifacts on first use.</param>
     /// <param name="logger">The logger.</param>
     public OnnxTextGenerationClient(
         IOptions<LlmRouterOptions> options,
+        ILlmRouterModelOverrideStore overrideStore,
         IHttpClientFactory httpClientFactory,
         ILogger<OnnxTextGenerationClient> logger)
     {
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(overrideStore);
         ArgumentNullException.ThrowIfNull(httpClientFactory);
         ArgumentNullException.ThrowIfNull(logger);
 
         _options = options.Value;
         _options.EnsureValid();
+        _overrideStore = overrideStore;
         _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
@@ -117,21 +131,13 @@ public sealed class OnnxTextGenerationClient : ITextGenerationClient, IAsyncDisp
                 return;
             }
 
-            var cacheDirectory = _options.ResolveModelCacheDirectory();
+            var activeOverride = _overrideStore.Snapshot.Override;
+            var cacheDirectory = activeOverride.ResolveCacheDirectory();
             Directory.CreateDirectory(cacheDirectory);
 
-            await EnsureArtifactCachedAsync(cacheDirectory, "genai_config.json", _options.GenAiConfigUrl, cancellationToken)
-                .ConfigureAwait(false);
-            await EnsureArtifactCachedAsync(cacheDirectory, "tokenizer.json", _options.TokenizerJsonUrl, cancellationToken)
-                .ConfigureAwait(false);
-            await EnsureArtifactCachedAsync(cacheDirectory, "tokenizer_config.json", _options.TokenizerConfigJsonUrl, cancellationToken)
-                .ConfigureAwait(false);
-            await EnsureArtifactCachedAsync(cacheDirectory, "model.onnx", _options.ModelOnnxUrl, cancellationToken)
-                .ConfigureAwait(false);
-
-            if (_options.ModelOnnxDataUrl is not null)
+            foreach (var fileName in LlmRouterModelFiles.All)
             {
-                await EnsureArtifactCachedAsync(cacheDirectory, "model.onnx.data", _options.ModelOnnxDataUrl, cancellationToken)
+                await EnsureArtifactCachedAsync(cacheDirectory, fileName, $"{activeOverride.BaseUrl}/{fileName}", cancellationToken)
                     .ConfigureAwait(false);
             }
 

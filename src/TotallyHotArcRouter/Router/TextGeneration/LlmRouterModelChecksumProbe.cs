@@ -1,0 +1,165 @@
+using System.Net.Http.Json;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Microsoft.Extensions.Logging;
+
+namespace TotallyHot.ArcRouter.Router.TextGeneration;
+
+/// <summary>One entry of the Hugging Face models tree API's response array.</summary>
+internal sealed class LlmRouterModelTreeEntry
+{
+    /// <summary>Gets or sets the entry kind, e.g. <c>"file"</c> or <c>"directory"</c>.</summary>
+    [JsonPropertyName("type")]
+    public string? Type { get; set; }
+
+    /// <summary>Gets or sets the entry's path relative to the model repository root.</summary>
+    [JsonPropertyName("path")]
+    public string? Path { get; set; }
+
+    /// <summary>Gets or sets the entry's git blob SHA-1.</summary>
+    [JsonPropertyName("oid")]
+    public string? Oid { get; set; }
+
+    /// <summary>Gets or sets the entry's size in bytes.</summary>
+    [JsonPropertyName("size")]
+    public long Size { get; set; }
+}
+
+/// <summary>The published git blob SHA-1 and size of one llm_router model file.</summary>
+/// <param name="PublishedOid">The git blob SHA-1 Hugging Face publishes for this file.</param>
+/// <param name="Size">The file's published size in bytes.</param>
+public sealed record LlmRouterModelPublishedFile(string PublishedOid, long Size);
+
+/// <summary>The result of one successful <see cref="LlmRouterModelChecksumProbe.TryFetchAsync"/> call.</summary>
+/// <param name="Files">Every published file's checksum and size, keyed by its file name (not full repo path).</param>
+public sealed record LlmRouterModelChecksumProbeResult(IReadOnlyDictionary<string, LlmRouterModelPublishedFile> Files);
+
+/// <summary>
+/// Fetches the published git blob SHA-1 and size of every file in a llm_router model's folder, via
+/// Hugging Face's <em>models</em> tree API - distinct from <see cref="CodeRouterBench.BenchmarkChecksumProbe"/>,
+/// which calls the <em>datasets</em> tree API for one fixed, hardcoded repository. This probe instead
+/// parses an arbitrary user-supplied <c>https://huggingface.co/{owner}/{repo}/resolve/{ref}/{path...}</c>
+/// URL, since the Governance panel's "Local Voter Model" section lets the operator switch to any model
+/// folder by URL.
+/// </summary>
+/// <remarks>
+/// Unlike <see cref="CodeRouterBench.BenchmarkChecksumProbe.FetchAsync"/>, this never throws: an
+/// arbitrary, operator-supplied URL is not guaranteed to be a Hugging Face URL at all, let alone one the
+/// API answers successfully, so <see cref="LlmRouterModelSyncService"/> must be able to fall back to
+/// existence/size-only verification rather than failing the whole sync over an unverifiable model source.
+/// </remarks>
+public sealed class LlmRouterModelChecksumProbe
+{
+    /// <summary>The named <see cref="HttpClient"/> registered for llm_router model Hugging Face calls.</summary>
+    public const string HttpClientName = "LlmRouterModelHuggingFace";
+
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly ILogger<LlmRouterModelChecksumProbe> _logger;
+
+    /// <summary>Initializes a new instance of the <see cref="LlmRouterModelChecksumProbe"/> class.</summary>
+    /// <param name="httpClientFactory">
+    /// Used to create a fresh <see cref="HttpClientName"/> client per call, mirroring
+    /// <see cref="CodeRouterBench.BenchmarkChecksumProbe"/>'s pattern rather than capturing one
+    /// factory-created client for the singleton's lifetime.
+    /// </param>
+    /// <param name="logger">The logger.</param>
+    public LlmRouterModelChecksumProbe(IHttpClientFactory httpClientFactory, ILogger<LlmRouterModelChecksumProbe> logger)
+    {
+        ArgumentNullException.ThrowIfNull(httpClientFactory);
+        ArgumentNullException.ThrowIfNull(logger);
+
+        _httpClientFactory = httpClientFactory;
+        _logger = logger;
+    }
+
+    /// <summary>
+    /// Attempts to fetch every published file's checksum under <paramref name="baseUrl"/>'s model folder.
+    /// Returns <see langword="null"/> - never throws - when <paramref name="baseUrl"/> is not a
+    /// recognized Hugging Face model resolve URL, or the API call fails for any reason.
+    /// </summary>
+    /// <param name="baseUrl">The model folder URL, e.g. <c>https://huggingface.co/{owner}/{repo}/resolve/{ref}/{path}</c>.</param>
+    /// <param name="cancellationToken">A token to cancel the request.</param>
+    public async Task<LlmRouterModelChecksumProbeResult?> TryFetchAsync(string baseUrl, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseUrl);
+
+        if (!TryParseResolveUrl(baseUrl, out var owner, out var repo, out var modelRef, out var pathPrefix))
+        {
+            _logger.LogInformation(
+                "llm_router checksum probe skipped for {BaseUrl}: not a recognized Hugging Face model resolve URL.",
+                baseUrl);
+            return null;
+        }
+
+        var apiUrl = string.IsNullOrEmpty(pathPrefix)
+            ? $"https://huggingface.co/api/models/{owner}/{repo}/tree/{Uri.EscapeDataString(modelRef)}"
+            : $"https://huggingface.co/api/models/{owner}/{repo}/tree/{Uri.EscapeDataString(modelRef)}/{pathPrefix}";
+
+        try
+        {
+            using var httpClient = _httpClientFactory.CreateClient(HttpClientName);
+            using var response = await httpClient.GetAsync(apiUrl, cancellationToken).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+
+            var entries = await response.Content
+                .ReadFromJsonAsync<List<LlmRouterModelTreeEntry>>(cancellationToken)
+                .ConfigureAwait(false) ?? [];
+
+            Dictionary<string, LlmRouterModelPublishedFile> files = [];
+            foreach (var entry in entries)
+            {
+                if (!string.Equals(entry.Type, "file", StringComparison.Ordinal) ||
+                    string.IsNullOrWhiteSpace(entry.Path) ||
+                    string.IsNullOrWhiteSpace(entry.Oid))
+                {
+                    continue;
+                }
+
+                var fileName = entry.Path.Contains('/', StringComparison.Ordinal)
+                    ? entry.Path[(entry.Path.LastIndexOf('/') + 1)..]
+                    : entry.Path;
+                files[fileName] = new LlmRouterModelPublishedFile(entry.Oid, entry.Size);
+            }
+
+            _logger.LogInformation(
+                "llm_router checksum probe found {FileCount} published file(s) at {BaseUrl}.", files.Count, baseUrl);
+            return new LlmRouterModelChecksumProbeResult(files);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or NotSupportedException or JsonException ||
+            (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
+        {
+            _logger.LogWarning(
+                ex,
+                "llm_router checksum probe failed for {BaseUrl}; falling back to existence/size verification only.",
+                baseUrl);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Parses <c>https://huggingface.co/{owner}/{repo}/resolve/{ref}/{path...}</c> into its components.
+    /// <paramref name="pathPrefix"/> is empty when the folder is the repository root.
+    /// </summary>
+    private static bool TryParseResolveUrl(string url, out string owner, out string repo, out string modelRef, out string pathPrefix)
+    {
+        owner = repo = modelRef = pathPrefix = string.Empty;
+
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
+            !string.Equals(uri.Host, "huggingface.co", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var segments = uri.AbsolutePath.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length < 4 || !string.Equals(segments[2], "resolve", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        owner = segments[0];
+        repo = segments[1];
+        modelRef = segments[3];
+        pathPrefix = segments.Length > 4 ? string.Join('/', segments[4..]) : string.Empty;
+        return true;
+    }
+}
