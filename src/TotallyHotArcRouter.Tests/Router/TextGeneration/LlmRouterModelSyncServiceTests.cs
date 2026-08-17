@@ -166,6 +166,32 @@ public sealed class LlmRouterModelSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncAsync_ExistingFileFailsPublishedChecksumAndRedownloadFails_QuarantinesMismatchedFile()
+    {
+        using var scope = new TempOverrideScope();
+        Directory.CreateDirectory(scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory());
+        var existingPath = Path.Combine(scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory(), "genai_config.json");
+        // The cached file's bytes don't match what the tree API publishes, and the re-download that the
+        // mismatch triggers also fails - the known-bad cached bytes must not be left in place, or a status
+        // check (and OnnxTextGenerationClient's lazy loader) would keep treating this file as synced
+        // because they only check File.Exists.
+        await File.WriteAllTextAsync(existingPath, "corrupted-cached-bytes", TestContext.Current.CancellationToken);
+
+        var service = CreateService(scope.OverrideStore, request =>
+            request.RequestUri!.ToString() == TreeApiUrl
+                ? ServeTree()
+                : request.RequestUri.Segments[^1] == "genai_config.json"
+                    ? new HttpResponseMessage(HttpStatusCode.InternalServerError)
+                    : ServeFixture(request));
+
+        var result = await service.SyncAsync(progress: null, TestContext.Current.CancellationToken);
+
+        var outcome = result.Files.Single(f => f.FileName == "genai_config.json");
+        Assert.False(outcome.Succeeded);
+        Assert.False(File.Exists(existingPath));
+    }
+
+    [Fact]
     public async Task SyncAsync_ModelOnnxDataMissing_SkipsOptionalFileWithoutFailing()
     {
         // An export that inlines all weights in model.onnx never publishes model.onnx.data at all - a

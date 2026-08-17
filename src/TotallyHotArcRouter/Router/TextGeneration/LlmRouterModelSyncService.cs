@@ -134,6 +134,12 @@ public sealed class LlmRouterModelSyncService
                     fileName,
                     cachedPublished.PublishedOid,
                     cachedOid);
+
+                // Quarantine the known-bad file now, before attempting the re-download: if the
+                // re-download itself then fails, File.Exists must not keep reporting this mismatched
+                // file as Synced (status checks and OnnxTextGenerationClient's lazy loader both only
+                // check File.Exists, not checksum validity).
+                SafeDelete(destinationPath);
             }
             else
             {
