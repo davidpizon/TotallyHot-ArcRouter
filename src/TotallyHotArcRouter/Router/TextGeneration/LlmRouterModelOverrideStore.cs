@@ -306,10 +306,26 @@ public sealed class LlmRouterModelOverrideStore : ILlmRouterModelOverrideStore, 
         var loaded = JsonSerializer.Deserialize<LlmRouterModelOverride>(json)
             ?? throw new InvalidOperationException($"llm_router model override file '{_filePath}' deserialized to null.");
 
+        if (string.IsNullOrWhiteSpace(loaded.BaseUrl))
+        {
+            throw new InvalidOperationException(
+                $"llm_router model override file '{_filePath}' has a missing or blank BaseUrl.");
+        }
+
         // Recompute the slug from BaseUrl rather than trust the persisted value: a corrupted or
         // hand-edited file could otherwise smuggle a CacheDirectorySlug containing path separators or
         // ".." that redirects ResolveCacheDirectory() outside the shared models root.
-        var normalized = NormalizeBaseUrl(loaded.BaseUrl);
+        string normalized;
+        try
+        {
+            normalized = NormalizeBaseUrl(loaded.BaseUrl);
+        }
+        catch (ArgumentException ex)
+        {
+            throw new InvalidOperationException(
+                $"llm_router model override file '{_filePath}' has an invalid BaseUrl: {ex.Message}", ex);
+        }
+
         return new LlmRouterModelOverride(normalized, ComputeSlug(normalized));
     }
 

@@ -26,6 +26,10 @@ public sealed record LlmRouterModelSyncProgress(
     long? BytesTransferred = null);
 
 /// <summary>One file's final outcome after a sync attempt.</summary>
+/// <param name="FileName">The file this outcome is about.</param>
+/// <param name="Succeeded">Whether the file is present and usable in the cache directory after this sync.</param>
+/// <param name="ChecksumVerified">Whether <paramref name="Succeeded"/> was confirmed against a published checksum, as opposed to presence-only.</param>
+/// <param name="ErrorMessage">The failure reason when <paramref name="Succeeded"/> is <see langword="false"/>; otherwise <see langword="null"/>.</param>
 public sealed record LlmRouterModelFileSyncOutcome(
     string FileName,
     bool Succeeded,
