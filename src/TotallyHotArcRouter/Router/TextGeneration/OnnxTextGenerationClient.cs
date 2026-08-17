@@ -200,7 +200,18 @@ public sealed class OnnxTextGenerationClient : ITextGenerationClient, IAsyncDisp
             }
 
             var model = new Model(cacheDirectory);
-            _tokenizer = new Tokenizer(model);
+            try
+            {
+                _tokenizer = new Tokenizer(model);
+            }
+            catch
+            {
+                // Tokenizer construction failed (e.g. corrupt/mismatched artifacts) - dispose the
+                // already-constructed Model rather than leaking it, since _model is never assigned below.
+                model.Dispose();
+                throw;
+            }
+
             _model = model;
             _loadedOverrideVersion = snapshot.Version;
 

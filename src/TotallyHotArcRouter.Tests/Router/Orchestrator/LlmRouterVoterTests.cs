@@ -56,6 +56,67 @@ public class LlmRouterVoterTests
     }
 
     [Fact]
+    public async Task VoteAsync_TextMentionsMultipleCandidates_PicksLastMentioned()
+    {
+        var voter = CreateVoter("Between model-a and model-b, I'll restate: model-a first, but model-b is the better fit.");
+        var context = NewContext();
+
+        var vote = await voter.VoteAsync(context, TestContext.Current.CancellationToken);
+
+        Assert.False(vote.IsAbstain);
+        Assert.Equal("model-b", vote.ModelName);
+    }
+
+    [Fact]
+    public async Task VoteAsync_NameMatchWithPrefixOverlappingCandidateNames_PicksLongerMatch()
+    {
+        RoutingCandidate[] candidates =
+        [
+            new RoutingCandidate("llama3", "bedrock", IsFree: false),
+            new RoutingCandidate("llama3-70b-bedrock", "bedrock", IsFree: false),
+        ];
+        var voter = CreateVoter("I'll go with llama3-70b-bedrock for this task, no JSON today.");
+        var context = new VotingContext("live:code_generation", candidates, TaskText: "Fix the bug.");
+
+        var vote = await voter.VoteAsync(context, TestContext.Current.CancellationToken);
+
+        Assert.False(vote.IsAbstain);
+        Assert.Equal("llama3-70b-bedrock", vote.ModelName);
+    }
+
+    [Fact]
+    public async Task VoteAsync_FencedJsonWithNestedBracesInString_ParsesFullBody()
+    {
+        var voter = CreateVoter(
+            "Here is my pick:\n```json\n{\"model\": \"model-b\", \"reasoning\": \"handles {edge} cases well\"}\n```\n");
+        var context = NewContext();
+
+        var vote = await voter.VoteAsync(context, TestContext.Current.CancellationToken);
+
+        Assert.False(vote.IsAbstain);
+        Assert.Equal("model-b", vote.ModelName);
+    }
+
+    [Fact]
+    public async Task VoteAsync_MultipleFencedBlocks_DoesNotSpanBlocksWithGreedyMatch()
+    {
+        // A greedy body capture unbounded by the closing fence would span from the first block's '{' to
+        // the second block's final '}', splicing in the fence markers between them and producing invalid
+        // JSON - which would fail this stage entirely and fall back to (lower-confidence) name matching,
+        // picking "model-b" as the last-mentioned name instead of parsing the first block's own JSON.
+        var voter = CreateVoter(
+            "First:\n```json\n{\"model\": \"model-a\", \"reasoning\": \"cheapest\"}\n```\n" +
+            "Unrelated second block:\n```json\n{\"model\": \"model-b\"}\n```\n");
+        var context = NewContext();
+
+        var vote = await voter.VoteAsync(context, TestContext.Current.CancellationToken);
+
+        Assert.False(vote.IsAbstain);
+        Assert.Equal("model-a", vote.ModelName);
+        Assert.Equal(0.75, vote.Confidence);
+    }
+
+    [Fact]
     public async Task VoteAsync_ResponseNamesNoCandidate_Abstains()
     {
         var voter = CreateVoter("I would pick gpt-5.4, which is not in the candidate list.");
