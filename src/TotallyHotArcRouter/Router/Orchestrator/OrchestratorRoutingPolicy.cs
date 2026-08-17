@@ -49,6 +49,7 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// </remarks>
 public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
 {
+    /// <summary>Prefix for a per-voter breakdown key in <see cref="RoutingDecision.CandidateScores"/> (<c>"voter:{voterName}:{modelName}"</c>), distinguishing it from a plain candidate aggregate-score key.</summary>
     private const string VoterKeyPrefix = "voter:";
 
     private readonly IReadOnlyList<IRoutingVoter> _voters;
@@ -298,6 +299,9 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
         }
     }
 
+    /// <summary>Looks up the configured ensemble weight for a voter by name, defaulting to 1 for an unrecognized name so a custom voter still participates.</summary>
+    /// <param name="voterName">The voter's <see cref="IRoutingVoter.Name"/>.</param>
+    /// <returns>The voter's configured weight.</returns>
     private double GetVoterWeight(string voterName) => voterName switch
     {
         VoterNames.DimBest => _options.DimBestVoterWeight,
@@ -307,6 +311,9 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
         _ => 1d,
     };
 
+    /// <summary>Looks up whether a voter is enabled by name, defaulting to enabled for an unrecognized name so a custom voter is not silently excluded.</summary>
+    /// <param name="voterName">The voter's <see cref="IRoutingVoter.Name"/>.</param>
+    /// <returns><see langword="true"/> if the voter should participate; otherwise <see langword="false"/>.</returns>
     private bool IsVoterEnabled(string voterName) => voterName switch
     {
         VoterNames.DimBest => _options.EnableDimBestVoter,

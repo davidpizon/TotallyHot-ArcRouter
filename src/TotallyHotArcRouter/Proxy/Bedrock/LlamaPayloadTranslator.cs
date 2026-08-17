@@ -194,6 +194,8 @@ internal sealed class LlamaStreamChunkTranslator : IBedrockStreamChunkTranslator
     // Llama's streaming chunks carry no model identifier either (see TranslateResponse's remarks) - the
     // provider key is passed down from LlamaPayloadTranslator.CreateBedrockStreamChunkTranslator so every
     // chunk reports the same stable value non-streaming responses do.
+    /// <summary>Initializes a new instance, reporting <paramref name="modelIdentifier"/> as the <c>model</c> field on every emitted chunk.</summary>
+    /// <param name="modelIdentifier">The stable model identifier to report (the provider key, since Llama's own chunks carry none).</param>
     public LlamaStreamChunkTranslator(string modelIdentifier) => _modelIdentifier = modelIdentifier;
 
     /// <summary>

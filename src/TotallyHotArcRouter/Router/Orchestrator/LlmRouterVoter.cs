@@ -42,10 +42,16 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// </remarks>
 public sealed class LlmRouterVoter : IRoutingVoter
 {
+    /// <summary>Synthesized confidence for a pick parsed directly from a bare JSON response - the highest-confidence parse stage.</summary>
     private const double JsonParseConfidence = 0.9;
+
+    /// <summary>Synthesized confidence for a pick parsed from a fenced JSON code block within the response.</summary>
     private const double CodeBlockParseConfidence = 0.75;
+
+    /// <summary>Synthesized confidence for a pick recovered by matching a candidate name mentioned anywhere in the response text.</summary>
     private const double NameMatchConfidence = 0.5;
 
+    /// <summary>Matches a fenced (optionally <c>json</c>-tagged) code block containing a JSON object, used as the second stage of <see cref="ParseResponse"/>'s fallback chain.</summary>
     private static readonly Regex FencedCodeBlockPattern = new(
         @"```(?:json)?\s*(?<body>\{.*?\})\s*```",
         RegexOptions.Singleline | RegexOptions.Compiled,
@@ -173,6 +179,10 @@ public sealed class LlmRouterVoter : IRoutingVoter
         return VoterVote.Abstain(Name);
     }
 
+    /// <summary>Attempts to parse <paramref name="text"/> as a JSON object with a non-empty string <c>model</c> property.</summary>
+    /// <param name="text">The candidate text to parse - either the raw response or an extracted fenced-block body.</param>
+    /// <param name="modelName">The parsed model name, or <see langword="null"/> if parsing failed.</param>
+    /// <returns><see langword="true"/> if a non-empty model name was parsed; otherwise <see langword="false"/>.</returns>
     private static bool TryParseJsonModel(string text, out string? modelName)
     {
         modelName = null;

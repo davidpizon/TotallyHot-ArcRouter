@@ -47,6 +47,9 @@ public static class UsageExportFormatter
         return builder.ToString();
     }
 
+    /// <summary>Appends one CSV row (each field quoted only if needed, per RFC 4180) followed by a CRLF line terminator.</summary>
+    /// <param name="builder">The buffer to append to.</param>
+    /// <param name="fields">The row's field values, in column order.</param>
     private static void AppendRow(StringBuilder builder, params string[] fields)
     {
         for (var i = 0; i < fields.Length; i++)
@@ -69,6 +72,13 @@ public static class UsageExportFormatter
     // for any other consumer (a CSV parser sees the literal leading apostrophe, same as any other char).
     private static readonly char[] FormulaTriggerChars = ['=', '+', '-', '@', '\t', '\r'];
 
+    /// <summary>
+    /// Quotes <paramref name="field"/> per RFC 4180 if it contains a comma, quote, or newline, and
+    /// prefixes it with an apostrophe first if it could otherwise be interpreted as a spreadsheet
+    /// formula (see the CSV-injection remarks above <see cref="FormulaTriggerChars"/>).
+    /// </summary>
+    /// <param name="field">The raw field value.</param>
+    /// <returns>The field value, quoted and/or formula-escaped as needed for safe CSV output.</returns>
     private static string QuoteIfNeeded(string field)
     {
         // Spreadsheet apps trim leading spaces before deciding whether a cell's content is a formula, so

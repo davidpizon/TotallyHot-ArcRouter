@@ -14,6 +14,9 @@ namespace TotallyHot.ArcRouter.Router.Embeddings;
 /// </summary>
 public sealed class PendingTaskEmbeddingCache
 {
+    /// <summary>A single cached embedding awaiting its verifier score, with the absolute time it expires.</summary>
+    /// <param name="Embedding">The task's embedding vector.</param>
+    /// <param name="ExpiresAtUtc">The UTC instant after which this entry is treated as evicted.</param>
     private sealed record Entry(float[] Embedding, DateTimeOffset ExpiresAtUtc);
 
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);

@@ -71,6 +71,9 @@ public sealed class AnthropicCostReconciler : IProviderCostReconciler
         return total;
     }
 
+    /// <summary>Builds a GET request for <paramref name="uri"/> with the Admin API key and version headers Anthropic requires.</summary>
+    /// <param name="uri">The fully-qualified cost report endpoint URI, including query parameters.</param>
+    /// <returns>A ready-to-send <see cref="HttpRequestMessage"/>.</returns>
     private HttpRequestMessage BuildRequest(string uri)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, uri);

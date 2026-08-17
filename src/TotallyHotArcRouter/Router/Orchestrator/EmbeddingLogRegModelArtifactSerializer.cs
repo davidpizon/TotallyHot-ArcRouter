@@ -11,6 +11,7 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// </summary>
 public static class EmbeddingLogRegModelArtifactSerializer
 {
+    /// <summary>Serializer options shared by <see cref="Serialize"/> and <see cref="Deserialize"/>: indented so a manually inspected artifact file stays human-readable.</summary>
     private static readonly JsonSerializerOptions Options = new()
     {
         WriteIndented = true,
@@ -107,20 +108,26 @@ public static class EmbeddingLogRegModelArtifactSerializer
         }
     }
 
+    /// <summary>The wire shape for <see cref="EmbeddingLogRegModelArtifact"/>, needed because the record's <see cref="IReadOnlyDictionary{TKey,TValue}"/> member doesn't round-trip through <c>System.Text.Json</c>'s default record support.</summary>
     private sealed class Dto
     {
+        /// <summary>Gets or sets the embedding dimension the artifact was trained at.</summary>
         [JsonPropertyName("embeddingDimension")]
         public int EmbeddingDimension { get; set; }
 
+        /// <summary>Gets or sets the per-class weight vectors, keyed by canonicalized model id.</summary>
         [JsonPropertyName("classWeights")]
         public Dictionary<string, double[]> ClassWeights { get; set; } = [];
 
+        /// <summary>Gets or sets the human-readable training provenance string.</summary>
         [JsonPropertyName("trainedFrom")]
         public string TrainedFrom { get; set; } = string.Empty;
 
+        /// <summary>Gets or sets the number of OOD bootstrap tasks that contributed to training.</summary>
         [JsonPropertyName("bootstrapTaskCount")]
         public int BootstrapTaskCount { get; set; }
 
+        /// <summary>Gets or sets the number of live memory entries that contributed to training.</summary>
         [JsonPropertyName("memoryEntryCount")]
         public int MemoryEntryCount { get; set; }
     }

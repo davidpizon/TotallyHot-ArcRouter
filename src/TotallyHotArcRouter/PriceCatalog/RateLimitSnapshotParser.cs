@@ -214,12 +214,15 @@ public static class RateLimitSnapshotParser
         return new RateLimitSnapshotView(standard, unifiedStatus, unifiedResetAt, windows, representativeClaim, raw);
     }
 
+    /// <summary>Returns the raw string value of <paramref name="headerName"/>, or <see langword="null"/> if absent.</summary>
     private static string? ReadString(IReadOnlyDictionary<string, string> raw, string headerName) =>
         raw.TryGetValue(headerName, out var value) ? value : null;
 
+    /// <summary>Reads and parses <paramref name="headerName"/> as an integer, or <see langword="null"/> if absent or malformed.</summary>
     private static long? ReadLong(IReadOnlyDictionary<string, string> raw, string headerName) =>
         raw.TryGetValue(headerName, out var value) ? ParseLong(value) : null;
 
+    /// <summary>Reads and parses <paramref name="headerName"/> as an RFC 3339 date, or <see langword="null"/> if absent or malformed.</summary>
     private static DateTimeOffset? ReadDate(IReadOnlyDictionary<string, string> raw, string headerName) =>
         raw.TryGetValue(headerName, out var value) ? ParseDate(value) : null;
 
@@ -234,10 +237,12 @@ public static class RateLimitSnapshotParser
         return ParseGoDuration(value) is { } duration ? observed + duration : null;
     }
 
+    /// <summary>Parses <paramref name="value"/> as an invariant-culture integer, or <see langword="null"/> if malformed.</summary>
     private static long? ParseLong(string value) =>
         long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : null;
 
     // RFC 3339, matching the format Anthropic publishes for every *-reset header.
+    /// <summary>Parses <paramref name="value"/> as an RFC 3339 date, or <see langword="null"/> if malformed.</summary>
     private static DateTimeOffset? ParseDate(string value) =>
         DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed)
             ? parsed

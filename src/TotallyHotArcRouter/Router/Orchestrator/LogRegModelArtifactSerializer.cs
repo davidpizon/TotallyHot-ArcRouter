@@ -10,6 +10,7 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// </summary>
 public static class LogRegModelArtifactSerializer
 {
+    /// <summary>Serializer options shared by <see cref="Serialize"/> and <see cref="Deserialize"/>: indented so a manually inspected artifact file stays human-readable.</summary>
     private static readonly JsonSerializerOptions Options = new()
     {
         WriteIndented = true,
@@ -124,20 +125,26 @@ public static class LogRegModelArtifactSerializer
         }
     }
 
+    /// <summary>The wire shape for <see cref="LogRegModelArtifact"/>, needed because the record's <see cref="IReadOnlyDictionary{TKey,TValue}"/>/<see cref="IReadOnlyList{T}"/> members don't round-trip through <c>System.Text.Json</c>'s default record support.</summary>
     private sealed class Dto
     {
+        /// <summary>Gets or sets the fixed TF-IDF vocabulary, in index order.</summary>
         [JsonPropertyName("vocabulary")]
         public List<string> Vocabulary { get; set; } = [];
 
+        /// <summary>Gets or sets the per-term inverse document frequency weights, same index order as <see cref="Vocabulary"/>.</summary>
         [JsonPropertyName("inverseDocumentFrequency")]
         public List<double> InverseDocumentFrequency { get; set; } = [];
 
+        /// <summary>Gets or sets the per-class weight vectors, keyed by canonicalized model id.</summary>
         [JsonPropertyName("classWeights")]
         public Dictionary<string, double[]> ClassWeights { get; set; } = [];
 
+        /// <summary>Gets or sets whether this artifact is a hand-built placeholder rather than a real training run.</summary>
         [JsonPropertyName("isPlaceholder")]
         public bool IsPlaceholder { get; set; }
 
+        /// <summary>Gets or sets the human-readable training provenance string.</summary>
         [JsonPropertyName("trainedFrom")]
         public string TrainedFrom { get; set; } = string.Empty;
     }

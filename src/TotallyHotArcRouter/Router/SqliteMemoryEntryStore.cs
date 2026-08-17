@@ -81,6 +81,9 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         return Task.CompletedTask;
     }
 
+    /// <summary>Materializes a <see cref="MemoryEntry"/> from the current row of a <c>memory_entries</c> reader.</summary>
+    /// <param name="reader">A reader positioned on a row selected with the columns in <see cref="LoadAllAsync"/>'s query order.</param>
+    /// <returns>The row's data as a <see cref="MemoryEntry"/>.</returns>
     private static MemoryEntry ReadEntry(SqliteDataReader reader)
     {
         var id = reader.GetInt64(0);
@@ -94,6 +97,9 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         return new MemoryEntry(id, embedding, chosenModel, score, cost, verifierTrace, createdAtUtc);
     }
 
+    /// <summary>Encodes an embedding vector as a raw little-endian <c>float32</c> byte array for storage in the <c>embedding</c> BLOB column.</summary>
+    /// <param name="embedding">The vector to encode.</param>
+    /// <returns>The encoded bytes.</returns>
     private static byte[] ToBytes(float[] embedding)
     {
         var bytes = new byte[embedding.Length * sizeof(float)];
@@ -101,6 +107,9 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         return bytes;
     }
 
+    /// <summary>Decodes a raw little-endian <c>float32</c> byte array, the inverse of <see cref="ToBytes"/>.</summary>
+    /// <param name="bytes">The bytes read from the <c>embedding</c> BLOB column.</param>
+    /// <returns>The decoded embedding vector.</returns>
     private static float[] FromBytes(byte[] bytes)
     {
         var embedding = new float[bytes.Length / sizeof(float)];

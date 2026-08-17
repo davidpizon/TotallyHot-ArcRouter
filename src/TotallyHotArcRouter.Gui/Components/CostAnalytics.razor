@@ -107,6 +107,7 @@
     [Parameter]
     public string? InitialSessionId { get; set; }
 
+    /// <summary>One metric pill's display definition: which <see cref="CostMetric"/> it selects, its button label, and its tooltip/subtitle description.</summary>
     private sealed record MetricDef(CostMetric Metric, string Label, string Description);
 
     // Ranked by business priority (the order the pills appear in), matching the CostMetric enum. The
@@ -140,6 +141,7 @@
     private CostChartModel _model = new(CostChartKind.DualDirectionalBars, "Routing ROI", "$", "—", null, [], []);
     private string _modelJson = "{}";
 
+    /// <summary>The display definition for the currently selected metric.</summary>
     private MetricDef CurrentDef => MetricDefs.First(d => d.Metric == _metric);
 
     protected override void OnInitialized()
@@ -190,24 +192,28 @@
     // LiveDataStore.Changed (new live telemetry) - keeps the chart auto-refreshing as new turns arrive.
     protected override void OnParametersSet() => Recompute();
 
+    /// <summary>Switches the active metric pill and recomputes the chart.</summary>
     private void SelectMetric(CostMetric metric)
     {
         _metric = metric;
         Recompute();
     }
 
+    /// <summary>Switches the active time range and recomputes the chart.</summary>
     private void SelectRange(MetricRange range)
     {
         _range = range;
         Recompute();
     }
 
+    /// <summary>Applies the session-scope dropdown's selection and recomputes the chart.</summary>
     private void OnSessionChanged(ChangeEventArgs e)
     {
         _sessionScope = (string?)e.Value ?? string.Empty;
         Recompute();
     }
 
+    /// <summary>Rebuilds the corpus and chart model for the current metric/range/session selection.</summary>
     private void Recompute()
     {
         var now = DateTimeOffset.UtcNow;
@@ -220,6 +226,7 @@
     // Merges live turns (real data) with rollup-backed history (also real, and what survives a GUI
     // restart) on the same time axis; the session scope dropdown lets the user isolate one. MockData only
     // fills in when there is neither - the offline/no-proxy demo path.
+    /// <summary>Builds the point corpus the chart model is derived from, combining rollup history, live turns, and (as a last resort) mock data.</summary>
     private IReadOnlyList<MetricTurnPoint> BuildCorpus(DateTimeOffset now)
     {
         var points = new List<MetricTurnPoint>();
@@ -259,6 +266,7 @@
     // Live conversations first (with their titles), then the mock demo sessions. Rollup-backed history
     // points are per-day aggregates, not real sessions - they're excluded here (they still count toward
     // "All Sessions") since offering "rollup:2026-08-07" as something to isolate wouldn't mean anything.
+    /// <summary>The session-scope dropdown's options: every live conversation, followed by any mock demo sessions.</summary>
     private IEnumerable<(string Id, string Label)> SessionOptions
     {
         get
@@ -282,6 +290,7 @@
         }
     }
 
+    /// <summary>The chart subtitle's human-readable label for the currently selected time range.</summary>
     private string RangeCaption => _range switch
     {
         MetricRange.Hour => "Past hour",

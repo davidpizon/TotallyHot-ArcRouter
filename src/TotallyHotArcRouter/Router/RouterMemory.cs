@@ -8,8 +8,13 @@ namespace TotallyHot.ArcRouter.Router;
 /// </summary>
 public class RouterMemory
 {
+    /// <summary>The in-memory scores, keyed by dimension then model. Reassigned wholesale by <see cref="InitializeAsync"/>, so callers must not cache a reference across that call.</summary>
     private ConcurrentDictionary<string, ConcurrentDictionary<string, List<double>>> _scores;
+
+    /// <summary>The optional persistence layer; <see langword="null"/> when this memory is in-memory-only (e.g. in tests).</summary>
     private readonly IRouterMemoryStore? _memoryStore;
+
+    /// <summary>The optional logger; <see langword="null"/> when logging is not configured for this instance.</summary>
     private readonly ILogger<RouterMemory>? _logger;
 
     /// <summary>

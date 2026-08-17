@@ -80,6 +80,9 @@ public sealed class HeuristicRequestClassifier : IRequestClassifier
         return match.Success ? SandboxLanguages.FromHint(match.Groups[1].Value) : SandboxLanguage.Unknown;
     }
 
+    /// <summary>Maps a <see cref="SandboxLanguage"/> to the lowercase name used in <see cref="RequestClassification.Language"/>.</summary>
+    /// <param name="language">The detected sandbox language.</param>
+    /// <returns>The lowercase language name, or <c>"unknown"</c> when <paramref name="language"/> has no known mapping.</returns>
     private static string LanguageName(SandboxLanguage language) => language switch
     {
         SandboxLanguage.CSharp => "csharp",
@@ -132,6 +135,10 @@ public sealed class HeuristicRequestClassifier : IRequestClassifier
             ContainsAny(prompt.ToLowerInvariant(), UtilityPromptSignals);
     }
 
+    /// <summary>Checks whether any of the given substrings occurs in <paramref name="haystack"/>, using an ordinal comparison so results don't shift with locale.</summary>
+    /// <param name="haystack">The text to search.</param>
+    /// <param name="needles">The candidate substrings to look for.</param>
+    /// <returns><see langword="true"/> if at least one needle is found; otherwise <see langword="false"/>.</returns>
     private static bool ContainsAny(string haystack, IReadOnlyList<string> needles)
     {
         foreach (var needle in needles)

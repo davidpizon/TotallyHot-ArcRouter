@@ -93,6 +93,14 @@ public sealed class OnnxTextGenerationClient : ITextGenerationClient, IAsyncDisp
         }
     }
 
+    /// <summary>
+    /// Runs greedy decoding to completion (or cancellation) for one prompt and returns the generated text.
+    /// Must be called with <see cref="_inferenceLock"/> already held, since ONNX Runtime GenAI's
+    /// <see cref="Generator"/> is not documented safe for concurrent use on the same <see cref="Model"/>.
+    /// </summary>
+    /// <param name="prompt">The fully-formatted prompt to generate from.</param>
+    /// <param name="cancellationToken">A token combining the caller's cancellation and the generation timeout deadline.</param>
+    /// <returns>The generated text.</returns>
     private string RunGeneration(string prompt, CancellationToken cancellationToken)
     {
         using var sequences = _tokenizer!.Encode(prompt);
@@ -118,6 +126,12 @@ public sealed class OnnxTextGenerationClient : ITextGenerationClient, IAsyncDisp
         return output.ToString();
     }
 
+    /// <summary>
+    /// Loads the ONNX GenAI model and tokenizer on first use or after a model switch, downloading their
+    /// artifacts if not already cached. Uses double-checked locking under <see cref="_initLock"/> so
+    /// concurrent callers do not race to download or load the model twice.
+    /// </summary>
+    /// <param name="cancellationToken">A cancellation token.</param>
     private async Task EnsureInitializedAsync(CancellationToken cancellationToken)
     {
         var snapshot = _overrideStore.Snapshot;

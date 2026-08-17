@@ -69,6 +69,7 @@
 
     // LiveDataStore raises LogLinesChanged from whatever thread the gRPC stream delivered the event
     // on; InvokeAsync marshals back to this component's render context before calling StateHasChanged.
+    /// <summary>Marks a pending scroll and re-renders when a new log line arrives.</summary>
     private void HandleLogLinesChanged()
     {
         _pendingScroll = true;
@@ -107,6 +108,7 @@
         }
     }
 
+    /// <summary>Toggles auto-scroll and, when re-enabled, immediately jumps the viewport to the bottom.</summary>
     private async Task ToggleAutoScroll()
     {
         _autoScroll = !_autoScroll;
@@ -116,12 +118,14 @@
         }
     }
 
+    /// <summary>Empties the log buffer. Implements the toolbar's Clear Buffer button.</summary>
     private void ClearBuffer() => LiveDataStore.ClearLogLines();
 
     // Uses MAUI's native Clipboard rather than the browser's navigator.clipboard via JS interop:
     // clipboard-write from inside a WebView2 page can be blocked by permission prompts/secure-context
     // rules, while the native API always works since this app is a MAUI Blazor Hybrid host, not a
     // real browser tab.
+    /// <summary>Copies every visible log line to the clipboard and briefly shows a "Copied!" confirmation.</summary>
     private async Task CopyAllToClipboard()
     {
         var lines = LiveDataStore.LogLines;
@@ -139,11 +143,13 @@
         StateHasChanged();
     }
 
+    /// <summary>Unsubscribes from <see cref="LiveDataStore.LogLinesChanged"/>.</summary>
     public void Dispose() => LiveDataStore.LogLinesChanged -= HandleLogLinesChanged;
 
     // Blazor prefers DisposeAsync() over Dispose() when a component implements both - it may never
     // call Dispose() at all. Call it explicitly here so the event unsubscription always happens
     // regardless of which teardown path Blazor takes.
+    /// <summary>Explicitly runs <see cref="Dispose"/> and releases the JS interop reference.</summary>
     public ValueTask DisposeAsync()
     {
         Dispose();

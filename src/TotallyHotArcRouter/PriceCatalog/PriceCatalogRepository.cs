@@ -1054,6 +1054,9 @@ public sealed class PriceCatalogRepository
 
     // minute_bucket is stored as "yyyy-MM-ddTHH:mm" (see UpsertRateLimitHeaders); appending seconds and a
     // 'Z' turns it into an unambiguous UTC instant for ParseExact.
+    /// <summary>Parses a stored <c>minute_bucket</c> string back into a UTC instant.</summary>
+    /// <param name="minuteBucket">The bucket key, formatted <c>"yyyy-MM-ddTHH:mm"</c>.</param>
+    /// <returns>The bucket start as a UTC <see cref="DateTimeOffset"/>.</returns>
     private static DateTimeOffset ParseMinuteBucket(string minuteBucket) =>
         DateTimeOffset.ParseExact(
             minuteBucket + ":00Z",

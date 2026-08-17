@@ -107,6 +107,9 @@ public sealed class BenchmarkFileLedger
         command.ExecuteNonQuery();
     }
 
+    /// <summary>Maps the current row of a <c>benchmark_files</c> reader onto a <see cref="BenchmarkFileLedgerEntry"/>.</summary>
+    /// <param name="reader">A reader positioned on a row selecting the ledger's six columns in order.</param>
+    /// <returns>The row's entry.</returns>
     private static BenchmarkFileLedgerEntry ReadEntry(SqliteDataReader reader) => new(
         FileName: reader.GetString(0),
         PublishedOid: reader.GetString(1),

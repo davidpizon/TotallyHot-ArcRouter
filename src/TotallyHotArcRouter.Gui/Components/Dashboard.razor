@@ -182,7 +182,7 @@
         }
     }
 
-    // Abbreviates a token count for the ticker tile: "12.4M", "830.0K", or the bare number under 1,000.
+    /// <summary>Abbreviates a token count for the ticker tile: "12.4M", "830.0K", or the bare number under 1,000.</summary>
     private static string FormatTokenCount(long tokens) => tokens switch
     {
         >= 1_000_000 => FormattableString.Invariant($"{tokens / 1_000_000d:0.0}M"),
@@ -192,8 +192,10 @@
 
     // LiveDataStore raises Changed from whatever thread the gRPC stream delivered the event on;
     // InvokeAsync marshals back to this component's render context before calling StateHasChanged.
+    /// <summary>Re-renders when live telemetry changes.</summary>
     private void HandleLiveDataChanged() => InvokeAsync(StateHasChanged);
 
+    /// <summary>Recomputes the budget-alert banner and re-renders when the provider list changes.</summary>
     private void HandleProvidersChanged() => InvokeAsync(() =>
     {
         RecomputeBudgetAlerts();
@@ -202,6 +204,7 @@
 
     // A provider counts as breached when a set cap is met/exceeded, and approaching when its highest
     // dimension utilization is in [80%, 100%). Providers with no caps are ignored.
+    /// <summary>Re-derives <see cref="_breached"/> and <see cref="_approaching"/> from the current provider list.</summary>
     private void RecomputeBudgetAlerts()
     {
         _breached = ProviderStore.Providers
@@ -220,6 +223,7 @@
 
     // The provider's worst-case utilization across whichever of its two caps are set; -1 when unbudgeted so
     // it never trips either alert.
+    /// <summary>Computes a provider's worst-case budget utilization percentage across its dollar and token caps.</summary>
     private static double Utilization(ProviderAdminView p)
     {
         // A zero cap is treated as 100% (immediately breached), matching the backend's spend >= cap rule, so
@@ -246,5 +250,6 @@
 
     // Clicking the alert banner jumps to the Governance tab's Providers view, where each over-budget
     // provider's card shows its caps, spend, and utilization bars.
+    /// <summary>Switches the active tab to Governance in response to the header alert banner being clicked.</summary>
     private void HandleAlertClick() => _activeTab = Tab.Governance;
 }

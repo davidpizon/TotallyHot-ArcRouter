@@ -163,6 +163,11 @@ public sealed class ConfigModelIdentityResolver : IModelIdentityResolver
         return null;
     }
 
+    /// <summary>
+    /// Returns the cached <see cref="ResolvedIndex"/>, rebuilding it under <see cref="_sync"/> first if the
+    /// live <see cref="IProviderConfigStore"/> snapshot has moved past the version the cache was built from.
+    /// </summary>
+    /// <returns>The index current as of the latest observed config snapshot.</returns>
     private ResolvedIndex GetIndex()
     {
         var snapshot = _configStore.Snapshot;
@@ -178,6 +183,13 @@ public sealed class ConfigModelIdentityResolver : IModelIdentityResolver
         }
     }
 
+    /// <summary>
+    /// Builds one <see cref="ResolvedIndex"/> lookup per resolution rung from the current
+    /// <c>ModelRouting:ModelList</c>, skipping entries with no configured provider or provider model id since
+    /// neither can key any of the lookups.
+    /// </summary>
+    /// <param name="options">The routing options snapshot to derive the indexes from.</param>
+    /// <returns>The rebuilt indexes, ready to be cached against the snapshot's version.</returns>
     private static ResolvedIndex Build(ModelRoutingOptions options)
     {
         var byModelName = new Dictionary<string, ResolvedModelIdentity>(StringComparer.OrdinalIgnoreCase);

@@ -66,6 +66,15 @@ public sealed record RouteCandidate(
 /// </summary>
 public sealed record ModelRouteResolutionResult
 {
+    /// <summary>
+    /// Sets every backing field directly; only reached through the <see cref="Success"/>/<see cref="Failure"/>
+    /// factories so each call site is forced to state whether the resolution succeeded and what it produced.
+    /// </summary>
+    /// <param name="isSuccess">See <see cref="IsSuccess"/>.</param>
+    /// <param name="candidates">See <see cref="Candidates"/>; <see langword="null"/> becomes an empty list.</param>
+    /// <param name="errorMessage">See <see cref="ErrorMessage"/>.</param>
+    /// <param name="taskEmbedding">See <see cref="TaskEmbedding"/>.</param>
+    /// <param name="routerTokens">See <see cref="RouterTokens"/>.</param>
     private ModelRouteResolutionResult(bool isSuccess, IReadOnlyList<RouteCandidate>? candidates, string? errorMessage, float[]? taskEmbedding, int routerTokens)
     {
         IsSuccess = isSuccess;

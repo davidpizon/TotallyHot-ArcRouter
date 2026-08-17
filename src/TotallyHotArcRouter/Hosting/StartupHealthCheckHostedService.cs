@@ -275,6 +275,14 @@ public sealed class StartupHealthCheckHostedService : IHostedService
     /// </summary>
     internal Task? EmbeddingWarmupTask => _embeddingWarmupTask;
 
+    /// <summary>
+    /// Runs one embedding call against <paramref name="embeddingClient"/> to force the one-time model
+    /// download/load off the request path, then marks <paramref name="embeddingWarmupState"/> warm on
+    /// success. Started fire-and-forget by <see cref="StartAsync"/> - see the call site's remarks for why
+    /// it is not awaited there - so any failure is only logged here; it never propagates to a caller.
+    /// </summary>
+    /// <param name="embeddingClient">The embedding client to warm up.</param>
+    /// <param name="embeddingWarmupState">The shared state flipped to warm on a successful embed call.</param>
     private async Task WarmUpEmbeddingClientAsync(
         Router.Embeddings.IEmbeddingClient embeddingClient,
         Router.Embeddings.EmbeddingWarmupState embeddingWarmupState)

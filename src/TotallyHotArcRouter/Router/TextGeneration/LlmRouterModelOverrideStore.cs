@@ -201,6 +201,12 @@ public sealed class LlmRouterModelOverrideStore : ILlmRouterModelOverrideStore, 
         return new LlmRouterModelOverride(baseUrl, ComputeSlug(baseUrl));
     }
 
+    /// <summary>
+    /// Validates that <paramref name="url"/> ends with <paramref name="expectedFileName"/> and returns the
+    /// folder portion, without requiring it to share a folder with any other seed URL - used for the base
+    /// (<c>GenAiConfigUrl</c>) URL itself, which every other seed URL is then checked against.
+    /// </summary>
+    /// <exception cref="InvalidOperationException"><paramref name="url"/> does not end with <paramref name="expectedFileName"/>.</exception>
     private static string StripFileName(string url, string expectedFileName, string propertyName)
     {
         var (folder, fileName) = SplitFolderAndFileName(url, propertyName);
@@ -213,6 +219,14 @@ public sealed class LlmRouterModelOverrideStore : ILlmRouterModelOverrideStore, 
         return folder;
     }
 
+    /// <summary>
+    /// Validates that <paramref name="url"/> ends with <paramref name="expectedFileName"/> and shares
+    /// <paramref name="baseUrl"/>'s folder, so every llm_router artifact URL points at the same model
+    /// folder rather than mixing files from different models.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="url"/> does not end with <paramref name="expectedFileName"/> or does not share <paramref name="baseUrl"/>'s folder.
+    /// </exception>
     private static void EnsureMatchesBaseUrl(string baseUrl, string url, string expectedFileName, string propertyName)
     {
         var (folder, fileName) = SplitFolderAndFileName(url, propertyName);
@@ -300,6 +314,11 @@ public sealed class LlmRouterModelOverrideStore : ILlmRouterModelOverrideStore, 
         return Convert.ToHexStringLower(hash)[..16];
     }
 
+    /// <summary>
+    /// Reads and validates the persisted override file, recomputing its cache-directory slug from
+    /// <c>BaseUrl</c> rather than trusting the persisted value.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The file's content is missing, malformed, or has an invalid <c>BaseUrl</c>.</exception>
     private LlmRouterModelOverride LoadFromFile()
     {
         var json = File.ReadAllText(_filePath);
@@ -329,6 +348,10 @@ public sealed class LlmRouterModelOverrideStore : ILlmRouterModelOverrideStore, 
         return new LlmRouterModelOverride(normalized, ComputeSlug(normalized));
     }
 
+    /// <summary>
+    /// Writes <paramref name="value"/> to <see cref="_filePath"/> via write-then-rename, so a crash or
+    /// interruption mid-write leaves only the temporary file incomplete and never the published path.
+    /// </summary>
     private async Task PersistAsync(LlmRouterModelOverride value, CancellationToken cancellationToken)
     {
         var directoryPath = Path.GetDirectoryName(_filePath);
@@ -348,6 +371,7 @@ public sealed class LlmRouterModelOverrideStore : ILlmRouterModelOverrideStore, 
 
     // Mirrors LlmRouterOptions' own %LOCALAPPDATA% expansion (that type has no public path-only helper
     // for an arbitrary configured path, only for its own ModelCacheDirectory/models-root properties).
+    /// <summary>Expands environment variables (including <c>%LOCALAPPDATA%</c> on non-Windows) in a configured path.</summary>
     private static string ExpandPath(string path)
     {
         const string localAppDataToken = "%LOCALAPPDATA%";

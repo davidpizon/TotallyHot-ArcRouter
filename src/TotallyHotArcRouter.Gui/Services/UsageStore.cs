@@ -129,5 +129,6 @@ public sealed class UsageStore
         }
     }
 
+    /// <summary>Cache key for <see cref="_rollupCache"/>: a rollup's full request shape, so distinct filter selections never collide.</summary>
     private readonly record struct RollupCacheKey(DateTimeOffset From, DateTimeOffset To, string Width, string GroupBy);
 }

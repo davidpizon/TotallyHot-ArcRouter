@@ -218,8 +218,10 @@
         _baseUrlDraft = VoterStore.Status?.BaseUrl ?? string.Empty;
     }
 
+    /// <summary>Re-renders when the corpus store's state changes.</summary>
     private void OnStoreChanged() => InvokeAsync(StateHasChanged);
 
+    /// <summary>Re-renders when the Local Voter Model store's state changes.</summary>
     private void OnVoterStoreChanged() => InvokeAsync(StateHasChanged);
 
     /// <summary>
@@ -237,6 +239,7 @@
         VoterStore.Changed -= OnVoterStoreChanged;
     }
 
+    /// <summary>Clears the inline error and reloads the corpus status. Implements the unreachable state's Retry button.</summary>
     private async Task Reload()
     {
         _opError = null;
@@ -280,6 +283,7 @@
             ? RunAsync(() => Store.SyncAsync())
             : RunAsync(() => Store.RecheckAsync());
 
+    /// <summary>The display label for one corpus file's current sync stage.</summary>
     private static string StageLabel(BenchmarkFileStatusInfo file, BenchmarkSyncProgressInfo? progress) => progress switch
     {
         { Stage: BenchmarkSyncStageInfo.Downloading } => "Downloading…",
@@ -290,6 +294,7 @@
         _ => file.Synced ? "Synced" : "Not synced",
     };
 
+    /// <summary>The CSS color class for one corpus file's current sync stage.</summary>
     private static string StageClass(BenchmarkSyncProgressInfo? progress) => progress?.Stage switch
     {
         BenchmarkSyncStageInfo.Failed => "text-red-400",
@@ -298,6 +303,7 @@
         _ => "text-slate-400",
     };
 
+    /// <summary>The display text for one corpus file's size/progress: rows imported, bytes downloaded so far, or the at-rest size and row count.</summary>
     private static string DescribeSize(BenchmarkFileStatusInfo file, BenchmarkSyncProgressInfo? progress)
     {
         if (progress is { RowsImported: { } rows })
@@ -313,6 +319,7 @@
         return file.Synced ? $"{file.SizeBytes / 1024.0 / 1024.0:0.#} MB, {file.RowCount:N0} rows" : "Never synced";
     }
 
+    /// <summary>The display text for one corpus file's last-synced time, or empty if it has never synced.</summary>
     private static string DescribeSyncedAt(BenchmarkFileStatusInfo file) =>
         file.SyncedAtUtc is { } syncedAt ? $"Synced {syncedAt.ToLocalTime():g} local" : string.Empty;
 

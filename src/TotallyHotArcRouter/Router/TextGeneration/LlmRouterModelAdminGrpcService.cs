@@ -151,8 +151,11 @@ public sealed class LlmRouterModelAdminGrpcService : Contract.LlmRouterModelAdmi
     {
         private readonly IServerStreamWriter<Contract.LlmRouterModelSyncStreamEvent> _stream;
 
+        /// <summary>Initializes a new instance of the <see cref="StreamingSyncProgress"/> class.</summary>
+        /// <param name="stream">The response stream progress events are written to.</param>
         public StreamingSyncProgress(IServerStreamWriter<Contract.LlmRouterModelSyncStreamEvent> stream) => _stream = stream;
 
+        /// <inheritdoc />
         public void Report(LlmRouterModelSyncProgress value)
         {
             var wire = new Contract.LlmRouterModelSyncProgressEvent
@@ -169,6 +172,7 @@ public sealed class LlmRouterModelAdminGrpcService : Contract.LlmRouterModelAdmi
             _stream.WriteAsync(new Contract.LlmRouterModelSyncStreamEvent { Progress = wire }).GetAwaiter().GetResult();
         }
 
+        /// <summary>Maps the service's sync stage onto the wire contract's enum.</summary>
         private static Contract.LlmRouterModelSyncStage MapStage(LlmRouterModelSyncStage stage) => stage switch
         {
             LlmRouterModelSyncStage.Downloading => Contract.LlmRouterModelSyncStage.Downloading,

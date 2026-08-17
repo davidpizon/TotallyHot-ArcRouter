@@ -54,8 +54,10 @@
 </div>
 
 @code {
+    /// <summary>One model's card display data: its name, owning provider, resolved provider-side id, and formatted 30-day spend.</summary>
     private sealed record ModelCard(string ModelName, string ProviderKey, string ProviderModelId, string SpendDisplay);
 
+    /// <summary>The cards currently rendered, rebuilt on every load and provider change.</summary>
     private List<ModelCard> Cards { get; set; } = [];
 
     protected override async Task OnInitializedAsync()
@@ -73,6 +75,7 @@
         await LoadRollupAndBuildCardsAsync();
     }
 
+    /// <summary>Re-derives the card list and re-renders when the provider list changes.</summary>
     private void HandleChanged() => InvokeAsync(async () =>
     {
         // A provider/model edit can add or remove cards; re-derive from whatever rollup data is already
@@ -83,6 +86,7 @@
 
     // Shared by the initial load, the provider-changed refresh, and the unreachable-state Retry button -
     // all three need the same "re-fetch the 30-day rollup, then re-derive Cards" sequence.
+    /// <summary>Reloads providers (if unreachable) and rebuilds the card list. Implements the unreachable state's Retry button.</summary>
     private async Task ReloadAsync()
     {
         if (!ProviderStore.IsReachable)
@@ -93,6 +97,7 @@
         await LoadRollupAndBuildCardsAsync();
     }
 
+    /// <summary>Fetches the 30-day model-grouped spend rollup and rebuilds <see cref="Cards"/> from it.</summary>
     private async Task LoadRollupAndBuildCardsAsync()
     {
         var to = BucketAlignedTo();
@@ -105,8 +110,10 @@
     // exact 'to' instant, so a per-call UtcNow would miss the cache on every OnInitializedAsync/HandleChanged
     // call within the same day (and every ProviderStore.Changed refresh). Buckets more recent than this
     // boundary are still not fully elapsed anyway, so nothing is lost by not asking for them.
+    /// <summary>The start of the current UTC day, used as the rollup query's cache-stable upper bound.</summary>
     private static DateTimeOffset BucketAlignedTo() => new(DateTimeOffset.UtcNow.Date, TimeSpan.Zero);
 
+    /// <summary>Rebuilds <see cref="Cards"/> from the configured providers/models, joined against the given spend rollup buckets.</summary>
     private void BuildCards(IReadOnlyList<UsageRollupBucketView> buckets)
     {
         // Spend is keyed by the resolved provider model id (what usage_ledger/usage_rollup record), not
@@ -128,6 +135,7 @@
     // the true total is at least this figure, not exactly it - the same "unknown != zero" discipline
     // ModelPrice/SpendTracker apply elsewhere, surfaced here as a "≥" prefix and the unpriced count rather
     // than a plain dollar amount that would silently understate spend.
+    /// <summary>Formats a card's spend, prefixing with "≥" and disclosing the unpriced-request count whenever the total is a floor rather than a complete sum.</summary>
     private static string FormatSpend((decimal CostUsd, long UnpricedRequests) spend)
     {
         var amount = spend.CostUsd.ToString("$0.00", System.Globalization.CultureInfo.InvariantCulture);
@@ -136,6 +144,7 @@
             : amount;
     }
 
+    /// <summary>Unsubscribes from <see cref="ProviderAdminStore.Changed"/>.</summary>
     public void Dispose()
     {
         ProviderStore.Changed -= HandleChanged;

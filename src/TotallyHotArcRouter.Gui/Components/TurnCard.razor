@@ -153,12 +153,15 @@
 
     private bool _expanded;
 
+    /// <summary>The card's accent color, derived from the turn's agent name.</summary>
     private string AgentColor => ColorUtils.GetColorForAgent(Turn.Agent);
 
     // §5.6: distinguishes an exact cost from a disclosed estimate (a resolution-ladder rung below Exact,
     // or a cache dimension that fell back to the standard input rate) without needing a chip per turn.
+    /// <summary>Whether the turn's cost is a disclosed approximation rather than an exact figure.</summary>
     private bool IsApproximateCost => Turn.CostConfidence is "CatalogApproximate";
 
+    /// <summary>The Cost stat's tooltip text, explaining why the figure is unknown/approximate when it isn't an exact cost.</summary>
     private string CostTip => Turn.CostConfidence switch
     {
         "NoUsage" => "Total turn cost: usage could not be extracted for this turn, so cost is unknown (shown as $0).",
@@ -169,12 +172,14 @@
 
     // Screen-reader equivalent of the header's visible sub-spans (see the accessibility note in the
     // markup above for why those spans aren't independently focusable).
+    /// <summary>The header button's accessible label, restating the turn's identifying facts and current expand/collapse state.</summary>
     private string HeaderAriaLabel =>
         $"Turn {Turn.TurnNumber} of {TotalTurns}, agent {Turn.Agent}" +
         (Turn.IsFallback ? ", fallback routing" : string.Empty) +
         $", at {Turn.Timestamp}. {(_expanded ? "Collapse" : "Expand")} details.";
 
     // First few words of the turn's request text, used as the card title.
+    /// <summary>The card header's title text: the first 8 words of the request summary, or a generic "Turn N" label when there is none.</summary>
     private string TitleExcerpt
     {
         get

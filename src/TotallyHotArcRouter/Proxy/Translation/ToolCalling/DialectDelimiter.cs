@@ -30,10 +30,15 @@ internal sealed record DialectDelimiter(string Open, string? Close)
     // copies via the auto-generated copy constructor and sets `init` properties directly, bypassing a
     // field initializer like the ones below. No call site in this codebase uses `with` on this type
     // today; if one starts to, it would need the same guard moved into the init accessor bodies.
+    /// <summary>Gets the literal opening token, matched ordinally against the raw message text.</summary>
     public string Open { get; init; } = !string.IsNullOrEmpty(Open)
         ? Open
         : throw new ArgumentException("A dialect delimiter's Open token must be non-empty.", nameof(Open));
 
+    /// <summary>
+    /// Gets the literal closing token, or <see langword="null"/> when the payload runs to the end of the
+    /// message (e.g. Mistral's close-less <c>[TOOL_CALLS]</c>).
+    /// </summary>
     public string? Close { get; init; } = Close is not { Length: 0 }
         ? Close
         : throw new ArgumentException("A dialect delimiter's Close token must be null or non-empty - use null for \"runs to end of message\", never an empty string.", nameof(Close));

@@ -13,6 +13,7 @@ public class JsonRouterMemoryStore : IRouterMemoryStore
 {
     private readonly ILogger<JsonRouterMemoryStore> _logger;
     private readonly string _filePath;
+    /// <summary>Serializer options for the memory file: indented so a manually inspected or edited file stays human-readable.</summary>
     private static readonly JsonSerializerOptions _serializerOptions = new() { WriteIndented = true };
 
     /// <summary>

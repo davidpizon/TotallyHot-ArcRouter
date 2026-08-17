@@ -16,6 +16,7 @@ public sealed class AnthropicUsageReportService
     /// <summary>How many trailing days of usage are re-fetched (and upserted) on every cycle.</summary>
     private const int TrailingWindowDays = 30;
 
+    /// <summary>The provider key rows are upserted under, matching the key used elsewhere for Anthropic cost tracking.</summary>
     private const string Provider = "anthropic";
 
     private readonly HttpClient _httpClient;

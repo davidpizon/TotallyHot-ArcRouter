@@ -123,6 +123,10 @@ public static class UsageAdminEndpoints
         "yyyy-MM-ddTHH:mm:ssK",
     ];
 
+    /// <summary>Parses <paramref name="value"/> against the exact ISO 8601 instant shapes in <see cref="IsoInstantFormats"/>, rejecting the looser shapes <see cref="DateTimeOffset.TryParse(string?, out DateTimeOffset)"/> would otherwise silently accept.</summary>
+    /// <param name="value">The raw query-string value to parse.</param>
+    /// <param name="instant">The parsed instant, when successful.</param>
+    /// <returns><see langword="true"/> if <paramref name="value"/> matched one of the accepted formats.</returns>
     private static bool TryParseInstant(string? value, out DateTimeOffset instant) =>
         DateTimeOffset.TryParseExact(
             value,
@@ -131,6 +135,9 @@ public static class UsageAdminEndpoints
             DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
             out instant);
 
+    /// <summary>Maps a facade <see cref="ManagementResult{T}"/> to an HTTP response: the value on success, or an OpenAI-shaped error whose status reflects <see cref="ManagementResult{T}.ErrorType"/> on failure.</summary>
+    /// <typeparam name="T">The result's success payload type.</typeparam>
+    /// <param name="result">The facade outcome to translate.</param>
     private static IResult ToResult<T>(ManagementResult<T> result) =>
         result.Success
             ? Results.Ok(result.Value)

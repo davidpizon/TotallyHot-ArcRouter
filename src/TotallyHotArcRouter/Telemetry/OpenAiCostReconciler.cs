@@ -68,6 +68,7 @@ public sealed class OpenAiCostReconciler : IProviderCostReconciler
         return total;
     }
 
+    /// <summary>Builds the GET request for <paramref name="uri"/>, authorized with the Admin API key.</summary>
     private HttpRequestMessage BuildRequest(string uri)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, uri);

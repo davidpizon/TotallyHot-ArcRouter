@@ -93,8 +93,10 @@
 
     // Case-sensitive on purpose: provider keys are matched case-insensitively everywhere else, but a
     // confirmation the user can satisfy with a near-miss isn't much of a confirmation.
+    /// <summary>Whether the typed confirmation text exactly (case-sensitively) matches <see cref="ProviderKey"/>.</summary>
     private bool IsConfirmed => string.Equals(_confirmText, ProviderKey, StringComparison.Ordinal);
 
+    /// <summary>Invokes <see cref="OnConfirm"/> once the confirmation text matches.</summary>
     private async Task Confirm()
     {
         if (!IsConfirmed)
@@ -109,6 +111,7 @@
     // Remove, and the close glyph are all focusable, and keydown bubbles from each of them. Handles
     // *only* Escape: Enter is left to HandleInputKeyDown so one keypress can't confirm twice as it
     // bubbles past both handlers.
+    /// <summary>Closes the dialog when Escape is pressed anywhere within the panel.</summary>
     private async Task HandlePanelKeyDown(KeyboardEventArgs args)
     {
         if (args.Key == "Escape")
@@ -119,6 +122,7 @@
 
     // Enter confirms only while typing in the confirmation field, matching the muscle memory of
     // submitting a form. Escape deliberately isn't handled here - the panel above owns it.
+    /// <summary>Confirms removal when Enter is pressed in the confirmation input.</summary>
     private async Task HandleInputKeyDown(KeyboardEventArgs args)
     {
         if (args.Key == "Enter")

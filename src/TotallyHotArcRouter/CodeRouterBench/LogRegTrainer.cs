@@ -103,8 +103,17 @@ public static class LogRegTrainer
             TrainedFrom: $"split='ood', tasks={examples.Count}, vocabulary={vocabulary.Count}, classes={classes.Count}, trained {DateTimeOffset.UtcNow:O}");
     }
 
+    /// <summary>One (task text, winning model) training pair derived from the OOD split.</summary>
+    /// <param name="Text">The task's prompt text, extracted from its raw JSON.</param>
+    /// <param name="Label">The canonicalized model id that resolved the task most cheaply.</param>
     private sealed record TrainingExample(string Text, string Label);
 
+    /// <summary>
+    /// Builds the (task text, label) training set by joining each OOD task's extracted prompt with the
+    /// cheapest model that resolved it, per <see cref="Train"/>'s labeling rule.
+    /// </summary>
+    /// <param name="database">The synced CodeRouterBench corpus to read the OOD split from.</param>
+    /// <returns>Every task with both extractable prompt text and at least one resolving model.</returns>
     private static List<TrainingExample> LoadTrainingExamples(BenchmarkDatabase database)
     {
         using var connection = database.OpenConnection();
@@ -164,6 +173,9 @@ public static class LogRegTrainer
         return examples;
     }
 
+    /// <summary>Extracts an OOD task's <c>prompt</c> string property from its raw JSON, tolerating malformed or missing content.</summary>
+    /// <param name="rawJson">The task row's verbatim raw JSON.</param>
+    /// <returns>The prompt text, or <see langword="null"/> when absent, blank, not a string, or the JSON fails to parse.</returns>
     private static string? TryExtractPrompt(string rawJson)
     {
         try
@@ -183,6 +195,14 @@ public static class LogRegTrainer
         return null;
     }
 
+    /// <summary>
+    /// Selects the top <paramref name="vocabularySize"/> terms by descending document frequency (ties
+    /// broken ordinally, for a deterministic vocabulary) and computes each term's inverse document
+    /// frequency.
+    /// </summary>
+    /// <param name="examples">The training examples to derive term statistics from.</param>
+    /// <param name="vocabularySize">The maximum number of terms to keep.</param>
+    /// <returns>The selected vocabulary terms and their parallel IDF values.</returns>
     private static (IReadOnlyList<string> Vocabulary, IReadOnlyList<double> Idf) BuildVocabulary(
         List<TrainingExample> examples,
         int vocabularySize)
@@ -211,6 +231,9 @@ public static class LogRegTrainer
         return (vocabulary, idf);
     }
 
+    /// <summary>Builds a term-to-position lookup for a vocabulary, so feature vectors can be assembled by index rather than by repeated linear search.</summary>
+    /// <param name="vocabulary">The vocabulary terms, in their fixed feature order.</param>
+    /// <returns>A dictionary mapping each term to its index in <paramref name="vocabulary"/>.</returns>
     private static Dictionary<string, int> BuildIndex(IReadOnlyList<string> vocabulary)
     {
         var index = new Dictionary<string, int>(vocabulary.Count, StringComparer.Ordinal);
@@ -222,6 +245,15 @@ public static class LogRegTrainer
         return index;
     }
 
+    /// <summary>
+    /// Computes a sparse TF-IDF feature vector for one document, restricted to terms present in
+    /// <paramref name="vocabularyIndex"/> - out-of-vocabulary tokens contribute nothing, matching a fixed
+    /// vocabulary's usual inference-time behavior.
+    /// </summary>
+    /// <param name="text">The document text to featurize.</param>
+    /// <param name="vocabularyIndex">The vocabulary's term-to-index lookup.</param>
+    /// <param name="idf">The vocabulary's parallel inverse-document-frequency values.</param>
+    /// <returns>The document's nonzero (feature index, TF-IDF value) pairs.</returns>
     private static (int Index, double Value)[] ComputeTfIdf(
         string text,
         IReadOnlyDictionary<string, int> vocabularyIndex,
@@ -292,9 +324,14 @@ public static class LogRegTrainer
         return weights;
     }
 
-    // The naive 1/(1+exp(-z)) form overflows exp(-z) to Infinity for very negative z, which combined
-    // elsewhere with a zero can produce NaN. Evaluating exp() on -|z| instead keeps its argument
-    // non-positive, so it can only underflow to 0 (safe), never overflow to Infinity.
+    /// <summary>
+    /// Computes the logistic sigmoid of <paramref name="z"/>. The naive 1/(1+exp(-z)) form overflows
+    /// exp(-z) to Infinity for very negative z, which combined elsewhere with a zero can produce NaN.
+    /// Evaluating exp() on -|z| instead keeps its argument non-positive, so it can only underflow to 0
+    /// (safe), never overflow to Infinity.
+    /// </summary>
+    /// <param name="z">The linear score to squash into <c>(0, 1)</c>.</param>
+    /// <returns>The sigmoid of <paramref name="z"/>.</returns>
     private static double Sigmoid(double z) => z >= 0
         ? 1.0 / (1.0 + Math.Exp(-z))
         : Math.Exp(z) / (1.0 + Math.Exp(z));

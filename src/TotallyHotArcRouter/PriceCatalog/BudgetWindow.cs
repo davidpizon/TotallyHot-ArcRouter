@@ -11,6 +11,11 @@ namespace TotallyHot.ArcRouter.PriceCatalog;
 /// </summary>
 public abstract record BudgetWindow
 {
+    /// <summary>
+    /// Private - only the nested <see cref="Monthly"/>, <see cref="Weekly"/>, and <see cref="RollingHours"/>
+    /// records may derive from this type, closing the hierarchy so a <c>switch</c> over kind can be
+    /// exhaustive without a default arm.
+    /// </summary>
     private BudgetWindow()
     {
     }
@@ -96,6 +101,9 @@ public abstract record BudgetWindow
         // Math.Floor, not a (long) cast - a cast truncates toward zero, which mis-buckets instants before
         // UnixEpoch (e.g. -0.1h would truncate to block 0 instead of flooring to block -1, the actual prior
         // block that instant falls in).
+        /// <summary>Computes the zero-based index of the rolling block that <paramref name="instant"/> falls in.</summary>
+        /// <param name="instant">The instant to bucket.</param>
+        /// <returns>The block index, which may be negative for instants before the Unix epoch.</returns>
         private long BlockIndex(DateTimeOffset instant) =>
             (long)Math.Floor((instant - DateTimeOffset.UnixEpoch).TotalHours / Hours);
     }

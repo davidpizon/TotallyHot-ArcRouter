@@ -112,12 +112,15 @@
     private string _newAggregatorModelKey = string.Empty;
     private string _newModelName = string.Empty;
 
+    /// <summary>The Resolution Diagnosis row's status label for one configured model.</summary>
     private static string DiagnosisLabel(PriceResolutionDiagnosisView d) =>
         !d.Resolved ? "Unresolved" : d.IsApproximate ? "Approximate" : "Exact";
 
+    /// <summary>The CSS color class for one configured model's resolution status.</summary>
     private static string DiagnosisClass(PriceResolutionDiagnosisView d) =>
         !d.Resolved ? "metric-critical" : d.IsApproximate ? "metric-fallback" : "metric-positive";
 
+    /// <summary>Whether the Add form has every field filled in and can submit.</summary>
     private bool CanAdd =>
         !string.IsNullOrWhiteSpace(_newSourceName) &&
         !string.IsNullOrWhiteSpace(_newAggregatorModelKey) &&
@@ -135,16 +138,20 @@
         await Store.LoadPriceOverridesAsync();
     }
 
+    /// <summary>Re-renders when the store's state changes.</summary>
     private void OnStoreChanged() => InvokeAsync(StateHasChanged);
 
+    /// <summary>Unsubscribes from <see cref="ProviderAdminStore.Changed"/>.</summary>
     public void Dispose() => Store.Changed -= OnStoreChanged;
 
+    /// <summary>Clears the inline error and reloads providers and price overrides. Implements the unreachable state's Retry button.</summary>
     private Task Reload() => RunAsync(async () =>
     {
         await Store.LoadAsync();
         await Store.LoadPriceOverridesAsync();
     });
 
+    /// <summary>Submits the Add form's fields as a new price override, then clears the form on success.</summary>
     private Task Add() => RunAsync(async () =>
     {
         await Store.SetPriceOverrideAsync(new PriceOverrideWriteRequest(_newSourceName, _newAggregatorModelKey, _newModelName));
@@ -153,6 +160,7 @@
         _newModelName = string.Empty;
     });
 
+    /// <summary>Removes one price override.</summary>
     private Task Remove(PriceOverrideView o) =>
         RunAsync(() => Store.RemovePriceOverrideAsync(o.SourceName, o.AggregatorModelKey));
 

@@ -77,6 +77,12 @@ public sealed class CostReconciliationService
         }
     }
 
+    /// <summary>
+    /// Reconciles one provider from its stored checkpoint (or yesterday, on a first run) through yesterday,
+    /// clamped to at most <see cref="MaxCatchUpDays"/> days so a long-idle provider catches up gradually
+    /// rather than in one unbounded burst. Stops - without advancing the checkpoint further - at the first
+    /// day whose reconciliation fails, so a gap is retried next cycle instead of being silently skipped.
+    /// </summary>
     private async Task ReconcileProviderAsync(IProviderCostReconciler reconciler, CancellationToken cancellationToken)
     {
         var yesterday = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(-1));
@@ -121,6 +127,10 @@ public sealed class CostReconciliationService
         }
     }
 
+    /// <summary>
+    /// Fetches the provider-reported cost for <paramref name="day"/>, sums the local ledger's estimated
+    /// cost over the same UTC day window, persists both as one reconciliation snapshot, and logs the delta.
+    /// </summary>
     private async Task ReconcileDayAsync(IProviderCostReconciler reconciler, DateOnly day, CancellationToken cancellationToken)
     {
         var reportedCost = await reconciler.GetReportedCostAsync(day, cancellationToken).ConfigureAwait(false);
@@ -150,6 +160,12 @@ public sealed class CostReconciliationService
         LogDelta(reconciler.Provider, day, reportedCost, localCost);
     }
 
+    /// <summary>
+    /// Logs the reported-vs-local cost comparison for one provider/day - at Warning when the delta exceeds
+    /// <see cref="CostReconciliationOptions.DeltaWarningPercent"/> (likely a stale price table), otherwise
+    /// at Debug. Either cost being non-positive skips the percentage comparison entirely, since it would
+    /// either divide by zero or always compute to a misleading 100%.
+    /// </summary>
     private void LogDelta(string provider, DateOnly day, decimal reportedCost, decimal localCost)
     {
         if (reportedCost <= 0m || localCost <= 0m)

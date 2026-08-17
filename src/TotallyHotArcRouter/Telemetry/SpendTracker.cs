@@ -161,6 +161,7 @@ public sealed class NullSpendTracker : ISpendTracker
     /// <summary>The shared, stateless no-op instance.</summary>
     public static readonly NullSpendTracker Instance = new();
 
+    /// <summary>Private: use <see cref="Instance"/> instead of constructing new instances.</summary>
     private NullSpendTracker()
     {
     }

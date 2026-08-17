@@ -12,6 +12,7 @@ namespace TotallyHot.ArcRouter.Router;
 /// </summary>
 public sealed class RouterMemoryDatabase
 {
+    /// <summary>DDL creating the <c>memory_entries</c> table if it does not already exist.</summary>
     private const string SchemaSql = """
         CREATE TABLE IF NOT EXISTS memory_entries (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -24,6 +25,7 @@ public sealed class RouterMemoryDatabase
         );
         """;
 
+    /// <summary>The resolved absolute path of the database file.</summary>
     private readonly string _databasePath;
 
     /// <summary>
@@ -43,6 +45,7 @@ public sealed class RouterMemoryDatabase
     /// <summary>Gets the resolved absolute path of the database file.</summary>
     public string DatabasePath => _databasePath;
 
+    /// <summary>Gets the SQLite connection string for <see cref="_databasePath"/>.</summary>
     private string ConnectionString => $"Data Source={_databasePath}";
 
     /// <summary>

@@ -134,6 +134,8 @@ public sealed class LlmRouterOptions
         }
     }
 
+    /// <summary>Validates that <paramref name="value"/> is an absolute URI, naming <paramref name="propertyName"/> in the failure.</summary>
+    /// <exception cref="ArgumentException"><paramref name="value"/> is not an absolute URI.</exception>
     private static void EnsureAbsoluteUri(string value, string propertyName)
     {
         if (!Uri.TryCreate(value, UriKind.Absolute, out _))
@@ -157,6 +159,7 @@ public sealed class LlmRouterOptions
     /// </summary>
     public static string ResolveModelsRootDirectory() => ResolvePath(ModelsRootDirectory);
 
+    /// <summary>Expands the <c>%LOCALAPPDATA%</c> token (falling back to <see cref="AppContext.BaseDirectory"/> if unavailable) and any other environment variables in <paramref name="path"/>.</summary>
     private static string ResolvePath(string path)
     {
         var expanded = Environment.ExpandEnvironmentVariables(path);
