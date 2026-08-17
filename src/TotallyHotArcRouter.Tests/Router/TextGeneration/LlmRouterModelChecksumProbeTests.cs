@@ -145,6 +145,31 @@ public sealed class LlmRouterModelChecksumProbeTests
             capturedRequest.RequestUri!.AbsoluteUri);
     }
 
+    [Fact]
+    public async Task TryFetchAsync_FolderNameContainsUrlEscapedCharacters_StillMatchesDecodedTreePaths()
+    {
+        const string treeJsonWithEscapedFolder = """
+            [
+              { "type": "file", "path": "cpu_and_mobile/sub dir/genai_config.json", "oid": "aaaa000000000000000000000000000000aaaa", "size": 1417 }
+            ]
+            """;
+        var probe = CreateProbe(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(treeJsonWithEscapedFolder, Encoding.UTF8, "application/json"),
+        });
+
+        // "sub dir" arrives from Uri.AbsolutePath already percent-encoded as "sub%20dir", but the tree
+        // API's JSON path values are decoded repo paths ("sub dir"). Comparing the still-encoded prefix
+        // against the decoded entry path must not silently drop every file in the folder.
+        var baseUrl = "https://huggingface.co/some-org/some-repo/resolve/main/cpu_and_mobile/sub dir";
+
+        var result = await probe.TryFetchAsync(baseUrl, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result);
+        Assert.Single(result.Files);
+        Assert.Equal("aaaa000000000000000000000000000000aaaa", result.Files["genai_config.json"].PublishedOid);
+    }
+
     private static LlmRouterModelChecksumProbe CreateProbe(Func<HttpRequestMessage, HttpResponseMessage> respond) =>
         CreateProbe(new FakeHttpMessageHandler(respond));
 

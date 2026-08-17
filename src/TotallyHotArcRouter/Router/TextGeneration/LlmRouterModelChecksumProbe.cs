@@ -117,7 +117,15 @@ public sealed class LlmRouterModelChecksumProbe
             // llm_router artifact set; keying by leaf name alone (ignoring where in the tree it came from)
             // would let a same-named file from an unrelated subdirectory silently overwrite the real one
             // and verify downloads against the wrong OID.
-            var folderPrefix = string.IsNullOrEmpty(pathPrefix) ? string.Empty : pathPrefix + "/";
+            //
+            // pathPrefix itself is a slice of Uri.AbsolutePath, so it's percent-encoded (e.g. "sub%20dir"),
+            // but the tree API's JSON path values are repo paths - decoded characters (e.g. "sub dir").
+            // Comparing the encoded prefix against decoded entry paths would never match for any folder
+            // name containing URL-escaped characters, silently dropping every file and disabling checksum
+            // verification for that model. Decode once here for comparison; EscapePathPrefix above already
+            // re-escapes pathPrefix separately when composing the API request URL.
+            var decodedPathPrefix = Uri.UnescapeDataString(pathPrefix);
+            var folderPrefix = string.IsNullOrEmpty(decodedPathPrefix) ? string.Empty : decodedPathPrefix + "/";
             Dictionary<string, LlmRouterModelPublishedFile> files = [];
             foreach (var entry in entries)
             {
