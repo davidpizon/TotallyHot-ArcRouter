@@ -203,24 +203,52 @@ public sealed class LlmRouterModelOverrideStore : ILlmRouterModelOverrideStore, 
 
     private static string StripFileName(string url, string expectedFileName, string propertyName)
     {
-        if (!url.EndsWith($"/{expectedFileName}", StringComparison.Ordinal))
+        var (folder, fileName) = SplitFolderAndFileName(url, propertyName);
+        if (!string.Equals(fileName, expectedFileName, StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
                 $"'{propertyName}' ('{url}') does not end with the expected file name '{expectedFileName}'.");
         }
 
-        return url[..^(expectedFileName.Length + 1)];
+        return folder;
     }
 
     private static void EnsureMatchesBaseUrl(string baseUrl, string url, string expectedFileName, string propertyName)
     {
-        var expected = $"{baseUrl}/{expectedFileName}";
-        if (!string.Equals(url, expected, StringComparison.Ordinal))
+        var (folder, fileName) = SplitFolderAndFileName(url, propertyName);
+        if (!string.Equals(fileName, expectedFileName, StringComparison.Ordinal) ||
+            !string.Equals(folder, baseUrl, StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
                 $"'{propertyName}' ('{url}') does not share the same folder as 'GenAiConfigUrl' ('{baseUrl}'). " +
-                $"Expected '{expected}'. Every LlmRouter artifact URL must point at the same model folder.");
+                $"Expected a URL ending in '/{expectedFileName}' under '{baseUrl}'. Every LlmRouter artifact URL must point at the same model folder.");
         }
+    }
+
+    /// <summary>
+    /// Splits a seed artifact URL into its folder (scheme/host normalized like
+    /// <see cref="NormalizeBaseUrl"/>, default port dropped, path casing preserved) and trailing file
+    /// name, ignoring any query string or fragment. Parsing the URL rather than comparing raw strings
+    /// means seed URLs that differ only in host casing, an explicit default port, or a query string (e.g.
+    /// a Hugging Face <c>?download=true</c>) still validate correctly instead of being rejected outright.
+    /// </summary>
+    private static (string Folder, string FileName) SplitFolderAndFileName(string url, string propertyName)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
+        {
+            throw new InvalidOperationException($"'{propertyName}' ('{url}') must be an absolute http or https URI.");
+        }
+
+        var path = uri.AbsolutePath;
+        var lastSlash = path.LastIndexOf('/');
+        if (lastSlash < 0)
+        {
+            throw new InvalidOperationException($"'{propertyName}' ('{url}') does not contain a file name.");
+        }
+
+        var fileName = path[(lastSlash + 1)..];
+        var folder = uri.GetLeftPart(UriPartial.Authority) + path[..lastSlash];
+        return (folder, fileName);
     }
 
     /// <summary>

@@ -46,6 +46,46 @@ public sealed class LlmRouterModelOverrideStoreTests : IDisposable
     }
 
     [Fact]
+    public void Constructor_SeedUrlsCarryQueryString_SeedsSuccessfully()
+    {
+        const string folder =
+            "https://huggingface.co/xiaoyao9184/Qwen2.5-0.5B-Instruct-onnx-genai/resolve/main/cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4";
+        var seed = new LlmRouterOptions
+        {
+            GenAiConfigUrl = $"{folder}/genai_config.json?download=true",
+            TokenizerJsonUrl = $"{folder}/tokenizer.json?download=true",
+            TokenizerConfigJsonUrl = $"{folder}/tokenizer_config.json?download=true",
+            ModelOnnxUrl = $"{folder}/model.onnx?download=true",
+            ModelOnnxDataUrl = $"{folder}/model.onnx.data?download=true",
+        };
+
+        var store = CreateStore(seed);
+
+        Assert.Equal(folder, store.Snapshot.Override.BaseUrl);
+    }
+
+    [Fact]
+    public void Constructor_SeedUrlsDifferOnlyByHostCasingAndDefaultPort_SeedsSuccessfully()
+    {
+        const string folder =
+            "https://huggingface.co/xiaoyao9184/Qwen2.5-0.5B-Instruct-onnx-genai/resolve/main/cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4";
+        const string differentlyCasedFolder =
+            "https://HuggingFace.co:443/xiaoyao9184/Qwen2.5-0.5B-Instruct-onnx-genai/resolve/main/cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4";
+        var seed = new LlmRouterOptions
+        {
+            GenAiConfigUrl = $"{differentlyCasedFolder}/genai_config.json",
+            TokenizerJsonUrl = $"{folder}/tokenizer.json",
+            TokenizerConfigJsonUrl = $"{folder}/tokenizer_config.json",
+            ModelOnnxUrl = $"{folder}/model.onnx",
+            ModelOnnxDataUrl = $"{folder}/model.onnx.data",
+        };
+
+        var store = CreateStore(seed);
+
+        Assert.Equal(folder, store.Snapshot.Override.BaseUrl);
+    }
+
+    [Fact]
     public async Task SetBaseUrlAsync_PersistsAndBumpsVersion()
     {
         var store = CreateStore(DefaultOptions());
