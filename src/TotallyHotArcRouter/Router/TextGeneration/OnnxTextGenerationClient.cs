@@ -137,9 +137,11 @@ public sealed class OnnxTextGenerationClient : ITextGenerationClient, IAsyncDisp
 
             if (_model is not null || _tokenizer is not null)
             {
-                // A model switch landed after this instance already loaded one: swap it out under the
-                // inference lock too, so a generation in flight (which only holds _inferenceLock, not
-                // _initLock) never reads a disposed Model/Tokenizer.
+                // A model switch landed after this instance already loaded one: hold the inference lock
+                // across the whole dispose-through-reload sequence below, not just the dispose, so a
+                // caller that passed the lock-free fast-path check above (racing this swap) cannot
+                // acquire _inferenceLock and read a null/disposed Model or Tokenizer while the new model
+                // downloads.
                 await _inferenceLock.WaitAsync(cancellationToken).ConfigureAwait(false);
                 try
                 {
@@ -147,11 +149,30 @@ public sealed class OnnxTextGenerationClient : ITextGenerationClient, IAsyncDisp
                     _tokenizer = null;
                     _model?.Dispose();
                     _model = null;
+
+                    var activeOverrideForSwap = snapshot.Override;
+                    var cacheDirectoryForSwap = activeOverrideForSwap.ResolveCacheDirectory();
+                    Directory.CreateDirectory(cacheDirectoryForSwap);
+
+                    foreach (var fileName in LlmRouterModelFiles.All)
+                    {
+                        await EnsureArtifactCachedAsync(cacheDirectoryForSwap, fileName, $"{activeOverrideForSwap.BaseUrl}/{fileName}", cancellationToken)
+                            .ConfigureAwait(false);
+                    }
+
+                    var swappedModel = new Model(cacheDirectoryForSwap);
+                    _tokenizer = new Tokenizer(swappedModel);
+                    _model = swappedModel;
+                    _loadedOverrideVersion = snapshot.Version;
+
+                    _logger.LogInformation("Loaded llm_router ONNX GenAI model from {CacheDirectory}.", cacheDirectoryForSwap);
                 }
                 finally
                 {
                     _inferenceLock.Release();
                 }
+
+                return;
             }
 
             var activeOverride = snapshot.Override;

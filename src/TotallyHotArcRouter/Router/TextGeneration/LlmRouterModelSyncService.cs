@@ -116,11 +116,27 @@ public sealed class LlmRouterModelSyncService
             if (probeResult is not null && probeResult.Files.TryGetValue(fileName, out var cachedPublished))
             {
                 progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Verifying));
-                var cachedLength = new FileInfo(destinationPath).Length;
+
+                // Isolate this file's failure per the class-level contract, same as the download path
+                // below: the cached file may be locked by a concurrent OnnxTextGenerationClient inference
+                // (IOException), fail an ACL check (UnauthorizedAccessException), or have been deleted
+                // between the File.Exists check above and here (FileNotFoundException).
                 string cachedOid;
-                await using (var hashStream = File.OpenRead(destinationPath))
+                try
                 {
+                    var cachedLength = new FileInfo(destinationPath).Length;
+                    await using var hashStream = File.OpenRead(destinationPath);
                     cachedOid = GitBlobHash.Compute(hashStream, cachedLength);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "llm_router cached model file verification failed for {FileName}.", fileName);
+                    progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Failed));
+                    return new LlmRouterModelFileSyncOutcome(fileName, Succeeded: false, ChecksumVerified: false, ex.Message);
                 }
 
                 if (string.Equals(cachedOid, cachedPublished.PublishedOid, StringComparison.OrdinalIgnoreCase))

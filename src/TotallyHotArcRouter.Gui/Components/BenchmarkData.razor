@@ -123,10 +123,23 @@
                     <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
                         <Icon Name="alert-triangle" Size="14" /> Router unreachable
                     </div>
+                    <div class="text-xs text-slate-400">
+                        @if (VoterStore.ServerAddress is { Length: > 0 } voterServerAddress)
+                        {
+                            <text>Could not reach <span class="font-mono">@voterServerAddress</span>. Is the proxy running?</text>
+                        }
+                        else
+                        {
+                            <text>Could not reach the router. Is the proxy running?</text>
+                        }
+                    </div>
                     @if (!string.IsNullOrEmpty(VoterStore.LastError))
                     {
                         <div class="text-xs text-slate-500 font-mono">@VoterStore.LastError</div>
                     }
+                    <button @onclick="VoterReload" class="btn btn-ghost">
+                        Retry
+                    </button>
                 </div>
             }
             else
@@ -228,6 +241,13 @@
     {
         _opError = null;
         await Store.LoadAsync();
+    }
+
+    /// <summary>Same purpose as <see cref="Reload"/>, for the Local Voter Model section's own store.</summary>
+    private async Task VoterReload()
+    {
+        _voterOpError = null;
+        await VoterStore.LoadAsync();
     }
 
     /// <summary>
