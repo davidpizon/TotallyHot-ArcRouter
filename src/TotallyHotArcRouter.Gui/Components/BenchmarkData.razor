@@ -106,7 +106,7 @@
             <div class="flex items-center justify-between mb-3 gap-2">
                 <span class="text-xs text-slate-500 uppercase tracking-widest">Local Voter Model</span>
                 <button @onclick="RunVoterAction"
-                        disabled="@(VoterStore.IsSyncing || VoterStore.Status?.Current == true)"
+                        disabled="@VoterStore.IsSyncing"
                         class="btn btn-secondary flex items-center gap-1.5">
                     <Icon Name="rotate-ccw" Size="13" />
                     @VoterActionLabel()
@@ -344,13 +344,16 @@
     }
 
     /// <summary>
-    /// The Local Voter Model header button's label: "Current" once every file is cached, "Update"
-    /// otherwise, "Updating…" for the duration of a sync. Unlike <see cref="ActionLabel"/>, there is no
-    /// "Check Failed" state - the base URL is a fixed pin, not a rolling ref, so there is nothing to
-    /// recheck against.
+    /// The Local Voter Model header button's label: "Re-verify" once every file is cached (the button
+    /// stays enabled in this state, unlike the corpus panel's <see cref="ActionLabel"/>/Store.Status.State
+    /// pairing, since checksum verification is in-memory only and doesn't survive a process restart -
+    /// re-running the sync is the only way to confirm already-cached files are still intact), "Update"
+    /// when at least one file is missing, "Updating…" for the duration of a sync. Unlike
+    /// <see cref="ActionLabel"/>, there is no "Check Failed" state - the base URL is a fixed pin, not a
+    /// rolling ref, so there is nothing to recheck against.
     /// </summary>
     private string VoterActionLabel() =>
-        VoterStore.IsSyncing ? "Updating…" : VoterStore.Status?.Current == true ? "Current" : "Update";
+        VoterStore.IsSyncing ? "Updating…" : VoterStore.Status?.Current == true ? "Re-verify" : "Update";
 
     private Task RunVoterAction() => RunVoterAsync(() => VoterStore.SyncAsync());
 

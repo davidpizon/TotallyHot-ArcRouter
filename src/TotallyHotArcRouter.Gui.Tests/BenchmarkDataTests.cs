@@ -179,6 +179,25 @@ public sealed class BenchmarkDataTests
     }
 
     [Fact]
+    public void Voter_current_state_renders_an_enabled_reverify_button_that_reruns_sync()
+    {
+        // Unlike the corpus panel, the voter's "Current" state must stay clickable: checksum verification
+        // is in-memory only and doesn't survive a process restart, so re-running the sync is the only way
+        // to confirm already-cached files are still intact.
+        var voterClient = new FakeVoterClient();
+        using var ctx = NewContext(new FakeClient(BenchmarkDataAdminState.Current), voterClient);
+
+        var cut = ctx.Render<BenchmarkData>();
+
+        var button = cut.FindAll("button").First(b => b.TextContent.Contains("Re-verify", StringComparison.Ordinal));
+        button.HasAttribute("disabled").Should().BeFalse();
+
+        button.Click();
+
+        voterClient.SyncCount.Should().Be(1);
+    }
+
+    [Fact]
     public void A_rejected_status_load_shows_the_rejection_rather_than_the_unreachable_state()
     {
         // The router answered - it just refused - so "Router unreachable" would both misstate the cause
@@ -288,6 +307,8 @@ public sealed class BenchmarkDataTests
 
         public int GetStatusCount { get; private set; }
 
+        public int SyncCount { get; private set; }
+
         public Task<LlmRouterModelStatusInfo> GetStatusAsync(CancellationToken cancellationToken = default)
         {
             GetStatusCount++;
@@ -302,6 +323,7 @@ public sealed class BenchmarkDataTests
         public async IAsyncEnumerable<LlmRouterModelSyncEvent> SyncAsync(
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
+            SyncCount++;
             await Task.CompletedTask;
             yield return new LlmRouterModelSyncEvent(Progress: null, FinalStatus: new LlmRouterModelStatusInfo(string.Empty, [], Current: true));
         }
