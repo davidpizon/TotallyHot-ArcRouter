@@ -6,8 +6,15 @@ dotnet build src/TotallyHotArcRouter.slnx -clp:ErrorsOnly
 ```
 Must report 0 warnings/errors (enforced by `TreatWarningsAsErrors` in `src/Directory.Build.props`).
 
-## Test — xUnit v3, `dotnet test` DOES NOT WORK on this .NET 10 setup
-Run the built test executable directly with `-class`/`-method` filters instead of `dotnet test`:
+## Test — xUnit v3 on Microsoft.Testing.Platform
+`global.json` pins `test.runner` to `Microsoft.Testing.Platform` and every test project sets
+`TestingPlatformDotnetTestSupport=true`, so `dotnet test` works directly (CI uses it too):
+```
+dotnet test src/<Project>.Tests/<Project>.Tests.csproj --configuration Release
+```
+Filter with `--filter-class`/`--filter-method` (Microsoft.Testing.Platform's flags, not VSTest's
+`--filter`). You can still run the built exe directly with `-class`/`-method` filters if you want
+to bypass `dotnet test`'s MSBuild overhead:
 ```
 ./src/<Project>.Tests/bin/Debug/net10.0/<Project>.Tests.exe -class "Full.Namespace.ClassName"
 ./src/<Project>.Tests/bin/Debug/net10.0/<Project>.Tests.exe -method "Full.Namespace.ClassName.MethodName"
