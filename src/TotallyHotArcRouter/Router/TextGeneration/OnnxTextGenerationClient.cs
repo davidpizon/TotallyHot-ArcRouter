@@ -83,6 +83,14 @@ public sealed class OnnxTextGenerationClient : ITextGenerationClient, IAsyncDisp
         await _inferenceLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            // DisposeAsync can run (and null out _model/_tokenizer) between the fast-path check inside
+            // EnsureInitializedAsync above and this thread acquiring _inferenceLock - fail fast here
+            // instead of RunGeneration hitting a NullReferenceException on the null-forgiving fields.
+            if (_model is null || _tokenizer is null)
+            {
+                throw new ObjectDisposedException(nameof(OnnxTextGenerationClient));
+            }
+
             using var deadline = new CancellationTokenSource(TimeSpan.FromMilliseconds(_options.GenerationTimeoutMs));
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
             return RunGeneration(prompt, linked.Token);
