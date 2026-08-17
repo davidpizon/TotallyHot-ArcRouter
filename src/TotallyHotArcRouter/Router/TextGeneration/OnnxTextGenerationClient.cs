@@ -266,10 +266,21 @@ public sealed class OnnxTextGenerationClient : ITextGenerationClient, IAsyncDisp
         await _initLock.WaitAsync().ConfigureAwait(false);
         try
         {
-            _tokenizer?.Dispose();
-            _tokenizer = null;
-            _model?.Dispose();
-            _model = null;
+            // GenerateAsync only holds _inferenceLock during inference, not _initLock - take it here
+            // too (after _initLock, matching EnsureInitializedAsync's lock order) so disposal can't
+            // race an in-flight generation into reading a disposed Model/Tokenizer.
+            await _inferenceLock.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                _tokenizer?.Dispose();
+                _tokenizer = null;
+                _model?.Dispose();
+                _model = null;
+            }
+            finally
+            {
+                _inferenceLock.Release();
+            }
         }
         finally
         {
