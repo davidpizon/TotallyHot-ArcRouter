@@ -21,6 +21,10 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <EnableMsixTooling>false</EnableMsixTooling>
     <WindowsPackageType>None</WindowsPackageType>
+    <!-- xunit.v3 runs on Microsoft.Testing.Platform (MTP), which the .NET 10 SDK no longer bridges to
+         VSTest for `dotnet test` by default (see https://aka.ms/dotnet-test-mtp-error). This opts back
+         into `dotnet test` support so CI's `dotnet test` invocation keeps working. -->
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
   </PropertyGroup>
 
   <PropertyGroup Condition="!$([MSBuild]::IsOSPlatform('Windows'))">
@@ -35,10 +39,6 @@
     <!-- bunit pulls in AngleSharp 1.4.0 transitively, which has a known moderate-severity mXSS
          vulnerability (GHSA-pgww-w46g-26qg). Pin directly to the patched version. -->
     <PackageReference Include="AngleSharp" Version="1.7.1" />
-    <PackageReference Include="coverlet.collector" Version="10.0.1">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
     <!-- AwesomeAssertions: the Apache-2.0 community fork of FluentAssertions. FluentAssertions 8.x moved to
          the Xceed Community License, which permits non-commercial use only and restricts *use*, not just
          redistribution - so it would constrain how this repository itself may be licensed and used. See
@@ -46,6 +46,7 @@
          (`using AwesomeAssertions;`), which is why no test assertion needed rewriting. -->
     <PackageReference Include="AwesomeAssertions" Version="9.5.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.10.0" />
     <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

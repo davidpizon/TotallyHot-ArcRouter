@@ -73,6 +73,12 @@ jobs:
             echo "::endgroup::"
           done
 
+      # coverage.runsettings (repo root) configures Microsoft.Testing.Extensions.CodeCoverage's exclusions
+      # (module/source/function patterns - see the "Check coverage threshold" step below for what and why).
+      # It intentionally has NO XML comments in it: Microsoft.Testing.Extensions.CodeCoverage 18.10.0's
+      # settings parser silently fails on any comment in that file - the run reports "Zero tests ran" with
+      # no further diagnostic - confirmed empirically while migrating off coverlet (xunit.v3/Microsoft.Testing.Platform
+      # dropped support for coverlet's VSTest-based data collector on the .NET 10 SDK, see https://aka.ms/dotnet-test-mtp-error).
       - name: Test
         run: |
           set -euo pipefail
@@ -80,17 +86,18 @@ jobs:
             echo "::group::dotnet test $proj"
             name=$(basename "$proj" .csproj)
             dotnet test "$proj" --configuration Release --no-restore --no-build \
-              --collect:"XPlat Code Coverage" --settings coverlet.runsettings \
+              --coverage --coverage-output-format cobertura --coverage-settings coverage.runsettings \
+              --coverage-output coverage.cobertura.xml \
               --results-directory "TestResults/$name"
             echo "::endgroup::"
           done
 
-      # AGENTS.md requires >=80% code coverage. coverlet.runsettings (repo root) already excludes
+      # AGENTS.md requires >=80% code coverage. coverage.runsettings (repo root) already excludes
       # generated/non-testable code (protobuf stubs, MAUI/WinRT bootstrap) from the line-coverage math
       # so the bar reflects code we actually own. TotallyHotArcRouter.Gui/.Gui.Tests aren't in $PROJECTS
       # (Windows-only MAUI, can't build/test on this Linux runner - same exclusion as Build/Test above)
       # so they're checked against this same 80% bar by the windows-gui-build-and-test job below instead;
-      # see coverlet.runsettings' own comment for why the split exists.
+      # see coverage.runsettings' own comment for why the split exists.
       - name: Check coverage threshold
         run: |
           set -euo pipefail
@@ -172,11 +179,12 @@ jobs:
         run: |
           dotnet test src/TotallyHotArcRouter.Gui.Tests/TotallyHotArcRouter.Gui.Tests.csproj `
             --configuration Release --no-restore `
-            --collect:"XPlat Code Coverage" --settings coverlet.runsettings `
+            --coverage --coverage-output-format cobertura --coverage-settings coverage.runsettings `
+            --coverage-output coverage.cobertura.xml `
             --results-directory TestResults/TotallyHotArcRouter.Gui.Tests
 
-      # Mirrors the Linux job's coverage gate (same coverlet.runsettings, same AGENTS.md 80% bar) for
-      # the one assembly that can only be measured on Windows - see coverlet.runsettings' own comment
+      # Mirrors the Linux job's coverage gate (same coverage.runsettings, same AGENTS.md 80% bar) for
+      # the one assembly that can only be measured on Windows - see coverage.runsettings' own comment
       # for why TotallyHotArcRouter.Gui/.Gui.Tests were previously checked here only by hand.
       # -assemblyfilters restricts the report to TotallyHotArcRouter.Gui itself: TotallyHotArcRouter.Gui.Tests
       # (bUnit) also links TotallyHotArcRouter.Gui.Admin/.Charts/.Console/.Telemetry through Gui's
