@@ -341,9 +341,10 @@
     {
         { Stage: LlmRouterModelSyncStageInfo.Downloading } => "Downloading…",
         { Stage: LlmRouterModelSyncStageInfo.Verifying } => "Verifying…",
-        { Stage: LlmRouterModelSyncStageInfo.Completed } => "Synced",
         { Stage: LlmRouterModelSyncStageInfo.Failed } => "Failed",
-        _ => file.Synced ? "Synced" : "Not synced",
+        // A Completed event for an absent optional file means the sync deliberately skipped it (the
+        // export inlines its weights), not that it synced - same as the at-rest (no progress) case below.
+        _ => file.Synced ? "Synced" : (file.IsOptional ? "Optional" : "Not synced"),
     };
 
     private static string VoterStageClass(LlmRouterModelSyncProgressInfo? progress) => progress?.Stage switch
@@ -361,7 +362,14 @@
             return $"{bytes / 1024.0 / 1024.0:0.#} MB downloaded";
         }
 
-        return file.Synced ? $"{file.SizeBytes / 1024.0 / 1024.0:0.#} MB" : "Never synced";
+        if (file.Synced)
+        {
+            return $"{file.SizeBytes / 1024.0 / 1024.0:0.#} MB";
+        }
+
+        // Same "expected, permanent absence" distinction as VoterStageLabel - an optional file that was
+        // never published shouldn't read as if a sync simply hasn't happened yet.
+        return file.IsOptional ? "Optional - not published for this model" : "Never synced";
     }
 
     private static string VoterDescribeSyncedAt(LlmRouterModelFileStatusInfo file) =>

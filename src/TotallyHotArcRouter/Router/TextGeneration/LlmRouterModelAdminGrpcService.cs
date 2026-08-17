@@ -114,6 +114,7 @@ public sealed class LlmRouterModelAdminGrpcService : Contract.LlmRouterModelAdmi
                     SizeBytes = fileInfo.Length,
                     SyncedAtUtc = Timestamp.FromDateTime(fileInfo.LastWriteTimeUtc),
                     ChecksumVerified = verifiedFiles?.GetValueOrDefault(fileName) ?? false,
+                    IsOptional = LlmRouterModelFiles.IsOptional(fileName),
                 });
             }
             else
@@ -125,7 +126,12 @@ public sealed class LlmRouterModelAdminGrpcService : Contract.LlmRouterModelAdmi
                     allSynced = false;
                 }
 
-                response.Files.Add(new Contract.LlmRouterModelFile { FileName = fileName, Synced = false });
+                response.Files.Add(new Contract.LlmRouterModelFile
+                {
+                    FileName = fileName,
+                    Synced = false,
+                    IsOptional = LlmRouterModelFiles.IsOptional(fileName),
+                });
             }
         }
 

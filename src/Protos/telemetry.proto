@@ -274,6 +274,10 @@ message LlmRouterModelFile {
   // been checksum-verified by a sync in this process's lifetime - in which case only the file's local
   // existence and size are known.
   bool checksum_verified = 5;
+  // True only for model.onnx.data: some exports inline all weights into model.onnx and never publish this
+  // file, so the panel needs to tell that expected, permanent absence apart from an unsynced required
+  // file rather than rendering both as "Not synced".
+  bool is_optional = 6;
 }
 
 message LlmRouterModelStatusResponse {

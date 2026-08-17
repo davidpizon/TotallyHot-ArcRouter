@@ -32,12 +32,17 @@ public sealed class LlmRouterModelAdminException : Exception
 /// <param name="SizeBytes">The cached file's byte size, or 0 if it has never synced.</param>
 /// <param name="SyncedAtUtc">When this file was last written to the cache, or <see langword="null"/> if it never has.</param>
 /// <param name="ChecksumVerified">Whether the most recent sync verified this file's checksum against Hugging Face.</param>
+/// <param name="IsOptional">
+/// True only for model.onnx.data: some exports inline all weights into model.onnx and never publish this
+/// file, so the panel can render its expected, permanent absence apart from an unsynced required file.
+/// </param>
 public sealed record LlmRouterModelFileStatusInfo(
     string FileName,
     bool Synced,
     long SizeBytes,
     DateTimeOffset? SyncedAtUtc,
-    bool ChecksumVerified);
+    bool ChecksumVerified,
+    bool IsOptional);
 
 /// <summary>The llm_router voter's active model, its 5 files' cache status, and whether all 5 are present.</summary>
 /// <param name="BaseUrl">The active model's base folder URL.</param>
@@ -220,7 +225,8 @@ public sealed class LlmRouterModelAdminClient : ILlmRouterModelAdminClient, IDis
         file.Synced,
         file.SizeBytes,
         file.SyncedAtUtc?.ToDateTimeOffset(),
-        file.ChecksumVerified);
+        file.ChecksumVerified,
+        file.IsOptional);
 
     /// <summary>Converts a gRPC-contract sync stream message into the client's <see cref="LlmRouterModelSyncEvent"/>.</summary>
     private static LlmRouterModelSyncEvent MapEvent(Contract.LlmRouterModelSyncStreamEvent wire) =>
