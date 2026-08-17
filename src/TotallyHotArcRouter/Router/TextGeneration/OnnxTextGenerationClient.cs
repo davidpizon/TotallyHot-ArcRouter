@@ -227,18 +227,36 @@ public sealed class OnnxTextGenerationClient : ITextGenerationClient, IAsyncDisp
         }
         catch (OperationCanceledException)
         {
-            File.Delete(temporaryPath);
+            SafeDelete(temporaryPath);
             throw;
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException)
         {
-            File.Delete(temporaryPath);
+            SafeDelete(temporaryPath);
             _logger.LogError(
                 ex,
                 "Failed to download llm_router artifact from {SourceUrl}. The llm_router voter abstains until this artifact is cached, either by network access or by manually placing the file at {DestinationPath}.",
                 sourceUrl,
                 destinationPath);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Best-effort deletion of a partial download's temp file. Mirrors
+    /// <c>LlmRouterModelSyncService.SafeDelete</c>: any failure here (e.g. <see cref="UnauthorizedAccessException"/>
+    /// on a read-only file, or an <see cref="IOException"/> because something still has it open) must not mask the
+    /// original network/cancellation failure that triggered the cleanup.
+    /// </summary>
+    private static void SafeDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception)
+        {
+            // Best-effort cleanup of a partial download; a failure here doesn't change the caller's outcome.
         }
     }
 
