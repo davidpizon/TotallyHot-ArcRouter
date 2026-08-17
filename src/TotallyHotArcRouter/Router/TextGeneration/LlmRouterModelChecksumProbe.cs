@@ -46,7 +46,7 @@ public sealed record LlmRouterModelChecksumProbeResult(IReadOnlyDictionary<strin
 /// Unlike <see cref="CodeRouterBench.BenchmarkChecksumProbe.FetchAsync"/>, this never throws for a
 /// probe-side failure: an arbitrary, operator-supplied URL is not guaranteed to be a Hugging Face URL at
 /// all, let alone one the API answers successfully, so <see cref="LlmRouterModelSyncService"/> must be
-/// able to fall back to existence/size-only verification rather than failing the whole sync over an
+/// able to fall back to existence-only verification rather than failing the whole sync over an
 /// unverifiable model source. Caller cancellation is the one exception - it still propagates as
 /// <see cref="OperationCanceledException"/>, matching <see cref="LlmRouterModelSyncService.SyncAsync"/>'s
 /// cancellation contract.
@@ -135,7 +135,7 @@ public sealed class LlmRouterModelChecksumProbe
         {
             _logger.LogWarning(
                 ex,
-                "llm_router checksum probe failed for {BaseUrl}; falling back to existence/size verification only.",
+                "llm_router checksum probe failed for {BaseUrl}; falling back to existence-only verification.",
                 baseUrl);
             return null;
         }
