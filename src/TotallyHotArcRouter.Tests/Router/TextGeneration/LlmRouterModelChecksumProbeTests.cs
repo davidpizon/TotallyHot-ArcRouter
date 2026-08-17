@@ -99,6 +99,26 @@ public sealed class LlmRouterModelChecksumProbeTests
     }
 
     [Fact]
+    public async Task TryFetchAsync_SameLeafNameInSubdirectory_DoesNotOverwriteFolderLevelEntry()
+    {
+        const string treeJsonWithSubdirCollision = """
+            [
+              { "type": "file", "path": "cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/model.onnx", "oid": "aaaa000000000000000000000000000000aaaa", "size": 512000 },
+              { "type": "file", "path": "cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/subdir/model.onnx", "oid": "bbbb000000000000000000000000000000bbbb", "size": 999999 }
+            ]
+            """;
+        var probe = CreateProbe(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(treeJsonWithSubdirCollision, Encoding.UTF8, "application/json"),
+        });
+
+        var result = await probe.TryFetchAsync(BaseUrl, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result);
+        Assert.Equal("aaaa000000000000000000000000000000aaaa", result.Files["model.onnx"].PublishedOid);
+    }
+
+    [Fact]
     public async Task TryFetchAsync_RefContainsEncodedSlash_EscapesExactlyOnce()
     {
         HttpRequestMessage? capturedRequest = null;

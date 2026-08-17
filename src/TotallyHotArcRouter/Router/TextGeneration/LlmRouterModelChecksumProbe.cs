@@ -110,20 +110,32 @@ public sealed class LlmRouterModelChecksumProbe
                 .ReadFromJsonAsync<List<LlmRouterModelTreeEntry>>(cancellationToken)
                 .ConfigureAwait(false) ?? [];
 
+            // The tree API is called scoped to pathPrefix already, but its response paths are relative to
+            // the repository root, not the folder - so an entry can legitimately live directly in the
+            // requested folder (no further '/') or, if a same-named file also exists in a subdirectory of
+            // that folder, one level deeper. Only the former is a real match for this fixed, flat
+            // llm_router artifact set; keying by leaf name alone (ignoring where in the tree it came from)
+            // would let a same-named file from an unrelated subdirectory silently overwrite the real one
+            // and verify downloads against the wrong OID.
+            var folderPrefix = string.IsNullOrEmpty(pathPrefix) ? string.Empty : pathPrefix + "/";
             Dictionary<string, LlmRouterModelPublishedFile> files = [];
             foreach (var entry in entries)
             {
                 if (!string.Equals(entry.Type, "file", StringComparison.Ordinal) ||
                     string.IsNullOrWhiteSpace(entry.Path) ||
-                    string.IsNullOrWhiteSpace(entry.Oid))
+                    string.IsNullOrWhiteSpace(entry.Oid) ||
+                    !entry.Path.StartsWith(folderPrefix, StringComparison.Ordinal))
                 {
                     continue;
                 }
 
-                var fileName = entry.Path.Contains('/', StringComparison.Ordinal)
-                    ? entry.Path[(entry.Path.LastIndexOf('/') + 1)..]
-                    : entry.Path;
-                files[fileName] = new LlmRouterModelPublishedFile(entry.Oid, entry.Size);
+                var relativePath = entry.Path[folderPrefix.Length..];
+                if (relativePath.Contains('/', StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                files[relativePath] = new LlmRouterModelPublishedFile(entry.Oid, entry.Size);
             }
 
             _logger.LogInformation(

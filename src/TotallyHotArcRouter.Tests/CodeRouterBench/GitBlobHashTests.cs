@@ -55,7 +55,7 @@ public class GitBlobHashTests
         var content = Encoding.UTF8.GetBytes("hello\n");
         using var stream = new MemoryStream(content);
 
-        var streamed = GitBlobHash.Compute(stream, content.LongLength);
+        var streamed = GitBlobHash.Compute(stream, content.LongLength, TestContext.Current.CancellationToken);
 
         Assert.Equal(GitBlobHash.Compute(content), streamed);
     }
@@ -67,8 +67,21 @@ public class GitBlobHashTests
         var content = Encoding.UTF8.GetBytes(new string('x', 200_000));
         using var stream = new MemoryStream(content);
 
-        var streamed = GitBlobHash.Compute(stream, content.LongLength);
+        var streamed = GitBlobHash.Compute(stream, content.LongLength, TestContext.Current.CancellationToken);
 
         Assert.Equal(GitBlobHash.Compute(content), streamed);
+    }
+
+    [Fact]
+    public void Compute_Stream_CancelledToken_ThrowsBeforeReadingWholeStream()
+    {
+        // A large artifact's hashing must observe cancellation between chunks rather than only after the
+        // whole stream has been read.
+        var content = Encoding.UTF8.GetBytes(new string('x', 200_000));
+        using var stream = new MemoryStream(content);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        Assert.Throws<OperationCanceledException>(() => GitBlobHash.Compute(stream, content.LongLength, cts.Token));
     }
 }

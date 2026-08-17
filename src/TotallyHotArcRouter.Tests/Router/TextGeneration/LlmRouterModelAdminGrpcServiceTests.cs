@@ -71,12 +71,34 @@ public sealed class LlmRouterModelAdminGrpcServiceTests
         Assert.False(required.IsOptional);
     }
 
+    [Fact]
+    public async Task SetLlmRouterModelBaseUrl_PersistenceFailure_ThrowsInternalRpcException()
+    {
+        var overrideStore = new ThrowingLlmRouterModelOverrideStore(new IOException("disk full"));
+        var service = CreateService(overrideStore);
+
+        var ex = await Assert.ThrowsAsync<RpcException>(() => service.SetLlmRouterModelBaseUrl(
+            new Contract.SetLlmRouterModelBaseUrlRequest { BaseUrl = "https://huggingface.co/some-org/some-model/resolve/main" },
+            CreateContext(TestContext.Current.CancellationToken)));
+
+        Assert.Equal(StatusCode.Internal, ex.StatusCode);
+    }
+
+    private sealed class ThrowingLlmRouterModelOverrideStore(Exception exception) : ILlmRouterModelOverrideStore
+    {
+        public LlmRouterModelSnapshot Snapshot => throw exception;
+
+        public event Action? Changed { add { } remove { } }
+
+        public Task SetBaseUrlAsync(string baseUrl, CancellationToken cancellationToken = default) => throw exception;
+    }
+
     private static LlmRouterModelAdminGrpcService CreateService(ILlmRouterModelOverrideStore overrideStore)
     {
         var factory = new FakeHttpClientFactory(new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound)));
         var probe = new LlmRouterModelChecksumProbe(factory, NullLogger<LlmRouterModelChecksumProbe>.Instance);
         var syncService = new LlmRouterModelSyncService(factory, probe, overrideStore, NullLogger<LlmRouterModelSyncService>.Instance);
-        return new LlmRouterModelAdminGrpcService(overrideStore, syncService);
+        return new LlmRouterModelAdminGrpcService(overrideStore, syncService, NullLogger<LlmRouterModelAdminGrpcService>.Instance);
     }
 
     private sealed class TempOverrideScope : IDisposable

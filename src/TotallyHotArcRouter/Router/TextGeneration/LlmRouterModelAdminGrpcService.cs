@@ -1,5 +1,6 @@
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
+using Microsoft.Extensions.Logging;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Router.TextGeneration;
@@ -14,15 +15,21 @@ public sealed class LlmRouterModelAdminGrpcService : Contract.LlmRouterModelAdmi
 {
     private readonly ILlmRouterModelOverrideStore _overrideStore;
     private readonly LlmRouterModelSyncService _syncService;
+    private readonly ILogger<LlmRouterModelAdminGrpcService> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="LlmRouterModelAdminGrpcService"/> class.</summary>
-    public LlmRouterModelAdminGrpcService(ILlmRouterModelOverrideStore overrideStore, LlmRouterModelSyncService syncService)
+    public LlmRouterModelAdminGrpcService(
+        ILlmRouterModelOverrideStore overrideStore,
+        LlmRouterModelSyncService syncService,
+        ILogger<LlmRouterModelAdminGrpcService> logger)
     {
         ArgumentNullException.ThrowIfNull(overrideStore);
         ArgumentNullException.ThrowIfNull(syncService);
+        ArgumentNullException.ThrowIfNull(logger);
 
         _overrideStore = overrideStore;
         _syncService = syncService;
+        _logger = logger;
     }
 
     /// <inheritdoc />
@@ -42,6 +49,18 @@ public sealed class LlmRouterModelAdminGrpcService : Contract.LlmRouterModelAdmi
         catch (ArgumentException ex)
         {
             throw new RpcException(new Status(StatusCode.InvalidArgument, ex.Message));
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // SetBaseUrlAsync's own validation failures surface as ArgumentException above; anything else
+            // (e.g. an IO/ACL failure persisting the override file) would otherwise escape as an unhelpful
+            // generic Unknown status - report it as Internal with a message the UI can actually show.
+            _logger.LogError(ex, "Failed to persist the llm_router model base URL override.");
+            throw new RpcException(new Status(StatusCode.Internal, "Failed to save the model base URL. See server logs for details."));
         }
 
         return BuildStatusResponse();

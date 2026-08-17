@@ -126,7 +126,7 @@ public sealed class LlmRouterModelSyncService
                 {
                     var cachedLength = new FileInfo(destinationPath).Length;
                     await using var hashStream = File.OpenRead(destinationPath);
-                    cachedOid = GitBlobHash.Compute(hashStream, cachedLength);
+                    cachedOid = GitBlobHash.Compute(hashStream, cachedLength, cancellationToken);
                 }
                 catch (OperationCanceledException)
                 {
@@ -206,7 +206,7 @@ public sealed class LlmRouterModelSyncService
                 string actualOid;
                 await using (var hashStream = File.OpenRead(temporaryPath))
                 {
-                    actualOid = GitBlobHash.Compute(hashStream, downloadedLength);
+                    actualOid = GitBlobHash.Compute(hashStream, downloadedLength, cancellationToken);
                 }
 
                 if (!string.Equals(actualOid, published.PublishedOid, StringComparison.OrdinalIgnoreCase))

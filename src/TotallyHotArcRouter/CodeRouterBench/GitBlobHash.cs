@@ -37,7 +37,11 @@ public static class GitBlobHash
     /// </summary>
     /// <param name="content">A stream positioned at the start of the content to hash.</param>
     /// <param name="length">The exact byte length of <paramref name="content"/>, matching git's blob header.</param>
-    public static string Compute(Stream content, long length)
+    /// <param name="cancellationToken">
+    /// Checked between chunks so a caller hashing a large (hundreds-of-MB) artifact can be cancelled
+    /// promptly instead of only after the whole file has been read.
+    /// </param>
+    public static string Compute(Stream content, long length, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(content);
 
@@ -50,6 +54,7 @@ public static class GitBlobHash
         int bytesRead;
         while ((bytesRead = content.Read(buffer, 0, buffer.Length)) > 0)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             sha1.AppendData(buffer, 0, bytesRead);
         }
 

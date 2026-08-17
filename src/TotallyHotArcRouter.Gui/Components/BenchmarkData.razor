@@ -251,6 +251,7 @@
     {
         _voterOpError = null;
         await VoterStore.LoadAsync();
+        _baseUrlDraft = VoterStore.Status?.BaseUrl ?? _baseUrlDraft;
     }
 
     /// <summary>
