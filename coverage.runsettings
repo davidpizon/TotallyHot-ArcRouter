@@ -5,6 +5,7 @@
       <Exclude>
         <ModulePath>.*[\\/]?xunit\..*\.dll$</ModulePath>
         <ModulePath>.*\.Tests\.dll$</ModulePath>
+        <ModulePath>.*\.Tests\.exe$</ModulePath>
       </Exclude>
     </ModulePaths>
     <Sources>

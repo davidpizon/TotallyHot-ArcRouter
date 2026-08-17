@@ -87,7 +87,7 @@ jobs:
             name=$(basename "$proj" .csproj)
             dotnet test "$proj" --configuration Release --no-restore --no-build \
               --coverage --coverage-output-format cobertura --coverage-settings coverage.runsettings \
-              --coverage-output coverage.cobertura.xml \
+              --coverage-output "TestResults/$name/coverage.cobertura.xml" \
               --results-directory "TestResults/$name"
             echo "::endgroup::"
           done
@@ -180,7 +180,7 @@ jobs:
           dotnet test src/TotallyHotArcRouter.Gui.Tests/TotallyHotArcRouter.Gui.Tests.csproj `
             --configuration Release --no-restore `
             --coverage --coverage-output-format cobertura --coverage-settings coverage.runsettings `
-            --coverage-output coverage.cobertura.xml `
+            --coverage-output TestResults/TotallyHotArcRouter.Gui.Tests/coverage.cobertura.xml `
             --results-directory TestResults/TotallyHotArcRouter.Gui.Tests
 
       # Mirrors the Linux job's coverage gate (same coverage.runsettings, same AGENTS.md 80% bar) for

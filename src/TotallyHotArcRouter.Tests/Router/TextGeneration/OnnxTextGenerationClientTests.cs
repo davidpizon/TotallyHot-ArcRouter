@@ -152,7 +152,11 @@ public class OnnxTextGenerationClientTests
         }
         finally
         {
-            Directory.Delete(fakeStore.Snapshot.Override.ResolveCacheDirectory(), recursive: true);
+            var cacheDirectory = fakeStore.Snapshot.Override.ResolveCacheDirectory();
+            if (Directory.Exists(cacheDirectory))
+            {
+                Directory.Delete(cacheDirectory, recursive: true);
+            }
         }
     }
 

@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Net;
 using Microsoft.Extensions.Logging;
 using TotallyHot.ArcRouter.CodeRouterBench;
@@ -19,7 +20,7 @@ public sealed class LlmRouterModelSyncService
     private readonly ILogger<LlmRouterModelSyncService> _logger;
 
     private volatile LlmRouterModelVerificationSnapshot _lastVerification =
-        new(BaseUrl: string.Empty, Files: new Dictionary<string, bool>(StringComparer.Ordinal));
+        new(BaseUrl: string.Empty, Files: new ReadOnlyDictionary<string, bool>(new Dictionary<string, bool>(StringComparer.Ordinal)));
 
     /// <summary>Initializes a new instance of the <see cref="LlmRouterModelSyncService"/> class.</summary>
     /// <param name="httpClientFactory">
@@ -91,7 +92,8 @@ public sealed class LlmRouterModelSyncService
 
         _lastVerification = new LlmRouterModelVerificationSnapshot(
             activeOverride.BaseUrl,
-            outcomes.ToDictionary(o => o.FileName, o => o.ChecksumVerified, StringComparer.Ordinal));
+            new ReadOnlyDictionary<string, bool>(
+                outcomes.ToDictionary(o => o.FileName, o => o.ChecksumVerified, StringComparer.Ordinal)));
 
         return new LlmRouterModelSyncResult(activeOverride.BaseUrl, outcomes);
     }
