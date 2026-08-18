@@ -43,14 +43,7 @@
     else
     {
         <div class="flex items-center justify-between mb-3 gap-2">
-            <span class="text-xs text-slate-500 uppercase tracking-widest">CodeRouterBench Corpus</span>
-            <button @onclick="RunAction"
-                    disabled="@(Store.IsSyncing || Store.Status?.State == BenchmarkDataAdminState.Current)"
-                    title="@(Store.Status?.Reason)"
-                    class="btn btn-secondary flex items-center gap-1.5">
-                <Icon Name="rotate-ccw" Size="13" />
-                @ActionLabel()
-            </button>
+            <span class="text-xs text-slate-500 uppercase tracking-widest">Task Matrix</span>
         </div>
 
         @* Store.LastError covers a status load the router answered with a rejection: reachable, so the
@@ -71,28 +64,83 @@
                 </div>
             }
 
-            <div class="space-y-2.5">
-                @foreach (var file in status.Files)
-                {
-                    var progress = Store.SyncProgress.GetValueOrDefault(file.FileName);
+            @* The corpus's .csv/.jsonl/.json files (BenchmarkFileSpec.All) are one logical asset, not eight -
+               a single card represents them, with the per-file breakdown tucked behind a disclosure. *@
+            <div class="rounded-lg p-3 space-y-2 ds-surface-card-draggable @(status.State == BenchmarkDataAdminState.Current ? "" : "ds-source-border-dim")">
+                <div class="flex items-center justify-between gap-2">
+                    <span class="text-sm font-semibold @(status.State == BenchmarkDataAdminState.Current ? "state-enabled" : "state-disabled")">
+                        Task Matrix
+                    </span>
+                    <button @onclick="RunAction"
+                            disabled="@Store.IsSyncing"
+                            title="@(status.Reason)"
+                            class="btn btn-secondary flex items-center gap-1.5">
+                        <Icon Name="rotate-ccw" Size="13" />
+                        @ActionLabel()
+                    </button>
+                </div>
 
-                    <div @key="file.FileName" class="rounded-lg p-3 space-y-1.5 ds-surface-card-draggable @(file.Synced ? "" : "ds-source-border-dim")">
-                        <div class="flex items-center justify-between gap-2">
-                            <span class="text-sm font-semibold @(file.Synced ? "state-enabled" : "state-disabled")">
-                                @file.FileName
-                            </span>
-                            <span class="text-xs @StageClass(progress)">@StageLabel(file, progress)</span>
+                <div class="text-xs text-slate-500">@SummaryLine(status)</div>
+
+                @if (Store.IsSyncing)
+                {
+                    <div class="space-y-1.5">
+                        <div>
+                            <div class="flex items-center justify-between text-xs text-slate-500 mb-0.5">
+                                <span>Overall progress</span>
+                                <span class="font-mono">@CumulativeByteLabel()</span>
+                            </div>
+                            <div class="progress-bar-track" role="progressbar" aria-label="Overall Task Matrix update progress"
+                                 aria-valuemin="0" aria-valuemax="100" aria-valuenow="@CumulativePercent()">
+                                <div class="progress-bar-fill" style="width:@(CumulativePercent())%"></div>
+                            </div>
                         </div>
-                        <div class="flex items-center justify-between text-xs text-slate-500">
-                            <span>@DescribeSize(file, progress)</span>
-                            <span>@DescribeSyncedAt(file)</span>
+                        <div>
+                            <div class="flex items-center justify-between text-xs text-slate-500 mb-0.5">
+                                <span class="font-mono truncate">@(Store.CurrentFileName ?? "Preparing…")</span>
+                                <span class="font-mono">@CurrentFileByteLabel()</span>
+                            </div>
+                            <div class="progress-bar-track" role="progressbar" aria-label="@($"{Store.CurrentFileName ?? "Current file"} download progress")"
+                                 aria-valuemin="0" aria-valuemax="100" aria-valuenow="@CurrentFilePercent()">
+                                <div class="progress-bar-fill" style="width:@(CurrentFilePercent())%"></div>
+                            </div>
                         </div>
-                        @if (progress is { Stage: BenchmarkSyncStageInfo.Failed, Error: { } error })
+                    </div>
+                }
+
+                <button @onclick="() => _filesExpanded = !_filesExpanded"
+                        aria-expanded="@(_filesExpanded ? "true" : "false")"
+                        class="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300 transition-colors">
+                    <Icon Name="@(_filesExpanded ? "chevron-up" : "chevron-down")" Size="12" />
+                    @(_filesExpanded ? "Hide files" : $"Show {status.Files.Count} files")
+                </button>
+
+                @if (_filesExpanded)
+                {
+                    <div class="space-y-2 pt-1">
+                        @foreach (var file in status.Files)
                         {
-                            <div class="rounded px-2 py-1.5 text-xs ds-outcome-critical">
-                                <span class="flex items-center gap-1.5 text-red-300">
-                                    <span aria-hidden="true"><Icon Name="alert-triangle" Size="12" /></span> @error
-                                </span>
+                            var progress = Store.SyncProgress.GetValueOrDefault(file.FileName);
+
+                            <div @key="file.FileName" class="space-y-0.5">
+                                <div class="flex items-center justify-between gap-2">
+                                    <span class="text-xs font-mono @(file.Synced ? "state-enabled" : "state-disabled")">
+                                        @file.FileName
+                                    </span>
+                                    <span class="text-xs @StageClass(progress)">@StageLabel(file, progress)</span>
+                                </div>
+                                <div class="flex items-center justify-between text-xs text-slate-500">
+                                    <span>@DescribeSize(file, progress)</span>
+                                    <span>@DescribeSyncedAt(file)</span>
+                                </div>
+                                @if (progress is { Stage: BenchmarkSyncStageInfo.Failed, Error: { } error })
+                                {
+                                    <div class="rounded px-2 py-1.5 text-xs ds-outcome-critical">
+                                        <span class="flex items-center gap-1.5 text-red-300">
+                                            <span aria-hidden="true"><Icon Name="alert-triangle" Size="12" /></span> @error
+                                        </span>
+                                    </div>
+                                }
                             </div>
                         }
                     </div>
@@ -100,17 +148,13 @@
             </div>
         }
 
-        @* Local Voter Model: the llm_router ONNX voter's 5 files. Unlike the corpus above, the base URL
-           is user-editable - the operator can switch to a different Hugging Face model folder here. *@
+        @* Local Voter Model: the llm_router ONNX voter's 5 files (LlmRouterModelFiles.All). Same
+           one-card-per-asset shape as Task Matrix above - a single card, two progress bars while
+           syncing, and the per-file breakdown behind a disclosure. The base URL is a fixed pin (set via
+           the override file/config, not this panel), so there is no URL editor here. *@
         <div class="mt-6">
             <div class="flex items-center justify-between mb-3 gap-2">
                 <span class="text-xs text-slate-500 uppercase tracking-widest">Local Voter Model</span>
-                <button @onclick="RunVoterAction"
-                        disabled="@VoterStore.IsSyncing"
-                        class="btn btn-secondary flex items-center gap-1.5">
-                    <Icon Name="rotate-ccw" Size="13" />
-                    @VoterActionLabel()
-                </button>
             </div>
 
             @if (!VoterStore.IsLoaded)
@@ -144,18 +188,6 @@
             }
             else
             {
-                <div class="mb-3 flex items-center gap-2">
-                    <input @bind="_baseUrlDraft" @bind:event="oninput"
-                           class="ds-input flex-1 text-xs font-mono"
-                           placeholder="Model base URL (Hugging Face resolve folder)"
-                           aria-label="Model base URL (Hugging Face resolve folder)" />
-                    <button @onclick="SwitchModel"
-                            disabled="@(VoterStore.IsSyncing || string.IsNullOrWhiteSpace(_baseUrlDraft) || _baseUrlDraft == VoterStore.Status?.BaseUrl)"
-                            class="btn btn-secondary">
-                        Switch
-                    </button>
-                </div>
-
                 @if (VoterErrorMessage() is { Length: > 0 } voterErrorMessage)
                 {
                     <div class="mb-3 text-xs ds-alert-critical">
@@ -165,34 +197,91 @@
 
                 @if (VoterStore.Status is { } voterStatus)
                 {
-                    <div class="space-y-2.5">
-                        @foreach (var file in voterStatus.Files)
-                        {
-                            var progress = VoterStore.SyncProgress.GetValueOrDefault(file.FileName);
+                    @* The voter's 5 files are one logical asset, not five - a single card represents
+                       them, with the per-file breakdown tucked behind a disclosure, mirroring Task Matrix. *@
+                    <div class="rounded-lg p-3 space-y-2 ds-surface-card-draggable @(voterStatus.Current ? "" : "ds-source-border-dim")">
+                        <div class="flex items-center justify-between gap-2">
+                            <span class="text-sm font-semibold @(voterStatus.Current ? "state-enabled" : "state-disabled")">
+                                Local Voter Model
+                            </span>
+                            <button @onclick="RunVoterAction"
+                                    disabled="@VoterStore.IsSyncing"
+                                    class="btn btn-secondary flex items-center gap-1.5">
+                                <Icon Name="rotate-ccw" Size="13" />
+                                @VoterActionLabel()
+                            </button>
+                        </div>
 
-                            <div @key="file.FileName" class="rounded-lg p-3 space-y-1.5 ds-surface-card-draggable @(file.Synced ? "" : "ds-source-border-dim")">
-                                <div class="flex items-center justify-between gap-2">
-                                    <span class="text-sm font-semibold @(file.Synced ? "state-enabled" : "state-disabled")">
-                                        @file.FileName
-                                    </span>
-                                    <span class="text-xs @VoterStageClass(progress)">@VoterStageLabel(file, progress)</span>
-                                </div>
-                                <div class="flex items-center justify-between text-xs text-slate-500">
-                                    <span>@VoterDescribeSize(file, progress)</span>
-                                    <span>@VoterDescribeSyncedAt(file)</span>
-                                </div>
-                                @if (file.Synced)
-                                {
-                                    <div class="text-xs @(file.ChecksumVerified ? "text-emerald-400" : "text-slate-500")">
-                                        @(file.ChecksumVerified ? "Verified" : "Unverified")
+                        <div class="text-xs text-slate-500 space-y-0.5">
+                            <div>@VoterSummaryLine(voterStatus)</div>
+                            <div class="font-mono truncate">@voterStatus.BaseUrl</div>
+                        </div>
+
+                        @if (VoterStore.IsSyncing)
+                        {
+                            <div class="space-y-1.5">
+                                <div>
+                                    <div class="flex items-center justify-between text-xs text-slate-500 mb-0.5">
+                                        <span>Overall progress</span>
+                                        <span class="font-mono">@VoterCumulativeByteLabel()</span>
                                     </div>
-                                }
-                                @if (progress is { Stage: LlmRouterModelSyncStageInfo.Failed, Error: { } voterError })
+                                    <div class="progress-bar-track" role="progressbar" aria-label="Overall Local Voter Model update progress"
+                                         aria-valuemin="0" aria-valuemax="100" aria-valuenow="@VoterCumulativePercent()">
+                                        <div class="progress-bar-fill" style="width:@(VoterCumulativePercent())%"></div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <div class="flex items-center justify-between text-xs text-slate-500 mb-0.5">
+                                        <span class="font-mono truncate">@(VoterStore.CurrentFileName ?? "Preparing…")</span>
+                                        <span class="font-mono">@VoterCurrentFileByteLabel()</span>
+                                    </div>
+                                    <div class="progress-bar-track" role="progressbar" aria-label="@($"{VoterStore.CurrentFileName ?? "Current file"} download progress")"
+                                         aria-valuemin="0" aria-valuemax="100" aria-valuenow="@VoterCurrentFilePercent()">
+                                        <div class="progress-bar-fill" style="width:@(VoterCurrentFilePercent())%"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+
+                        <button @onclick="() => _voterFilesExpanded = !_voterFilesExpanded"
+                                aria-expanded="@(_voterFilesExpanded ? "true" : "false")"
+                                class="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300 transition-colors">
+                            <Icon Name="@(_voterFilesExpanded ? "chevron-up" : "chevron-down")" Size="12" />
+                            @(_voterFilesExpanded ? "Hide files" : $"Show {voterStatus.Files.Count} files")
+                        </button>
+
+                        @if (_voterFilesExpanded)
+                        {
+                            <div class="space-y-2 pt-1">
+                                @foreach (var file in voterStatus.Files)
                                 {
-                                    <div class="rounded px-2 py-1.5 text-xs ds-outcome-critical">
-                                        <span class="flex items-center gap-1.5 text-red-300">
-                                            <span aria-hidden="true"><Icon Name="alert-triangle" Size="12" /></span> @voterError
-                                        </span>
+                                    var progress = VoterStore.SyncProgress.GetValueOrDefault(file.FileName);
+
+                                    <div @key="file.FileName" class="space-y-0.5">
+                                        <div class="flex items-center justify-between gap-2">
+                                            <span class="text-xs font-mono @(file.Synced ? "state-enabled" : "state-disabled")">
+                                                @file.FileName
+                                            </span>
+                                            <span class="text-xs @VoterStageClass(progress)">@VoterStageLabel(file, progress)</span>
+                                        </div>
+                                        <div class="flex items-center justify-between text-xs text-slate-500">
+                                            <span>@VoterDescribeSize(file, progress)</span>
+                                            <span>@VoterDescribeSyncedAt(file)</span>
+                                        </div>
+                                        @if (file.Synced)
+                                        {
+                                            <div class="text-xs @(file.ChecksumVerified ? "text-emerald-400" : "text-slate-500")">
+                                                @(file.ChecksumVerified ? "Verified" : "Unverified")
+                                            </div>
+                                        }
+                                        @if (progress is { Stage: LlmRouterModelSyncStageInfo.Failed, Error: { } voterError })
+                                        {
+                                            <div class="rounded px-2 py-1.5 text-xs ds-outcome-critical">
+                                                <span class="flex items-center gap-1.5 text-red-300">
+                                                    <span aria-hidden="true"><Icon Name="alert-triangle" Size="12" /></span> @voterError
+                                                </span>
+                                            </div>
+                                        }
                                     </div>
                                 }
                             </div>
@@ -207,7 +296,12 @@
 @code {
     private string? _opError;
     private string? _voterOpError;
-    private string _baseUrlDraft = string.Empty;
+
+    /// <summary>Whether the Task Matrix card's per-file disclosure is open. Starts collapsed.</summary>
+    private bool _filesExpanded;
+
+    /// <summary>Whether the Local Voter Model card's per-file disclosure is open. Starts collapsed.</summary>
+    private bool _voterFilesExpanded;
 
     protected override async Task OnInitializedAsync()
     {
@@ -215,7 +309,6 @@
         VoterStore.Changed += OnVoterStoreChanged;
         await Store.LoadAsync();
         await VoterStore.LoadAsync();
-        _baseUrlDraft = VoterStore.Status?.BaseUrl ?? string.Empty;
     }
 
     /// <summary>Re-renders when the corpus store's state changes.</summary>
@@ -251,13 +344,15 @@
     {
         _voterOpError = null;
         await VoterStore.LoadAsync();
-        _baseUrlDraft = VoterStore.Status?.BaseUrl ?? _baseUrlDraft;
     }
 
     /// <summary>
-    /// The header button's label, reflecting the corpus's freshness state directly - "Current" once every
-    /// file matches the published tree, "Update" when at least one does not, "Check Failed" when the last
-    /// probe could not reach Hugging Face - and "Updating…" for the duration of a sync.
+    /// The header button's label, reflecting the corpus's freshness state directly - "Re-verify" once
+    /// every file matches the published tree (the button stays enabled in this state, mirroring the Local
+    /// Voter Model panel's <see cref="VoterActionLabel"/>: re-running the sync is the only way to confirm
+    /// the ledger's recorded checksums still match what's actually on disk), "Update" when at least one
+    /// file does not match, "Check Failed" when the last probe could not reach Hugging Face - and
+    /// "Updating…" for the duration of a sync.
     /// </summary>
     private string ActionLabel()
     {
@@ -268,7 +363,7 @@
 
         return Store.Status?.State switch
         {
-            BenchmarkDataAdminState.Current => "Current",
+            BenchmarkDataAdminState.Current => "Re-verify",
             BenchmarkDataAdminState.Update => "Update",
             BenchmarkDataAdminState.CheckFailed => "Check Failed",
             _ => "Check Failed",
@@ -276,13 +371,135 @@
     }
 
     /// <summary>
-    /// Runs the action the header button's current state implies: a stale corpus (Update) syncs; an
-    /// unknown freshness (CheckFailed, or no status yet) rechecks rather than downloading blind.
+    /// Runs the action the header button's current state implies: a stale corpus (Update) or an
+    /// already-current one (Current, i.e. "Re-verify") both sync - the sync itself re-probes Hugging Face
+    /// and only re-downloads files whose ledger checksum no longer matches, so re-verifying a current
+    /// corpus is cheap. An unknown freshness (CheckFailed, or no status yet) rechecks rather than
+    /// downloading blind.
     /// </summary>
     private Task RunAction() =>
-        Store.Status?.State == BenchmarkDataAdminState.Update
+        Store.Status?.State is BenchmarkDataAdminState.Update or BenchmarkDataAdminState.Current
             ? RunAsync(() => Store.SyncAsync())
             : RunAsync(() => Store.RecheckAsync());
+
+    /// <summary>
+    /// The Task Matrix card's at-rest summary line: how many files are synced, their combined size and
+    /// row count, and the most recent sync time - the aggregate view that replaces the eight individual
+    /// file cards this section used to show.
+    /// </summary>
+    private static string SummaryLine(BenchmarkDataStatusInfo status)
+    {
+        var syncedCount = status.Files.Count(f => f.Synced);
+        var totalMb = status.Files.Sum(f => f.SizeBytes) / 1024.0 / 1024.0;
+        var totalRows = status.Files.Sum(f => f.RowCount);
+
+        if (syncedCount == 0)
+        {
+            return $"0 of {status.Files.Count} files synced";
+        }
+
+        var syncedAt = status.Files
+            .Where(f => f.SyncedAtUtc is not null)
+            .Select(f => f.SyncedAtUtc!.Value)
+            .DefaultIfEmpty()
+            .Max();
+
+        return $"{syncedCount} of {status.Files.Count} files synced — {totalMb:0.#} MB, {totalRows:N0} rows — last synced {syncedAt.ToLocalTime():g} local";
+    }
+
+    /// <summary>The cumulative progress bar's byte counter label, e.g. "4.2 / 11.8 MB".</summary>
+    private string CumulativeByteLabel() =>
+        $"{Store.CumulativeBytesTransferred / 1024.0 / 1024.0:0.#} / {Store.CumulativeTotalBytes / 1024.0 / 1024.0:0.#} MB";
+
+    /// <summary>The cumulative progress bar's fill percentage, 0-100.</summary>
+    private double CumulativePercent() => Store.CumulativeTotalBytes > 0
+        ? Math.Clamp(100.0 * Store.CumulativeBytesTransferred / Store.CumulativeTotalBytes, 0, 100)
+        : 0;
+
+    /// <summary>The current-file progress bar's byte counter label, e.g. "1.1 / 3.4 MB".</summary>
+    private string CurrentFileByteLabel()
+    {
+        var progress = Store.CurrentFileName is { } fileName ? Store.SyncProgress.GetValueOrDefault(fileName) : null;
+        var totalBytes = progress?.TotalBytes ?? 0;
+        var transferred = progress?.BytesTransferred ?? 0;
+        return $"{transferred / 1024.0 / 1024.0:0.#} / {totalBytes / 1024.0 / 1024.0:0.#} MB";
+    }
+
+    /// <summary>The current-file progress bar's fill percentage, 0-100.</summary>
+    private double CurrentFilePercent()
+    {
+        var progress = Store.CurrentFileName is { } fileName ? Store.SyncProgress.GetValueOrDefault(fileName) : null;
+        if (progress is not { TotalBytes: > 0 } || progress.BytesTransferred is not { } transferred)
+        {
+            return progress?.Stage is BenchmarkSyncStageInfo.Verifying or BenchmarkSyncStageInfo.Importing or BenchmarkSyncStageInfo.Completed
+                ? 100
+                : 0;
+        }
+
+        return Math.Clamp(100.0 * transferred / progress.TotalBytes.Value, 0, 100);
+    }
+
+    /// <summary>
+    /// The Local Voter Model card's at-rest summary line: how many of the 5 files are synced, their
+    /// combined size, how many are checksum-verified, and the most recent sync time - the aggregate view
+    /// that replaces the five individual file cards this section used to show, mirroring
+    /// <see cref="SummaryLine"/>.
+    /// </summary>
+    private static string VoterSummaryLine(LlmRouterModelStatusInfo status)
+    {
+        var syncedCount = status.Files.Count(f => f.Synced);
+        var totalMb = status.Files.Sum(f => f.SizeBytes) / 1024.0 / 1024.0;
+        var verifiedCount = status.Files.Count(f => f.ChecksumVerified);
+
+        if (syncedCount == 0)
+        {
+            return $"0 of {status.Files.Count} files synced";
+        }
+
+        var syncedAt = status.Files
+            .Where(f => f.SyncedAtUtc is not null)
+            .Select(f => f.SyncedAtUtc!.Value)
+            .DefaultIfEmpty()
+            .Max();
+
+        return $"{syncedCount} of {status.Files.Count} files synced — {totalMb:0.#} MB, {verifiedCount} verified — last synced {syncedAt.ToLocalTime():g} local";
+    }
+
+    /// <summary>The Local Voter Model cumulative progress bar's byte counter label, e.g. "4.2 / 11.8 MB".</summary>
+    private string VoterCumulativeByteLabel() =>
+        $"{VoterStore.CumulativeBytesTransferred / 1024.0 / 1024.0:0.#} / {VoterStore.CumulativeTotalBytes / 1024.0 / 1024.0:0.#} MB";
+
+    /// <summary>The Local Voter Model cumulative progress bar's fill percentage, 0-100.</summary>
+    private double VoterCumulativePercent() => VoterStore.CumulativeTotalBytes > 0
+        ? Math.Clamp(100.0 * VoterStore.CumulativeBytesTransferred / VoterStore.CumulativeTotalBytes, 0, 100)
+        : 0;
+
+    /// <summary>The Local Voter Model current-file progress bar's byte counter label, e.g. "1.1 / 3.4 MB".</summary>
+    private string VoterCurrentFileByteLabel()
+    {
+        var progress = VoterStore.CurrentFileName is { } fileName ? VoterStore.SyncProgress.GetValueOrDefault(fileName) : null;
+        var totalBytes = progress?.TotalBytes ?? 0;
+        var transferred = progress?.BytesTransferred ?? 0;
+        return $"{transferred / 1024.0 / 1024.0:0.#} / {totalBytes / 1024.0 / 1024.0:0.#} MB";
+    }
+
+    /// <summary>
+    /// The Local Voter Model current-file progress bar's fill percentage, 0-100. Unlike
+    /// <see cref="CurrentFilePercent"/>, the "treat as complete" stage set has no Importing entry - this
+    /// pipeline has no import step.
+    /// </summary>
+    private double VoterCurrentFilePercent()
+    {
+        var progress = VoterStore.CurrentFileName is { } fileName ? VoterStore.SyncProgress.GetValueOrDefault(fileName) : null;
+        if (progress is not { TotalBytes: > 0 } || progress.BytesTransferred is not { } transferred)
+        {
+            return progress?.Stage is LlmRouterModelSyncStageInfo.Verifying or LlmRouterModelSyncStageInfo.Completed
+                ? 100
+                : 0;
+        }
+
+        return Math.Clamp(100.0 * transferred / progress.TotalBytes.Value, 0, 100);
+    }
 
     /// <summary>The display label for one corpus file's current sync stage.</summary>
     private static string StageLabel(BenchmarkFileStatusInfo file, BenchmarkSyncProgressInfo? progress) => progress switch
@@ -357,17 +574,7 @@
 
     private Task RunVoterAction() => RunVoterAsync(() => VoterStore.SyncAsync());
 
-    private async Task SwitchModel()
-    {
-        // The router normalizes the URL (e.g. trims a trailing slash), so after a successful switch
-        // re-sync the draft from the returned status - otherwise the draft can keep differing from
-        // VoterStore.Status.BaseUrl, leaving the Switch button enabled for a no-op resubmit.
-        if (await RunVoterAsync(() => VoterStore.SetBaseUrlAsync(_baseUrlDraft)))
-        {
-            _baseUrlDraft = VoterStore.Status?.BaseUrl ?? _baseUrlDraft;
-        }
-    }
-
+    /// <summary>The display label for one voter file's current sync stage.</summary>
     private static string VoterStageLabel(LlmRouterModelFileStatusInfo file, LlmRouterModelSyncProgressInfo? progress) => progress switch
     {
         { Stage: LlmRouterModelSyncStageInfo.Downloading } => "Downloading…",
@@ -378,6 +585,7 @@
         _ => file.Synced ? "Synced" : (file.IsOptional ? "Optional" : "Not synced"),
     };
 
+    /// <summary>The CSS color class for one voter file's current sync stage.</summary>
     private static string VoterStageClass(LlmRouterModelSyncProgressInfo? progress) => progress?.Stage switch
     {
         LlmRouterModelSyncStageInfo.Failed => "text-red-400",
@@ -386,6 +594,7 @@
         _ => "text-slate-400",
     };
 
+    /// <summary>The display text for one voter file's size/progress: bytes downloaded so far, or the at-rest size.</summary>
     private static string VoterDescribeSize(LlmRouterModelFileStatusInfo file, LlmRouterModelSyncProgressInfo? progress)
     {
         if (progress is { BytesTransferred: { } bytes })
@@ -403,6 +612,7 @@
         return file.IsOptional ? "Optional - not published for this model" : "Never synced";
     }
 
+    /// <summary>The display text for one voter file's last-synced time, or empty if it has never synced.</summary>
     private static string VoterDescribeSyncedAt(LlmRouterModelFileStatusInfo file) =>
         file.SyncedAtUtc is { } syncedAt ? $"Synced {syncedAt.ToLocalTime():g} local" : string.Empty;
 

@@ -74,20 +74,41 @@ public enum LlmRouterModelSyncStageInfo
 /// <param name="Stage">The stage the file is currently in.</param>
 /// <param name="BytesTransferred">Bytes downloaded so far, when known.</param>
 /// <param name="Error">Why the file failed, set only on a terminal <see cref="LlmRouterModelSyncStageInfo.Failed"/> update.</param>
+/// <param name="TotalBytes">The file's published size in bytes, when known.</param>
 public sealed record LlmRouterModelSyncProgressInfo(
     string FileName,
     LlmRouterModelSyncStageInfo Stage,
     long? BytesTransferred,
-    string? Error);
+    string? Error,
+    long? TotalBytes = null);
+
+/// <summary>One file a sync is about to download, from the up-front <see cref="LlmRouterModelSyncPlanInfo"/>.</summary>
+/// <param name="FileName">The file's name.</param>
+/// <param name="SizeBytes">The file's published size in bytes.</param>
+public sealed record LlmRouterModelSyncPlanFileInfo(string FileName, long SizeBytes);
 
 /// <summary>
-/// One message on the sync stream: either a per-file <see cref="Progress"/> update, or - exactly once, as
-/// the final message - the aggregate <see cref="FinalStatus"/> after every file has been attempted.
-/// Exactly one of the two is non-null, mirroring the wire contract's <c>oneof</c>.
+/// The sync's plan, delivered once before any file downloads: which files are stale and how many bytes
+/// the whole run will transfer, so the panel's cumulative progress bar has a stable denominator from the
+/// first byte.
 /// </summary>
-/// <param name="Progress">A per-file progress update, or <see langword="null"/> for the final message.</param>
+/// <param name="Files">The files that will be downloaded. A file omitted here was already current.</param>
+/// <param name="TotalBytes">The combined published size of every file in <paramref name="Files"/>.</param>
+public sealed record LlmRouterModelSyncPlanInfo(IReadOnlyList<LlmRouterModelSyncPlanFileInfo> Files, long TotalBytes);
+
+/// <summary>
+/// One message on the sync stream: the one-time <see cref="Plan"/>, a per-file <see cref="Progress"/>
+/// update, or - exactly once, as the final message - the aggregate <see cref="FinalStatus"/> after every
+/// file has been attempted. Exactly one of the three is non-null, mirroring the wire contract's
+/// <c>oneof</c>.
+/// </summary>
+/// <param name="Plan">The sync's plan, set only on the first message when present.</param>
+/// <param name="Progress">A per-file progress update, or <see langword="null"/> for the plan/final messages.</param>
 /// <param name="FinalStatus">The aggregate status, set only on the final message.</param>
-public sealed record LlmRouterModelSyncEvent(LlmRouterModelSyncProgressInfo? Progress, LlmRouterModelStatusInfo? FinalStatus);
+public sealed record LlmRouterModelSyncEvent(
+    LlmRouterModelSyncPlanInfo? Plan,
+    LlmRouterModelSyncProgressInfo? Progress,
+    LlmRouterModelStatusInfo? FinalStatus);
 
 /// <summary>
 /// The llm_router model management operations the Governance → Benchmark Data panel's "Local Voter
@@ -230,20 +251,29 @@ public sealed class LlmRouterModelAdminClient : ILlmRouterModelAdminClient, IDis
 
     /// <summary>Converts a gRPC-contract sync stream message into the client's <see cref="LlmRouterModelSyncEvent"/>.</summary>
     /// <exception cref="LlmRouterModelAdminException">
-    /// <paramref name="wire"/> carries neither a <c>Progress</c> nor a <c>FinalStatus</c> payload - a
+    /// <paramref name="wire"/> carries none of <c>Plan</c>, <c>Progress</c>, or <c>FinalStatus</c> - a
     /// malformed message the wire contract's <c>oneof</c> should never actually produce.
     /// </exception>
     private static LlmRouterModelSyncEvent MapEvent(Contract.LlmRouterModelSyncStreamEvent wire) => wire.EventCase switch
     {
+        Contract.LlmRouterModelSyncStreamEvent.EventOneofCase.Plan =>
+            new LlmRouterModelSyncEvent(
+                Plan: new LlmRouterModelSyncPlanInfo(
+                    [.. wire.Plan.Files.Select(file => new LlmRouterModelSyncPlanFileInfo(file.FileName, file.SizeBytes))],
+                    wire.Plan.TotalBytes),
+                Progress: null,
+                FinalStatus: null),
         Contract.LlmRouterModelSyncStreamEvent.EventOneofCase.FinalStatus =>
-            new LlmRouterModelSyncEvent(Progress: null, FinalStatus: MapStatus(wire.FinalStatus)),
+            new LlmRouterModelSyncEvent(Plan: null, Progress: null, FinalStatus: MapStatus(wire.FinalStatus)),
         Contract.LlmRouterModelSyncStreamEvent.EventOneofCase.Progress =>
             new LlmRouterModelSyncEvent(
+                Plan: null,
                 Progress: new LlmRouterModelSyncProgressInfo(
                     wire.Progress.FileName,
                     MapStage(wire.Progress.Stage),
                     wire.Progress.HasBytesTransferred ? wire.Progress.BytesTransferred : null,
-                    wire.Progress.HasError ? wire.Progress.Error : null),
+                    wire.Progress.HasError ? wire.Progress.Error : null,
+                    wire.Progress.HasTotalBytes ? wire.Progress.TotalBytes : null),
                 FinalStatus: null),
         _ => throw new LlmRouterModelAdminException("llm_router model sync stream sent an empty message"),
     };

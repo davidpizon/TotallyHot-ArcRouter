@@ -5,16 +5,29 @@ using Microsoft.Extensions.Logging;
 namespace TotallyHot.ArcRouter.CodeRouterBench;
 
 /// <summary>
-/// Downloads, verifies, parses, and imports every file in <see cref="BenchmarkFileSpec.All"/>
-/// (docs/router/coderouterbench-sqlite-migration-plan.md, Phase 2). Each file is handled independently:
-/// a failure at any step - download, checksum mismatch, row-count mismatch, or a parse error - aborts
-/// that file only. Its table rows and ledger entry stay exactly as they were before the sync started
-/// (the "fail loudly on import" ground rule), and the failure is reported in the returned outcome rather
-/// than thrown.
+/// Downloads, verifies, parses, and imports every stale file in <see cref="BenchmarkFileSpec.All"/> - a
+/// file whose ledger checksum already matches the published one is skipped entirely, matching
+/// <see cref="BenchmarkDataStatusService.RecheckAsync"/>'s freshness comparison
+/// (docs/router/coderouterbench-sqlite-migration-plan.md, Phase 2). Each downloaded file is handled
+/// independently: a failure at any step - download, checksum mismatch, row-count mismatch, or a parse
+/// error - aborts that file only. Its table rows and ledger entry stay exactly as they were before the
+/// sync started (the "fail loudly on import" ground rule), and the failure is reported in the returned
+/// outcome rather than thrown.
+///
+/// Every file is streamed to a per-run temporary directory rather than buffered in memory, verified
+/// there, and only promoted (moved) into its final on-disk name once its checksum matches - the same
+/// stream/verify/promote shape <c>LlmRouterModelSyncService</c> uses for the ONNX voter's files. The
+/// temporary directory is deleted once the run completes, successfully or not.
 /// </summary>
 public sealed class BenchmarkSyncService
 {
     private const string DownloadUrlTemplate = "https://huggingface.co/datasets/{0}/resolve/{1}/{2}";
+
+    // Reported no more often than this many bytes, or this often, whichever comes first - streaming
+    // every buffer-sized read as its own progress event would flood the gRPC stream for a
+    // multi-thousand-row CSV.
+    private const long ProgressReportIntervalBytes = 256 * 1024;
+    private static readonly TimeSpan ProgressReportInterval = TimeSpan.FromMilliseconds(100);
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly BenchmarkChecksumProbe _probe;
@@ -61,12 +74,19 @@ public sealed class BenchmarkSyncService
     }
 
     /// <summary>
-    /// Syncs every file in <see cref="BenchmarkFileSpec.All"/> from <paramref name="datasetRef"/>,
-    /// reporting per-file progress through <paramref name="progress"/> when supplied.
+    /// Syncs every stale file in <see cref="BenchmarkFileSpec.All"/> from <paramref name="datasetRef"/> -
+    /// one whose ledger checksum no longer matches the just-fetched published tree, or that has never
+    /// synced. A file that already matches is skipped without a network request and reported as a
+    /// succeeded, <see cref="BenchmarkFileSyncOutcome.Skipped"/> outcome.
     /// </summary>
     /// <param name="datasetRef">The dataset ref (branch, tag, or commit) to sync from, e.g. <c>"main"</c>.</param>
     /// <param name="progress">An optional progress reporter for streaming per-file status.</param>
     /// <param name="cancellationToken">A token to cancel the sync.</param>
+    /// <param name="planProgress">
+    /// An optional reporter for the up-front plan (the stale files and their combined size), invoked
+    /// exactly once before any file's progress is reported, so a cumulative progress display has a
+    /// stable denominator from the first byte.
+    /// </param>
     /// <exception cref="HttpRequestException">The checksum probe itself failed; no file was synced.</exception>
     /// <exception cref="System.Text.Json.JsonException">The checksum probe's response body was not valid JSON; no file was synced.</exception>
     /// <exception cref="NotSupportedException">The checksum probe's response content type was not supported for JSON deserialization; no file was synced.</exception>
@@ -78,21 +98,77 @@ public sealed class BenchmarkSyncService
     public async Task<BenchmarkSyncResult> SyncAsync(
         string datasetRef,
         IProgress<BenchmarkSyncProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IProgress<BenchmarkSyncPlan>? planProgress = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(datasetRef);
 
         _database.EnsureCreated();
 
         var probeResult = await _probe.FetchAsync(datasetRef, cancellationToken).ConfigureAwait(false);
+        var ledgerEntries = _ledger.GetAll().ToDictionary(entry => entry.FileName, StringComparer.Ordinal);
 
+        List<BenchmarkFileSpec> staleSpecs = [];
         List<BenchmarkFileSyncOutcome> outcomes = [];
         foreach (var spec in _fileSpecs)
         {
-            outcomes.Add(await SyncFileAsync(spec, datasetRef, probeResult, progress, cancellationToken).ConfigureAwait(false));
+            if (ledgerEntries.TryGetValue(spec.FileName, out var ledgerEntry) &&
+                probeResult.Files.TryGetValue(spec.FileName, out var publishedForSkipCheck) &&
+                string.Equals(ledgerEntry.PublishedOid, publishedForSkipCheck.PublishedOid, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation(
+                    "CodeRouterBench sync skipping {FileName}: already current at checksum {Oid}.",
+                    spec.FileName,
+                    ledgerEntry.PublishedOid);
+                outcomes.Add(new BenchmarkFileSyncOutcome(
+                    spec.FileName, Succeeded: true, ledgerEntry.RowCount, ErrorMessage: null, Skipped: true));
+            }
+            else
+            {
+                staleSpecs.Add(spec);
+            }
         }
 
-        return new BenchmarkSyncResult(probeResult.RepoCommit, outcomes);
+        var planFiles = staleSpecs
+            .Select(spec => probeResult.Files.TryGetValue(spec.FileName, out var published)
+                ? new BenchmarkSyncPlanFile(spec.FileName, published.Size)
+                : new BenchmarkSyncPlanFile(spec.FileName, SizeBytes: 0))
+            .ToList();
+        planProgress?.Report(new BenchmarkSyncPlan(planFiles, planFiles.Sum(f => f.SizeBytes)));
+
+        var tempDirectory = Directory.CreateTempSubdirectory("arcrouter-bench-");
+        try
+        {
+            foreach (var spec in staleSpecs)
+            {
+                outcomes.Add(await SyncFileAsync(spec, datasetRef, probeResult, tempDirectory.FullName, progress, cancellationToken)
+                    .ConfigureAwait(false));
+            }
+        }
+        finally
+        {
+            try
+            {
+                tempDirectory.Delete(recursive: true);
+            }
+            catch (IOException)
+            {
+                // Best-effort cleanup only, mirroring LlmRouterModelSyncService's SafeDelete: a file the
+                // OS hasn't released yet (e.g. a lingering antivirus scan) must not fail the sync.
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
+
+        // Preserve BenchmarkFileSpec.All's order in the result regardless of which files were skipped
+        // vs. synced, since consumers (the gRPC service's BuildFiles-independent outcome loop) assume
+        // one outcome per spec in manifest order.
+        var orderedOutcomes = _fileSpecs
+            .Select(spec => outcomes.First(outcome => outcome.FileName == spec.FileName))
+            .ToList();
+
+        return new BenchmarkSyncResult(probeResult.RepoCommit, orderedOutcomes);
     }
 
     /// <summary>
@@ -104,6 +180,7 @@ public sealed class BenchmarkSyncService
     /// <param name="spec">The file to sync.</param>
     /// <param name="datasetRef">The dataset ref the file is downloaded from.</param>
     /// <param name="probeResult">The already-fetched published checksums, used to verify the download.</param>
+    /// <param name="tempDirectory">The run's temporary directory the file is streamed into before verification.</param>
     /// <param name="progress">An optional progress reporter for streaming this file's status.</param>
     /// <param name="cancellationToken">A token to cancel the download or import.</param>
     /// <returns>The file's outcome: succeeded with a row count, or failed with a reason.</returns>
@@ -112,6 +189,7 @@ public sealed class BenchmarkSyncService
         BenchmarkFileSpec spec,
         string datasetRef,
         BenchmarkChecksumProbeResult probeResult,
+        string tempDirectory,
         IProgress<BenchmarkSyncProgress>? progress,
         CancellationToken cancellationToken)
     {
@@ -123,9 +201,12 @@ public sealed class BenchmarkSyncService
             return new BenchmarkFileSyncOutcome(spec.FileName, Succeeded: false, RowCount: null, missingMessage);
         }
 
+        // A GUID-suffixed temp name so two files with the same base name (there are none today, but
+        // this mirrors LlmRouterModelSyncService's convention) never collide within the run's directory.
+        var partPath = Path.Combine(tempDirectory, $"{spec.FileName}.{Guid.NewGuid():N}.part");
         try
         {
-            progress?.Report(new BenchmarkSyncProgress(spec.FileName, BenchmarkSyncStage.Downloading));
+            progress?.Report(new BenchmarkSyncProgress(spec.FileName, BenchmarkSyncStage.Downloading, TotalBytes: published.Size));
             var url = string.Format(
                 CultureInfo.InvariantCulture,
                 DownloadUrlTemplate,
@@ -133,24 +214,72 @@ public sealed class BenchmarkSyncService
                 Uri.EscapeDataString(datasetRef),
                 spec.FileName);
             using var httpClient = _httpClientFactory.CreateClient(BenchmarkChecksumProbe.HttpClientName);
-            var bytes = await httpClient.GetByteArrayAsync(url, cancellationToken).ConfigureAwait(false);
-            progress?.Report(new BenchmarkSyncProgress(spec.FileName, BenchmarkSyncStage.Downloading, bytes.LongLength));
 
-            progress?.Report(new BenchmarkSyncProgress(spec.FileName, BenchmarkSyncStage.Verifying));
-            var actualOid = GitBlobHash.Compute(bytes);
+            long downloadedLength;
+            using (var response = await httpClient
+                .GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .ConfigureAwait(false))
+            {
+                response.EnsureSuccessStatusCode();
+
+                await using var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+                await using var destination = File.Create(partPath);
+
+                var buffer = new byte[81920];
+                long totalRead = 0;
+                var lastReportedBytes = 0L;
+                var lastReportedAt = DateTime.UtcNow;
+                int bytesRead;
+                while ((bytesRead = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) > 0)
+                {
+                    await destination.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken).ConfigureAwait(false);
+                    totalRead += bytesRead;
+
+                    var now = DateTime.UtcNow;
+                    if (totalRead - lastReportedBytes >= ProgressReportIntervalBytes ||
+                        now - lastReportedAt >= ProgressReportInterval)
+                    {
+                        progress?.Report(new BenchmarkSyncProgress(
+                            spec.FileName, BenchmarkSyncStage.Downloading, totalRead, TotalBytes: published.Size));
+                        lastReportedBytes = totalRead;
+                        lastReportedAt = now;
+                    }
+                }
+
+                downloadedLength = totalRead;
+            }
+
+            progress?.Report(new BenchmarkSyncProgress(
+                spec.FileName, BenchmarkSyncStage.Downloading, downloadedLength, TotalBytes: published.Size));
+
+            progress?.Report(new BenchmarkSyncProgress(spec.FileName, BenchmarkSyncStage.Verifying, TotalBytes: published.Size));
+            string actualOid;
+            await using (var hashStream = File.OpenRead(partPath))
+            {
+                actualOid = PublishedChecksumHasher.Compute(hashStream, downloadedLength, published.Algorithm, cancellationToken);
+            }
+
             if (!string.Equals(actualOid, published.PublishedOid, StringComparison.OrdinalIgnoreCase))
             {
                 var mismatchMessage =
                     $"Checksum mismatch for '{spec.FileName}': expected {published.PublishedOid}, computed {actualOid}.";
                 _logger.LogError("CodeRouterBench sync rejected {FileName}: {Reason}", spec.FileName, mismatchMessage);
-                progress?.Report(new BenchmarkSyncProgress(spec.FileName, BenchmarkSyncStage.Failed));
+                progress?.Report(new BenchmarkSyncProgress(spec.FileName, BenchmarkSyncStage.Failed, TotalBytes: published.Size));
+                SafeDelete(partPath);
                 return new BenchmarkFileSyncOutcome(spec.FileName, Succeeded: false, RowCount: null, mismatchMessage);
             }
 
-            progress?.Report(new BenchmarkSyncProgress(spec.FileName, BenchmarkSyncStage.Importing));
-            var rowCount = ImportAndRecord(spec, bytes, actualOid, probeResult.RepoCommit);
+            // Promote only once the checksum has verified - the "copied over once the checksum matches"
+            // step - so a mismatched download never leaves a same-named file behind to be confused with
+            // a verified one.
+            var verifiedPath = Path.Combine(tempDirectory, spec.FileName);
+            File.Move(partPath, verifiedPath, overwrite: true);
 
-            progress?.Report(new BenchmarkSyncProgress(spec.FileName, BenchmarkSyncStage.Completed, RowsImported: rowCount));
+            progress?.Report(new BenchmarkSyncProgress(spec.FileName, BenchmarkSyncStage.Importing, TotalBytes: published.Size));
+            var rowCount = ImportAndRecord(spec, verifiedPath, actualOid, probeResult.RepoCommit);
+
+            progress?.Report(new BenchmarkSyncProgress(
+                spec.FileName, BenchmarkSyncStage.Completed, RowsImported: rowCount, TotalBytes: published.Size));
             _logger.LogInformation(
                 "CodeRouterBench sync imported {RowCount} row(s) from {FileName} at commit {RepoCommit}.",
                 rowCount,
@@ -165,26 +294,33 @@ public sealed class BenchmarkSyncService
         {
             _logger.LogError(ex, "CodeRouterBench sync failed for {FileName}.", spec.FileName);
             progress?.Report(new BenchmarkSyncProgress(spec.FileName, BenchmarkSyncStage.Failed));
+            SafeDelete(partPath);
             return new BenchmarkFileSyncOutcome(spec.FileName, Succeeded: false, RowCount: null, ex.Message);
+        }
+        catch (OperationCanceledException)
+        {
+            SafeDelete(partPath);
+            throw;
         }
     }
 
     /// <summary>
-    /// Parses <paramref name="bytes"/> with the importer <paramref name="spec"/>'s kind selects, asserts
-    /// its row count, and - only if both succeed - writes the ledger row, all on one transaction. A
-    /// row-count mismatch throws before the transaction commits, so the whole import (table rows and
-    /// ledger row alike) rolls back and the prior state is untouched.
+    /// Parses the file at <paramref name="filePath"/> with the importer <paramref name="spec"/>'s kind
+    /// selects, asserts its row count, and - only if both succeed - writes the ledger row, all on one
+    /// transaction. A row-count mismatch throws before the transaction commits, so the whole import
+    /// (table rows and ledger row alike) rolls back and the prior state is untouched.
     /// </summary>
     /// <exception cref="FormatException">The imported row count did not match <see cref="BenchmarkFileSpec.ExpectedRowCount"/>.</exception>
     /// <exception cref="System.Text.Json.JsonException">A JSON or JSONL file's content was not valid JSON.</exception>
     /// <exception cref="NotSupportedException"><paramref name="spec"/>'s <see cref="BenchmarkFileSpec.Kind"/> has no importer.</exception>
     /// <exception cref="ArgumentException"><paramref name="spec"/>'s <see cref="BenchmarkFileSpec.Split"/> is required by its importer but null or blank.</exception>
-    private int ImportAndRecord(BenchmarkFileSpec spec, byte[] bytes, string actualOid, string repoCommit)
+    private int ImportAndRecord(BenchmarkFileSpec spec, string filePath, string actualOid, string repoCommit)
     {
         using var connection = _database.OpenConnection();
         using var transaction = connection.BeginTransaction();
 
-        using var reader = new StreamReader(new MemoryStream(bytes), System.Text.Encoding.UTF8);
+        using var fileStream = File.OpenRead(filePath);
+        using var reader = new StreamReader(fileStream, System.Text.Encoding.UTF8);
         var rowCount = spec.Kind switch
         {
             BenchmarkFileKind.IdResultsCsv => BenchmarkIdResultsCsvImporter.Import(reader, spec.Split!, connection, transaction),
@@ -196,17 +332,33 @@ public sealed class BenchmarkSyncService
             _ => throw new NotSupportedException($"Unsupported benchmark file kind '{spec.Kind}'."),
         };
 
+        var fileSizeBytes = new FileInfo(filePath).Length;
         if (spec.ExpectedRowCount is int expected && rowCount != expected)
         {
             throw new FormatException($"'{spec.FileName}' has {rowCount} data row(s) but expected {expected}.");
         }
 
         _ledger.Upsert(
-            new BenchmarkFileLedgerEntry(spec.FileName, actualOid, bytes.LongLength, rowCount, repoCommit, DateTimeOffset.UtcNow),
+            new BenchmarkFileLedgerEntry(spec.FileName, actualOid, fileSizeBytes, rowCount, repoCommit, DateTimeOffset.UtcNow),
             connection,
             transaction);
 
         transaction.Commit();
         return rowCount;
+    }
+
+    /// <summary>Deletes <paramref name="path"/> if it exists, swallowing failures - best-effort cleanup only.</summary>
+    private static void SafeDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
     }
 }

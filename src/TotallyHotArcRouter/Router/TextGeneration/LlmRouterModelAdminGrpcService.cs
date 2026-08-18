@@ -73,7 +73,8 @@ public sealed class LlmRouterModelAdminGrpcService : Contract.LlmRouterModelAdmi
         ServerCallContext context)
     {
         var progress = new StreamingSyncProgress(responseStream);
-        var result = await _syncService.SyncAsync(progress, context.CancellationToken).ConfigureAwait(false);
+        var planProgress = new StreamingSyncPlan(responseStream);
+        var result = await _syncService.SyncAsync(progress, context.CancellationToken, planProgress).ConfigureAwait(false);
 
         // The plain per-file progress events above report a Failed stage but carry no error text
         // (LlmRouterModelSyncProgress has none - only the terminal LlmRouterModelSyncResult does). Send
@@ -188,6 +189,11 @@ public sealed class LlmRouterModelAdminGrpcService : Contract.LlmRouterModelAdmi
                 wire.BytesTransferred = bytes;
             }
 
+            if (value.TotalBytes is long totalBytes)
+            {
+                wire.TotalBytes = totalBytes;
+            }
+
             _stream.WriteAsync(new Contract.LlmRouterModelSyncStreamEvent { Progress = wire }).GetAwaiter().GetResult();
         }
 
@@ -200,5 +206,34 @@ public sealed class LlmRouterModelAdminGrpcService : Contract.LlmRouterModelAdmi
             LlmRouterModelSyncStage.Failed => Contract.LlmRouterModelSyncStage.Failed,
             _ => Contract.LlmRouterModelSyncStage.Unspecified,
         };
+    }
+
+    /// <summary>
+    /// Bridges <see cref="LlmRouterModelSyncService"/>'s one-time plan callback onto the response stream,
+    /// writing it as the very first message on a successful sync - before any
+    /// <see cref="StreamingSyncProgress"/> event - so the panel's cumulative progress bar has its
+    /// denominator before the first byte arrives. Same single-threaded, blocking-write safety argument as
+    /// <see cref="StreamingSyncProgress"/>.
+    /// </summary>
+    private sealed class StreamingSyncPlan : IProgress<LlmRouterModelSyncPlan>
+    {
+        private readonly IServerStreamWriter<Contract.LlmRouterModelSyncStreamEvent> _stream;
+
+        /// <summary>Initializes a new instance of the <see cref="StreamingSyncPlan"/> class.</summary>
+        /// <param name="stream">The gRPC response stream to write the plan event to.</param>
+        public StreamingSyncPlan(IServerStreamWriter<Contract.LlmRouterModelSyncStreamEvent> stream) => _stream = stream;
+
+        /// <inheritdoc/>
+        public void Report(LlmRouterModelSyncPlan value)
+        {
+            var wire = new Contract.LlmRouterModelSyncPlanEvent { TotalBytes = value.TotalBytes };
+            wire.Files.AddRange(value.Files.Select(file => new Contract.LlmRouterModelSyncPlanFile
+            {
+                FileName = file.FileName,
+                SizeBytes = file.SizeBytes,
+            }));
+
+            _stream.WriteAsync(new Contract.LlmRouterModelSyncStreamEvent { Plan = wire }).GetAwaiter().GetResult();
+        }
     }
 }

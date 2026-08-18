@@ -173,6 +173,73 @@ public class LlmRouterModelAdminClientTests
     }
 
     [Fact]
+    public async Task SyncAsync_maps_the_plan_event()
+    {
+        var stub = new StubClient
+        {
+            SyncEvents =
+            [
+                new Contract.LlmRouterModelSyncStreamEvent
+                {
+                    Plan = new Contract.LlmRouterModelSyncPlanEvent
+                    {
+                        Files =
+                        {
+                            new Contract.LlmRouterModelSyncPlanFile { FileName = "model.onnx", SizeBytes = 42 },
+                            new Contract.LlmRouterModelSyncPlanFile { FileName = "tokenizer.json", SizeBytes = 8 },
+                        },
+                        TotalBytes = 50,
+                    },
+                },
+            ],
+        };
+        using var client = new LlmRouterModelAdminClient(stub);
+
+        var events = new List<LlmRouterModelSyncEvent>();
+        await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken))
+        {
+            events.Add(e);
+        }
+
+        var plan = events.Single().Plan;
+        plan.Should().NotBeNull();
+        plan!.TotalBytes.Should().Be(50);
+        plan.Files.Should().HaveCount(2);
+        plan.Files[0].FileName.Should().Be("model.onnx");
+        plan.Files[0].SizeBytes.Should().Be(42);
+    }
+
+    [Fact]
+    public async Task SyncAsync_maps_a_progress_events_total_bytes()
+    {
+        var stub = new StubClient
+        {
+            SyncEvents =
+            [
+                new Contract.LlmRouterModelSyncStreamEvent
+                {
+                    Progress = new Contract.LlmRouterModelSyncProgressEvent
+                    {
+                        FileName = "model.onnx",
+                        Stage = Contract.LlmRouterModelSyncStage.Downloading,
+                        BytesTransferred = 10,
+                        TotalBytes = 42,
+                    },
+                },
+            ],
+        };
+        using var client = new LlmRouterModelAdminClient(stub);
+
+        var events = new List<LlmRouterModelSyncEvent>();
+        await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken))
+        {
+            events.Add(e);
+        }
+
+        events.Single().Progress!.TotalBytes.Should().Be(42);
+    }
+
+    [Fact]
     public async Task SyncAsync_maps_a_failed_progress_events_error()
     {
         var stub = new StubClient

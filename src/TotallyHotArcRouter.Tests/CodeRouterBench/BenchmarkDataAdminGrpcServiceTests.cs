@@ -155,6 +155,48 @@ public class BenchmarkDataAdminGrpcServiceTests
         Assert.Equal(Contract.BenchmarkDataState.Update, finalEvent.FinalStatus.State);
     }
 
+    [Fact]
+    public async Task SyncBenchmarkData_AllFilesStale_StreamsThePlanFirstListingEveryStaleFile()
+    {
+        using var temp = new TempBenchmarkDatabase();
+        var (service, _) = CreateService(temp, Fixtures, repoCommit: "commit123");
+        var writer = new FakeServerStreamWriter<Contract.BenchmarkSyncStreamEvent>();
+
+        await service.SyncBenchmarkData(new Contract.SyncBenchmarkDataRequest(), writer, CreateContext(TestContext.Current.CancellationToken));
+
+        var firstEvent = Assert.Single(writer.Written, e => e.EventCase == Contract.BenchmarkSyncStreamEvent.EventOneofCase.Plan);
+        Assert.Same(writer.Written[0], firstEvent);
+        Assert.Equal(TestFileSpecs.Count, firstEvent.Plan.Files.Count);
+        Assert.Equal(firstEvent.Plan.Files.Sum(f => f.SizeBytes), firstEvent.Plan.TotalBytes);
+        Assert.True(firstEvent.Plan.TotalBytes > 0);
+    }
+
+    [Fact]
+    public async Task SyncBenchmarkData_FileAlreadyCurrent_IsOmittedFromThePlanAndStreamsNoFailedEvent()
+    {
+        using var temp = new TempBenchmarkDatabase();
+        var ledger = temp.CreateLedger();
+        var publishedOid = GitBlobHash.Compute(Encoding.UTF8.GetBytes(Fixtures["models.json"]));
+        ledger.Upsert(new BenchmarkFileLedgerEntry("models.json", publishedOid, 42, 1, "old-commit", DateTimeOffset.UtcNow));
+        var (service, _) = CreateService(temp, Fixtures, repoCommit: "commit123");
+        var writer = new FakeServerStreamWriter<Contract.BenchmarkSyncStreamEvent>();
+
+        await service.SyncBenchmarkData(new Contract.SyncBenchmarkDataRequest(), writer, CreateContext(TestContext.Current.CancellationToken));
+
+        var plan = Assert.Single(writer.Written, e => e.EventCase == Contract.BenchmarkSyncStreamEvent.EventOneofCase.Plan).Plan;
+        Assert.DoesNotContain(plan.Files, f => f.FileName == "models.json");
+        Assert.Equal(TestFileSpecs.Count - 1, plan.Files.Count);
+
+        Assert.DoesNotContain(
+            writer.Written,
+            e => e.EventCase == Contract.BenchmarkSyncStreamEvent.EventOneofCase.Progress &&
+                 e.Progress.FileName == "models.json" &&
+                 e.Progress.Stage == Contract.BenchmarkSyncStage.Failed);
+
+        var finalEvent = Assert.Single(writer.Written, e => e.EventCase == Contract.BenchmarkSyncStreamEvent.EventOneofCase.FinalStatus);
+        Assert.Equal(Contract.BenchmarkDataState.Current, finalEvent.FinalStatus.State);
+    }
+
     private static (BenchmarkDataAdminGrpcService Service, BenchmarkSyncService SyncService) CreateService(
         TempBenchmarkDatabase temp,
         HttpMessageHandler handler)

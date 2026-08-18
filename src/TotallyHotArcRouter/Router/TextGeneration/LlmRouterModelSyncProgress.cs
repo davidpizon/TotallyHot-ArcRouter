@@ -20,10 +20,26 @@ public enum LlmRouterModelSyncStage
 /// <param name="FileName">The file this update is about.</param>
 /// <param name="Stage">The stage the file is currently in.</param>
 /// <param name="BytesTransferred">Bytes downloaded so far, when known.</param>
+/// <param name="TotalBytes">The file's published size in bytes, from the checksum probe, when known.</param>
 public sealed record LlmRouterModelSyncProgress(
     string FileName,
     LlmRouterModelSyncStage Stage,
-    long? BytesTransferred = null);
+    long? BytesTransferred = null,
+    long? TotalBytes = null);
+
+/// <summary>One file a sync is about to download, from the up-front <see cref="LlmRouterModelSyncPlan"/>.</summary>
+/// <param name="FileName">The file's name.</param>
+/// <param name="SizeBytes">The file's published size in bytes.</param>
+public sealed record LlmRouterModelSyncPlanFile(string FileName, long SizeBytes);
+
+/// <summary>
+/// The sync's plan, reported once before any file downloads: which files are stale and how many bytes
+/// the whole run will transfer, so the panel's cumulative progress bar has a stable denominator from
+/// the first byte rather than one that grows as each file starts.
+/// </summary>
+/// <param name="Files">The files that will be downloaded. A file omitted here was already current.</param>
+/// <param name="TotalBytes">The combined published size of every file in <paramref name="Files"/>.</param>
+public sealed record LlmRouterModelSyncPlan(IReadOnlyList<LlmRouterModelSyncPlanFile> Files, long TotalBytes);
 
 /// <summary>One file's final outcome after a sync attempt.</summary>
 /// <param name="FileName">The file this outcome is about.</param>

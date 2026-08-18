@@ -6,14 +6,23 @@ using TotallyHot.ArcRouter.CodeRouterBench;
 namespace TotallyHot.ArcRouter.Router.TextGeneration;
 
 /// <summary>
-/// Downloads, and checksum-verifies where possible, every file in <see cref="LlmRouterModelFiles.All"/>
-/// for the llm_router voter's currently active model (docs/router - Governance → Benchmark Data panel's
-/// "Local Voter Model" section). Each file is handled independently: a download failure or checksum
-/// mismatch aborts that file only, reported in the returned outcome rather than thrown - the same
-/// per-file-isolation convention <see cref="BenchmarkSyncService"/> uses for the CodeRouterBench corpus.
+/// Downloads and checksum-verifies every required file in <see cref="LlmRouterModelFiles.All"/> for the
+/// llm_router voter's currently active model (docs/router - Governance → Benchmark Data panel's "Local
+/// Voter Model" section). Unlike an earlier version of this service, a file is never installed without a
+/// published checksum to verify it against - a model source the checksum probe cannot reach or parse
+/// fails every required file's sync rather than trusting unverified bytes. Each file is otherwise handled
+/// independently: a download failure or checksum mismatch aborts that file only, reported in the returned
+/// outcome rather than thrown - the same per-file-isolation convention <see cref="BenchmarkSyncService"/>
+/// uses for the CodeRouterBench corpus.
 /// </summary>
 public sealed class LlmRouterModelSyncService
 {
+    // Reported no more often than this many bytes, or this often, whichever comes first - streaming
+    // every buffer-sized read as its own progress event would flood the gRPC stream for a
+    // multi-hundred-megabyte model.onnx.data.
+    private const long ProgressReportIntervalBytes = 256 * 1024;
+    private static readonly TimeSpan ProgressReportInterval = TimeSpan.FromMilliseconds(100);
+
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly LlmRouterModelChecksumProbe _probe;
     private readonly ILlmRouterModelOverrideStore _overrideStore;
@@ -68,6 +77,11 @@ public sealed class LlmRouterModelSyncService
     /// </remarks>
     /// <param name="progress">An optional progress reporter for streaming per-file status.</param>
     /// <param name="cancellationToken">A token to cancel the sync.</param>
+    /// <param name="planProgress">
+    /// An optional reporter for the one-time plan - which files are stale and how many bytes the run
+    /// will transfer - published once, before any file starts downloading, so a progress bar has a
+    /// stable denominator from the first byte.
+    /// </param>
     /// <exception cref="OperationCanceledException">
     /// <paramref name="cancellationToken"/> was canceled while a file was downloading or being verified.
     /// Unlike a per-file network or checksum failure, caller cancellation aborts the whole sync rather
@@ -75,7 +89,8 @@ public sealed class LlmRouterModelSyncService
     /// </exception>
     public async Task<LlmRouterModelSyncResult> SyncAsync(
         IProgress<LlmRouterModelSyncProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IProgress<LlmRouterModelSyncPlan>? planProgress = null)
     {
         var activeOverride = _overrideStore.Snapshot.Override;
         var cacheDirectory = activeOverride.ResolveCacheDirectory();
@@ -83,96 +98,177 @@ public sealed class LlmRouterModelSyncService
 
         var probeResult = await _probe.TryFetchAsync(activeOverride.BaseUrl, cancellationToken).ConfigureAwait(false);
 
-        List<LlmRouterModelFileSyncOutcome> outcomes = [];
-        foreach (var fileName in LlmRouterModelFiles.All)
+        var (outcomes, staleFiles) = await ClassifyAsync(cacheDirectory, probeResult, progress, cancellationToken)
+            .ConfigureAwait(false);
+
+        var planFiles = staleFiles
+            .Select(file => new LlmRouterModelSyncPlanFile(file.FileName, file.Published.Size))
+            .ToList();
+        planProgress?.Report(new LlmRouterModelSyncPlan(planFiles, planFiles.Sum(file => file.SizeBytes)));
+
+        foreach (var (fileName, published) in staleFiles)
         {
-            outcomes.Add(await SyncFileAsync(activeOverride.BaseUrl, cacheDirectory, fileName, probeResult, progress, cancellationToken)
-                .ConfigureAwait(false));
+            outcomes[fileName] = await SyncFileAsync(activeOverride.BaseUrl, cacheDirectory, fileName, published, progress, cancellationToken)
+                .ConfigureAwait(false);
         }
+
+        var orderedOutcomes = LlmRouterModelFiles.All.Select(fileName => outcomes[fileName]).ToList();
 
         _lastVerification = new LlmRouterModelVerificationSnapshot(
             activeOverride.BaseUrl,
             new ReadOnlyDictionary<string, bool>(
-                outcomes.ToDictionary(o => o.FileName, o => o.ChecksumVerified, StringComparer.Ordinal)));
+                orderedOutcomes.ToDictionary(o => o.FileName, o => o.ChecksumVerified, StringComparer.Ordinal)));
 
-        return new LlmRouterModelSyncResult(activeOverride.BaseUrl, outcomes);
+        return new LlmRouterModelSyncResult(activeOverride.BaseUrl, orderedOutcomes);
     }
 
-    private async Task<LlmRouterModelFileSyncOutcome> SyncFileAsync(
-        string baseUrl,
+    /// <summary>
+    /// Decides every file's fate without downloading anything, so the caller can publish a one-time plan
+    /// before the download loop starts. A file is resolved immediately (no entry in the returned stale
+    /// list) when: it is optional and unpublished (skipped), it is required but no published checksum
+    /// exists to verify it against (failed - this pipeline never installs unverified bytes), or it is
+    /// already cached with a matching size and checksum (completed, verified). Everything else -
+    /// missing, size-mismatched, or checksum-mismatched - is returned in <c>StaleFiles</c> for the
+    /// download loop to fetch.
+    /// </summary>
+    /// <param name="cacheDirectory">The active model's cache directory.</param>
+    /// <param name="probeResult">The already-fetched published checksums, or <see langword="null"/> if the model source could not be probed.</param>
+    /// <param name="progress">An optional progress reporter for the immediate stage transitions this method reports.</param>
+    /// <param name="cancellationToken">A token to cancel a cached-file hash in progress.</param>
+    private async Task<(Dictionary<string, LlmRouterModelFileSyncOutcome> Outcomes, List<(string FileName, LlmRouterModelPublishedFile Published)> StaleFiles)> ClassifyAsync(
         string cacheDirectory,
-        string fileName,
         LlmRouterModelChecksumProbeResult? probeResult,
         IProgress<LlmRouterModelSyncProgress>? progress,
         CancellationToken cancellationToken)
     {
-        var destinationPath = Path.Combine(cacheDirectory, fileName);
-        if (File.Exists(destinationPath))
+        var outcomes = new Dictionary<string, LlmRouterModelFileSyncOutcome>(StringComparer.Ordinal);
+        List<(string FileName, LlmRouterModelPublishedFile Published)> staleFiles = [];
+
+        foreach (var fileName in LlmRouterModelFiles.All)
         {
-            // Already cached from a prior sync (or the lazy OnnxTextGenerationClient fallback); an
-            // explicit "Update" only fills in what's missing rather than re-downloading a
-            // multi-hundred-megabyte file on every click. But when a published checksum is available,
-            // verify the cached bytes against it first - a corrupted or tampered cached file must not be
-            // silently reported as succeeded - and fall through to re-download on a mismatch instead of
-            // trusting stale bytes.
-            if (probeResult is not null && probeResult.Files.TryGetValue(fileName, out var cachedPublished))
+            var isOptional = LlmRouterModelFiles.IsOptional(fileName);
+
+            if (probeResult is null || !probeResult.Files.TryGetValue(fileName, out var published))
             {
-                progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Verifying));
-
-                // Isolate this file's failure per the class-level contract, same as the download path
-                // below: the cached file may be locked by a concurrent OnnxTextGenerationClient inference
-                // (IOException), fail an ACL check (UnauthorizedAccessException), or have been deleted
-                // between the File.Exists check above and here (FileNotFoundException).
-                string cachedOid;
-                try
+                if (isOptional)
                 {
-                    var cachedLength = new FileInfo(destinationPath).Length;
-                    await using var hashStream = File.OpenRead(destinationPath);
-                    cachedOid = GitBlobHash.Compute(hashStream, cachedLength, cancellationToken);
-                }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "llm_router cached model file verification failed for {FileName}.", fileName);
-                    progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Failed));
-                    return new LlmRouterModelFileSyncOutcome(fileName, Succeeded: false, ChecksumVerified: false, ex.Message);
-                }
-
-                if (string.Equals(cachedOid, cachedPublished.PublishedOid, StringComparison.OrdinalIgnoreCase))
-                {
+                    // An optional file's absence from the published tree is expected - some exports
+                    // inline all weights into model.onnx and never publish a separate external-data
+                    // file - so it is skipped rather than failed, mirroring the 404-during-download case.
                     progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Completed));
-                    return new LlmRouterModelFileSyncOutcome(fileName, Succeeded: true, ChecksumVerified: true, ErrorMessage: null);
+                    outcomes[fileName] = new LlmRouterModelFileSyncOutcome(fileName, Succeeded: true, ChecksumVerified: false, ErrorMessage: null);
+                }
+                else
+                {
+                    var reason = probeResult is null
+                        ? "No published checksums are available for this model source; refusing to install unverified files."
+                        : $"'{fileName}' was not present in the published model tree.";
+                    _logger.LogWarning("llm_router model sync skipped {FileName}: {Reason}", fileName, reason);
+                    progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Failed));
+                    outcomes[fileName] = new LlmRouterModelFileSyncOutcome(fileName, Succeeded: false, ChecksumVerified: false, reason);
                 }
 
-                _logger.LogWarning(
-                    "llm_router cached model file {FileName} failed checksum verification (expected {ExpectedOid}, computed {ActualOid}); re-downloading.",
-                    fileName,
-                    cachedPublished.PublishedOid,
-                    cachedOid);
+                continue;
+            }
 
-                // Quarantine the known-bad file now, before attempting the re-download: if the
-                // re-download itself then fails, File.Exists must not keep reporting this mismatched
-                // file as Synced (status checks and OnnxTextGenerationClient's lazy loader both only
-                // check File.Exists, not checksum validity).
-                SafeDelete(destinationPath);
-            }
-            else
+            var destinationPath = Path.Combine(cacheDirectory, fileName);
+            if (!File.Exists(destinationPath))
             {
-                progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Completed));
-                return new LlmRouterModelFileSyncOutcome(fileName, Succeeded: true, ChecksumVerified: false, ErrorMessage: null);
+                staleFiles.Add((fileName, published));
+                continue;
             }
+
+            // Size pre-filter, before paying for a hash of a potentially-hundreds-of-MB file: a cached
+            // file whose length already disagrees with the published size cannot possibly match the
+            // published checksum, so it is quarantined and queued for re-download without hashing it.
+            var cachedLength = new FileInfo(destinationPath).Length;
+            if (cachedLength != published.Size)
+            {
+                SafeDelete(destinationPath);
+                staleFiles.Add((fileName, published));
+                continue;
+            }
+
+            progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Verifying, TotalBytes: published.Size));
+
+            // Isolate this file's failure per the class-level contract: the cached file may be locked by
+            // a concurrent OnnxTextGenerationClient inference (IOException), fail an ACL check
+            // (UnauthorizedAccessException), or have been deleted between the File.Exists check above and
+            // here (FileNotFoundException).
+            string cachedOid;
+            try
+            {
+                await using var hashStream = File.OpenRead(destinationPath);
+                cachedOid = PublishedChecksumHasher.Compute(hashStream, cachedLength, published.Algorithm, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "llm_router cached model file verification failed for {FileName}.", fileName);
+                progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Failed));
+                outcomes[fileName] = new LlmRouterModelFileSyncOutcome(fileName, Succeeded: false, ChecksumVerified: false, ex.Message);
+                continue;
+            }
+
+            if (string.Equals(cachedOid, published.PublishedOid, StringComparison.OrdinalIgnoreCase))
+            {
+                progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Completed, TotalBytes: published.Size));
+                outcomes[fileName] = new LlmRouterModelFileSyncOutcome(fileName, Succeeded: true, ChecksumVerified: true, ErrorMessage: null);
+                continue;
+            }
+
+            _logger.LogWarning(
+                "llm_router cached model file {FileName} failed checksum verification (expected {ExpectedOid}, computed {ActualOid}); re-downloading.",
+                fileName,
+                published.PublishedOid,
+                cachedOid);
+
+            // Quarantine the known-bad file now, before attempting the re-download: if the re-download
+            // itself then fails, File.Exists must not keep reporting this mismatched file as synced
+            // (status checks and OnnxTextGenerationClient's lazy loader both only check File.Exists, not
+            // checksum validity).
+            SafeDelete(destinationPath);
+            staleFiles.Add((fileName, published));
         }
+
+        return (outcomes, staleFiles);
+    }
+
+    /// <summary>
+    /// Downloads one known-stale file to a temporary sibling of its destination, verifies it against
+    /// <paramref name="published"/>'s checksum, and promotes it (atomic same-volume rename) only on a
+    /// match - a checksum mismatch, like any other failure, leaves no file at the destination and is
+    /// reported in this file's outcome rather than propagating, per the class-level per-file isolation
+    /// contract.
+    /// </summary>
+    /// <param name="baseUrl">The active model's base URL the file is downloaded from.</param>
+    /// <param name="cacheDirectory">The active model's cache directory.</param>
+    /// <param name="fileName">The file to download.</param>
+    /// <param name="published">The file's published checksum and size, used to report progress and verify the download.</param>
+    /// <param name="progress">An optional progress reporter for streaming this file's status.</param>
+    /// <param name="cancellationToken">A token to cancel the download or verification.</param>
+    private async Task<LlmRouterModelFileSyncOutcome> SyncFileAsync(
+        string baseUrl,
+        string cacheDirectory,
+        string fileName,
+        LlmRouterModelPublishedFile published,
+        IProgress<LlmRouterModelSyncProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        var destinationPath = Path.Combine(cacheDirectory, fileName);
 
         // A GUID-suffixed temp name, not a fixed "<destination>.download" - two concurrent downloads of
         // the same file (two admin clients clicking Update, or a sync overlapping the lazy
-        // OnnxTextGenerationClient fallback) must not race on the same temp path.
+        // OnnxTextGenerationClient fallback) must not race on the same temp path. It stays a sibling of
+        // the destination (not under a system temp directory) so the eventual promotion is an atomic
+        // same-volume rename rather than a cross-volume copy of a potentially-hundreds-of-MB file.
         var temporaryPath = $"{destinationPath}.{Guid.NewGuid():N}.download";
         try
         {
-            progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Downloading));
+            progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Downloading, TotalBytes: published.Size));
             var url = $"{baseUrl}/{fileName}";
             using var httpClient = _httpClientFactory.CreateClient(LlmRouterModelChecksumProbe.HttpClientName);
             using var response = await httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
@@ -191,48 +287,64 @@ public sealed class LlmRouterModelSyncService
             response.EnsureSuccessStatusCode();
 
             // Stream straight to a temp file rather than buffering the whole artifact in memory - a
-            // llm_router file (especially model.onnx.data) can run hundreds of MB.
+            // llm_router file (especially model.onnx.data) can run hundreds of MB - reporting
+            // incremental byte progress along the way rather than only before/after.
+            long downloadedLength;
             await using (var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false))
             await using (var destination = File.Create(temporaryPath))
             {
-                await source.CopyToAsync(destination, cancellationToken).ConfigureAwait(false);
+                var buffer = new byte[81920];
+                long totalRead = 0;
+                var lastReportedBytes = 0L;
+                var lastReportedAt = DateTime.UtcNow;
+                int bytesRead;
+                while ((bytesRead = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) > 0)
+                {
+                    await destination.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken).ConfigureAwait(false);
+                    totalRead += bytesRead;
+
+                    var now = DateTime.UtcNow;
+                    if (totalRead - lastReportedBytes >= ProgressReportIntervalBytes ||
+                        now - lastReportedAt >= ProgressReportInterval)
+                    {
+                        progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Downloading, totalRead, published.Size));
+                        lastReportedBytes = totalRead;
+                        lastReportedAt = now;
+                    }
+                }
+
+                downloadedLength = totalRead;
             }
 
-            var downloadedLength = new FileInfo(temporaryPath).Length;
-            progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Downloading, downloadedLength));
+            progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Downloading, downloadedLength, published.Size));
 
-            var checksumVerified = false;
-            if (probeResult is not null && probeResult.Files.TryGetValue(fileName, out var published))
+            progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Verifying, TotalBytes: published.Size));
+            string actualOid;
+            await using (var hashStream = File.OpenRead(temporaryPath))
             {
-                progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Verifying));
-                string actualOid;
-                await using (var hashStream = File.OpenRead(temporaryPath))
-                {
-                    actualOid = GitBlobHash.Compute(hashStream, downloadedLength, cancellationToken);
-                }
-
-                if (!string.Equals(actualOid, published.PublishedOid, StringComparison.OrdinalIgnoreCase))
-                {
-                    var mismatchMessage =
-                        $"Checksum mismatch for '{fileName}': expected {published.PublishedOid}, computed {actualOid}.";
-                    _logger.LogError("llm_router model sync rejected {FileName}: {Reason}", fileName, mismatchMessage);
-                    progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Failed));
-                    SafeDelete(temporaryPath);
-                    return new LlmRouterModelFileSyncOutcome(fileName, Succeeded: false, ChecksumVerified: false, mismatchMessage);
-                }
-
-                checksumVerified = true;
+                actualOid = PublishedChecksumHasher.Compute(hashStream, downloadedLength, published.Algorithm, cancellationToken);
             }
 
+            if (!string.Equals(actualOid, published.PublishedOid, StringComparison.OrdinalIgnoreCase))
+            {
+                var mismatchMessage =
+                    $"Checksum mismatch for '{fileName}': expected {published.PublishedOid}, computed {actualOid}.";
+                _logger.LogError("llm_router model sync rejected {FileName}: {Reason}", fileName, mismatchMessage);
+                progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Failed));
+                SafeDelete(temporaryPath);
+                return new LlmRouterModelFileSyncOutcome(fileName, Succeeded: false, ChecksumVerified: false, mismatchMessage);
+            }
+
+            // Promote only once the checksum has verified - "copy over once the checksum matches" - so a
+            // mismatched download never leaves a same-named file behind to be confused with a verified one.
             File.Move(temporaryPath, destinationPath, overwrite: true);
 
-            progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Completed));
+            progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Completed, TotalBytes: published.Size));
             _logger.LogInformation(
-                "llm_router model sync downloaded {FileName} from {Url} (checksum verified: {ChecksumVerified}).",
+                "llm_router model sync downloaded and verified {FileName} from {Url}.",
                 fileName,
-                url,
-                checksumVerified);
-            return new LlmRouterModelFileSyncOutcome(fileName, Succeeded: true, checksumVerified, ErrorMessage: null);
+                url);
+            return new LlmRouterModelFileSyncOutcome(fileName, Succeeded: true, ChecksumVerified: true, ErrorMessage: null);
         }
         catch (OperationCanceledException)
         {
