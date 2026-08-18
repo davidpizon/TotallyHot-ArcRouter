@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using TotallyHot.ArcRouter.Checksums;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -151,6 +152,84 @@ public class BenchmarkSyncServiceTests
 
         Assert.Contains(updates, u => u.FileName == "models.json" && u.Stage == BenchmarkSyncStage.Completed);
         Assert.Equal(8, updates.Count(u => u.Stage == BenchmarkSyncStage.Completed));
+        // Every progress update for a file being synced carries its published size, constant across the
+        // whole file's lifecycle, so a progress bar's denominator never shifts mid-download.
+        Assert.All(updates, u => Assert.NotNull(u.TotalBytes));
+        foreach (var group in updates.GroupBy(u => u.FileName))
+        {
+            Assert.Single(group.Select(u => u.TotalBytes).Distinct());
+        }
+    }
+
+    [Fact]
+    public async Task SyncAsync_FileAlreadyCurrent_IsSkippedWithoutADownloadRequest()
+    {
+        using var temp = new TempBenchmarkDatabase();
+        var ledger = temp.CreateLedger();
+        var publishedOid = GitBlobHash.Compute(Encoding.UTF8.GetBytes(Fixtures["models.json"]));
+        ledger.Upsert(new BenchmarkFileLedgerEntry("models.json", publishedOid, 123, 1, "old-commit", DateTimeOffset.UtcNow));
+
+        HashSet<string> requestedFiles = [];
+        var service = CreateService(temp, Fixtures, repoCommit: "commit123", onFileRequested: name => requestedFiles.Add(name));
+
+        var result = await service.SyncAsync("main", progress: null, TestContext.Current.CancellationToken);
+
+        var outcome = result.Files.Single(f => f.FileName == "models.json");
+        Assert.True(outcome.Succeeded);
+        Assert.True(outcome.Skipped);
+        Assert.Equal(1, outcome.RowCount);
+        Assert.DoesNotContain("models.json", requestedFiles);
+        Assert.Equal(7, result.Files.Count(f => !f.Skipped && f.Succeeded));
+    }
+
+    [Fact]
+    public async Task SyncAsync_ChecksumMismatch_LeavesNoFileInTheTempDirectory()
+    {
+        using var temp = new TempBenchmarkDatabase();
+        var tempRoot = Path.GetTempPath();
+        var before = Directory.GetDirectories(tempRoot, "arcrouter-bench-*");
+        var servedBodies = new Dictionary<string, string>(Fixtures)
+        {
+            ["models.json"] = """{ "tampered-after-checksum-was-published": {} }""",
+        };
+        var service = CreateService(temp, servedBodies, repoCommit: "commit123", publishedFixtures: Fixtures);
+
+        await service.SyncAsync("main", progress: null, TestContext.Current.CancellationToken);
+
+        var after = Directory.GetDirectories(tempRoot, "arcrouter-bench-*");
+        Assert.Equal(before.Length, after.Length);
+    }
+
+    [Fact]
+    public async Task SyncAsync_LfsTrackedFile_VerifiesAgainstItsRealContentSha256AndSucceeds()
+    {
+        using var temp = new TempBenchmarkDatabase();
+        var service = CreateService(
+            temp, Fixtures, repoCommit: "commit123", lfsFileNames: new HashSet<string> { "models.json" });
+
+        var result = await service.SyncAsync("main", progress: null, TestContext.Current.CancellationToken);
+
+        var outcome = result.Files.Single(f => f.FileName == "models.json");
+        Assert.True(outcome.Succeeded, outcome.ErrorMessage);
+
+        var ledger = temp.CreateLedger();
+        var entry = ledger.TryGet("models.json");
+        Assert.NotNull(entry);
+        Assert.Equal(ContentSha256Hash.Compute(Encoding.UTF8.GetBytes(Fixtures["models.json"])), entry!.PublishedOid);
+    }
+
+    [Fact]
+    public async Task SyncAsync_Completes_DeletesItsTempDirectory()
+    {
+        using var temp = new TempBenchmarkDatabase();
+        var tempRoot = Path.GetTempPath();
+        var before = Directory.GetDirectories(tempRoot, "arcrouter-bench-*");
+        var service = CreateService(temp, Fixtures, repoCommit: "commit123");
+
+        await service.SyncAsync("main", progress: null, TestContext.Current.CancellationToken);
+
+        var after = Directory.GetDirectories(tempRoot, "arcrouter-bench-*");
+        Assert.Equal(before.Length, after.Length);
     }
 
     private sealed class SynchronousProgress<T>(Action<T> report) : IProgress<T>
@@ -164,7 +243,9 @@ public class BenchmarkSyncServiceTests
         string repoCommit,
         IReadOnlyDictionary<string, string>? publishedFixtures = null,
         string? omitFromTree = null,
-        CancellationTokenSource? cancelDownloadsWith = null)
+        CancellationTokenSource? cancelDownloadsWith = null,
+        Action<string>? onFileRequested = null,
+        IReadOnlySet<string>? lfsFileNames = null)
     {
         var oidSourceBodies = publishedFixtures ?? servedBodies;
         var publishedOids = oidSourceBodies.ToDictionary(
@@ -180,7 +261,18 @@ public class BenchmarkSyncServiceTests
                 var treeEntries = publishedOids
                     .Where(kvp => kvp.Key != omitFromTree)
                     .Select(kvp =>
-                        $$"""{ "type": "file", "path": "{{kvp.Key}}", "oid": "{{kvp.Value}}", "size": {{Encoding.UTF8.GetByteCount(oidSourceBodies[kvp.Key])}} }""");
+                    {
+                        var size = Encoding.UTF8.GetByteCount(oidSourceBodies[kvp.Key]);
+                        if (lfsFileNames?.Contains(kvp.Key) == true)
+                        {
+                            // A deliberately-wrong top-level oid (not the real git blob hash of the served
+                            // bytes) proves the sync verifies against lfs.oid, not this one.
+                            var lfsOid = ContentSha256Hash.Compute(Encoding.UTF8.GetBytes(oidSourceBodies[kvp.Key]));
+                            return $$"""{ "type": "file", "path": "{{kvp.Key}}", "oid": "0000000000000000000000000000000000wrong", "size": 1, "lfs": { "oid": "{{lfsOid}}", "size": {{size}} } }""";
+                        }
+
+                        return $$"""{ "type": "file", "path": "{{kvp.Key}}", "oid": "{{kvp.Value}}", "size": {{size}} }""";
+                    });
                 var response = new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent($"[{string.Join(',', treeEntries)}]", Encoding.UTF8, "application/json"),
@@ -190,6 +282,7 @@ public class BenchmarkSyncServiceTests
             }
 
             var fileName = path[(path.LastIndexOf('/') + 1)..];
+            onFileRequested?.Invoke(fileName);
             cancelDownloadsWith?.Cancel();
             return servedBodies.TryGetValue(fileName, out var body)
                 ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8) }

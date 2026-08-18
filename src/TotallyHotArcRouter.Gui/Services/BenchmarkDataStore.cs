@@ -75,6 +75,46 @@ public sealed class BenchmarkDataStore : IDisposable
 
     private Dictionary<string, BenchmarkSyncProgressInfo> _syncProgress = [];
 
+    /// <summary>
+    /// The current sync's up-front plan - the stale files it will download and their combined size -
+    /// published as the first event on the stream. <see langword="null"/> before that first event
+    /// arrives (including outside of a running sync) or if the sync failed before it was sent.
+    /// </summary>
+    public BenchmarkSyncPlanInfo? SyncPlan { get; private set; }
+
+    /// <summary>
+    /// The name of the file the most recent progress event was about, i.e. the file currently being
+    /// downloaded, verified, or imported. The server processes files strictly sequentially, so the
+    /// latest event's file is always the one presently in flight.
+    /// </summary>
+    public string? CurrentFileName { get; private set; }
+
+    /// <summary>
+    /// The combined bytes transferred so far across every file in <see cref="SyncPlan"/>: a file that
+    /// has not started counts 0, a file mid-download counts its <see cref="BenchmarkSyncProgressInfo.BytesTransferred"/>
+    /// (capped at its planned size), and a file that has reached verifying, importing, or completed
+    /// counts its full planned size regardless of the last reported byte count.
+    /// </summary>
+    public long CumulativeBytesTransferred => SyncPlan is null
+        ? 0
+        : SyncPlan.Files.Sum(file =>
+        {
+            if (!_syncProgress.TryGetValue(file.FileName, out var progress))
+            {
+                return 0L;
+            }
+
+            return progress.Stage switch
+            {
+                BenchmarkSyncStageInfo.Verifying or BenchmarkSyncStageInfo.Importing or BenchmarkSyncStageInfo.Completed
+                    => file.SizeBytes,
+                _ => Math.Min(progress.BytesTransferred ?? 0, file.SizeBytes),
+            };
+        });
+
+    /// <summary>The combined planned size of every file in <see cref="SyncPlan"/>, or 0 before the plan arrives.</summary>
+    public long CumulativeTotalBytes => SyncPlan?.TotalBytes ?? 0;
+
     /// <summary>Raised after any of the above change.</summary>
     public event Action? Changed;
 
@@ -144,15 +184,34 @@ public sealed class BenchmarkDataStore : IDisposable
     {
         IsSyncing = true;
         _syncProgress = [];
+        SyncPlan = null;
+        CurrentFileName = null;
         Changed?.Invoke();
 
         try
         {
             await foreach (var syncEvent in _client.SyncAsync(cancellationToken))
             {
-                if (syncEvent.Progress is { } progress)
+                if (syncEvent.Plan is { } plan)
                 {
+                    SyncPlan = plan;
+                }
+                else if (syncEvent.Progress is { } progress)
+                {
+                    // Certain stages (Failed, Verifying) often omit BytesTransferred/TotalBytes; carry the
+                    // prior non-null values forward so a file's cumulative progress cannot regress to 0
+                    // just because the latest event didn't repeat them.
+                    if (_syncProgress.TryGetValue(progress.FileName, out var previous))
+                    {
+                        progress = progress with
+                        {
+                            BytesTransferred = progress.BytesTransferred ?? previous.BytesTransferred,
+                            TotalBytes = progress.TotalBytes ?? previous.TotalBytes,
+                        };
+                    }
+
                     _syncProgress[progress.FileName] = progress;
+                    CurrentFileName = progress.FileName;
                 }
                 else if (syncEvent.FinalStatus is { } finalStatus)
                 {

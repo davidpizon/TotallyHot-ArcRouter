@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
+using TotallyHot.ArcRouter.Checksums;
 
 namespace TotallyHot.ArcRouter.CodeRouterBench;
 
@@ -15,19 +16,43 @@ internal sealed class HuggingFaceTreeEntry
     [JsonPropertyName("path")]
     public string? Path { get; set; }
 
-    /// <summary>Gets or sets the entry's git blob SHA-1.</summary>
+    /// <summary>
+    /// Gets or sets the entry's git blob SHA-1. For a Git LFS-tracked entry (<see cref="Lfs"/> non-null),
+    /// this is the SHA-1 of the small LFS pointer text file, not of the real content - see
+    /// <see cref="PublishedChecksumAlgorithm.LfsSha256"/>.
+    /// </summary>
     [JsonPropertyName("oid")]
     public string? Oid { get; set; }
 
-    /// <summary>Gets or sets the entry's size in bytes.</summary>
+    /// <summary>Gets or sets the entry's size in bytes. For an LFS-tracked entry, prefer <see cref="Lfs"/>'s size instead.</summary>
     [JsonPropertyName("size")]
     public long Size { get; set; }
+
+    /// <summary>Gets or sets the entry's Git LFS metadata, present only when this file is LFS-tracked.</summary>
+    [JsonPropertyName("lfs")]
+    public HuggingFaceTreeEntryLfs? Lfs { get; set; }
 }
 
-/// <summary>The published git blob SHA-1 and size of one CodeRouterBench file.</summary>
-/// <param name="PublishedOid">The git blob SHA-1 Hugging Face publishes for this file.</param>
+/// <summary>The Git LFS metadata of one Hugging Face dataset tree entry, present only for an LFS-tracked file.</summary>
+internal sealed class HuggingFaceTreeEntryLfs
+{
+    /// <summary>Gets or sets the file's real content SHA-256, unlike the enclosing entry's git-blob <c>oid</c>.</summary>
+    [JsonPropertyName("oid")]
+    public string? Oid { get; set; }
+
+    /// <summary>Gets or sets the file's real (LFS-resolved) size in bytes.</summary>
+    [JsonPropertyName("size")]
+    public long? Size { get; set; }
+}
+
+/// <summary>The published checksum and size of one CodeRouterBench file.</summary>
+/// <param name="PublishedOid">
+/// The checksum Hugging Face publishes for this file, in the format <paramref name="Algorithm"/> names -
+/// a git blob SHA-1 for a regular file, or a content SHA-256 for a Git LFS-tracked one.
+/// </param>
 /// <param name="Size">The file's published size in bytes.</param>
-public sealed record BenchmarkPublishedFile(string PublishedOid, long Size);
+/// <param name="Algorithm">Which hash <paramref name="PublishedOid"/> is, and so which algorithm a downloaded/cached copy must be verified with.</param>
+public sealed record BenchmarkPublishedFile(string PublishedOid, long Size, PublishedChecksumAlgorithm Algorithm);
 
 /// <summary>The result of one <see cref="BenchmarkChecksumProbe.FetchAsync"/> call.</summary>
 /// <param name="Files">Every published file's checksum and size, keyed by its dataset-relative path.</param>
@@ -105,7 +130,12 @@ public sealed class BenchmarkChecksumProbe
                 continue;
             }
 
-            files[entry.Path] = new BenchmarkPublishedFile(entry.Oid, entry.Size);
+            // An entry with a non-empty Lfs.Oid is Git LFS-tracked: the real content hash lives there
+            // (SHA-256), not in the entry's own git-blob oid (which is only the small pointer file's
+            // hash). Prefer Lfs.Size too - it's the real, LFS-resolved size a download actually transfers.
+            files[entry.Path] = entry.Lfs is { Oid: { Length: > 0 } lfsOid } lfs
+                ? new BenchmarkPublishedFile(lfsOid, lfs.Size ?? entry.Size, PublishedChecksumAlgorithm.LfsSha256)
+                : new BenchmarkPublishedFile(entry.Oid, entry.Size, PublishedChecksumAlgorithm.GitBlobSha1);
         }
 
         _logger.LogInformation(

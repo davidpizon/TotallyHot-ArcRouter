@@ -242,15 +242,22 @@ test helper exists for the suite (the benchmark database needs its own, since `T
   how the price-source clients are registered.
 - `GitBlobHash` — computes `SHA1("blob " + length + "\0" + bytes)`. Small, pure, exhaustively tested
   against the known-good vector in this document.
-- `BenchmarkSyncService` — per file: download → recompute blob SHA-1 → compare to published `oid` →
-  parse → import in one transaction → write the ledger row. Any step failing aborts *that file only*,
-  leaving its table and ledger row untouched, and is reported in the outcome.
-- Importers: `CodeRouterBenchCsvReader` gains a stream/text overload so it parses downloaded bytes
-  without a temp file; a JSONL importer and JSON importers for `models.json` / `summary.json`.
+- `BenchmarkSyncService` — computes the stale subset of `BenchmarkFileSpec.All` up front (a file whose
+  ledger `oid` already matches the just-probed published `oid` is skipped entirely, reported as a
+  `Skipped` outcome, and never downloaded), then per stale file: stream to a per-run temporary
+  directory → recompute blob SHA-1 from that file → compare to published `oid` → on match, move
+  (promote) it within the temp directory → parse → import in one transaction → write the ledger row.
+  Any step failing aborts *that file only*, leaving its table and ledger row untouched, and is reported
+  in the outcome; a checksum mismatch also deletes the partial download. The run's temporary directory
+  is deleted, successfully or not, once every stale file has been attempted.
+- Importers: `CodeRouterBenchCsvReader` gains a stream/text overload so it parses the promoted on-disk
+  file directly; a JSONL importer and JSON importers for `models.json` / `summary.json`.
 - Row-count assertions retained from the now-removed `fetch-coderouterbench.sh`: 56,640 / 23,352 / 1,408 / 7,080 / 2,919
   / 176, plus the derivation invariant (56,640 + 23,352 = 79,992; 7,080 + 2,919 = 9,999).
-- Progress reporting via `IProgress<BenchmarkSyncProgress>` (file name, stage, bytes, rows) so Phase 4
-  can stream it.
+- Progress reporting via `IProgress<BenchmarkSyncProgress>` (file name, stage, bytes, total bytes, rows)
+  for per-file updates, plus a one-time `IProgress<BenchmarkSyncPlan>` (the stale files and their
+  combined size) reported before any file starts, so Phase 4 can stream both and a consumer's
+  cumulative progress display has a stable denominator from the first byte.
 
 **Exit:** a fake `HttpMessageHandler` drives a full sync against fixture bytes in under 5 seconds; a
 checksum mismatch, a truncated file, and a row-count mismatch each leave prior state intact.
@@ -284,13 +291,17 @@ be exposed as a service. New in `src/Protos/telemetry.proto`, mirroring `PriceSo
 service BenchmarkDataAdminService {
   rpc GetBenchmarkStatus (GetBenchmarkStatusRequest) returns (BenchmarkStatusResponse);
   rpc RecheckBenchmarkData (RecheckBenchmarkDataRequest) returns (BenchmarkStatusResponse);
-  rpc SyncBenchmarkData (SyncBenchmarkDataRequest) returns (stream BenchmarkSyncProgress);
+  rpc SyncBenchmarkData (SyncBenchmarkDataRequest) returns (stream BenchmarkSyncStreamEvent);
 }
 ```
 
-`SyncBenchmarkData` streams so the pane can show per-file progress rather than sitting silent through a
-~12 MB download. Messages carry per-file name, stage, bytes-transferred, rows-imported, and a terminal
-per-file outcome, plus the aggregate state.
+`SyncBenchmarkData` streams so the pane can show progress rather than sitting silent through a ~12 MB
+download. The very first message is a one-time `BenchmarkSyncPlanEvent` — the stale files (a file
+already current is omitted, having been skipped without a download) and their combined byte size — so a
+cumulative progress display has its denominator before the first byte arrives. Subsequent messages carry
+per-file name, stage, bytes-transferred, total bytes, rows-imported, and a terminal per-file outcome
+(files already current produce no per-file event at all, matching their absence from the plan), followed
+by exactly one final message carrying the aggregate state.
 
 **Exit:** service tests cover the status, recheck, and streaming-sync paths, including a sync that fails
 on one file and succeeds on the rest.
@@ -300,17 +311,24 @@ on one file and succeeds on the rest.
 - `Components/BenchmarkData.razor`, added as a fifth `GovView` in `Components/Governance.razor`
   (`Providers`, `Models`, `Price Sources`, `Price Overrides`, **`Benchmark Data`**).
 - `Services/BenchmarkDataStore.cs` in the GUI, mirroring `PriceSourceStore`: load, recheck, sync,
-  `IsRefreshing`, and the router-unreachable state `PriceSourcesAdmin` already renders.
-- Layout follows `PriceSourcesAdmin.razor`: a header row carrying the single action button, and a card
-  per file below showing its stage, size, row count, and last-synced time.
-- The button reflects the Phase 3 state directly — "Current" (disabled) / "Update" / "Check Failed" —
-  and becomes "Updating…" and disabled during a sync, exactly as "Pull Now" becomes "Pulling…".
-- Per-file progress updates in place as the stream arrives. No modal: the rest of the app stays usable.
+  `IsRefreshing`, and the router-unreachable state `PriceSourcesAdmin` already renders. Also tracks the
+  sync's `SyncPlan` and derives `CumulativeBytesTransferred`/`CumulativeTotalBytes`/`CurrentFileName`
+  from the plan plus the per-file `SyncProgress` dictionary.
+- **Single "Task Matrix" card**, not one card per file: `BenchmarkFileSpec.All`'s eight `.csv`/`.jsonl`/
+  `.json` files are one logical asset. The card carries its own action button (following the Phase 3
+  state directly — "Current" (disabled) / "Update" / "Check Failed" — and "Updating…" while syncing,
+  exactly as "Pull Now" becomes "Pulling…"), an at-rest summary line (files synced, combined size and
+  row count, most recent sync time), and a collapsed-by-default disclosure revealing each file's own
+  stage, size, row count, and last-synced time.
+- **Two progress bars while syncing**: a cumulative bar over `CumulativeBytesTransferred` /
+  `CumulativeTotalBytes` across every stale file, and beneath it a per-file bar labelled with
+  `CurrentFileName` showing that one file's bytes transferred against its own size. Both disappear once
+  the sync ends. No modal: the rest of the app stays usable.
 - Styling per `docs/gui/DESIGN.md`; any dialog introduced here must copy the `SettingsModal.razor` shell
   (backdrop, panel classes, header bar, close-as-`EventCallback`) per the repository's window contract.
 
-**Exit:** bUnit tests cover each button state, the in-progress state, per-file progress rendering, and
-the unreachable state.
+**Exit:** bUnit tests cover each button state, the in-progress state with both progress bars, the
+collapsed/expanded disclosure, and the unreachable state.
 
 ## Phase 6 — Retarget consumers, extra surfaces, and removal — shipped
 

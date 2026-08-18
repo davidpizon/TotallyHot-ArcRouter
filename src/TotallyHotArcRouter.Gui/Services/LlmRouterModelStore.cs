@@ -76,6 +76,46 @@ public sealed class LlmRouterModelStore : IDisposable
 
     private Dictionary<string, LlmRouterModelSyncProgressInfo> _syncProgress = [];
 
+    /// <summary>
+    /// The current sync's plan - which files are stale and how many bytes the run will transfer - or
+    /// <see langword="null"/> before the plan event arrives (or when no sync is running). Cleared at the
+    /// start of each <see cref="SyncAsync"/> call.
+    /// </summary>
+    public LlmRouterModelSyncPlanInfo? SyncPlan { get; private set; }
+
+    /// <summary>
+    /// The file named by the most recently received progress event of the current sync - terminal
+    /// (Completed/Failed) events included - driving the current-file progress bar's label.
+    /// <see langword="null"/> before the first progress event of a sync arrives.
+    /// </summary>
+    public string? CurrentFileName { get; private set; }
+
+    /// <summary>
+    /// The combined bytes transferred so far across every planned file, derived from <see cref="SyncPlan"/>
+    /// and <see cref="SyncProgress"/> rather than accumulated, so it stays correct under out-of-order or
+    /// repeated events: each planned file contributes its full size once its stage reaches
+    /// <see cref="LlmRouterModelSyncStageInfo.Verifying"/> or later, otherwise the lesser of its reported
+    /// bytes transferred and its planned size. 0 before the plan arrives.
+    /// </summary>
+    public long CumulativeBytesTransferred => SyncPlan is null
+        ? 0
+        : SyncPlan.Files.Sum(file =>
+        {
+            if (!_syncProgress.TryGetValue(file.FileName, out var progress))
+            {
+                return 0L;
+            }
+
+            return progress.Stage switch
+            {
+                LlmRouterModelSyncStageInfo.Verifying or LlmRouterModelSyncStageInfo.Completed => file.SizeBytes,
+                _ => Math.Min(progress.BytesTransferred ?? 0, file.SizeBytes),
+            };
+        });
+
+    /// <summary>The combined planned size of every file in <see cref="SyncPlan"/>, or 0 before the plan arrives.</summary>
+    public long CumulativeTotalBytes => SyncPlan?.TotalBytes ?? 0;
+
     /// <summary>Raised after any of the above change.</summary>
     public event Action? Changed;
 
@@ -126,6 +166,8 @@ public sealed class LlmRouterModelStore : IDisposable
         // The new model's files share the old model's file names (genai_config.json, model.onnx, ...),
         // so a leftover progress entry from the previous model would otherwise be misread as this one's.
         _syncProgress = [];
+        SyncPlan = null;
+        CurrentFileName = null;
         IsReachable = true;
         IsLoaded = true;
         LastError = null;
@@ -142,15 +184,34 @@ public sealed class LlmRouterModelStore : IDisposable
     {
         IsSyncing = true;
         _syncProgress = [];
+        SyncPlan = null;
+        CurrentFileName = null;
         Changed?.Invoke();
 
         try
         {
             await foreach (var syncEvent in _client.SyncAsync(cancellationToken))
             {
-                if (syncEvent.Progress is { } progress)
+                if (syncEvent.Plan is { } plan)
                 {
+                    SyncPlan = plan;
+                }
+                else if (syncEvent.Progress is { } progress)
+                {
+                    // Certain stages (Failed, Verifying) often omit BytesTransferred/TotalBytes; carry the
+                    // prior non-null values forward so a file's cumulative progress cannot regress to 0
+                    // just because the latest event didn't repeat them.
+                    if (_syncProgress.TryGetValue(progress.FileName, out var previous))
+                    {
+                        progress = progress with
+                        {
+                            BytesTransferred = progress.BytesTransferred ?? previous.BytesTransferred,
+                            TotalBytes = progress.TotalBytes ?? previous.TotalBytes,
+                        };
+                    }
+
                     _syncProgress[progress.FileName] = progress;
+                    CurrentFileName = progress.FileName;
                 }
                 else if (syncEvent.FinalStatus is { } finalStatus)
                 {

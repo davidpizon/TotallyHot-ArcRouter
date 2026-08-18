@@ -172,8 +172,13 @@ actually appear in `app.css`.
   count/label chips (e.g. the agent-color dot, fallback `⚠` badge); larger containers use `rounded`
   (4px) or `rounded-lg` (8px). The ranked metric-picker pill row in Cost Analytics follows the same
   `rounded-full` pattern.
-- **Status bars** — `.progress-bar-track` (`background:#1e3a5f`, `rounded` 2px, 6px tall) hosts the
-  OK/WARNING/CRITICAL utilization fill for provider budgets and price-source caps.
+- **Status bars** — `.progress-bar-track` (`background:#1f1f1f`, `rounded` 2px, 6px tall) hosts the
+  OK/WARNING/CRITICAL utilization fill for provider budgets and price-source caps. The same track class
+  also hosts a plain `.progress-bar-fill` (`background:var(--accent)`, width set inline as a percentage)
+  for a determinate transfer progress bar — the established pattern for any multi-file transfer.
+  Governance › Benchmark Data's Task Matrix and Local Voter Model cards each stack two of these while
+  their own sync runs: a cumulative bar over the whole update, and beneath it a per-file bar labelled
+  with the file currently downloading. Both bars are rendered only for the sync's duration.
 - **Card action buttons** (the glyph row in a Governance › Providers card header) — a 26×26 square
   (`rounded p-1.5` around a 14px `Icon`), `rounded` 4px, deliberately **not** pill/circular, 150ms
   `transition-colors`. Edit stays on the slate ramp via Tailwind utilities (recolored to the new

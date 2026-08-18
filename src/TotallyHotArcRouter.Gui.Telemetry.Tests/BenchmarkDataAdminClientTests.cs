@@ -165,6 +165,91 @@ public class BenchmarkDataAdminClientTests
     }
 
     [Fact]
+    public async Task SyncAsync_maps_the_plan_event()
+    {
+        var stub = new StubClient
+        {
+            SyncEvents =
+            [
+                new Contract.BenchmarkSyncStreamEvent
+                {
+                    Plan = new Contract.BenchmarkSyncPlanEvent
+                    {
+                        Files =
+                        {
+                            new Contract.BenchmarkSyncPlanFile { FileName = "models.json", SizeBytes = 42 },
+                            new Contract.BenchmarkSyncPlanFile { FileName = "summary.json", SizeBytes = 8 },
+                        },
+                        TotalBytes = 50,
+                    },
+                },
+            ],
+        };
+        using var client = new BenchmarkDataAdminClient(stub);
+
+        var events = new List<BenchmarkSyncEvent>();
+        await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken))
+        {
+            events.Add(e);
+        }
+
+        var plan = events.Single().Plan;
+        plan.Should().NotBeNull();
+        plan!.TotalBytes.Should().Be(50);
+        plan.Files.Should().HaveCount(2);
+        plan.Files[0].FileName.Should().Be("models.json");
+        plan.Files[0].SizeBytes.Should().Be(42);
+    }
+
+    [Fact]
+    public async Task SyncAsync_maps_a_progress_events_total_bytes()
+    {
+        var stub = new StubClient
+        {
+            SyncEvents =
+            [
+                new Contract.BenchmarkSyncStreamEvent
+                {
+                    Progress = new Contract.BenchmarkSyncProgressEvent
+                    {
+                        FileName = "models.json",
+                        Stage = Contract.BenchmarkSyncStage.Downloading,
+                        BytesTransferred = 10,
+                        TotalBytes = 42,
+                    },
+                },
+            ],
+        };
+        using var client = new BenchmarkDataAdminClient(stub);
+
+        var events = new List<BenchmarkSyncEvent>();
+        await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken))
+        {
+            events.Add(e);
+        }
+
+        events.Single().Progress!.TotalBytes.Should().Be(42);
+    }
+
+    [Fact]
+    public async Task SyncAsync_an_empty_oneof_maps_to_an_all_null_event_without_throwing()
+    {
+        var stub = new StubClient { SyncEvents = [new Contract.BenchmarkSyncStreamEvent()] };
+        using var client = new BenchmarkDataAdminClient(stub);
+
+        var events = new List<BenchmarkSyncEvent>();
+        await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken))
+        {
+            events.Add(e);
+        }
+
+        var single = events.Single();
+        single.Plan.Should().BeNull();
+        single.Progress.Should().BeNull();
+        single.FinalStatus.Should().BeNull();
+    }
+
+    [Fact]
     public async Task SyncAsync_maps_a_failed_progress_events_error()
     {
         var stub = new StubClient

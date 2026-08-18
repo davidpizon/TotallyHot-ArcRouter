@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using Microsoft.Extensions.Logging.Abstractions;
+using TotallyHot.ArcRouter.Checksums;
 using TotallyHot.ArcRouter.Router.TextGeneration;
 using TotallyHot.ArcRouter.Tests.CodeRouterBench;
 
@@ -42,10 +43,42 @@ public sealed class LlmRouterModelChecksumProbeTests
         Assert.Equal(2, result.Files.Count);
         Assert.Equal("aaaa000000000000000000000000000000aaaa", result.Files["genai_config.json"].PublishedOid);
         Assert.Equal(1417, result.Files["genai_config.json"].Size);
+        Assert.Equal(PublishedChecksumAlgorithm.GitBlobSha1, result.Files["genai_config.json"].Algorithm);
         Assert.NotNull(capturedRequest);
         Assert.Equal(
             "https://huggingface.co/api/models/xiaoyao9184/Qwen2.5-0.5B-Instruct-onnx-genai/tree/main/cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4",
             capturedRequest.RequestUri!.ToString());
+    }
+
+    [Fact]
+    public async Task TryFetchAsync_LfsTrackedEntry_UsesLfsOidSizeAndAlgorithm()
+    {
+        // model.onnx and model.onnx.data are almost always Git LFS-tracked - their top-level "oid"/"size"
+        // describe the small pointer file, not the real content; only the nested "lfs" object's oid (a
+        // SHA-256) and size will actually match a downloaded copy.
+        const string treeJsonWithLfsEntry = """
+            [
+              {
+                "type": "file",
+                "path": "cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/model.onnx",
+                "oid": "bbbb000000000000000000000000000000bbbb",
+                "size": 134,
+                "lfs": { "oid": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "size": 512000, "pointerSize": 134 }
+              }
+            ]
+            """;
+        var probe = CreateProbe(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(treeJsonWithLfsEntry, Encoding.UTF8, "application/json"),
+        });
+
+        var result = await probe.TryFetchAsync(BaseUrl, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result);
+        var file = result.Files["model.onnx"];
+        Assert.Equal("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", file.PublishedOid);
+        Assert.Equal(512000, file.Size);
+        Assert.Equal(PublishedChecksumAlgorithm.LfsSha256, file.Algorithm);
     }
 
     [Fact]

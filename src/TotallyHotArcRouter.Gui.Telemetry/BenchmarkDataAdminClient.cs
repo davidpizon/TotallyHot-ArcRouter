@@ -87,21 +87,41 @@ public enum BenchmarkSyncStageInfo
 /// <param name="BytesTransferred">Bytes downloaded so far, when known.</param>
 /// <param name="RowsImported">Rows imported, once <see cref="BenchmarkSyncStageInfo.Completed"/> is reached.</param>
 /// <param name="Error">Why the file failed, set only on a terminal <see cref="BenchmarkSyncStageInfo.Failed"/> update.</param>
+/// <param name="TotalBytes">The file's published size in bytes, when known.</param>
 public sealed record BenchmarkSyncProgressInfo(
     string FileName,
     BenchmarkSyncStageInfo Stage,
     long? BytesTransferred,
     int? RowsImported,
-    string? Error);
+    string? Error,
+    long? TotalBytes = null);
+
+/// <summary>One file a sync is about to download, from the up-front <see cref="BenchmarkSyncPlanInfo"/>.</summary>
+/// <param name="FileName">The file's name in the published Hugging Face dataset.</param>
+/// <param name="SizeBytes">The file's published size in bytes.</param>
+public sealed record BenchmarkSyncPlanFileInfo(string FileName, long SizeBytes);
 
 /// <summary>
-/// One message on the sync stream: either a per-file <see cref="Progress"/> update, or - exactly once, as
-/// the final message - the aggregate <see cref="FinalStatus"/> after every file has been attempted.
-/// Exactly one of the two is non-null, mirroring the wire contract's <c>oneof</c>.
+/// The set of files a sync will download and their combined size, reported once as the first message
+/// on the stream so a cumulative progress display has a stable denominator from the first byte.
 /// </summary>
-/// <param name="Progress">A per-file progress update, or <see langword="null"/> for the final message.</param>
+/// <param name="Files">The files that will be downloaded. A file already current is not listed.</param>
+/// <param name="TotalBytes">The combined published size of every file in <see cref="Files"/>.</param>
+public sealed record BenchmarkSyncPlanInfo(IReadOnlyList<BenchmarkSyncPlanFileInfo> Files, long TotalBytes);
+
+/// <summary>
+/// One message on the sync stream: the up-front <see cref="Plan"/> (always first), a per-file
+/// <see cref="Progress"/> update, or - exactly once, as the final message - the aggregate
+/// <see cref="FinalStatus"/> after every file has been attempted. Exactly one of the three is
+/// non-null, mirroring the wire contract's <c>oneof</c>.
+/// </summary>
+/// <param name="Plan">The sync's up-front plan, set only on the first message.</param>
+/// <param name="Progress">A per-file progress update, or <see langword="null"/> for the plan/final message.</param>
 /// <param name="FinalStatus">The aggregate status, set only on the final message.</param>
-public sealed record BenchmarkSyncEvent(BenchmarkSyncProgressInfo? Progress, BenchmarkDataStatusInfo? FinalStatus);
+public sealed record BenchmarkSyncEvent(
+    BenchmarkSyncPlanInfo? Plan,
+    BenchmarkSyncProgressInfo? Progress,
+    BenchmarkDataStatusInfo? FinalStatus);
 
 /// <summary>
 /// Client for the proxy's <c>BenchmarkDataAdminService</c> - the Governance → Benchmark Data panel's read
@@ -213,18 +233,36 @@ public sealed class BenchmarkDataAdminClient : IBenchmarkDataAdminClient, IDispo
         file.RowCount,
         file.SyncedAtUtc?.ToDateTimeOffset());
 
-    /// <summary>Converts a gRPC-contract sync stream message into the client's <see cref="BenchmarkSyncEvent"/>.</summary>
-    private static BenchmarkSyncEvent MapEvent(Contract.BenchmarkSyncStreamEvent wire) =>
-        wire.EventCase == Contract.BenchmarkSyncStreamEvent.EventOneofCase.FinalStatus
-            ? new BenchmarkSyncEvent(Progress: null, FinalStatus: MapStatus(wire.FinalStatus))
-            : new BenchmarkSyncEvent(
+    /// <summary>
+    /// Converts a gRPC-contract sync stream message into the client's <see cref="BenchmarkSyncEvent"/>.
+    /// Switches explicitly on every defined <see cref="Contract.BenchmarkSyncStreamEvent.EventOneofCase"/>,
+    /// including <c>None</c> - an empty oneof (e.g. a stream implementation that sends a bare keepalive
+    /// message) must not be misread as a progress event and dereference an unset <c>Progress</c> field.
+    /// </summary>
+    private static BenchmarkSyncEvent MapEvent(Contract.BenchmarkSyncStreamEvent wire) => wire.EventCase switch
+    {
+        Contract.BenchmarkSyncStreamEvent.EventOneofCase.Plan =>
+            new BenchmarkSyncEvent(Plan: MapPlan(wire.Plan), Progress: null, FinalStatus: null),
+        Contract.BenchmarkSyncStreamEvent.EventOneofCase.Progress =>
+            new BenchmarkSyncEvent(
+                Plan: null,
                 Progress: new BenchmarkSyncProgressInfo(
                     wire.Progress.FileName,
                     MapStage(wire.Progress.Stage),
                     wire.Progress.HasBytesTransferred ? wire.Progress.BytesTransferred : null,
                     wire.Progress.HasRowsImported ? wire.Progress.RowsImported : null,
-                    wire.Progress.HasError ? wire.Progress.Error : null),
-                FinalStatus: null);
+                    wire.Progress.HasError ? wire.Progress.Error : null,
+                    wire.Progress.HasTotalBytes ? wire.Progress.TotalBytes : null),
+                FinalStatus: null),
+        Contract.BenchmarkSyncStreamEvent.EventOneofCase.FinalStatus =>
+            new BenchmarkSyncEvent(Plan: null, Progress: null, FinalStatus: MapStatus(wire.FinalStatus)),
+        _ => new BenchmarkSyncEvent(Plan: null, Progress: null, FinalStatus: null),
+    };
+
+    /// <summary>Converts a gRPC-contract plan event into the client's <see cref="BenchmarkSyncPlanInfo"/>.</summary>
+    private static BenchmarkSyncPlanInfo MapPlan(Contract.BenchmarkSyncPlanEvent plan) => new(
+        [.. plan.Files.Select(file => new BenchmarkSyncPlanFileInfo(file.FileName, file.SizeBytes))],
+        plan.TotalBytes);
 
     /// <summary>
     /// Maps the wire freshness state onto the client's enum. Every defined value is mapped explicitly and

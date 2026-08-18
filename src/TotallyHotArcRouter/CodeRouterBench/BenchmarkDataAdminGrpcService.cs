@@ -69,15 +69,17 @@ public sealed class BenchmarkDataAdminGrpcService : Contract.BenchmarkDataAdminS
         ServerCallContext context)
     {
         var progress = new StreamingSyncProgress(responseStream);
+        var planProgress = new StreamingSyncPlan(responseStream);
         var result = await _syncService
-            .SyncAsync(_options.DatasetRef, progress, context.CancellationToken)
+            .SyncAsync(_options.DatasetRef, progress, context.CancellationToken, planProgress)
             .ConfigureAwait(false);
 
         // The plain per-file progress events above report a Failed stage but carry no error text
         // (BenchmarkSyncProgress has none - only the terminal BenchmarkSyncResult does). Send one
         // supplemental event per failed file with the reason, so the panel can render it without a
-        // second call.
-        foreach (var outcome in result.Files.Where(f => !f.Succeeded))
+        // second call. Skipped files never failed - they simply weren't downloaded - so they are
+        // excluded here the same way a succeeded file is.
+        foreach (var outcome in result.Files.Where(f => !f.Succeeded && !f.Skipped))
         {
             await responseStream.WriteAsync(new Contract.BenchmarkSyncStreamEvent
             {
@@ -199,6 +201,11 @@ public sealed class BenchmarkDataAdminGrpcService : Contract.BenchmarkDataAdminS
                 wire.RowsImported = rows;
             }
 
+            if (value.TotalBytes is long totalBytes)
+            {
+                wire.TotalBytes = totalBytes;
+            }
+
             _stream.WriteAsync(new Contract.BenchmarkSyncStreamEvent { Progress = wire }).GetAwaiter().GetResult();
         }
 
@@ -212,5 +219,34 @@ public sealed class BenchmarkDataAdminGrpcService : Contract.BenchmarkDataAdminS
             BenchmarkSyncStage.Failed => Contract.BenchmarkSyncStage.Failed,
             _ => Contract.BenchmarkSyncStage.Unspecified,
         };
+    }
+
+    /// <summary>
+    /// Bridges <see cref="BenchmarkSyncService"/>'s one-time plan callback onto the response stream,
+    /// writing it as the very first message on a successful sync - before any
+    /// <see cref="StreamingSyncProgress"/> event - so the panel's cumulative progress bar has its
+    /// denominator before the first byte arrives. Same single-threaded, blocking-write safety argument
+    /// as <see cref="StreamingSyncProgress"/>.
+    /// </summary>
+    private sealed class StreamingSyncPlan : IProgress<BenchmarkSyncPlan>
+    {
+        private readonly IServerStreamWriter<Contract.BenchmarkSyncStreamEvent> _stream;
+
+        /// <summary>Initializes a new instance of the <see cref="StreamingSyncPlan"/> class.</summary>
+        /// <param name="stream">The gRPC response stream to write the plan event to.</param>
+        public StreamingSyncPlan(IServerStreamWriter<Contract.BenchmarkSyncStreamEvent> stream) => _stream = stream;
+
+        /// <inheritdoc/>
+        public void Report(BenchmarkSyncPlan value)
+        {
+            var wire = new Contract.BenchmarkSyncPlanEvent { TotalBytes = value.TotalBytes };
+            wire.Files.AddRange(value.Files.Select(file => new Contract.BenchmarkSyncPlanFile
+            {
+                FileName = file.FileName,
+                SizeBytes = file.SizeBytes,
+            }));
+
+            _stream.WriteAsync(new Contract.BenchmarkSyncStreamEvent { Plan = wire }).GetAwaiter().GetResult();
+        }
     }
 }

@@ -214,12 +214,34 @@ message BenchmarkSyncProgressEvent {
   optional int32 rows_imported = 4;
   // Set only on a BENCHMARK_SYNC_STAGE_FAILED event.
   optional string error = 5;
+  // The file's published size in bytes, from the checksum probe. Set on every progress event for a
+  // file that is actually being synced (i.e. never for a file the plan omitted as already current),
+  // so the panel can render a "N / total MB" per-file bar without a separate lookup.
+  optional int64 total_bytes = 6;
 }
 
-// One message on the SyncBenchmarkData stream: either a per-file progress update, or - exactly once, as
-// the final message - the aggregate status after every file has been attempted.
+// One file the sync is about to download, from the plan computed once at the start of a
+// SyncBenchmarkData call - the files whose ledger checksum did not match the published one. A file
+// omitted here matched already and is not downloaded or reported via BenchmarkSyncProgressEvent.
+message BenchmarkSyncPlanFile {
+  string file_name = 1;
+  int64 size_bytes = 2;
+}
+
+// The sync's plan: which files are stale and how many bytes the whole run will transfer, so the
+// panel's cumulative progress bar has a stable denominator from the first byte rather than one that
+// grows as each file starts.
+message BenchmarkSyncPlanEvent {
+  repeated BenchmarkSyncPlanFile files = 1;
+  int64 total_bytes = 2;
+}
+
+// One message on the SyncBenchmarkData stream: a one-time plan (always first), a per-file progress
+// update, or - exactly once, as the final message - the aggregate status after every file has been
+// attempted.
 message BenchmarkSyncStreamEvent {
   oneof event {
+    BenchmarkSyncPlanEvent plan = 3;
     BenchmarkSyncProgressEvent progress = 1;
     BenchmarkStatusResponse final_status = 2;
   }
@@ -303,12 +325,32 @@ message LlmRouterModelSyncProgressEvent {
   optional int64 bytes_transferred = 3;
   // Set only on a LLM_ROUTER_MODEL_SYNC_STAGE_FAILED event.
   optional string error = 4;
+  // The file's published size in bytes, from the checksum probe, when known.
+  optional int64 total_bytes = 5;
 }
 
-// One message on the SyncLlmRouterModel stream: either a per-file progress update, or - exactly once, as
-// the final message - the aggregate status after every file has been attempted.
+// One file the sync is about to download, from the plan computed once at the start of a
+// SyncLlmRouterModel call - the files that are missing locally, or whose cached bytes no longer match
+// the published size/checksum. A file omitted here was already current and is not downloaded.
+message LlmRouterModelSyncPlanFile {
+  string file_name = 1;
+  int64 size_bytes = 2;
+}
+
+// The sync's plan: which files are stale and how many bytes the whole run will transfer, so the
+// panel's cumulative progress bar has a stable denominator from the first byte rather than one that
+// grows as each file starts.
+message LlmRouterModelSyncPlanEvent {
+  repeated LlmRouterModelSyncPlanFile files = 1;
+  int64 total_bytes = 2;
+}
+
+// One message on the SyncLlmRouterModel stream: a one-time plan, per-file progress updates, or -
+// exactly once, as the final message - the aggregate status after every file has been attempted. The
+// plan, when present, always arrives first, before any progress event.
 message LlmRouterModelSyncStreamEvent {
   oneof event {
+    LlmRouterModelSyncPlanEvent plan = 3;
     LlmRouterModelSyncProgressEvent progress = 1;
     LlmRouterModelStatusResponse final_status = 2;
   }
