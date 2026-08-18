@@ -98,13 +98,22 @@ public sealed class LlmRouterModelSyncService
 
         var probeResult = await _probe.TryFetchAsync(activeOverride.BaseUrl, cancellationToken).ConfigureAwait(false);
 
-        var (outcomes, staleFiles) = await ClassifyAsync(cacheDirectory, probeResult, progress, cancellationToken)
+        var (outcomes, staleFiles, deferredProgress) = await ClassifyAsync(cacheDirectory, probeResult, cancellationToken)
             .ConfigureAwait(false);
 
         var planFiles = staleFiles
             .Select(file => new LlmRouterModelSyncPlanFile(file.FileName, file.Published.Size))
             .ToList();
         planProgress?.Report(new LlmRouterModelSyncPlan(planFiles, planFiles.Sum(file => file.SizeBytes)));
+
+        // Flushed only now, after the plan: ClassifyAsync itself must stay silent on progress so that no
+        // event - a skipped optional file, a failed required file, or a cached file's Verifying/Completed
+        // transition - can reach the caller before the plan and leave a progress bar with a 0-byte
+        // denominator.
+        foreach (var deferredEvent in deferredProgress)
+        {
+            progress?.Report(deferredEvent);
+        }
 
         foreach (var (fileName, published) in staleFiles)
         {
@@ -133,16 +142,21 @@ public sealed class LlmRouterModelSyncService
     /// </summary>
     /// <param name="cacheDirectory">The active model's cache directory.</param>
     /// <param name="probeResult">The already-fetched published checksums, or <see langword="null"/> if the model source could not be probed.</param>
-    /// <param name="progress">An optional progress reporter for the immediate stage transitions this method reports.</param>
     /// <param name="cancellationToken">A token to cancel a cached-file hash in progress.</param>
-    private async Task<(Dictionary<string, LlmRouterModelFileSyncOutcome> Outcomes, List<(string FileName, LlmRouterModelPublishedFile Published)> StaleFiles)> ClassifyAsync(
+    /// <returns>
+    /// The outcomes and stale-file list, plus every progress event this method would have reported for an
+    /// immediately-resolved file. These are returned rather than reported directly so <see cref="SyncAsync"/>
+    /// can publish the one-time plan first and only then flush them - preserving the "plan arrives before
+    /// any progress" contract even though classification itself can resolve a file's fate outright.
+    /// </returns>
+    private async Task<(Dictionary<string, LlmRouterModelFileSyncOutcome> Outcomes, List<(string FileName, LlmRouterModelPublishedFile Published)> StaleFiles, List<LlmRouterModelSyncProgress> DeferredProgress)> ClassifyAsync(
         string cacheDirectory,
         LlmRouterModelChecksumProbeResult? probeResult,
-        IProgress<LlmRouterModelSyncProgress>? progress,
         CancellationToken cancellationToken)
     {
         var outcomes = new Dictionary<string, LlmRouterModelFileSyncOutcome>(StringComparer.Ordinal);
         List<(string FileName, LlmRouterModelPublishedFile Published)> staleFiles = [];
+        List<LlmRouterModelSyncProgress> deferredProgress = [];
 
         foreach (var fileName in LlmRouterModelFiles.All)
         {
@@ -155,7 +169,7 @@ public sealed class LlmRouterModelSyncService
                     // An optional file's absence from the published tree is expected - some exports
                     // inline all weights into model.onnx and never publish a separate external-data
                     // file - so it is skipped rather than failed, mirroring the 404-during-download case.
-                    progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Completed));
+                    deferredProgress.Add(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Completed));
                     outcomes[fileName] = new LlmRouterModelFileSyncOutcome(fileName, Succeeded: true, ChecksumVerified: false, ErrorMessage: null);
                 }
                 else
@@ -164,7 +178,7 @@ public sealed class LlmRouterModelSyncService
                         ? "No published checksums are available for this model source; refusing to install unverified files."
                         : $"'{fileName}' was not present in the published model tree.";
                     _logger.LogWarning("llm_router model sync skipped {FileName}: {Reason}", fileName, reason);
-                    progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Failed));
+                    deferredProgress.Add(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Failed));
                     outcomes[fileName] = new LlmRouterModelFileSyncOutcome(fileName, Succeeded: false, ChecksumVerified: false, reason);
                 }
 
@@ -189,7 +203,7 @@ public sealed class LlmRouterModelSyncService
                 continue;
             }
 
-            progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Verifying, TotalBytes: published.Size));
+            deferredProgress.Add(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Verifying, TotalBytes: published.Size));
 
             // Isolate this file's failure per the class-level contract: the cached file may be locked by
             // a concurrent OnnxTextGenerationClient inference (IOException), fail an ACL check
@@ -208,14 +222,14 @@ public sealed class LlmRouterModelSyncService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "llm_router cached model file verification failed for {FileName}.", fileName);
-                progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Failed));
+                deferredProgress.Add(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Failed));
                 outcomes[fileName] = new LlmRouterModelFileSyncOutcome(fileName, Succeeded: false, ChecksumVerified: false, ex.Message);
                 continue;
             }
 
             if (string.Equals(cachedOid, published.PublishedOid, StringComparison.OrdinalIgnoreCase))
             {
-                progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Completed, TotalBytes: published.Size));
+                deferredProgress.Add(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Completed, TotalBytes: published.Size));
                 outcomes[fileName] = new LlmRouterModelFileSyncOutcome(fileName, Succeeded: true, ChecksumVerified: true, ErrorMessage: null);
                 continue;
             }
@@ -234,7 +248,7 @@ public sealed class LlmRouterModelSyncService
             staleFiles.Add((fileName, published));
         }
 
-        return (outcomes, staleFiles);
+        return (outcomes, staleFiles, deferredProgress);
     }
 
     /// <summary>

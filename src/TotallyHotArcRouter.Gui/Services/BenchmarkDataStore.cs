@@ -198,6 +198,18 @@ public sealed class BenchmarkDataStore : IDisposable
                 }
                 else if (syncEvent.Progress is { } progress)
                 {
+                    // A terminal stage (Failed, Verifying) often omits BytesTransferred/TotalBytes; carry
+                    // the prior non-null values forward so a file's cumulative progress cannot regress to
+                    // 0 just because the latest event didn't repeat them.
+                    if (_syncProgress.TryGetValue(progress.FileName, out var previous))
+                    {
+                        progress = progress with
+                        {
+                            BytesTransferred = progress.BytesTransferred ?? previous.BytesTransferred,
+                            TotalBytes = progress.TotalBytes ?? previous.TotalBytes,
+                        };
+                    }
+
                     _syncProgress[progress.FileName] = progress;
                     CurrentFileName = progress.FileName;
                 }

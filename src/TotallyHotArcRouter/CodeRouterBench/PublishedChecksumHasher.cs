@@ -22,7 +22,8 @@ public static class PublishedChecksumHasher
     public static string Compute(Stream content, long length, PublishedChecksumAlgorithm algorithm, CancellationToken cancellationToken = default) =>
         algorithm switch
         {
+            PublishedChecksumAlgorithm.GitBlobSha1 => GitBlobHash.Compute(content, length, cancellationToken),
             PublishedChecksumAlgorithm.LfsSha256 => ContentSha256Hash.Compute(content, cancellationToken),
-            _ => GitBlobHash.Compute(content, length, cancellationToken),
+            _ => throw new ArgumentOutOfRangeException(nameof(algorithm), algorithm, "Unrecognized published checksum algorithm."),
         };
 }
