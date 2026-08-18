@@ -1,4 +1,4 @@
-namespace TotallyHot.ArcRouter.CodeRouterBench;
+namespace TotallyHot.ArcRouter.Checksums;
 
 /// <summary>
 /// Which hash a published Hugging Face tree entry's oid represents, so a downloaded file is verified

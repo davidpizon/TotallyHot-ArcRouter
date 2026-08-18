@@ -1,7 +1,7 @@
 using System.Text;
-using TotallyHot.ArcRouter.CodeRouterBench;
+using TotallyHot.ArcRouter.Checksums;
 
-namespace TotallyHot.ArcRouter.Tests.CodeRouterBench;
+namespace TotallyHot.ArcRouter.Tests.Checksums;
 
 /// <summary>Covers <see cref="PublishedChecksumHasher"/>'s dispatch between the two hash algorithms.</summary>
 public class PublishedChecksumHasherTests

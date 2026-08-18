@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 
-namespace TotallyHot.ArcRouter.CodeRouterBench;
+namespace TotallyHot.ArcRouter.Checksums;
 
 /// <summary>
 /// Computes a git blob SHA-1 - the content hash git (and, for these files, the Hugging Face tree API)

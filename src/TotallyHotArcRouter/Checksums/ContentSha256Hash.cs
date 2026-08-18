@@ -1,6 +1,6 @@
 using System.Security.Cryptography;
 
-namespace TotallyHot.ArcRouter.CodeRouterBench;
+namespace TotallyHot.ArcRouter.Checksums;
 
 /// <summary>
 /// Computes a plain SHA-256 of raw file bytes - what Hugging Face publishes as a Git LFS-tracked tree

@@ -172,7 +172,7 @@ actually appear in `app.css`.
   count/label chips (e.g. the agent-color dot, fallback `⚠` badge); larger containers use `rounded`
   (4px) or `rounded-lg` (8px). The ranked metric-picker pill row in Cost Analytics follows the same
   `rounded-full` pattern.
-- **Status bars** — `.progress-bar-track` (`background:#1e3a5f`, `rounded` 2px, 6px tall) hosts the
+- **Status bars** — `.progress-bar-track` (`background:#1f1f1f`, `rounded` 2px, 6px tall) hosts the
   OK/WARNING/CRITICAL utilization fill for provider budgets and price-source caps. The same track class
   also hosts a plain `.progress-bar-fill` (`background:var(--accent)`, width set inline as a percentage)
   for a determinate transfer progress bar — the established pattern for any multi-file transfer.

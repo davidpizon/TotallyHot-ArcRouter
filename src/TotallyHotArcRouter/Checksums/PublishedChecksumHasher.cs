@@ -1,4 +1,4 @@
-namespace TotallyHot.ArcRouter.CodeRouterBench;
+namespace TotallyHot.ArcRouter.Checksums;
 
 /// <summary>
 /// Dispatches to <see cref="GitBlobHash"/> or <see cref="ContentSha256Hash"/> depending on a published

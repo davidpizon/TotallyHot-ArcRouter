@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using TotallyHot.ArcRouter.Checksums;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.Mcp.Tools;
 using TotallyHot.ArcRouter.Tests.CodeRouterBench;

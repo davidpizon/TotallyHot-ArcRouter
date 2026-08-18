@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
+using TotallyHot.ArcRouter.Checksums;
 
 namespace TotallyHot.ArcRouter.CodeRouterBench;
 
@@ -196,7 +197,7 @@ public sealed class BenchmarkSyncService
         if (!probeResult.Files.TryGetValue(spec.FileName, out var published))
         {
             var missingMessage = $"'{spec.FileName}' was not present in the published dataset tree.";
-            _logger.LogWarning("CodeRouterBench sync skipped {FileName}: {Reason}", spec.FileName, missingMessage);
+            _logger.LogWarning("CodeRouterBench sync failed for {FileName}: {Reason}", spec.FileName, missingMessage);
             progress?.Report(new BenchmarkSyncProgress(spec.FileName, BenchmarkSyncStage.Failed));
             return new BenchmarkFileSyncOutcome(spec.FileName, Succeeded: false, RowCount: null, missingMessage);
         }
