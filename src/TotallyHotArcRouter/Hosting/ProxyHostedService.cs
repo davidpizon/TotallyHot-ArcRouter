@@ -3,6 +3,7 @@ using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
+using TotallyHot.ArcRouter.Router.TextGeneration;
 using TotallyHot.ArcRouter.Telemetry;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -22,9 +23,9 @@ namespace TotallyHot.ArcRouter.Hosting
         /// <summary>
         /// Constructs the underlying <see cref="ProxyServer"/> from its dependencies. Optional
         /// parameters (telemetry, provider config store, environment, management HTTP client/token, price
-        /// catalog services, the protected secret store's reader/writer, CodeRouterBench corpus services)
-        /// let callers omit pieces they don't need wired up, mirroring <see cref="ProxyServer"/>'s own
-        /// constructor.
+        /// catalog services, the protected secret store's reader/writer, CodeRouterBench corpus services,
+        /// the llm_router model override store and sync service) let callers omit pieces they don't need
+        /// wired up, mirroring <see cref="ProxyServer"/>'s own constructor.
         /// </summary>
         public ProxyHostedService(
             ILogger<ProxyHostedService> logger,
@@ -51,7 +52,9 @@ namespace TotallyHot.ArcRouter.Hosting
             BenchmarkDataStatusService? benchmarkDataStatusService = null,
             BenchmarkFileLedger? benchmarkFileLedger = null,
             BenchmarkSyncService? benchmarkSyncService = null,
-            BenchmarkSyncOptions? benchmarkSyncOptions = null)
+            BenchmarkSyncOptions? benchmarkSyncOptions = null,
+            ILlmRouterModelOverrideStore? llmRouterModelOverrideStore = null,
+            LlmRouterModelSyncService? llmRouterModelSyncService = null)
         {
             _logger = logger;
             _proxyServer = new ProxyServer(
@@ -78,7 +81,9 @@ namespace TotallyHot.ArcRouter.Hosting
                 benchmarkDataStatusService,
                 benchmarkFileLedger,
                 benchmarkSyncService,
-                benchmarkSyncOptions);
+                benchmarkSyncOptions,
+                llmRouterModelOverrideStore,
+                llmRouterModelSyncService);
         }
 
         /// <summary>

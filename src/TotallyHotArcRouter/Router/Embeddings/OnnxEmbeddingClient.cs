@@ -20,7 +20,10 @@ namespace TotallyHot.ArcRouter.Router.Embeddings;
 /// </remarks>
 public sealed class OnnxEmbeddingClient : IEmbeddingClient, IAsyncDisposable
 {
+    /// <summary>The cached ONNX model file's name within <see cref="EmbeddingOptions.ModelCacheDirectory"/>.</summary>
     private const string ModelFileName = "model.onnx";
+
+    /// <summary>The cached tokenizer JSON file's name within <see cref="EmbeddingOptions.ModelCacheDirectory"/>.</summary>
     private const string TokenizerFileName = "tokenizer.json";
 
     private readonly EmbeddingOptions _options;
@@ -124,6 +127,8 @@ public sealed class OnnxEmbeddingClient : IEmbeddingClient, IAsyncDisposable
         return new EmbeddingResult(embedding, sequenceLength);
     }
 
+    /// <summary>L2-normalizes <paramref name="vector"/> in place so its magnitude is 1, leaving an all-zero vector unchanged rather than dividing by zero.</summary>
+    /// <param name="vector">The vector to normalize.</param>
     private static void Normalize(float[] vector)
     {
         var sumOfSquares = 0.0;
@@ -144,6 +149,12 @@ public sealed class OnnxEmbeddingClient : IEmbeddingClient, IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Loads the ONNX session and tokenizer on first use, downloading their artifacts if not already
+    /// cached. Uses double-checked locking under <see cref="_initLock"/> so concurrent callers do not
+    /// race to download or load the model twice.
+    /// </summary>
+    /// <param name="cancellationToken">A cancellation token.</param>
     private async Task EnsureInitializedAsync(CancellationToken cancellationToken)
     {
         if (_session is not null && _tokenizer is not null)

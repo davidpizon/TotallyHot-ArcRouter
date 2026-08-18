@@ -268,8 +268,8 @@ below 80% without anyone touching these classes directly.
 4. Re-run the exact verification done when this item was filed, to confirm progress and that neither
    assembly regresses:
    ```
-   dotnet test src/TotallyHotArcRouter.Tests/TotallyHotArcRouter.Tests.csproj --configuration Release --collect:"XPlat Code Coverage" --settings coverlet.runsettings --results-directory TestResults/TotallyHotArcRouter.Tests
-   dotnet test src/TotallyHotArcRouter.Sandbox.Tests/TotallyHotArcRouter.Sandbox.Tests.csproj --configuration Release --collect:"XPlat Code Coverage" --settings coverlet.runsettings --results-directory TestResults/TotallyHotArcRouter.Sandbox.Tests
+   dotnet test src/TotallyHotArcRouter.Tests/TotallyHotArcRouter.Tests.csproj --configuration Release --coverage --coverage-output-format cobertura --coverage-settings coverage.runsettings --coverage-output TestResults/TotallyHotArcRouter.Tests/coverage.cobertura.xml --results-directory TestResults/TotallyHotArcRouter.Tests
+   dotnet test src/TotallyHotArcRouter.Sandbox.Tests/TotallyHotArcRouter.Sandbox.Tests.csproj --configuration Release --coverage --coverage-output-format cobertura --coverage-settings coverage.runsettings --coverage-output TestResults/TotallyHotArcRouter.Sandbox.Tests/coverage.cobertura.xml --results-directory TestResults/TotallyHotArcRouter.Sandbox.Tests
    reportgenerator -reports:"TestResults/TotallyHotArcRouter.Tests/**/coverage.cobertura.xml;TestResults/TotallyHotArcRouter.Sandbox.Tests/**/coverage.cobertura.xml" -targetdir:TestResults/Report -reporttypes:JsonSummary;TextSummary
    ```
    Then check `TestResults/Report/Summary.json`'s per-assembly `coverage` values against the 80% bar,

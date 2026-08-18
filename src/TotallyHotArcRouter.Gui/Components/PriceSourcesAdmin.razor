@@ -200,31 +200,39 @@
         await Store.LoadAsync();
     }
 
+    /// <summary>Re-renders when the store's state changes.</summary>
     private void OnStoreChanged() => InvokeAsync(StateHasChanged);
 
+    /// <summary>Unsubscribes from <see cref="PriceSourceStore.Changed"/> and stops the countdown timer.</summary>
     public void Dispose()
     {
         Store.Changed -= OnStoreChanged;
         _tick?.Dispose();
     }
 
+    /// <summary>Clears the inline error and reloads price sources. Implements the unreachable state's Retry button.</summary>
     private async Task Reload()
     {
         _opError = null;
         await Store.LoadAsync();
     }
 
+    /// <summary>Flips one source's enabled state.</summary>
     private Task Toggle(PriceSourceStatus source) =>
         RunAsync(() => Store.SetEnabledAsync(source.Name, !source.Enabled));
 
+    /// <summary>Runs an ingestion cycle now. Implements the Pull Now button.</summary>
     private Task PullNow() => RunAsync(() => Store.RefreshAsync());
 
     // Store.Sources is already ordered by rank (PriceSourceToggleStore.List() sorts descending), so a plain
     // list swap by index followed by ReorderAsync is enough - no separate "current rank" bookkeeping needed.
+    /// <summary>Moves one source up a rank via the up-arrow control.</summary>
     private Task MoveUp(int index) => Swap(index, index - 1);
 
+    /// <summary>Moves one source down a rank via the down-arrow control.</summary>
     private Task MoveDown(int index) => Swap(index, index + 1);
 
+    /// <summary>Swaps two sources' ranks and persists the reordered list.</summary>
     private Task Swap(int index, int otherIndex)
     {
         var names = Store.Sources.Select(s => s.Name).ToList();
@@ -340,6 +348,7 @@
         }
     }
 
+    /// <summary>Discards the in-progress drag's working order, reverting the list to the store's own ranked order.</summary>
     private void CancelDrag()
     {
         _dragName = null;
@@ -384,6 +393,7 @@
         }
     }
 
+    /// <summary>The most recent pull's per-source outcome for the given source, or <see langword="null"/> if none has run.</summary>
     private PriceRefreshOutcome? LastOutcomeFor(string sourceName) =>
         Store.LastRefreshOutcomes.FirstOrDefault(o =>
             string.Equals(o.Source, sourceName, StringComparison.OrdinalIgnoreCase));

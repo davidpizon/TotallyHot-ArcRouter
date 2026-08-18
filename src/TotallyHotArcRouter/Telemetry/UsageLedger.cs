@@ -235,6 +235,10 @@ public sealed class UsageLedger : IUsageLedger
     // Warning (not Error - this is an expected defensive check, not an operational failure) and dropped.
     // §5.4's third proposed check - totals consistent with a "recorded total" - is not implemented: no
     // provider-reported total flows into UsageLedgerEntry to validate the four token fields against.
+    /// <summary>Runs the §5.4 validation gate against <paramref name="entry"/> before it is written.</summary>
+    /// <param name="entry">The candidate entry to validate.</param>
+    /// <param name="reason">A human-readable rejection reason when this returns <see langword="false"/>; otherwise empty.</param>
+    /// <returns><see langword="true"/> if the entry passed validation; otherwise <see langword="false"/>.</returns>
     private static bool TryValidate(UsageLedgerEntry entry, out string reason)
     {
         if (entry.PromptTokens is < 0 || entry.CompletionTokens is < 0 ||

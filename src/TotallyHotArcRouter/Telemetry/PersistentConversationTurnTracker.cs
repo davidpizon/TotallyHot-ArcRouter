@@ -79,6 +79,11 @@ public sealed class PersistentConversationTurnTracker : IConversationTurnTracker
         }
     }
 
+    /// <summary>
+    /// Removes every session whose <see cref="TrackedSession.LastSeenUtc"/> is older than
+    /// <see cref="IdleEviction"/> from <see cref="_sessions"/>.
+    /// </summary>
+    /// <param name="now">The current time, used as the eviction reference point.</param>
     // Called under _lock, on NextTurn's slow path only (an untracked or idle-expired session) - not on
     // every call, since the fast path above returns before reaching this. Walks the whole map rather than
     // a scheduled sweep: session counts are small relative to request volume, and this keeps the tracker

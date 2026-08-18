@@ -208,6 +208,7 @@
     /// <summary>The proxy-reported error, or the local validation reason when the form is not yet valid.</summary>
     private string? DisplayedError => string.IsNullOrEmpty(Error) ? DuplicateHeaderError : Error;
 
+    /// <summary>Whether the form has enough to submit: a base URL, a display name when adding a new provider, and no duplicate header names.</summary>
     private bool CanSave =>
         !string.IsNullOrWhiteSpace(_baseUrl)
         && (!IsNew || !string.IsNullOrWhiteSpace(_providerName))
@@ -251,6 +252,7 @@
         }
     }
 
+    /// <summary>Applies the newly selected provider type's template when the dropdown changes.</summary>
     private void OnProviderTypeChanged(ChangeEventArgs e)
     {
         if (Enum.TryParse<ProviderType>(AsString(e.Value), out var providerType)
@@ -282,8 +284,10 @@
         }
     }
 
+    /// <summary>Appends a blank custom-header row.</summary>
     private void AddHeader() => _headers.Add(new HeaderRow());
 
+    /// <summary>Removes one custom-header row.</summary>
     private void RemoveHeader(HeaderRow header) => _headers.Remove(header);
 
     /// <summary>Switches a header between a literal value and an environment-variable reference. An env-var
@@ -385,6 +389,7 @@
             ? templateAuthHeaderName
             : string.IsNullOrWhiteSpace(AuthHeaderName) ? "Authorization" : AuthHeaderName.Trim();
 
+    /// <summary>Builds a <see cref="ProviderEditResult"/> from the form's current fields and raises <see cref="OnSave"/>.</summary>
     private async Task Save()
     {
         if (!CanSave)
@@ -427,6 +432,7 @@
                     Locked: h.Locked || string.Equals(h.Name.Trim(), authHeaderName, StringComparison.OrdinalIgnoreCase)))
             .ToList();
 
+    /// <summary>Coerces a Blazor event value to a non-null string.</summary>
     private static string AsString(object? value) => (string?)value ?? string.Empty;
 
     /// <summary>The values captured by the dialog when the user saves. Authentication is expressed purely
@@ -454,8 +460,13 @@
     /// when <see cref="UseEnvVar"/> is set, the environment-variable name.</summary>
     private sealed class HeaderRow
     {
+        /// <summary>The header's name as typed.</summary>
         public string Name { get; set; } = string.Empty;
+
+        /// <summary>Whether <see cref="Value"/> holds an environment-variable name rather than a literal value.</summary>
         public bool UseEnvVar { get; set; }
+
+        /// <summary>The literal value, or the environment-variable name when <see cref="UseEnvVar"/> is set.</summary>
         public string Value { get; set; } = string.Empty;
 
         /// <summary>Whether this literal value is a secret: masked here and withheld by the router on the

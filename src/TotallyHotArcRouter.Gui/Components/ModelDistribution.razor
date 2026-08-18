@@ -81,6 +81,7 @@
 
     protected override async Task OnInitializedAsync() => await ReloadAsync();
 
+    /// <summary>Switches the active time filter, clears any custom range, and reloads both charts.</summary>
     private async Task SetFilterAsync(string filter)
     {
         _activeFilter = filter;
@@ -94,6 +95,7 @@
     // timezone-dependent parsing - the placeholder advertises that one format, and a locale-dependent parse
     // of the same typed text would resolve to a different UTC instant depending on the operator's machine.
     // Interpreted as UTC midnight to match the rollup buckets' own UTC storage (UsageRollupStore).
+    /// <summary>Reloads both charts against the typed From/To dates once both parse to a valid (To after From) range.</summary>
     private async Task ApplyCustomRangeAsync()
     {
         if (DateOnly.TryParseExact(_fromText, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var fromDate) &&
@@ -108,6 +110,10 @@
         }
     }
 
+    /// <summary>
+    /// Loads the day- and model-grouped rollups for the active filter (or an explicit custom range) and
+    /// rebuilds both charts, falling back to <see cref="MockData"/> when neither bucket set has any data.
+    /// </summary>
     private async Task ReloadAsync(DateTimeOffset? explicitFrom = null, DateTimeOffset? explicitTo = null)
     {
         DateTimeOffset from;
@@ -158,6 +164,7 @@
         StateHasChanged();
     }
 
+    /// <summary>Serializes the given buckets/shares into the histogram and donut chart-model JSON the <c>EChart</c> hosts render.</summary>
     private void BuildCharts(IReadOnlyList<TokenBucket> tokenBuckets, IReadOnlyList<ModelShare> modelShares)
     {
         _modelShares = modelShares;
@@ -183,6 +190,7 @@
         _donutJson = ChartJson.Serialize(donut);
     }
 
+    /// <summary>Maps a time-filter button to its (From, To, bucket width) query range anchored at <paramref name="now"/>.</summary>
     private static (DateTimeOffset From, DateTimeOffset To, string Width) RangeFor(string filter, DateTimeOffset now) => filter switch
     {
         "Day" => (now.AddDays(-1), now, "hour"),
@@ -193,6 +201,7 @@
         _ => (now.AddMonths(-1), now, "day"),
     };
 
+    /// <summary>Formats a bucket's local start time for the histogram's x-axis: "HH:mm" for hourly buckets, "MM/dd" otherwise.</summary>
     private static string FormatSlot(DateTimeOffset bucketStartUtc, string width) =>
         width == "hour" ? bucketStartUtc.ToLocalTime().ToString("HH:mm") : bucketStartUtc.ToLocalTime().ToString("MM/dd");
 }

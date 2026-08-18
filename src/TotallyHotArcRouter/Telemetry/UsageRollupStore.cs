@@ -222,6 +222,12 @@ public sealed class UsageRollupStore : IUsageRollupStore, IDisposable
             CostUsd: rows.Aggregate(0m, (acc, r) => acc + r.CostUsd));
     }
 
+    /// <summary>Aggregates a group of raw rollup rows into a single <see cref="UsageRollupBucket"/> by summing every numeric column.</summary>
+    /// <param name="bucketStartUtc">The bucket start to report on the result (the group's own key for a day grouping, otherwise the query's <c>from</c> bound).</param>
+    /// <param name="bucketWidth">The rollup width the rows were read at.</param>
+    /// <param name="groupKey">The grouping key to report (a model name, provider name, or ISO timestamp).</param>
+    /// <param name="rows">The raw rows to sum.</param>
+    /// <returns>The summed bucket.</returns>
     private static UsageRollupBucket Summarize(DateTimeOffset bucketStartUtc, string bucketWidth, string groupKey, IEnumerable<RawRow> rows) =>
         new(
             bucketStartUtc,
@@ -237,6 +243,17 @@ public sealed class UsageRollupStore : IUsageRollupStore, IDisposable
 
     // Raw row shape read back from usage_rollup before grouping - deliberately not a public record, since
     // its BucketStartUtc/Provider/Model triple is an implementation detail of how Query groups results.
+    /// <summary>Raw row shape read back from <c>usage_rollup</c> before grouping.</summary>
+    /// <param name="BucketStartUtc">The bucket's UTC start instant.</param>
+    /// <param name="Provider">The provider key the bucket's requests were served by.</param>
+    /// <param name="Model">The resolved model the bucket's requests were served by.</param>
+    /// <param name="Requests">Total request count in the bucket.</param>
+    /// <param name="UnpricedRequests">Count of requests in the bucket with no known price.</param>
+    /// <param name="PromptTokens">Summed prompt/input tokens.</param>
+    /// <param name="CompletionTokens">Summed completion/output tokens.</param>
+    /// <param name="CacheCreationTokens">Summed cache-creation input tokens.</param>
+    /// <param name="CacheReadTokens">Summed cache-read input tokens.</param>
+    /// <param name="CostUsd">Summed estimated USD cost.</param>
     private readonly record struct RawRow(
         DateTimeOffset BucketStartUtc,
         string Provider,
@@ -249,6 +266,14 @@ public sealed class UsageRollupStore : IUsageRollupStore, IDisposable
         long CacheReadTokens,
         decimal CostUsd);
 
+    /// <summary>
+    /// Reads every stored bucket of <paramref name="bucketWidth"/> in <c>[from, to)</c>, excluding any
+    /// bucket that has not fully elapsed yet in the pinned rollup timezone.
+    /// </summary>
+    /// <param name="from">Inclusive lower bound.</param>
+    /// <param name="to">Exclusive upper bound.</param>
+    /// <param name="bucketWidth">The rollup width to read.</param>
+    /// <returns>The matching raw rows.</returns>
     private List<RawRow> ReadRawBuckets(DateTimeOffset from, DateTimeOffset to, string bucketWidth)
     {
         var now = DateTimeOffset.UtcNow;
@@ -295,6 +320,10 @@ public sealed class UsageRollupStore : IUsageRollupStore, IDisposable
         return rows;
     }
 
+    /// <summary>Converts a supported ISO-8601 bucket width string to its fixed <see cref="TimeSpan"/> duration.</summary>
+    /// <param name="width">One of <c>"PT30M"</c>, <c>"PT1H"</c>, or <c>"P1D"</c>.</param>
+    /// <returns>The corresponding duration.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="width"/> is not one of the supported values.</exception>
     private static TimeSpan WidthToDuration(string width) => width switch
     {
         "PT30M" => TimeSpan.FromMinutes(30),
@@ -310,6 +339,11 @@ public sealed class UsageRollupStore : IUsageRollupStore, IDisposable
     // UTC - the same wall-clock math BucketStartUtc itself uses - gives the true end of that calendar day
     // regardless of its actual UTC-duration. PT30M/PT1H buckets don't span a local calendar day, so a fixed
     // duration is exact for them.
+    /// <summary>Computes the UTC instant a bucket that started at <paramref name="bucketStartUtc"/> ends, honoring DST transitions for day-width buckets.</summary>
+    /// <param name="bucketStartUtc">The bucket's UTC start instant.</param>
+    /// <param name="tz">The pinned rollup timezone.</param>
+    /// <param name="width">The bucket width.</param>
+    /// <returns>The UTC instant the bucket ends (exclusive).</returns>
     private static DateTimeOffset BucketEndUtc(DateTimeOffset bucketStartUtc, TimeZoneInfo tz, string width)
     {
         if (width != "P1D")
@@ -330,6 +364,8 @@ public sealed class UsageRollupStore : IUsageRollupStore, IDisposable
     // INSERT OR IGNORE, not an upsert: once a row exists at id=1 it is never modified except for
     // last_rolled_up_entry_id (via WriteCheckpoint), because the timezone itself is write-once (see the
     // type remarks).
+    /// <summary>Pins the configured rollup timezone into <c>rollup_metadata</c> if no row exists yet; a no-op once pinned, since the timezone is write-once.</summary>
+    /// <param name="connection">The open database connection to write through.</param>
     private void PinTimezoneIfMissing(SqliteConnection connection)
     {
         using var command = connection.CreateCommand();
@@ -342,6 +378,13 @@ public sealed class UsageRollupStore : IUsageRollupStore, IDisposable
         command.ExecuteNonQuery();
     }
 
+    /// <summary>
+    /// Resolves the pinned rollup timezone, caching the result for the process lifetime since it cannot
+    /// change once pinned. Falls back to UTC (with a warning) if the pinned IANA id is not resolvable on
+    /// this host.
+    /// </summary>
+    /// <param name="connection">The open database connection to read <c>rollup_metadata</c> from.</param>
+    /// <returns>The resolved timezone.</returns>
     private TimeZoneInfo ResolveTimeZone(SqliteConnection connection)
     {
         if (_cachedTimeZone is { } cached)
@@ -368,6 +411,9 @@ public sealed class UsageRollupStore : IUsageRollupStore, IDisposable
         return tz;
     }
 
+    /// <summary>Reads the last <c>usage_ledger</c> entry id already rolled up, or 0 if roll-forward has never run.</summary>
+    /// <param name="connection">The open database connection to read from.</param>
+    /// <returns>The checkpoint entry id.</returns>
     private static long ReadCheckpoint(SqliteConnection connection)
     {
         using var command = connection.CreateCommand();
@@ -376,6 +422,9 @@ public sealed class UsageRollupStore : IUsageRollupStore, IDisposable
         return result is null or DBNull ? 0 : Convert.ToInt64(result, CultureInfo.InvariantCulture);
     }
 
+    /// <summary>Advances the roll-forward checkpoint to <paramref name="entryId"/>, marking every entry up to and including it as applied.</summary>
+    /// <param name="connection">The open database connection to write through.</param>
+    /// <param name="entryId">The highest <c>usage_ledger</c> entry id that has now been rolled up.</param>
     private static void WriteCheckpoint(SqliteConnection connection, long entryId)
     {
         using var command = connection.CreateCommand();
@@ -384,6 +433,10 @@ public sealed class UsageRollupStore : IUsageRollupStore, IDisposable
         command.ExecuteNonQuery();
     }
 
+    /// <summary>Reads every <c>usage_ledger</c> entry with an id greater than <paramref name="checkpoint"/>, in ascending id order.</summary>
+    /// <param name="connection">The open database connection to read from.</param>
+    /// <param name="checkpoint">The last entry id already rolled up.</param>
+    /// <returns>The pending entries paired with their entry ids, oldest first.</returns>
     private static List<(long EntryId, UsageLedgerEntry Entry)> ReadPendingEntries(SqliteConnection connection, long checkpoint)
     {
         using var command = connection.CreateCommand();
@@ -421,6 +474,10 @@ public sealed class UsageRollupStore : IUsageRollupStore, IDisposable
         return pending;
     }
 
+    /// <summary>Increments every rollup width's bucket (30-minute, hourly, and daily) for one ledger entry.</summary>
+    /// <param name="connection">The open database connection to write through.</param>
+    /// <param name="entry">The ledger entry to fold into the rollup.</param>
+    /// <param name="tz">The pinned rollup timezone, used to compute each bucket's start.</param>
     private void ApplyIncrement(SqliteConnection connection, UsageLedgerEntry entry, TimeZoneInfo tz)
     {
         var unpriced = entry.EstimatedCostUsd is null ? 1 : 0;
@@ -456,6 +513,12 @@ public sealed class UsageRollupStore : IUsageRollupStore, IDisposable
     // reproducible-bucket rule describes. IsInvalidTime handles the one-hour spring-forward gap (a floored
     // local time that never occurred) by nudging forward past it; SQLite storage and range queries only
     // ever see the resulting UTC instant, never the local wall-clock value.
+    /// <summary>Floors <paramref name="occurredAtUtc"/> to a bucket boundary in the pinned wall-clock timezone, then converts that boundary back to UTC for storage.</summary>
+    /// <param name="occurredAtUtc">The request's UTC completion timestamp.</param>
+    /// <param name="tz">The pinned rollup timezone.</param>
+    /// <param name="width">The bucket width to floor to.</param>
+    /// <returns>The bucket's start instant, in UTC.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="width"/> is not one of the supported values.</exception>
     private static DateTime BucketStartUtc(DateTimeOffset occurredAtUtc, TimeZoneInfo tz, string width)
     {
         var local = TimeZoneInfo.ConvertTime(occurredAtUtc, tz).DateTime;
@@ -475,6 +538,22 @@ public sealed class UsageRollupStore : IUsageRollupStore, IDisposable
         return TimeZoneInfo.ConvertTimeToUtc(floored, tz);
     }
 
+    /// <summary>
+    /// Inserts or increments one <c>usage_rollup</c> bucket for one ledger entry, transactionally
+    /// read-modify-writing the decimal <c>cost_usd</c> column (stored as TEXT) rather than relying on SQL
+    /// arithmetic, which would lose decimal precision.
+    /// </summary>
+    /// <param name="connection">The open database connection to write through.</param>
+    /// <param name="bucketStartUtc">The bucket's UTC start instant.</param>
+    /// <param name="bucketWidth">The bucket width being incremented.</param>
+    /// <param name="provider">The provider key.</param>
+    /// <param name="model">The resolved model.</param>
+    /// <param name="unpriced">1 if the entry had no known price; otherwise 0.</param>
+    /// <param name="promptTokens">Prompt tokens to add.</param>
+    /// <param name="completionTokens">Completion tokens to add.</param>
+    /// <param name="cacheCreationTokens">Cache-creation tokens to add.</param>
+    /// <param name="cacheReadTokens">Cache-read tokens to add.</param>
+    /// <param name="cost">Estimated USD cost to add.</param>
     private void UpsertBucket(
         SqliteConnection connection,
         DateTime bucketStartUtc,
@@ -546,6 +625,9 @@ public sealed class UsageRollupStore : IUsageRollupStore, IDisposable
         transaction.Commit();
     }
 
+    /// <summary>Parses a stored round-trip UTC timestamp back into a <see cref="DateTimeOffset"/>.</summary>
+    /// <param name="value">The stored timestamp text, in <see cref="TimestampFormat"/>.</param>
+    /// <returns>The parsed UTC instant.</returns>
     private static DateTimeOffset ParseTimestamp(string value) =>
         new(
             DateTime.ParseExact(value, TimestampFormat, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal),

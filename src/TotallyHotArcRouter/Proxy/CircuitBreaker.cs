@@ -153,6 +153,15 @@ public sealed class CircuitBreaker : ICircuitBreaker
         }
     }
 
+    /// <summary>
+    /// Shared implementation behind <see cref="IsOpen"/>/<see cref="IsProviderOpen"/>: reports OPEN only
+    /// while the cooldown is still running, so a target whose cooldown already expired reads as not-open
+    /// even though it has not yet been formally moved to HALF-OPEN by <see cref="ShouldBypassCore{TKey}"/>.
+    /// </summary>
+    /// <typeparam name="TKey">Either <see cref="CircuitBreakerTargetKey"/> (per-target) or <see cref="string"/> (per-provider).</typeparam>
+    /// <param name="states">The per-target or per-provider state dictionary to read from.</param>
+    /// <param name="key">The target or provider key to check.</param>
+    /// <returns><see langword="true"/> if <paramref name="key"/> is OPEN and still cooling down.</returns>
     private bool IsOpenCore<TKey>(ConcurrentDictionary<TKey, TargetState> states, TKey key)
         where TKey : notnull
     {
@@ -167,6 +176,15 @@ public sealed class CircuitBreaker : ICircuitBreaker
         }
     }
 
+    /// <summary>
+    /// Shared implementation behind <see cref="ShouldBypass"/>/<see cref="ShouldBypassProvider"/>: performs
+    /// the OPEN-&gt;HALF-OPEN transition once the cooldown expires and claims the single probe slot for the
+    /// caller that observes the transition, so concurrent callers keep bypassing until that probe resolves.
+    /// </summary>
+    /// <typeparam name="TKey">Either <see cref="CircuitBreakerTargetKey"/> (per-target) or <see cref="string"/> (per-provider).</typeparam>
+    /// <param name="states">The per-target or per-provider state dictionary to read/mutate.</param>
+    /// <param name="key">The target or provider key about to be attempted.</param>
+    /// <returns><see langword="true"/> if the caller must skip this attempt entirely.</returns>
     private bool ShouldBypassCore<TKey>(ConcurrentDictionary<TKey, TargetState> states, TKey key)
         where TKey : notnull
     {
@@ -207,6 +225,14 @@ public sealed class CircuitBreaker : ICircuitBreaker
         }
     }
 
+    /// <summary>
+    /// Shared implementation behind <see cref="RecordSuccess"/>'s per-target and per-provider resets: closes
+    /// the circuit for <paramref name="key"/> and clears its failure/trip counters. A key that was never
+    /// seen (or never failed) is left untouched since it is already implicitly Closed.
+    /// </summary>
+    /// <typeparam name="TKey">Either <see cref="CircuitBreakerTargetKey"/> (per-target) or <see cref="string"/> (per-provider).</typeparam>
+    /// <param name="states">The per-target or per-provider state dictionary to mutate.</param>
+    /// <param name="key">The target or provider key that just succeeded.</param>
     private static void RecordSuccessCore<TKey>(ConcurrentDictionary<TKey, TargetState> states, TKey key)
         where TKey : notnull
     {
@@ -225,6 +251,15 @@ public sealed class CircuitBreaker : ICircuitBreaker
         }
     }
 
+    /// <summary>
+    /// Shared implementation behind <see cref="RecordFailure"/>: a failure observed while HALF-OPEN
+    /// re-trips immediately (the probe itself failed, so no threshold needs to be re-crossed), otherwise the
+    /// failure only trips the circuit once <see cref="CircuitBreakerOptions.FailureThreshold"/> consecutive
+    /// failures have accumulated.
+    /// </summary>
+    /// <typeparam name="TKey">Either <see cref="CircuitBreakerTargetKey"/> (per-target) or <see cref="string"/> (per-provider).</typeparam>
+    /// <param name="states">The per-target or per-provider state dictionary to mutate.</param>
+    /// <param name="key">The target or provider key that just failed.</param>
     private void RecordFailureCore<TKey>(ConcurrentDictionary<TKey, TargetState> states, TKey key)
         where TKey : notnull
     {

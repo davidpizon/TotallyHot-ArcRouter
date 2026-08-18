@@ -162,6 +162,8 @@ internal static class ProviderUrlBuilder
         return path[index..];
     }
 
+    /// <summary>Splits a path into its non-empty segments, ignoring leading/trailing/duplicate slashes.</summary>
+    /// <param name="path">The path to split; <see langword="null"/> or empty yields no segments.</param>
     private static string[] SplitSegments(string path) =>
         string.IsNullOrEmpty(path)
             ? []

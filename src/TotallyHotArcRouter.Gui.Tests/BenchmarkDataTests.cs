@@ -13,10 +13,14 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 /// </summary>
 public sealed class BenchmarkDataTests
 {
-    private static Bunit.BunitContext NewContext(IBenchmarkDataAdminClient client)
+    private static Bunit.BunitContext NewContext(IBenchmarkDataAdminClient client) =>
+        NewContext(client, new FakeVoterClient());
+
+    private static Bunit.BunitContext NewContext(IBenchmarkDataAdminClient client, ILlmRouterModelAdminClient voterClient)
     {
         var ctx = new Bunit.BunitContext();
         ctx.Services.AddSingleton(new BenchmarkDataStore(client));
+        ctx.Services.AddSingleton(new LlmRouterModelStore(voterClient));
         return ctx;
     }
 
@@ -153,6 +157,47 @@ public sealed class BenchmarkDataTests
     }
 
     [Fact]
+    public void The_voter_unreachable_state_offers_a_retry()
+    {
+        // A store built over a caller-supplied client (as NewContext does) has no endpoint of its own,
+        // mirroring The_unreachable_state_names_no_endpoint_when_the_store_cannot_know_one above - so this
+        // covers the Retry affordance rather than the address text, which the corpus test already covers.
+        var voterClient = new FakeVoterClient
+        {
+            StatusError = new LlmRouterModelAdminException("the router is not reachable.", isUnavailable: true),
+        };
+        using var ctx = NewContext(new FakeClient(BenchmarkDataAdminState.Current), voterClient);
+
+        var cut = ctx.Render<BenchmarkData>();
+
+        cut.Markup.Should().Contain("Router unreachable");
+        cut.Markup.Should().Contain("Could not reach the router.");
+
+        cut.FindAll("button").First(b => b.TextContent.Contains("Retry", StringComparison.Ordinal)).Click();
+
+        voterClient.GetStatusCount.Should().Be(2);
+    }
+
+    [Fact]
+    public void Voter_current_state_renders_an_enabled_reverify_button_that_reruns_sync()
+    {
+        // Unlike the corpus panel, the voter's "Current" state must stay clickable: checksum verification
+        // is in-memory only and doesn't survive a process restart, so re-running the sync is the only way
+        // to confirm already-cached files are still intact.
+        var voterClient = new FakeVoterClient();
+        using var ctx = NewContext(new FakeClient(BenchmarkDataAdminState.Current), voterClient);
+
+        var cut = ctx.Render<BenchmarkData>();
+
+        var button = cut.FindAll("button").First(b => b.TextContent.Contains("Re-verify", StringComparison.Ordinal));
+        button.HasAttribute("disabled").Should().BeFalse();
+
+        button.Click();
+
+        voterClient.SyncCount.Should().Be(1);
+    }
+
+    [Fact]
     public void A_rejected_status_load_shows_the_rejection_rather_than_the_unreachable_state()
     {
         // The router answered - it just refused - so "Router unreachable" would both misstate the cause
@@ -247,6 +292,40 @@ public sealed class BenchmarkDataTests
             {
                 yield return e;
             }
+        }
+    }
+
+    /// <summary>
+    /// A minimal, always-reachable, no-files <see cref="ILlmRouterModelAdminClient"/> fake, so
+    /// <see cref="NewContext"/> can register a <see cref="LlmRouterModelStore"/> for the Local Voter Model
+    /// section without needing a live proxy. None of the tests in this file exercise that section, so its
+    /// behavior does not need to vary.
+    /// </summary>
+    private sealed class FakeVoterClient : ILlmRouterModelAdminClient
+    {
+        public LlmRouterModelAdminException? StatusError { get; init; }
+
+        public int GetStatusCount { get; private set; }
+
+        public int SyncCount { get; private set; }
+
+        public Task<LlmRouterModelStatusInfo> GetStatusAsync(CancellationToken cancellationToken = default)
+        {
+            GetStatusCount++;
+            return StatusError is not null
+                ? Task.FromException<LlmRouterModelStatusInfo>(StatusError)
+                : Task.FromResult(new LlmRouterModelStatusInfo(string.Empty, [], Current: true));
+        }
+
+        public Task<LlmRouterModelStatusInfo> SetBaseUrlAsync(string baseUrl, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new LlmRouterModelStatusInfo(baseUrl, [], Current: true));
+
+        public async IAsyncEnumerable<LlmRouterModelSyncEvent> SyncAsync(
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            SyncCount++;
+            await Task.CompletedTask;
+            yield return new LlmRouterModelSyncEvent(Progress: null, FinalStatus: new LlmRouterModelStatusInfo(string.Empty, [], Current: true));
         }
     }
 }

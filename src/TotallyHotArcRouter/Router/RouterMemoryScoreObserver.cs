@@ -13,9 +13,16 @@ namespace TotallyHot.ArcRouter.Router;
 /// </summary>
 public sealed class RouterMemoryScoreObserver : IRouterScoreObserver
 {
+    /// <summary>The router memory this observer writes live scores into.</summary>
     private readonly RouterMemory _memory;
+
+    /// <summary>The sandbox options, carrying the live-memory dimension prefix.</summary>
     private readonly SandboxOptions _options;
+
+    /// <summary>The logger.</summary>
     private readonly ILogger<RouterMemoryScoreObserver> _logger;
+
+    /// <summary>The optional dashboard telemetry publisher; <see langword="null"/> when telemetry publishing is not configured.</summary>
     private readonly ITelemetryPublisher? _telemetryPublisher;
 
     /// <summary>Initializes a new instance of the <see cref="RouterMemoryScoreObserver"/> class.</summary>

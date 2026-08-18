@@ -108,8 +108,10 @@
     private string _telemetryAddress = string.Empty;
     private bool _telemetryAddressSaved;
 
+    /// <summary>The exact word the operator must type to confirm the active destructive action.</summary>
     private string Required => _activeAction == "reset" ? "RESET" : "PURGE";
 
+    /// <summary>Whether the typed confirmation text exactly matches <see cref="Required"/>.</summary>
     private bool IsConfirmed => _confirmText == Required;
 
     protected override void OnInitialized()
@@ -124,6 +126,7 @@
         _telemetryAddressSaved = false;
     }
 
+    /// <summary>Trims and persists the typed telemetry address, then shows the "Saved" confirmation.</summary>
     private void SaveTelemetryAddress()
     {
         var trimmed = _telemetryAddress.Trim();
@@ -137,6 +140,7 @@
         _telemetryAddressSaved = true;
     }
 
+    /// <summary>Opens the type-to-confirm step for the given destructive action and queues focus on its input.</summary>
     private void StartAction(string action)
     {
         _activeAction = action;
@@ -144,6 +148,7 @@
         _focusPending = true;
     }
 
+    /// <summary>Closes the type-to-confirm step without executing the action.</summary>
     private void CancelAction()
     {
         _activeAction = null;
@@ -155,6 +160,7 @@
     // Live Stream/Cost Analytics stats "Reset Stats" implies. Neither touches the proxy's own durable
     // history (see ClearEvents' remarks) or any persisted configuration - the note below the buttons stays
     // accurate.
+    /// <summary>Runs the confirmed destructive action (Reset Stats or Clear History), then closes the modal.</summary>
     private async Task ExecuteAction()
     {
         if (!IsConfirmed)

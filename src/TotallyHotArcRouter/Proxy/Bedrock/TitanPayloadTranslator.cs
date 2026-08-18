@@ -239,6 +239,8 @@ internal sealed class TitanStreamChunkTranslator : IBedrockStreamChunkTranslator
     // Titan's streaming chunks carry no model identifier either (see TranslateResponse's remarks) - the
     // provider key is passed down from TitanPayloadTranslator.CreateBedrockStreamChunkTranslator so every
     // chunk reports the same stable value non-streaming responses do.
+    /// <summary>Initializes a new instance, reporting <paramref name="modelIdentifier"/> as the <c>model</c> field on every emitted chunk.</summary>
+    /// <param name="modelIdentifier">The stable model identifier to report (the provider key, since Titan's own chunks carry none).</param>
     public TitanStreamChunkTranslator(string modelIdentifier) => _modelIdentifier = modelIdentifier;
 
     /// <summary>

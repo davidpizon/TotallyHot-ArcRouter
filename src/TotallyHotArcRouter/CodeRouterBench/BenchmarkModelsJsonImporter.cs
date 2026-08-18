@@ -124,6 +124,10 @@ public static class BenchmarkModelsJsonImporter
         }
     }
 
+    /// <summary>Reads a string property from a model's JSON object, returning <see langword="null"/> when absent or not a string.</summary>
+    /// <param name="element">The model's JSON element.</param>
+    /// <param name="propertyName">The property name to read.</param>
+    /// <returns>The property's string value, or <see langword="null"/>.</returns>
     private static string? ReadOptionalString(JsonElement element, string propertyName) =>
         element.ValueKind == JsonValueKind.Object &&
         element.TryGetProperty(propertyName, out var value) &&
@@ -131,6 +135,14 @@ public static class BenchmarkModelsJsonImporter
             ? value.GetString()
             : null;
 
+    /// <summary>
+    /// Reads the first present numeric property from a model's JSON object, trying
+    /// <paramref name="propertyNames"/> in order - callers pass both the schema's own field name and any
+    /// alternate name the published catalog has used, so a single call covers both.
+    /// </summary>
+    /// <param name="element">The model's JSON element.</param>
+    /// <param name="propertyNames">The property names to try, in priority order.</param>
+    /// <returns>The first matching property's numeric value, or <see langword="null"/> if none match.</returns>
     private static double? ReadOptionalNumber(JsonElement element, params string[] propertyNames)
     {
         if (element.ValueKind != JsonValueKind.Object)

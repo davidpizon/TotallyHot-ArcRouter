@@ -25,19 +25,31 @@ public class OnnxTextGenerationClientTests
     private static LlmRouterOptions CreateOptions() => new();
 
     /// <summary>
-    /// Reports whether every artifact <see cref="OnnxTextGenerationClient"/> needs is already on disk.
-    /// <c>model.onnx.data</c> is checked too: the default export keeps its weights external, so a cache
-    /// holding only the graph loads no faster than an empty one - it throws. Skipping on a partial cache
-    /// keeps that failure out of the suite as a skip rather than a red test.
+    /// Builds an override store seeded from <paramref name="options"/>, backed by a temp file path that
+    /// is never actually written (nothing calls <see cref="ILlmRouterModelOverrideStore.SetBaseUrlAsync"/>
+    /// in these tests), so each test seeds fresh from <paramref name="options"/> rather than picking up a
+    /// leftover override from a previous run.
     /// </summary>
-    private static bool ModelIsCached(LlmRouterOptions options)
+    private static LlmRouterModelOverrideStore CreateOverrideStore(LlmRouterOptions options) => new(
+        NullLogger<LlmRouterModelOverrideStore>.Instance,
+        Options.Create(options),
+        Options.Create(new LlmRouterModelOverrideStoreOptions
+        {
+            FilePath = Path.Combine(Path.GetTempPath(), $"llm-router-override-test-{Guid.NewGuid():N}.json"),
+        }));
+
+    /// <summary>
+    /// Reports whether every required artifact <see cref="OnnxTextGenerationClient"/> needs is already on
+    /// disk, in <paramref name="overrideStore"/>'s active model's cache directory. Skipping on a partial
+    /// cache keeps a load failure out of the suite as a skip rather than a red test. A missing
+    /// <see cref="LlmRouterModelFiles.IsOptional"/> file doesn't count as partial - inlined-weight exports
+    /// legitimately never have model.onnx.data.
+    /// </summary>
+    private static bool ModelIsCached(ILlmRouterModelOverrideStore overrideStore)
     {
-        var cacheDirectory = options.ResolveModelCacheDirectory();
-        return File.Exists(Path.Combine(cacheDirectory, "genai_config.json")) &&
-            File.Exists(Path.Combine(cacheDirectory, "tokenizer.json")) &&
-            File.Exists(Path.Combine(cacheDirectory, "tokenizer_config.json")) &&
-            File.Exists(Path.Combine(cacheDirectory, "model.onnx")) &&
-            (options.ModelOnnxDataUrl is null || File.Exists(Path.Combine(cacheDirectory, "model.onnx.data")));
+        var cacheDirectory = overrideStore.Snapshot.Override.ResolveCacheDirectory();
+        return LlmRouterModelFiles.All.All(fileName =>
+            File.Exists(Path.Combine(cacheDirectory, fileName)) || LlmRouterModelFiles.IsOptional(fileName));
     }
 
     /// <summary>
@@ -50,10 +62,12 @@ public class OnnxTextGenerationClientTests
     public async Task GenerateAsync_OnCachedModel_ProducesNonEmptyText()
     {
         var options = CreateOptions();
-        Assert.SkipUnless(ModelIsCached(options), SkipReason);
+        using var overrideStore = CreateOverrideStore(options);
+        Assert.SkipUnless(ModelIsCached(overrideStore), SkipReason);
 
         await using var client = new OnnxTextGenerationClient(
             Options.Create(options),
+            overrideStore,
             new ThrowingHttpClientFactory(),
             NullLogger<OnnxTextGenerationClient>.Instance);
 
@@ -107,6 +121,46 @@ public class OnnxTextGenerationClientTests
     }
 
     /// <summary>
+    /// Guards that <see cref="OnnxTextGenerationClient"/> derives its download URLs and cache directory
+    /// from the injected <see cref="ILlmRouterModelOverrideStore"/> rather than reading
+    /// <see cref="LlmRouterOptions"/>'s own URL properties directly - the switch requirement 4's
+    /// minimal-disruption design made. Deliberately points the override at a base URL that answers 404
+    /// (no artifact is actually downloaded), so this exercises the URL construction path without a real
+    /// network dependency and without needing a cached model on disk.
+    /// </summary>
+    [Fact]
+    public async Task GenerateAsync_UsesOverrideStoreBaseUrl_NotOptionsUrls()
+    {
+        var options = CreateOptions();
+        const string overrideBaseUrl = "https://example.invalid/custom-model";
+        var slug = $"test-{Guid.NewGuid():N}";
+        var fakeStore = new FakeLlmRouterModelOverrideStore(new LlmRouterModelOverride(overrideBaseUrl, slug));
+        var capturingFactory = new CapturingHttpClientFactory();
+
+        try
+        {
+            await using var client = new OnnxTextGenerationClient(
+                Options.Create(options),
+                fakeStore,
+                capturingFactory,
+                NullLogger<OnnxTextGenerationClient>.Instance);
+
+            await Assert.ThrowsAsync<HttpRequestException>(
+                () => client.GenerateAsync("prompt", TestContext.Current.CancellationToken));
+
+            Assert.Equal($"{overrideBaseUrl}/genai_config.json", capturingFactory.RequestedUrls.Single());
+        }
+        finally
+        {
+            var cacheDirectory = fakeStore.Snapshot.Override.ResolveCacheDirectory();
+            if (Directory.Exists(cacheDirectory))
+            {
+                Directory.Delete(cacheDirectory, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
     /// Fails loudly if a test reaches the network - every artifact should already be present on disk
     /// whenever <see cref="GenerateAsync_OnCachedModel_ProducesNonEmptyText"/> actually runs (it
     /// self-skips otherwise), so a download attempt here indicates the cache check above is wrong.
@@ -115,5 +169,22 @@ public class OnnxTextGenerationClientTests
     {
         public HttpClient CreateClient(string name) =>
             throw new InvalidOperationException("Unexpected network access: llm_router model artifacts should already be cached.");
+    }
+
+    /// <summary>Records every requested URL and answers 404, so a caller sees a real HTTP failure without a real network call.</summary>
+    private sealed class CapturingHttpClientFactory : IHttpClientFactory
+    {
+        public List<string> RequestedUrls { get; } = [];
+
+        public HttpClient CreateClient(string name) => new(new CapturingHandler(RequestedUrls));
+
+        private sealed class CapturingHandler(List<string> requestedUrls) : HttpMessageHandler
+        {
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            {
+                requestedUrls.Add(request.RequestUri!.ToString());
+                return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.NotFound));
+            }
+        }
     }
 }

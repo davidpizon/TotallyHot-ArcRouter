@@ -176,8 +176,11 @@ public sealed class BenchmarkDataAdminGrpcService : Contract.BenchmarkDataAdminS
     {
         private readonly IServerStreamWriter<Contract.BenchmarkSyncStreamEvent> _stream;
 
+        /// <summary>Initializes a new instance of the <see cref="StreamingSyncProgress"/> class.</summary>
+        /// <param name="stream">The gRPC response stream to write each progress event to.</param>
         public StreamingSyncProgress(IServerStreamWriter<Contract.BenchmarkSyncStreamEvent> stream) => _stream = stream;
 
+        /// <inheritdoc/>
         public void Report(BenchmarkSyncProgress value)
         {
             var wire = new Contract.BenchmarkSyncProgressEvent
@@ -199,6 +202,7 @@ public sealed class BenchmarkDataAdminGrpcService : Contract.BenchmarkDataAdminS
             _stream.WriteAsync(new Contract.BenchmarkSyncStreamEvent { Progress = wire }).GetAwaiter().GetResult();
         }
 
+        /// <summary>Maps the domain sync stage onto its wire enum.</summary>
         private static Contract.BenchmarkSyncStage MapStage(BenchmarkSyncStage stage) => stage switch
         {
             BenchmarkSyncStage.Downloading => Contract.BenchmarkSyncStage.Downloading,

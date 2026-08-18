@@ -95,6 +95,19 @@ public sealed class BenchmarkSyncService
         return new BenchmarkSyncResult(probeResult.RepoCommit, outcomes);
     }
 
+    /// <summary>
+    /// Downloads, verifies, and imports one file, reporting each stage through <paramref name="progress"/>.
+    /// A missing published entry, a checksum mismatch, or an exception caught below all end this file's
+    /// sync with a failed outcome rather than propagating - the per-file isolation this class's summary
+    /// describes.
+    /// </summary>
+    /// <param name="spec">The file to sync.</param>
+    /// <param name="datasetRef">The dataset ref the file is downloaded from.</param>
+    /// <param name="probeResult">The already-fetched published checksums, used to verify the download.</param>
+    /// <param name="progress">An optional progress reporter for streaming this file's status.</param>
+    /// <param name="cancellationToken">A token to cancel the download or import.</param>
+    /// <returns>The file's outcome: succeeded with a row count, or failed with a reason.</returns>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     private async Task<BenchmarkFileSyncOutcome> SyncFileAsync(
         BenchmarkFileSpec spec,
         string datasetRef,

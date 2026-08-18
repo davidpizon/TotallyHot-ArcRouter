@@ -98,6 +98,7 @@ public sealed class UsageQueryClient
         return response;
     }
 
+    /// <summary>Deserializes a response body, translating an empty body or malformed JSON into a <see cref="ProviderAdminException"/> rather than letting a null-reference or raw <see cref="JsonException"/> surface to the caller.</summary>
     private static T Deserialize<T>(string body)
     {
         try

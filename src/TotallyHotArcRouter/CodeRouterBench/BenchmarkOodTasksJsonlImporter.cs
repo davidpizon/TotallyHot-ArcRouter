@@ -107,6 +107,10 @@ public static class BenchmarkOodTasksJsonlImporter
         return rowCount;
     }
 
+    /// <summary>Reads a string property from a task's JSON object, returning <see langword="null"/> when absent or not a string.</summary>
+    /// <param name="root">The task's root JSON element.</param>
+    /// <param name="propertyName">The property name to read.</param>
+    /// <returns>The property's string value, or <see langword="null"/>.</returns>
     private static string? ReadOptionalString(JsonElement root, string propertyName) =>
         root.TryGetProperty(propertyName, out var element) && element.ValueKind == JsonValueKind.String
             ? element.GetString()

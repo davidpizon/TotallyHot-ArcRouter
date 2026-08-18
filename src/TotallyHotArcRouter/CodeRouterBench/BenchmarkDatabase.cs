@@ -125,6 +125,7 @@ public sealed class BenchmarkDatabase
     /// <summary>Gets the resolved absolute path of the database file.</summary>
     public string DatabasePath => _databasePath;
 
+    /// <summary>Gets the SQLite connection string for <see cref="_databasePath"/>, opened read/write and created if missing.</summary>
     private string ConnectionString => new SqliteConnectionStringBuilder
     {
         DataSource = _databasePath,
@@ -198,14 +199,17 @@ public sealed class BenchmarkDatabase
         return alreadyExisted;
     }
 
-    // Repairs docs/router/live-feedback-learning-plan.md Phase 1a in place: a database imported before
-    // BenchmarkModelsJsonImporter unwrapped the {"models": [...]} envelope has exactly one
-    // benchmark_models row, keyed 'models', whose raw_json is the entire published models array. Both the
-    // bad state and its fix are re-derivable from that one row's raw_json - no re-download needed. A
-    // correctly-imported database has no row keyed 'models' (a real model id never collides with the
-    // envelope's own wrapper key - see BenchmarkModelsJsonImporterTests'
-    // Import_ObjectShapeWithLiteralModelsKeyAmongOthers test for why that distinction is safe), so this is
-    // a no-op there.
+    /// <summary>
+    /// Repairs docs/router/live-feedback-learning-plan.md Phase 1a in place: a database imported before
+    /// BenchmarkModelsJsonImporter unwrapped the {"models": [...]} envelope has exactly one
+    /// benchmark_models row, keyed 'models', whose raw_json is the entire published models array. Both the
+    /// bad state and its fix are re-derivable from that one row's raw_json - no re-download needed. A
+    /// correctly-imported database has no row keyed 'models' (a real model id never collides with the
+    /// envelope's own wrapper key - see BenchmarkModelsJsonImporterTests'
+    /// Import_ObjectShapeWithLiteralModelsKeyAmongOthers test for why that distinction is safe), so this is
+    /// a no-op there.
+    /// </summary>
+    /// <param name="connection">The open connection to repair rows on.</param>
     private void RepairModelsEnvelopeRow(SqliteConnection connection)
     {
         string? rawJson;
@@ -248,14 +252,17 @@ public sealed class BenchmarkDatabase
             repairedCount);
     }
 
-    // Repairs docs/router/live-feedback-learning-plan.md Phase 1b in place: a database imported before
-    // BenchmarkIdTasksJsonlImporter read "source_split" has that column holding the same
-    // probing/id_test value as the split column, instead of upstream's train/val/test distinction. Both
-    // columns are keyed the same way in the broken state, so any row whose source_split is not one of the
-    // three valid values is repairable from its own raw_json - no re-download needed. Rows whose raw_json
-    // never carried a source_split property (already covered by the importer's own split-argument
-    // fallback) can never be repaired this way, so the query itself excludes them via json_extract rather
-    // than fetching them into badRows every startup only to skip them in the loop below.
+    /// <summary>
+    /// Repairs docs/router/live-feedback-learning-plan.md Phase 1b in place: a database imported before
+    /// BenchmarkIdTasksJsonlImporter read "source_split" has that column holding the same
+    /// probing/id_test value as the split column, instead of upstream's train/val/test distinction. Both
+    /// columns are keyed the same way in the broken state, so any row whose source_split is not one of the
+    /// three valid values is repairable from its own raw_json - no re-download needed. Rows whose raw_json
+    /// never carried a source_split property (already covered by the importer's own split-argument
+    /// fallback) can never be repaired this way, so the query itself excludes them via json_extract rather
+    /// than fetching them into badRows every startup only to skip them in the loop below.
+    /// </summary>
+    /// <param name="connection">The open connection to repair rows on.</param>
     private void RepairIdTasksSourceSplit(SqliteConnection connection)
     {
         List<(string TaskId, string RawJson)> badRows = [];

@@ -159,7 +159,16 @@ namespace TotallyHot.ArcRouter.Proxy
         /// Optional CodeRouterBench sync configuration. Only its <c>DatasetRef</c> is used here, to drive
         /// the panel's sync action. Defaults to <see cref="CodeRouterBench.BenchmarkSyncOptions"/>'s own defaults.
         /// </param>
-        public ProxyServer(ILogger<ProxyServer> logger, ProxyMiddleware proxyMiddleware, int port = 5001, TelemetryBroadcaster? telemetryBroadcaster = null, int grpcPort = DefaultGrpcPort, IProviderConfigStore? providerConfigStore = null, IEnvironmentVariableProvider? environment = null, HttpClient? managementHttpClient = null, string? managementToken = null, PriceSourceToggleStore? priceSourceToggleStore = null, PriceCatalogIngestionService? priceCatalogIngestionService = null, PriceCatalogOptions? priceCatalogOptions = null, ProviderBudgetStore? providerBudgetStore = null, ProviderEndpointScanner? endpointScanner = null, ToolCallCapabilityStore? toolCallCapabilityStore = null, PriceCatalogRepository? priceCatalogRepository = null, ModelAliasOverrideStore? modelAliasOverrideStore = null, IUsageRollupStore? usageRollupStore = null, ISecretWriter? secretWriter = null, ISecretReader? secretReader = null, CodeRouterBench.BenchmarkDataStatusService? benchmarkDataStatusService = null, CodeRouterBench.BenchmarkFileLedger? benchmarkFileLedger = null, CodeRouterBench.BenchmarkSyncService? benchmarkSyncService = null, CodeRouterBench.BenchmarkSyncOptions? benchmarkSyncOptions = null)
+        /// <param name="llmRouterModelOverrideStore">
+        /// Optional llm_router active-model store. When supplied together with
+        /// <paramref name="llmRouterModelSyncService"/>,
+        /// <see cref="Router.TextGeneration.LlmRouterModelAdminGrpcService"/> is mapped onto the TLS
+        /// <paramref name="grpcPort"/> so the Governance UI's Benchmark Data panel's "Local Voter Model"
+        /// section can read the voter's file sync state, switch models, and run a sync. Defaults to
+        /// <see langword="null"/> (panel API absent).
+        /// </param>
+        /// <param name="llmRouterModelSyncService">Optional sync service backing the panel's sync action. See <paramref name="llmRouterModelOverrideStore"/>.</param>
+        public ProxyServer(ILogger<ProxyServer> logger, ProxyMiddleware proxyMiddleware, int port = 5001, TelemetryBroadcaster? telemetryBroadcaster = null, int grpcPort = DefaultGrpcPort, IProviderConfigStore? providerConfigStore = null, IEnvironmentVariableProvider? environment = null, HttpClient? managementHttpClient = null, string? managementToken = null, PriceSourceToggleStore? priceSourceToggleStore = null, PriceCatalogIngestionService? priceCatalogIngestionService = null, PriceCatalogOptions? priceCatalogOptions = null, ProviderBudgetStore? providerBudgetStore = null, ProviderEndpointScanner? endpointScanner = null, ToolCallCapabilityStore? toolCallCapabilityStore = null, PriceCatalogRepository? priceCatalogRepository = null, ModelAliasOverrideStore? modelAliasOverrideStore = null, IUsageRollupStore? usageRollupStore = null, ISecretWriter? secretWriter = null, ISecretReader? secretReader = null, CodeRouterBench.BenchmarkDataStatusService? benchmarkDataStatusService = null, CodeRouterBench.BenchmarkFileLedger? benchmarkFileLedger = null, CodeRouterBench.BenchmarkSyncService? benchmarkSyncService = null, CodeRouterBench.BenchmarkSyncOptions? benchmarkSyncOptions = null, Router.TextGeneration.ILlmRouterModelOverrideStore? llmRouterModelOverrideStore = null, Router.TextGeneration.LlmRouterModelSyncService? llmRouterModelSyncService = null)
         {
             ArgumentNullException.ThrowIfNull(logger);
             ArgumentNullException.ThrowIfNull(proxyMiddleware);
@@ -277,6 +286,15 @@ namespace TotallyHot.ArcRouter.Proxy
                             services.AddSingleton(benchmarkSyncService);
                             services.AddSingleton(Options.Create(benchmarkSyncOptions ?? new CodeRouterBench.BenchmarkSyncOptions()));
                         }
+
+                        // Same reasoning again: the llm_router model override store and sync service live
+                        // in the outer container, so LlmRouterModelAdminGrpcService can only be
+                        // constructed here if they are handed across explicitly.
+                        if (llmRouterModelOverrideStore is not null && llmRouterModelSyncService is not null)
+                        {
+                            services.AddSingleton(llmRouterModelOverrideStore);
+                            services.AddSingleton(llmRouterModelSyncService);
+                        }
                     });
 
                     webBuilder.Configure(app =>
@@ -304,6 +322,13 @@ namespace TotallyHot.ArcRouter.Proxy
                             if (benchmarkDataStatusService is not null && benchmarkFileLedger is not null && benchmarkSyncService is not null)
                             {
                                 endpoints.MapGrpcService<CodeRouterBench.BenchmarkDataAdminGrpcService>();
+                            }
+
+                            // The Governance UI's Benchmark Data panel's "Local Voter Model" section API.
+                            // Shares the TLS gRPC port with the telemetry stream and the other admin services.
+                            if (llmRouterModelOverrideStore is not null && llmRouterModelSyncService is not null)
+                            {
+                                endpoints.MapGrpcService<Router.TextGeneration.LlmRouterModelAdminGrpcService>();
                             }
 
                             // The Governance UI's provider/credential/model management API. Only mapped

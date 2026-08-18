@@ -63,10 +63,12 @@
     [Parameter, EditorRequired]
     public Conversation Conversation { get; set; } = null!;
 
+    /// <summary>The average routing ROI across this conversation's turns, or 0 when there are none.</summary>
     private decimal AvgRoi => Conversation.Turns.Count == 0 ? 0m : Conversation.Turns.Average(t => t.RoutingRoi);
 
     // §5.6: a non-zero UnpricedTurns means the total is a floor, not a complete sum - the tooltip
     // discloses that explicitly rather than letting "$4.10" read as a confident total.
+    /// <summary>The Total Cost stat's tooltip, disclosing when unpriced turns make the total a floor rather than a complete sum.</summary>
     private string TotalCostTip => Conversation.UnpricedTurns > 0
         ? $"Sum of all priced LLM API costs for this conversation. {Conversation.UnpricedTurns} turn(s) had no known cost and are not included - the true total is at least this much."
         : "Sum of all LLM API costs for this conversation";
@@ -76,6 +78,7 @@
 
     // Per-turn total-token trend, rendered as a compact inline SVG polyline. The coordinate math
     // lives in TotallyHot.ArcRouter.Gui.Charts (unit-tested there); this just formats the points string.
+    /// <summary>The sparkline's SVG polyline <c>points</c> attribute value, or empty when there is nothing to plot.</summary>
     private string SparklinePoints
     {
         get

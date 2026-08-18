@@ -101,6 +101,12 @@ public static class CodeRouterBenchCsvReader
     public static string NormalizeDimension(string rawDimension) =>
         DimensionAliases.TryGetValue(rawDimension, out var normalized) ? normalized : rawDimension;
 
+    /// <summary>Finds a required column by name (case-insensitive), throwing when absent.</summary>
+    /// <param name="columns">The header row's column names.</param>
+    /// <param name="name">The required column name to find.</param>
+    /// <param name="csvPath">A label identifying the source in the thrown exception's message.</param>
+    /// <returns>The column's index.</returns>
+    /// <exception cref="FormatException">No column named <paramref name="name"/> is present.</exception>
     private static int RequireColumn(IReadOnlyList<string> columns, string name, string csvPath)
     {
         for (var i = 0; i < columns.Count; i++)

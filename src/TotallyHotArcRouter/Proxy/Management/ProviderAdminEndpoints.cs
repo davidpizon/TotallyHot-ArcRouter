@@ -154,6 +154,9 @@ public static class ProviderAdminEndpoints
         return endpoints;
     }
 
+    /// <summary>Maps a facade <see cref="ManagementResult{T}"/> to an HTTP response: the value on success, or an OpenAI-shaped error whose status reflects <see cref="ManagementResult{T}.ErrorType"/> on failure.</summary>
+    /// <typeparam name="T">The result's success payload type.</typeparam>
+    /// <param name="result">The facade outcome to translate.</param>
     private static IResult ToResult<T>(ManagementResult<T> result) =>
         result.Success
             ? Results.Ok(result.Value)

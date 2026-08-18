@@ -207,6 +207,7 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
         return toRemove.Count;
     }
 
+    /// <summary>Loads the current map, upserts <paramref name="name"/>, and persists the result - the shared read-modify-write sequence behind <see cref="Write"/>.</summary>
     [SupportedOSPlatform("windows")]
     private void WriteWindows(string name, string value)
     {
@@ -263,6 +264,7 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
         File.Move(tempPath, _path, overwrite: true);
     }
 
+    /// <summary>Creates the path-scoped named mutex serializing every read-modify-write cycle against this store's file across processes.</summary>
     private Mutex OpenMutex() =>
         new(initiallyOwned: false, "TotallyHot.ArcRouter.ProtectedSecretStore." +
             Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(_path)))[..32]);
@@ -272,6 +274,8 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
     {
         private readonly Mutex _mutex;
 
+        /// <summary>Waits on <paramref name="mutex"/>, tolerating an abandoned-mutex signal from a crashed prior owner.</summary>
+        /// <param name="mutex">The mutex to acquire for the scope's lifetime.</param>
         public MutexGuard(Mutex mutex)
         {
             _mutex = mutex;
@@ -288,6 +292,7 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
             }
         }
 
+        /// <summary>Releases the mutex acquired by the constructor.</summary>
         public void Dispose() => _mutex.ReleaseMutex();
     }
 }

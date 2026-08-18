@@ -456,6 +456,7 @@
     // on the Blazor renderer's sync context - RequestRateLimitHistories mutates _historyRequested (a plain,
     // non-thread-safe HashSet), so it has to run inside the same InvokeAsync as StateHasChanged rather than
     // directly on whatever thread raised the event.
+    /// <summary>Re-requests rate-limit history for any newly-eligible providers and re-renders when the store's state changes.</summary>
     private void OnStoreChanged() =>
         InvokeAsync(() =>
         {
@@ -466,6 +467,7 @@
     // Kicks off (fire-and-forget, best-effort) a history load for every provider that has a rate-limit
     // snapshot and hasn't been requested yet. LoadRateLimitHistoryAsync raises Store.Changed on success,
     // which re-enters this method - the HashSet guard is what stops that from looping.
+    /// <summary>Starts a fire-and-forget rate-limit history load for every provider that has a snapshot and hasn't already been requested this session.</summary>
     private void RequestRateLimitHistories()
     {
         foreach (var provider in Store.Providers)
@@ -479,14 +481,17 @@
         }
     }
 
+    /// <summary>Unsubscribes from <see cref="ProviderAdminStore.Changed"/>.</summary>
     public void Dispose() => Store.Changed -= OnStoreChanged;
 
+    /// <summary>Clears the inline error and reloads providers. Implements the unreachable state's Retry button.</summary>
     private async Task Reload()
     {
         _opError = null;
         await Store.LoadAsync();
     }
 
+    /// <summary>Opens the edit dialog seeded with blank/default fields for adding a new provider.</summary>
     private void OpenAdd()
     {
         _dialogIsNew = true;
@@ -501,6 +506,7 @@
         _showDialog = true;
     }
 
+    /// <summary>Opens the edit dialog seeded with an existing provider's current fields.</summary>
     private void OpenEdit(ProviderAdminView provider)
     {
         _dialogIsNew = false;
@@ -518,12 +524,14 @@
         _showDialog = true;
     }
 
+    /// <summary>Closes the edit dialog without saving.</summary>
     private void CancelDialog()
     {
         _showDialog = false;
         _dialogError = null;
     }
 
+    /// <summary>Submits the edit dialog's result as an add or edit, closing the dialog on success or showing the rejection inline.</summary>
     private async Task SaveDialog(ProviderEditDialog.ProviderEditResult result)
     {
         var body = new ProviderWriteRequest(
@@ -555,12 +563,14 @@
         _removeModelCount = provider.Models.Count;
     }
 
+    /// <summary>Closes the type-to-confirm removal dialog without removing anything.</summary>
     private void CancelRemove()
     {
         _removeKey = null;
         _removeModelCount = 0;
     }
 
+    /// <summary>Removes the provider the removal dialog targeted, after closing the dialog first.</summary>
     private async Task ConfirmRemove()
     {
         var key = _removeKey;
@@ -585,11 +595,13 @@
 
     // The model-level twin of ToggleEnabled: flips a model's own Start/Stop state through the dedicated
     // /enabled route, independent of whether the last scan reported it present.
+    /// <summary>Flips one model's own Start/Stop state.</summary>
     private async Task ToggleModelEnabled(ProviderAdminView provider, ModelAdminView model)
     {
         await RunAsync(() => Store.SetModelEnabledAsync(provider.Key, model.ModelName, new ModelEnabledWriteRequest(!model.Enabled)));
     }
 
+    /// <summary>Removes one model from a provider.</summary>
     private async Task RemoveModel(string key, string modelName)
     {
         await RunAsync(() => Store.RemoveModelAsync(key, modelName));
@@ -602,13 +614,16 @@
     // detection resumes. Worth an operator control because automatic detection can reach a wrong answer that
     // never self-corrects: a model that emits native tool_calls on only some replies is recorded
     // openai-native on the first one that succeeds, and is then never re-inspected.
+    /// <summary>Pins (or clears, for an empty selection) a model's tool-call dialect override.</summary>
     private async Task SetModelDialect(string key, string modelName, string? dialect)
     {
         await RunAsync(() => Store.SetModelToolDialectAsync(key, modelName, new ModelToolDialectWriteRequest(dialect)));
     }
 
+    /// <summary>Whether a provider's "Add model manually" pane is currently expanded.</summary>
     private bool IsAddModelPaneOpen(string key) => _addModelPaneOpen.Contains(key);
 
+    /// <summary>Expands or collapses a provider's "Add model manually" pane.</summary>
     private void ToggleAddModelPane(string key)
     {
         if (!_addModelPaneOpen.Remove(key))
@@ -617,6 +632,7 @@
         }
     }
 
+    /// <summary>Submits the manual add-model form's draft name/id, clearing the drafts on success.</summary>
     private async Task AddModel(string key)
     {
         var name = GetDraft(_draftName, key).Trim();
@@ -637,6 +653,7 @@
     // The router does all the work here (discovery, model-list reconciliation, endpoint-flavor scan,
     // dialect detection - see ManagementFacade.RefreshFromEndpointAsync); this just triggers it and
     // publishes the fresh result, same as every other mutation on this page.
+    /// <summary>Triggers a live re-scan of a provider's endpoint: model discovery/reconciliation, API-flavor detection, and dialect detection.</summary>
     private async Task RefreshFromEndpoint(string key)
     {
         await RunAsync(() => Store.RefreshFromEndpointAsync(key));
@@ -671,6 +688,7 @@
         }
     }
 
+    /// <summary>Runs a mutation, surfacing a failure in the inline error banner rather than letting it escape into the renderer.</summary>
     private async Task<bool> RunAsync(Func<Task> operation)
     {
         _opError = null;
@@ -686,34 +704,42 @@
         }
     }
 
+    /// <summary>The in-progress draft text for a per-provider input, or empty if none has been typed yet.</summary>
     private static string GetDraft(Dictionary<string, string> drafts, string key) =>
         drafts.TryGetValue(key, out var value) ? value : string.Empty;
 
+    /// <summary>Coerces a Blazor event value to a non-null string.</summary>
     private static string AsString(object? value) => (string?)value ?? string.Empty;
 
     // A budget input shows the user's in-progress edit if there is one, otherwise the persisted value (so a
     // freshly loaded card reflects what's stored). A successful save clears the draft, letting the input
     // re-seed from the refreshed provider.
+    /// <summary>The in-progress budget draft for a provider, or the persisted cap when there is no unsaved edit.</summary>
     private static string GetBudgetDraft(Dictionary<string, string> drafts, string key, string? current) =>
         drafts.TryGetValue(key, out var value) ? value : (current ?? string.Empty);
 
     // Percentage of a cap consumed, clamped to 0-100 for the bar height. A zero cap reads as 100% (fully
     // breached) to match the backend's spend >= cap rule - a "$0/month" provider is over budget the moment
     // it exists, so the bar must show CRITICAL, not an OK-looking 0%.
+    /// <summary>The percentage of a dollar cap consumed, clamped to [0, 100].</summary>
     private static double UtilizationPercent(decimal spent, decimal cap) =>
         cap <= 0m ? 100d : (double)Math.Min(spent / cap * 100m, 100m);
 
+    /// <summary>The percentage of a token cap consumed, clamped to [0, 100].</summary>
     private static double UtilizationPercent(long used, long cap) =>
         cap <= 0 ? 100d : Math.Min((double)used / cap * 100d, 100d);
 
+    /// <summary>Formats a decimal amount with two fixed decimal places.</summary>
     private static string Money2(decimal value) => value.ToString("F2", CultureInfo.InvariantCulture);
 
     // OK / approaching / breached, matching the old Budgets view's 80% and 100% thresholds.
+    /// <summary>The utilization bar's status color: green under 80%, amber under 100%, red at or above.</summary>
     private static string BarColor(double pct) =>
         pct >= 100d ? "#ef4444" : pct >= 80d ? "#f59e0b" : "#10b981";
 
     // A single-bar GroupedBars chart (0-100 y-axis) for one utilization dimension, colored by status. The
     // renderer ignores the model title, so the human-readable label lives in the surrounding markup.
+    /// <summary>Serializes one budget-utilization bar's chart-model JSON.</summary>
     private static string BudgetBarJson(string label, double pct)
     {
         var value = (decimal)Math.Round(pct, 1);
@@ -727,17 +753,21 @@
 
     // Backend-stored timestamps only, never the GUI clock (docs/router/anthropic-reported-usage-plan.md
     // Phase 3 test contract) - both footers below format a value the server already computed.
+    /// <summary>Formats a UTC timestamp for display.</summary>
     private static string FormatUtc(DateTimeOffset value) => value.ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture);
 
+    /// <summary>The estimated-usage footer's "last recorded" caption, or a placeholder when no usage has been recorded.</summary>
     private static string FormatLastRecorded(DateTimeOffset? lastRecordedAtUtc) =>
         lastRecordedAtUtc is { } value ? $"Last recorded {FormatUtc(value)}" : "No usage recorded yet";
 
     // "requests" -> "Requests", "input-tokens" -> "Input tokens" - readable labels for the standard
     // rate-limit family's dimension keys, which RateLimitSnapshotParser leaves as their raw header-segment
     // names since interpretation is a display concern, not a parsing one.
+    /// <summary>Converts a raw rate-limit dimension key into a readable label.</summary>
     private static string DimensionLabel(string dimensionName) =>
         dimensionName[..1].ToUpperInvariant() + dimensionName[1..].Replace('-', ' ');
 
+    /// <summary>Formats one rate-limit dimension's remaining/limit/reset line.</summary>
     private static string FormatDimension(string dimensionName, RateLimitDimensionAdminView dimension)
     {
         var remaining = dimension.Remaining?.ToString("N0", CultureInfo.InvariantCulture) ?? "?";
@@ -746,6 +776,7 @@
         return $"{DimensionLabel(dimensionName)}: {remaining} of {limit} remaining{reset}";
     }
 
+    /// <summary>Formats one rate-limit window's status/reset line.</summary>
     private static string FormatWindow(string windowName, RateLimitWindowAdminView window)
     {
         var status = window.Status ?? "unknown";
@@ -756,6 +787,7 @@
     // "~19 min at current rate" / "~2h 5m at current rate" - no fabricated urgency: this only renders when
     // ManagementFacade has already decided a projection exists (RateLimitProjection.Project returned
     // non-null), so there is nothing to show when burn rate can't be trusted (flat, refilled, reset-before-empty).
+    /// <summary>Formats a rate-limit exhaustion projection's estimated time-to-exhaustion caption.</summary>
     private static string FormatBurnRate(RateLimitExhaustionAdminView projection)
     {
         var eta = projection.TimeToExhaustion;
@@ -795,6 +827,7 @@
         return ChartJson.Serialize(model);
     }
 
+    /// <summary>Serializes one rate-limit dimension's trend-chart-model JSON.</summary>
     private static string RateLimitTrendJson(string dimensionName, IReadOnlyList<RateLimitHistoryPointAdminView> points)
     {
         var model = RateLimitTrendChartBuilder.Build(
@@ -803,6 +836,7 @@
         return ChartJson.Serialize(model);
     }
 
+    /// <summary>Validates and submits the budget form's draft dollar/token caps, clearing the drafts on success.</summary>
     private async Task SaveBudget(string key)
     {
         _opError = null;
@@ -835,12 +869,15 @@
     // The only two providers BuildCostReconcilers/ManagementFacade.SetSecret recognize
     // (docs/router/agent-cost-tracking.md §3.5) - matches the provider dictionary key convention under
     // CostTracking:Reconciliation:Providers, not ProviderType.
+    /// <summary>Whether a provider key is one of the two providers cost reconciliation recognizes.</summary>
     private static bool IsRecognizedReconciliationProvider(string key) =>
         string.Equals(key, "openai", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(key, "anthropic", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>The in-progress draft text for a provider's Admin API key field, or empty if none has been typed yet.</summary>
     private string GetAdminKeyDraft(string key) => _draftAdminKey.TryGetValue(key, out var value) ? value : string.Empty;
 
+    /// <summary>Validates and stores the draft Admin API key for a provider, clearing the draft on success.</summary>
     private async Task SaveAdminApiKey(string key)
     {
         _opError = null;
@@ -858,6 +895,7 @@
         }
     }
 
+    /// <summary>Clears a provider's stored Admin API key.</summary>
     private async Task ClearAdminApiKey(string key)
     {
         if (await RunAsync(() => Store.DeleteAdminApiKeyAsync(key)))
@@ -868,6 +906,7 @@
 
     // Parses an optional decimal cap: blank -> null (no cap); a non-negative number -> that value; anything
     // else -> rejected (caller shows the error). Mirrors TryParseLongCap for the token dimension.
+    /// <summary>Parses an optional decimal budget cap: blank means no cap, a non-negative number is accepted, anything else is rejected.</summary>
     private static bool TryParseDecimalCap(string? text, out decimal? value)
     {
         value = null;
@@ -885,6 +924,7 @@
         return false;
     }
 
+    /// <summary>Parses an optional integer budget cap: blank means no cap, a non-negative whole number is accepted, anything else is rejected.</summary>
     private static bool TryParseLongCap(string? text, out long? value)
     {
         value = null;

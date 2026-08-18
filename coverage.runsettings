@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Configuration>
+  <CodeCoverage>
+    <ModulePaths>
+      <Exclude>
+        <ModulePath>.*[\\/]?xunit\..*\.dll$</ModulePath>
+        <ModulePath>.*\.Tests\.dll$</ModulePath>
+        <ModulePath>.*\.Tests\.exe$</ModulePath>
+      </Exclude>
+    </ModulePaths>
+    <Sources>
+      <Exclude>
+        <Source>.*[\\/]Migrations[\\/].*</Source>
+        <Source>.*\.g\.cs$</Source>
+        <Source>.*\.designer\.cs$</Source>
+      </Exclude>
+    </Sources>
+    <Functions>
+      <Exclude>
+        <Function>^TotallyHot\.ArcRouter\.Telemetry\.Contract\..*</Function>
+      </Exclude>
+    </Functions>
+  </CodeCoverage>
+</Configuration>

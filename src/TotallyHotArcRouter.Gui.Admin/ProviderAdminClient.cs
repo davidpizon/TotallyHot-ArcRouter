@@ -347,9 +347,11 @@ public sealed class ProviderAdminClient
         return response;
     }
 
+    /// <summary>Serializes a request body to a JSON <see cref="StringContent"/> using the client's web-JSON conventions.</summary>
     private static StringContent JsonBody<T>(T value) =>
         new(JsonSerializer.Serialize(value, JsonOptions), Encoding.UTF8, "application/json");
 
+    /// <summary>Deserializes a response body, translating an empty body or malformed JSON into a <see cref="ProviderAdminException"/> rather than letting a null-reference or raw <see cref="JsonException"/> surface to the caller.</summary>
     private static T Deserialize<T>(string body)
     {
         try

@@ -181,6 +181,8 @@ public sealed class LogRegVoter : IRoutingVoter
         }
     }
 
+    /// <summary>Returns the cached model, attempting a load from disk on the first call (or after a <see cref="Reload"/>).</summary>
+    /// <returns>The loaded model artifact, or <see langword="null"/> when none is available.</returns>
     private EmbeddingLogRegModelArtifact? GetModel()
     {
         lock (_loadLock)
@@ -196,6 +198,8 @@ public sealed class LogRegVoter : IRoutingVoter
         }
     }
 
+    /// <summary>Reads and deserializes the model artifact from <see cref="_modelPath"/>, tolerating a missing or unreadable file by returning <see langword="null"/> so the voter degrades to an abstention instead of throwing.</summary>
+    /// <returns>The deserialized model artifact, or <see langword="null"/> if the file is absent or could not be loaded.</returns>
     private EmbeddingLogRegModelArtifact? TryLoadFromDisk()
     {
         if (!File.Exists(_modelPath))

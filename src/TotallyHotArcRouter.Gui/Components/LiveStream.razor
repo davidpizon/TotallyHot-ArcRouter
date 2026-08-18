@@ -78,6 +78,7 @@
     private ElementReference _divider;
     private ElementReference _leftPanel;
 
+    /// <summary>Conversations matching the search box: title, id, agent, or model contains the query, case-insensitively.</summary>
     private IEnumerable<Conversation> Filtered =>
         Conversations.Where(c => string.IsNullOrEmpty(_search)
             || c.Title.Contains(_search, StringComparison.OrdinalIgnoreCase)
@@ -85,10 +86,12 @@
             || c.Turns.Any(t => t.Agent.Contains(_search, StringComparison.OrdinalIgnoreCase)
                 || t.Model.Contains(_search, StringComparison.OrdinalIgnoreCase)));
 
+    /// <summary>The conversation matching <see cref="SelectedId"/>, falling back to the first conversation, or <see langword="null"/> when there are none.</summary>
     private Conversation? SelectedOrDefault =>
         Conversations.FirstOrDefault(c => c.Id == SelectedId) ?? Conversations.FirstOrDefault();
 
     // Guarded by the @if (SelectedOrDefault is null) { ... return; } check at the top of the markup.
+    /// <summary>The conversation currently drilled into. Only accessed once the markup's null-guard has confirmed <see cref="SelectedOrDefault"/> is non-null.</summary>
     private Conversation Selected => SelectedOrDefault!;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)

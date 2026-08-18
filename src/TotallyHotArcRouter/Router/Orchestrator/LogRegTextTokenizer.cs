@@ -30,6 +30,8 @@ public static partial class LogRegTextTokenizer
         return tokens;
     }
 
+    /// <summary>The compiled pattern for a token: a run of at least two lowercase letters or digits.</summary>
+    /// <returns>The generated, culture-invariant <see cref="Regex"/> instance.</returns>
     [GeneratedRegex(@"[a-z0-9]{2,}", RegexOptions.CultureInvariant)]
     private static partial Regex TokenPattern();
 }

@@ -77,6 +77,7 @@ public sealed class AnthropicUsageReportClient
         return rows;
     }
 
+    /// <summary>Builds a GET request for <paramref name="uri"/> with the Admin API key and version headers this endpoint requires.</summary>
     private HttpRequestMessage BuildRequest(string uri)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, uri);
@@ -151,6 +152,7 @@ public sealed class AnthropicUsageReportClient
         return ReadLong(result, "cache_creation_input_tokens");
     }
 
+    /// <summary>Reads a named property from <paramref name="result"/> as a <see langword="long"/>, defaulting to 0 when absent or not numeric.</summary>
     private static long ReadLong(JsonObject result, string propertyName) =>
         result[propertyName] is JsonValue value && value.TryGetValue<long>(out var tokens) ? tokens : 0;
 }

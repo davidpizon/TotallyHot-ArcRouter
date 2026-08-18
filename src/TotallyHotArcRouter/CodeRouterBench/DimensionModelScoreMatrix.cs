@@ -11,6 +11,8 @@ public sealed class DimensionModelScoreMatrix
 {
     private readonly IReadOnlyDictionary<(string Dimension, string Model), double> _averages;
 
+    /// <summary>Initializes a new instance of the <see cref="DimensionModelScoreMatrix"/> class from already-aggregated averages.</summary>
+    /// <param name="averages">The per (dimension, model) average scores, keyed with an already-canonicalized model id.</param>
     private DimensionModelScoreMatrix(IReadOnlyDictionary<(string Dimension, string Model), double> averages)
     {
         _averages = averages;

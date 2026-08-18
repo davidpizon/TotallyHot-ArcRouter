@@ -22,6 +22,7 @@ public sealed class GovernanceTests
         ctx.Services.AddSingleton(new UsageStore(managementAddress: "http://127.0.0.1:59989"));
         ctx.Services.AddSingleton(new PriceSourceStore(new StubPriceSourceAdminClient()));
         ctx.Services.AddSingleton(new BenchmarkDataStore(new StubBenchmarkDataAdminClient()));
+        ctx.Services.AddSingleton(new LlmRouterModelStore(new StubLlmRouterModelAdminClient()));
         return ctx;
     }
 
@@ -51,6 +52,19 @@ public sealed class GovernanceTests
             throw new NotSupportedException();
 
         public IAsyncEnumerable<BenchmarkSyncEvent> SyncAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
+
+    /// <summary>Hangs forever, so the Local Voter Model section stays in its "loading" state for the toggle smoke test.</summary>
+    private sealed class StubLlmRouterModelAdminClient : ILlmRouterModelAdminClient
+    {
+        public Task<LlmRouterModelStatusInfo> GetStatusAsync(CancellationToken cancellationToken = default) =>
+            new TaskCompletionSource<LlmRouterModelStatusInfo>().Task;
+
+        public Task<LlmRouterModelStatusInfo> SetBaseUrlAsync(string baseUrl, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public IAsyncEnumerable<LlmRouterModelSyncEvent> SyncAsync(CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
     }
 

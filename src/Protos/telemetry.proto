@@ -225,6 +225,95 @@ message BenchmarkSyncStreamEvent {
   }
 }
 
+// The Governance → Benchmark Data panel's "Local Voter Model" section: read the llm_router ONNX voter's
+// file sync state, switch the model by base URL, and run a download/verify sync with streamed per-file
+// progress.
+//
+// Same shape as BenchmarkDataAdminService (unary reads/mutations plus one streaming RPC), sharing the
+// same :5002 TLS loopback endpoint. Deliberately a separate service rather than more RPCs on
+// BenchmarkDataAdminService: the two pipelines diverge (this one has no import stage, and adds a
+// model-switch mutation the corpus has no equivalent of), and keeping them separate means a client that
+// only cares about one doesn't pull in messages for the other.
+service LlmRouterModelAdminService {
+  // Returns the currently active base URL and every file's cache status. "Current" means every required
+  // file is present locally, independent of checksum verification (tracked separately per file via
+  // checksum_verified, and only for the most recent in-process sync); model.onnx.data is optional and
+  // its absence alone doesn't make the model non-current, since some exports inline its weights into
+  // model.onnx. The base URL is a fixed pin, not a rolling ref, so there is no remote freshness check to
+  // run, unlike BenchmarkDataAdminService's Recheck.
+  rpc GetLlmRouterModelStatus (GetLlmRouterModelStatusRequest) returns (LlmRouterModelStatusResponse);
+
+  // Persists a new base URL as the active model. Does not download - the panel calls SyncLlmRouterModel
+  // afterward, the same two-step shape as switching a provider then syncing it.
+  rpc SetLlmRouterModelBaseUrl (SetLlmRouterModelBaseUrlRequest) returns (LlmRouterModelStatusResponse);
+
+  // Downloads and checksum-verifies (where possible) the 5 files for the currently active base URL into
+  // its per-model cache directory, streaming one LlmRouterModelSyncStreamEvent per stage transition. The
+  // final message carries the aggregate status, mirroring SyncBenchmarkData's convention.
+  rpc SyncLlmRouterModel (SyncLlmRouterModelRequest) returns (stream LlmRouterModelSyncStreamEvent);
+}
+
+message GetLlmRouterModelStatusRequest {}
+
+message SetLlmRouterModelBaseUrlRequest {
+  string base_url = 1;
+}
+
+message SyncLlmRouterModelRequest {}
+
+// One of the 5 files (genai_config.json, tokenizer.json, tokenizer_config.json, model.onnx,
+// model.onnx.data) the llm_router ONNX voter needs. A file that has never synced is still listed, with
+// synced = false, the same convention BenchmarkFile uses.
+message LlmRouterModelFile {
+  string file_name = 1;
+  bool synced = 2;
+  int64 size_bytes = 3;
+  google.protobuf.Timestamp synced_at_utc = 4;
+  // True when the sync verified this file's checksum against Hugging Face's models-tree API; false when
+  // the URL wasn't in the expected Hugging Face shape, the API call failed, or the file simply hasn't
+  // been checksum-verified by a sync in this process's lifetime - in which case only the file's local
+  // existence and size are known.
+  bool checksum_verified = 5;
+  // True only for model.onnx.data: some exports inline all weights into model.onnx and never publish this
+  // file, so the panel needs to tell that expected, permanent absence apart from an unsynced required
+  // file rather than rendering both as "Not synced".
+  bool is_optional = 6;
+}
+
+message LlmRouterModelStatusResponse {
+  string base_url = 1;
+  // Always the 5 files above, in fixed order - not only ones that have synced.
+  repeated LlmRouterModelFile files = 2;
+  bool current = 3;
+}
+
+enum LlmRouterModelSyncStage {
+  LLM_ROUTER_MODEL_SYNC_STAGE_UNSPECIFIED = 0;
+  LLM_ROUTER_MODEL_SYNC_STAGE_DOWNLOADING = 1;
+  LLM_ROUTER_MODEL_SYNC_STAGE_VERIFYING = 2;
+  LLM_ROUTER_MODEL_SYNC_STAGE_COMPLETED = 3;
+  LLM_ROUTER_MODEL_SYNC_STAGE_FAILED = 4;
+}
+
+// One file's progress update during a sync. No rows_imported field, unlike BenchmarkSyncProgressEvent -
+// this pipeline has no import stage.
+message LlmRouterModelSyncProgressEvent {
+  string file_name = 1;
+  LlmRouterModelSyncStage stage = 2;
+  optional int64 bytes_transferred = 3;
+  // Set only on a LLM_ROUTER_MODEL_SYNC_STAGE_FAILED event.
+  optional string error = 4;
+}
+
+// One message on the SyncLlmRouterModel stream: either a per-file progress update, or - exactly once, as
+// the final message - the aggregate status after every file has been attempted.
+message LlmRouterModelSyncStreamEvent {
+  oneof event {
+    LlmRouterModelSyncProgressEvent progress = 1;
+    LlmRouterModelStatusResponse final_status = 2;
+  }
+}
+
 // Envelope: exactly one of these is set per message, matching SignalR's per-message-type dispatch
 // ("RoutingTelemetry" / "LogLine" client methods) with a single Protobuf idiom.
 message TelemetryEvent {
