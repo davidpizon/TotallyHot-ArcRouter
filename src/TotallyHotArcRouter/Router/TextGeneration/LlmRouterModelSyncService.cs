@@ -177,7 +177,7 @@ public sealed class LlmRouterModelSyncService
                     var reason = probeResult is null
                         ? "No published checksums are available for this model source; refusing to install unverified files."
                         : $"'{fileName}' was not present in the published model tree.";
-                    _logger.LogWarning("llm_router model sync skipped {FileName}: {Reason}", fileName, reason);
+                    _logger.LogWarning("llm_router model sync failed for {FileName}: {Reason}", fileName, reason);
                     deferredProgress.Add(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Failed));
                     outcomes[fileName] = new LlmRouterModelFileSyncOutcome(fileName, Succeeded: false, ChecksumVerified: false, reason);
                 }

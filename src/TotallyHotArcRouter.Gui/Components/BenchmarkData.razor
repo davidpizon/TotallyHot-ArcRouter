@@ -587,8 +587,12 @@
         { Stage: LlmRouterModelSyncStageInfo.Downloading } => "Downloading…",
         { Stage: LlmRouterModelSyncStageInfo.Verifying } => "Verifying…",
         { Stage: LlmRouterModelSyncStageInfo.Failed } => "Failed",
-        // A Completed event for an absent optional file means the sync deliberately skipped it (the
-        // export inlines its weights), not that it synced - same as the at-rest (no progress) case below.
+        // A Completed event with no bytes transferred means an absent optional file was deliberately
+        // skipped (the export inlines its weights), not that it synced.
+        { Stage: LlmRouterModelSyncStageInfo.Completed, BytesTransferred: null } when file.IsOptional => "Optional",
+        // Otherwise Completed means this file finished this sync, even if the overall model status
+        // (file.Synced) hasn't been refreshed yet - same as the at-rest (no progress) case below.
+        { Stage: LlmRouterModelSyncStageInfo.Completed } => "Synced",
         _ => file.Synced ? "Synced" : (file.IsOptional ? "Optional" : "Not synced"),
     };
 

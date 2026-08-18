@@ -84,8 +84,9 @@ public sealed class LlmRouterModelStore : IDisposable
     public LlmRouterModelSyncPlanInfo? SyncPlan { get; private set; }
 
     /// <summary>
-    /// The file whose most recent progress event is non-terminal, driving the current-file progress bar's
-    /// label. <see langword="null"/> before the first progress event of a sync arrives.
+    /// The file named by the most recently received progress event of the current sync - terminal
+    /// (Completed/Failed) events included - driving the current-file progress bar's label.
+    /// <see langword="null"/> before the first progress event of a sync arrives.
     /// </summary>
     public string? CurrentFileName { get; private set; }
 
