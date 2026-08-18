@@ -92,7 +92,7 @@
                             </div>
                             <div class="progress-bar-track" role="progressbar" aria-label="Overall Task Matrix update progress"
                                  aria-valuemin="0" aria-valuemax="100" aria-valuenow="@CumulativePercent()">
-                                <div class="progress-bar-fill" style="width:@(CumulativePercent())%"></div>
+                                <div class="progress-bar-fill" style="width:@(PercentCss(CumulativePercent()))%"></div>
                             </div>
                         </div>
                         <div>
@@ -102,7 +102,7 @@
                             </div>
                             <div class="progress-bar-track" role="progressbar" aria-label="@($"{Store.CurrentFileName ?? "Current file"} download progress")"
                                  aria-valuemin="0" aria-valuemax="100" aria-valuenow="@CurrentFilePercent()">
-                                <div class="progress-bar-fill" style="width:@(CurrentFilePercent())%"></div>
+                                <div class="progress-bar-fill" style="width:@(PercentCss(CurrentFilePercent()))%"></div>
                             </div>
                         </div>
                     </div>
@@ -227,7 +227,7 @@
                                     </div>
                                     <div class="progress-bar-track" role="progressbar" aria-label="Overall Local Voter Model update progress"
                                          aria-valuemin="0" aria-valuemax="100" aria-valuenow="@VoterCumulativePercent()">
-                                        <div class="progress-bar-fill" style="width:@(VoterCumulativePercent())%"></div>
+                                        <div class="progress-bar-fill" style="width:@(PercentCss(VoterCumulativePercent()))%"></div>
                                     </div>
                                 </div>
                                 <div>
@@ -237,7 +237,7 @@
                                     </div>
                                     <div class="progress-bar-track" role="progressbar" aria-label="@($"{VoterStore.CurrentFileName ?? "Current file"} download progress")"
                                          aria-valuemin="0" aria-valuemax="100" aria-valuenow="@VoterCurrentFilePercent()">
-                                        <div class="progress-bar-fill" style="width:@(VoterCurrentFilePercent())%"></div>
+                                        <div class="progress-bar-fill" style="width:@(PercentCss(VoterCurrentFilePercent()))%"></div>
                                     </div>
                                 </div>
                             </div>
@@ -410,6 +410,13 @@
     /// <summary>The cumulative progress bar's byte counter label, e.g. "4.2 / 11.8 MB".</summary>
     private string CumulativeByteLabel() =>
         $"{Store.CumulativeBytesTransferred / 1024.0 / 1024.0:0.#} / {Store.CumulativeTotalBytes / 1024.0 / 1024.0:0.#} MB";
+
+    /// <summary>
+    /// Formats a fill percentage for a CSS <c>width</c> value using invariant culture, so a locale with a
+    /// comma decimal separator (e.g. fr-FR) cannot turn <c>width:52.5%</c> into the invalid CSS
+    /// <c>width:52,5%</c>.
+    /// </summary>
+    private static string PercentCss(double percent) => percent.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>The cumulative progress bar's fill percentage, 0-100.</summary>
     private double CumulativePercent() => Store.CumulativeTotalBytes > 0

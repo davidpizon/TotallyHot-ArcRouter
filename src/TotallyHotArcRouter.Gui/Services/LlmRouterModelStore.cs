@@ -197,9 +197,9 @@ public sealed class LlmRouterModelStore : IDisposable
                 }
                 else if (syncEvent.Progress is { } progress)
                 {
-                    // A terminal stage (Failed, Verifying) often omits BytesTransferred/TotalBytes; carry
-                    // the prior non-null values forward so a file's cumulative progress cannot regress to
-                    // 0 just because the latest event didn't repeat them.
+                    // Certain stages (Failed, Verifying) often omit BytesTransferred/TotalBytes; carry the
+                    // prior non-null values forward so a file's cumulative progress cannot regress to 0
+                    // just because the latest event didn't repeat them.
                     if (_syncProgress.TryGetValue(progress.FileName, out var previous))
                     {
                         progress = progress with

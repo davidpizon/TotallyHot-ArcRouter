@@ -293,7 +293,7 @@ public sealed class BenchmarkSyncService
             (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
         {
             _logger.LogError(ex, "CodeRouterBench sync failed for {FileName}.", spec.FileName);
-            progress?.Report(new BenchmarkSyncProgress(spec.FileName, BenchmarkSyncStage.Failed));
+            progress?.Report(new BenchmarkSyncProgress(spec.FileName, BenchmarkSyncStage.Failed, TotalBytes: published.Size));
             SafeDelete(partPath);
             return new BenchmarkFileSyncOutcome(spec.FileName, Succeeded: false, RowCount: null, ex.Message);
         }

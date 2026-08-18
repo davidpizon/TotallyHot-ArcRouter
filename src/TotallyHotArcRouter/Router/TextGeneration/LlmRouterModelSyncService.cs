@@ -344,7 +344,7 @@ public sealed class LlmRouterModelSyncService
                 var mismatchMessage =
                     $"Checksum mismatch for '{fileName}': expected {published.PublishedOid}, computed {actualOid}.";
                 _logger.LogError("llm_router model sync rejected {FileName}: {Reason}", fileName, mismatchMessage);
-                progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Failed));
+                progress?.Report(new LlmRouterModelSyncProgress(fileName, LlmRouterModelSyncStage.Failed, TotalBytes: published.Size));
                 SafeDelete(temporaryPath);
                 return new LlmRouterModelFileSyncOutcome(fileName, Succeeded: false, ChecksumVerified: false, mismatchMessage);
             }
