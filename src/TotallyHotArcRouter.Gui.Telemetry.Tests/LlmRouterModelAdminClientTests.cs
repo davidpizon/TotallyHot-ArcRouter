@@ -202,6 +202,22 @@ public class LlmRouterModelAdminClientTests
     }
 
     [Fact]
+    public async Task SyncAsync_rejects_an_empty_stream_message_instead_of_crashing()
+    {
+        var stub = new StubClient { SyncEvents = [new Contract.LlmRouterModelSyncStreamEvent()] };
+        using var client = new LlmRouterModelAdminClient(stub);
+
+        var ex = await Assert.ThrowsAsync<LlmRouterModelAdminException>(async () =>
+        {
+            await foreach (var _ in client.SyncAsync(TestContext.Current.CancellationToken))
+            {
+            }
+        });
+
+        ex.Message.Should().Be("llm_router model sync stream sent an empty message");
+    }
+
+    [Fact]
     public async Task SyncAsync_wraps_a_mid_stream_failure()
     {
         var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.Unavailable, "failed to connect")) };

@@ -229,16 +229,24 @@ public sealed class LlmRouterModelAdminClient : ILlmRouterModelAdminClient, IDis
         file.IsOptional);
 
     /// <summary>Converts a gRPC-contract sync stream message into the client's <see cref="LlmRouterModelSyncEvent"/>.</summary>
-    private static LlmRouterModelSyncEvent MapEvent(Contract.LlmRouterModelSyncStreamEvent wire) =>
-        wire.EventCase == Contract.LlmRouterModelSyncStreamEvent.EventOneofCase.FinalStatus
-            ? new LlmRouterModelSyncEvent(Progress: null, FinalStatus: MapStatus(wire.FinalStatus))
-            : new LlmRouterModelSyncEvent(
+    /// <exception cref="LlmRouterModelAdminException">
+    /// <paramref name="wire"/> carries neither a <c>Progress</c> nor a <c>FinalStatus</c> payload - a
+    /// malformed message the wire contract's <c>oneof</c> should never actually produce.
+    /// </exception>
+    private static LlmRouterModelSyncEvent MapEvent(Contract.LlmRouterModelSyncStreamEvent wire) => wire.EventCase switch
+    {
+        Contract.LlmRouterModelSyncStreamEvent.EventOneofCase.FinalStatus =>
+            new LlmRouterModelSyncEvent(Progress: null, FinalStatus: MapStatus(wire.FinalStatus)),
+        Contract.LlmRouterModelSyncStreamEvent.EventOneofCase.Progress =>
+            new LlmRouterModelSyncEvent(
                 Progress: new LlmRouterModelSyncProgressInfo(
                     wire.Progress.FileName,
                     MapStage(wire.Progress.Stage),
                     wire.Progress.HasBytesTransferred ? wire.Progress.BytesTransferred : null,
                     wire.Progress.HasError ? wire.Progress.Error : null),
-                FinalStatus: null);
+                FinalStatus: null),
+        _ => throw new LlmRouterModelAdminException("llm_router model sync stream sent an empty message"),
+    };
 
     /// <summary>Maps the wire sync stage onto the client's enum.</summary>
     private static LlmRouterModelSyncStageInfo MapStage(Contract.LlmRouterModelSyncStage stage) => stage switch
