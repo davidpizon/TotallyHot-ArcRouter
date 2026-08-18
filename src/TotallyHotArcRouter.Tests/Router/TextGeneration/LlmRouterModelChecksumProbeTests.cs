@@ -2,7 +2,6 @@ using System.Net;
 using System.Text;
 using Microsoft.Extensions.Logging.Abstractions;
 using TotallyHot.ArcRouter.Checksums;
-using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.Router.TextGeneration;
 using TotallyHot.ArcRouter.Tests.CodeRouterBench;
 

@@ -3,7 +3,6 @@ using Grpc.Core;
 using Grpc.Core.Testing;
 using Microsoft.Extensions.Logging.Abstractions;
 using TotallyHot.ArcRouter.Checksums;
-using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.Router.TextGeneration;
 using TotallyHot.ArcRouter.Tests.CodeRouterBench;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
