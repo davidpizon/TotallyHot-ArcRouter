@@ -196,7 +196,20 @@ public sealed class LlmRouterModelSyncService
             // Size pre-filter, before paying for a hash of a potentially-hundreds-of-MB file: a cached
             // file whose length already disagrees with the published size cannot possibly match the
             // published checksum, so it is quarantined and queued for re-download without hashing it.
-            var cachedLength = new FileInfo(destinationPath).Length;
+            // The read is wrapped like the hash below it: the file may have been deleted or gone
+            // inaccessible between the File.Exists check above and here, and that race must be treated
+            // as "needs re-download," not bubble up and abort the whole sync.
+            long cachedLength;
+            try
+            {
+                cachedLength = new FileInfo(destinationPath).Length;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                staleFiles.Add((fileName, published));
+                continue;
+            }
+
             if (cachedLength != published.Size)
             {
                 SafeDelete(destinationPath);
