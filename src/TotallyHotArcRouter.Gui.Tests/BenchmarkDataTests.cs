@@ -60,7 +60,13 @@ public sealed class BenchmarkDataTests
 
         var cut = ctx.Render<BenchmarkData>();
 
-        cut.Markup.Should().NotContain("models.json");
+        // Collapsed no longer means "absent from the DOM": the pane stays mounted so it can animate
+        // shut as well as open, so the state to assert is the wrapper's (no .open, plus inert).
+        var disclosure = cut.FindAll(".ls-disclosure")
+            .Single(d => d.InnerHtml.Contains("models.json", StringComparison.Ordinal));
+        disclosure.ClassList.Should().NotContain("open");
+        disclosure.HasAttribute("inert").Should().BeTrue();
+
         // Mirrors the Local Voter Model panel's "Current" state: the button stays clickable so the
         // operator can re-verify the corpus against Hugging Face rather than trusting the ledger forever.
         var button = cut.FindAll("button").First(b => b.TextContent.Contains("Re-verify", StringComparison.Ordinal));
@@ -99,15 +105,22 @@ public sealed class BenchmarkDataTests
 
         var toggle = cut.FindAll("button").First(b => b.TextContent.Contains("Show 8 files", StringComparison.Ordinal));
         toggle.GetAttribute("aria-expanded").Should().Be("false");
-        foreach (var file in files)
-        {
-            cut.Markup.Should().NotContain(file.FileName);
-        }
+
+        // The rows are rendered while collapsed - that is what lets the pane animate shut instead of
+        // vanishing - so "collapsed" is the wrapper being closed and inert, not the rows being absent.
+        var disclosure = cut.FindAll(".ls-disclosure")
+            .Single(d => d.InnerHtml.Contains("file1.json", StringComparison.Ordinal));
+        disclosure.ClassList.Should().NotContain("open");
+        disclosure.HasAttribute("inert").Should().BeTrue();
 
         toggle.Click();
 
         cut.FindAll("button").First(b => b.TextContent.Contains("Hide files", StringComparison.Ordinal))
             .GetAttribute("aria-expanded").Should().Be("true");
+        disclosure = cut.FindAll(".ls-disclosure")
+            .Single(d => d.InnerHtml.Contains("file1.json", StringComparison.Ordinal));
+        disclosure.ClassList.Should().Contain("open");
+        disclosure.HasAttribute("inert").Should().BeFalse();
         foreach (var file in files)
         {
             cut.Markup.Should().Contain(file.FileName);
@@ -396,15 +409,21 @@ public sealed class BenchmarkDataTests
 
         var toggle = cut.FindAll("button").First(b => b.TextContent.Contains("Show 5 files", StringComparison.Ordinal));
         toggle.GetAttribute("aria-expanded").Should().Be("false");
-        foreach (var file in files)
-        {
-            cut.Markup.Should().NotContain(file.FileName);
-        }
+
+        // Same collapsed-but-mounted contract as the Task Matrix disclosure above.
+        var disclosure = cut.FindAll(".ls-disclosure")
+            .Single(d => d.InnerHtml.Contains("file1.bin", StringComparison.Ordinal));
+        disclosure.ClassList.Should().NotContain("open");
+        disclosure.HasAttribute("inert").Should().BeTrue();
 
         toggle.Click();
 
         cut.FindAll("button").First(b => b.TextContent.Contains("Hide files", StringComparison.Ordinal))
             .GetAttribute("aria-expanded").Should().Be("true");
+        disclosure = cut.FindAll(".ls-disclosure")
+            .Single(d => d.InnerHtml.Contains("file1.bin", StringComparison.Ordinal));
+        disclosure.ClassList.Should().Contain("open");
+        disclosure.HasAttribute("inert").Should().BeFalse();
         foreach (var file in files)
         {
             cut.Markup.Should().Contain(file.FileName);
