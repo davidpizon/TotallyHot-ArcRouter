@@ -19,9 +19,12 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// that satisfies PLAN.md Phase L's "refined by live RouterMemory averages" - live, execution-grounded
 /// feedback always wins once it exists, and the offline prior only fills the cold-start gap before any
 /// feedback has accumulated for that pair. A weighted blend (e.g. shrinking toward the prior for a small
-/// sample count) was considered and rejected for this phase: <see cref="RouterMemory"/> does not expose an
-/// observation count today, only an average, so a sample-size-aware blend would need a wider change to
-/// that type for a phase explicitly scoped to the voter, not to memory's storage shape.
+/// sample count) was considered and rejected for Phase L, when <see cref="RouterMemory"/> exposed only an
+/// average and a sample-size-aware rule would have needed a wider change to that type. That obstacle is
+/// gone - <see cref="RouterMemory.GetObservationCount"/> now reports the sample size backing each average -
+/// but the blend rule here is deliberately unchanged: switching from "live always wins" to a shrinkage
+/// rule alters live routing behavior and belongs to whichever phase is prepared to measure the difference,
+/// not to the storage refactor that merely made it expressible.
 /// </para>
 /// <para>
 /// The benchmark corpus is synced on demand (<c>data/README.md</c>) and may not be present on a given

@@ -78,7 +78,10 @@ Verified against the code:
   [`TotallyHotArcRouter/Router/SqliteMemoryEntryStore.cs`](TotallyHotArcRouter/Router/SqliteMemoryEntryStore.cs)
   in its own SQLite file. `VectorStoreRouterMemoryStore`'s Jaccard-over-dimension-strings similarity is
   deleted. `EmbeddingMemory.FindNearest` is now called by Phase L's `MemoryKnnVoter`, and
-  `RouterMemory`'s `dimension → model → List<double>` averages are `DimBestVoter`'s backing store - but
+  `RouterMemory`'s `dimension → model → ScoreAggregate` averages (a running sum/count per pair, persisted
+  to the same database's `dimension_scores` table - see
+  [`../docs/router/memory-persistence.md`](../docs/router/memory-persistence.md)) are `DimBestVoter`'s
+  backing store - but
   neither is on the *live* routing decision path yet, since the Orchestrator itself isn't (Phase M).
   Per D.3 of the research doc, dimension identity carries only ~27% of the oracle-choice entropy - the
   other ~73% is exactly what this task-keyed memory exists to capture, once Phase M puts the Orchestrator
@@ -363,7 +366,7 @@ pin escape are removed rather than deferred — each existed only to serve overr
   requested-vs-routed; exploration still fires at `ExplorationRate` and is flagged as such;
   `EnableOrchestratorPolicy = false` restores `AgentRouterPolicy` exactly.
 
-### Phase N: Regret evaluation harness
+### Phase N: Regret evaluation harness — **proposed**
 
 Makes every phase above measurable instead of asserted.
 
@@ -374,6 +377,12 @@ own stated ordering ("before PLAN.md Phase N... measuring voters that structural
 produce a benchmark of `dim_best` wearing an ensemble's name") is satisfied; Phase N may proceed. That
 plan's Phases 5-6 (Governance admin surface, TF-IDF namespace relocation) remain open but do not block
 Phase N.
+
+Full plan, sub-phase breakdown (N1-N6), the metrics/oracle/regret math, the baseline set, and the
+ID-split text-availability constraint that shapes which baselines can run where:
+[`docs/router/regret-evaluation-harness-plan.md`](../docs/router/regret-evaluation-harness-plan.md). The
+bullets below are the roadmap-level scope and exit bar carried from the original write-up; detail lives
+in that doc and is not restated here.
 
 - Implement the metrics of research-doc §5.1 and A.2: reward matrix `R_ij = ε₁·s_ij + ε₂·κ_ij`,
   per-task oracle `a*_i = argmax_j R_ij`, cumulative regret `CumReg_N = Σ(r*_i − r_i(a_i))`, plus

@@ -55,17 +55,28 @@ public sealed class RoutingOptions
     public string PolicyName { get; init; } = RouterConstants.DefaultPolicy;
 
     /// <summary>
-    /// Gets the path to the JSON file used for router memory persistence.
-    /// Relative paths are resolved from the application base directory.
+    /// Dead configuration: bound from <c>appsettings.json</c> but read by nothing. Router memory moved from
+    /// a JSON file to the <c>dimension_scores</c> table in <see cref="EmbeddingMemoryDatabasePath"/>'s
+    /// database, so no code resolves this path any more. Kept rather than removed for the same reason as
+    /// <see cref="PolicyName"/> - dropping a bound config key is a schema break unrelated to routing, and an
+    /// operator whose <c>appsettings.json</c> still sets it should not fail validation on upgrade. Any
+    /// <c>router_memory.json</c> left on disk is an orphan; nothing reads it and its contents were
+    /// deliberately not migrated.
     /// </summary>
     [Required]
     public string MemoryPath { get; init; } = "router_memory.json";
 
     /// <summary>
-    /// Gets the path to the SQLite database used for task-embedding-keyed memory persistence
-    /// (PLAN.md Phase J, research-doc §3.3), separate from the JSON dimension-averages file at
-    /// <see cref="MemoryPath"/>. Relative paths are resolved from the application base directory.
+    /// Gets the path to the SQLite database used for router memory persistence: both the
+    /// task-embedding-keyed <c>memory_entries</c> working set (PLAN.md Phase J, research-doc §3.3) and the
+    /// dimension-keyed <c>dimension_scores</c> aggregates behind <see cref="Router.RouterMemory"/>.
+    /// Relative paths are resolved from the application base directory.
     /// </summary>
+    /// <remarks>
+    /// The name predates the second table and now under-describes what the file holds. It is left alone
+    /// deliberately: renaming it would break every existing <c>appsettings.json</c> that sets it, which is a
+    /// worse outcome than a slightly narrow name.
+    /// </remarks>
     [Required]
     public string EmbeddingMemoryDatabasePath { get; init; } = "router_embedding_memory.db";
 

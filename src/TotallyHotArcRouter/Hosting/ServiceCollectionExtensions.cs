@@ -32,8 +32,10 @@ namespace TotallyHot.ArcRouter.Hosting
         /// <returns>The <see cref="IServiceCollection"/> so that additional calls can be chained.</returns>
         public static IServiceCollection AddTotallyHotArcRouter(this IServiceCollection services)
         {
-            // Core Router
-            services.AddSingleton<IRouterMemoryStore, JsonRouterMemoryStore>();
+            // Core Router. IRouterMemoryStore is backed by RouterMemoryDatabase (registered below with the
+            // Phase J embedding memory that shares the same file), so both learned-memory tables live in one
+            // WAL-journaled SQLite database rather than the crash-unsafe JSON file this replaced.
+            services.AddSingleton<IRouterMemoryStore, SqliteRouterMemoryStore>();
             services.AddSingleton<RouterMemory>();
             services.AddSingleton<AgentAsARouter>();
 
@@ -46,7 +48,7 @@ namespace TotallyHot.ArcRouter.Hosting
                     configuration.GetSection(EmbeddingOptions.SectionName).Bind(options));
             // EnsureValid() is enforced here (rather than by a consuming component's constructor, this
             // options type's usual pattern - see e.g. CircuitBreaker's) because RoutingOptions is read
-            // piecemeal by several singletons (AgentAsARouter, JsonRouterMemoryStore, RequestInterceptor),
+            // piecemeal by several singletons (AgentAsARouter, RouterMemoryDatabase, RequestInterceptor),
             // none of which is guaranteed to be constructed eagerly; ValidateOnStart guarantees the check
             // runs during host startup regardless of which of those paths is actually exercised.
             // ValidateDataAnnotations() enforces the [Range]/[Required] attributes on individual properties

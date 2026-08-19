@@ -1,100 +1,116 @@
 # Router Memory Persistence Architecture
 
-> **Status: Partially implemented.** The JSON persistence layer described in "What's actually
-> built" below is real and matches `src/TotallyHotArcRouter/Router/{IRouterMemoryStore,
-> JsonRouterMemoryStore, RouterMemory}.cs`. The richer design in "Proposed future extensions"
-> (schema versioning, backups, compaction, an embedding-based vector store) is **not implemented**
-> — the current "vector store" is an in-memory Jaccard-similarity approximation, not a real vector
-> database.
+The router keeps two independent learned memories, both persisted to the same SQLite database
+(`RoutingOptions.EmbeddingMemoryDatabasePath`, default `router_embedding_memory.db`):
 
-## What's actually built
+| Memory | Keyed by | Table | Bound | Feeds |
+|---|---|---|---|---|
+| `RouterMemory` | dimension → model | `dimension_scores` | one row per (dimension, model) | `dim_best` voter, `AgentAsARouter`, `UtilityRoutingPolicy`, `RequestInterceptor` |
+| `EmbeddingMemory` | task embedding | `memory_entries` | FIFO, `EmbeddingMemoryCapacity` (20,000) | `memory_kNN` voter, `logreg` training |
 
-The router learns from each observation and can persist that learning across process restarts
-via `IRouterMemoryStore`:
+This document covers the first. `EmbeddingMemory` is specified in PLAN.md Phase J and
+`docs/router/live-feedback-learning-plan.md`.
+
+## What `RouterMemory` stores
+
+A running aggregate per (dimension, model) pair, not the raw observations:
 
 ```csharp
-public interface IRouterMemoryStore
+public sealed record ScoreAggregate(double Sum, int Count)
 {
-    Task<ConcurrentDictionary<string, ConcurrentDictionary<string, List<double>>>> LoadAsync();
-    Task SaveAsync(ConcurrentDictionary<string, ConcurrentDictionary<string, List<double>>> memory);
+    public double? Average => Count > 0 ? Sum / Count : null;
 }
 ```
 
-The memory shape is a plain nested dictionary: `dimension -> model -> list of observed scores`.
-There is no schema version field, no metadata, no variance/average precomputation — just raw
-score lists; `RouterMemory` (below) computes averages on read.
-
-### `JsonRouterMemoryStore` (the default, registered via DI)
-
-- Reads/writes the whole dictionary as indented JSON to a single file, `RoutingOptions.MemoryPath`
-  (default `"router_memory.json"`, resolved relative to `AppContext.BaseDirectory` unless the
-  configured path is already rooted).
-- **No backups, no atomic temp-file-then-rename, no compaction, no schema versioning.** A write is
-  a direct `File.WriteAllTextAsync` overwrite of the target file.
-- If the file is missing or fails to parse, `LoadAsync` logs and returns an **empty** memory — there
-  is no backup file to fall back to.
-- Registered as the default `IRouterMemoryStore` in `Hosting/ServiceCollectionExtensions.cs`:
-  `services.AddSingleton<IRouterMemoryStore, JsonRouterMemoryStore>();`
-
-### `VectorStoreRouterMemoryStore` (implemented, but not used by default)
-
-Implements the same `IRouterMemoryStore` contract, but purely in-process — `LoadAsync`/`SaveAsync`
-read and write an in-memory dictionary (deep-copied under a lock) with **no disk persistence at
-all**. It additionally exposes:
-
-```csharp
-Task<IReadOnlyList<(string Model, double Score)>> FindSimilarAsync(
-    string taskDescription, int topK = 5, CancellationToken cancellationToken = default);
-```
-
-"Similarity" here is **Jaccard token overlap** between the query text and each stored dimension
-name (splitting on whitespace/punctuation, lowercasing, set intersection ÷ union) — not an
-embedding model, not cosine similarity, and not backed by Milvus, Weaviate, or SQLite. It exists
-and has test coverage (`src/TotallyHotArcRouter.Tests/Router/VectorStoreRouterMemoryStoreTests.cs`) but
-is not wired into DI, so nothing uses it by default today.
-
-### `RouterMemory` (the facade)
+`RouterMemory` holds these in a `ConcurrentDictionary<string, ConcurrentDictionary<string, ScoreAggregate>>`
+as the hot-path read source, and mirrors every observation into `dimension_scores`.
 
 ```csharp
 public class RouterMemory
 {
-    public Task InitializeAsync();                                    // loads from the store once, at startup
+    public Task InitializeAsync();                                     // loads the table at startup
     public Task AddScoreAsync(string dimension, string model, double score);
-    public double? GetAverageScore(string dimension, string model);
+    public double? GetAverageScore(string dimension, string model);    // O(1)
+    public int GetObservationCount(string dimension, string model);    // sample size behind the average
     public IEnumerable<string> GetModelsForDimension(string dimension);
 }
 ```
 
-`AddScoreAsync` appends the score in-memory, then **synchronously calls `SaveAsync` with the full
-dictionary on every single observation** — there is no debounced/periodic async save, no
-`AutoSaveIntervalMs`. Every recorded score is an immediate full-file rewrite.
+**Why an aggregate rather than the score list this previously kept.** `GetAverageScore` was the only
+consumer of the list's contents and needs only the mean, while the list cost three things: unbounded growth
+for the life of the installation, an O(n) average recomputed once per candidate per request on the routing
+hot path, and a full re-serialization of all accumulated history on every single score. A fixed-size
+aggregate bounds both the in-memory structure and the table by the (dimension × model) vocabulary rather
+than by observation count.
 
-### Configuration
+**Growth is deliberately unbounded in observations folded in.** Unlike `EmbeddingMemory`'s FIFO window,
+this memory is meant to accumulate indefinitely — `docs/router/regret-evaluation-harness-plan.md` depends on
+that asymmetry. The aggregate is what makes indefinite accumulation free rather than expensive.
 
-The only configuration surface is `RoutingOptions.MemoryPath` (default `"router_memory.json"`).
-There is no `MemorySettings` section, no `EnableBackups`, `BackupRetentionDays`,
-`CompactIntervalHours`, or `VectorStore*` keys anywhere in `appsettings.json` — none of that
-configuration is read by any code.
+## `SqliteRouterMemoryStore`
 
-## Proposed future extensions
+```csharp
+public interface IRouterMemoryStore
+{
+    Task<ConcurrentDictionary<string, ConcurrentDictionary<string, ScoreAggregate>>> LoadAllAsync(CancellationToken ct = default);
+    Task RecordScoreAsync(string dimension, string model, double score, CancellationToken ct = default);
+}
+```
 
-The following was the original design for this feature and remains a reasonable roadmap, but
-**none of it exists in code today**. If implementing any of these, update the corresponding
-section above and remove the caveat.
+The write side takes **one observation**, not a whole-memory snapshot, so the store folds it in with a
+single statement:
 
-- **Schema versioning + richer per-model stats**: a `version`/`lastUpdated`/`metadata` envelope
-  around the score data, with precomputed `average`/`variance` per model instead of raw score
-  lists recomputed on read.
-- **Atomic writes + backups**: write to a temp file and rename over the target (crash-safe),
-  timestamped `.bak` copies before each save with a retention window, and fallback to the most
-  recent backup on load failure instead of silently starting empty.
-- **Compaction**: a periodic background service that caps stored scores per model (e.g. keep the
-  most recent N) once a threshold is crossed, to bound file size and load time.
-- **A real vector store**: an `IVectorStoreRouterMemoryStore` abstraction with pluggable backends
-  (Milvus for production-scale semantic search, Weaviate, or an embedded SQLite+vector-extension
-  option), replacing the current Jaccard-overlap approximation with actual embedding similarity.
-- **`MemorySettings` configuration section**: `PersistencePath`, `JsonMemoryFile`,
-  `AutoSaveIntervalMs`, `CompactThresholdScoresPerModel`, `CompactIntervalHours`, `EnableBackups`,
-  `BackupRetentionDays`, `VectorStoreEnabled`, `VectorStoreType`, `VectorStoreConnection`,
-  `EmbeddingDimension`, `VectorStoreTopK`.
+```sql
+INSERT INTO dimension_scores (dimension, model, sum, count) VALUES ($d, $m, $score, 1)
+ON CONFLICT (dimension, model) DO UPDATE SET sum = sum + excluded.sum, count = count + 1;
+```
 
+**The addition happens inside SQLite on purpose.** A read-modify-write would let two racing observations of
+the same pair read the same starting value, with the later write silently discarding the earlier score.
+Letting the database compute the sum makes the fold atomic regardless of interleaving —
+`SqliteRouterMemoryStoreTests.RecordScoreAsync_ConcurrentObservationsOfTheSamePair_LoseNothing` is the guard.
+
+**The store creates its own schema on first use.** It does not assume startup already ran
+`RouterMemoryDatabase.EnsureCreated()`, because scores arrive from the sandbox verification path for the
+life of the process and `StartupHealthCheckHostedService` runs its `EnsureCreated` call best-effort inside a
+catch that only logs. Without self-creation, a startup failure would turn every subsequent score write into
+a "no such table" throw instead of a degraded-but-working router.
+
+**Startup loads it.** `StartupHealthCheckHostedService` calls `RouterMemory.InitializeAsync()` alongside
+`EmbeddingMemory.InitializeAsync()`, best-effort and log-only like every other startup check.
+
+## History: the JSON store this replaced
+
+Router memory was originally persisted as an indented JSON file at `RoutingOptions.MemoryPath`
+(`router_memory.json`), rewritten in full on every observation via `File.WriteAllTextAsync`. It was removed
+rather than improved, for four reasons:
+
+- **Write amplification.** Every score re-serialized the entire accumulated history.
+- **No crash safety.** An in-place overwrite with no temp-file-and-rename meant a crash mid-write truncated
+  the file, and the loader treated an unparseable file as *empty* — silently discarding everything learned.
+- **A data race.** Scores were appended to a `List<double>` under a lock the serializer did not take;
+  `List<T>` is not safe for concurrent read+write, so a save racing a score could throw or write torn output.
+- **It was never read back.** `RouterMemory.InitializeAsync()` had no production caller, so the router paid
+  the full rewrite cost on every score to maintain a file it loaded at no point. Accumulated feedback was
+  discarded at every restart and `dim_best` began each run from the CodeRouterBench prior alone.
+
+Every item on the old design's wish list — schema versioning, atomic writes, backups, compaction,
+precomputed averages instead of raw score lists — was a description of properties a database already has.
+
+**No migration was performed, by explicit decision.** Existing `router_memory.json` files are not imported;
+the router starts from an empty `dimension_scores` table and re-accumulates from live traffic, with
+`dim_best` falling back to its CodeRouterBench probing prior in the meantime — the cold-start path it
+already handles. Any `router_memory.json` left on disk is an orphan that nothing reads.
+`RoutingOptions.MemoryPath` is retained as dead configuration (like `RoutingOptions.PolicyName`) so an
+operator's existing `appsettings.json` does not fail validation on upgrade.
+
+`VectorStoreRouterMemoryStore`, an in-process `IRouterMemoryStore` that approximated similarity with Jaccard
+token overlap over dimension names, was deleted earlier (PLAN.md Phase J) when `EmbeddingMemory` shipped
+real embedding-based cosine kNN. `SqliteRouterMemoryStore` is the only implementation today.
+
+## Configuration
+
+| Key | Default | Meaning |
+|---|---|---|
+| `Routing:EmbeddingMemoryDatabasePath` | `router_embedding_memory.db` | The SQLite file holding **both** `dimension_scores` and `memory_entries`. Relative paths resolve from the application base directory. The name predates the second table and under-describes it; renaming it would break existing `appsettings.json` files, which is the worse trade. |
+| `Routing:MemoryPath` | `router_memory.json` | **Dead.** Read by nothing since router memory moved to SQLite. |

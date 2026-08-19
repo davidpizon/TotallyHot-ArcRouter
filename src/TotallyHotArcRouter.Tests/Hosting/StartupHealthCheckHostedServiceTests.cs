@@ -51,6 +51,7 @@ public class StartupHealthCheckHostedServiceTests
             temp.CreateRollupStore(),
             Options.Create(new StorageOptions { UsageLedgerRetentionDays = retentionDays }),
             CreateRouterMemoryDatabase(temp),
+            new RouterMemory(),
             CreateEmbeddingMemory(temp),
             CreateBenchmarkDatabase(temp),
             CreateBenchmarkStatusService(temp));
@@ -90,6 +91,7 @@ public class StartupHealthCheckHostedServiceTests
             temp.CreateRollupStore(),
             Options.Create(new StorageOptions { UsageLedgerRetentionDays = retentionDays }),
             CreateRouterMemoryDatabase(temp),
+            new RouterMemory(),
             CreateEmbeddingMemory(temp),
             CreateBenchmarkDatabase(temp),
             CreateBenchmarkStatusService(temp));
@@ -166,6 +168,7 @@ public class StartupHealthCheckHostedServiceTests
             temp.CreateRollupStore(),
             Options.Create(new StorageOptions()),
             CreateRouterMemoryDatabase(temp),
+            new RouterMemory(),
             CreateEmbeddingMemory(temp),
             CreateBenchmarkDatabase(temp),
             CreateBenchmarkStatusService(temp),
