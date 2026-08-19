@@ -43,7 +43,14 @@ public sealed class RoutingOptions
     public double ExplorationRate { get; init; } = 0.05;
 
     /// <summary>
-    /// Gets the name of the configured routing policy.
+    /// Dead configuration: bound from <c>appsettings.json</c> (default <c>"hierarchical"</c>) but read by
+    /// nothing except this property's own unit tests - no policy selection in the codebase branches on it.
+    /// <see cref="EnableOrchestratorPolicy"/> is the actual live-path switch
+    /// (docs/router/orchestrator-live-path-plan.md M1.3, which considered and rejected repurposing this
+    /// property for that role: its shipped value is operator-authored and has never had live meaning, so
+    /// attaching one now would change behavior based on configuration nobody was asked to review). Kept
+    /// rather than removed because dropping a bound config key is a schema break unrelated to routing;
+    /// removal is tracked as a separate cleanup.
     /// </summary>
     public string PolicyName { get; init; } = RouterConstants.DefaultPolicy;
 

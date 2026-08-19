@@ -1,0 +1,103 @@
+@* Governance > Routing Mode pane: read-only report of whether the Orchestrator ensemble is the live
+   routing policy, each voter's enablement and weight, and the exploration setting. Talks to the proxy's
+   RoutingModeAdminService gRPC API via the injected RoutingModeStore.
+
+   No mutation controls - docs/router/orchestrator-live-path-plan.md §M3.2 deferred an editable toggle to
+   a separate config-management sub-project; flipping any of this today means an appsettings.json change
+   and a restart, so this pane only ever reports what is currently bound. *@
+@implements IDisposable
+@inject RoutingModeStore Store
+
+<div class="h-full overflow-y-auto pr-1">
+    @if (!Store.IsLoaded)
+    {
+        <div class="text-sm text-slate-500 p-4">Loading routing mode…</div>
+    }
+    else if (!Store.IsReachable || Store.Mode is null)
+    {
+        <div class="rounded-lg p-4 space-y-2 ds-surface-card-critical">
+            <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
+                <Icon Name="alert-triangle" Size="14" /> Router unreachable
+            </div>
+            <div class="text-xs text-slate-400">
+                Could not reach <span class="font-mono">@TelemetryChannelFactory.DefaultServerAddress</span>. Is the proxy running?
+            </div>
+            @if (!string.IsNullOrEmpty(Store.LastError))
+            {
+                <div class="text-xs text-slate-500 font-mono">@Store.LastError</div>
+            }
+            <button @onclick="Reload" class="btn btn-ghost">
+                Retry
+            </button>
+        </div>
+    }
+    else
+    {
+        var mode = Store.Mode;
+        <div class="flex items-center justify-between mb-3 gap-2">
+            <span class="text-xs text-slate-500 uppercase tracking-widest">Routing Mode</span>
+            <button @onclick="Reload" class="btn btn-ghost flex items-center gap-1.5">
+                <Icon Name="rotate-ccw" Size="13" /> Refresh
+            </button>
+        </div>
+
+        <div class="rounded-lg p-3 space-y-2.5 mb-3 ds-surface-card">
+            <div class="flex items-center justify-between gap-2">
+                <span class="text-sm font-semibold @(mode.OrchestratorEnabled ? "state-enabled" : "state-disabled")">
+                    Orchestrator @(mode.OrchestratorEnabled ? "Live" : "Disabled")
+                </span>
+                <span class="text-xs text-slate-500">
+                    @(mode.OrchestratorEnabled
+                        ? "Non-utility traffic is decided by the four-voter ensemble."
+                        : "Non-utility traffic falls back to memory-only ranking.")
+                </span>
+            </div>
+            <div class="flex items-center justify-between gap-2">
+                <span class="text-sm font-semibold @(mode.ExplorationEnabled ? "state-enabled" : "state-disabled")">
+                    Exploration @(mode.ExplorationEnabled ? "On" : "Off")
+                </span>
+                @if (mode.ExplorationEnabled)
+                {
+                    <span class="text-xs text-slate-500 font-mono">@FormatRate(mode.ExplorationRate) of decisions</span>
+                }
+            </div>
+        </div>
+
+        <div class="space-y-2">
+            @foreach (var voter in mode.Voters)
+            {
+                <div class="rounded-lg p-3 flex items-center justify-between gap-2 ds-surface-card">
+                    <div class="flex items-center gap-2 min-w-0">
+                        <Icon Name="bot" Size="14" />
+                        <span class="text-sm font-mono font-semibold @(voter.Enabled ? "state-enabled" : "state-disabled")">
+                            @voter.Name
+                        </span>
+                    </div>
+                    <span class="text-xs font-mono text-slate-500">
+                        @(voter.Enabled ? $"weight {voter.Weight.ToString("F2", CultureInfo.InvariantCulture)}" : "disabled")
+                    </span>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        Store.Changed += OnStoreChanged;
+        await Store.LoadAsync();
+    }
+
+    /// <summary>Re-renders when the store's state changes.</summary>
+    private void OnStoreChanged() => InvokeAsync(StateHasChanged);
+
+    /// <summary>Unsubscribes from <see cref="RoutingModeStore.Changed"/>.</summary>
+    public void Dispose() => Store.Changed -= OnStoreChanged;
+
+    /// <summary>Reloads the routing mode. Implements both the unreachable state's Retry button and the loaded state's Refresh button.</summary>
+    private Task Reload() => Store.LoadAsync();
+
+    /// <summary>Formats a 0..1 exploration rate as a whole-number percentage.</summary>
+    private static string FormatRate(double rate) => $"{(rate * 100).ToString("F0", CultureInfo.InvariantCulture)}%";
+}

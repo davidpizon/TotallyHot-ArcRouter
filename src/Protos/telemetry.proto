@@ -356,6 +356,39 @@ message LlmRouterModelSyncStreamEvent {
   }
 }
 
+// The Governance → Routing Mode panel: a read-only surface reporting whether the Orchestrator ensemble
+// (PLAN.md Phase L) is live, each of its voters' enablement and weight, and the exploration setting -
+// docs/router/orchestrator-live-path-plan.md §M3.2. No mutation RPC: flipping any of these is an
+// appsettings.json change and a process restart, not a GUI action - M3.2's documented deferral leaves an
+// editable toggle as a separate config-management sub-project. Same shape as the other admin services
+// above (unary, sharing the :5002 TLS loopback endpoint) but always mapped, unlike them: routing
+// configuration is core, not an optional feature gated on an external store being supplied.
+service RoutingModeAdminService {
+  // Returns the routing options currently bound into RoutingOptions.
+  rpc GetRoutingMode (GetRoutingModeRequest) returns (RoutingModeResponse);
+}
+
+message GetRoutingModeRequest {}
+
+// One voter's participation in the Orchestrator's weighted vote (PLAN.md Phase L, research-doc §3.3).
+message VoterMode {
+  string name = 1;
+  bool enabled = 2;
+  double weight = 3;
+}
+
+message RoutingModeResponse {
+  // RoutingOptions.EnableOrchestratorPolicy - whether CompositeRoutingPolicy dispatches non-utility
+  // traffic to OrchestratorRoutingPolicy (true) or AgentRouterPolicy (false). The Phase M kill switch.
+  bool orchestrator_enabled = 1;
+  bool exploration_enabled = 2;
+  double exploration_rate = 3;
+  // Always the four voters PLAN.md Phase L ships, in dim_best / memory_kNN / logreg / llm_router order,
+  // regardless of orchestrator_enabled - the panel reports the configuration that would apply if the
+  // Orchestrator were live, not only when it currently is.
+  repeated VoterMode voters = 4;
+}
+
 // Envelope: exactly one of these is set per message, matching SignalR's per-message-type dispatch
 // ("RoutingTelemetry" / "LogLine" client methods) with a single Protobuf idiom.
 message TelemetryEvent {

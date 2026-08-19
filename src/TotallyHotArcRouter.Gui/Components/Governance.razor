@@ -38,16 +38,22 @@
             <PriceOverridesAdmin />
         </div>
     }
-    else
+    else if (_view == GovView.BenchmarkData)
     {
         <div class="flex-1 min-h-0">
             <BenchmarkData />
         </div>
     }
+    else
+    {
+        <div class="flex-1 min-h-0">
+            <RoutingModeAdmin />
+        </div>
+    }
 </div>
 
 @code {
-    private enum GovView { Providers, Models, PriceSources, PriceOverrides, BenchmarkData }
+    private enum GovView { Providers, Models, PriceSources, PriceOverrides, BenchmarkData, RoutingMode }
 
     private static readonly (GovView View, string Label)[] Views =
     [
@@ -55,7 +61,8 @@
         (GovView.Models, "Models"),
         (GovView.PriceSources, "Price Sources"),
         (GovView.PriceOverrides, "Price Overrides"),
-        (GovView.BenchmarkData, "Benchmark Data")
+        (GovView.BenchmarkData, "Benchmark Data"),
+        (GovView.RoutingMode, "Routing Mode")
     ];
 
     private GovView _view = GovView.Providers;

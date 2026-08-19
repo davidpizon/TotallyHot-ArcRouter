@@ -161,8 +161,8 @@ flowchart LR
 |---|---|---|---|---|
 | M1 | `CompositeRoutingPolicy` dispatches the general path to the Orchestrator and forwards `RoutingSignals`; exploration decision resolved | — | Medium — changes `auto`/unknown/unhealthy routing | **Shipped** |
 | M2 | Requested-vs-routed in the response and telemetry, end to end | M1 | Medium — touches the proto and the GUI DTO | **Shipped** |
-| M3 | GUI: substitution visible at a glance; routing mode discoverable | M2 | Low | Proposed |
-| M4 | Docs reconciliation | M1 | Low | Proposed |
+| M3 | GUI: substitution visible at a glance; routing mode discoverable | M2 | Low | **Shipped** |
+| M4 | Docs reconciliation | M1 | Low | **Shipped** |
 
 The high-risk sub-phase from the original plan — routing named models — is gone. Nothing here changes
 what a client that names a servable model receives.
@@ -397,13 +397,13 @@ telemetry tests pass with the new fields defaulted.
 
 ---
 
-## M3 — GUI
+## M3 — GUI — **shipped**
 
-### M3.1 Substitution at a glance
+### M3.1 Substitution at a glance — **shipped**
 
-`LiveConversationMapper.BuildRoutingSteps` ([`:86`](../../src/TotallyHotArcRouter.Gui/Services/LiveConversationMapper.cs:86))
-today emits at most a fallback warning plus `"Route Confirmed: {model}"`. It gains a substitution step
-above the confirmation:
+`LiveConversationMapper.BuildRoutingSteps` ([`:107`](../../src/TotallyHotArcRouter.Gui/Services/LiveConversationMapper.cs:107))
+now emits a fallback warning, a substitution warning, and `"Route Confirmed: {model}"`, in that order.
+The substitution step reads:
 
 ```
 StepStatus.Warn   "Requested {RequestedModel} → routed to {RoutedModel} ({reason})"
@@ -420,48 +420,60 @@ did not get it: `UnresolvedName`, `ModelStopped`, `CircuitOpen`, `Failover` — 
 client asked for something that doesn't exist or something is unhealthy, and each worth a `Warn`. This
 keeps the decision log's warning severity meaningful rather than ambient.
 
-`TurnCard.razor` renders the model at [`:82`](../../src/TotallyHotArcRouter.Gui/Components/TurnCard.razor:82)
-with `metric-fallback`/`metric-accent` styling driven by `IsFallback`. Extend the same treatment to
-substitution, and extend the accessible label at [`:178`](../../src/TotallyHotArcRouter.Gui/Components/TurnCard.razor:178)
-— "at a glance" must include screen readers. The existing
-`TurnCardTests.Clicking_the_header_expands_and_shows_the_routing_decision_log` is the natural place to
-extend coverage.
+`TurnCard.razor` now derives an `IsSubstituted` flag (any `SubstitutionReason` but `None`/`AutoSelect`,
+with both `RequestedModel`/`RoutedModel` present) and extends the Model stat's
+`metric-fallback`/`metric-accent` styling and the header's accessible label to it, alongside the existing
+`IsFallback` treatment — "at a glance" now covers screen readers too.
+`LiveConversationMapperTests`/`TurnCardTests` cover a visible-reason turn, an `AutoSelect`/`None`/absent
+turn (no step, no styling), and the accessible label's exact text.
 
-### M3.2 Discoverability of the routing mode
+### M3.2 Discoverability of the routing mode — **shipped**
 
-Recommended: a **read-only** "Routing Mode" card in Governance following `PriceSourcesAdmin.razor`'s
-layout — whether the Orchestrator is live, the configured voter weights and enablement, and the
-exploration setting once M1.2 is resolved. Needs only a read path on an existing gRPC admin service,
-matching how `BenchmarkData.razor` and `PriceSourcesAdmin.razor` already surface router state.
+A new, **always-mapped, read-only** `RoutingModeAdminService` gRPC service
+([`RoutingModeAdminGrpcService.cs`](../../src/TotallyHotArcRouter/Router/RoutingModeAdminGrpcService.cs))
+reports `RoutingOptions.EnableOrchestratorPolicy`, the exploration enablement/rate, and the four PLAN.md
+Phase L voters' enablement/weight (`dim_best`/`memory_kNN`/`logreg`/`llm_router`, in that fixed order).
+Unlike the other admin services sharing the :5002 TLS endpoint, it needed no optional-store gating in
+`ProxyServer`/`ProxyHostedService`/`ServiceCollectionExtensions` — `RoutingOptions` is core, always-bound
+configuration, not an add-on feature. A new Governance sub-tab, `RoutingModeAdmin.razor`, renders the
+report via `RoutingModeStore` (the client-side singleton, mirroring `PriceSourceStore`'s
+loaded/unreachable/loaded-with-error states) — no mutation controls, per the deferral below.
 
-Deferred: an editable toggle. Flipping `EnableOrchestratorPolicy` from the GUI means a write RPC, a
-persisted override outranking `appsettings.json`, and a hot-reload story for a bound `IOptions` — a
-config-management sub-project.
+**Deferred, as planned:** an editable toggle. Flipping `EnableOrchestratorPolicy` from the GUI means a
+write RPC, a persisted override outranking `appsettings.json`, and a hot-reload story for a bound
+`IOptions` — a config-management sub-project, out of scope here.
 
-Any dialog copies the `SettingsModal.razor` shell per [`docs/gui/DESIGN.md`](../gui/DESIGN.md) §4.1.
-
-**Exit:** bUnit tests cover a `Warn` substitution turn, an `AutoSelect` turn asserting **no**
-substitution step is emitted, a plain non-substituted turn, the accessible label, and the Routing Mode
-card in each state including router-unreachable.
+**Exit:** `LiveConversationMapperTests`/`TurnCardTests` cover a `Warn` substitution turn, an `AutoSelect`
+turn asserting **no** substitution step is emitted, a plain non-substituted turn, and the accessible
+label; `RoutingModeAdminGrpcServiceTests`/`RoutingModeAdminClientTests`/`RoutingModeAdminTests` cover the
+service's voter projection, the client's wire mapping and error translation, and the panel's
+loaded/disabled/unreachable states including Retry.
 
 ---
 
-## M4 — Documentation reconciliation
+## M4 — Documentation reconciliation — **shipped**
 
-- **`src/PLAN.md`** — Phase M is rescoped: it no longer routes named models, and its recorded
-  supersession of `utility-model-routing.md`'s non-goal is **withdrawn**. Update the phase title, the
-  bullets, and the exit criteria to match this plan.
-- **`docs/router/utility-model-routing.md`** — no change needed; confirm its non-goal now stands, and
-  record that Phase M considered and rejected superseding it, so the question isn't reopened without
-  new evidence.
-- **`README.md` / `docs/HANDBOOK.md`** — document that `auto` is how a client opts into routing, and
-  the three new response headers.
-- **`docs/router/telemetry.md`** — the new fields and the `RequestedModel` semantic correction from M2.
-- **`docs/router/agent-cost-tracking.md`** — only if M2's spend-attribution question resolves to
-  "routed".
-- **`RoutingOptions.PolicyName`** — document as dead configuration where it is defined.
-- **`README.md` routing-options list** — if M1.2 lands option 3, say plainly that
-  `EnableExploration`/`ExplorationRate` no longer apply to the general path.
+- **`src/PLAN.md`** — done (shipped alongside M1-M3): Phase M's title, bullets, and exit criteria already
+  reflect the rescoped plan (no named-model routing; the `utility-model-routing.md` supersession recorded
+  as withdrawn).
+- **`docs/router/utility-model-routing.md`** — done: its non-goal (§"Non-goals") now carries a note that
+  PLAN.md Phase M considered and rejected superseding it, naming the withdrawn `HonorRequestedModel`
+  draft, so the question isn't reopened without new evidence.
+- **`README.md`** — done: a new "Routing" section documents `"model": "auto"` as the opt-in, that a
+  named servable model is always served exactly as named, and the three `X-ArcRouter-*` response headers
+  in a table. `docs/HANDBOOK.md` needed no change — it is scoped entirely to the CodeRouterBench dataset,
+  not runtime/API behavior, so this content belongs in README.md alone (confirmed with the user rather
+  than assumed, since neither file previously documented the client-facing API at all).
+- **`docs/router/telemetry.md`** — done in the M2 commit (`ffcc8fa`): the new fields and the
+  `RequestedModel` semantic correction were already reconciled there.
+- **`docs/router/agent-cost-tracking.md`** — done in the M2 commit: M2.3 resolved spend attribution to
+  "the model that served," and the doc was updated in the same commit.
+- **`RoutingOptions.PolicyName`** — done: its XML doc now states it is dead configuration, names
+  `EnableOrchestratorPolicy` as the actual live-path switch, and records that M1.3 considered and
+  rejected repurposing it.
+- **`README.md` routing-options list** — not applicable: M1.2 landed option 1 (lift exploration into
+  `OrchestratorRoutingPolicy`), not option 3, so `EnableExploration`/`ExplorationRate` still apply to the
+  general path and no correction was needed.
 
 ---
 

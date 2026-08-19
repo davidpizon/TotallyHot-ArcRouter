@@ -77,8 +77,10 @@ public sealed record ConversationTurn(
     string? CostConfidence = null,
     // The client's literal requested model, the model that actually served, and why they differ (a
     // Telemetry.RoutingSubstitutionReason name), or null for a mock turn with no live-routing concept.
-    // Plumbed through by Phase M2 (docs/router/orchestrator-live-path-plan.md §M2.2); not yet rendered -
-    // Phase M3.1 is what turns these into the Live Stream inspector's substitution step.
+    // Plumbed through by Phase M2 (docs/router/orchestrator-live-path-plan.md §M2.2) and rendered by
+    // Phase M3.1: LiveConversationMapper.BuildRoutingSteps turns a visible reason (anything but None or
+    // AutoSelect) into the Live Stream inspector's substitution warning step, and TurnCard extends its
+    // fallback styling/accessible label to the same condition.
     string? RequestedModel = null,
     string? RoutedModel = null,
     string? SubstitutionReason = null);

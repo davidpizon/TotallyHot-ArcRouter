@@ -13,7 +13,10 @@ public sealed class TurnCardTests
         bool isFallback = false,
         string? requestSummary = "Please review this diff for security issues in the auth flow",
         string? responseSummary = "Found one issue.",
-        IReadOnlyList<RoutingStep>? steps = null) => new(
+        IReadOnlyList<RoutingStep>? steps = null,
+        string? requestedModel = null,
+        string? routedModel = null,
+        string? substitutionReason = null) => new(
         Id: "sess-1-t1",
         Agent: "Code Review Bot",
         Model: "claude-3-haiku",
@@ -35,7 +38,10 @@ public sealed class TurnCardTests
         ],
         RequestSummary: requestSummary,
         ResponseSummary: responseSummary,
-        IsFallback: isFallback);
+        IsFallback: isFallback,
+        RequestedModel: requestedModel,
+        RoutedModel: routedModel,
+        SubstitutionReason: substitutionReason);
 
     [Fact]
     public void Renders_turn_number_agent_and_model()
@@ -61,6 +67,32 @@ public sealed class TurnCardTests
 
         var normal = ctx.Render<TurnCard>(p => p.Add(c => c.Turn, MakeTurn(isFallback: false)).Add(c => c.TotalTurns, 1));
         normal.Markup.Should().NotContain("This turn was served by fallback routing");
+    }
+
+    [Fact]
+    public void Marks_the_model_stat_and_accessible_label_when_the_router_substituted_a_model()
+    {
+        using var ctx = new Bunit.BunitContext();
+        var turn = MakeTurn(requestedModel: "gpt-4o", routedModel: "claude-3-haiku", substitutionReason: "CircuitOpen");
+
+        var cut = ctx.Render<TurnCard>(p => p.Add(c => c.Turn, turn).Add(c => c.TotalTurns, 1));
+
+        cut.Find("button[aria-label]").GetAttribute("aria-label")
+            .Should().Contain("requested gpt-4o, routed to claude-3-haiku");
+    }
+
+    [Fact]
+    public void Does_not_mark_the_accessible_label_for_an_auto_select_or_no_substitution()
+    {
+        using var ctx = new Bunit.BunitContext();
+
+        var autoSelect = ctx.Render<TurnCard>(p => p.Add(c => c.Turn,
+            MakeTurn(requestedModel: "auto", routedModel: "claude-3-haiku", substitutionReason: "AutoSelect")).Add(c => c.TotalTurns, 1));
+        autoSelect.Find("button[aria-label]").GetAttribute("aria-label").Should().NotContain("requested");
+
+        var none = ctx.Render<TurnCard>(p => p.Add(c => c.Turn,
+            MakeTurn(requestedModel: "claude-3-haiku", routedModel: "claude-3-haiku", substitutionReason: "None")).Add(c => c.TotalTurns, 1));
+        none.Find("button[aria-label]").GetAttribute("aria-label").Should().NotContain("requested");
     }
 
     [Fact]

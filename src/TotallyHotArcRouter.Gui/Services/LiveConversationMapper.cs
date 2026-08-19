@@ -85,13 +85,32 @@ public static class LiveConversationMapper
             SubstitutionReason: turn.SubstitutionReason);
     }
 
-    /// <summary>Builds the display routing steps for a turn, flagging fallback routing and naming the confirmed model.</summary>
+    /// <summary>
+    /// Substitution reasons that describe the client's own choice rather than an override, and so must
+    /// not surface a warning step (docs/router/orchestrator-live-path-plan.md §M3.1): a request naming
+    /// no concrete model was never denied anything.
+    /// </summary>
+    private static readonly HashSet<string> SilentSubstitutionReasons = new(StringComparer.Ordinal)
+    {
+        "None",
+        "AutoSelect",
+    };
+
+    /// <summary>Builds the display routing steps for a turn, flagging fallback routing, a visible substitution, and naming the confirmed model.</summary>
     private static IReadOnlyList<RoutingStep> BuildRoutingSteps(LiveConversationTurn turn)
     {
         List<RoutingStep> steps = [];
         if (turn.IsFallback)
         {
             steps.Add(new RoutingStep(StepStatus.Warn, "Fallback routing was used for this turn."));
+        }
+
+        if (turn.SubstitutionReason is { } reason && !SilentSubstitutionReasons.Contains(reason)
+            && turn.RequestedModel is not null && turn.RoutedModel is not null)
+        {
+            steps.Add(new RoutingStep(
+                StepStatus.Warn,
+                $"Requested {turn.RequestedModel} → routed to {turn.RoutedModel} ({reason})."));
         }
 
         steps.Add(new RoutingStep(StepStatus.Info, $"Route Confirmed: {turn.Model}"));
