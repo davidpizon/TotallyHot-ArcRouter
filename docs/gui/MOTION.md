@@ -168,6 +168,40 @@ the panel settles rather than pops, small enough that dense text never appears t
 .panel-enter { animation: panel-enter var(--dur-default) var(--ease-out-expo); }
 ```
 
+### Tab Chrome Crossfade — *Shipping*
+
+The companion to Panel Crossfade: the tab *button* itself, as selection moves between peers. Only
+colour channels transition — `color`, `background-color`, `border-color`.
+
+**The border geometry is reserved on the base rule, in `transparent`, and never declared per-state.**
+This is a hard constraint, not a style preference, and it is the one mistake this pattern exists to
+prevent. Tabs are auto-sized flex items, so a border that appears only on `.active` makes the
+selected tab 2px wider and 2px taller than its peers: every click reflows the tab row and resizes the
+`flex-1` `<main>` beneath it. It also cannot animate — `border-style: none → solid` is a discrete
+property, so the highlight snaps rather than fading.
+
+For the same reason, **never use `transition: all` on a selectable control.** `all` silently opts
+every future layout property into the animation.
+
+```css
+.tab-button {
+  border: 1px solid transparent;   /* reserved in BOTH states */
+  border-radius: 6px 6px 0 0;
+  margin-bottom: -1px;
+  transition: color            var(--dur-default) var(--ease-standard),
+              background-color var(--dur-default) var(--ease-standard),
+              border-color     var(--dur-default) var(--ease-standard);
+}
+.tab-button.active   { color: var(--accent); background: var(--surface-base);
+                       border-color: var(--border-button);
+                       border-bottom-color: var(--surface-base); }
+.tab-button.inactive { color: var(--text-muted); background: transparent;
+                       border-color: transparent; }
+```
+
+All four selected-one-of-N families share this timing: `.tab-button` (Dashboard nav), `.gov-tab`
+(Governance), `.metric-button` (Cost Analytics), `.filter-button` (Model Distribution).
+
 ### Overlay Rise — *Coded and wired (§10) — not confirmed in UI*
 
 `SettingsModal`, `ProviderEditDialog`. The backdrop fades while the panel rises — two durations, one
@@ -356,6 +390,8 @@ Add to `app.css` below the compiled Tailwind blob:
 | Duration + easing tokens | `app.css` `:root` |
 | Bare `ease` → `var(--ease-standard)` | `.card-hover`, `.ls-divider`, input focus |
 | `.tab-indicator` actually applied (was dead CSS) | `Dashboard.razor` nav buttons |
+| Tab Chrome Crossfade — border geometry reserved on the base rule so selection no longer reflows the tab row | `.tab-button` |
+| `transition: all` retired on every selected-one-of-N control | `.tab-button`, `.tab-indicator`, `.gov-tab`, `.metric-button`, `.filter-button` |
 | `prefers-reduced-motion` block | `app.css` |
 
 ### Coded and wired — not confirmed in UI

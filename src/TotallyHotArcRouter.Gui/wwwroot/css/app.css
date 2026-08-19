@@ -671,8 +671,12 @@ input[type="number"]:focus {
 .gov-tab {
   position: relative;
   padding: 0.375rem 0.75rem;
+  /* Reserved in the base rule so .active/.inactive only swap border-top-color — same
+     no-reflow contract as .tab-button. */
   border-top: 1px solid transparent;
-  transition: all var(--dur-fast) var(--ease-standard);
+  transition: color var(--dur-default) var(--ease-standard),
+              background-color var(--dur-default) var(--ease-standard),
+              border-color var(--dur-default) var(--ease-standard);
 }
 
 .gov-tab.active {
@@ -696,7 +700,10 @@ input[type="number"]:focus {
   padding: 0.625rem 0.625rem;
   font-size: 0.75rem;
   font-weight: 500;
-  transition: all var(--dur-fast) var(--ease-standard);
+  /* Colors only — neither state declares a border, so nothing here can reflow. */
+  transition: color var(--dur-default) var(--ease-standard),
+              background-color var(--dur-default) var(--ease-standard),
+              border-color var(--dur-default) var(--ease-standard);
 }
 
 .metric-button.active {
@@ -887,6 +894,12 @@ input[type="number"]:focus {
 }
 
 /* ---- Tab button states ---- */
+/* Border geometry lives on the base rule, never on .active. The 1px border and the -1px
+   overlap margin are reserved in BOTH states so selecting a tab changes only colors.
+   Sizing them per-state (the old `border: none` on .inactive) made the selected tab 2px
+   wider and 2px taller than its peers, so every mouseup reflowed the whole tab row and
+   resized the flex-1 <main> beneath it. It also could not animate: `border-style: none ->
+   solid` is a discrete property, so the highlight snapped in. Do not move these back. */
 .tab-button {
   position: relative;
   display: flex;
@@ -895,24 +908,27 @@ input[type="number"]:focus {
   padding: 0.625rem 1rem;
   font-size: 0.75rem;
   font-weight: 500;
-  transition: all var(--dur-fast) var(--ease-standard);
+  border: 1px solid transparent;
+  border-radius: 6px 6px 0 0;
+  margin-bottom: -1px;
+  transition: color var(--dur-default) var(--ease-standard),
+              background-color var(--dur-default) var(--ease-standard),
+              border-color var(--dur-default) var(--ease-standard);
 }
 
 .tab-button.active {
   color: var(--accent);
   background: var(--surface-base);
-  border-top: 1px solid var(--border-button);
-  border-left: 1px solid var(--border-button);
-  border-right: 1px solid var(--border-button);
-  border-bottom: 1px solid var(--surface-base);
-  border-radius: 6px 6px 0 0;
-  margin-bottom: -1px;
+  border-color: var(--border-button);
+  /* Matches the panel below so this edge hides .ds-toolbar's border-bottom, which is
+     what makes the selected tab read as continuous with its panel. */
+  border-bottom-color: var(--surface-base);
 }
 
 .tab-button.inactive {
   color: var(--text-muted);
   background: transparent;
-  border: none;
+  border-color: transparent;
 }
 
 /* ---- Expanded section with top border ---- */
@@ -1029,6 +1045,16 @@ input[type="number"]:focus {
 }
 
 /* ---- Time-filter pill buttons (ModelDistribution) ---- */
+/* Declared here rather than left to Tailwind's `transition-colors` utility so the whole
+   selected-one-of-N family (tab bar, governance tabs, metric buttons, these) shares one
+   timing. Colors only; the .filter-button-divider border is keyed off position, not
+   selection, so it never changes with state. */
+.filter-button {
+  transition: color var(--dur-default) var(--ease-standard),
+              background-color var(--dur-default) var(--ease-standard),
+              border-color var(--dur-default) var(--ease-standard);
+}
+
 .filter-button.active {
   background: var(--accent);
   color: var(--surface-base);
@@ -1072,8 +1098,13 @@ input[type="number"]:focus {
               border-color var(--dur-fast) var(--ease-standard);
 }
 
+/* Applied alongside .tab-button in Dashboard.razor and declared later in the file, so it
+   overrides .tab-button's own transition — the two are kept identical on purpose. `all`
+   here would re-animate the layout properties the tab bar must never animate. */
 .tab-indicator {
-  transition: all var(--dur-default) var(--ease-standard);
+  transition: color var(--dur-default) var(--ease-standard),
+              background-color var(--dur-default) var(--ease-standard),
+              border-color var(--dur-default) var(--ease-standard);
 }
 
 input[type="text"],
