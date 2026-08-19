@@ -9,9 +9,9 @@ embedding-backed `logreg`, but they only reach `OrchestratorRoutingPolicy`, whic
 registered for live traffic today (`CompositeRoutingPolicy`, dispatching to `UtilityRoutingPolicy` /
 `AgentRouterPolicy`, is) — see the "Live status today" table below for the current, post-merge picture.
 
-**Status:** in progress — Phases 1-3 shipped (importer defect repair, feedback-capture wiring, and the
-embedding-backed `logreg` voter); Phases 4-6 (training/retrain, admin surface, TF-IDF relocation) are
-still proposed. **Ordering:** before PLAN.md Phase N. Phase N's regret harness
+**Status:** in progress — Phases 1-4 shipped (importer defect repair, feedback-capture wiring, the
+embedding-backed `logreg` voter, and its trainer); Phases 5-6 (admin surface, TF-IDF relocation) remain
+proposed/partially shipped. **Ordering:** before PLAN.md Phase N. Phase N's regret harness
 measures voter quality; measuring voters that structurally cannot fire would produce a benchmark of
 `dim_best` wearing an ensemble's name.
 
@@ -36,16 +36,24 @@ nulls. That is not, by itself, the same as fixing it for live traffic — see th
 | Voter | Needs | Live status today |
 |---|---|---|
 | `dim_best` | `RouterMemory` scores | **Working** — `RouterMemoryScoreObserver` writes `live:`-prefixed scores through the sandbox |
-| `memory_kNN` | `VotingContext.TaskEmbedding` | **Reachable only via `OrchestratorRoutingPolicy`** — `RequestInterceptor` now computes and passes `RoutingSignals`, but the live-registered policy (`CompositeRoutingPolicy` → `UtilityRoutingPolicy`/`AgentRouterPolicy`) doesn't override the signals overload, so it still abstains on live traffic today |
-| `logreg` | `VotingContext.TaskText` | **Reachable only via `OrchestratorRoutingPolicy`** — same gap as `memory_kNN`; embedding-backed, but not on the live routing path yet |
-| `llm_router` | `VotingContext.TaskText` | **Reachable only via `OrchestratorRoutingPolicy`** — same gap as `memory_kNN`/`logreg`; prompts a local ONNX GenAI instruct model (a documented substitute for the paper's unpublished fine-tuned checkpoint - see `LlmRouterVoter`'s remarks), but not on the live routing path yet |
+| `memory_kNN` | `VotingContext.TaskEmbedding` | **Wired and reachable** — PLAN.md Phase M1 shipped `CompositeRoutingPolicy`'s `RoutingSignals` overload (`Router/CompositeRoutingPolicy.cs`), which forwards to `OrchestratorRoutingPolicy` for non-utility traffic by default (`RoutingOptions.EnableOrchestratorPolicy`). Casts a real vote whenever a task embedding is present; abstains only when one isn't (e.g. the embedding budget timed out) |
+| `logreg` | `VotingContext.TaskEmbedding` | **Wired and reachable, same as `memory_kNN`** — abstains until an artifact exists; Phase 4 (below) is what produces one |
+| `llm_router` | `VotingContext.TaskText` | **Wired and reachable, same as `memory_kNN`** — prompts a local ONNX GenAI instruct model (a documented substitute for the paper's unpublished fine-tuned checkpoint - see `LlmRouterVoter`'s remarks); abstains only when its model artifacts are missing or the task has no text |
+
+**Correction (verified against code, not just this doc):** an earlier revision of this table said all
+three of `memory_kNN`/`logreg`/`llm_router` were reachable "only via `OrchestratorRoutingPolicy`" because
+the live-registered policy didn't forward `RoutingSignals`. That gap was closed when PLAN.md Phase M1
+shipped: `CompositeRoutingPolicy.SelectModelAsync(RoutingContext, RoutingSignals?, ...)`
+(`Router/CompositeRoutingPolicy.cs:69-81`) does override the signals overload and dispatches to
+`_orchestratorPolicy` for non-utility traffic whenever `RoutingOptions.EnableOrchestratorPolicy` (default
+`true`) is set. The three voters are on the live path today; `memory_kNN`/`llm_router` already cast real
+votes when their inputs are present, and `logreg`'s remaining abstention is a missing artifact, not a
+wiring gap - Phase 4 below is what trains one.
 
 `EmbeddingMemory.AddEntryAsync` — the writer of the `memory_entries` table — now has a production
 caller: `EmbeddingMemoryScoreObserver` writes entries via `PendingTaskEmbeddingCache`, and
 `RequestInterceptor` optionally computes embeddings through `IEmbeddingClient` (budgeted, warm-up
-guarded). So the observation loop this section originally said didn't exist now does — the remaining
-gap is that `OrchestratorRoutingPolicy`, the only policy that reads those signals back out for voting,
-isn't the policy wired in for live requests (see `Hosting/ServiceCollectionExtensions.cs:126`).
+guarded).
 
 ## What we are actually able to train on
 
@@ -133,7 +141,7 @@ flowchart LR
 | 1 | Fix two importer defects; repair affected rows in place | — | Shipped |
 | 2 | Wire feedback capture: prompt text, embeddings, `memory_entries` writes | — | Shipped |
 | 3 | Embedding-backed `logreg` voter reading a local artifact | 2 | Shipped |
-| 4 | Training: OOD bootstrap + continual retrain from memory | 1, 3 | Proposed |
+| 4 | Training: OOD bootstrap + continual retrain from memory | 1, 3 | Shipped |
 | 5 | gRPC admin surface + Governance pane + CLI flag | 4 | Proposed |
 | 6 | Relocate TF-IDF machinery to the Phase N harness; delete the placeholder | 3 | Proposed |
 
@@ -255,7 +263,7 @@ dimension mismatch; given a small hand-constructed artifact it selects the expec
 restricts to the candidate set; artifact round-trips through its serializer with validation rejecting
 malformed weight vectors, non-finite values, and dimension disagreements.
 
-## Phase 4 — Training: bootstrap and continual retrain
+## Phase 4 — Training: bootstrap and continual retrain — **shipped**
 
 **The model form: per-model score regression, not multiclass classification.** Live rows only ever
 carry the score of the model actually chosen, so a multiclass "which of 8 won" label is not
@@ -302,6 +310,39 @@ one from fixture memory rows; blending honors the weight; a degenerate set is de
 artifact intact; the threshold trigger fires once and only once per threshold crossing; a retrain
 running concurrently with routing does not block a request; no test exceeds 5 seconds (fixture
 embeddings, not real ONNX inference).
+
+**Shipped, as follows:**
+
+- `EmbeddingLogRegTrainer.Train` (`Router/Orchestrator/EmbeddingLogRegTrainer.cs`) — one ridge-
+  regularized linear regression head per model, plain weighted batch gradient descent, no ML package.
+  `LogRegTrainingSample` (`Embedding`, `ModelKey`, `Score`, `Weight`) is the shared shape both sources
+  below produce.
+- **4a.** `OodBootstrapSampleSource` (`Router/Orchestrator/OodBootstrapSampleSource.cs`). **One deviation
+  from this section's original wording, driven by schema reality:** `benchmark_ood_results` carries no
+  `score` column (only `resolved`) - the same constraint `LogRegTrainer` (Phase 6) already documents.
+  Rather than one winning label per task, this source emits one regression sample per `(task, model)`
+  result row: target `1.0` when `resolved = 1`, `0.0` otherwise. Existence-checks `BenchmarkDatabase.DatabasePath`
+  before opening a connection (`DimBestVoter`'s idiom) and reports task-embedded progress via
+  `IProgress<int>`.
+- **4b.** `EmbeddingLogRegTrainingService` reads `IMemoryEntryStore.LoadAllAsync` directly (no new public
+  surface added to `EmbeddingMemory` itself) and skips any entry whose embedding dimension has drifted
+  from `EmbeddingOptions.EmbeddingDimension`, logging a warning rather than failing the whole retrain.
+  `RoutingOptions.LogRegLiveSampleWeight` (default `3.0`) is the blend weight, applied against the
+  bootstrap source's fixed `1.0`.
+- **4c.** `EmbeddingLogRegTrainingService.RetrainAsync` is the single guarded entry point, gated by a
+  `SemaphoreSlim(1,1)` (`TryEnter`, not queued - a concurrent call returns `AlreadyRunning` immediately).
+  `Program.cs`'s `--retrain-logreg` flag calls it directly, following `--sync-benchmark-data`'s extraction
+  and headless-exit-code pattern. `LogRegRetrainHostedService` (`Hosting/LogRegRetrainHostedService.cs`)
+  is the automatic threshold trigger: a 5-minute `PeriodicTimer` compares the live memory entry count
+  against the artifact's last recorded `MemoryEntryCount`, gated by
+  `RoutingOptions.EnableAutomaticLogRegRetrain` (default `true`). The Governance button remains Phase 5,
+  not built here. The degenerate-set guard (`RoutingOptions.LogRegMinTrainingRows` = 20,
+  `LogRegMinModelsRepresented` = 2) declines and leaves the prior artifact untouched; a successful retrain
+  writes to a temp file and `File.Move`s it into place (atomic swap, no torn read for `LogRegVoter`), then
+  calls the existing `LogRegVoter.Reload()` (already present since Phase 3 - no change needed there).
+- Coverage: `EmbeddingLogRegTrainerTests`, `OodBootstrapSampleSourceTests`,
+  `EmbeddingLogRegTrainingServiceTests`, `LogRegRetrainHostedServiceTests` - all fixture-based, no real
+  ONNX inference, full suite (1,811 tests) green in ~26s.
 
 ## Phase 5 — Admin surface
 

@@ -367,6 +367,14 @@ pin escape are removed rather than deferred — each existed only to serve overr
 
 Makes every phase above measurable instead of asserted.
 
+**Prerequisite status:** [`docs/router/live-feedback-learning-plan.md`](../docs/router/live-feedback-learning-plan.md)
+Phase 4 (training/retraining the `logreg` voter's artifact) shipped - all four Orchestrator voters can
+now cast a real vote on live traffic instead of three of them abstaining for lack of an input. That plan's
+own stated ordering ("before PLAN.md Phase N... measuring voters that structurally cannot fire would
+produce a benchmark of `dim_best` wearing an ensemble's name") is satisfied; Phase N may proceed. That
+plan's Phases 5-6 (Governance admin surface, TF-IDF namespace relocation) remain open but do not block
+Phase N.
+
 - Implement the metrics of research-doc §5.1 and A.2: reward matrix `R_ij = ε₁·s_ij + ε₂·κ_ij`,
   per-task oracle `a*_i = argmax_j R_ij`, cumulative regret `CumReg_N = Σ(r*_i − r_i(a_i))`, plus
   `AvgPerf`, `TotTok`, `$Total`, and `Perf/$`.

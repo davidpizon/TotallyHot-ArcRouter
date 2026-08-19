@@ -118,6 +118,13 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddSingleton<Router.Orchestrator.IRoutingVoter>(sp => sp.GetRequiredService<Router.Orchestrator.LlmRouterVoter>());
             services.AddSingleton<Router.Orchestrator.OrchestratorRoutingPolicy>();
 
+            // docs/router/live-feedback-learning-plan.md Phase 4: trains and hot-swaps the logreg voter's
+            // artifact. LogRegRetrainHostedService (registered below, with the other hosted services) is
+            // the automatic-threshold trigger; Program.cs's --retrain-logreg flag and Phase 5's Governance
+            // button both resolve IEmbeddingLogRegTrainingService directly instead of going through it.
+            services.AddSingleton<Router.Orchestrator.OodBootstrapSampleSource>();
+            services.AddSingleton<Router.Orchestrator.IEmbeddingLogRegTrainingService, Router.Orchestrator.EmbeddingLogRegTrainingService>();
+
             // Tools
             services.AddTransient<CheckSyntax>();
             services.AddTransient<RunVisibleTests>();
@@ -401,6 +408,7 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddHostedService<StartupHealthCheckHostedService>();
             services.AddHostedService<PriceCatalogIngestionHostedService>();
             services.AddHostedService<CostReconciliationHostedService>();
+            services.AddHostedService<LogRegRetrainHostedService>();
 
             // ProxyServer's inner Kestrel host is handed an already-constructed ProxyMiddleware instance rather
             // than a copy of this IServiceCollection. It never gets its own IHostedService registrations, so it
