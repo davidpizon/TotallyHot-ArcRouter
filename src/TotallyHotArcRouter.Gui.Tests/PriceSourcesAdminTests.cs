@@ -328,7 +328,7 @@ public sealed class PriceSourcesAdminTests
         var cut = ctx.Render<PriceSourcesAdmin>();
         Card(cut, 1).PointerDown(new PointerEventArgs { Button = 0 });
         Card(cut, 0).PointerEnter(new PointerEventArgs { Buttons = 1 });
-        cut.Find("div.space-y-3").PointerUp();
+        cut.Find("div.ds-card-stack").PointerUp();
 
         client.ReorderCount.Should().Be(1);
         client.LastReorderRequest.Should().Equal("openrouter", "litellm");
@@ -346,7 +346,7 @@ public sealed class PriceSourcesAdminTests
         // A plain click - press and release without ever crossing onto another card. The toggle and the rank
         // arrows bubble their press up to the card, so this is what every click on them looks like from here.
         Card(cut, 0).PointerDown(new PointerEventArgs { Button = 0 });
-        cut.Find("div.space-y-3").PointerUp();
+        cut.Find("div.ds-card-stack").PointerUp();
 
         client.ReorderCount.Should().Be(0);
     }
@@ -364,7 +364,7 @@ public sealed class PriceSourcesAdminTests
         // Buttons: 0 - the pointer is back over a card with nothing held, so the release happened somewhere
         // we never saw it. The cards must not keep following the cursor.
         Card(cut, 0).PointerEnter(new PointerEventArgs { Buttons = 0 });
-        cut.Find("div.space-y-3").PointerUp();
+        cut.Find("div.ds-card-stack").PointerUp();
 
         client.ReorderCount.Should().Be(0);
     }
@@ -374,7 +374,7 @@ public sealed class PriceSourcesAdminTests
     /// render tree changes, so a held reference goes stale the moment a handler fires.
     /// </summary>
     private static AngleSharp.Dom.IElement Card(IRenderedComponent<PriceSourcesAdmin> cut, int index) =>
-        cut.FindAll("div.space-y-3 > div.rounded-lg")[index];
+        cut.FindAll("div.ds-card-stack > div.rounded-lg")[index];
 
     [Fact]
     public void No_razor_comment_leaks_into_the_rendered_markup()
