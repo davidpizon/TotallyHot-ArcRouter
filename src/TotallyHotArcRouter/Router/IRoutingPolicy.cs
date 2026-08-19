@@ -20,8 +20,11 @@ public interface IRoutingPolicy
     /// Phase 2a. The default implementation ignores <paramref name="signals"/> and delegates to
     /// <see cref="SelectModelAsync(RoutingContext, CancellationToken)"/>, so every existing
     /// <see cref="IRoutingPolicy"/> implementation and caller keeps compiling and behaving exactly as
-    /// before without opting in; only <see cref="Orchestrator.OrchestratorRoutingPolicy"/> overrides this
-    /// to actually use the signals.
+    /// before without opting in. <see cref="Orchestrator.OrchestratorRoutingPolicy"/> overrides this to
+    /// actually use the signals; <see cref="CompositeRoutingPolicy"/> also overrides it, purely to
+    /// forward to whichever leg it dispatches to (docs/router/orchestrator-live-path-plan.md M1.1) -
+    /// <see cref="UtilityRoutingPolicy"/> and <see cref="AgentRouterPolicy"/> still fall through to this
+    /// default and discard the signals either way.
     /// </summary>
     /// <param name="context">The candidates and classification signal to select from.</param>
     /// <param name="signals">Out-of-band signals about the request, or <see langword="null"/> if none are available.</param>

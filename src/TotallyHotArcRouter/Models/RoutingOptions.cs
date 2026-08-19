@@ -222,6 +222,18 @@ public sealed class RoutingOptions
     public bool EnableLlmRouterVoter { get; init; } = true;
 
     /// <summary>
+    /// Gets whether <see cref="Router.CompositeRoutingPolicy"/> dispatches non-utility traffic to
+    /// <see cref="Router.Orchestrator.OrchestratorRoutingPolicy"/> (the default) rather than
+    /// <see cref="Router.AgentRouterPolicy"/>'s memory-only ranking
+    /// (docs/router/orchestrator-live-path-plan.md M1.3). The kill switch for the Orchestrator's live
+    /// path, independent of whether an explicitly-named model is honored - that question is settled
+    /// (a named, servable model is always served) and has no configuration knob. Setting this to
+    /// <see langword="false"/> restores pre-Phase-M routing exactly, and is also how PLAN.md Phase N
+    /// exercises <see cref="Router.AgentRouterPolicy"/> as a comparison baseline without deregistering it.
+    /// </summary>
+    public bool EnableOrchestratorPolicy { get; init; } = true;
+
+    /// <summary>
     /// Performs domain-level validation that is not fully expressible through data annotations.
     /// </summary>
     /// <exception cref="OptionsValidationException">Thrown when the routing option values are inconsistent.</exception>

@@ -11,8 +11,9 @@ a **Verifier**, and a **Memory**, selecting under the cost-aware reward
 
 ## Where the gap actually is
 
-The **Feedback** leg is built. The **Action** and **Context** legs are not, and the loop is currently
-severed at a single point.
+The **Feedback** leg is built, and Phase G reconnected it to the reader. The **Action** and **Context**
+legs are still not on the live path: the Orchestrator exists but is not the registered policy, so most
+traffic never reaches it (Phase M).
 
 ```mermaid
 flowchart LR
@@ -34,7 +35,7 @@ flowchart LR
     end
 
     RM["RouterMemory<br/>dimension to model averages<br/>SHIPPED"]
-    RI["RequestInterceptor ranker<br/>reads unresolved-model-fallback<br/>SHIPPED but reads a dead key"]
+    RI["RequestInterceptor ranker<br/>reads RouterDimension.ToLiveKey<br/>SHIPPED (Phase G)"]
 
     CLS --> ORC
     MEM -.->|"Phase L wires the memory_kNN voter"| ORC
@@ -45,7 +46,7 @@ flowchart LR
     ING --> VER
     VER --> OBS
     OBS --> RM
-    RM -.->|"reads a key nothing writes"| RI
+    RM -->|"shared ToLiveKey contract"| RI
 ```
 
 Verified against the code:
@@ -102,9 +103,11 @@ component spec** for the classifier, `IRoutingPolicy`, the cost-aware selection 
 write (its §B2–B5). This file is the **roadmap**: phases, ordering, and exit criteria. Detail is not
 restated here, so the two cannot drift.
 
-One correction that phase M lands: that doc's locked non-goal — *"Changing how normal,
-explicitly-named model requests is out of scope"* — is **superseded**. The paper routes every task,
-and this plan now does too, behind an opt-out.
+That doc's locked non-goal — *"Changing how normal, explicitly-named model requests is out of scope"* —
+**stands.** An earlier draft of Phase M planned to supersede it (the paper routes every task); that was
+withdrawn by an explicit product decision that a client naming a model is naming a command. See Phase M
+below and [`../docs/router/orchestrator-live-path-plan.md`](../docs/router/orchestrator-live-path-plan.md)
+§1 for what that costs.
 
 ### Settled deferrals (do not re-open without new evidence)
 
@@ -127,28 +130,6 @@ and this plan now does too, behind an opt-out.
 ---
 
 ## Active Phases
-
-### Phase G: Reconnect the feedback loop — **prerequisite for everything below**
-
-The smallest change with the largest effect: make the dimension the Verifier writes and the dimension
-the router reads the *same value by construction*, rather than two independently-chosen string
-constants that happen not to match.
-
-- Introduce a single dimension contract (a `RouterDimension` type or shared helper) owning the
-  `live:` prefix and the canonical dimension vocabulary from research-doc §4.4. Both
-  `RouterMemoryScoreObserver` and every reader construct keys through it; neither hand-writes a
-  literal.
-- Retire the `"unresolved-model-fallback"` literal. The fallback ranker in
-  [`TotallyHotArcRouter/Proxy/RequestInterceptor.cs`](TotallyHotArcRouter/Proxy/RequestInterceptor.cs)
-  reads the classified dimension for the request in flight (Phase H supplies it; until then, the
-  inferred dimension of the prompt).
-- Keep `ColdStartRankingScore` as the genuine cold-start prior, but it must now be reachable *only*
-  when memory is truly empty — not because the read key can never match.
-- **Regression test:** an end-to-end test ingests a scored sandbox result, then asserts a
-  subsequent auto-select for a same-dimension prompt ranks by that score. This test verifies
-  the feedback loop reconnection.
-- Exit: Zero literal dimension strings outside the contract type. Every verifier score written on request
-  *N* propagates to influence model selection on request *N+1*.
 
 ### Phase K: Restore CodeRouterBench — **shipped, superseded by Phase K2**
 
@@ -305,22 +286,52 @@ placeholder-artifact deferral this paragraph originally recorded is resolved and
 artifact at all (it scores task embeddings, abstaining cleanly with none present), and `LogRegTrainer` /
 `LogRegTrainerReconciliationTests` now train Phase N's static comparison baseline from the OOD split.
 
-### Phase M: Route all traffic (opt-out)
+### Phase M: Put the Orchestrator on the live path — **M1 shipped, M2-M4 next**
 
-- The Orchestrator becomes the default path for **every** request, not only `agentic-router`, `auto`,
-  the utility aliases, and unresolved names. An explicitly-named model becomes a strong prior/voter
-  rather than a command.
-- Ship `ModelRouting.HonorRequestedModel` (opt-out) plus a per-request escape for pinning. `--model`
-  single-model serving continues to win unconditionally.
-- **This is a behavior change for every existing client.** Requirements: the response and telemetry
-  must always surface *requested vs. routed* model; the GUI decision log must make a substitution
-  visible at a glance; and the opt-out must be discoverable in `docs/` and the GUI, not only in
-  `appsettings.json`.
-- Update [`../docs/router/utility-model-routing.md`](../docs/router/utility-model-routing.md)'s
-  non-goals section to record that this supersedes it, and why.
-- Exit: a named-model request routes through the Orchestrator by default; `HonorRequestedModel = true`
-  restores today's exact behavior byte-for-byte, proven by the existing allowlist test suite passing
-  unchanged under that flag.
+Full plan, sub-phase breakdown, and open decisions:
+[`docs/router/orchestrator-live-path-plan.md`](../docs/router/orchestrator-live-path-plan.md). The
+bullets below are the roadmap-level scope and exit bar; the detail lives there and is not restated here.
+
+**M1 shipped.** `CompositeRoutingPolicy` dispatches non-utility traffic to `OrchestratorRoutingPolicy`
+by default and forwards `RoutingSignals`; `RoutingOptions.EnableOrchestratorPolicy` (default `true`) is
+the kill switch back to `AgentRouterPolicy`. Exploration is lifted into the Orchestrator, gated on
+`EnableExploration`/`ExplorationRate`, restricted to eligible candidates, flagged via
+`RoutingDecision.IsExploratory`. `memory_kNN` and `logreg` are reachable on live traffic for the first
+time. Requested-vs-routed reporting (M2), the GUI substitution step (M3), and docs reconciliation (M4)
+remain open.
+
+**Rescoped.** This phase was originally written to route *every* request, demoting an explicitly-named
+model to "a strong prior/voter rather than a command" behind a `ModelRouting.HonorRequestedModel`
+opt-out. That is superseded by an explicit product decision: **when a client names a model, the router
+serves that model.** The `requested_model` voter, the `HonorRequestedModel` option, and the per-request
+pin escape are removed rather than deferred — each existed only to serve overriding a named model.
+
+- `OrchestratorRoutingPolicy` becomes the general-path policy inside `CompositeRoutingPolicy`, which
+  must also override the `RoutingSignals` overload — without that, `memory_kNN`, `logreg`, and
+  `llm_router` abstain on every live request no matter which policy is registered.
+- The Orchestrator decides on the paths the router already owns: `auto`, unknown model names,
+  administratively stopped models, circuit-open primaries, and the failover cascade. Utility traffic
+  keeps `UtilityRoutingPolicy` and its cost term. `--model` single-model serving continues to win
+  unconditionally.
+- **Preserve exploration — the highest-stakes item in the phase.** The expected deployment sends
+  `"model": "auto"` on the majority of requests, so the paths the Orchestrator owns are most traffic and
+  are where the router explores. `AgentAsARouter` is the only implementation of epsilon-greedy in the
+  codebase, so replacing it on the general path silently disables `EnableExploration`/`ExplorationRate`
+  and leaves `dim_best`'s early scores self-reinforcing. Lift exploration into the Orchestrator rather
+  than dropping it.
+- Requirements carried forward from the original scope: the response and telemetry must always surface
+  *requested vs. routed* model — today's `RequestedModel` is the post-routing primary, so substitutions
+  are already misreported — and the GUI decision log must make a substitution visible at a glance.
+- [`../docs/router/utility-model-routing.md`](../docs/router/utility-model-routing.md)'s non-goal
+  (*"Changing how normal, explicitly-named model requests is out of scope"*) **stands**; the
+  supersession this phase previously recorded is withdrawn.
+- **Spend attribution is corrected**: the ledger and spend tracker record the model that *served*, not
+  the one lined up first. A value fix, not a schema change — `agent-cost-tracking.md` already documents
+  the column as holding the model the spend belongs to.
+- Exit: a request naming a servable model receives that model, proven by the existing allowlist test
+  suites passing unchanged; every request the router *does* decide runs all four voters and reports
+  requested-vs-routed; exploration still fires at `ExplorationRate` and is flagged as such;
+  `EnableOrchestratorPolicy = false` restores `AgentRouterPolicy` exactly.
 
 ### Phase N: Regret evaluation harness
 

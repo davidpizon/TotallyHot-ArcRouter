@@ -28,6 +28,7 @@ public class RoutingOptionsTests
         Assert.Equal("router_embedding_memory.db", options.EmbeddingMemoryDatabasePath);
         Assert.Equal(0.5, options.EmbeddingSimilarityThreshold, 3);
         Assert.Equal(20_000, options.EmbeddingMemoryCapacity);
+        Assert.True(options.EnableOrchestratorPolicy);
     }
 
     /// <summary>
