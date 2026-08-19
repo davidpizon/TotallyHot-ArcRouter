@@ -286,7 +286,7 @@ placeholder-artifact deferral this paragraph originally recorded is resolved and
 artifact at all (it scores task embeddings, abstaining cleanly with none present), and `LogRegTrainer` /
 `LogRegTrainerReconciliationTests` now train Phase N's static comparison baseline from the OOD split.
 
-### Phase M: Put the Orchestrator on the live path — **M1, M2 shipped, M3-M4 next**
+### Phase M: Put the Orchestrator on the live path — **shipped (M1-M4)**
 
 Full plan, sub-phase breakdown, and open decisions:
 [`docs/router/orchestrator-live-path-plan.md`](../docs/router/orchestrator-live-path-plan.md). The
@@ -311,7 +311,24 @@ every served response, streaming and buffered alike. Spend/ledger attribution (`
 fix per `docs/router/agent-cost-tracking.md`'s already-documented column meaning, not a schema change).
 See [`docs/router/orchestrator-live-path-plan.md`](../docs/router/orchestrator-live-path-plan.md) §M2 for
 detail and [`docs/router/phase-m2-plan.md`](../docs/router/phase-m2-plan.md) for the implementation plan
-this followed. The GUI substitution step (M3) and remaining docs reconciliation (M4) remain open.
+this followed.
+
+**M3 shipped.** `LiveConversationMapper.BuildRoutingSteps` emits a `Warn` substitution step (`Requested
+{X} → routed to {Y} ({reason})`) for every visible `RoutingSubstitutionReason` except `None`/`AutoSelect`
+(the latter is the majority `auto` path, where a step on nearly every turn would be noise, not signal);
+`TurnCard.razor` extends its `IsFallback` styling and accessible label to the same condition. A new,
+always-mapped, read-only `RoutingModeAdminService` gRPC service reports whether the Orchestrator is live,
+the exploration setting, and all four PLAN.md Phase L voters' enablement/weight; a new Governance sub-tab,
+`RoutingModeAdmin.razor` (backed by `RoutingModeStore`/`RoutingModeAdminClient`), renders it. No mutation
+controls - an editable toggle remains deferred to a separate config-management sub-project, per
+[`docs/router/orchestrator-live-path-plan.md`](../docs/router/orchestrator-live-path-plan.md) §M3.2.
+
+**M4 shipped.** `utility-model-routing.md`'s non-goal now records that Phase M considered and rejected
+superseding it; `RoutingOptions.PolicyName`'s doc marks it dead configuration and names
+`EnableOrchestratorPolicy` as the real switch; `README.md` gained a "Routing" section documenting the
+`auto` opt-in and the three `X-ArcRouter-*` response headers (`docs/HANDBOOK.md` needed no change - it is
+scoped to the CodeRouterBench dataset, not API behavior). `telemetry.md` and `agent-cost-tracking.md` were
+already reconciled in the M2 commit.
 
 **Rescoped.** This phase was originally written to route *every* request, demoting an explicitly-named
 model to "a strong prior/voter rather than a command" behind a `ModelRouting.HonorRequestedModel`

@@ -442,7 +442,9 @@ namespace TotallyHot.ArcRouter.Hosting
                     benchmarkSyncOptions: sp.GetRequiredService<IOptions<BenchmarkSyncOptions>>().Value,
                     // Backs the Governance > Benchmark Data panel's "Local Voter Model" gRPC API.
                     llmRouterModelOverrideStore: sp.GetRequiredService<Router.TextGeneration.ILlmRouterModelOverrideStore>(),
-                    llmRouterModelSyncService: sp.GetRequiredService<Router.TextGeneration.LlmRouterModelSyncService>());
+                    llmRouterModelSyncService: sp.GetRequiredService<Router.TextGeneration.LlmRouterModelSyncService>(),
+                    // Backs the Governance > Routing Mode panel's gRPC API (docs/router/orchestrator-live-path-plan.md §M3.2).
+                    routingOptions: sp.GetRequiredService<IOptions<RoutingOptions>>());
             });
 
             return services;

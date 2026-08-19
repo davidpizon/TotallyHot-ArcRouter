@@ -66,7 +66,7 @@ Implement this as a per-tier `(ε₁, ε₂)` weight pair and quality threshold 
 ## Non-goals
 
 - Full productionization of the `AgentAsARouter` research engine (execution-grounded verifier, memory-driven per-dimension exploit/explore) for *all* traffic. This plan wires **selection-only** routing for the utility/router-alias path and leaves the richer engine as a follow-up.
-- Changing how normal, explicitly-named model requests (e.g. `gpt-5.4`, `claude-sonnet-5`) are handled — those keep flowing through the existing static allowlist unchanged.
+- Changing how normal, explicitly-named model requests (e.g. `gpt-5.4`, `claude-sonnet-5`) are handled — those keep flowing through the existing static allowlist unchanged. **Reconfirmed by PLAN.md Phase M** (`docs/router/orchestrator-live-path-plan.md` §1): an earlier draft of that phase planned to supersede this non-goal, routing every request including explicitly-named ones behind a `HonorRequestedModel` opt-out. That was withdrawn by an explicit product decision — a client naming a model is naming a command — so this non-goal stands unchanged. Don't reopen it without new evidence.
 
 ## Design decisions (locked)
 

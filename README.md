@@ -9,6 +9,25 @@
 TotallyHot Arc Router routes coding tasks to different backend models under a
 performance-cost tradeoff.
 
+## Routing
+
+Point an OpenAI/Anthropic-compatible client at the proxy and send `"model": "auto"`
+(any casing) to opt a request into routing — the router picks the model. A
+request naming a real, servable model (e.g. `"model": "gpt-5.4"`) is always
+served exactly that model; the router never substitutes a model the client
+explicitly named. An unrecognized name, an administratively stopped model, or
+a circuit-open/unhealthy provider fall back to the same routing decision as
+`auto`.
+
+Every response — streaming or buffered — carries three headers reporting what
+happened:
+
+| Header | Meaning |
+|---|---|
+| `X-ArcRouter-Requested-Model` | The client's literal `model` string. |
+| `X-ArcRouter-Routed-Model` | The model that actually served the request (post-failover, post-substitution). |
+| `X-ArcRouter-Substitution-Reason` | Why they differ: `None`, `AutoSelect`, `UnresolvedName`, `ModelStopped`, `CircuitOpen`, or `Failover`. |
+
 ## Data
 
 This project **evaluates against** CodeRouterBench, a task-by-model benchmark

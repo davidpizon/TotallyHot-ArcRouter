@@ -1,3 +1,4 @@
+using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Proxy.Management;
@@ -168,7 +169,14 @@ namespace TotallyHot.ArcRouter.Proxy
         /// <see langword="null"/> (panel API absent).
         /// </param>
         /// <param name="llmRouterModelSyncService">Optional sync service backing the panel's sync action. See <paramref name="llmRouterModelOverrideStore"/>.</param>
-        public ProxyServer(ILogger<ProxyServer> logger, ProxyMiddleware proxyMiddleware, int port = 5001, TelemetryBroadcaster? telemetryBroadcaster = null, int grpcPort = DefaultGrpcPort, IProviderConfigStore? providerConfigStore = null, IEnvironmentVariableProvider? environment = null, HttpClient? managementHttpClient = null, string? managementToken = null, PriceSourceToggleStore? priceSourceToggleStore = null, PriceCatalogIngestionService? priceCatalogIngestionService = null, PriceCatalogOptions? priceCatalogOptions = null, ProviderBudgetStore? providerBudgetStore = null, ProviderEndpointScanner? endpointScanner = null, ToolCallCapabilityStore? toolCallCapabilityStore = null, PriceCatalogRepository? priceCatalogRepository = null, ModelAliasOverrideStore? modelAliasOverrideStore = null, IUsageRollupStore? usageRollupStore = null, ISecretWriter? secretWriter = null, ISecretReader? secretReader = null, CodeRouterBench.BenchmarkDataStatusService? benchmarkDataStatusService = null, CodeRouterBench.BenchmarkFileLedger? benchmarkFileLedger = null, CodeRouterBench.BenchmarkSyncService? benchmarkSyncService = null, CodeRouterBench.BenchmarkSyncOptions? benchmarkSyncOptions = null, Router.TextGeneration.ILlmRouterModelOverrideStore? llmRouterModelOverrideStore = null, Router.TextGeneration.LlmRouterModelSyncService? llmRouterModelSyncService = null)
+        /// <param name="routingOptions">
+        /// Optional routing configuration. When supplied, <see cref="Router.RoutingModeAdminGrpcService"/> is
+        /// mapped onto the TLS <paramref name="grpcPort"/> so the Governance UI's Routing Mode panel can read
+        /// whether the Orchestrator is live, its voters' enablement/weight, and the exploration setting
+        /// (docs/router/orchestrator-live-path-plan.md §M3.2). Defaults to <see langword="null"/> (panel API
+        /// absent), so existing callers/tests that construct a plain forwarding server are unaffected.
+        /// </param>
+        public ProxyServer(ILogger<ProxyServer> logger, ProxyMiddleware proxyMiddleware, int port = 5001, TelemetryBroadcaster? telemetryBroadcaster = null, int grpcPort = DefaultGrpcPort, IProviderConfigStore? providerConfigStore = null, IEnvironmentVariableProvider? environment = null, HttpClient? managementHttpClient = null, string? managementToken = null, PriceSourceToggleStore? priceSourceToggleStore = null, PriceCatalogIngestionService? priceCatalogIngestionService = null, PriceCatalogOptions? priceCatalogOptions = null, ProviderBudgetStore? providerBudgetStore = null, ProviderEndpointScanner? endpointScanner = null, ToolCallCapabilityStore? toolCallCapabilityStore = null, PriceCatalogRepository? priceCatalogRepository = null, ModelAliasOverrideStore? modelAliasOverrideStore = null, IUsageRollupStore? usageRollupStore = null, ISecretWriter? secretWriter = null, ISecretReader? secretReader = null, CodeRouterBench.BenchmarkDataStatusService? benchmarkDataStatusService = null, CodeRouterBench.BenchmarkFileLedger? benchmarkFileLedger = null, CodeRouterBench.BenchmarkSyncService? benchmarkSyncService = null, CodeRouterBench.BenchmarkSyncOptions? benchmarkSyncOptions = null, Router.TextGeneration.ILlmRouterModelOverrideStore? llmRouterModelOverrideStore = null, Router.TextGeneration.LlmRouterModelSyncService? llmRouterModelSyncService = null, IOptions<RoutingOptions>? routingOptions = null)
         {
             ArgumentNullException.ThrowIfNull(logger);
             ArgumentNullException.ThrowIfNull(proxyMiddleware);
@@ -295,6 +303,11 @@ namespace TotallyHot.ArcRouter.Proxy
                             services.AddSingleton(llmRouterModelOverrideStore);
                             services.AddSingleton(llmRouterModelSyncService);
                         }
+
+                        // Unlike the pairs above, RoutingModeAdminGrpcService's dependency is core
+                        // configuration rather than an optional feature store, so it defaults to the
+                        // caller's own RoutingOptions defaults instead of leaving the service unmapped.
+                        services.AddSingleton(routingOptions ?? Options.Create(new RoutingOptions()));
                     });
 
                     webBuilder.Configure(app =>
@@ -330,6 +343,11 @@ namespace TotallyHot.ArcRouter.Proxy
                             {
                                 endpoints.MapGrpcService<Router.TextGeneration.LlmRouterModelAdminGrpcService>();
                             }
+
+                            // The Governance UI's Routing Mode panel API. Shares the TLS gRPC port with the
+                            // telemetry stream and the other admin services. Always mapped - see the
+                            // routingOptions registration above.
+                            endpoints.MapGrpcService<Router.RoutingModeAdminGrpcService>();
 
                             // The Governance UI's provider/credential/model management API. Only mapped
                             // when a writable store is supplied; shares this plain-HTTP loopback port with

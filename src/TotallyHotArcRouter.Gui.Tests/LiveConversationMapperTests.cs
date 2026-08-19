@@ -189,5 +189,89 @@ public sealed class LiveConversationMapperTests
         mappedTurn.RoutingSteps[0].Message.Should().Be("Fallback routing was used for this turn.");
         mappedTurn.RoutingSteps[1].Status.Should().Be(StepStatus.Info);
     }
+
+    [Theory]
+    [InlineData("UnresolvedName")]
+    [InlineData("ModelStopped")]
+    [InlineData("CircuitOpen")]
+    [InlineData("Failover")]
+    public void ToModel_adds_a_substitution_warning_step_for_a_visible_substitution_reason(string reason)
+    {
+        var turn = new LiveConversationTurn(
+            SessionId: "s1",
+            TurnNumber: 1,
+            Agent: "claude-sonnet-5",
+            Model: "claude-sonnet-5",
+            PromptTokens: 10,
+            CompletionTokens: 5,
+            EstimatedCostUsd: 0.01m,
+            IsFallback: false,
+            LatencyToHeadersMs: 100,
+            TimestampUtc: DateTimeOffset.UtcNow,
+            RequestedModel: "gpt-4o",
+            RoutedModel: "claude-sonnet-5",
+            SubstitutionReason: reason);
+
+        var conversation = new LiveConversation(
+            SessionId: "s1",
+            IsSessionSynthesized: false,
+            FirstTimestampUtc: turn.TimestampUtc,
+            LastTimestampUtc: turn.TimestampUtc,
+            TotalCost: turn.EstimatedCostUsd,
+            TotalPromptTokens: turn.PromptTokens,
+            TotalCompletionTokens: turn.CompletionTokens,
+            HasFallbackTurns: false,
+            Turns: [turn]);
+
+        var model = LiveConversationMapper.ToModel(conversation);
+        var mappedTurn = model.Turns.Should().ContainSingle().Subject;
+
+        mappedTurn.RequestedModel.Should().Be("gpt-4o");
+        mappedTurn.RoutedModel.Should().Be("claude-sonnet-5");
+        mappedTurn.SubstitutionReason.Should().Be(reason);
+        mappedTurn.RoutingSteps.Should().HaveCount(2);
+        mappedTurn.RoutingSteps[0].Status.Should().Be(StepStatus.Warn);
+        mappedTurn.RoutingSteps[0].Message.Should().Be($"Requested gpt-4o → routed to claude-sonnet-5 ({reason}).");
+        mappedTurn.RoutingSteps[1].Message.Should().Be("Route Confirmed: claude-sonnet-5");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("None")]
+    [InlineData("AutoSelect")]
+    public void ToModel_omits_the_substitution_step_when_the_reason_is_not_visible(string? reason)
+    {
+        var turn = new LiveConversationTurn(
+            SessionId: "s1",
+            TurnNumber: 1,
+            Agent: "claude-sonnet-5",
+            Model: "claude-sonnet-5",
+            PromptTokens: 10,
+            CompletionTokens: 5,
+            EstimatedCostUsd: 0.01m,
+            IsFallback: false,
+            LatencyToHeadersMs: 100,
+            TimestampUtc: DateTimeOffset.UtcNow,
+            RequestedModel: "auto",
+            RoutedModel: "claude-sonnet-5",
+            SubstitutionReason: reason);
+
+        var conversation = new LiveConversation(
+            SessionId: "s1",
+            IsSessionSynthesized: false,
+            FirstTimestampUtc: turn.TimestampUtc,
+            LastTimestampUtc: turn.TimestampUtc,
+            TotalCost: turn.EstimatedCostUsd,
+            TotalPromptTokens: turn.PromptTokens,
+            TotalCompletionTokens: turn.CompletionTokens,
+            HasFallbackTurns: false,
+            Turns: [turn]);
+
+        var model = LiveConversationMapper.ToModel(conversation);
+        var mappedTurn = model.Turns.Should().ContainSingle().Subject;
+
+        mappedTurn.RoutingSteps.Should().ContainSingle()
+            .Which.Message.Should().Be("Route Confirmed: claude-sonnet-5");
+    }
 }
 

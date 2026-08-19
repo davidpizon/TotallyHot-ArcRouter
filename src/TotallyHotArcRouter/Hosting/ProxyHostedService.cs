@@ -1,4 +1,5 @@
 using TotallyHot.ArcRouter.CodeRouterBench;
+using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Management;
@@ -7,6 +8,7 @@ using TotallyHot.ArcRouter.Router.TextGeneration;
 using TotallyHot.ArcRouter.Telemetry;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -24,8 +26,8 @@ namespace TotallyHot.ArcRouter.Hosting
         /// Constructs the underlying <see cref="ProxyServer"/> from its dependencies. Optional
         /// parameters (telemetry, provider config store, environment, management HTTP client/token, price
         /// catalog services, the protected secret store's reader/writer, CodeRouterBench corpus services,
-        /// the llm_router model override store and sync service) let callers omit pieces they don't need
-        /// wired up, mirroring <see cref="ProxyServer"/>'s own constructor.
+        /// the llm_router model override store and sync service, routing configuration) let callers omit
+        /// pieces they don't need wired up, mirroring <see cref="ProxyServer"/>'s own constructor.
         /// </summary>
         public ProxyHostedService(
             ILogger<ProxyHostedService> logger,
@@ -54,7 +56,8 @@ namespace TotallyHot.ArcRouter.Hosting
             BenchmarkSyncService? benchmarkSyncService = null,
             BenchmarkSyncOptions? benchmarkSyncOptions = null,
             ILlmRouterModelOverrideStore? llmRouterModelOverrideStore = null,
-            LlmRouterModelSyncService? llmRouterModelSyncService = null)
+            LlmRouterModelSyncService? llmRouterModelSyncService = null,
+            IOptions<RoutingOptions>? routingOptions = null)
         {
             _logger = logger;
             _proxyServer = new ProxyServer(
@@ -83,7 +86,8 @@ namespace TotallyHot.ArcRouter.Hosting
                 benchmarkSyncService,
                 benchmarkSyncOptions,
                 llmRouterModelOverrideStore,
-                llmRouterModelSyncService);
+                llmRouterModelSyncService,
+                routingOptions);
         }
 
         /// <summary>
