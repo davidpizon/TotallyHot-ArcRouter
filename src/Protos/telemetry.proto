@@ -406,6 +406,14 @@ message RoutingTelemetryEvent {
   // router_cost_usd is decimal-as-string for the same precision reason as estimated_cost_usd above.
   optional int32 router_tokens = 21;
   optional string router_cost_usd = 22;
+  // The router's client-facing name for the model that actually served the request (post-failover,
+  // post-substitution). Plain (not optional), matching requested_model/resolved_model's own convention -
+  // every current writer always sets it.
+  string routed_model = 23;
+  // TotallyHot.ArcRouter.Telemetry.RoutingSubstitutionReason serialized via Enum.ToString()/Enum.Parse() on
+  // each end, same convention as cost_confidence above. Plain (not optional): None is a real,
+  // always-present value on every current writer, not an absent one.
+  string substitution_reason = 24;
 }
 
 message LogLineEvent {

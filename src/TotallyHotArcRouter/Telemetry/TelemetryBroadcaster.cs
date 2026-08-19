@@ -116,6 +116,8 @@ public sealed class TelemetryBroadcaster
             IsSessionSynthesized = e.IsSessionSynthesized,
             RequestedModel = e.RequestedModel,
             ResolvedModel = e.ResolvedModel,
+            RoutedModel = e.RoutedModel,
+            SubstitutionReason = e.SubstitutionReason.ToString(),
             Provider = e.Provider,
             IsFallback = e.IsFallback,
             IsStreaming = e.IsStreaming,

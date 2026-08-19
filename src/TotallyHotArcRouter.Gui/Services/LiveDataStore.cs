@@ -239,6 +239,7 @@ public sealed class LiveDataStore : IAsyncDisposable
         IsSessionSynthesized: e.IsSessionSynthesized,
         RequestedModel: e.RequestedModel,
         ResolvedModel: e.ResolvedModel,
+        RoutedModel: e.RoutedModel,
         Provider: e.Provider,
         IsFallback: e.IsFallback,
         PromptTokens: e.HasPromptTokens ? e.PromptTokens : null,
@@ -263,7 +264,10 @@ public sealed class LiveDataStore : IAsyncDisposable
         // telemetry stream must degrade to 0m rather than take down live rendering for every event.
         RouterCostUsd: e.HasRouterCostUsd && decimal.TryParse(e.RouterCostUsd, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var routerCostUsd)
             ? routerCostUsd
-            : 0m);
+            : 0m,
+        // Plain (not optional) proto3 field, like RoutedModel above: an older writer that predates this
+        // phase sends neither, decoding as "" - degrade that to null rather than a fabricated reason.
+        SubstitutionReason: string.IsNullOrEmpty(e.SubstitutionReason) ? null : e.SubstitutionReason);
 
     /// <summary>Converts a gRPC-contract <see cref="Contract.LogLineEvent"/> into the store's <see cref="LogLineDto"/>.</summary>
     private static LogLineDto MapToDto(Contract.LogLineEvent e) => new(

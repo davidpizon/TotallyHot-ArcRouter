@@ -286,7 +286,7 @@ placeholder-artifact deferral this paragraph originally recorded is resolved and
 artifact at all (it scores task embeddings, abstaining cleanly with none present), and `LogRegTrainer` /
 `LogRegTrainerReconciliationTests` now train Phase N's static comparison baseline from the OOD split.
 
-### Phase M: Put the Orchestrator on the live path — **M1 shipped, M2-M4 next**
+### Phase M: Put the Orchestrator on the live path — **M1, M2 shipped, M3-M4 next**
 
 Full plan, sub-phase breakdown, and open decisions:
 [`docs/router/orchestrator-live-path-plan.md`](../docs/router/orchestrator-live-path-plan.md). The
@@ -297,8 +297,21 @@ by default and forwards `RoutingSignals`; `RoutingOptions.EnableOrchestratorPoli
 the kill switch back to `AgentRouterPolicy`. Exploration is lifted into the Orchestrator, gated on
 `EnableExploration`/`ExplorationRate`, restricted to eligible candidates, flagged via
 `RoutingDecision.IsExploratory`. `memory_kNN` and `logreg` are reachable on live traffic for the first
-time. Requested-vs-routed reporting (M2), the GUI substitution step (M3), and docs reconciliation (M4)
-remain open.
+time.
+
+**M2 shipped.** `ModelRouteResolutionResult` now carries the client's literal `RequestedModelName` and a
+resolution-time `RoutingSubstitutionReason`; `RoutingTelemetryEvent` gains `RoutedModel` (the model that
+actually served, post-failover) and `SubstitutionReason` (`Failover` overrides the resolution-time reason
+whenever the primary candidate itself was attempted and failed at the transport layer). Propagated end to
+end through `telemetry.proto` → `RoutingTelemetryEventDto` → `LiveDataStore` → `LiveConversationTurn` →
+`ConversationTurn` (not yet rendered — that's M3.1). Three response headers
+(`X-ArcRouter-Requested-Model`/`X-ArcRouter-Routed-Model`/`X-ArcRouter-Substitution-Reason`) are set on
+every served response, streaming and buffered alike. Spend/ledger attribution (`SpendTracker.RecordAsync`,
+`UsageLedgerEntry.RequestedModel`) moved from the lined-up candidate to `route.ModelName` (M2.3, a value
+fix per `docs/router/agent-cost-tracking.md`'s already-documented column meaning, not a schema change).
+See [`docs/router/orchestrator-live-path-plan.md`](../docs/router/orchestrator-live-path-plan.md) §M2 for
+detail and [`docs/router/phase-m2-plan.md`](../docs/router/phase-m2-plan.md) for the implementation plan
+this followed. The GUI substitution step (M3) and remaining docs reconciliation (M4) remain open.
 
 **Rescoped.** This phase was originally written to route *every* request, demoting an explicitly-named
 model to "a strong prior/voter rather than a command" behind a `ModelRouting.HonorRequestedModel`

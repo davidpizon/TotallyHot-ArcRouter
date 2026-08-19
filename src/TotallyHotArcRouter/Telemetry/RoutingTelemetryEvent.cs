@@ -17,7 +17,12 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// <paramref name="TurnNumber"/> can still be greater than 1) or, failing that, generating a fresh
 /// single-use id.
 /// </param>
-/// <param name="RequestedModel">The client-facing model name from the request body.</param>
+/// <param name="RequestedModel">
+/// The client's literal <c>model</c> string from the request body - captured before any router
+/// substitution (auto-select, an unresolved name, a stopped model, an open circuit, or failover). See
+/// <paramref name="RoutedModel"/> for what actually served the request, and
+/// <c>docs/router/orchestrator-live-path-plan.md</c> §M2.2 for the three-field distinction.
+/// </param>
 /// <param name="ResolvedModel">The upstream provider's model id the request was actually forwarded as.</param>
 /// <param name="Provider">The provider key the request was routed to.</param>
 /// <param name="IsFallback">Whether this request was served by fallback routing.</param>
@@ -69,6 +74,16 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// into <c>TotTok</c>). Never <see langword="null"/>: unlike a provider price, this rate is always known,
 /// so zero tokens yield a known zero rather than an unknown.
 /// </param>
+/// <param name="RoutedModel">
+/// The router's client-facing name for the model that actually served the request (post-failover,
+/// post-substitution) - <c>ResolvedModelRoute.ModelName</c> of the winning candidate. Equal to
+/// <paramref name="RequestedModel"/> when no substitution occurred. See
+/// <paramref name="SubstitutionReason"/> for why they differ when they do.
+/// </param>
+/// <param name="SubstitutionReason">
+/// Why <paramref name="RoutedModel"/> differs from <paramref name="RequestedModel"/> -
+/// <see cref="RoutingSubstitutionReason.None"/> when it doesn't.
+/// </param>
 public sealed record RoutingTelemetryEvent(
     string SessionId,
     int TurnNumber,
@@ -85,6 +100,7 @@ public sealed record RoutingTelemetryEvent(
     long TotalDurationMs,
     int StatusCode,
     DateTimeOffset TimestampUtc,
+    string RoutedModel,
     int? CacheCreationTokens = null,
     int? CacheReadTokens = null,
     CostConfidence CostConfidence = CostConfidence.Unknown,
@@ -92,5 +108,6 @@ public sealed record RoutingTelemetryEvent(
     string? ResponseSummary = null,
     string? CorrelationId = null,
     int RouterTokens = 0,
-    decimal RouterCostUsd = 0m);
+    decimal RouterCostUsd = 0m,
+    RoutingSubstitutionReason SubstitutionReason = RoutingSubstitutionReason.None);
 

@@ -34,12 +34,14 @@ public class TelemetryBroadcasterTests
         TotalDurationMs: 800,
         StatusCode: 200,
         TimestampUtc: new DateTimeOffset(2026, 7, 9, 15, 0, 0, TimeSpan.Zero),
+        RoutedModel: "gpt-5.4-mini",
         CacheCreationTokens: cacheCreationTokens,
         CacheReadTokens: cacheReadTokens,
         RequestSummary: requestSummary,
         ResponseSummary: responseSummary,
         RouterTokens: routerTokens,
-        RouterCostUsd: routerCostUsd);
+        RouterCostUsd: routerCostUsd,
+        SubstitutionReason: RoutingSubstitutionReason.Failover);
 
     private static SandboxSignalEvent SampleSignal(int? exitCode = 0) => new(
         CorrelationId: "corr-1",
@@ -127,6 +129,8 @@ public class TelemetryBroadcasterTests
         Assert.Equal(telemetryEvent.RouterTokens, wire.RouterTokens);
         Assert.True(wire.HasRouterCostUsd);
         Assert.Equal(telemetryEvent.RouterCostUsd, decimal.Parse(wire.RouterCostUsd, CultureInfo.InvariantCulture));
+        Assert.Equal(telemetryEvent.RoutedModel, wire.RoutedModel);
+        Assert.Equal(telemetryEvent.SubstitutionReason.ToString(), wire.SubstitutionReason);
     }
 
     [Fact]

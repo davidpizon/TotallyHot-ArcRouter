@@ -83,6 +83,13 @@ public class ProxyMiddlewareFallbackTests
         Assert.Equal("primary", telemetry.RequestedModel);
         Assert.Equal("prov-b", telemetry.Provider);
         Assert.Equal("backup-upstream", telemetry.ResolvedModel);
+        // M2.3/M2.2: RoutedModel is "backup" (the model that served), and the transport-level failover
+        // reports RoutingSubstitutionReason.Failover regardless of the resolution-time reason.
+        Assert.Equal("backup", telemetry.RoutedModel);
+        Assert.Equal(RoutingSubstitutionReason.Failover, telemetry.SubstitutionReason);
+        Assert.Equal("primary", context.Response.Headers["X-ArcRouter-Requested-Model"].ToString());
+        Assert.Equal("backup", context.Response.Headers["X-ArcRouter-Routed-Model"].ToString());
+        Assert.Equal(RoutingSubstitutionReason.Failover.ToString(), context.Response.Headers["X-ArcRouter-Substitution-Reason"].ToString());
     }
 
     [Fact]

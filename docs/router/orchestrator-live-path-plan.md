@@ -160,7 +160,7 @@ flowchart LR
 | # | Deliverable | Depends on | Risk | Status |
 |---|---|---|---|---|
 | M1 | `CompositeRoutingPolicy` dispatches the general path to the Orchestrator and forwards `RoutingSignals`; exploration decision resolved | — | Medium — changes `auto`/unknown/unhealthy routing | **Shipped** |
-| M2 | Requested-vs-routed in the response and telemetry, end to end | M1 | Medium — touches the proto and the GUI DTO | Proposed |
+| M2 | Requested-vs-routed in the response and telemetry, end to end | M1 | Medium — touches the proto and the GUI DTO | **Shipped** |
 | M3 | GUI: substitution visible at a glance; routing mode discoverable | M2 | Low | Proposed |
 | M4 | Docs reconciliation | M1 | Low | Proposed |
 
@@ -306,7 +306,7 @@ decision, with a test that pins whichever outcome is chosen.
 
 ---
 
-## M2 — Requested vs. routed, end to end
+## M2 — Requested vs. routed, end to end — **shipped**
 
 ### M2.1 The existing defect
 

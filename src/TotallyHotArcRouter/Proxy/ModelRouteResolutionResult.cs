@@ -1,3 +1,5 @@
+using TotallyHot.ArcRouter.Telemetry;
+
 namespace TotallyHot.ArcRouter.Proxy;
 
 /// <summary>
@@ -73,13 +75,17 @@ public sealed record ModelRouteResolutionResult
     /// <param name="isSuccess">See <see cref="IsSuccess"/>.</param>
     /// <param name="candidates">See <see cref="Candidates"/>; <see langword="null"/> becomes an empty list.</param>
     /// <param name="errorMessage">See <see cref="ErrorMessage"/>.</param>
+    /// <param name="requestedModelName">See <see cref="RequestedModelName"/>.</param>
+    /// <param name="substitutionReason">See <see cref="SubstitutionReason"/>.</param>
     /// <param name="taskEmbedding">See <see cref="TaskEmbedding"/>.</param>
     /// <param name="routerTokens">See <see cref="RouterTokens"/>.</param>
-    private ModelRouteResolutionResult(bool isSuccess, IReadOnlyList<RouteCandidate>? candidates, string? errorMessage, float[]? taskEmbedding, int routerTokens)
+    private ModelRouteResolutionResult(bool isSuccess, IReadOnlyList<RouteCandidate>? candidates, string? errorMessage, string? requestedModelName, RoutingSubstitutionReason substitutionReason, float[]? taskEmbedding, int routerTokens)
     {
         IsSuccess = isSuccess;
         Candidates = candidates ?? [];
         ErrorMessage = errorMessage;
+        RequestedModelName = requestedModelName;
+        SubstitutionReason = substitutionReason;
         TaskEmbedding = taskEmbedding;
         RouterTokens = routerTokens;
     }
@@ -115,6 +121,27 @@ public sealed record ModelRouteResolutionResult
     public string? ErrorMessage { get; }
 
     /// <summary>
+    /// Gets the client's literal <c>model</c> string from the request body, when <see cref="IsSuccess"/>
+    /// is <see langword="true"/> - captured before single-model-serving's forced override (see
+    /// <c>RequestInterceptor.ResolveModelRouteAsync</c>), so it always reflects what the client actually
+    /// asked for, not what was ultimately served. Distinct from <see cref="Route"/>'s
+    /// <c>ResolvedModelRoute.ModelName</c>, which is the router's client-facing name for whichever
+    /// candidate was lined up first, and from the eventually-served model's own name once
+    /// <c>ProxyMiddleware</c>'s failover loop runs - see <c>docs/router/orchestrator-live-path-plan.md</c>
+    /// §M2.2's three-field table.
+    /// </summary>
+    public string? RequestedModelName { get; }
+
+    /// <summary>
+    /// Gets why the primary candidate (<see cref="Route"/>) differs from <see cref="RequestedModelName"/>,
+    /// as known at resolution time - <see cref="RoutingSubstitutionReason.None"/> when it doesn't.
+    /// <c>ProxyMiddleware</c> may still report <see cref="RoutingSubstitutionReason.Failover"/> instead of
+    /// this value when the primary candidate itself failed at the transport layer and a later one served,
+    /// since that outcome isn't knowable at resolution time.
+    /// </summary>
+    public RoutingSubstitutionReason SubstitutionReason { get; }
+
+    /// <summary>
     /// Gets the request's task embedding, computed on the request path under a time budget
     /// (docs/router/live-feedback-learning-plan.md Phase 2b), or <see langword="null"/> when it was not
     /// computed (no embedding client configured, still warming up, budget exceeded, or the request had no
@@ -147,10 +174,12 @@ public sealed record ModelRouteResolutionResult
     /// Creates a successful resolution result from an ordered candidate list (primary first, then fallbacks).
     /// </summary>
     /// <param name="candidates">The ordered candidate list; must contain at least the primary route.</param>
+    /// <param name="requestedModelName">See <see cref="RequestedModelName"/>. No default - a silently-omitted client-literal name is worse than a compile error, same reasoning <see cref="RouteCandidate.CarriesTools"/> already applies.</param>
+    /// <param name="substitutionReason">See <see cref="SubstitutionReason"/>.</param>
     /// <param name="taskEmbedding">See <see cref="TaskEmbedding"/>.</param>
     /// <param name="routerTokens">See <see cref="RouterTokens"/>.</param>
     /// <exception cref="ArgumentException"><paramref name="candidates"/> is empty - a success must have at least the primary route, since <see cref="Route"/>/<see cref="RewrittenBody"/> index the first candidate.</exception>
-    public static ModelRouteResolutionResult Success(IReadOnlyList<RouteCandidate> candidates, float[]? taskEmbedding = null, int routerTokens = 0)
+    public static ModelRouteResolutionResult Success(IReadOnlyList<RouteCandidate> candidates, string requestedModelName, RoutingSubstitutionReason substitutionReason, float[]? taskEmbedding = null, int routerTokens = 0)
     {
         ArgumentNullException.ThrowIfNull(candidates);
         if (candidates.Count == 0)
@@ -158,7 +187,7 @@ public sealed record ModelRouteResolutionResult
             throw new ArgumentException("A successful resolution must contain at least the primary route candidate.", nameof(candidates));
         }
 
-        return new(true, candidates, null, taskEmbedding, routerTokens);
+        return new(true, candidates, null, requestedModelName, substitutionReason, taskEmbedding, routerTokens);
     }
 
     /// <summary>
@@ -170,6 +199,6 @@ public sealed record ModelRouteResolutionResult
     /// for the figure to appear on and no savings denominator it could distort.
     /// </remarks>
     public static ModelRouteResolutionResult Failure(string errorMessage) =>
-        new(false, null, errorMessage, null, 0);
+        new(false, null, errorMessage, null, RoutingSubstitutionReason.None, null, 0);
 }
 

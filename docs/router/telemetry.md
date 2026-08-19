@@ -32,8 +32,11 @@ request, after the response has already been fully forwarded to the client:
 |---|---|
 | `SessionId`, `IsSessionSynthesized` | `SessionIdResolver`, falling back to `MessageHistoryContinuityMatcher` (see below) |
 | `TurnNumber` | `IConversationTurnTracker` - `PersistentConversationTurnTracker` (ledger-seeded, app default) or `ConversationTurnTracker` (in-memory only, tests/no-ledger callers) |
-| `RequestedModel`, `ResolvedModel`, `Provider` | From the existing `ModelRouteResolver` resolution already computed for routing |
-| `IsFallback` | Hardcoded `false` — `ModelRouteResolver` has no fallback-routing concept today, unlike the GUI's mock data which simulates one |
+| `RequestedModel` | The client's literal `model` string from the request body, captured before any router substitution (auto-select, an unresolved name, a stopped model, an open circuit, or failover) — `ModelRouteResolutionResult.RequestedModelName` (PLAN.md Phase M2, `docs/router/orchestrator-live-path-plan.md` §M2.2) |
+| `RoutedModel` | The router's client-facing name for the model that actually served the request (post-failover, post-substitution) — `route.ModelName`. Equal to `RequestedModel` when no substitution occurred |
+| `ResolvedModel`, `Provider` | From the existing `ModelRouteResolver` resolution already computed for routing |
+| `SubstitutionReason` | Why `RoutedModel` differs from `RequestedModel` — one of `None`/`AutoSelect`/`UnresolvedName`/`ModelStopped`/`CircuitOpen`/`Failover` (`RoutingSubstitutionReason`). `Failover` (a transport-level bypass `ProxyMiddleware`'s own loop discovered) always overrides whatever `RequestInterceptor` determined at resolution time |
+| `IsFallback` | `true` when the served candidate was not the primary `RequestInterceptor` lined up (a transport-level outage cascade — see `docs/router/agent-resilience-strategies.md`'s Circuit Breaker) |
 | `PromptTokens`, `CompletionTokens` | `UsageExtractor`, parsed from the captured response body (see below); `null` if extraction fails or the provider is unrecognized |
 | `EstimatedCostUsd` | `0` when the route's provider is free (`ProviderOptions.IsFree`); a real catalog-priced estimate when the price catalog holds a fresh (≤24h) resolved price for `(route.ModelName, route.Provider)` (`PriceCatalogModelPriceLookup` → `ModelPrice.EstimateCost`, cache-aware); otherwise `null` — an unresolved or stale price yields no cost estimate rather than a fabricated one. Also `null` if usage wasn't extracted. See [Pricing](#pricing) |
 | `IsStreaming` | Whether the upstream response's `Content-Type` was `text/event-stream` |

@@ -105,6 +105,15 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     private static readonly IReadOnlyDictionary<string, IPayloadTranslator> NoTranslators =
         new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Response header carrying the client's literal requested model (docs/router/orchestrator-live-path-plan.md §M2.2).</summary>
+    private const string RequestedModelHeaderName = "X-ArcRouter-Requested-Model";
+
+    /// <summary>Response header carrying the model that actually served the request.</summary>
+    private const string RoutedModelHeaderName = "X-ArcRouter-Routed-Model";
+
+    /// <summary>Response header carrying the <see cref="RoutingSubstitutionReason"/> for why the two headers above differ, if they do.</summary>
+    private const string SubstitutionReasonHeaderName = "X-ArcRouter-Substitution-Reason";
+
     /// <summary>
     /// The result of capturing a translated response for telemetry: the OpenAI-shaped bytes actually sent
     /// to the client, and - only for a provider <see cref="UsageExtractor.SupportsNativeShape"/> recognizes
@@ -254,9 +263,11 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
         var candidates = resolution.Candidates;
 
-        // The client's requested model (candidate 0), reported as RequestedModel in telemetry even when a
-        // fallback actually served the request - so a dashboard shows "asked for X, served by backup Y".
-        var requestedModelName = candidates[0].Route.ModelName;
+        // The client's literal requested model (not candidate 0's name - see
+        // ModelRouteResolutionResult.RequestedModelName), reported as RequestedModel in telemetry even
+        // when a substitution or fallback actually served the request - so a dashboard shows "asked for
+        // X, served by Y".
+        var requestedModelName = resolution.RequestedModelName!;
 
         // Budget enforcement (Governance > Providers): a provider whose monthly cap is exhausted is skipped
         // for this request (the in-loop check below), so an under-budget fallback serves it. If *every*
@@ -427,7 +438,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // exactly like an HTTP outage does.
             if (translator is IBedrockPayloadTranslator bedrockTranslator)
             {
-                if (await InvokeBedrockAsync(context, route, bedrockTranslator, rewrittenBody, requestedModelName, isFallback, hasNextCandidate, nextProviderDiffers, resolution.TaskEmbedding, resolution.RouterTokens))
+                if (await InvokeBedrockAsync(context, route, bedrockTranslator, rewrittenBody, requestedModelName, isFallback, hasNextCandidate, nextProviderDiffers, resolution.TaskEmbedding, resolution.RouterTokens, resolution.SubstitutionReason))
                 {
                     return;
                 }
@@ -735,6 +746,14 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                     context.Response.Headers.Remove("Content-Encoding");
                 }
 
+                // docs/router/orchestrator-live-path-plan.md §M2.2: requested-vs-routed surfaced in
+                // response headers (not the provider-shaped JSON body) so it works identically for
+                // streaming and buffered responses. Set before any body byte is written, alongside the
+                // rest of this hop's response headers above.
+                context.Response.Headers[RequestedModelHeaderName] = requestedModelName;
+                context.Response.Headers[RoutedModelHeaderName] = route.ModelName;
+                context.Response.Headers[SubstitutionReasonHeaderName] = ResolveSubstitutionReason(isFallback, resolution.SubstitutionReason).ToString();
+
                 byte[] capturedResponseBytes;
                 byte[]? nativeResponseBytes = null;
                 IncrementalUsageScanner? tailScanner = null;
@@ -825,7 +844,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                     // ResponseTextExtractor pick the right parser per request instead of assuming one shape per
                     // provider, which broke once "anthropic" became dual-mode.
                     var telemetryShapeProvider = translator is not null ? "openai" : route.Provider;
-                    await PublishTelemetryAsync(context, route, requestedModelName, isFallback, telemetryShapeProvider, rewrittenBody, capturedResponseBytes, nativeResponseBytes, isStreaming, latencyToHeadersMs, totalDurationMs, statusCode, context.RequestAborted, responseMessage.Headers, tailScanner, resolution.TaskEmbedding, resolution.RouterTokens);
+                    await PublishTelemetryAsync(context, route, requestedModelName, isFallback, telemetryShapeProvider, rewrittenBody, capturedResponseBytes, nativeResponseBytes, isStreaming, latencyToHeadersMs, totalDurationMs, statusCode, context.RequestAborted, responseMessage.Headers, tailScanner, resolution.TaskEmbedding, resolution.RouterTokens, resolution.SubstitutionReason);
                 }
                 catch (Exception ex)
                 {
@@ -970,13 +989,14 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// </param>
     /// <param name="taskEmbedding">The request's task embedding (see <see cref="ModelRouteResolutionResult.TaskEmbedding"/>), forwarded to <see cref="PublishTelemetryAsync"/>.</param>
     /// <param name="routerTokens">The router's own token consumption for this request (see <see cref="ModelRouteResolutionResult.RouterTokens"/>), forwarded to <see cref="PublishTelemetryAsync"/>.</param>
+    /// <param name="resolutionReason">The resolution-time <see cref="RoutingSubstitutionReason"/> (see <see cref="ModelRouteResolutionResult.SubstitutionReason"/>), forwarded to <see cref="PublishTelemetryAsync"/> and the requested/routed response headers.</param>
     /// <returns>
     /// <see langword="true"/> if a response was written to the client (success, or a failure with no
     /// eligible next candidate) - the caller's cascade is over. <see langword="false"/> if the SDK call
     /// failed before anything was written and a next candidate should be tried - the caller should
     /// <c>continue</c> its loop.
     /// </returns>
-    private async Task<bool> InvokeBedrockAsync(HttpContext context, ResolvedModelRoute route, IBedrockPayloadTranslator translator, byte[] rewrittenBody, string requestedModelName, bool isFallback, bool hasNextCandidate, bool nextProviderDiffers, float[]? taskEmbedding, int routerTokens)
+    private async Task<bool> InvokeBedrockAsync(HttpContext context, ResolvedModelRoute route, IBedrockPayloadTranslator translator, byte[] rewrittenBody, string requestedModelName, bool isFallback, bool hasNextCandidate, bool nextProviderDiffers, float[]? taskEmbedding, int routerTokens, RoutingSubstitutionReason resolutionReason)
     {
         var circuitTarget = CircuitBreakerTargetKey.FromRoute(route);
         var nativeRequestBody = translator.TranslateRequest(rewrittenBody);
@@ -1007,6 +1027,9 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
                 context.Response.StatusCode = StatusCodes.Status200OK;
                 context.Response.ContentType = "text/event-stream";
+                context.Response.Headers[RequestedModelHeaderName] = requestedModelName;
+                context.Response.Headers[RoutedModelHeaderName] = route.ModelName;
+                context.Response.Headers[SubstitutionReasonHeaderName] = ResolveSubstitutionReason(isFallback, resolutionReason).ToString();
 
                 (capturedResponseBytes, tailScanner) = await TranslateAndCaptureBedrockStreamAsync(translator, response.Body, context.Response.Body, MaxCapturedResponseBytes, context.RequestAborted);
             }
@@ -1026,6 +1049,9 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
                 context.Response.StatusCode = StatusCodes.Status200OK;
                 context.Response.ContentType = "application/json";
+                context.Response.Headers[RequestedModelHeaderName] = requestedModelName;
+                context.Response.Headers[RoutedModelHeaderName] = route.ModelName;
+                context.Response.Headers[SubstitutionReasonHeaderName] = ResolveSubstitutionReason(isFallback, resolutionReason).ToString();
                 await context.Response.Body.WriteAsync(translated, context.RequestAborted);
 
                 capturedResponseBytes = translated.Length <= MaxCapturedResponseBytes ? translated : translated[..MaxCapturedResponseBytes];
@@ -1123,7 +1149,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // its streaming chunks aren't SSE-framed, so the same capture approach doesn't apply. Always
             // null here - telemetry falls back to parsing the translated "openai"-shaped bytes, unchanged
             // from before this plan.
-            await PublishTelemetryAsync(context, route, requestedModelName, isFallback, "openai", rewrittenBody, capturedResponseBytes, nativeResponseBytes: null, isStreamingRequest, latencyToHeadersMs, totalDurationMs, StatusCodes.Status200OK, context.RequestAborted, upstreamHeaders: null, tailScanner: tailScanner, taskEmbedding: taskEmbedding, routerTokens: routerTokens);
+            await PublishTelemetryAsync(context, route, requestedModelName, isFallback, "openai", rewrittenBody, capturedResponseBytes, nativeResponseBytes: null, isStreamingRequest, latencyToHeadersMs, totalDurationMs, StatusCodes.Status200OK, context.RequestAborted, upstreamHeaders: null, tailScanner: tailScanner, taskEmbedding: taskEmbedding, routerTokens: routerTokens, resolutionReason: resolutionReason);
         }
         catch (Exception ex)
         {
@@ -1240,6 +1266,12 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// <c>telemetryShapeProvider</c> - the native shape is immune to translation lossiness (e.g. dropped
     /// Anthropic cache-token fields), so it is always preferred when available.
     /// </para>
+    /// <para>
+    /// <c>resolutionReason</c> is the <see cref="RoutingSubstitutionReason"/> as known when
+    /// <c>RequestInterceptor</c> resolved this request, before any transport-level failover. Overridden
+    /// by <see cref="RoutingSubstitutionReason.Failover"/> when <c>isFallback</c> is <see langword="true"/>
+    /// - see <see cref="ResolveSubstitutionReason"/>.
+    /// </para>
     /// </summary>
     private async Task PublishTelemetryAsync(
         HttpContext context,
@@ -1258,7 +1290,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         System.Net.Http.Headers.HttpResponseHeaders? upstreamHeaders = null,
         IncrementalUsageScanner? tailScanner = null,
         float[]? taskEmbedding = null,
-        int routerTokens = 0)
+        int routerTokens = 0,
+        RoutingSubstitutionReason resolutionReason = RoutingSubstitutionReason.None)
     {
         var requestBody = TryParseJsonObject(rewrittenRequestBody);
         var resolvedSessionId = _sessionIdResolver.Resolve(context.Request.Headers, requestBody);
@@ -1305,11 +1338,19 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             _logger.LogDebug("Resolved session {SessionId}, turn {TurnNumber}.", SanitizeForLog(sessionId), turnNumber);
         }
 
-        // The client's requested model (which may differ from route.ModelName when a fallback served the
-        // request); isFallback tells the dashboard the primary was bypassed. See the failover loop in
+        // The client's literal requested model (docs/router/orchestrator-live-path-plan.md §M2.2) - always
+        // distinct from route.ModelName (the model that served) when any substitution or failover
+        // occurred; substitutionReason below names why. isFallback additionally tells the dashboard the
+        // resolved primary specifically was bypassed at the transport layer. See the failover loop in
         // InvokeAsync. This is the infrastructure-outage cascade, not the paper's Verifier-driven
         // semantic re-routing.
         var requestedModel = requestedModelName;
+
+        // Failover (a transport-level bypass ProxyMiddleware's own loop discovered) always wins over
+        // whatever RequestInterceptor knew at resolution time: if isFallback is true, the primary that
+        // resolutionReason describes was never actually served, so Failover is the more accurate account
+        // of why route differs from requestedModel.
+        var substitutionReason = ResolveSubstitutionReason(isFallback, resolutionReason);
 
         int? promptTokens = null;
         int? completionTokens = null;
@@ -1434,7 +1475,10 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         // this runs after the response has already been fully sent, and RequestAborted fires the moment the
         // client disconnects - which for a streaming response happens right as the client finishes reading
         // it - so recording must not be cancellable by the request's own lifetime or it gets silently dropped.
-        await _spendTracker.RecordAsync(requestedModel, promptTokens, completionTokens, estimatedCostUsd, CancellationToken.None).ConfigureAwait(false);
+        // Attributed to route.ModelName - the model that actually served (M2.3, decided: a value fix, not
+        // a schema change) - not requestedModel, which on an auto-majority deployment would otherwise file
+        // nearly all spend under the literal string "auto".
+        await _spendTracker.RecordAsync(route.ModelName, promptTokens, completionTokens, estimatedCostUsd, CancellationToken.None).ConfigureAwait(false);
 
         // Attribute this request's usage to the provider that actually served it (route.Provider is the
         // post-failover, post-budget-skip winner), so per-provider monthly spend and the Governance budget
@@ -1467,7 +1511,10 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 SessionId: sessionId,
                 TurnNumber: turnNumber,
                 Provider: route.Provider,
-                RequestedModel: requestedModel,
+                // The model that served (M2.3) - matches this column's documented meaning
+                // (docs/router/agent-cost-tracking.md: "the model this spend belongs to"), not the one
+                // lined up first when a substitution or failover occurred.
+                RequestedModel: route.ModelName,
                 ResolvedModel: route.ProviderModelId,
                 PromptTokens: promptTokens,
                 CompletionTokens: completionTokens,
@@ -1533,6 +1580,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             TotalDurationMs: totalDurationMs,
             StatusCode: statusCode,
             TimestampUtc: DateTimeOffset.UtcNow,
+            RoutedModel: route.ModelName,
             CacheCreationTokens: cacheCreationTokens,
             CacheReadTokens: cacheReadTokens,
             CostConfidence: costConfidence,
@@ -1540,7 +1588,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             ResponseSummary: responseSummary,
             CorrelationId: correlationId,
             RouterTokens: routerTokens,
-            RouterCostUsd: routerCostUsd);
+            RouterCostUsd: routerCostUsd,
+            SubstitutionReason: substitutionReason);
 
         await _telemetryPublisher.PublishAsync(telemetryEvent, cancellationToken);
 
@@ -1557,6 +1606,16 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 SessionId: sessionId));
         }
     }
+
+    /// <summary>
+    /// Resolves the <see cref="RoutingSubstitutionReason"/> actually reported for a served request:
+    /// <see cref="RoutingSubstitutionReason.Failover"/> when <paramref name="isFallback"/> is
+    /// <see langword="true"/> (the candidate <c>RequestInterceptor</c> lined up first was attempted and
+    /// failed at the transport layer, so whatever reason it computed no longer describes what happened),
+    /// otherwise <paramref name="resolutionReason"/> unchanged.
+    /// </summary>
+    private static RoutingSubstitutionReason ResolveSubstitutionReason(bool isFallback, RoutingSubstitutionReason resolutionReason) =>
+        isFallback ? RoutingSubstitutionReason.Failover : resolutionReason;
 
     /// <summary>
     /// Publishes one request's usage to <see cref="UsageMetrics"/> (§5.12): a token count per non-zero

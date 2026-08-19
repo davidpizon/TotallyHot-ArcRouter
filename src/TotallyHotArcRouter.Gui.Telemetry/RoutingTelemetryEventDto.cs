@@ -27,11 +27,13 @@ public sealed record RoutingTelemetryEventDto(
     long TotalDurationMs,
     int StatusCode,
     DateTimeOffset TimestampUtc,
+    string RoutedModel,
     int? CacheCreationTokens = null,
     int? CacheReadTokens = null,
     string? RequestSummary = null,
     string? ResponseSummary = null,
     string? CostConfidence = null,
     int RouterTokens = 0,
-    decimal RouterCostUsd = 0m);
+    decimal RouterCostUsd = 0m,
+    string? SubstitutionReason = null);
 

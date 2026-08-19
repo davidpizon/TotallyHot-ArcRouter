@@ -79,7 +79,10 @@ public static class LiveConversationMapper
             ResponseSummary: turn.ResponseSummary,
             IsFallback: turn.IsFallback,
             TimestampUtc: turn.TimestampUtc,
-            CostConfidence: turn.CostConfidence);
+            CostConfidence: turn.CostConfidence,
+            RequestedModel: turn.RequestedModel,
+            RoutedModel: turn.RoutedModel,
+            SubstitutionReason: turn.SubstitutionReason);
     }
 
     /// <summary>Builds the display routing steps for a turn, flagging fallback routing and naming the confirmed model.</summary>

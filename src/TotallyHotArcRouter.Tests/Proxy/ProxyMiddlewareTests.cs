@@ -70,6 +70,12 @@ public class ProxyMiddlewareTests
         Assert.Equal("true", context.Response.Headers["X-From-Upstream"].ToString());
         Assert.Equal(1, interceptor.InterceptedRequestCount);
 
+        // A named, servable model with no substitution: requested equals routed, reason is None
+        // (docs/router/orchestrator-live-path-plan.md §M2.2).
+        Assert.Equal("gpt-5.4", context.Response.Headers["X-ArcRouter-Requested-Model"].ToString());
+        Assert.Equal("gpt-5.4", context.Response.Headers["X-ArcRouter-Routed-Model"].ToString());
+        Assert.Equal(RoutingSubstitutionReason.None.ToString(), context.Response.Headers["X-ArcRouter-Substitution-Reason"].ToString());
+
         context.Response.Body.Position = 0;
         using var reader = new StreamReader(context.Response.Body, Encoding.UTF8);
         var responseBody = await reader.ReadToEndAsync(TestContext.Current.CancellationToken);

@@ -27,7 +27,9 @@ public class ConversationAggregatorTests
         string? responseSummary = null,
         int? cacheCreationTokens = null,
         int? cacheReadTokens = null,
-        string? costConfidence = null)
+        string? costConfidence = null,
+        string? routedModel = null,
+        string? substitutionReason = null)
     {
         return new RoutingTelemetryEventDto(
             SessionId: sessionId,
@@ -45,11 +47,13 @@ public class ConversationAggregatorTests
             TotalDurationMs: totalDurationMs,
             StatusCode: statusCode,
             TimestampUtc: timestampUtc ?? BaseTime.AddMinutes(turnNumber),
+            RoutedModel: routedModel ?? resolvedModel,
             CacheCreationTokens: cacheCreationTokens,
             CacheReadTokens: cacheReadTokens,
             RequestSummary: requestSummary,
             ResponseSummary: responseSummary,
-            CostConfidence: costConfidence);
+            CostConfidence: costConfidence,
+            SubstitutionReason: substitutionReason);
     }
 
     [Fact]
@@ -234,6 +238,27 @@ public class ConversationAggregatorTests
         var turn = Assert.Single(result[0].Turns);
         Assert.Equal("claude-sonnet-5", turn.Agent);
         Assert.Equal("claude-sonnet-5", turn.Model);
+    }
+
+    [Fact]
+    public void Aggregate_RequestedRoutedAndSubstitutionReason_PropagateThroughToTheTurn()
+    {
+        var events = new[]
+        {
+            CreateEvent(
+                sessionId: "session-1",
+                turnNumber: 1,
+                requestedModel: "auto",
+                routedModel: "claude-sonnet-5",
+                substitutionReason: "AutoSelect"),
+        };
+
+        var result = ConversationAggregator.Aggregate(events);
+
+        var turn = Assert.Single(result[0].Turns);
+        Assert.Equal("auto", turn.RequestedModel);
+        Assert.Equal("claude-sonnet-5", turn.RoutedModel);
+        Assert.Equal("AutoSelect", turn.SubstitutionReason);
     }
 
     [Fact]

@@ -57,7 +57,8 @@ public class TelemetryGrpcServiceTests
         LatencyToHeadersMs: 250,
         TotalDurationMs: 800,
         StatusCode: 200,
-        TimestampUtc: DateTimeOffset.UtcNow);
+        TimestampUtc: DateTimeOffset.UtcNow,
+        RoutedModel: "gpt-5.4");
 
     private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout, CancellationToken cancellationToken)
     {
