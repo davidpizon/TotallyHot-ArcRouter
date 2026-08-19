@@ -27,6 +27,21 @@ public class RoutingDecisionTests
         Assert.Equal("dimension-best prior", decision.Rationale);
         Assert.Equal(timestamp, decision.TimestampUtc);
         Assert.Equal(2, decision.CandidateScores.Count);
+        Assert.False(decision.IsExploratory);
+    }
+
+    /// <summary>
+    /// Verifies that an exploratory decision reports itself as such.
+    /// </summary>
+    [Fact]
+    public void Constructor_IsExploratoryTrue_IsReflectedOnTheDecision()
+    {
+        var timestamp = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+        var decision = new RoutingDecision(
+            "kimi-k2.5", 0.5, "exploration", timestamp, candidateScores: null, isExploratory: true);
+
+        Assert.True(decision.IsExploratory);
     }
 
     /// <summary>
@@ -53,6 +68,7 @@ public class RoutingDecisionTests
         Assert.Equal(0, decision.Confidence);
         Assert.Equal(RouterConstants.FallbackReason, decision.Rationale);
         Assert.Empty(decision.CandidateScores);
+        Assert.False(decision.IsExploratory);
     }
 }
 

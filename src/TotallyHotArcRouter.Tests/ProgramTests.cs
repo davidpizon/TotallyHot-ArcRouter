@@ -140,7 +140,7 @@ namespace TotallyHot.ArcRouter.Tests
         // Development. This reproduces Program.cs's ConfigureServices registrations directly under that
         // stricter mode, without depending on ambient environment variables during test execution.
         [Fact]
-        public void ConfigureServices_ProducesResolvableServiceGraph_UnderValidateOnBuild()
+        public async Task ConfigureServices_ProducesResolvableServiceGraph_UnderValidateOnBuild()
         {
             var services = new ServiceCollection();
             services.AddLogging();
@@ -150,7 +150,12 @@ namespace TotallyHot.ArcRouter.Tests
 
             services.AddTotallyHotArcRouter();
 
-            using var provider = services.BuildServiceProvider(new ServiceProviderOptions
+            // await using, not using: resolving IRoutingPolicy below now also constructs
+            // OrchestratorRoutingPolicy's voters (docs/router/orchestrator-live-path-plan.md M1), including
+            // LlmRouterVoter's OnnxTextGenerationClient, which - like OnnxEmbeddingClient elsewhere in this
+            // graph - implements only IAsyncDisposable. A synchronous Dispose() on this scope would throw
+            // when it reached that singleton.
+            await using var provider = services.BuildServiceProvider(new ServiceProviderOptions
             {
                 ValidateOnBuild = true,
                 ValidateScopes = true

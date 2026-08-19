@@ -99,13 +99,15 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddSingleton<Router.TextGeneration.LlmRouterModelChecksumProbe>();
             services.AddSingleton<Router.TextGeneration.LlmRouterModelSyncService>();
 
-            // PLAN.md Phase L: the Orchestrator ensemble - a self-contained, DI-registered component, NOT
-            // yet the registered IRoutingPolicy (CompositeRoutingPolicy keeps that role; swapping the
-            // Orchestrator in for live traffic by default is Phase M's job). BenchmarkDatabase is
-            // registered later in this method - safe, DI resolution order is independent of registration
-            // order. Voters are registered by concrete type (so tests/other consumers can depend on one
-            // directly) and again as IRoutingVoter (so OrchestratorRoutingPolicy's IEnumerable<IRoutingVoter>
-            // constructor parameter resolves every one of them).
+            // PLAN.md Phase L: the Orchestrator ensemble. Registered by concrete type - CompositeRoutingPolicy
+            // (still the registered IRoutingPolicy) takes it as a direct constructor dependency and, per
+            // PLAN.md Phase M / docs/router/orchestrator-live-path-plan.md, dispatches every non-utility
+            // decision to it by default (RoutingOptions.EnableOrchestratorPolicy is the kill switch back to
+            // AgentRouterPolicy). BenchmarkDatabase is registered later in this method - safe, DI resolution
+            // order is independent of registration order. Voters are registered by concrete type (so tests/
+            // other consumers can depend on one directly) and again as IRoutingVoter (so
+            // OrchestratorRoutingPolicy's IEnumerable<IRoutingVoter> constructor parameter resolves every one
+            // of them).
             services.AddSingleton<Router.Orchestrator.DimBestVoter>();
             services.AddSingleton<Router.Orchestrator.MemoryKnnVoter>();
             services.AddSingleton<Router.Orchestrator.LogRegVoter>();
@@ -161,11 +163,11 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddSingleton<IRequestClassifier, HeuristicRequestClassifier>();
 
             // PLAN.md Phase I (the Action leg, docs/router/utility-model-routing.md §B3-B4): selection-only
-            // routing for the agentic-router alias and the unresolved-model fallback. UtilityRoutingPolicy
-            // takes IModelPriceCatalog (registered later in this method - DI resolution order is
-            // independent of registration order, so this is safe). The two leaf policies are registered by
-            // concrete type so CompositeRoutingPolicy's constructor can resolve them directly, with only the
-            // composite exposed as IRoutingPolicy.
+            // routing for the auto/unresolved-model paths. UtilityRoutingPolicy takes IModelPriceCatalog
+            // (registered later in this method - DI resolution order is independent of registration order,
+            // so this is safe). The three leaf policies (UtilityRoutingPolicy, AgentRouterPolicy, and Phase
+            // L's OrchestratorRoutingPolicy above) are registered by concrete type so CompositeRoutingPolicy's
+            // constructor can resolve all three directly, with only the composite exposed as IRoutingPolicy.
             services.AddSingleton<UtilityRoutingPolicy>();
             services.AddSingleton<AgentRouterPolicy>();
             services.AddSingleton<IRoutingPolicy, CompositeRoutingPolicy>();

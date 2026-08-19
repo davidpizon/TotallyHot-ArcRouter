@@ -132,6 +132,59 @@ public class OrchestratorRoutingPolicyTests
         Assert.Equal("kimi-k2.5", decision.SelectedModel);
         Assert.Equal(0, decision.Confidence);
         Assert.Equal(RouterConstants.FallbackReason, decision.Rationale);
+        Assert.False(decision.IsExploratory);
+    }
+
+    /// <summary>
+    /// docs/router/orchestrator-live-path-plan.md M1.2: with a single eligible candidate, an
+    /// exploration roll of rate 1.0 is deterministic in outcome (there is only one candidate to land on)
+    /// while still exercising the roll itself, so this asserts the mechanism fires and is flagged without
+    /// depending on RNG seeding.
+    /// </summary>
+    [Fact]
+    public async Task DecideAsync_ExplorationRollFires_SelectsRandomCandidateAndFlagsExploratory()
+    {
+        var voters = new IRoutingVoter[] { new FakeVoter(VoterNames.DimBest, "kimi-k2.5", confidence: 1.0) };
+        var policy = CreatePolicy(voters, enableExploration: true, explorationRate: 1.0);
+        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi]);
+
+        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+
+        Assert.Equal("kimi-k2.5", decision.SelectedModel);
+        Assert.True(decision.IsExploratory);
+    }
+
+    [Fact]
+    public async Task DecideAsync_ExplorationDisabled_NeverFlagsExploratory()
+    {
+        var voters = new IRoutingVoter[] { new FakeVoter(VoterNames.DimBest, "kimi-k2.5", confidence: 1.0) };
+        var policy = CreatePolicy(voters); // exploration disabled by default via CreatePolicy
+
+        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi]);
+
+        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+
+        Assert.Equal("kimi-k2.5", decision.SelectedModel);
+        Assert.False(decision.IsExploratory);
+    }
+
+    /// <summary>
+    /// docs/router/orchestrator-live-path-plan.md M1.2: exploration must never fire on the all-abstain
+    /// fallback path - <see cref="RoutingDecision.CreateFallback"/> is already a degraded outcome and
+    /// must not be compounded with a random pick, even with a rate of 1.0.
+    /// </summary>
+    [Fact]
+    public async Task DecideAsync_EveryVoterAbstains_ExplorationRateOne_FallbackIsNeverExploratory()
+    {
+        var voters = new IRoutingVoter[] { new LlmRouterVoter(new NeverCalledTextGenerationClient(), NullLogger<LlmRouterVoter>.Instance) };
+        var policy = CreatePolicy(voters, defaultModel: "kimi-k2.5", enableExploration: true, explorationRate: 1.0);
+        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi]);
+
+        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+
+        Assert.Equal("kimi-k2.5", decision.SelectedModel);
+        Assert.False(decision.IsExploratory);
+        Assert.Equal(RouterConstants.FallbackReason, decision.Rationale);
     }
 
     [Fact]
@@ -294,6 +347,11 @@ public class OrchestratorRoutingPolicyTests
                 DefaultModel = "kimi-k2.5",
                 DimBestVoterWeight = 0.5,
                 MemoryKnnVoterWeight = 0.5,
+                // Exploration defaults to enabled at 5% (RoutingOptions' own defaults) - disabled here so
+                // this tie-break assertion can't flake on an exploration roll (docs/router/
+                // orchestrator-live-path-plan.md M1.2).
+                EnableExploration = false,
+                ExplorationRate = 0,
             }),
             NullLogger<OrchestratorRoutingPolicy>.Instance);
         var context = new RoutingContext("live:bug_fixing", IsUtility: false, [MiniMax, Glm]);
@@ -414,7 +472,9 @@ public class OrchestratorRoutingPolicyTests
     private static OrchestratorRoutingPolicy CreatePolicy(
         IEnumerable<IRoutingVoter> voters,
         string defaultModel = "kimi-k2.5",
-        bool enableLogReg = true) =>
+        bool enableLogReg = true,
+        bool enableExploration = false,
+        double explorationRate = 0d) =>
         new(
             voters,
             Options.Create(new RoutingOptions
@@ -425,6 +485,10 @@ public class OrchestratorRoutingPolicyTests
                 LogRegVoterWeight = 0.43,
                 LlmRouterVoterWeight = 0.64,
                 EnableLogRegVoter = enableLogReg,
+                // Every other test in this file relies on deterministic argmax behavior, so exploration
+                // is off by default here - only the exploration-focused tests below opt in explicitly.
+                EnableExploration = enableExploration,
+                ExplorationRate = explorationRate,
             }),
             NullLogger<OrchestratorRoutingPolicy>.Instance);
 

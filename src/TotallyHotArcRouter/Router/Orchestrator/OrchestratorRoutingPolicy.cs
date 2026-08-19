@@ -10,10 +10,12 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Not yet on the live path.</b> This class is a self-contained, DI-registered component
-/// (<c>ServiceCollectionExtensions</c> registers it by concrete type) - it does not replace
-/// <see cref="CompositeRoutingPolicy"/> as the registered <see cref="IRoutingPolicy"/>. Wiring the
-/// Orchestrator into live traffic by default is PLAN.md Phase M's job, deliberately not this one's.
+/// <b>On the live path (PLAN.md Phase M).</b> <see cref="CompositeRoutingPolicy"/> dispatches every
+/// non-utility request here by default - <see cref="Models.RoutingOptions.EnableOrchestratorPolicy"/>
+/// is the kill switch back to <see cref="AgentRouterPolicy"/>'s memory-only ranking. An
+/// explicitly-named, servable model never reaches this class at all: that routing decision is made
+/// upstream, in <see cref="Proxy.RequestInterceptor"/>, before a policy is ever consulted - see
+/// docs/router/orchestrator-live-path-plan.md §1.
 /// </para>
 /// <para>
 /// <b>Weighting scheme.</b> Each voter contributes <c>weight(voter) × vote.Confidence</c> to its picked
@@ -36,6 +38,22 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// abstains, this falls back to <see cref="RoutingDecision.CreateFallback"/> rather than throwing -
 /// matching every other <see cref="IRoutingPolicy"/> in this codebase's "never hard-fail a routing
 /// decision" convention.
+/// </para>
+/// <para>
+/// <b>Exploration (docs/router/orchestrator-live-path-plan.md M1.2).</b> After the argmax, with
+/// probability <see cref="RoutingOptions.ExplorationRate"/> (gated on
+/// <see cref="RoutingOptions.EnableExploration"/>), the decision is replaced with a uniformly-random
+/// pick from <see cref="RoutingContext.Candidates"/> instead - never from outside the eligible set, so
+/// an exploratory pick can never bypass circuit-breaker or enabled-state checks. This is the same
+/// epsilon-greedy mechanism <see cref="AgentAsARouter"/> used on the general path before this class
+/// replaced it, lifted here so <see cref="RoutingOptions.EnableExploration"/>/
+/// <see cref="RoutingOptions.ExplorationRate"/> keep doing something once
+/// <see cref="CompositeRoutingPolicy"/> routes through here. The roll never fires on the all-abstain
+/// fallback path - <see cref="RoutingDecision.CreateFallback"/> is already a degraded outcome and this
+/// class does not compound it with a random pick. A decision produced by the roll sets
+/// <see cref="RoutingDecision.IsExploratory"/> so a downstream reader (PLAN.md Phase N in particular)
+/// can separate a deliberate probe from a genuine ensemble pick rather than scoring the former as if it
+/// were the latter.
 /// </para>
 /// <para>
 /// <b>Vote-breakdown logging.</b> <see cref="RoutingDecision.CandidateScores"/> carries both the
@@ -266,21 +284,51 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
             }
         }
 
-        var confidence = effectiveWeight > 0 ? Math.Clamp(best.Score!.Value / effectiveWeight, 0d, 1d) : 0d;
+        // docs/router/orchestrator-live-path-plan.md M1.2: epsilon-greedy exploration, lifted from
+        // AgentAsARouter (the policy this ensemble replaces on the general path per Phase M) so
+        // EnableExploration/ExplorationRate keep mattering once CompositeRoutingPolicy routes through
+        // here. Rolled after the argmax and restricted to context.Candidates - the same eligible set the
+        // argmax itself drew from - so an exploratory pick can never bypass circuit-breaker or
+        // enabled-state checks. Deliberately not reached on the all-abstain fallback path above: that is
+        // already a degraded outcome and randomizing it would compound two unrelated failures.
+        var isExploratory = _options.EnableExploration && Random.Shared.NextDouble() < _options.ExplorationRate;
+        var selectedModel = isExploratory
+            ? context.Candidates[Random.Shared.Next(context.Candidates.Count)].ModelName
+            : best.Model;
+
+        if (isExploratory)
+        {
+            _logger.LogInformation(
+                "[ORCHESTRATOR] Exploring: selected {Model} at random instead of the argmax pick {ArgmaxModel} (rate {Rate}).",
+                selectedModel,
+                best.Model,
+                _options.ExplorationRate);
+        }
+
+        // aggregateScores (not the merged candidateScores below) is the source of truth for a real
+        // candidate's weighted score - an exploratory pick that no voter chose simply has no entry and
+        // is correctly scored 0, same as any other un-voted-for candidate.
+        var selectedScore = aggregateScores.TryGetValue(selectedModel, out var scoreForSelected) ? scoreForSelected : 0d;
+        var confidence = effectiveWeight > 0 ? Math.Clamp(selectedScore / effectiveWeight, 0d, 1d) : 0d;
+        var rationale = isExploratory
+            ? $"Orchestrator exploration selected '{selectedModel}' at random (rate {_options.ExplorationRate:F2}); argmax pick was '{best.Model}' with weighted score {best.Score:F2} across {participatingVoters} voting voter(s)."
+            : $"Orchestrator ensemble selected '{best.Model}' with weighted score {best.Score:F2} across {participatingVoters} voting voter(s).";
         var decision = new RoutingDecision(
-            best.Model,
+            selectedModel,
             confidence,
-            $"Orchestrator ensemble selected '{best.Model}' with weighted score {best.Score:F2} across {participatingVoters} voting voter(s).",
+            rationale,
             DateTimeOffset.UtcNow,
-            candidateScores);
+            candidateScores,
+            isExploratory);
 
         _logger.LogInformation(
-            "[ORCHESTRATOR] Selected {Model} for dimension {Dimension} with weighted score {Score} (confidence {Confidence}, {VoterCount} voters participated).",
+            "[ORCHESTRATOR] Selected {Model} for dimension {Dimension} with weighted score {Score} (confidence {Confidence}, {VoterCount} voters participated, exploratory {IsExploratory}).",
             decision.SelectedModel,
             context.Dimension,
             best.Score,
             decision.Confidence,
-            participatingVoters);
+            participatingVoters,
+            decision.IsExploratory);
 
         return decision;
     }

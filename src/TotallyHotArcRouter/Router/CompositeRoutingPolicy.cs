@@ -1,33 +1,82 @@
+using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Models;
+
 namespace TotallyHot.ArcRouter.Router;
 
 /// <summary>
 /// The <see cref="IRoutingPolicy"/> registered for live traffic: dispatches to
 /// <see cref="UtilityRoutingPolicy"/> for requests PLAN.md Phase H's classifier marked
-/// <see cref="RoutingContext.IsUtility"/>, and to <see cref="AgentRouterPolicy"/> otherwise
-/// (<c>docs/router/utility-model-routing.md</c> §B3's tier split between the utility and general cases).
+/// <see cref="RoutingContext.IsUtility"/> (<c>docs/router/utility-model-routing.md</c> §B3's tier
+/// split), and otherwise to <see cref="Orchestrator.OrchestratorRoutingPolicy"/> - the PLAN.md Phase M
+/// default - or <see cref="AgentRouterPolicy"/>'s memory-only ranking when
+/// <see cref="RoutingOptions.EnableOrchestratorPolicy"/> is <see langword="false"/>
+/// (docs/router/orchestrator-live-path-plan.md M1.1/M1.3).
 /// </summary>
+/// <remarks>
+/// An explicitly-named, servable model never reaches this class: <see cref="Proxy.RequestInterceptor"/>
+/// serves it directly and only consults a policy on the paths it already owns (<c>auto</c>, an unknown
+/// or disabled model name, a circuit-open primary, the failover cascade) - see
+/// docs/router/orchestrator-live-path-plan.md §1. <see cref="UtilityRoutingPolicy"/> keeps its cost term
+/// regardless of the kill switch above; only the general (non-utility) leg is affected, since the
+/// Orchestrator has no cost term of its own.
+/// </remarks>
 public sealed class CompositeRoutingPolicy : IRoutingPolicy
 {
     private readonly UtilityRoutingPolicy _utilityPolicy;
     private readonly AgentRouterPolicy _generalPolicy;
+    private readonly Orchestrator.OrchestratorRoutingPolicy _orchestratorPolicy;
+    private readonly RoutingOptions _options;
 
     /// <param name="utilityPolicy">Handles requests classified as utility traffic.</param>
-    /// <param name="generalPolicy">Handles every other request.</param>
-    public CompositeRoutingPolicy(UtilityRoutingPolicy utilityPolicy, AgentRouterPolicy generalPolicy)
+    /// <param name="generalPolicy">
+    /// The pre-Phase-M general engine, kept reachable behind <see cref="RoutingOptions.EnableOrchestratorPolicy"/>
+    /// as a rollback and as a PLAN.md Phase N comparison baseline.
+    /// </param>
+    /// <param name="orchestratorPolicy">The PLAN.md Phase M default general engine.</param>
+    /// <param name="options">Supplies <see cref="RoutingOptions.EnableOrchestratorPolicy"/>.</param>
+    public CompositeRoutingPolicy(
+        UtilityRoutingPolicy utilityPolicy,
+        AgentRouterPolicy generalPolicy,
+        Orchestrator.OrchestratorRoutingPolicy orchestratorPolicy,
+        IOptions<RoutingOptions> options)
     {
         ArgumentNullException.ThrowIfNull(utilityPolicy);
         ArgumentNullException.ThrowIfNull(generalPolicy);
+        ArgumentNullException.ThrowIfNull(orchestratorPolicy);
+        ArgumentNullException.ThrowIfNull(options);
+
         _utilityPolicy = utilityPolicy;
         _generalPolicy = generalPolicy;
+        _orchestratorPolicy = orchestratorPolicy;
+        _options = options.Value;
     }
 
     /// <inheritdoc />
-    public Task<string> SelectModelAsync(RoutingContext context, CancellationToken cancellationToken = default)
+    /// <remarks>
+    /// Delegates to the <see cref="RoutingSignals"/> overload of this method with no signals.
+    /// </remarks>
+    public Task<string> SelectModelAsync(RoutingContext context, CancellationToken cancellationToken = default) =>
+        SelectModelAsync(context, signals: null, cancellationToken);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Forwards <paramref name="signals"/> to <see cref="Orchestrator.OrchestratorRoutingPolicy"/> when
+    /// the general leg is chosen, so <c>memory_kNN</c> and <c>logreg</c> can participate in a live
+    /// decision instead of abstaining (docs/router/live-feedback-learning-plan.md Phase 2a). Neither
+    /// <see cref="UtilityRoutingPolicy"/> nor <see cref="AgentRouterPolicy"/> uses signals - both fall
+    /// through to <see cref="IRoutingPolicy"/>'s no-signals default, which simply discards them.
+    /// </remarks>
+    public Task<string> SelectModelAsync(RoutingContext context, RoutingSignals? signals, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        return context.IsUtility
-            ? _utilityPolicy.SelectModelAsync(context, cancellationToken)
+        if (context.IsUtility)
+        {
+            return _utilityPolicy.SelectModelAsync(context, cancellationToken);
+        }
+
+        return _options.EnableOrchestratorPolicy
+            ? _orchestratorPolicy.SelectModelAsync(context, signals, cancellationToken)
             : _generalPolicy.SelectModelAsync(context, cancellationToken);
     }
 }

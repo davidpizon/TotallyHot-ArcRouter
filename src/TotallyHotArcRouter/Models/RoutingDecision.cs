@@ -15,6 +15,10 @@ public sealed record RoutingDecision
     /// <param name="rationale">The textual rationale for the decision.</param>
     /// <param name="timestampUtc">The UTC timestamp when the decision was made.</param>
     /// <param name="candidateScores">Optional candidate score map copied into an immutable view.</param>
+    /// <param name="isExploratory">
+    /// Whether this decision was an epsilon-greedy exploratory pick rather than the policy's normal
+    /// choice. See <see cref="IsExploratory"/>.
+    /// </param>
     /// <exception cref="ArgumentException">Thrown when required string arguments are null, empty, or whitespace.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="confidence"/> is outside [0, 1].</exception>
     public RoutingDecision(
@@ -22,7 +26,8 @@ public sealed record RoutingDecision
         double confidence,
         string rationale,
         DateTimeOffset timestampUtc,
-        IReadOnlyDictionary<string, double>? candidateScores = null)
+        IReadOnlyDictionary<string, double>? candidateScores = null,
+        bool isExploratory = false)
     {
         if (string.IsNullOrWhiteSpace(selectedModel))
         {
@@ -43,6 +48,7 @@ public sealed record RoutingDecision
         Confidence = confidence;
         Rationale = rationale;
         TimestampUtc = timestampUtc;
+        IsExploratory = isExploratory;
 
         var copiedScores = candidateScores is null
             ? new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
@@ -75,6 +81,17 @@ public sealed record RoutingDecision
     /// Gets the immutable candidate score map captured with the decision.
     /// </summary>
     public IReadOnlyDictionary<string, double> CandidateScores { get; }
+
+    /// <summary>
+    /// Gets whether this decision was an epsilon-greedy exploratory pick
+    /// (docs/router/orchestrator-live-path-plan.md M1.2) - a deliberate random sample of a currently-
+    /// eligible candidate, rolled instead of the policy's normal choice, so the router keeps sampling
+    /// models its current scores disfavor rather than starving them permanently. <see langword="false"/>
+    /// for every decision made by a policy with no exploration mechanism, and always <see langword="false"/>
+    /// for <see cref="CreateFallback"/> - an all-abstain fallback is already a degraded outcome, and
+    /// exploration deliberately does not compound it with a random pick on top.
+    /// </summary>
+    public bool IsExploratory { get; }
 
     /// <summary>
     /// Creates a fallback routing decision for the supplied model.
