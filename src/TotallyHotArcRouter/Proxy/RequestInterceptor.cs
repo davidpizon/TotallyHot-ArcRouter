@@ -285,9 +285,18 @@ namespace TotallyHot.ArcRouter.Proxy
                 return ModelRouteResolutionResult.Failure("Request body must include a non-empty 'model' field.");
             }
 
+            // Captured before single-model-serving's forced override below (and before any agentic
+            // substitution) so it always reflects the client's literal string, independent of what is
+            // ultimately served - docs/router/orchestrator-live-path-plan.md §M2.2.
+            var clientRequestedModelName = modelName;
+            var substitutionReason = RoutingSubstitutionReason.None;
+
             // Local Proxy CLI: single-model serving ignores whatever model the client
             // asked for and always routes to the one CLI-forced model (already confirmed configured in
-            // the constructor), mirroring LiteLLM's "litellm --model provider/name" behavior.
+            // the constructor), mirroring LiteLLM's "litellm --model provider/name" behavior. Reported as
+            // RoutingSubstitutionReason.None rather than a dedicated reason: forced serving is a
+            // deployment-time decision with nothing to fail over from, not a per-request substitution -
+            // RequestedModel/RoutedModel diverging in telemetry already makes it visible.
             if (_forcedModelName is not null)
             {
                 modelName = _forcedModelName;
@@ -319,6 +328,7 @@ namespace TotallyHot.ArcRouter.Proxy
                     "[INTERCEPTOR] Auto-select requested; routed to '{ResolvedModel}'.",
                     SanitizeForLog(autoSelectedRoute.ModelName));
                 route = autoSelectedRoute;
+                substitutionReason = RoutingSubstitutionReason.AutoSelect;
             }
             else if (!_modelRouteResolver.TryResolve(modelName, out route) || !_modelRouteResolver.IsModelEnabled(modelName))
             {
@@ -330,7 +340,11 @@ namespace TotallyHot.ArcRouter.Proxy
                 // A model that resolved but is stopped/not-currently-upstream (IsModelEnabled false) is
                 // treated identically to an unresolved name - same fallback, same rejection message - rather
                 // than silently routing to a model the operator just disabled or the endpoint stopped
-                // reporting.
+                // reporting. The two cases still report distinct RoutingSubstitutionReasons, since a
+                // dashboard must not merge "we don't know this model" with "we know it but it's stopped" -
+                // TryResolve's [NotNullWhen(true)] out param means route is already non-null here exactly
+                // when the name resolved (even though IsModelEnabled is what triggered this branch).
+                var wasResolved = route is not null;
                 var agenticRoute = _forcedModelName is null
                     ? await ResolveAgenticRouteAsync(classification, liveDimension, routingSignals, cancellationToken)
                     : null;
@@ -341,6 +355,9 @@ namespace TotallyHot.ArcRouter.Proxy
                         "[INTERCEPTOR] Unresolved model '{ModelName}' accepted and agentically routed to '{ResolvedModel}'.",
                         SanitizeForLog(modelName), SanitizeForLog(agenticRoute.ModelName));
                     route = agenticRoute;
+                    substitutionReason = wasResolved
+                        ? RoutingSubstitutionReason.ModelStopped
+                        : RoutingSubstitutionReason.UnresolvedName;
                 }
                 else
                 {
@@ -386,6 +403,10 @@ namespace TotallyHot.ArcRouter.Proxy
                         _logger.LogInformation(
                             "[INTERCEPTOR] Model '{ModelName}' circuit is open; substituting next-best model '{Substitute}'.",
                             SanitizeForLog(route.ModelName), SanitizeForLog(substitute.ModelName));
+                        substitutionReason = _circuitBreaker.IsOpen(CircuitBreakerTargetKey.FromRoute(route)) ||
+                            _circuitBreaker.IsProviderOpen(route.Provider)
+                                ? RoutingSubstitutionReason.CircuitOpen
+                                : RoutingSubstitutionReason.ModelStopped;
                         route = substitute;
                     }
                 }
@@ -411,7 +432,7 @@ namespace TotallyHot.ArcRouter.Proxy
                 }
             }
 
-            return ModelRouteResolutionResult.Success(candidates, taskEmbedding, routerTokens);
+            return ModelRouteResolutionResult.Success(candidates, clientRequestedModelName, substitutionReason, taskEmbedding, routerTokens);
         }
 
         /// <summary>

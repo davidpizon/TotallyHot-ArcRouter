@@ -31,7 +31,7 @@ public class DeferredTelemetryPublisherTests
 
         var telemetryEvent = new RoutingTelemetryEvent(
             "sess-1", 1, false, "gpt-5.4", "gpt-5.4", "openai", false,
-            100, 20, 0.001m, false, 250, 800, 200, DateTimeOffset.UtcNow);
+            100, 20, 0.001m, false, 250, 800, 200, DateTimeOffset.UtcNow, "gpt-5.4");
         await deferred.PublishAsync(telemetryEvent, TestContext.Current.CancellationToken);
 
         Assert.Equal(1, resolveCount);

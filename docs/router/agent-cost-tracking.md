@@ -149,6 +149,16 @@ for reconciliation data that the reference blueprint didn't cover.
 -- NOT ResolvedModel - matches how the price catalog is keyed (see model-price-catalog.md's D3) and is
 -- the stable identity across a provider's own model-id changes. See
 -- docs/gui/governance-model-cards.md section 3.2 for why this matters.
+--
+-- CHANGED 2026-08-18 (PLAN.md Phase M2, docs/router/orchestrator-live-path-plan.md M2.3): the value
+-- ProxyMiddleware writes here is now route.ModelName - the model that actually SERVED the request
+-- (post-failover, post-substitution) - not the one RequestInterceptor lined up first. This is a value
+-- fix, not a schema or semantic change: the column's documented meaning was always "the model this
+-- spend belongs to," and on a failover it had been reading the lined-up model, which never ran.
+-- Historical rows written before this change are not backfilled - the raw upstream attribution for
+-- those requests is not recoverable from the ledger itself. The client's *literal* requested model
+-- string is now available separately, via RoutingTelemetryEvent.RequestedModel and the
+-- X-ArcRouter-Requested-Model response header - it no longer flows into this column.
 CREATE TABLE IF NOT EXISTS usage_ledger (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id TEXT NOT NULL,

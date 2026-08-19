@@ -70,6 +70,33 @@ public class ProxyMiddlewareUsageLedgerTests
     }
 
     [Fact]
+    public async Task InvokeAsync_FailoverServed_LedgerRowAttributesRequestedModelToTheModelThatServed()
+    {
+        using var temp = new TempDatabase();
+        var ledger = temp.CreateUsageLedger();
+
+        const string PrimaryHost = "primary-failover.test";
+        const string BackupHost = "backup-failover.test";
+        // Distinct provider keys so ModelRouteResolverTestFactory.CreateWithModels gives each its own
+        // BaseUrl - "ollama" is OpenAI-shaped for usage-parsing purposes (UsageExtractor), so both
+        // candidates' responses are still extractable.
+        var resolver = ModelRouteResolverTestFactory.CreateWithModels(
+            ("primary", "openai", "primary-upstream", $"https://{PrimaryHost}"),
+            ("backup", "ollama", "backup-upstream", $"https://{BackupHost}"));
+
+        var handler = new RoutingHandlerStub(request => request.RequestUri!.Host == PrimaryHost
+            ? throw new HttpRequestException("connection refused")
+            : OpenAiUsageResponse());
+
+        await RunAsync(resolver, handler, ledger);
+
+        Assert.Equal(1, CountRows(temp));
+        // M2.3: the ledger's requested_model column holds the model that served ("backup"), not the one
+        // lined up first ("primary") - a value fix, not a schema change (docs/router/agent-cost-tracking.md).
+        Assert.Equal("backup", ReadRequestedModel(temp));
+    }
+
+    [Fact]
     public async Task InvokeAsync_NoUsageBlock_RecordsNothing()
     {
         using var temp = new TempDatabase();
@@ -114,6 +141,14 @@ public class ProxyMiddlewareUsageLedgerTests
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT COUNT(*) FROM usage_ledger;";
         return Convert.ToInt32(command.ExecuteScalar());
+    }
+
+    private static string ReadRequestedModel(TempDatabase temp)
+    {
+        using var connection = temp.Database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT requested_model FROM usage_ledger LIMIT 1;";
+        return (string)command.ExecuteScalar()!;
     }
 
     private static async Task<HttpContext> RunAsync(

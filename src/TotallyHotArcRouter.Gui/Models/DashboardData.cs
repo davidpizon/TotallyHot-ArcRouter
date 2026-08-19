@@ -74,7 +74,14 @@ public sealed record ConversationTurn(
     // How TotalCost was arrived at (a Telemetry.CostConfidence name, e.g. "Catalog", "Unknown"), or null
     // for a mock turn with no confidence concept. Backs the turn card's cost-stat confidence indicator
     // (docs/router/token-tracking-implementation-plan.md Phase 3, §5.6).
-    string? CostConfidence = null);
+    string? CostConfidence = null,
+    // The client's literal requested model, the model that actually served, and why they differ (a
+    // Telemetry.RoutingSubstitutionReason name), or null for a mock turn with no live-routing concept.
+    // Plumbed through by Phase M2 (docs/router/orchestrator-live-path-plan.md §M2.2); not yet rendered -
+    // Phase M3.1 is what turns these into the Live Stream inspector's substitution step.
+    string? RequestedModel = null,
+    string? RoutedModel = null,
+    string? SubstitutionReason = null);
 
 /// <summary>A conversation (session) whose turns are shown in the Live Stream tab.</summary>
 /// <param name="Id">The session id.</param>

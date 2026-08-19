@@ -16,7 +16,10 @@ public sealed record LiveConversationTurn(
     int CacheReadTokens = 0,
     string? RequestSummary = null,
     string? ResponseSummary = null,
-    string? CostConfidence = null);
+    string? CostConfidence = null,
+    string? RequestedModel = null,
+    string? RoutedModel = null,
+    string? SubstitutionReason = null);
 
 /// <summary>A conversation (session) reconstructed from the live telemetry stream.</summary>
 /// <param name="SessionId">The session id every turn in <paramref name="Turns"/> shares.</param>
@@ -104,7 +107,10 @@ public static class ConversationAggregator
                 CacheReadTokens: e.CacheReadTokens ?? 0,
                 RequestSummary: e.RequestSummary,
                 ResponseSummary: e.ResponseSummary,
-                CostConfidence: e.CostConfidence))
+                CostConfidence: e.CostConfidence,
+                RequestedModel: e.RequestedModel,
+                RoutedModel: e.RoutedModel,
+                SubstitutionReason: e.SubstitutionReason))
             .ToList();
 
         return new LiveConversation(
