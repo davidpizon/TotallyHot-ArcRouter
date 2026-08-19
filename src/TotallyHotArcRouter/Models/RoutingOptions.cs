@@ -229,6 +229,52 @@ public sealed class RoutingOptions
     public bool EnableLlmRouterVoter { get; init; } = true;
 
     /// <summary>
+    /// Gets the relative training weight applied to each live <c>memory_entries</c> row when training the
+    /// <c>logreg</c> voter's artifact, relative to an OOD bootstrap row's fixed weight of <c>1.0</c>
+    /// (docs/router/live-feedback-learning-plan.md Phase 4b). Greater than 1 by default because live
+    /// traffic is the distribution actually being served, while the OOD bootstrap set is only a prior -
+    /// the plan's own reasoning for weighting live observations above bootstrap rows.
+    /// </summary>
+    [Range(0d, 1000d)]
+    public double LogRegLiveSampleWeight { get; init; } = 3.0;
+
+    /// <summary>
+    /// Gets the minimum total number of training samples (bootstrap rows plus live memory entries)
+    /// <see cref="Router.Orchestrator.EmbeddingLogRegTrainingService"/> requires before writing a new
+    /// <c>logreg</c> artifact. Below this, the retrain is declined and the prior artifact (if any) is
+    /// left in place - the plan's "reject rather than install something worse" guard against a
+    /// meaningless fit from too few rows.
+    /// </summary>
+    [Range(1, 1_000_000)]
+    public int LogRegMinTrainingRows { get; init; } = 20;
+
+    /// <summary>
+    /// Gets the minimum number of distinct models that must have at least one training sample before
+    /// <see cref="Router.Orchestrator.EmbeddingLogRegTrainingService"/> writes a new <c>logreg</c> artifact. A fit
+    /// covering only one model is meaningless for an argmax-over-candidates voter - see
+    /// <see cref="LogRegMinTrainingRows"/>'s remarks for the same guard's reasoning.
+    /// </summary>
+    [Range(1, 1_000)]
+    public int LogRegMinModelsRepresented { get; init; } = 2;
+
+    /// <summary>
+    /// Gets the number of new <c>memory_entries</c> rows that must accumulate since the <c>logreg</c>
+    /// artifact's last recorded <see cref="Router.Orchestrator.EmbeddingLogRegModelArtifact.MemoryEntryCount"/>
+    /// before <c>Hosting.LogRegRetrainHostedService</c> automatically retrains
+    /// (docs/router/live-feedback-learning-plan.md Phase 4c).
+    /// </summary>
+    [Range(1, 1_000_000)]
+    public int LogRegRetrainThreshold { get; init; } = 500;
+
+    /// <summary>
+    /// Gets whether <c>Hosting.LogRegRetrainHostedService</c> automatically retrains the
+    /// <c>logreg</c> voter's artifact once <see cref="LogRegRetrainThreshold"/> new memory entries have
+    /// accumulated. The CLI flag (<c>--retrain-logreg</c>) and, later, the Governance retrain button both
+    /// bypass this flag - it only gates the unattended background trigger.
+    /// </summary>
+    public bool EnableAutomaticLogRegRetrain { get; init; } = true;
+
+    /// <summary>
     /// Gets whether <see cref="Router.CompositeRoutingPolicy"/> dispatches non-utility traffic to
     /// <see cref="Router.Orchestrator.OrchestratorRoutingPolicy"/> (the default) rather than
     /// <see cref="Router.AgentRouterPolicy"/>'s memory-only ranking

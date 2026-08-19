@@ -173,10 +173,15 @@ public static class LogRegTrainer
         return examples;
     }
 
-    /// <summary>Extracts an OOD task's <c>prompt</c> string property from its raw JSON, tolerating malformed or missing content.</summary>
+    /// <summary>
+    /// Extracts an OOD task's <c>prompt</c> string property from its raw JSON, tolerating malformed or
+    /// missing content. Internal (not private) so <see cref="Router.Orchestrator.OodBootstrapSampleSource"/>
+    /// (docs/router/live-feedback-learning-plan.md Phase 4a) shares this exact extraction logic rather than
+    /// duplicating it - both read the same <c>benchmark_ood_tasks.raw_json</c> shape.
+    /// </summary>
     /// <param name="rawJson">The task row's verbatim raw JSON.</param>
     /// <returns>The prompt text, or <see langword="null"/> when absent, blank, not a string, or the JSON fails to parse.</returns>
-    private static string? TryExtractPrompt(string rawJson)
+    internal static string? TryExtractPrompt(string rawJson)
     {
         try
         {

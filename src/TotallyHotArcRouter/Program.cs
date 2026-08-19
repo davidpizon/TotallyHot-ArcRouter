@@ -2,6 +2,7 @@ using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.Hosting;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Router;
+using TotallyHot.ArcRouter.Router.Orchestrator;
 using TotallyHot.ArcRouter.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -34,16 +35,27 @@ public static class Program
             // (docs/router/coderouterbench-sqlite-migration-plan.md Phase 6): stripped before
             // CreateHostBuilder for the same reason --model is, so it never reaches the command-line
             // configuration provider as a stray "sync-benchmark-data" key.
-            var (runBenchmarkDataSync, remainingArgs) = ExtractFlag(args, "--sync-benchmark-data");
+            var (runBenchmarkDataSync, afterBenchmarkFlag) = ExtractFlag(args, "--sync-benchmark-data");
 
-            // `using` (not a bare local) so the sync path below, which returns without ever calling
-            // RunAsync, still disposes the container and everything singleton-scoped in it - SQLite
+            // docs/router/live-feedback-learning-plan.md Phase 4c: headless retrain trigger, stripped for
+            // the same reason --sync-benchmark-data is - it must never reach the command-line configuration
+            // provider as a stray "retrain-logreg" key.
+            var (runLogRegRetrain, remainingArgs) = ExtractFlag(afterBenchmarkFlag, "--retrain-logreg");
+
+            // `using` (not a bare local) so the sync/retrain paths below, which return without ever calling
+            // RunAsync, still dispose the container and everything singleton-scoped in it - SQLite
             // connections and HttpClient handlers among them - rather than leaving that to process exit.
             using var host = CreateHostBuilder(remainingArgs).Build();
 
             if (runBenchmarkDataSync)
             {
                 await RunBenchmarkDataSyncAsync(host.Services);
+                return;
+            }
+
+            if (runLogRegRetrain)
+            {
+                await RunLogRegRetrainAsync(host.Services);
                 return;
             }
 
@@ -214,6 +226,31 @@ public static class Program
             logger.LogInformation(
                 "CodeRouterBench sync completed: {FileCount} file(s) synced at commit {RepoCommit}.",
                 result.Files.Count, result.RepoCommit);
+        }
+    }
+
+    /// <summary>
+    /// Runs one <c>logreg</c> voter retrain to completion (docs/router/live-feedback-learning-plan.md
+    /// Phase 4c), following <see cref="RunBenchmarkDataSyncAsync"/>'s headless-CLI shape: resolved directly
+    /// from the built (but not started) host, no Kestrel, process exits once the retrain completes. Sets a
+    /// non-zero <see cref="Environment.ExitCode"/> when the retrain declined for lack of data, so a CI or
+    /// scheduled-task caller can detect it.
+    /// </summary>
+    private static async Task RunLogRegRetrainAsync(IServiceProvider services)
+    {
+        var logger = services.GetRequiredService<ILogger<IEmbeddingLogRegTrainingService>>();
+        var trainingService = services.GetRequiredService<IEmbeddingLogRegTrainingService>();
+
+        var progress = new Progress<int>(taskCount =>
+            logger.LogInformation("logreg retrain: embedded {TaskCount} OOD bootstrap task(s) so far.", taskCount));
+
+        var outcome = await trainingService.RetrainAsync(progress, CancellationToken.None);
+
+        logger.LogInformation("logreg retrain finished with outcome {Kind}: {Message}", outcome.Kind, outcome.Message);
+
+        if (outcome.Kind != LogRegTrainingResultKind.Trained)
+        {
+            Environment.ExitCode = 1;
         }
     }
 }
