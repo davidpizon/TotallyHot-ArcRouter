@@ -248,6 +248,59 @@ Opacity only, per the §2 floating-layer constraint. Already correct in `app.css
 .ls-tooltip.visible { opacity: 1; }
 ```
 
+### Disclosure Collapse — *Shipping*
+
+The two-way companion to Disclosure Expand, for a card that should **grow and shrink smoothly** —
+Benchmark Data's Task Matrix and Local Voter Model file lists, and the provider card's add-model
+chevron pane.
+
+**Why this exists alongside Disclosure Expand.** That pattern animates content Blazor has just
+mounted with `@if`, so it can only ever play on the way *in* — the node is gone before an exit could
+run — and the card itself still snaps to its new height. When the card's own size change is the
+thing that should feel smooth, the content has to **stay mounted** and toggle a class instead.
+
+**This does not violate the "never animate height" rule in Disclosure Expand — it is how that rule
+is satisfied.** The point of that rule is that `height: auto` is not an interpolable value, so
+animating it means measuring the content in JS and writing a pixel height back every time the
+content changes. `grid-template-rows: 0fr → 1fr` interpolates natively against content of unknown
+height: no measurement, no JS, no stale pixel value when a file row is added mid-transition. Chromium
+has supported it since 107 and the only host is WebView2, so there is no engine to degrade for.
+
+Two transition declarations, not one — the base rule governs the way closed and `.open` the way
+open. That is what lets the exit be faster than the enter (§3) and use the mirrored curve (§4)
+instead of replaying the entrance backwards.
+
+```css
+.ls-disclosure {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows var(--dur-exit) var(--ease-in-quart),
+              opacity            var(--dur-exit) var(--ease-in-quart);
+}
+.ls-disclosure.open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition: grid-template-rows var(--dur-default) var(--ease-out-expo),
+              opacity            var(--dur-fast)    var(--ease-out-expo);
+}
+/* The single child is the clipping window. min-height: 0 is load-bearing: grid items default to
+   min-height: auto, which refuses to shrink below their content and pins the pane open. */
+.ls-disclosure > * { overflow: hidden; min-height: 0; }
+```
+
+Three rules for using it:
+
+- **Exactly one element between the wrapper and the content.** Padding or margin on the wrapper's
+  child survives the `0fr` track and leaves a residual strip when collapsed, so spacing utilities
+  (`pt-1`, `mt-1.5`) belong on an element *inside* that child.
+- **Mark it `inert` while collapsed.** The content is still in the DOM, so without it the pane's
+  focusable controls stay in the tab order while invisible. `inert="@(!_open)"` — Blazor emits the
+  attribute only when the value is true.
+- **Do not use it for long or repeated lists.** Staying mounted means rendering the collapsed
+  content for every instance. `TurnCard` deliberately keeps `@if` + Disclosure Expand for exactly
+  this reason — see §10.
+
 ### Value Tick — *Proposed*
 
 A numeric stat whose value just changed. Colour only — **no transform, no layout change, no
@@ -392,6 +445,7 @@ Add to `app.css` below the compiled Tailwind blob:
 | `.tab-indicator` actually applied (was dead CSS) | `Dashboard.razor` nav buttons |
 | Tab Chrome Crossfade — border geometry reserved on the base rule so selection no longer reflows the tab row | `.tab-button` |
 | `transition: all` retired on every selected-one-of-N control | `.tab-button`, `.tab-indicator`, `.gov-tab`, `.metric-button`, `.filter-button` |
+| Disclosure Collapse — two-way expand/contract via `grid-template-rows` | `.ls-disclosure`; `BenchmarkData` (Task Matrix + Local Voter Model), `ProvidersAdmin` add-model pane |
 | `prefers-reduced-motion` block | `app.css` |
 
 ### Coded and wired — not confirmed in UI
@@ -415,6 +469,7 @@ accessibility setting forcing `prefers-reduced-motion: reduce` (collapses all du
 | **Value Tick** (§6) | Needs per-stat previous-value tracking to fire on. The CSS is intentionally *not* in `app.css` — unused rules rot, as `.tab-indicator` did. Add rule and wiring together. |
 | **Row Enter on `TurnCard`** | Turn lists re-render on selection change; entrance animation there needs the same first-mount gate `LiveStream` uses for conversations, or every conversation switch replays it. |
 | **Grid stagger on provider/model cards** (§7) | Straightforward; not yet applied. |
+| **Disclosure Collapse on `TurnCard`** (§6) | Deliberately *not* applied, and not a gap to close. Its expanded block carries the full routing-step list plus the request/response `<pre>` payload summaries, and the live stream renders many turn cards at once; staying mounted to gain a collapse animation would mean rendering every collapsed turn's payload for every card in the list. It keeps `@if` + Disclosure Expand — entrance animates, collapse is instant. Revisit only if the turn list is virtualized. |
 
 ### Notes for future work
 

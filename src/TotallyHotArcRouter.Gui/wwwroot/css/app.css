@@ -1188,6 +1188,46 @@ input[type="number"] {
   animation-delay: calc(var(--i, 0) * 25ms);
 }
 
+/* Disclosure Collapse (MOTION.md §6) — the two-way companion to .disclosure-enter above.
+   .disclosure-enter animates content that Blazor has just mounted with @if, so it can only
+   ever play on the way IN; the node is gone before an exit could run. A card whose own height
+   should grow and shrink smoothly therefore has to stay mounted and toggle a class instead.
+
+   The open/closed size is carried by the grid track, not by `height`. This is what MOTION.md
+   §6's "never animate height" rule is really guarding against: `height: auto` is not an
+   interpolable value, so animating it at all means measuring the content in JS and writing a
+   pixel height back every time the content changes. `0fr -> 1fr` interpolates natively against
+   content of unknown height, so there is no measurement step and no JS. WebView2 is Chromium
+   (107+ for this); the app has no non-Chromium target to degrade for.
+
+   Two transitions, not one: the base rule runs on the way closed and the .open rule on the way
+   open, which is how the exit gets to be faster than the enter (§3) and to use the mirrored
+   curve (§4) rather than replaying the entrance backwards. */
+.ls-disclosure {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows var(--dur-exit) var(--ease-in-quart),
+              opacity var(--dur-exit) var(--ease-in-quart);
+}
+
+.ls-disclosure.open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition: grid-template-rows var(--dur-default) var(--ease-out-expo),
+              opacity var(--dur-fast) var(--ease-out-expo);
+}
+
+/* The single child is the window the collapsing track clips content against. min-height: 0 is
+   load-bearing, not defensive: grid items default to min-height: auto, which refuses to shrink
+   below their content's intrinsic height and would pin the disclosure permanently open. Any
+   padding belongs on an element INSIDE this one — padding here survives the 0fr track and
+   leaves a residual strip when collapsed. */
+.ls-disclosure > * {
+  overflow: hidden;
+  min-height: 0;
+}
+
 /* Value Tick (MOTION.md §6) is deliberately not defined here: it needs per-stat previous-value
    tracking to fire on, and unused CSS rots. Add it together with its wiring, not before. */
 

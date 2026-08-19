@@ -438,6 +438,10 @@ Earlier round of classes:
 - `.ds-divider`, `.ds-divider-subtle` — separator lines
 - `.ds-code-block` — code/payload block styling
 - `.tab-button` with `.active`/`.inactive` states — tab bar button styling
+- `.ls-disclosure` with `.open` — expand/collapse pane wrapper for cards whose contents unfold
+  (Benchmark Data's file lists, the provider card's add-model pane). Wraps exactly one child, which
+  is the clipping window; spacing utilities go on an element inside that child, and the wrapper takes
+  `inert` while collapsed. Motion contract: [`MOTION.md`](MOTION.md) §6 Disclosure Collapse
 - `.btn-state-active`, `.btn-state-inactive`, `.btn-metric-active`, `.btn-metric-inactive` — conditional button states
 
 Every remaining `style=` attribute in `TotallyHotArcRouter.Gui/Components` is one of the sanctioned

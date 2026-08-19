@@ -182,23 +182,29 @@
                             <span aria-hidden="true">@(IsAddModelPaneOpen(provider.Key) ? "▴" : "▾")</span>
                         </button>
 
-                        @if (IsAddModelPaneOpen(provider.Key))
-                        {
-                            <div class="flex items-center gap-1.5 mt-1.5">
-                                <input type="text" value="@GetDraft(_draftName, provider.Key)"
-                                       @oninput="e => _draftName[provider.Key] = AsString(e.Value)"
-                                       placeholder="model name"
-                                       class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input" />
-                                <input type="text" value="@GetDraft(_draftId, provider.Key)"
-                                       @oninput="e => _draftId[provider.Key] = AsString(e.Value)"
-                                       placeholder="provider model id (optional)"
-                                       class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input" />
-                                <button @onclick="() => AddModel(provider.Key)"
-                                        class="btn-small-action shrink-0">
-                                    Add
-                                </button>
+                        @* Always mounted so the pane can animate shut as well as open (the @if this
+                           replaced unmounted it instantly). `inert` matters more here than on a
+                           read-only disclosure: without it Tab would land in the two inputs and the
+                           Add button while the pane is visually collapsed. *@
+                        <div class="ls-disclosure @(IsAddModelPaneOpen(provider.Key) ? "open" : null)"
+                             inert="@(!IsAddModelPaneOpen(provider.Key))">
+                            <div>
+                                <div class="flex items-center gap-1.5 mt-1.5">
+                                    <input type="text" value="@GetDraft(_draftName, provider.Key)"
+                                           @oninput="e => _draftName[provider.Key] = AsString(e.Value)"
+                                           placeholder="model name"
+                                           class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input" />
+                                    <input type="text" value="@GetDraft(_draftId, provider.Key)"
+                                           @oninput="e => _draftId[provider.Key] = AsString(e.Value)"
+                                           placeholder="provider model id (optional)"
+                                           class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input" />
+                                    <button @onclick="() => AddModel(provider.Key)"
+                                            class="btn-small-action shrink-0">
+                                        Add
+                                    </button>
+                                </div>
                             </div>
-                        }
+                        </div>
                     </div>
 
                     @* Budget: optional monthly $ / token caps, current-month spend, and two utilization

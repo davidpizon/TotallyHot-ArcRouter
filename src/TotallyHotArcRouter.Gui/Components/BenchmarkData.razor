@@ -115,36 +115,40 @@
                     @(_filesExpanded ? "Hide files" : $"Show {status.Files.Count} files")
                 </button>
 
-                @if (_filesExpanded)
-                {
-                    <div class="space-y-2 pt-1">
-                        @foreach (var file in status.Files)
-                        {
-                            var progress = Store.SyncProgress.GetValueOrDefault(file.FileName);
+                @* Rendered unconditionally, unlike the @if this replaced: collapsing can only
+                   animate if the node survives the toggle. `inert` keeps the hidden rows out of
+                   the tab order and the accessibility tree while the track is closed. *@
+                <div class="ls-disclosure @(_filesExpanded ? "open" : null)" inert="@(!_filesExpanded)">
+                    <div>
+                        <div class="space-y-2 pt-1">
+                            @foreach (var file in status.Files)
+                            {
+                                var progress = Store.SyncProgress.GetValueOrDefault(file.FileName);
 
-                            <div @key="file.FileName" class="space-y-0.5">
-                                <div class="flex items-center justify-between gap-2">
-                                    <span class="text-xs font-mono @(file.Synced ? "state-enabled" : "state-disabled")">
-                                        @file.FileName
-                                    </span>
-                                    <span class="text-xs @StageClass(progress)">@StageLabel(file, progress)</span>
-                                </div>
-                                <div class="flex items-center justify-between text-xs text-slate-500">
-                                    <span>@DescribeSize(file, progress)</span>
-                                    <span>@DescribeSyncedAt(file)</span>
-                                </div>
-                                @if (progress is { Stage: BenchmarkSyncStageInfo.Failed, Error: { } error })
-                                {
-                                    <div class="rounded px-2 py-1.5 text-xs ds-outcome-critical">
-                                        <span class="flex items-center gap-1.5 text-red-300">
-                                            <span aria-hidden="true"><Icon Name="alert-triangle" Size="12" /></span> @error
+                                <div @key="file.FileName" class="space-y-0.5">
+                                    <div class="flex items-center justify-between gap-2">
+                                        <span class="text-xs font-mono @(file.Synced ? "state-enabled" : "state-disabled")">
+                                            @file.FileName
                                         </span>
+                                        <span class="text-xs @StageClass(progress)">@StageLabel(file, progress)</span>
                                     </div>
-                                }
-                            </div>
-                        }
+                                    <div class="flex items-center justify-between text-xs text-slate-500">
+                                        <span>@DescribeSize(file, progress)</span>
+                                        <span>@DescribeSyncedAt(file)</span>
+                                    </div>
+                                    @if (progress is { Stage: BenchmarkSyncStageInfo.Failed, Error: { } error })
+                                    {
+                                        <div class="rounded px-2 py-1.5 text-xs ds-outcome-critical">
+                                            <span class="flex items-center gap-1.5 text-red-300">
+                                                <span aria-hidden="true"><Icon Name="alert-triangle" Size="12" /></span> @error
+                                            </span>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
                     </div>
-                }
+                </div>
             </div>
         }
 
@@ -250,42 +254,44 @@
                             @(_voterFilesExpanded ? "Hide files" : $"Show {voterStatus.Files.Count} files")
                         </button>
 
-                        @if (_voterFilesExpanded)
-                        {
-                            <div class="space-y-2 pt-1">
-                                @foreach (var file in voterStatus.Files)
-                                {
-                                    var progress = VoterStore.SyncProgress.GetValueOrDefault(file.FileName);
+                        @* Same always-mounted disclosure as Task Matrix above — see its comment. *@
+                        <div class="ls-disclosure @(_voterFilesExpanded ? "open" : null)" inert="@(!_voterFilesExpanded)">
+                            <div>
+                                <div class="space-y-2 pt-1">
+                                    @foreach (var file in voterStatus.Files)
+                                    {
+                                        var progress = VoterStore.SyncProgress.GetValueOrDefault(file.FileName);
 
-                                    <div @key="file.FileName" class="space-y-0.5">
-                                        <div class="flex items-center justify-between gap-2">
-                                            <span class="text-xs font-mono @(file.Synced ? "state-enabled" : "state-disabled")">
-                                                @file.FileName
-                                            </span>
-                                            <span class="text-xs @VoterStageClass(progress)">@VoterStageLabel(file, progress)</span>
-                                        </div>
-                                        <div class="flex items-center justify-between text-xs text-slate-500">
-                                            <span>@VoterDescribeSize(file, progress)</span>
-                                            <span>@VoterDescribeSyncedAt(file)</span>
-                                        </div>
-                                        @if (file.Synced)
-                                        {
-                                            <div class="text-xs @(file.ChecksumVerified ? "text-emerald-400" : "text-slate-500")">
-                                                @(file.ChecksumVerified ? "Verified" : "Unverified")
-                                            </div>
-                                        }
-                                        @if (progress is { Stage: LlmRouterModelSyncStageInfo.Failed, Error: { } voterError })
-                                        {
-                                            <div class="rounded px-2 py-1.5 text-xs ds-outcome-critical">
-                                                <span class="flex items-center gap-1.5 text-red-300">
-                                                    <span aria-hidden="true"><Icon Name="alert-triangle" Size="12" /></span> @voterError
+                                        <div @key="file.FileName" class="space-y-0.5">
+                                            <div class="flex items-center justify-between gap-2">
+                                                <span class="text-xs font-mono @(file.Synced ? "state-enabled" : "state-disabled")">
+                                                    @file.FileName
                                                 </span>
+                                                <span class="text-xs @VoterStageClass(progress)">@VoterStageLabel(file, progress)</span>
                                             </div>
-                                        }
-                                    </div>
-                                }
+                                            <div class="flex items-center justify-between text-xs text-slate-500">
+                                                <span>@VoterDescribeSize(file, progress)</span>
+                                                <span>@VoterDescribeSyncedAt(file)</span>
+                                            </div>
+                                            @if (file.Synced)
+                                            {
+                                                <div class="text-xs @(file.ChecksumVerified ? "text-emerald-400" : "text-slate-500")">
+                                                    @(file.ChecksumVerified ? "Verified" : "Unverified")
+                                                </div>
+                                            }
+                                            @if (progress is { Stage: LlmRouterModelSyncStageInfo.Failed, Error: { } voterError })
+                                            {
+                                                <div class="rounded px-2 py-1.5 text-xs ds-outcome-critical">
+                                                    <span class="flex items-center gap-1.5 text-red-300">
+                                                        <span aria-hidden="true"><Icon Name="alert-triangle" Size="12" /></span> @voterError
+                                                    </span>
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                </div>
                             </div>
-                        }
+                        </div>
                     </div>
                 }
             }

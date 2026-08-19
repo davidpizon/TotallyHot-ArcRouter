@@ -270,11 +270,22 @@ public sealed class ProvidersAdminLoadedTests
         using var ctx = NewContext(transport);
         var cut = RenderLoaded(ctx);
 
-        cut.FindAll("input[placeholder='model name']").Should().BeEmpty();
+        // Every provider's pane stays mounted so it can animate shut as well as open, so a collapsed
+        // pane is one whose wrapper lacks .open and carries inert - the latter is what keeps its two
+        // inputs and Add button out of the tab order while they are not visible.
+        var panes = cut.FindAll(".ls-disclosure");
+        panes.Should().NotBeEmpty();
+        panes.Should().AllSatisfy(pane =>
+        {
+            pane.ClassList.Should().NotContain("open");
+            pane.HasAttribute("inert").Should().BeTrue();
+        });
 
         cut.FindAll("button[aria-label='Add model manually']")[0].Click();
 
-        cut.FindAll("input[placeholder='model name']").Should().ContainSingle();
+        var opened = cut.FindAll(".ls-disclosure").Where(p => p.ClassList.Contains("open")).ToList();
+        opened.Should().ContainSingle();
+        opened[0].HasAttribute("inert").Should().BeFalse();
     }
 
     [Fact]
