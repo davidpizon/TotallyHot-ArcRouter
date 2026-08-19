@@ -202,6 +202,12 @@ dependency - nothing in this codebase uses a database today; `Router/JsonRouterM
 closest existing precedent, and it uses a plain JSON file, not a DB - see "Known limitations" for why
 SQLite is still the right call here anyway).
 
+> **Historical note.** The parenthetical above describes the codebase as it stood when this blueprint was
+> written. SQLite is now the repository's standard persistence layer (`PriceCatalogDatabase`,
+> `BenchmarkDatabase`, `RouterMemoryDatabase`), and `JsonRouterMemoryStore` has been deleted - router memory
+> moved to the `dimension_scores` table, per
+> [`memory-persistence.md`](memory-persistence.md). Kept as written for the reasoning trail.
+
 ### 3.1 Schema initialization
 
 ```csharp

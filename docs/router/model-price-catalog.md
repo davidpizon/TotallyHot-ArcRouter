@@ -966,7 +966,9 @@ catalog feeds the *existing* `EstimateCost` computation rather than growing a pa
   future source added to LiteLLM and OpenRouter — a new source arrives with its own terms and cannot be
   assumed to inherit these.
 - **`Microsoft.Data.Sqlite` is a new dependency.** Nothing in this repo uses a database today
-  (`Router/JsonRouterMemoryStore.cs` uses a plain JSON file). Flagged as a tradeoff in
+  (`Router/JsonRouterMemoryStore.cs` uses a plain JSON file) - *true when written; SQLite is now the
+  repository standard and that JSON store has been deleted, see
+  [`memory-persistence.md`](memory-persistence.md)*. Flagged as a tradeoff in
   [`agent-cost-tracking.md`](agent-cost-tracking.md) §6. [`utility-model-routing.md`](utility-model-routing.md)
   §B3a documents the escape hatch if that's unacceptable for a first cut: ship the memory-only
   quality-gate path and add the cost term when the catalog lands.

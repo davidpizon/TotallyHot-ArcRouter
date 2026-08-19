@@ -34,6 +34,7 @@ public sealed class StartupHealthCheckHostedService : IHostedService
     private readonly IUsageRollupStore _rollupStore;
     private readonly StorageOptions _storageOptions;
     private readonly Router.RouterMemoryDatabase _routerMemoryDatabase;
+    private readonly Router.RouterMemory _routerMemory;
     private readonly Router.EmbeddingMemory _embeddingMemory;
     private readonly CodeRouterBench.BenchmarkDatabase _benchmarkDatabase;
     private readonly CodeRouterBench.BenchmarkDataStatusService _benchmarkStatusService;
@@ -60,6 +61,7 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         IUsageRollupStore rollupStore,
         IOptions<StorageOptions> storageOptions,
         Router.RouterMemoryDatabase routerMemoryDatabase,
+        Router.RouterMemory routerMemory,
         Router.EmbeddingMemory embeddingMemory,
         CodeRouterBench.BenchmarkDatabase benchmarkDatabase,
         CodeRouterBench.BenchmarkDataStatusService benchmarkStatusService,
@@ -77,6 +79,7 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         ArgumentNullException.ThrowIfNull(rollupStore);
         ArgumentNullException.ThrowIfNull(storageOptions);
         ArgumentNullException.ThrowIfNull(routerMemoryDatabase);
+        ArgumentNullException.ThrowIfNull(routerMemory);
         ArgumentNullException.ThrowIfNull(embeddingMemory);
         ArgumentNullException.ThrowIfNull(benchmarkDatabase);
         ArgumentNullException.ThrowIfNull(benchmarkStatusService);
@@ -92,6 +95,7 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         _rollupStore = rollupStore;
         _storageOptions = storageOptions.Value;
         _routerMemoryDatabase = routerMemoryDatabase;
+        _routerMemory = routerMemory;
         _embeddingMemory = embeddingMemory;
         _benchmarkDatabase = benchmarkDatabase;
         _benchmarkStatusService = benchmarkStatusService;
@@ -216,18 +220,24 @@ public sealed class StartupHealthCheckHostedService : IHostedService
             _logger.LogWarning(ex, "Usage-rollup backfill failed; continuing startup.");
         }
 
-        // Task-embedding-keyed memory (PLAN.md Phase J): ensure its own SQLite schema exists and load
-        // the working set, best-effort and log-only like every check above - Phase J's store is not yet
-        // on the routing decision path (Phase L wires the Orchestrator's memory_kNN voter to it), so a
-        // failure here must not block the proxy from binding its port.
+        // Router memory: ensure the shared SQLite schema exists, then load both working sets - the
+        // dimension-keyed score aggregates behind RouterMemory and the task-embedding-keyed entries behind
+        // EmbeddingMemory (PLAN.md Phase J). Best-effort and log-only like every check above; a failure
+        // must not block the proxy from binding its port, it just leaves the router starting cold.
+        //
+        // RouterMemory.InitializeAsync had no production caller before this: scores were persisted on every
+        // observation and never read back, so accumulated feedback was silently discarded at every restart
+        // and dim_best began each run from the CodeRouterBench prior alone. Loading it here is what makes
+        // that persistence actually mean something.
         try
         {
             _routerMemoryDatabase.EnsureCreated();
+            await _routerMemory.InitializeAsync().ConfigureAwait(false);
             await _embeddingMemory.InitializeAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Embedding memory initialization failed; continuing startup.");
+            _logger.LogWarning(ex, "Router memory initialization failed; continuing startup.");
         }
 
         // Embedding client warm-up (docs/router/live-feedback-learning-plan.md Phase 2b): forces the

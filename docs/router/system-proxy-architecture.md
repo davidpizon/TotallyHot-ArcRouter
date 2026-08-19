@@ -204,7 +204,7 @@ sequenceDiagram
 	"Enabled": true,
 	"CheapChain": ["gpt-4-turbo"],
 	"EscalateTo": "gpt-4",
-	"MemoryPath": "./router_memory.json",
+	"EmbeddingMemoryDatabasePath": "./router_embedding_memory.db",
 	"MaxNeighbors": 10
   },
   "Logging": {
@@ -237,8 +237,9 @@ dotnet run --project src/TotallyHotArcRouter/TotallyHotArcRouter.csproj
 # Verify proxy is active
 netsh winhttp show proxy
 
-# View memory to see routing decisions
-cat ./router_memory.json
+# View memory to see routing decisions (router memory is SQLite, not a JSON file -
+# see docs/router/memory-persistence.md)
+sqlite3 ./router_embedding_memory.db "SELECT dimension, model, sum / count AS average, count FROM dimension_scores ORDER BY dimension, model;"
 ```
 
 ### Scenario 2: System-Wide (Windows + All IDEs)
