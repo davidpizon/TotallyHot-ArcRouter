@@ -229,6 +229,11 @@
   --border-button: #4d4d4d;
   --border-light: #7c7c7c;
 
+  /* The gap between sibling cards in a stacked list, everywhere in the app. 0.75rem is the value
+     the Price Sources and Providers lists have always used (Tailwind's space-y-3); naming it here
+     makes it the single source of truth rather than a number re-guessed per pane. */
+  --space-card-gap: 0.75rem;
+
   --radius-card: 8px;
   --radius-control: 12px;
   --radius-pill: 9999px;
@@ -1070,6 +1075,26 @@ input[type="number"]:focus {
 }
 
 /* ---- Static card surfaces (prefer over inline `background:#181818;border:1px solid #4d4d4d`) ---- */
+/* ---- Card stack rhythm (DESIGN.md §5) ----
+   Two spellings of one value, because the panes differ in shape, not in spacing:
+
+   .ds-card-stack  — a container whose children are all cards (Price Sources). Preferred.
+   .ds-card-gap    — one card that follows another but has no shared stack parent to hang the rule
+                     on. Benchmark Data is the case: its two cards sit in different @if branches
+                     that flatten into the same DOM level alongside error banners which carry their
+                     own margins, so a stack container would double those banners' spacing.
+
+   Do NOT reach for Tailwind's space-y-* here. The blob is generated output with no build step, so
+   it ships only the utilities the mock happened to use — .mt-6 and .mt-3 are both absent, which is
+   why Benchmark Data's `mt-6` rendered no margin at all. A token cannot silently evaporate. */
+.ds-card-stack > * + * {
+  margin-top: var(--space-card-gap);
+}
+
+.ds-card-gap {
+  margin-top: var(--space-card-gap);
+}
+
 .ds-surface-card {
   background: var(--surface-card);
   border: 1px solid var(--border-button);

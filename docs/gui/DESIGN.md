@@ -330,7 +330,7 @@ the header, dismissal behavior, close API, and dynamic scrolling identical regar
 | **Margin (all sides)** | `ml-auto` only | `m-0`, `m-1`, `m-2`, `m-3`, etc. |
 | **Margin (horizontal)** | None | All `mx-*` variants |
 | **Margin (vertical)** | None | All `my-*` variants |
-| **Margin (top)** | `mt-0.5`, `mt-1.5`, `mt-2` | `mt-1`, `mt-3`, `mt-4`, etc. |
+| **Margin (top)** | `mt-0.5`, `mt-1.5`, `mt-2` | `mt-1`, `mt-3`, `mt-4`, `mt-6`, etc. |
 | **Margin (bottom)** | `mb-0.5`, `mb-1`, `mb-2`, `mb-3` | `mb-1.5`, `mb-4`, etc. |
 | **Margin (left/right)** | `ml-auto`, `pr-1`, `pr-3` | `ml-*`, `mr-*` (except `ml-auto`) |
 | **Padding (all sides)** | `p-2`, `p-3`, `p-4`, `p-5` | `p-0`, `p-1`, `p-6`, etc. |
@@ -348,6 +348,31 @@ the header, dismissal behavior, close API, and dynamic scrolling identical regar
 ```
 
 Then use `class="my-custom-spacing"` in markup. See `.btn-small-action` (added for compact action buttons with margin) as a reference pattern.
+
+### 5.2 Card stack spacing
+
+**The gap between sibling cards in a stacked list is `0.75rem` (12px), everywhere in the app.** It is
+defined once, as the `--space-card-gap` token in `app.css`, and every pane derives from it. Do not
+write the number into a pane.
+
+| Class | Use when | Example |
+| --- | --- | --- |
+| `.ds-card-stack` | A container whose children are all cards. **Preferred.** | `PriceSourcesAdmin` — the draggable source list; `ProvidersAdmin` — the provider list |
+| `.ds-card-gap` | A card follows another but the two have no shared stack parent to hang the rule on | `BenchmarkData` — the Local Voter Model section |
+
+`BenchmarkData` needs the second form because its two cards live in different `@if` branches that
+flatten into the same DOM level, alongside error banners that carry their own `mb-3`; a stack
+container would double those banners' spacing rather than only separating the cards.
+
+**Do not express this gap with `space-y-3`/`gap-3`**, even though they compute to the same value.
+The token says *why* the number is what it is, and `space-y-3` is a general vertical-rhythm utility
+used for unrelated things (modal body blocks in `ProviderEditDialog`, `SettingsModal`, and the
+destructive-confirm boxes) — overloading it hides which stacks are card lists.
+
+**Why a token and not a utility class.** This gap was previously `mt-6` on the Benchmark Data pane
+and rendered *nothing at all*: per §5.1 the compiled blob ships only the utilities the original mock
+used, and neither `mt-6` nor `mt-3` is among them, so the class was inert and the two cards sat flush.
+A missing utility fails silently; a missing token does not.
 
 ## 6. Elevation & Depth
 
@@ -438,6 +463,8 @@ Earlier round of classes:
 - `.ds-divider`, `.ds-divider-subtle` — separator lines
 - `.ds-code-block` — code/payload block styling
 - `.tab-button` with `.active`/`.inactive` states — tab bar button styling
+- `.ds-card-stack` / `.ds-card-gap` — the standard `--space-card-gap` (0.75rem) gap between stacked
+  cards; see §5.2 for which form to use
 - `.ls-disclosure` with `.open` — expand/collapse pane wrapper for cards whose contents unfold
   (Benchmark Data's file lists, the provider card's add-model pane). Wraps exactly one child, which
   is the clipping window; spacing utilities go on an element inside that child, and the wrapper takes

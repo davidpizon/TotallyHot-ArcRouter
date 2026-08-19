@@ -42,10 +42,6 @@
     }
     else
     {
-        <div class="flex items-center justify-between mb-3 gap-2">
-            <span class="text-xs text-slate-500 uppercase tracking-widest">Task Matrix</span>
-        </div>
-
         @* Store.LastError covers a status load the router answered with a rejection: reachable, so the
            layout above stays, but the reason still has to be shown somewhere. *@
         @if (ErrorMessage() is { Length: > 0 } errorMessage)
@@ -156,11 +152,7 @@
            one-card-per-asset shape as Task Matrix above - a single card, two progress bars while
            syncing, and the per-file breakdown behind a disclosure. The base URL is a fixed pin (set via
            the override file/config, not this panel), so there is no URL editor here. *@
-        <div class="mt-6">
-            <div class="flex items-center justify-between mb-3 gap-2">
-                <span class="text-xs text-slate-500 uppercase tracking-widest">Local Voter Model</span>
-            </div>
-
+        <div class="ds-card-gap">
             @if (!VoterStore.IsLoaded)
             {
                 <div class="text-sm text-slate-500 p-4">Loading local voter model status…</div>

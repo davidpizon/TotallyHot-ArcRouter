@@ -65,7 +65,7 @@
             <div class="text-xs text-slate-500 p-4">No price sources are registered.</div>
         }
 
-        <div class="space-y-3" @onpointerup="OnPointerUp" @onpointerleave="CancelDragIfActive" @onpointercancel="CancelDragIfActive">
+        <div class="ds-card-stack" @onpointerup="OnPointerUp" @onpointerleave="CancelDragIfActive" @onpointercancel="CancelDragIfActive">
             @{ var sources = DisplayOrder; }
             @for (var i = 0; i < sources.Count; i++)
             {
