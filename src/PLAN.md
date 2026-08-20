@@ -47,20 +47,29 @@ flowchart LR
         LOOP["Classifier → 4-voter Orchestrator →<br/>model → Verifier → RouterMemory/EmbeddingMemory →<br/>back into the voters"]
     end
 
+    ROI["Routing ROI: expense + regret<br/>vs dim_best, fast drain,<br/>hard pause under load"]
     T["T5–T6: cluster-training admin pane,<br/>adaptive-routing settings surface<br/>(T1–T4 shipped)"]
     P5["live-feedback Phase 5:<br/>logreg admin pane"]
     G1["G1: shadow judge<br/>(accumulates, influences nothing)"]
     N["Phase N: regret harness<br/>(+ live-feedback Phase 6 relocation)"]
     G23["G2 → G3: judge calibration,<br/>then judge as verifier for<br/>non-executable dimensions"]
 
-    LOOP --> T --> P5 --> G1 --> N --> G23
+    LOOP --> ROI --> T --> P5 --> G1 --> N --> G23
     T -.->|"closes N's three<br/>live-arm blockers"| N
     G1 -.->|"shadow data gates"| G23
 ```
 
 ## Remaining work, in order
 
-1. **Phases T5–T6 — self-organizing request classification (remaining).** Full plan:
+1. **Routing ROI: expense + regret vs `dim_best` (next up).** Full plan:
+   [`../docs/router/routing-roi-regret-plan.md`](../docs/router/routing-roi-regret-plan.md)
+   (approved). Extends Phase T4's shipped comparison job: each `taxonomy_comparisons` row also
+   records an estimated **regret** vs the `dim_best` counterfactual under the canonical reward
+   `r = ε₁·s + ε₂·κ` (`RoutingOptions.Epsilon1/Epsilon2`), the comparison loop drains its whole
+   backlog on a one-minute cadence with cached heavy inputs, and an in-flight request gauge hard-
+   pauses all ROI work whenever the proxy is serving traffic. Store-only — the
+   `/admin/usage/routing-roi` contract and GUI chart are unchanged.
+2. **Phases T5–T6 — self-organizing request classification (remaining).** Full plan:
    [`../docs/router/self-organizing-classification-plan.md`](../docs/router/self-organizing-classification-plan.md).
    **T1–T4 have shipped**: opt-in transcript capture with provenance (`IsExploratory`, propensity, real
    cost), embedding backfill, spherical k-means clustering with an OOD bootstrap, the fifth additive
@@ -70,22 +79,22 @@ flowchart LR
    **T5**, the cluster-training admin pane, and **T6**, the System Settings adaptive-routing toggle plus
    the router-side mutable settings store it needs. T1 already closed the three prerequisites the regret
    plan names as blocking any future live-regret arm, so Phase N is no longer gated on this workstream.
-2. **Live-feedback Phase 5 — `logreg` admin surface.**
+3. **Live-feedback Phase 5 — `logreg` admin surface.**
    [`../docs/router/live-feedback-learning-plan.md`](../docs/router/live-feedback-learning-plan.md)
    Phase 5 (proposed). A `RouterModelAdminService` gRPC service plus a Governance "Router Model" pane
    mirroring `BenchmarkDataAdminService`. Non-blocking for Phase N; natural to land with or right
    after T5, which builds the same pane pattern for cluster training.
-3. **Phase G1 — shadow judge.**
+4. **Phase G1 — shadow judge.**
    [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md)
    (proposed). The G-Eval judge scores in parallel with `VerifierScorer` into a side table and
    influences nothing. Deliberately sequenced *before* Phase N so agreement data accumulates passively
    while the harness is built — G2's gate needs volume, and shadow rows cost nothing on the hot path.
-4. **Phase N — regret evaluation harness.** Detail below; full component spec:
+5. **Phase N — regret evaluation harness.** Detail below; full component spec:
    [`../docs/router/regret-evaluation-harness-plan.md`](../docs/router/regret-evaluation-harness-plan.md)
    (N1–N6). Also carries live-feedback Phase 6's remaining item (relocating the TF-IDF
    `LogRegTrainer` machinery into a Phase-N-facing namespace), deferred by that plan to land alongside
    the harness itself.
-5. **Phases G2 → G3 — judge calibration, then judge-as-verifier.** G2's agreement/calibration analysis
+6. **Phases G2 → G3 — judge calibration, then judge-as-verifier.** G2's agreement/calibration analysis
    runs once G1 has accumulated shadow data; G3 (the judge as scorer of record for non-executable
    dimensions only, with `is_judge_scored` provenance) is gated on G2's criteria and never starts if
    the gate fails.
@@ -95,7 +104,7 @@ flowchart LR
 **Prerequisite status:** `live-feedback-learning-plan.md` Phase 4 shipped — all four Orchestrator
 voters can cast a real vote on live traffic instead of three of them abstaining for lack of an input,
 satisfying that plan's own ordering requirement ("measuring voters that structurally cannot fire would
-produce a benchmark of `dim_best` wearing an ensemble's name"). The T phases (item 1 above) are
+produce a benchmark of `dim_best` wearing an ensemble's name"). The T phases (item 2 above) are
 sequenced ahead of N because every phase of them removes a blocker N would otherwise have to solve
 itself, but N does not require them to complete.
 

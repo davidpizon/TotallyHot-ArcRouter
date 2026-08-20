@@ -84,6 +84,17 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         return Task.CompletedTask;
     }
 
+    /// <inheritdoc />
+    public Task<long> GetMaxIdAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COALESCE(MAX(id), 0) FROM memory_entries;";
+        return Task.FromResult((long)command.ExecuteScalar()!);
+    }
+
     /// <summary>Materializes a <see cref="MemoryEntry"/> from the current row of a <c>memory_entries</c> reader.</summary>
     /// <param name="reader">A reader positioned on a row selected with the columns in <see cref="LoadAllAsync"/>'s query order.</param>
     /// <returns>The row's data as a <see cref="MemoryEntry"/>.</returns>

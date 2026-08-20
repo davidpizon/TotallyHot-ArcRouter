@@ -291,6 +291,11 @@ namespace TotallyHot.ArcRouter.Hosting
             });
             services.AddSandbox();
 
+            // In-flight request gauge (docs/router/routing-roi-regret-plan.md): a singleton so
+            // ProxyMiddleware (incrementing per served request) and TaxonomyComparisonService
+            // (hard-pausing its comparison drain while the count is non-zero) observe one number.
+            services.AddSingleton<InFlightRequestGauge>();
+
             services.AddSingleton<ProxyMiddleware>();
 
             // Model price catalog (docs/router/model-price-catalog.md). Shares agent_telemetry.db with the

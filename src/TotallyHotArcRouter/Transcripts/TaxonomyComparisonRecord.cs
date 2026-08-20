@@ -48,6 +48,23 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// <see cref="BaselineEstimatedCostUsd"/> minus <see cref="ActualCostUsd"/> - positive when routing saved
 /// money against the frozen baseline, negative when it cost more. Inherits the estimate qualification.
 /// </param>
+/// <param name="BaselinePredictedScore">
+/// The score <see cref="BaselineModel"/> would likely have achieved on this request, predicted from the
+/// dimension ledger's blend (live average, else probing prior) - the same number <c>DimBestVoter</c> votes
+/// on, held out when the routed model <em>is</em> the baseline so a cell never predicts from its own
+/// observation. <b>An estimate</b>: the counterfactual response was never produced.
+/// <see langword="null"/> when the baseline abstained or neither ledger source has the cell.
+/// </param>
+/// <param name="EstimatedRegret">
+/// The routing decision's estimated regret against the <c>dim_best</c> baseline under the canonical
+/// reward <c>r = ε₁·s + ε₂·κ</c> (docs/router/routing-roi-regret-plan.md, weights from
+/// <c>RoutingOptions.Epsilon1</c>/<c>Epsilon2</c>): the baseline's estimated reward
+/// (<see cref="BaselinePredictedScore"/>, <see cref="BaselineEstimatedCostUsd"/>) minus the routed pick's
+/// observed reward (<see cref="ObservedScore"/>, <see cref="ActualCostUsd"/>). Positive means the
+/// <c>dim_best</c> pick would likely have earned more reward; negative means routing beat it.
+/// <see langword="null"/> whenever any input is missing - never fabricated. Inherits the estimate
+/// qualification: the baseline half is predicted, not observed.
+/// </param>
 public sealed record TaxonomyComparisonRecord(
     long TranscriptId,
     DateTimeOffset ComparedAtUtc,
@@ -63,4 +80,6 @@ public sealed record TaxonomyComparisonRecord(
     string? BaselineModel,
     decimal? ActualCostUsd,
     decimal? BaselineEstimatedCostUsd,
-    decimal? EstimatedNetSavingsUsd);
+    decimal? EstimatedNetSavingsUsd,
+    double? BaselinePredictedScore,
+    double? EstimatedRegret);

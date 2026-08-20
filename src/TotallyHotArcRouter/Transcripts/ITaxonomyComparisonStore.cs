@@ -16,7 +16,8 @@ public interface ITaxonomyComparisonStore
     /// <summary>
     /// Returns up to <paramref name="limit"/> transcript row ids that are ready to compare and have not
     /// been compared yet - scored, linked to a <c>memory_entries</c> row (so an embedding exists to assign
-    /// a cluster from), and carrying no <c>taxonomy_comparisons</c> row. Oldest first.
+    /// a cluster from), carrying a heuristic dimension (so the frozen taxonomy has anything to say about
+    /// it), and carrying no <c>taxonomy_comparisons</c> row. Oldest first.
     /// </summary>
     /// <param name="limit">The maximum number of ids to return.</param>
     /// <param name="cancellationToken">A cancellation token.</param>
@@ -25,7 +26,11 @@ public interface ITaxonomyComparisonStore
     /// This is the queue Phase T4's background job drains. Readiness deliberately requires the embedding
     /// link rather than just a score: the learned taxonomy cannot assign a cluster without one, and
     /// comparing a row that only one of the two taxonomies could speak to would bias the comparison toward
-    /// whichever side happened to have data.
+    /// whichever side happened to have data. The dimension requirement is both a fairness condition (a row
+    /// with no heuristic dimension is not comparable against the frozen taxonomy at all) and a termination
+    /// guarantee: the drain loop (docs/router/routing-roi-regret-plan.md) skips dimensionless rows without
+    /// writing a comparison, so admitting one here would park it at the head of every oldest-first batch
+    /// forever.
     /// </remarks>
     Task<IReadOnlyList<long>> LoadPendingComparisonsAsync(int limit, CancellationToken cancellationToken = default);
 

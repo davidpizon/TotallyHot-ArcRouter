@@ -534,8 +534,18 @@ voters (both by concrete type and as `IRoutingVoter`).
 
 ## Phase T4 — Baseline comparison: learned clusters vs. the frozen 9-dimension categorizer
 
-> **Status: shipped.** `TaxonomyComparisonService` drains a queue of scored, embedded transcript rows on a
-> five-minute timer and writes one `taxonomy_comparisons` row per request; `DimensionLedger` (extracted
+> **Status: shipped; extended by [`routing-roi-regret-plan.md`](routing-roi-regret-plan.md).**
+> `TaxonomyComparisonService` drains a queue of scored, embedded transcript rows and writes one
+> `taxonomy_comparisons` row per request. As of the regret plan the timer is **one minute** and each cycle
+> **drains the entire backlog** (originally: one 200-row batch per five-minute tick), each row also
+> records an **estimated regret** vs the `dim_best` counterfactual under the canonical reward
+> `r = ε₁·s + ε₂·κ` (`baseline_predicted_score` / `estimated_regret`, weights from
+> `RoutingOptions.Epsilon1/Epsilon2`, store-only — the ROI API/GUI contract is unchanged), the heavy
+> per-cycle inputs (memory-entry snapshot, cluster artifact/ledger, probing prior) are cached across
+> cycles behind cheap change stamps, and the whole loop **hard-pauses while any proxy request is in
+> flight** (`InFlightRequestGauge`), so ROI computation can never contend with serving traffic.
+> `request_transcripts.dim_best_model` is retained after comparison (an erasure-on-consumption variant
+> was considered and rejected). `DimensionLedger` (extracted
 > from `DimBestVoter` so the measured rule is the voted rule) and `ClusterLedger` supply the two
 > predictions; `TaxonomyPromotionCriterion` implements the promotion predicate. Four implementation
 > decisions worth recording, since each departs from or sharpens what this section originally specified:

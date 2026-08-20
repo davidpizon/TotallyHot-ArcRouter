@@ -95,6 +95,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     private readonly PendingRequestCostCache? _pendingRequestCostCache;
     private readonly PendingRequestProvenanceCache? _pendingRequestProvenanceCache;
     private readonly ITranscriptStore? _transcriptStore;
+    private readonly InFlightRequestGauge? _inFlightGauge;
 
     // The rate the router's own tokens are charged at (see RoutingOptions.SelfHostedRouterPricePerMillionTokens).
     // Read once at construction rather than per request: it is a static amortization figure, not a catalog
@@ -190,6 +191,12 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// score is backfilled later by <see cref="Transcripts.TranscriptScoreObserver"/>. Defaults to
     /// <see langword="null"/> (no rows written), matching the feature's opt-in-and-off-by-default posture.
     /// </param>
+    /// <param name="inFlightGauge">
+    /// Optional in-flight request gauge (docs/router/routing-roi-regret-plan.md). When supplied, every
+    /// request is counted for the full duration of <see cref="InvokeAsync"/> so background analysis work
+    /// (the taxonomy-comparison drain) can hard-pause while traffic is being served. Defaults to
+    /// <see langword="null"/> (no tracking), so existing callers/tests are unaffected.
+    /// </param>
     public ProxyMiddleware(
         ILogger<ProxyMiddleware> logger,
         RequestInterceptor interceptor,
@@ -214,7 +221,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         IOptions<Models.RoutingOptions>? routingOptions = null,
         PendingRequestCostCache? pendingRequestCostCache = null,
         PendingRequestProvenanceCache? pendingRequestProvenanceCache = null,
-        ITranscriptStore? transcriptStore = null)
+        ITranscriptStore? transcriptStore = null,
+        InFlightRequestGauge? inFlightGauge = null)
     {
         _logger = logger;
         _interceptor = interceptor;
@@ -242,6 +250,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         _pendingRequestCostCache = pendingRequestCostCache;
         _pendingRequestProvenanceCache = pendingRequestProvenanceCache;
         _transcriptStore = transcriptStore;
+        _inFlightGauge = inFlightGauge;
         _selfHostedRouterPricePerMillionTokens =
             routingOptions?.Value.SelfHostedRouterPricePerMillionTokens ?? new Models.RoutingOptions().SelfHostedRouterPricePerMillionTokens;
 
@@ -273,6 +282,22 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
     /// <inheritdoc />
     public async Task InvokeAsync(HttpContext context, RequestDelegate next)
+    {
+        // The gauge scope spans the entire request - routing, upstream call, and response streaming -
+        // because background work pausing on "in flight" (see InFlightRequestGauge) must stay paused
+        // for exactly as long as a client could feel the contention.
+        using var _ = _inFlightGauge?.Track();
+        await InvokeCoreAsync(context, next);
+    }
+
+    /// <summary>
+    /// The whole of the request pipeline behind <see cref="InvokeAsync"/>, split out so the in-flight
+    /// accounting above wraps every exit path (including exceptions and streamed responses) in one
+    /// <c>using</c> scope rather than threading try/finally through this method's many returns.
+    /// </summary>
+    /// <param name="context">The HTTP context being served.</param>
+    /// <param name="next">The next middleware delegate (unused; the proxy is terminal).</param>
+    private async Task InvokeCoreAsync(HttpContext context, RequestDelegate next)
     {
         _logger.LogInformation("Proxy middleware caught request to {Path}", SanitizeForLog(context.Request.Path.ToString()));
 

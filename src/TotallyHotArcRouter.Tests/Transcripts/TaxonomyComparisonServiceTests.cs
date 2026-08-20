@@ -198,6 +198,168 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
             DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken));
     }
 
+    [Fact]
+    public async Task RunCycle_RecordsRegretFromLedgerPredictionAndRewardWeights()
+    {
+        // model-b's one prior observation (0.5) is the ledger cell the baseline prediction reads; the
+        // routed row scored 0.9 at $0.01 against a much pricier counterfactual, so regret must be negative
+        // (dim_best would likely have done worse AND cost more) and exactly the reward difference under
+        // the default (ε₁, ε₂) = (1, -0.1) weights.
+        var harness = await BuildHarnessAsync(
+            [
+                new Sample([1f, 0f], "model-b", 0.5, Cost: 0.10m),
+                new Sample([1f, 0f], "model-a", 0.9, Cost: 0.01m, DimBestModel: "model-b"),
+            ]);
+
+        await harness.Service.RunCycleAsync(TestContext.Current.CancellationToken);
+
+        var rows = await harness.ComparisonStore.LoadSinceAsync(
+            DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken);
+        var routed = Assert.Single(rows, r => r.RoutedModel == "model-a");
+
+        Assert.NotNull(routed.BaselinePredictedScore);
+        Assert.Equal(0.5, routed.BaselinePredictedScore!.Value, precision: 10);
+
+        Assert.NotNull(routed.EstimatedRegret);
+        var expectedRegret =
+            ((1.0 * routed.BaselinePredictedScore.Value) + (-0.1 * (double)routed.BaselineEstimatedCostUsd!.Value))
+            - ((1.0 * 0.9) + (-0.1 * 0.01));
+        Assert.Equal(expectedRegret, routed.EstimatedRegret!.Value, precision: 10);
+        Assert.True(routed.EstimatedRegret < 0, $"Routing beat the baseline on both axes; regret should be negative, got {routed.EstimatedRegret}.");
+    }
+
+    [Fact]
+    public async Task RunCycle_UnpriceableBaseline_RecordsNullRegretOnce()
+    {
+        // model-c has no price, no observed token averages, and no ledger cell - every regret input is
+        // missing, so both estimates stay null. One shot: the comparison row exists, so a second cycle
+        // must not requeue or duplicate it.
+        var harness = await BuildHarnessAsync(
+            [new Sample([1f, 0f], "model-a", 0.9, DimBestModel: "model-c")]);
+
+        await harness.Service.RunCycleAsync(TestContext.Current.CancellationToken);
+        await harness.Service.RunCycleAsync(TestContext.Current.CancellationToken);
+
+        var row = Assert.Single(await harness.ComparisonStore.LoadSinceAsync(
+            DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal("model-c", row.BaselineModel);
+        Assert.Null(row.BaselinePredictedScore);
+        Assert.Null(row.EstimatedRegret);
+        Assert.Null(row.EstimatedNetSavingsUsd);
+    }
+
+    [Fact]
+    public async Task RunCycle_RoutedEqualsBaseline_UsesLeaveOneOutPrediction()
+    {
+        // When the routed model IS the baseline's pick, the observation being compared already sits in the
+        // baseline's own ledger cell, so the prediction must hold it out: with observations 0.2 and 0.8 in
+        // one cell, each row's baseline prediction is the OTHER observation, never the contaminated 0.5.
+        var harness = await BuildHarnessAsync(
+            [
+                new Sample([1f, 0f], "model-a", 0.2, DimBestModel: "model-a"),
+                new Sample([1f, 0f], "model-a", 0.8, DimBestModel: "model-a"),
+            ]);
+
+        await harness.Service.RunCycleAsync(TestContext.Current.CancellationToken);
+
+        var rows = await harness.ComparisonStore.LoadSinceAsync(
+            DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken);
+        var low = Assert.Single(rows, r => r.ObservedScore == 0.2);
+        var high = Assert.Single(rows, r => r.ObservedScore == 0.8);
+        Assert.Equal(0.8, low.BaselinePredictedScore!.Value, precision: 10);
+        Assert.Equal(0.2, high.BaselinePredictedScore!.Value, precision: 10);
+    }
+
+    [Fact]
+    public async Task RunCycle_BacklogSpansMultipleBatches_DrainsEveryPendingRow()
+    {
+        var harness = await BuildHarnessAsync(
+            [
+                new Sample([1f, 0f], "model-a", 0.9),
+                new Sample([1f, 0f], "model-a", 0.8),
+                new Sample([1f, 0f], "model-a", 0.7),
+                new Sample([1f, 0f], "model-a", 0.6),
+                new Sample([1f, 0f], "model-a", 0.5),
+            ],
+            batchSize: 2);
+
+        await harness.Service.RunCycleAsync(TestContext.Current.CancellationToken);
+
+        // One cycle drains the whole backlog - three fetches at batch size 2, not one batch per tick.
+        var rows = await harness.ComparisonStore.LoadSinceAsync(
+            DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(5, rows.Count);
+    }
+
+    [Fact]
+    public async Task RunCycle_RowWithNoDimension_IsNeverQueuedAndTheCycleTerminates()
+    {
+        // A dimensionless row is not comparable against the frozen taxonomy, and with oldest-first
+        // ordering it would sit at the head of every batch: the queue predicate must exclude it, so the
+        // cycle both terminates and still compares the row behind it.
+        var harness = await BuildHarnessAsync(
+            [
+                new Sample([1f, 0f], "model-a", 0.9, Dimension: null),
+                new Sample([0f, 1f], "model-a", 0.7),
+            ]);
+
+        await harness.Service.RunCycleAsync(TestContext.Current.CancellationToken);
+
+        var row = Assert.Single(await harness.ComparisonStore.LoadSinceAsync(
+            DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(0.7, row.ObservedScore);
+    }
+
+    [Fact]
+    public async Task RunCycle_RequestsInFlight_DoesNothing()
+    {
+        var gauge = new InFlightRequestGauge();
+        var harness = await BuildHarnessAsync([new Sample([1f, 0f], "model-a", 0.9)], inFlightGauge: gauge);
+
+        using (gauge.Track())
+        {
+            await harness.Service.RunCycleAsync(TestContext.Current.CancellationToken);
+        }
+
+        // The hard-pause guarantee: with a request in flight, the cycle does no comparison work at all.
+        Assert.Empty(await harness.ComparisonStore.LoadSinceAsync(
+            DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken));
+
+        await harness.Service.RunCycleAsync(TestContext.Current.CancellationToken);
+        Assert.Single(await harness.ComparisonStore.LoadSinceAsync(
+            DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task RunCycle_TrafficArrivesMidDrain_StopsAndResumesNextCycle()
+    {
+        // The tripping store raises the gauge after the second transcript read, simulating a request
+        // arriving mid-drain: the first cycle commits the batch it was in and stops before the next row;
+        // the second (idle) cycle finishes the backlog.
+        var harness = await BuildHarnessAsync(
+            [
+                new Sample([1f, 0f], "model-a", 0.9),
+                new Sample([1f, 0f], "model-a", 0.8),
+                new Sample([1f, 0f], "model-a", 0.7),
+                new Sample([1f, 0f], "model-a", 0.6),
+            ],
+            batchSize: 2,
+            wrapTranscriptStore: (gauge, inner) => new GaugeTrippingTranscriptStore(inner, gauge, tripAfterReads: 2));
+
+        await harness.Service.RunCycleAsync(TestContext.Current.CancellationToken);
+
+        var afterFirstCycle = await harness.ComparisonStore.LoadSinceAsync(
+            DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(2, afterFirstCycle.Count);
+
+        harness.Gauge!.Decrement();
+        await harness.Service.RunCycleAsync(TestContext.Current.CancellationToken);
+
+        var afterSecondCycle = await harness.ComparisonStore.LoadSinceAsync(
+            DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(4, afterSecondCycle.Count);
+    }
+
     /// <summary>One fixture request: its embedding, the model that served it, and what came back.</summary>
     private sealed record Sample(
         float[] Embedding,
@@ -205,10 +367,14 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
         double? Score,
         bool IsExploratory = false,
         decimal? Cost = 0.05m,
-        string? DimBestModel = "model-b");
+        string? DimBestModel = "model-b",
+        string? Dimension = "code_generation");
 
     /// <summary>Everything one test needs to drive a cycle and inspect its output.</summary>
-    private sealed record Harness(TaxonomyComparisonService Service, ITaxonomyComparisonStore ComparisonStore);
+    private sealed record Harness(
+        TaxonomyComparisonService Service,
+        ITaxonomyComparisonStore ComparisonStore,
+        InFlightRequestGauge? Gauge);
 
     /// <summary>
     /// Builds a fully-wired service over real SQLite stores, seeding one transcript plus one linked memory
@@ -217,7 +383,10 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
     private async Task<Harness> BuildHarnessAsync(
         IReadOnlyList<Sample> samples,
         bool trainClusterModel = true,
-        bool transcriptsEnabled = true)
+        bool transcriptsEnabled = true,
+        InFlightRequestGauge? inFlightGauge = null,
+        int batchSize = 200,
+        Func<InFlightRequestGauge, ITranscriptStore, ITranscriptStore>? wrapTranscriptStore = null)
     {
         var storageOptions = Options.Create(new StorageOptions
         {
@@ -258,7 +427,7 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
                     CreatedAtUtc: DateTimeOffset.UtcNow,
                     RequestedModel: "auto",
                     RoutedModel: sample.Model,
-                    Dimension: "code_generation",
+                    Dimension: sample.Dimension,
                     Difficulty: "medium",
                     Language: "python",
                     IsUtility: false,
@@ -280,9 +449,12 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
                 if (sample.Score is { } score)
                 {
                     await transcriptStore.UpdateOutcomeAsync($"session-1:{i}", score, token);
-                    // Mirrors RouterMemoryScoreObserver: live memory is keyed by the live-prefixed dimension.
-                    await routerMemory.AddScoreAsync(
-                        RouterDimension.ToLiveKey(Prefix, "code_generation"), sample.Model, score);
+                    if (sample.Dimension is { } sampleDimension)
+                    {
+                        // Mirrors RouterMemoryScoreObserver: live memory is keyed by the live-prefixed dimension.
+                        await routerMemory.AddScoreAsync(
+                            RouterDimension.ToLiveKey(Prefix, sampleDimension), sample.Model, score);
+                    }
                 }
             }
         }
@@ -292,9 +464,14 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
             WriteClusterModel();
         }
 
+        inFlightGauge ??= wrapTranscriptStore is null ? null : new InFlightRequestGauge();
+        var serviceTranscriptStore = wrapTranscriptStore is null
+            ? transcriptStore
+            : wrapTranscriptStore(inFlightGauge!, transcriptStore);
+
         var service = new TaxonomyComparisonService(
             NullLogger<TaxonomyComparisonService>.Instance,
-            transcriptStore,
+            serviceTranscriptStore,
             comparisonStore,
             memoryEntryStore,
             routerMemory,
@@ -307,9 +484,11 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
             Options.Create(new RoutingOptions { ClusterAssignmentThreshold = 0.5 }),
             storageOptions,
             Options.Create(new SandboxOptions { LiveMemoryPrefix = Prefix }),
-            new StubPriceLookup());
+            new StubPriceLookup(),
+            inFlightGauge,
+            batchSize);
 
-        return new Harness(service, comparisonStore);
+        return new Harness(service, comparisonStore, inFlightGauge);
     }
 
     /// <summary>Writes a two-centroid artifact on the axes the fixture embeddings sit on.</summary>
@@ -328,6 +507,55 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
             MemoryEntryCount: 4);
 
         File.WriteAllText(_clusterModelPath, ClusterModelArtifactSerializer.Serialize(artifact));
+    }
+
+    /// <summary>
+    /// Delegates everything to the real store, but raises <paramref name="gauge"/> after the
+    /// <paramref name="tripAfterReads"/>-th transcript read - the seam that lets a test make "a proxy
+    /// request arrives" happen at an exact point inside a running drain.
+    /// </summary>
+    private sealed class GaugeTrippingTranscriptStore(
+        ITranscriptStore inner, InFlightRequestGauge gauge, int tripAfterReads) : ITranscriptStore
+    {
+        private int _reads;
+
+        public async Task<TranscriptRecord?> GetTranscriptAsync(long id, CancellationToken cancellationToken = default)
+        {
+            var record = await inner.GetTranscriptAsync(id, cancellationToken);
+            if (++_reads == tripAfterReads)
+            {
+                gauge.Increment();
+            }
+
+            return record;
+        }
+
+        public Task<long?> InsertAsync(TranscriptRecord record, CancellationToken cancellationToken = default) =>
+            inner.InsertAsync(record, cancellationToken);
+
+        public Task UpdateOutcomeAsync(string correlationId, double? score, CancellationToken cancellationToken = default) =>
+            inner.UpdateOutcomeAsync(correlationId, score, cancellationToken);
+
+        public Task<IReadOnlyList<long>> LoadUnembeddedScoredAsync(int limit, CancellationToken cancellationToken = default) =>
+            inner.LoadUnembeddedScoredAsync(limit, cancellationToken);
+
+        public Task LinkMemoryEntryAsync(long transcriptId, long memoryEntryId, CancellationToken cancellationToken = default) =>
+            inner.LinkMemoryEntryAsync(transcriptId, memoryEntryId, cancellationToken);
+
+        public Task<int> GetRowCountAsync(CancellationToken cancellationToken = default) =>
+            inner.GetRowCountAsync(cancellationToken);
+
+        public Task<int> DeleteOldestAsync(int count, CancellationToken cancellationToken = default) =>
+            inner.DeleteOldestAsync(count, cancellationToken);
+
+        public Task<int> DeleteBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken = default) =>
+            inner.DeleteBeforeAsync(cutoff, cancellationToken);
+
+        public Task<IReadOnlyDictionary<long, string>> LoadPromptTextByMemoryEntryIdAsync(CancellationToken cancellationToken = default) =>
+            inner.LoadPromptTextByMemoryEntryIdAsync(cancellationToken);
+
+        public Task<IReadOnlyDictionary<string, ModelTokenAverage>> LoadObservedTokenAveragesAsync(CancellationToken cancellationToken = default) =>
+            inner.LoadObservedTokenAveragesAsync(cancellationToken);
     }
 
     /// <summary>An in-memory <see cref="IMemoryEntryStore"/>, avoiding a second SQLite file per test.</summary>

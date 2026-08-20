@@ -96,7 +96,9 @@ public sealed class UsageAdminFacadeTests
             BaselineModel: "glm-5",
             ActualCostUsd: 0.02m,
             BaselineEstimatedCostUsd: 0.02m + savings,
-            EstimatedNetSavingsUsd: savings);
+            EstimatedNetSavingsUsd: savings,
+            BaselinePredictedScore: 0.75,
+            EstimatedRegret: -0.05);
 
     /// <summary>Serves a fixed set of comparison rows, filtering only on the lower bound as the real store does.</summary>
     private sealed class StubComparisonStore(IReadOnlyList<TotallyHot.ArcRouter.Transcripts.TaxonomyComparisonRecord> rows)

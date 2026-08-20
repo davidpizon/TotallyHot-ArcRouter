@@ -44,7 +44,8 @@ public sealed class SqliteTaxonomyComparisonStore : ITaxonomyComparisonStore
             SELECT t.id
             FROM request_transcripts t
             LEFT JOIN taxonomy_comparisons c ON c.transcript_id = t.id
-            WHERE t.score IS NOT NULL AND t.memory_entry_id IS NOT NULL AND c.transcript_id IS NULL
+            WHERE t.score IS NOT NULL AND t.memory_entry_id IS NOT NULL AND t.dimension IS NOT NULL
+              AND c.transcript_id IS NULL
             ORDER BY t.id ASC
             LIMIT $limit;
             """;
@@ -78,12 +79,13 @@ public sealed class SqliteTaxonomyComparisonStore : ITaxonomyComparisonStore
                 transcript_id, compared_at_utc, session_id, observed_score, dimension_predicted_score,
                 cluster_predicted_score, dimension_abs_error, cluster_abs_error, is_clustered,
                 is_exploratory, routed_model, baseline_model, actual_cost_usd,
-                baseline_estimated_cost_usd, estimated_net_savings_usd)
+                baseline_estimated_cost_usd, estimated_net_savings_usd,
+                baseline_predicted_score, estimated_regret)
             VALUES (
                 $transcriptId, $comparedAtUtc, $sessionId, $observedScore, $dimensionPredicted,
                 $clusterPredicted, $dimensionError, $clusterError, $isClustered,
                 $isExploratory, $routedModel, $baselineModel, $actualCost,
-                $baselineCost, $netSavings)
+                $baselineCost, $netSavings, $baselinePredicted, $estimatedRegret)
             ON CONFLICT(transcript_id) DO UPDATE SET
                 compared_at_utc = excluded.compared_at_utc,
                 session_id = excluded.session_id,
@@ -98,7 +100,9 @@ public sealed class SqliteTaxonomyComparisonStore : ITaxonomyComparisonStore
                 baseline_model = excluded.baseline_model,
                 actual_cost_usd = excluded.actual_cost_usd,
                 baseline_estimated_cost_usd = excluded.baseline_estimated_cost_usd,
-                estimated_net_savings_usd = excluded.estimated_net_savings_usd;
+                estimated_net_savings_usd = excluded.estimated_net_savings_usd,
+                baseline_predicted_score = excluded.baseline_predicted_score,
+                estimated_regret = excluded.estimated_regret;
             """;
         command.Parameters.AddWithValue("$transcriptId", record.TranscriptId);
         command.Parameters.AddWithValue("$comparedAtUtc", record.ComparedAtUtc.ToString("O", CultureInfo.InvariantCulture));
@@ -115,6 +119,8 @@ public sealed class SqliteTaxonomyComparisonStore : ITaxonomyComparisonStore
         command.Parameters.AddWithValue("$actualCost", record.ActualCostUsd is { } actual ? (double)actual : DBNull.Value);
         command.Parameters.AddWithValue("$baselineCost", record.BaselineEstimatedCostUsd is { } baseline ? (double)baseline : DBNull.Value);
         command.Parameters.AddWithValue("$netSavings", record.EstimatedNetSavingsUsd is { } savings ? (double)savings : DBNull.Value);
+        command.Parameters.AddWithValue("$baselinePredicted", (object?)record.BaselinePredictedScore ?? DBNull.Value);
+        command.Parameters.AddWithValue("$estimatedRegret", (object?)record.EstimatedRegret ?? DBNull.Value);
         command.ExecuteNonQuery();
 
         return Task.CompletedTask;
@@ -140,7 +146,8 @@ public sealed class SqliteTaxonomyComparisonStore : ITaxonomyComparisonStore
                 transcript_id, compared_at_utc, session_id, observed_score, dimension_predicted_score,
                 cluster_predicted_score, dimension_abs_error, cluster_abs_error, is_clustered,
                 is_exploratory, routed_model, baseline_model, actual_cost_usd,
-                baseline_estimated_cost_usd, estimated_net_savings_usd
+                baseline_estimated_cost_usd, estimated_net_savings_usd,
+                baseline_predicted_score, estimated_regret
             FROM taxonomy_comparisons
             WHERE compared_at_utc >= $since AND ($sessionId IS NULL OR session_id = $sessionId)
             ORDER BY compared_at_utc ASC, transcript_id ASC;
@@ -177,5 +184,7 @@ public sealed class SqliteTaxonomyComparisonStore : ITaxonomyComparisonStore
             BaselineModel: reader.IsDBNull(11) ? null : reader.GetString(11),
             ActualCostUsd: reader.IsDBNull(12) ? null : (decimal)reader.GetDouble(12),
             BaselineEstimatedCostUsd: reader.IsDBNull(13) ? null : (decimal)reader.GetDouble(13),
-            EstimatedNetSavingsUsd: reader.IsDBNull(14) ? null : (decimal)reader.GetDouble(14));
+            EstimatedNetSavingsUsd: reader.IsDBNull(14) ? null : (decimal)reader.GetDouble(14),
+            BaselinePredictedScore: reader.IsDBNull(15) ? null : reader.GetDouble(15),
+            EstimatedRegret: reader.IsDBNull(16) ? null : reader.GetDouble(16));
 }
