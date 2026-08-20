@@ -1618,7 +1618,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         // cost and provenance once the verifier score arrives instead of writing cost 0.0 / certain
         // non-exploratory provenance unconditionally.
         _pendingRequestCostCache?.Set(correlationId, estimatedCostUsd ?? 0m);
-        _pendingRequestProvenanceCache?.Set(correlationId, isExploratory, propensity);
+        _pendingRequestProvenanceCache?.Set(correlationId, isExploratory, propensity, classification?.Dimension);
 
         // docs/router/self-organizing-classification-plan.md Phase T1a/T1b: the transcript store's single
         // insert. Best-effort and off the hot path in spirit (the response has already been fully sent to

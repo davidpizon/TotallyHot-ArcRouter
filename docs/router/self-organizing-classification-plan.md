@@ -308,7 +308,7 @@ New for this plan:
 | Phase | Deliverable | Depends on | Status |
 |---|---|---|---|
 | T1 | Opt-in transcript capture; provenance columns (`IsExploratory`, propensity, real cost); embedding backfill | live-feedback-learning-plan.md Phases 1-4 | Shipped — 1a-1e complete |
-| T2 | Self-organizing clustering job over `memory_entries` embeddings | T1 (bootstrap path only needs the synced corpus) | Proposed |
+| T2 | Self-organizing clustering job over `memory_entries` embeddings | T1 (bootstrap path only needs the synced corpus) | Shipped — 2a-2g complete |
 | T3 | `ClusterBestVoter` — fifth Orchestrator voter | T2 | Proposed |
 | T4 | Baseline comparison: learned clusters vs. the frozen 9-dimension categorizer | T1, T2, T3 | Proposed |
 | T5 | Admin surface for cluster training (Governance pane + gRPC + CLI) | T2 | Proposed |
@@ -404,6 +404,13 @@ scans scored transcript rows with no `memory_entry_id` on a 5-minute check inter
 both the configured `RetentionDays` and `MaxRows` bounds, with a startup purge in
 `StartupHealthCheckHostedService` to clean retention-expired rows from before each restart.
 
+**`MemoryEntry.Dimension` (additive, Phase T2e prerequisite).** T2e's per-cluster heuristic-dimension
+histogram needed to work independently of transcript capture (T4's promotion criterion and Phase N both
+outlive an operator's choice to leave transcripts off), so this pass adds a `dimension` column to
+`memory_entries` (nullable, additively migrated) alongside the request's classification, threaded through
+a widened `PendingRequestProvenanceCache` (now also carrying the dimension label, set at the same point as
+`IsExploratory`/`Propensity` in `ProxyMiddleware`) rather than a new fourth cache.
+
 ## Phase T2 — Self-organizing clustering
 
 **2a. Trainer.** A background service mirroring `EmbeddingLogRegTrainingService` /
@@ -457,6 +464,32 @@ deterministically under the fixed seed; a degenerate training set is declined wi
 intact; a dimension mismatch on load abstains rather than throwing; the artifact round-trips through
 its serializer with validation rejecting malformed centroids and dimension disagreements; no test
 exceeds 5 seconds.
+
+**Where things stand.** 2a-2g shipped in this pass. `SphericalKMeansTrainer` implements deterministic
+k-means++ initialization and weighted Lloyd-style refinement over cosine similarity, with an O(n·k)
+centroid-distance approximate silhouette score (the plan's own "simplified index if exact silhouette
+proves too slow" allowance) driving the `[ClusterCountMin, ClusterCountMax]` sweep (defaults 6-24).
+`ClusterTrainingService` (`IClusterTrainingService`) mirrors `EmbeddingLogRegTrainingService`'s
+gather/blend/train/validate/write sequence exactly: `OodClusterBootstrapSampleSource` embeds the 176-task
+OOD split (one sample per task, `Dimension: null` since the OOD split carries no dimension label of its
+own) for cold start; live `memory_entries` rows are weighted by `RoutingOptions.ClusterLiveSampleWeight`
+and skipped on an embedding-dimension mismatch; a `ClusterMinTrainingRows` guard (default 200) declines a
+too-small retrain leaving the prior artifact untouched; a `SemaphoreSlim(1,1)` prevents concurrent
+retrains; the artifact is written via temp-file-plus-`File.Move`. `ClusterModelArtifact`
+(`cluster_model.json`, resolved through `StorageOptions.ResolveClusterModelPath`) carries centroids,
+chosen k, per-cluster sizes, a per-cluster heuristic-dimension histogram (populated from
+`MemoryEntry.Dimension` regardless of transcript capture), and - only when transcript capture is enabled,
+via the new `ITranscriptStore.LoadPromptTextByMemoryEntryIdAsync` reverse lookup - top TF-IDF-distinguishing
+terms per cluster computed by the new `ClusterTermExtractor` (a class-based TF-IDF over
+`LogRegTextTokenizer`'s shared tokenization rule). `ClusterModelArtifact.DescribeCluster` names a cluster
+from whichever of the two signals is available, falling back to a bare index when neither is. `ClusterLedger`
+implements 2f's "ledger-as-view": given an artifact and the live `memory_entries` working set, it
+re-assigns every entry to its nearest *current* centroid and aggregates a per-(cluster, canonicalized
+model) mean score fresh on every call, rather than tracking a ledger incrementally against an unstable
+cluster identity. `ClusterRetrainHostedService` mirrors `LogRegRetrainHostedService`'s poll-and-threshold
+shape (`RoutingOptions.ClusterRetrainThreshold`/`EnableAutomaticClusterRetrain`), and a headless
+`--retrain-clusters` CLI flag mirrors `--retrain-logreg`. `ClusterBestVoter` itself (consuming
+`ClusterModelArtifact`/`ClusterLedger` to cast a vote) is Phase T3, not this pass.
 
 ## Phase T3 — `ClusterBestVoter`
 

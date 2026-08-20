@@ -20,8 +20,13 @@ public sealed class PendingRequestProvenanceCache
     /// <summary>A single cached provenance record awaiting its verifier score, with the absolute time it expires.</summary>
     /// <param name="IsExploratory">Whether the request's routing decision was an epsilon-greedy exploratory pick.</param>
     /// <param name="Propensity">The propensity of the arm actually chosen.</param>
+    /// <param name="Dimension">
+    /// The heuristic classifier's dimension label for this request
+    /// (docs/router/self-organizing-classification-plan.md Phase T2e), or <see langword="null"/> when
+    /// unavailable.
+    /// </param>
     /// <param name="ExpiresAtUtc">The UTC instant after which this entry is treated as evicted.</param>
-    private sealed record Entry(bool IsExploratory, double Propensity, DateTimeOffset ExpiresAtUtc);
+    private sealed record Entry(bool IsExploratory, double Propensity, string? Dimension, DateTimeOffset ExpiresAtUtc);
 
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
     private readonly Queue<string> _insertionOrder = new();
@@ -55,11 +60,11 @@ public sealed class PendingRequestProvenanceCache
     }
 
     /// <summary>
-    /// Records <paramref name="isExploratory"/>/<paramref name="propensity"/> under
-    /// <paramref name="correlationId"/>, evicting expired entries first and then the oldest entries
+    /// Records <paramref name="isExploratory"/>/<paramref name="propensity"/>/<paramref name="dimension"/>
+    /// under <paramref name="correlationId"/>, evicting expired entries first and then the oldest entries
     /// beyond capacity.
     /// </summary>
-    public void Set(string correlationId, bool isExploratory, double propensity)
+    public void Set(string correlationId, bool isExploratory, double propensity, string? dimension = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(correlationId);
 
@@ -72,7 +77,7 @@ public sealed class PendingRequestProvenanceCache
                 _insertionOrder.Enqueue(correlationId);
             }
 
-            _entries[correlationId] = new Entry(isExploratory, propensity, _timeProvider.GetUtcNow() + _ttl);
+            _entries[correlationId] = new Entry(isExploratory, propensity, dimension, _timeProvider.GetUtcNow() + _ttl);
 
             while (_entries.Count > _capacity && _insertionOrder.Count > 0)
             {
@@ -87,7 +92,7 @@ public sealed class PendingRequestProvenanceCache
     /// not yet expired.
     /// </summary>
     /// <returns><see langword="true"/> if an unexpired entry was found and removed.</returns>
-    public bool TryTake(string correlationId, out bool isExploratory, out double propensity)
+    public bool TryTake(string correlationId, out bool isExploratory, out double propensity, out string? dimension)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(correlationId);
 
@@ -100,17 +105,27 @@ public sealed class PendingRequestProvenanceCache
             {
                 isExploratory = entry.IsExploratory;
                 propensity = entry.Propensity;
+                dimension = entry.Dimension;
                 return true;
             }
         }
 
         isExploratory = false;
         propensity = 1.0;
+        dimension = null;
         return false;
     }
 
     /// <summary>
-    /// Drops expired entries and any stale queue entries left behind by a prior <see cref="TryTake"/> or
+    /// Overload of <see cref="TryTake(string, out bool, out double, out string)"/> for callers that do not
+    /// need the dimension label.
+    /// </summary>
+    /// <returns><see langword="true"/> if an unexpired entry was found and removed.</returns>
+    public bool TryTake(string correlationId, out bool isExploratory, out double propensity) =>
+        TryTake(correlationId, out isExploratory, out propensity, out _);
+
+    /// <summary>
+    /// Drops expired entries and any stale queue entries left behind by a prior <see cref="TryTake(string, out bool, out double)"/> or
     /// capacity eviction. Must be called under <see cref="_lock"/>. A re-<see cref="Set"/> on an existing
     /// key refreshes that entry's expiry without moving its queue position, so insertion order can no
     /// longer be trusted as TTL order - this is a full bounded sweep (each queued key visited once, live

@@ -82,4 +82,16 @@ public interface ITranscriptStore
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <returns>The number of rows actually deleted.</returns>
     Task<int> DeleteBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Loads the prompt text of every transcript row linked to a <c>memory_entries</c> row, keyed by
+    /// <c>memory_entry_id</c> - used by the cluster trainer's top-TF-IDF-term naming
+    /// (docs/router/self-organizing-classification-plan.md Phase T2e), the one piece of cluster-model
+    /// provenance that genuinely needs prompt text rather than just the dimension label already carried on
+    /// <see cref="Router.MemoryEntry.Dimension"/>. Returns an empty map if transcript capture is disabled
+    /// or no linked rows carry prompt text.
+    /// </summary>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    /// <returns>A map from <c>memory_entry_id</c> to that row's prompt text.</returns>
+    Task<IReadOnlyDictionary<long, string>> LoadPromptTextByMemoryEntryIdAsync(CancellationToken cancellationToken = default);
 }

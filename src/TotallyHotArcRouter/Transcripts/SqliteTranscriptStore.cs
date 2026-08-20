@@ -244,6 +244,34 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         return Task.FromResult(affectedRows);
     }
 
+    /// <inheritdoc />
+    public Task<IReadOnlyDictionary<long, string>> LoadPromptTextByMemoryEntryIdAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (!_options.Enabled)
+        {
+            return Task.FromResult<IReadOnlyDictionary<long, string>>(new Dictionary<long, string>());
+        }
+
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT memory_entry_id, prompt_text
+            FROM request_transcripts
+            WHERE memory_entry_id IS NOT NULL AND prompt_text IS NOT NULL;
+            """;
+
+        var promptTextByMemoryEntryId = new Dictionary<long, string>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            promptTextByMemoryEntryId[reader.GetInt64(0)] = reader.GetString(1);
+        }
+
+        return Task.FromResult<IReadOnlyDictionary<long, string>>(promptTextByMemoryEntryId);
+    }
+
     /// <summary>
     /// Reads a complete <see cref="TranscriptRecord"/> from a reader positioned at a row with all
     /// columns in their standard order.

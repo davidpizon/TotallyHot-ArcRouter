@@ -94,11 +94,13 @@ public sealed class EmbeddingMemoryScoreObserver : IRouterScoreObserver
 
         var recoveredIsExploratory = false;
         var recoveredPropensity = 1.0;
+        string? recoveredDimension = null;
         if (!string.IsNullOrEmpty(result.RequestCorrelationId) &&
-            _pendingProvenanceCache.TryTake(result.RequestCorrelationId, out var cachedIsExploratory, out var cachedPropensity))
+            _pendingProvenanceCache.TryTake(result.RequestCorrelationId, out var cachedIsExploratory, out var cachedPropensity, out var cachedDimension))
         {
             recoveredIsExploratory = cachedIsExploratory;
             recoveredPropensity = cachedPropensity;
+            recoveredDimension = cachedDimension;
         }
         else
         {
@@ -115,7 +117,8 @@ public sealed class EmbeddingMemoryScoreObserver : IRouterScoreObserver
             verifierTrace: null,
             cancellationToken,
             isExploratory: recoveredIsExploratory,
-            propensity: recoveredPropensity).ConfigureAwait(false);
+            propensity: recoveredPropensity,
+            dimension: recoveredDimension).ConfigureAwait(false);
 
         if (_logger.IsEnabled(LogLevel.Information))
         {

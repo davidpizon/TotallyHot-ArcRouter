@@ -127,6 +127,14 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddSingleton<Router.Orchestrator.OodBootstrapSampleSource>();
             services.AddSingleton<Router.Orchestrator.IEmbeddingLogRegTrainingService, Router.Orchestrator.EmbeddingLogRegTrainingService>();
 
+            // docs/router/self-organizing-classification-plan.md Phase T2: trains and atomically writes the
+            // self-organizing cluster model's artifact. ClusterRetrainHostedService (registered below, with
+            // the other hosted services) is the automatic-threshold trigger; Program.cs's --retrain-clusters
+            // flag and Phase T5's Governance button both resolve IClusterTrainingService directly instead of
+            // going through it.
+            services.AddSingleton<Router.Orchestrator.OodClusterBootstrapSampleSource>();
+            services.AddSingleton<Router.Orchestrator.IClusterTrainingService, Router.Orchestrator.ClusterTrainingService>();
+
             // Tools
             services.AddTransient<CheckSyntax>();
             services.AddTransient<RunVisibleTests>();
@@ -446,6 +454,7 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddHostedService<PriceCatalogIngestionHostedService>();
             services.AddHostedService<CostReconciliationHostedService>();
             services.AddHostedService<LogRegRetrainHostedService>();
+            services.AddHostedService<ClusterRetrainHostedService>();
 
             // ProxyServer's inner Kestrel host is handed an already-constructed ProxyMiddleware instance rather
             // than a copy of this IServiceCollection. It never gets its own IHostedService registrations, so it
