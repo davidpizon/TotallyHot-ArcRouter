@@ -152,6 +152,75 @@ public class CompositeRoutingPolicyTests
         Assert.Same(embedding, recordingVoter.LastContext.TaskEmbedding);
     }
 
+    /// <summary>
+    /// docs/router/self-organizing-classification-plan.md Phase T1c: the utility leg has no exploration
+    /// mechanism, so it falls through to <see cref="IRoutingPolicy"/>'s default
+    /// <see cref="IRoutingPolicy.DecideOutcomeAsync"/> implementation - non-exploratory, propensity 1.0 -
+    /// even though <see cref="CompositeRoutingPolicy"/> itself overrides the method.
+    /// </summary>
+    [Fact]
+    public async Task DecideOutcomeAsync_UtilityContext_ReportsNonExploratoryCertainPropensity()
+    {
+        var catalog = new PassthroughPriceCatalog();
+        catalog.SetPrice("cheap", "openai", 1m, 1m);
+        var utilityPolicy = new UtilityRoutingPolicy(catalog, new RouterMemory(), Options.Create(new RoutingOptions()), NullLogger<UtilityRoutingPolicy>.Instance);
+        var generalPolicy = new AgentRouterPolicy(new AgentAsARouter(
+            NullLogger<AgentAsARouter>.Instance,
+            Options.Create(new RoutingOptions { EnableExploration = false, ExplorationRate = 0 }),
+            new RouterMemory()));
+        var composite = new CompositeRoutingPolicy(
+            utilityPolicy,
+            generalPolicy,
+            CreateOrchestrator([]),
+            Options.Create(new RoutingOptions { EnableOrchestratorPolicy = false }));
+        var context = new RoutingContext(
+            "live:utility",
+            IsUtility: true,
+            Candidates: [new RoutingCandidate("cheap", "openai", IsFree: false)]);
+
+        var decision = await composite.DecideOutcomeAsync(context, signals: null, TestContext.Current.CancellationToken);
+
+        Assert.Equal("cheap", decision.SelectedModel);
+        Assert.False(decision.IsExploratory);
+        Assert.Equal(1.0, decision.Propensity, precision: 6);
+    }
+
+    /// <summary>
+    /// docs/router/self-organizing-classification-plan.md Phase T1c: when the Orchestrator leg is chosen,
+    /// <see cref="CompositeRoutingPolicy.DecideOutcomeAsync"/> forwards to
+    /// <see cref="OrchestratorRoutingPolicy.DecideOutcomeAsync"/>, which reports real epsilon-greedy
+    /// provenance instead of the interface default's always-certain wrap.
+    /// </summary>
+    [Fact]
+    public async Task DecideOutcomeAsync_OrchestratorLeg_ReportsRealExplorationProvenance()
+    {
+        var utilityPolicy = new UtilityRoutingPolicy(new PassthroughPriceCatalog(), new RouterMemory(), Options.Create(new RoutingOptions()), NullLogger<UtilityRoutingPolicy>.Instance);
+        var generalPolicy = new AgentRouterPolicy(new AgentAsARouter(
+            NullLogger<AgentAsARouter>.Instance,
+            Options.Create(new RoutingOptions { EnableExploration = false, ExplorationRate = 0 }),
+            new RouterMemory()));
+        var orchestratorVoter = new FakeVoter(VoterNames.DimBest, "model-a", 1.0);
+        var orchestrator = new OrchestratorRoutingPolicy(
+            [orchestratorVoter],
+            Options.Create(new RoutingOptions { EnableExploration = true, ExplorationRate = 1.0 }),
+            NullLogger<OrchestratorRoutingPolicy>.Instance);
+        var composite = new CompositeRoutingPolicy(
+            utilityPolicy,
+            generalPolicy,
+            orchestrator,
+            Options.Create(new RoutingOptions()));
+        var context = new RoutingContext(
+            "live:code_generation",
+            IsUtility: false,
+            Candidates: [new RoutingCandidate("model-a", "openai", IsFree: false)]);
+
+        var decision = await composite.DecideOutcomeAsync(context, signals: null, TestContext.Current.CancellationToken);
+
+        Assert.Equal("model-a", decision.SelectedModel);
+        Assert.True(decision.IsExploratory);
+        Assert.Equal(1.0, decision.Propensity, precision: 6);
+    }
+
     /// <summary>Builds a bare <see cref="OrchestratorRoutingPolicy"/> for dispatch-only test fixtures - exploration disabled so dispatch assertions stay deterministic.</summary>
     private static OrchestratorRoutingPolicy CreateOrchestrator(IEnumerable<IRoutingVoter> voters) =>
         new(

@@ -296,6 +296,14 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
             ? context.Candidates[Random.Shared.Next(context.Candidates.Count)].ModelName
             : best.Model;
 
+        // docs/router/self-organizing-classification-plan.md Phase T1c: the propensity of the arm
+        // actually chosen is closed-form under epsilon-greedy. K is guaranteed > 0 by the
+        // Candidates.Count == 0 check above, so this never divides by zero. eps is folded to 0 when
+        // exploration itself is disabled, so a non-exploring policy always reports certain selection.
+        var eps = _options.EnableExploration ? _options.ExplorationRate : 0d;
+        var k = context.Candidates.Count;
+        var propensity = isExploratory ? eps / k : (1d - eps) + (eps / k);
+
         if (isExploratory)
         {
             _logger.LogInformation(
@@ -319,19 +327,31 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
             rationale,
             DateTimeOffset.UtcNow,
             candidateScores,
-            isExploratory);
+            isExploratory,
+            propensity);
 
         _logger.LogInformation(
-            "[ORCHESTRATOR] Selected {Model} for dimension {Dimension} with weighted score {Score} (confidence {Confidence}, {VoterCount} voters participated, exploratory {IsExploratory}).",
+            "[ORCHESTRATOR] Selected {Model} for dimension {Dimension} with weighted score {Score} (confidence {Confidence}, {VoterCount} voters participated, exploratory {IsExploratory}, propensity {Propensity}).",
             decision.SelectedModel,
             context.Dimension,
             best.Score,
             decision.Confidence,
             participatingVoters,
-            decision.IsExploratory);
+            decision.IsExploratory,
+            decision.Propensity);
 
         return decision;
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Delegates directly to <see cref="DecideAsync"/>, which already builds the full decision
+    /// (including the real <see cref="RoutingDecision.IsExploratory"/> and
+    /// <see cref="RoutingDecision.Propensity"/>) from <paramref name="signals"/> - no need for the
+    /// interface's default wrap-a-string-in-a-decision implementation here.
+    /// </remarks>
+    public Task<RoutingDecision> DecideOutcomeAsync(RoutingContext context, RoutingSignals? signals, CancellationToken cancellationToken = default) =>
+        DecideAsync(context, signals?.TaskEmbedding, signals?.TaskText, cancellationToken);
 
     /// <summary>Casts one voter's vote, degrading a thrown exception to an abstention rather than failing the whole decision.</summary>
     private async Task<VoterVote> CastVoteAsync(IRoutingVoter voter, VotingContext votingContext, CancellationToken cancellationToken)

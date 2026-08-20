@@ -54,7 +54,9 @@ public class StartupHealthCheckHostedServiceTests
             new RouterMemory(),
             CreateEmbeddingMemory(temp),
             CreateBenchmarkDatabase(temp),
-            CreateBenchmarkStatusService(temp));
+            CreateBenchmarkStatusService(temp),
+            CreateTranscriptDatabase(temp),
+            Options.Create(new TotallyHot.ArcRouter.Transcripts.TranscriptOptions()));
 
         await service.StartAsync(TestContext.Current.CancellationToken);
 
@@ -94,7 +96,9 @@ public class StartupHealthCheckHostedServiceTests
             new RouterMemory(),
             CreateEmbeddingMemory(temp),
             CreateBenchmarkDatabase(temp),
-            CreateBenchmarkStatusService(temp));
+            CreateBenchmarkStatusService(temp),
+            CreateTranscriptDatabase(temp),
+            Options.Create(new TotallyHot.ArcRouter.Transcripts.TranscriptOptions()));
 
         await service.StartAsync(TestContext.Current.CancellationToken);
 
@@ -172,6 +176,8 @@ public class StartupHealthCheckHostedServiceTests
             CreateEmbeddingMemory(temp),
             CreateBenchmarkDatabase(temp),
             CreateBenchmarkStatusService(temp),
+            CreateTranscriptDatabase(temp),
+            Options.Create(new TotallyHot.ArcRouter.Transcripts.TranscriptOptions()),
             embeddingClient,
             warmupState);
     }
@@ -217,6 +223,13 @@ public class StartupHealthCheckHostedServiceTests
         var directory = Path.GetDirectoryName(temp.Path_)!;
         var dbPath = Path.Combine(directory, "coderouterbench.db");
         return new BenchmarkDatabase(Options.Create(new StorageOptions { BenchmarkDatabasePath = dbPath }));
+    }
+
+    private static TotallyHot.ArcRouter.Transcripts.TranscriptDatabase CreateTranscriptDatabase(TempDatabase temp)
+    {
+        var directory = Path.GetDirectoryName(temp.Path_)!;
+        var dbPath = Path.Combine(directory, "transcripts.db");
+        return new TotallyHot.ArcRouter.Transcripts.TranscriptDatabase(Options.Create(new StorageOptions { TranscriptDatabasePath = dbPath }));
     }
 
     // The probe's HttpClient always fails fast (no real network I/O), so RecheckAsync resolves to

@@ -1,3 +1,5 @@
+using TotallyHot.ArcRouter.Models;
+
 namespace TotallyHot.ArcRouter.Router;
 
 /// <summary>
@@ -12,6 +14,17 @@ namespace TotallyHot.ArcRouter.Router;
 /// <param name="Cost">The monetary cost κ of serving this task with <paramref name="ChosenModel"/>.</param>
 /// <param name="VerifierTrace">The Verifier's trace/explanation for <paramref name="Score"/>, if recorded.</param>
 /// <param name="CreatedAtUtc">When this entry was written, in UTC.</param>
+/// <param name="IsExploratory">
+/// Whether the routing decision that chose <paramref name="ChosenModel"/> was an epsilon-greedy
+/// exploratory pick rather than the policy's normal choice, mirroring
+/// <see cref="Models.RoutingDecision.IsExploratory"/> (docs/router/self-organizing-classification-plan.md
+/// Phase T1c). Defaults to <see langword="false"/> for entries written before this provenance existed.
+/// </param>
+/// <param name="Propensity">
+/// The propensity of <paramref name="ChosenModel"/> under the policy's own arm-selection distribution at
+/// the time it was chosen, mirroring <see cref="Models.RoutingDecision.Propensity"/>. Defaults to
+/// <c>1.0</c> - certain selection - for entries written before this provenance existed.
+/// </param>
 public sealed record MemoryEntry(
     long Id,
     float[] TaskEmbedding,
@@ -19,4 +32,6 @@ public sealed record MemoryEntry(
     double Score,
     double Cost,
     string? VerifierTrace,
-    DateTimeOffset CreatedAtUtc);
+    DateTimeOffset CreatedAtUtc,
+    bool IsExploratory = false,
+    double Propensity = 1.0);

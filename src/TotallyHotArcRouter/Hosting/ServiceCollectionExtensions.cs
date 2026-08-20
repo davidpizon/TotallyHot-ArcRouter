@@ -241,11 +241,39 @@ namespace TotallyHot.ArcRouter.Hosting
             // (docs/router/live-feedback-learning-plan.md Phase 2c: memory_entries writes). Registered
             // before AddSandbox so it wins over the library's Null default (which uses TryAdd).
             services.AddSingleton<Router.Embeddings.PendingTaskEmbeddingCache>();
+            services.AddSingleton<Router.Embeddings.PendingRequestCostCache>();
+            services.AddSingleton<Router.Embeddings.PendingRequestProvenanceCache>();
             services.AddSingleton<RouterMemoryScoreObserver>();
             services.AddSingleton<Router.EmbeddingMemoryScoreObserver>();
-            services.AddSingleton<IRouterScoreObserver>(sp => new Router.CompositeRouterScoreObserver(
-                [sp.GetRequiredService<RouterMemoryScoreObserver>(), sp.GetRequiredService<Router.EmbeddingMemoryScoreObserver>()],
-                sp.GetRequiredService<ILogger<Router.CompositeRouterScoreObserver>>()));
+
+            // docs/router/self-organizing-classification-plan.md Phase T1: the opt-in transcript store.
+            // TranscriptDatabase/SqliteTranscriptStore are registered unconditionally (SqliteTranscriptStore
+            // itself no-ops every method when TranscriptOptions.Enabled is false, so nothing queries a table
+            // that was never created), but TranscriptScoreObserver only joins the fan-out below when capture
+            // is enabled - registering a dead observer for the common (disabled) case would do nothing
+            // except add a per-score no-op call.
+            services.AddOptions<TotallyHot.ArcRouter.Transcripts.TranscriptOptions>()
+                .Configure<IConfiguration>((options, configuration) =>
+                    configuration.GetSection(TotallyHot.ArcRouter.Transcripts.TranscriptOptions.SectionName).Bind(options));
+            services.AddSingleton<TotallyHot.ArcRouter.Transcripts.TranscriptDatabase>();
+            services.AddSingleton<TotallyHot.ArcRouter.Transcripts.ITranscriptStore, TotallyHot.ArcRouter.Transcripts.SqliteTranscriptStore>();
+            services.AddSingleton<TotallyHot.ArcRouter.Transcripts.TranscriptScoreObserver>();
+
+            services.AddSingleton<IRouterScoreObserver>(sp =>
+            {
+                var observers = new List<IRouterScoreObserver>
+                {
+                    sp.GetRequiredService<RouterMemoryScoreObserver>(),
+                    sp.GetRequiredService<Router.EmbeddingMemoryScoreObserver>(),
+                };
+
+                if (sp.GetRequiredService<IOptions<TotallyHot.ArcRouter.Transcripts.TranscriptOptions>>().Value.Enabled)
+                {
+                    observers.Add(sp.GetRequiredService<TotallyHot.ArcRouter.Transcripts.TranscriptScoreObserver>());
+                }
+
+                return new Router.CompositeRouterScoreObserver(observers, sp.GetRequiredService<ILogger<Router.CompositeRouterScoreObserver>>());
+            });
             services.AddSandbox();
 
             services.AddSingleton<ProxyMiddleware>();

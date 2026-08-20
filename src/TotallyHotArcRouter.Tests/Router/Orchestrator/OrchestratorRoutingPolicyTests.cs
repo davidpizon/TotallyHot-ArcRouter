@@ -187,6 +187,80 @@ public class OrchestratorRoutingPolicyTests
         Assert.Equal(RouterConstants.FallbackReason, decision.Rationale);
     }
 
+    /// <summary>
+    /// docs/router/self-organizing-classification-plan.md Phase T1c: with exploration enabled and K
+    /// eligible candidates, the greedy-arm propensity is <c>(1 - eps) + eps / K</c>.
+    /// </summary>
+    [Fact]
+    public async Task DecideAsync_ExplorationEnabled_GreedyPick_PropensityIsOneMinusEpsPlusEpsOverK()
+    {
+        var voters = new IRoutingVoter[] { new FakeVoter(VoterNames.DimBest, "kimi-k2.5", confidence: 1.0) };
+        // explorationRate 0 keeps the roll deterministic (never exploratory) while EnableExploration
+        // stays true, so the propensity formula's eps term is exercised without RNG flakiness.
+        var policy = CreatePolicy(voters, enableExploration: true, explorationRate: 0.0);
+        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [MiniMax, Glm, Kimi]);
+
+        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+
+        Assert.False(decision.IsExploratory);
+        Assert.Equal(1.0, decision.Propensity, precision: 6);
+    }
+
+    /// <summary>
+    /// docs/router/self-organizing-classification-plan.md Phase T1c: an exploratory pick's propensity is
+    /// <c>eps / K</c>.
+    /// </summary>
+    [Fact]
+    public async Task DecideAsync_ExplorationRollFires_PropensityIsEpsOverK()
+    {
+        var voters = new IRoutingVoter[] { new FakeVoter(VoterNames.DimBest, "kimi-k2.5", confidence: 1.0) };
+        var policy = CreatePolicy(voters, enableExploration: true, explorationRate: 1.0);
+        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [MiniMax, Glm, Kimi]);
+
+        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+
+        Assert.True(decision.IsExploratory);
+        Assert.Equal(1.0 / 3.0, decision.Propensity, precision: 6);
+    }
+
+    /// <summary>
+    /// docs/router/self-organizing-classification-plan.md Phase T1c: with exploration disabled entirely
+    /// (not just a zero rate), eps folds to 0 and every decision reports certain selection.
+    /// </summary>
+    [Fact]
+    public async Task DecideAsync_ExplorationDisabled_PropensityIsAlwaysOne()
+    {
+        var voters = new IRoutingVoter[] { new FakeVoter(VoterNames.DimBest, "kimi-k2.5", confidence: 1.0) };
+        var policy = CreatePolicy(voters); // exploration disabled by default via CreatePolicy
+        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [MiniMax, Glm, Kimi]);
+
+        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+
+        Assert.False(decision.IsExploratory);
+        Assert.Equal(1.0, decision.Propensity, precision: 6);
+    }
+
+    /// <summary>
+    /// docs/router/self-organizing-classification-plan.md Phase T1c: <see cref="OrchestratorRoutingPolicy.DecideOutcomeAsync"/>
+    /// delegates directly to <see cref="OrchestratorRoutingPolicy.DecideAsync"/>, so it reports the same
+    /// real provenance rather than the interface default's always-certain wrap.
+    /// </summary>
+    [Fact]
+    public async Task DecideOutcomeAsync_DelegatesToDecideAsync_PreservingRealProvenance()
+    {
+        var voters = new IRoutingVoter[] { new FakeVoter(VoterNames.DimBest, "kimi-k2.5", confidence: 1.0) };
+        var policy = CreatePolicy(voters, enableExploration: true, explorationRate: 1.0);
+        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi]);
+        var signals = new RoutingSignals("some task", [1f, 2f, 3f]);
+
+        IRoutingPolicy asInterface = policy;
+        var decision = await asInterface.DecideOutcomeAsync(context, signals, TestContext.Current.CancellationToken);
+
+        Assert.Equal("kimi-k2.5", decision.SelectedModel);
+        Assert.True(decision.IsExploratory);
+        Assert.Equal(1.0, decision.Propensity, precision: 6);
+    }
+
     [Fact]
     public async Task DecideAsync_DisabledVoter_DoesNotParticipate()
     {

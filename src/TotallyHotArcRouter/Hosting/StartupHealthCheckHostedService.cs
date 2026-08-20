@@ -38,6 +38,8 @@ public sealed class StartupHealthCheckHostedService : IHostedService
     private readonly Router.EmbeddingMemory _embeddingMemory;
     private readonly CodeRouterBench.BenchmarkDatabase _benchmarkDatabase;
     private readonly CodeRouterBench.BenchmarkDataStatusService _benchmarkStatusService;
+    private readonly Transcripts.TranscriptDatabase _transcriptDatabase;
+    private readonly Transcripts.TranscriptOptions _transcriptOptions;
     private readonly Router.Embeddings.IEmbeddingClient? _embeddingClient;
     private readonly Router.Embeddings.EmbeddingWarmupState? _embeddingWarmupState;
     private Task? _embeddingWarmupTask;
@@ -65,6 +67,8 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         Router.EmbeddingMemory embeddingMemory,
         CodeRouterBench.BenchmarkDatabase benchmarkDatabase,
         CodeRouterBench.BenchmarkDataStatusService benchmarkStatusService,
+        Transcripts.TranscriptDatabase transcriptDatabase,
+        IOptions<Transcripts.TranscriptOptions> transcriptOptions,
         Router.Embeddings.IEmbeddingClient? embeddingClient = null,
         Router.Embeddings.EmbeddingWarmupState? embeddingWarmupState = null)
     {
@@ -83,6 +87,8 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         ArgumentNullException.ThrowIfNull(embeddingMemory);
         ArgumentNullException.ThrowIfNull(benchmarkDatabase);
         ArgumentNullException.ThrowIfNull(benchmarkStatusService);
+        ArgumentNullException.ThrowIfNull(transcriptDatabase);
+        ArgumentNullException.ThrowIfNull(transcriptOptions);
 
         _logger = logger;
         _database = database;
@@ -99,6 +105,8 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         _embeddingMemory = embeddingMemory;
         _benchmarkDatabase = benchmarkDatabase;
         _benchmarkStatusService = benchmarkStatusService;
+        _transcriptDatabase = transcriptDatabase;
+        _transcriptOptions = transcriptOptions.Value;
         _embeddingClient = embeddingClient;
         _embeddingWarmupState = embeddingWarmupState;
     }
@@ -238,6 +246,23 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Router memory initialization failed; continuing startup.");
+        }
+
+        // docs/router/self-organizing-classification-plan.md Phase T1a: the transcript store's schema is
+        // created only when capture is enabled - "with capture disabled (the default), no table is created
+        // and nothing is written" is the plan's stated exit criterion, so this deliberately does not follow
+        // every other database above in creating its schema unconditionally.
+        if (_transcriptOptions.Enabled)
+        {
+            try
+            {
+                _transcriptDatabase.EnsureCreated();
+                _logger.LogInformation("Transcript capture is enabled; ensured transcript database at {Path}.", _transcriptDatabase.DatabasePath);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Transcript database initialization failed; continuing startup with capture effectively disabled.");
+            }
         }
 
         // Embedding client warm-up (docs/router/live-feedback-learning-plan.md Phase 2b): forces the

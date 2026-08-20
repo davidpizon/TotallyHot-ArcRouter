@@ -311,11 +311,13 @@ namespace TotallyHot.ArcRouter.Proxy
                 _forcedModelName is null && string.Equals(modelName, AutoSelectModelName, StringComparison.OrdinalIgnoreCase);
 
             ResolvedModelRoute? route;
+            var isExploratory = false;
+            var propensity = 1.0;
 
             if (isAutoSelectRequest)
             {
-                var autoSelectedRoute = await ResolveAgenticRouteAsync(classification, liveDimension, routingSignals, cancellationToken);
-                if (autoSelectedRoute is null)
+                var autoSelected = await ResolveAgenticRouteAsync(classification, liveDimension, routingSignals, cancellationToken);
+                if (autoSelected is null)
                 {
                     // Same "everything is unavailable" condition the fallback path reports, but phrased for a
                     // caller who asked for auto-select rather than one who named a model we didn't recognize.
@@ -326,8 +328,10 @@ namespace TotallyHot.ArcRouter.Proxy
 
                 _logger.LogInformation(
                     "[INTERCEPTOR] Auto-select requested; routed to '{ResolvedModel}'.",
-                    SanitizeForLog(autoSelectedRoute.ModelName));
-                route = autoSelectedRoute;
+                    SanitizeForLog(autoSelected.Route.ModelName));
+                route = autoSelected.Route;
+                isExploratory = autoSelected.IsExploratory;
+                propensity = autoSelected.Propensity;
                 substitutionReason = RoutingSubstitutionReason.AutoSelect;
             }
             else if (!_modelRouteResolver.TryResolve(modelName, out route) || !_modelRouteResolver.IsModelEnabled(modelName))
@@ -353,8 +357,10 @@ namespace TotallyHot.ArcRouter.Proxy
                 {
                     _logger.LogInformation(
                         "[INTERCEPTOR] Unresolved model '{ModelName}' accepted and agentically routed to '{ResolvedModel}'.",
-                        SanitizeForLog(modelName), SanitizeForLog(agenticRoute.ModelName));
-                    route = agenticRoute;
+                        SanitizeForLog(modelName), SanitizeForLog(agenticRoute.Route.ModelName));
+                    route = agenticRoute.Route;
+                    isExploratory = agenticRoute.IsExploratory;
+                    propensity = agenticRoute.Propensity;
                     substitutionReason = wasResolved
                         ? RoutingSubstitutionReason.ModelStopped
                         : RoutingSubstitutionReason.UnresolvedName;
@@ -432,7 +438,16 @@ namespace TotallyHot.ArcRouter.Proxy
                 }
             }
 
-            return ModelRouteResolutionResult.Success(candidates, clientRequestedModelName, substitutionReason, taskEmbedding, routerTokens);
+            return ModelRouteResolutionResult.Success(
+                candidates,
+                clientRequestedModelName,
+                substitutionReason,
+                taskEmbedding,
+                routerTokens,
+                isExploratory,
+                propensity,
+                classification,
+                taskText);
         }
 
         /// <summary>
@@ -504,7 +519,7 @@ namespace TotallyHot.ArcRouter.Proxy
         /// </param>
         /// <param name="cancellationToken">A token to cancel the operation.</param>
         /// <returns>The resolved route to serve the request with, or <see langword="null"/> when no eligible model is currently available.</returns>
-        private async Task<ResolvedModelRoute?> ResolveAgenticRouteAsync(
+        private async Task<AgenticRouteResult?> ResolveAgenticRouteAsync(
             RequestClassification classification,
             string liveDimension,
             RoutingSignals? signals,
@@ -516,10 +531,10 @@ namespace TotallyHot.ArcRouter.Proxy
                 if (candidates.Count > 0)
                 {
                     var context = new RoutingContext(liveDimension, classification.IsUtility, candidates);
-                    string? selectedName;
+                    RoutingDecision? decision;
                     try
                     {
-                        selectedName = await _routingPolicy.SelectModelAsync(context, signals, cancellationToken);
+                        decision = await _routingPolicy.DecideOutcomeAsync(context, signals, cancellationToken);
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {
@@ -528,8 +543,10 @@ namespace TotallyHot.ArcRouter.Proxy
                         _logger.LogWarning(
                             ex,
                             "[INTERCEPTOR] Routing policy threw while selecting a model; falling back to memory ranking.");
-                        selectedName = null;
+                        decision = null;
                     }
+
+                    var selectedName = decision?.SelectedModel;
 
                     // Validate that the policy returned a model from the eligible candidate set to enforce contract.
                     var selectedInCandidates = selectedName is not null
@@ -554,7 +571,7 @@ namespace TotallyHot.ArcRouter.Proxy
                             SanitizeForLog(selectedName!),
                             SanitizeForLog(liveDimension),
                             classification.IsUtility);
-                        return selectedRoute;
+                        return new AgenticRouteResult(selectedRoute, decision!.IsExploratory, decision.Propensity);
                     }
                     else
                     {
@@ -565,8 +582,23 @@ namespace TotallyHot.ArcRouter.Proxy
                 }
             }
 
-            return RankEligibleModels([], liveDimension).FirstOrDefault();
+            // The memory-ranking fallback below was never a policy pick - IsExploratory=false,
+            // Propensity=1.0 (certain selection) is the correct provenance for it, matching the same
+            // default IRoutingPolicy.DecideOutcomeAsync's default implementation reports.
+            var fallbackRoute = RankEligibleModels([], liveDimension).FirstOrDefault();
+            return fallbackRoute is null ? null : new AgenticRouteResult(fallbackRoute, IsExploratory: false, Propensity: 1.0);
         }
+
+        /// <summary>
+        /// The outcome of <see cref="ResolveAgenticRouteAsync"/>: the resolved route plus the provenance
+        /// (docs/router/self-organizing-classification-plan.md Phase T1c) of how it was chosen, so
+        /// <see cref="ResolveModelRouteAsync"/> can carry <see cref="IsExploratory"/>/<see cref="Propensity"/>
+        /// into <see cref="ModelRouteResolutionResult"/> without a second round-trip through the policy.
+        /// </summary>
+        /// <param name="Route">The resolved route.</param>
+        /// <param name="IsExploratory">Whether this was an epsilon-greedy exploratory pick.</param>
+        /// <param name="Propensity">The propensity of the arm actually chosen.</param>
+        private sealed record AgenticRouteResult(ResolvedModelRoute Route, bool IsExploratory, double Propensity);
 
         /// <summary>
         /// Builds one <see cref="RoutingCandidate"/> per currently-eligible model (the same eligibility

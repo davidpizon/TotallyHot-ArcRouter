@@ -1,0 +1,54 @@
+using Microsoft.Extensions.Logging;
+using TotallyHot.ArcRouter.Sandbox;
+using TotallyHot.ArcRouter.Sandbox.Execution;
+
+namespace TotallyHot.ArcRouter.Transcripts;
+
+/// <summary>
+/// Backfills a transcript row's <c>score</c> column once the verifier's result arrives
+/// (docs/router/self-organizing-classification-plan.md Phase T1b) - the second of the transcript store's
+/// two writes (insert at request time, this update once scored). Registered alongside
+/// <see cref="Router.RouterMemoryScoreObserver"/> and <see cref="Router.EmbeddingMemoryScoreObserver"/> in
+/// the fan-out <see cref="Router.CompositeRouterScoreObserver"/>, but only when transcript capture is
+/// enabled - see <c>Hosting.ServiceCollectionExtensions</c>.
+/// </summary>
+public sealed class TranscriptScoreObserver : IRouterScoreObserver
+{
+    private readonly ITranscriptStore _store;
+    private readonly ILogger<TranscriptScoreObserver> _logger;
+
+    /// <summary>Initializes a new instance of the <see cref="TranscriptScoreObserver"/> class.</summary>
+    /// <param name="store">The transcript store to backfill into.</param>
+    /// <param name="logger">The logger.</param>
+    public TranscriptScoreObserver(ITranscriptStore store, ILogger<TranscriptScoreObserver> logger)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(logger);
+
+        _store = store;
+        _logger = logger;
+    }
+
+    /// <inheritdoc />
+    public async Task ObserveAsync(SandboxResult result, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+
+        if (string.IsNullOrEmpty(result.RequestCorrelationId))
+        {
+            _logger.LogDebug("Sandbox result has no correlation id; skipping transcript score backfill.");
+            return;
+        }
+
+        var score = Math.Clamp(result.UnifiedScore, 0.0, 1.0);
+        await _store.UpdateOutcomeAsync(result.RequestCorrelationId, score, cancellationToken).ConfigureAwait(false);
+
+        if (_logger.IsEnabled(LogLevel.Debug))
+        {
+            _logger.LogDebug(
+                "Backfilled transcript score for correlation {CorrelationId} with score {Score:F3}.",
+                result.RequestCorrelationId,
+                score);
+        }
+    }
+}

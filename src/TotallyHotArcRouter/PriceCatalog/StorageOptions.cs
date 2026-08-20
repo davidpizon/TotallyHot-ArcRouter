@@ -46,6 +46,17 @@ public sealed class StorageOptions
     public string LogRegModelPath { get; init; } = @"%LOCALAPPDATA%\TotallyHot.ArcRouter\logreg_voter_model.json";
 
     /// <summary>
+    /// Gets the opt-in transcript store's file path
+    /// (docs/router/self-organizing-classification-plan.md Phase T1a). May contain the same tokens and
+    /// separators as <see cref="DatabasePath"/>, resolved by <see cref="ResolveTranscriptDatabasePath"/>.
+    /// A separate file from <see cref="DatabasePath"/> and from <c>RouterMemoryDatabase</c>'s file: it
+    /// carries raw prompt/response text, which the two existing databases deliberately do not, so its
+    /// lifecycle (creation gated on <c>TranscriptOptions.Enabled</c>, retention-bounded) stays independent
+    /// of both.
+    /// </summary>
+    public string TranscriptDatabasePath { get; init; } = @"%LOCALAPPDATA%\TotallyHot.ArcRouter\transcripts.db";
+
+    /// <summary>
     /// Gets the number of days a <c>usage_ledger</c> row is retained before the startup health check's
     /// retention sweep deletes it, keyed on the row's <c>occurred_at_utc</c>. Defaults to 370 - a year plus
     /// slack, matching the token-monitor plan's bounded-archive discipline (long enough for annual
@@ -95,6 +106,12 @@ public sealed class StorageOptions
     /// returns an absolute path, via the same rules as <see cref="ResolveDatabasePath"/>.
     /// </summary>
     public string ResolveLogRegModelPath() => ResolvePath(LogRegModelPath);
+
+    /// <summary>
+    /// Expands environment-variable tokens in <see cref="TranscriptDatabasePath"/>, normalizes
+    /// separators, and returns an absolute path, via the same rules as <see cref="ResolveDatabasePath"/>.
+    /// </summary>
+    public string ResolveTranscriptDatabasePath() => ResolvePath(TranscriptDatabasePath);
 
     /// <summary>
     /// Shared expansion/normalization logic behind <see cref="ResolveDatabasePath"/> and

@@ -307,7 +307,7 @@ New for this plan:
 
 | Phase | Deliverable | Depends on | Status |
 |---|---|---|---|
-| T1 | Opt-in transcript capture; provenance columns (`IsExploratory`, propensity, real cost); embedding backfill | live-feedback-learning-plan.md Phases 1-4 | Proposed |
+| T1 | Opt-in transcript capture; provenance columns (`IsExploratory`, propensity, real cost); embedding backfill | live-feedback-learning-plan.md Phases 1-4 | Partially shipped — 1a-1c done, 1d-1e proposed (see note below) |
 | T2 | Self-organizing clustering job over `memory_entries` embeddings | T1 (bootstrap path only needs the synced corpus) | Proposed |
 | T3 | `ClusterBestVoter` — fifth Orchestrator voter | T2 | Proposed |
 | T4 | Baseline comparison: learned clusters vs. the frozen 9-dimension categorizer | T1, T2, T3 | Proposed |
@@ -380,6 +380,29 @@ created and nothing is written; retention purges verifiably under both bounds; a
 embedding was skipped is backfilled into `memory_entries` within one background cycle once scored;
 routing latency is unaffected — no test in the suite exceeds 5 seconds, and all new writes are off the
 hot path or fire-and-forget with a logged failure.
+
+**Where things stand.** 1a (transcript store), 1b (capture points), and 1c (the three provenance
+repairs — `IsExploratory` and propensity computed and persisted, real cost wired into
+`EmbeddingMemoryScoreObserver`) shipped in this pass. Concretely: `RoutingDecision.Propensity` is
+computed in `OrchestratorRoutingPolicy.DecideAsync` under the closed-form epsilon-greedy formula and
+persisted through a new `IRoutingPolicy.DecideOutcomeAsync` (additive default-interface method,
+overridden by `OrchestratorRoutingPolicy` and `CompositeRoutingPolicy`) threaded through
+`RequestInterceptor`/`ModelRouteResolutionResult`/`ProxyMiddleware` into a new
+`Transcripts.TranscriptDatabase`/`SqliteTranscriptStore` (its own `transcripts.db`, schema created only
+when `TranscriptOptions.Enabled` is true) and additively into `memory_entries`
+(`is_exploratory`/`propensity` columns, migrated via `RouterMemoryDatabase`'s existing additive-column
+convention). `EmbeddingMemoryScoreObserver` no longer writes `cost: 0.0` unconditionally — it recovers
+the real estimated cost and exploration provenance from two new request-scoped caches
+(`PendingRequestCostCache`, `PendingRequestProvenanceCache`, mirroring `PendingTaskEmbeddingCache`'s
+shape) set alongside the existing embedding cache in `ProxyMiddleware`. The `memory_entry_id` column is
+present in the transcript schema, per 1a's design, but left unused by every phase this pass ships — 1d's
+backfill is the first consumer.
+
+**1d (embedding backfill) and 1e (retention) remain out of scope** for this pass and are unimplemented:
+no background job yet scans scored transcript rows with no `memory_entry_id` and backfills
+`memory_entries`, and no retention purge (startup or periodic) yet enforces `RetentionDays`/`MaxRows` on
+`request_transcripts`. A future pass can build both without a further schema migration, since the
+`memory_entry_id` column and every other 1a column already exist.
 
 ## Phase T2 — Self-organizing clustering
 
