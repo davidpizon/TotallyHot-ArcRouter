@@ -24,7 +24,7 @@ public class EmbeddingMemoryScoreObserverTests
         var pendingCache = CreatePendingCache();
         pendingCache.Set("corr-1", [1f, 0f, 0f]);
 
-        var observer = new EmbeddingMemoryScoreObserver(memory, pendingCache, NullLogger<EmbeddingMemoryScoreObserver>.Instance);
+        var observer = new EmbeddingMemoryScoreObserver(memory, pendingCache, CreatePendingCostCache(), CreatePendingProvenanceCache(), NullLogger<EmbeddingMemoryScoreObserver>.Instance);
 
         var result = new SandboxResult
         {
@@ -48,7 +48,7 @@ public class EmbeddingMemoryScoreObserverTests
         await memory.InitializeAsync(TestContext.Current.CancellationToken);
 
         var pendingCache = CreatePendingCache();
-        var observer = new EmbeddingMemoryScoreObserver(memory, pendingCache, NullLogger<EmbeddingMemoryScoreObserver>.Instance);
+        var observer = new EmbeddingMemoryScoreObserver(memory, pendingCache, CreatePendingCostCache(), CreatePendingProvenanceCache(), NullLogger<EmbeddingMemoryScoreObserver>.Instance);
 
         var result = new SandboxResult
         {
@@ -70,7 +70,7 @@ public class EmbeddingMemoryScoreObserverTests
         await memory.InitializeAsync(TestContext.Current.CancellationToken);
 
         var pendingCache = CreatePendingCache();
-        var observer = new EmbeddingMemoryScoreObserver(memory, pendingCache, NullLogger<EmbeddingMemoryScoreObserver>.Instance);
+        var observer = new EmbeddingMemoryScoreObserver(memory, pendingCache, CreatePendingCostCache(), CreatePendingProvenanceCache(), NullLogger<EmbeddingMemoryScoreObserver>.Instance);
 
         var result = new SandboxResult { RequestCorrelationId = string.Empty, Model = "claude-opus-4-6", UnifiedScore = 0.5 };
 
@@ -88,7 +88,7 @@ public class EmbeddingMemoryScoreObserverTests
 
         var pendingCache = CreatePendingCache();
         pendingCache.Set("corr-1", [1f]);
-        var observer = new EmbeddingMemoryScoreObserver(memory, pendingCache, NullLogger<EmbeddingMemoryScoreObserver>.Instance);
+        var observer = new EmbeddingMemoryScoreObserver(memory, pendingCache, CreatePendingCostCache(), CreatePendingProvenanceCache(), NullLogger<EmbeddingMemoryScoreObserver>.Instance);
 
         var result = new SandboxResult { RequestCorrelationId = "corr-1", Model = string.Empty, UnifiedScore = 0.5 };
 
@@ -106,13 +106,71 @@ public class EmbeddingMemoryScoreObserverTests
 
         var pendingCache = CreatePendingCache();
         pendingCache.Set("corr-1", [1f]);
-        var observer = new EmbeddingMemoryScoreObserver(memory, pendingCache, NullLogger<EmbeddingMemoryScoreObserver>.Instance);
+        var observer = new EmbeddingMemoryScoreObserver(memory, pendingCache, CreatePendingCostCache(), CreatePendingProvenanceCache(), NullLogger<EmbeddingMemoryScoreObserver>.Instance);
 
         var result = new SandboxResult { RequestCorrelationId = "corr-1", Model = "m", UnifiedScore = 5.0 };
 
         await observer.ObserveAsync(result, TestContext.Current.CancellationToken);
 
         Assert.Equal(1.0, Assert.Single(store.Entries).Score);
+    }
+
+    [Fact]
+    public async Task ObserveAsync_PendingCostAndProvenanceForCorrelationId_RecoversBothOntoTheEntry()
+    {
+        var store = new FakeMemoryEntryStore();
+        var memory = CreateMemory(store);
+        await memory.InitializeAsync(TestContext.Current.CancellationToken);
+
+        var pendingCache = CreatePendingCache();
+        pendingCache.Set("corr-1", [1f, 0f, 0f]);
+        var pendingCostCache = CreatePendingCostCache();
+        pendingCostCache.Set("corr-1", 0.0042m);
+        var pendingProvenanceCache = CreatePendingProvenanceCache();
+        pendingProvenanceCache.Set("corr-1", isExploratory: true, propensity: 0.02);
+
+        var observer = new EmbeddingMemoryScoreObserver(memory, pendingCache, pendingCostCache, pendingProvenanceCache, NullLogger<EmbeddingMemoryScoreObserver>.Instance);
+
+        var result = new SandboxResult
+        {
+            RequestCorrelationId = "corr-1",
+            Model = "claude-opus-4-6",
+            UnifiedScore = 0.75,
+        };
+
+        await observer.ObserveAsync(result, TestContext.Current.CancellationToken);
+
+        var entry = Assert.Single(store.Entries);
+        Assert.Equal(0.0042, entry.Cost);
+        Assert.True(entry.IsExploratory);
+        Assert.Equal(0.02, entry.Propensity);
+    }
+
+    [Fact]
+    public async Task ObserveAsync_NoPendingCostOrProvenance_DefaultsToZeroCostAndCertainNonExploratoryPropensity()
+    {
+        var store = new FakeMemoryEntryStore();
+        var memory = CreateMemory(store);
+        await memory.InitializeAsync(TestContext.Current.CancellationToken);
+
+        var pendingCache = CreatePendingCache();
+        pendingCache.Set("corr-1", [1f, 0f, 0f]);
+
+        var observer = new EmbeddingMemoryScoreObserver(memory, pendingCache, CreatePendingCostCache(), CreatePendingProvenanceCache(), NullLogger<EmbeddingMemoryScoreObserver>.Instance);
+
+        var result = new SandboxResult
+        {
+            RequestCorrelationId = "corr-1",
+            Model = "claude-opus-4-6",
+            UnifiedScore = 0.75,
+        };
+
+        await observer.ObserveAsync(result, TestContext.Current.CancellationToken);
+
+        var entry = Assert.Single(store.Entries);
+        Assert.Equal(0.0, entry.Cost);
+        Assert.False(entry.IsExploratory);
+        Assert.Equal(1.0, entry.Propensity);
     }
 
     private static EmbeddingMemory CreateMemory(IMemoryEntryStore store) =>
@@ -122,6 +180,12 @@ public class EmbeddingMemoryScoreObserverTests
             NullLogger<EmbeddingMemory>.Instance);
 
     private static PendingTaskEmbeddingCache CreatePendingCache() =>
+        new(Options.Create(new RoutingOptions { PendingEmbeddingCacheCapacity = 100, PendingEmbeddingCacheTtlSeconds = 300 }));
+
+    private static PendingRequestCostCache CreatePendingCostCache() =>
+        new(Options.Create(new RoutingOptions { PendingEmbeddingCacheCapacity = 100, PendingEmbeddingCacheTtlSeconds = 300 }));
+
+    private static PendingRequestProvenanceCache CreatePendingProvenanceCache() =>
         new(Options.Create(new RoutingOptions { PendingEmbeddingCacheCapacity = 100, PendingEmbeddingCacheTtlSeconds = 300 }));
 
     private sealed class FakeMemoryEntryStore : IMemoryEntryStore

@@ -28,7 +28,7 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT id, embedding, chosen_model, score, cost, verifier_trace, created_at_utc
+            SELECT id, embedding, chosen_model, score, cost, verifier_trace, created_at_utc, is_exploratory, propensity
             FROM memory_entries
             ORDER BY id ASC;
             """;
@@ -52,8 +52,8 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO memory_entries (embedding, chosen_model, score, cost, verifier_trace, created_at_utc)
-            VALUES ($embedding, $chosenModel, $score, $cost, $verifierTrace, $createdAtUtc);
+            INSERT INTO memory_entries (embedding, chosen_model, score, cost, verifier_trace, created_at_utc, is_exploratory, propensity)
+            VALUES ($embedding, $chosenModel, $score, $cost, $verifierTrace, $createdAtUtc, $isExploratory, $propensity);
             SELECT last_insert_rowid();
             """;
         command.Parameters.AddWithValue("$embedding", ToBytes(entry.TaskEmbedding));
@@ -62,6 +62,8 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         command.Parameters.AddWithValue("$cost", entry.Cost);
         command.Parameters.AddWithValue("$verifierTrace", (object?)entry.VerifierTrace ?? DBNull.Value);
         command.Parameters.AddWithValue("$createdAtUtc", entry.CreatedAtUtc.ToString("O"));
+        command.Parameters.AddWithValue("$isExploratory", entry.IsExploratory ? 1 : 0);
+        command.Parameters.AddWithValue("$propensity", entry.Propensity);
 
         var id = (long)command.ExecuteScalar()!;
         return Task.FromResult(entry with { Id = id });
@@ -93,8 +95,10 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         var cost = reader.GetDouble(4);
         var verifierTrace = reader.IsDBNull(5) ? null : reader.GetString(5);
         var createdAtUtc = DateTimeOffset.Parse(reader.GetString(6), null, System.Globalization.DateTimeStyles.RoundtripKind);
+        var isExploratory = reader.GetInt64(7) != 0;
+        var propensity = reader.GetDouble(8);
 
-        return new MemoryEntry(id, embedding, chosenModel, score, cost, verifierTrace, createdAtUtc);
+        return new MemoryEntry(id, embedding, chosenModel, score, cost, verifierTrace, createdAtUtc, isExploratory, propensity);
     }
 
     /// <summary>Encodes an embedding vector as a raw little-endian <c>float32</c> byte array for storage in the <c>embedding</c> BLOB column.</summary>

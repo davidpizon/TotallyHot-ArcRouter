@@ -17,20 +17,33 @@ public sealed class EmbeddingMemoryScoreObserver : IRouterScoreObserver
 {
     private readonly EmbeddingMemory _memory;
     private readonly PendingTaskEmbeddingCache _pendingCache;
+    private readonly PendingRequestCostCache _pendingCostCache;
+    private readonly PendingRequestProvenanceCache _pendingProvenanceCache;
     private readonly ILogger<EmbeddingMemoryScoreObserver> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="EmbeddingMemoryScoreObserver"/> class.</summary>
     /// <param name="memory">The embedding-keyed memory to write into.</param>
     /// <param name="pendingCache">The cache bridging a request's embedding to its later-arriving score.</param>
+    /// <param name="pendingCostCache">The cache bridging a request's estimated dollar cost to its later-arriving score.</param>
+    /// <param name="pendingProvenanceCache">The cache bridging a request's exploration provenance to its later-arriving score.</param>
     /// <param name="logger">The logger.</param>
-    public EmbeddingMemoryScoreObserver(EmbeddingMemory memory, PendingTaskEmbeddingCache pendingCache, ILogger<EmbeddingMemoryScoreObserver> logger)
+    public EmbeddingMemoryScoreObserver(
+        EmbeddingMemory memory,
+        PendingTaskEmbeddingCache pendingCache,
+        PendingRequestCostCache pendingCostCache,
+        PendingRequestProvenanceCache pendingProvenanceCache,
+        ILogger<EmbeddingMemoryScoreObserver> logger)
     {
         ArgumentNullException.ThrowIfNull(memory);
         ArgumentNullException.ThrowIfNull(pendingCache);
+        ArgumentNullException.ThrowIfNull(pendingCostCache);
+        ArgumentNullException.ThrowIfNull(pendingProvenanceCache);
         ArgumentNullException.ThrowIfNull(logger);
 
         _memory = memory;
         _pendingCache = pendingCache;
+        _pendingCostCache = pendingCostCache;
+        _pendingProvenanceCache = pendingProvenanceCache;
         _logger = logger;
     }
 
@@ -59,19 +72,60 @@ public sealed class EmbeddingMemoryScoreObserver : IRouterScoreObserver
 
         var score = Math.Clamp(result.UnifiedScore, 0.0, 1.0);
 
-        // Cost (κ) is not yet threaded from spend tracking into SandboxResult - no Phase 1-3 consumer needs
-        // it, since Phase 3's LogRegVoter scores on embedding alone and cost-aware training is Phase 4/N's
-        // concern. Recorded as 0.0 rather than fabricating a value; a future phase that needs κ here must
-        // wire a real cost source before relying on this field.
-        await _memory.AddEntryAsync(embedding, result.Model, score, cost: 0.0, verifierTrace: null, cancellationToken).ConfigureAwait(false);
+        // docs/router/self-organizing-classification-plan.md Phase T1c: cost, IsExploratory, and
+        // Propensity are all known at request-resolution time (ModelRouteResolutionResult) but only
+        // become available here, keyed by the same correlation id, once the verifier score arrives -
+        // exactly the timing problem PendingTaskEmbeddingCache already solves for the embedding. Three
+        // parallel TryTake calls, not one merged lookup, because ProxyMiddleware sets the three caches
+        // independently (they come from different points in that method) and a miss on any one of them
+        // must not block recording the other two - a cost never recorded is still worth an embedding
+        // memory entry.
+        var recoveredCost = 0.0;
+        if (!string.IsNullOrEmpty(result.RequestCorrelationId) && _pendingCostCache.TryTake(result.RequestCorrelationId, out var cachedCost))
+        {
+            recoveredCost = (double)cachedCost;
+        }
+        else
+        {
+            _logger.LogDebug(
+                "No pending cost for correlation {CorrelationId}; recording embedding-memory entry with cost 0.",
+                result.RequestCorrelationId);
+        }
+
+        var recoveredIsExploratory = false;
+        var recoveredPropensity = 1.0;
+        if (!string.IsNullOrEmpty(result.RequestCorrelationId) &&
+            _pendingProvenanceCache.TryTake(result.RequestCorrelationId, out var cachedIsExploratory, out var cachedPropensity))
+        {
+            recoveredIsExploratory = cachedIsExploratory;
+            recoveredPropensity = cachedPropensity;
+        }
+        else
+        {
+            _logger.LogDebug(
+                "No pending provenance for correlation {CorrelationId}; recording embedding-memory entry as non-exploratory, propensity 1.0.",
+                result.RequestCorrelationId);
+        }
+
+        await _memory.AddEntryAsync(
+            embedding,
+            result.Model,
+            score,
+            cost: recoveredCost,
+            verifierTrace: null,
+            cancellationToken,
+            isExploratory: recoveredIsExploratory,
+            propensity: recoveredPropensity).ConfigureAwait(false);
 
         if (_logger.IsEnabled(LogLevel.Information))
         {
             _logger.LogInformation(
-                "Recorded embedding-memory entry for model {Model} (correlation {CorrelationId}) with score {Score:F3}.",
+                "Recorded embedding-memory entry for model {Model} (correlation {CorrelationId}) with score {Score:F3}, cost {Cost:F6}, exploratory {IsExploratory}.",
                 result.Model,
                 result.RequestCorrelationId,
-                score);
+                score,
+                recoveredCost,
+                recoveredIsExploratory);
         }
     }
 }

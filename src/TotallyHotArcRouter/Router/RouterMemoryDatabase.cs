@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Models;
@@ -101,5 +102,48 @@ public sealed class RouterMemoryDatabase
         using var schema = connection.CreateCommand();
         schema.CommandText = SchemaSql;
         schema.ExecuteNonQuery();
+
+        MigrateProvenanceColumns(connection);
+    }
+
+    // CREATE TABLE IF NOT EXISTS silently does nothing when the table already exists, so it cannot add a
+    // column to a database created before provenance tracking existed - the same blind spot
+    // PriceCatalogDatabase.MigrateEnabledColumn documents and works around. Without this, every install
+    // predating docs/router/self-organizing-classification-plan.md Phase T1c would fail on first read with
+    // "no such column". Defaulting both columns to "not exploratory, certain selection" (0 / 1.0) is exactly
+    // how every pre-existing row actually behaved: it was written before either concept existed, by a policy
+    // with no exploration mechanism recorded against it.
+    /// <summary>
+    /// Adds the `is_exploratory` and `propensity` columns to `memory_entries` if missing, so databases
+    /// created before docs/router/self-organizing-classification-plan.md Phase T1c pick them up on startup,
+    /// with existing rows defaulting to non-exploratory, certain-propensity provenance.
+    /// </summary>
+    private static void MigrateProvenanceColumns(SqliteConnection connection)
+    {
+        if (!ColumnExists(connection, "memory_entries", "is_exploratory"))
+        {
+            using var alterIsExploratory = connection.CreateCommand();
+            alterIsExploratory.CommandText = "ALTER TABLE memory_entries ADD COLUMN is_exploratory INTEGER NOT NULL DEFAULT 0;";
+            alterIsExploratory.ExecuteNonQuery();
+        }
+
+        if (!ColumnExists(connection, "memory_entries", "propensity"))
+        {
+            using var alterPropensity = connection.CreateCommand();
+            alterPropensity.CommandText = "ALTER TABLE memory_entries ADD COLUMN propensity REAL NOT NULL DEFAULT 1.0;";
+            alterPropensity.ExecuteNonQuery();
+        }
+    }
+
+    /// <summary>Checks whether <paramref name="table"/> already has a column named <paramref name="column"/>.</summary>
+    /// <param name="connection">An open connection to query.</param>
+    /// <param name="table">The table name. Must be a compile-time constant - interpolated directly into the PRAGMA, which does not accept a bound parameter for a table name.</param>
+    /// <param name="column">The column name to look for.</param>
+    private static bool ColumnExists(SqliteConnection connection, string table, string column)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = $column;";
+        command.Parameters.AddWithValue("$column", column);
+        return Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture) > 0;
     }
 }

@@ -1,3 +1,5 @@
+using TotallyHot.ArcRouter.Router;
+using TotallyHot.ArcRouter.Router.Classification;
 using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Proxy;
@@ -79,7 +81,22 @@ public sealed record ModelRouteResolutionResult
     /// <param name="substitutionReason">See <see cref="SubstitutionReason"/>.</param>
     /// <param name="taskEmbedding">See <see cref="TaskEmbedding"/>.</param>
     /// <param name="routerTokens">See <see cref="RouterTokens"/>.</param>
-    private ModelRouteResolutionResult(bool isSuccess, IReadOnlyList<RouteCandidate>? candidates, string? errorMessage, string? requestedModelName, RoutingSubstitutionReason substitutionReason, float[]? taskEmbedding, int routerTokens)
+    /// <param name="isExploratory">See <see cref="IsExploratory"/>.</param>
+    /// <param name="propensity">See <see cref="Propensity"/>.</param>
+    /// <param name="classification">See <see cref="Classification"/>.</param>
+    /// <param name="taskText">See <see cref="TaskText"/>.</param>
+    private ModelRouteResolutionResult(
+        bool isSuccess,
+        IReadOnlyList<RouteCandidate>? candidates,
+        string? errorMessage,
+        string? requestedModelName,
+        RoutingSubstitutionReason substitutionReason,
+        float[]? taskEmbedding,
+        int routerTokens,
+        bool isExploratory,
+        double propensity,
+        RequestClassification? classification,
+        string? taskText)
     {
         IsSuccess = isSuccess;
         Candidates = candidates ?? [];
@@ -88,6 +105,10 @@ public sealed record ModelRouteResolutionResult
         SubstitutionReason = substitutionReason;
         TaskEmbedding = taskEmbedding;
         RouterTokens = routerTokens;
+        IsExploratory = isExploratory;
+        Propensity = propensity;
+        Classification = classification;
+        TaskText = taskText;
     }
 
     /// <summary>
@@ -163,6 +184,42 @@ public sealed record ModelRouteResolutionResult
     /// </summary>
     public int RouterTokens { get; }
 
+    /// <summary>
+    /// Gets whether the routing policy's pick for this request was an epsilon-greedy exploratory pick
+    /// rather than its normal choice (<see cref="TotallyHot.ArcRouter.Models.RoutingDecision.IsExploratory"/>) -
+    /// docs/router/self-organizing-classification-plan.md Phase T1c. Only set to a real value on the
+    /// path that consults an <see cref="IRoutingPolicy"/> (an unresolved model name, auto-select, or a
+    /// substitution). A request served directly (an explicitly-named, currently-eligible model) never
+    /// reaches a policy, so it correctly reports <see langword="false"/> - naming an exact model is not
+    /// a policy pick to begin with.
+    /// </summary>
+    public bool IsExploratory { get; }
+
+    /// <summary>
+    /// Gets the propensity of the model actually served, under the routing policy's own arm-selection
+    /// distribution (<see cref="TotallyHot.ArcRouter.Models.RoutingDecision.Propensity"/>). Defaults to
+    /// <c>1.0</c> - certain selection - for a request that never reaches a policy, matching
+    /// <see cref="IsExploratory"/>'s default of <see langword="false"/> for the same reason.
+    /// </summary>
+    public double Propensity { get; }
+
+    /// <summary>
+    /// Gets the request's Phase H heuristic classification (<see cref="RequestClassification.Dimension"/>,
+    /// <see cref="RequestClassification.Difficulty"/>, <see cref="RequestClassification.Language"/>,
+    /// <see cref="RequestClassification.IsUtility"/>), computed once in
+    /// <c>RequestInterceptor.ResolveModelRouteAsync</c> and carried through for the transcript store's
+    /// insert (docs/router/self-organizing-classification-plan.md Phase T1a/T1b). <see langword="null"/>
+    /// only on <see cref="Failure"/>.
+    /// </summary>
+    public RequestClassification? Classification { get; }
+
+    /// <summary>
+    /// Gets the newest user message's extracted text, when available, for the transcript store's
+    /// <c>prompt_text</c> column. The same text already extracted to compute <see cref="TaskEmbedding"/>,
+    /// reused rather than re-parsed.
+    /// </summary>
+    public string? TaskText { get; }
+
     // A single-route Success(route, rewrittenBody) overload used to sit here. It was unreachable - every
     // caller goes through the candidate-list overload below, because even a no-fallback resolution builds
     // its one candidate through RequestInterceptor.BuildCandidate - and it constructed a RouteCandidate
@@ -178,8 +235,21 @@ public sealed record ModelRouteResolutionResult
     /// <param name="substitutionReason">See <see cref="SubstitutionReason"/>.</param>
     /// <param name="taskEmbedding">See <see cref="TaskEmbedding"/>.</param>
     /// <param name="routerTokens">See <see cref="RouterTokens"/>.</param>
+    /// <param name="isExploratory">See <see cref="IsExploratory"/>.</param>
+    /// <param name="propensity">See <see cref="Propensity"/>.</param>
+    /// <param name="classification">See <see cref="Classification"/>.</param>
+    /// <param name="taskText">See <see cref="TaskText"/>.</param>
     /// <exception cref="ArgumentException"><paramref name="candidates"/> is empty - a success must have at least the primary route, since <see cref="Route"/>/<see cref="RewrittenBody"/> index the first candidate.</exception>
-    public static ModelRouteResolutionResult Success(IReadOnlyList<RouteCandidate> candidates, string requestedModelName, RoutingSubstitutionReason substitutionReason, float[]? taskEmbedding = null, int routerTokens = 0)
+    public static ModelRouteResolutionResult Success(
+        IReadOnlyList<RouteCandidate> candidates,
+        string requestedModelName,
+        RoutingSubstitutionReason substitutionReason,
+        float[]? taskEmbedding = null,
+        int routerTokens = 0,
+        bool isExploratory = false,
+        double propensity = 1.0,
+        RequestClassification? classification = null,
+        string? taskText = null)
     {
         ArgumentNullException.ThrowIfNull(candidates);
         if (candidates.Count == 0)
@@ -187,7 +257,7 @@ public sealed record ModelRouteResolutionResult
             throw new ArgumentException("A successful resolution must contain at least the primary route candidate.", nameof(candidates));
         }
 
-        return new(true, candidates, null, requestedModelName, substitutionReason, taskEmbedding, routerTokens);
+        return new(true, candidates, null, requestedModelName, substitutionReason, taskEmbedding, routerTokens, isExploratory, propensity, classification, taskText);
     }
 
     /// <summary>
@@ -199,6 +269,6 @@ public sealed record ModelRouteResolutionResult
     /// for the figure to appear on and no savings denominator it could distort.
     /// </remarks>
     public static ModelRouteResolutionResult Failure(string errorMessage) =>
-        new(false, null, errorMessage, null, RoutingSubstitutionReason.None, null, 0);
+        new(false, null, errorMessage, null, RoutingSubstitutionReason.None, null, 0, false, 1.0, null, null);
 }
 

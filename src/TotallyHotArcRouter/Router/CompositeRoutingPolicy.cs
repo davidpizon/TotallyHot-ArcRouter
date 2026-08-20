@@ -79,4 +79,27 @@ public sealed class CompositeRoutingPolicy : IRoutingPolicy
             ? _orchestratorPolicy.SelectModelAsync(context, signals, cancellationToken)
             : _generalPolicy.SelectModelAsync(context, cancellationToken);
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Mirrors <see cref="SelectModelAsync(RoutingContext, RoutingSignals?, CancellationToken)"/>'s
+    /// dispatch exactly, but preserves each leg's real provenance instead of collapsing to a model name:
+    /// the utility and pre-Orchestrator general legs fall through to <see cref="IRoutingPolicy"/>'s
+    /// default (non-exploratory, propensity 1.0 - neither has an exploration mechanism), while the
+    /// Orchestrator leg forwards to its own <see cref="Orchestrator.OrchestratorRoutingPolicy.DecideOutcomeAsync"/>
+    /// override, which reports the real epsilon-greedy provenance.
+    /// </remarks>
+    public Task<RoutingDecision> DecideOutcomeAsync(RoutingContext context, RoutingSignals? signals, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        if (context.IsUtility)
+        {
+            return ((IRoutingPolicy)_utilityPolicy).DecideOutcomeAsync(context, signals, cancellationToken);
+        }
+
+        return _options.EnableOrchestratorPolicy
+            ? _orchestratorPolicy.DecideOutcomeAsync(context, signals, cancellationToken)
+            : ((IRoutingPolicy)_generalPolicy).DecideOutcomeAsync(context, signals, cancellationToken);
+    }
 }

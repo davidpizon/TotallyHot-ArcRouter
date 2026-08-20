@@ -47,6 +47,69 @@ public class SqliteMemoryEntryStoreTests : IDisposable
         Assert.Equal(0.87, entry.Score, 6);
         Assert.Equal(0.0042, entry.Cost, 6);
         Assert.Equal("trace-details", entry.VerifierTrace);
+        Assert.False(entry.IsExploratory);
+        Assert.Equal(1.0, entry.Propensity, 6);
+    }
+
+    /// <summary>
+    /// docs/router/self-organizing-classification-plan.md Phase T1c: is_exploratory/propensity round-trip
+    /// through the store like every other column.
+    /// </summary>
+    [Fact]
+    public async Task LoadAllAsync_RoundTripsProvenance()
+    {
+        var store = new SqliteMemoryEntryStore(_database);
+        var embedding = new float[] { 0.1f, -0.2f, 0.75f };
+        await store.AppendAsync(
+            new MemoryEntry(0, embedding, "model-c", 0.87, 0.0042, null, DateTimeOffset.UtcNow, IsExploratory: true, Propensity: 0.0167),
+            TestContext.Current.CancellationToken);
+
+        var loaded = await store.LoadAllAsync(TestContext.Current.CancellationToken);
+
+        var entry = Assert.Single(loaded);
+        Assert.True(entry.IsExploratory);
+        Assert.Equal(0.0167, entry.Propensity, 6);
+    }
+
+    /// <summary>
+    /// docs/router/self-organizing-classification-plan.md Phase T1c: a database created before provenance
+    /// tracking existed (schema without is_exploratory/propensity) picks up the columns on the next
+    /// EnsureCreated call, with existing rows defaulting to non-exploratory, certain propensity.
+    /// </summary>
+    [Fact]
+    public async Task EnsureCreated_PreExistingDatabaseWithoutProvenanceColumns_MigratesWithDefaults()
+    {
+        using var connection = _database.OpenConnection();
+        using (var drop = connection.CreateCommand())
+        {
+            // Simulate a pre-migration database: recreate memory_entries without the two new columns,
+            // then seed one row exactly as a pre-existing install would have it.
+            drop.CommandText = """
+                DROP TABLE memory_entries;
+                CREATE TABLE memory_entries (
+                    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                    embedding        BLOB    NOT NULL,
+                    chosen_model     TEXT    NOT NULL,
+                    score            REAL    NOT NULL,
+                    cost             REAL    NOT NULL,
+                    verifier_trace   TEXT    NULL,
+                    created_at_utc   TEXT    NOT NULL
+                );
+                INSERT INTO memory_entries (embedding, chosen_model, score, cost, verifier_trace, created_at_utc)
+                VALUES (x'0000803F', 'legacy-model', 0.5, 0.01, NULL, '2026-01-01T00:00:00.0000000+00:00');
+                """;
+            drop.ExecuteNonQuery();
+        }
+
+        _database.EnsureCreated();
+
+        var store = new SqliteMemoryEntryStore(_database);
+        var loaded = await store.LoadAllAsync(TestContext.Current.CancellationToken);
+
+        var entry = Assert.Single(loaded);
+        Assert.Equal("legacy-model", entry.ChosenModel);
+        Assert.False(entry.IsExploratory);
+        Assert.Equal(1.0, entry.Propensity, 6);
     }
 
     [Fact]

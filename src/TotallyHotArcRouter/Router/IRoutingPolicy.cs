@@ -1,3 +1,5 @@
+using TotallyHot.ArcRouter.Models;
+
 namespace TotallyHot.ArcRouter.Router;
 
 /// <summary>
@@ -32,4 +34,32 @@ public interface IRoutingPolicy
     /// <returns>The selected candidate's <see cref="RoutingCandidate.ModelName"/>.</returns>
     Task<string> SelectModelAsync(RoutingContext context, RoutingSignals? signals, CancellationToken cancellationToken = default) =>
         SelectModelAsync(context, cancellationToken);
+
+    /// <summary>
+    /// Chooses a model for the given routing context and returns the full outcome, including
+    /// <see cref="RoutingDecision.IsExploratory"/> and <see cref="RoutingDecision.Propensity"/> -
+    /// docs/router/self-organizing-classification-plan.md Phase T1c. The default implementation
+    /// delegates to <see cref="SelectModelAsync(RoutingContext, RoutingSignals?, CancellationToken)"/>
+    /// and wraps the returned model name in a non-exploratory, certain-propensity decision, so every
+    /// existing <see cref="IRoutingPolicy"/> implementation gets correct-enough behavior (no exploration
+    /// mechanism means propensity 1.0) without any change.
+    /// <see cref="Orchestrator.OrchestratorRoutingPolicy"/> and <see cref="CompositeRoutingPolicy"/>
+    /// override this to report their real provenance instead.
+    /// </summary>
+    /// <param name="context">The candidates and classification signal to select from.</param>
+    /// <param name="signals">Out-of-band signals about the request, or <see langword="null"/> if none are available.</param>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    /// <returns>The full routing decision, including provenance.</returns>
+    async Task<RoutingDecision> DecideOutcomeAsync(RoutingContext context, RoutingSignals? signals, CancellationToken cancellationToken = default)
+    {
+        var model = await SelectModelAsync(context, signals, cancellationToken).ConfigureAwait(false);
+        return new RoutingDecision(
+            model,
+            confidence: 0,
+            rationale: "Wrapped from SelectModelAsync by the IRoutingPolicy.DecideOutcomeAsync default implementation.",
+            timestampUtc: DateTimeOffset.UtcNow,
+            candidateScores: null,
+            isExploratory: false,
+            propensity: 1.0);
+    }
 }

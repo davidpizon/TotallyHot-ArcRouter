@@ -9,6 +9,7 @@ using TotallyHot.ArcRouter.Router.Embeddings;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tests.CodeRouterBench;
 using TotallyHot.ArcRouter.Tests.PriceCatalog;
+using TotallyHot.ArcRouter.Transcripts;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -39,6 +40,9 @@ public class StartupHealthCheckHostedServiceTests
         var ingestionService = new PriceCatalogIngestionService(
             registry, repository, temp.CreateToggleStore(repository), NullLogger<PriceCatalogIngestionService>.Instance);
 
+        var transcriptDb = CreateTranscriptDatabase(temp);
+        var transcriptStore = new SqliteTranscriptStore(
+            transcriptDb, Options.Create(new TranscriptOptions()));
         var service = new StartupHealthCheckHostedService(
             NullLogger<StartupHealthCheckHostedService>.Instance,
             temp.Database,
@@ -54,7 +58,10 @@ public class StartupHealthCheckHostedServiceTests
             new RouterMemory(),
             CreateEmbeddingMemory(temp),
             CreateBenchmarkDatabase(temp),
-            CreateBenchmarkStatusService(temp));
+            CreateBenchmarkStatusService(temp),
+            transcriptDb,
+            transcriptStore,
+            Options.Create(new TranscriptOptions()));
 
         await service.StartAsync(TestContext.Current.CancellationToken);
 
@@ -79,6 +86,9 @@ public class StartupHealthCheckHostedServiceTests
         var ingestionService = new PriceCatalogIngestionService(
             registry, repository, temp.CreateToggleStore(repository), NullLogger<PriceCatalogIngestionService>.Instance);
 
+        var transcriptDb = CreateTranscriptDatabase(temp);
+        var transcriptStore = new SqliteTranscriptStore(
+            transcriptDb, Options.Create(new TranscriptOptions()));
         var service = new StartupHealthCheckHostedService(
             NullLogger<StartupHealthCheckHostedService>.Instance,
             temp.Database,
@@ -94,7 +104,10 @@ public class StartupHealthCheckHostedServiceTests
             new RouterMemory(),
             CreateEmbeddingMemory(temp),
             CreateBenchmarkDatabase(temp),
-            CreateBenchmarkStatusService(temp));
+            CreateBenchmarkStatusService(temp),
+            transcriptDb,
+            transcriptStore,
+            Options.Create(new TranscriptOptions()));
 
         await service.StartAsync(TestContext.Current.CancellationToken);
 
@@ -156,6 +169,10 @@ public class StartupHealthCheckHostedServiceTests
             registry, repository, temp.CreateToggleStore(repository), NullLogger<PriceCatalogIngestionService>.Instance);
         warmupState = embeddingClient is null ? null : new EmbeddingWarmupState();
 
+        var transcriptDb = CreateTranscriptDatabase(temp);
+        var transcriptStore = new SqliteTranscriptStore(
+            transcriptDb, Options.Create(new TranscriptOptions()));
+
         return new StartupHealthCheckHostedService(
             NullLogger<StartupHealthCheckHostedService>.Instance,
             temp.Database,
@@ -172,6 +189,9 @@ public class StartupHealthCheckHostedServiceTests
             CreateEmbeddingMemory(temp),
             CreateBenchmarkDatabase(temp),
             CreateBenchmarkStatusService(temp),
+            transcriptDb,
+            transcriptStore,
+            Options.Create(new TranscriptOptions()),
             embeddingClient,
             warmupState);
     }
@@ -217,6 +237,13 @@ public class StartupHealthCheckHostedServiceTests
         var directory = Path.GetDirectoryName(temp.Path_)!;
         var dbPath = Path.Combine(directory, "coderouterbench.db");
         return new BenchmarkDatabase(Options.Create(new StorageOptions { BenchmarkDatabasePath = dbPath }));
+    }
+
+    private static TotallyHot.ArcRouter.Transcripts.TranscriptDatabase CreateTranscriptDatabase(TempDatabase temp)
+    {
+        var directory = Path.GetDirectoryName(temp.Path_)!;
+        var dbPath = Path.Combine(directory, "transcripts.db");
+        return new TotallyHot.ArcRouter.Transcripts.TranscriptDatabase(Options.Create(new StorageOptions { TranscriptDatabasePath = dbPath }));
     }
 
     // The probe's HttpClient always fails fast (no real network I/O), so RecheckAsync resolves to

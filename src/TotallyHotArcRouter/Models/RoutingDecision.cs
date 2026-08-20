@@ -19,6 +19,10 @@ public sealed record RoutingDecision
     /// Whether this decision was an epsilon-greedy exploratory pick rather than the policy's normal
     /// choice. See <see cref="IsExploratory"/>.
     /// </param>
+    /// <param name="propensity">
+    /// The probability, under the policy's own arm-selection distribution, that the arm actually
+    /// selected would be chosen. See <see cref="Propensity"/>.
+    /// </param>
     /// <exception cref="ArgumentException">Thrown when required string arguments are null, empty, or whitespace.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="confidence"/> is outside [0, 1].</exception>
     public RoutingDecision(
@@ -27,7 +31,8 @@ public sealed record RoutingDecision
         string rationale,
         DateTimeOffset timestampUtc,
         IReadOnlyDictionary<string, double>? candidateScores = null,
-        bool isExploratory = false)
+        bool isExploratory = false,
+        double propensity = 1.0)
     {
         if (string.IsNullOrWhiteSpace(selectedModel))
         {
@@ -49,6 +54,7 @@ public sealed record RoutingDecision
         Rationale = rationale;
         TimestampUtc = timestampUtc;
         IsExploratory = isExploratory;
+        Propensity = propensity;
 
         var copiedScores = candidateScores is null
             ? new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
@@ -92,6 +98,19 @@ public sealed record RoutingDecision
     /// exploration deliberately does not compound it with a random pick on top.
     /// </summary>
     public bool IsExploratory { get; }
+
+    /// <summary>
+    /// Gets the propensity - the probability, under the policy's own arm-selection distribution, that
+    /// the arm actually selected (<see cref="SelectedModel"/>) would be chosen. Under epsilon-greedy
+    /// exploration with <c>K</c> eligible candidates and exploration rate <c>eps</c>, this is
+    /// <c>eps / K</c> when <see cref="IsExploratory"/> is <see langword="true"/>, and
+    /// <c>(1 - eps) + eps / K</c> for the greedy arm otherwise. This is the input inverse-propensity
+    /// weighting needs to de-bias an off-policy estimate from live traffic
+    /// (docs/router/self-organizing-classification-plan.md Phase T1c); it is not itself consumed by any
+    /// shipped estimator yet. Defaults to <c>1.0</c> - certain selection - for every policy with no
+    /// exploration mechanism, matching <see cref="IsExploratory"/>'s default of <see langword="false"/>.
+    /// </summary>
+    public double Propensity { get; }
 
     /// <summary>
     /// Creates a fallback routing decision for the supplied model.

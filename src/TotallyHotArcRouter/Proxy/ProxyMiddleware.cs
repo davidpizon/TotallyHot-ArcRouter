@@ -10,8 +10,11 @@ using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Bedrock;
 using TotallyHot.ArcRouter.Proxy.Translation;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
+using TotallyHot.ArcRouter.Router.Classification;
+using TotallyHot.ArcRouter.Router.Embeddings;
 using TotallyHot.ArcRouter.Sandbox.Ingress;
 using TotallyHot.ArcRouter.Telemetry;
+using TotallyHot.ArcRouter.Transcripts;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -89,6 +92,9 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     private readonly ICircuitBreaker _circuitBreaker;
     private readonly ToolCallNormalizerFactory _toolCallNormalizerFactory;
     private readonly Router.Embeddings.PendingTaskEmbeddingCache? _pendingTaskEmbeddingCache;
+    private readonly PendingRequestCostCache? _pendingRequestCostCache;
+    private readonly PendingRequestProvenanceCache? _pendingRequestProvenanceCache;
+    private readonly ITranscriptStore? _transcriptStore;
 
     // The rate the router's own tokens are charged at (see RoutingOptions.SelfHostedRouterPricePerMillionTokens).
     // Read once at construction rather than per request: it is a static amortization figure, not a catalog
@@ -165,6 +171,25 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// suppressed - unlike the optional collaborators above, there is no "unavailable" state for a static
     /// amortization rate.
     /// </param>
+    /// <param name="pendingRequestCostCache">
+    /// Optional bridge (docs/router/self-organizing-classification-plan.md Phase T1c) between this
+    /// request's estimated cost, computed below, and its later-arriving verifier score - mirrors
+    /// <paramref name="pendingTaskEmbeddingCache"/>'s role exactly, for a different value. Defaults to
+    /// <see langword="null"/> (no entries recorded), so existing callers/tests are unaffected.
+    /// </param>
+    /// <param name="pendingRequestProvenanceCache">
+    /// Optional bridge (docs/router/self-organizing-classification-plan.md Phase T1c) between this
+    /// request's exploration provenance (is-exploratory/propensity, resolved earlier by
+    /// <see cref="RequestInterceptor"/>) and its later-arriving verifier score. Defaults to
+    /// <see langword="null"/> (no entries recorded), so existing callers/tests are unaffected.
+    /// </param>
+    /// <param name="transcriptStore">
+    /// Optional opt-in transcript store (docs/router/self-organizing-classification-plan.md Phase T1a/T1b).
+    /// When supplied and transcript capture is enabled, one row is inserted per served request with the
+    /// prompt/response text, classification, cost, and provenance already in scope at this point; the
+    /// score is backfilled later by <see cref="Transcripts.TranscriptScoreObserver"/>. Defaults to
+    /// <see langword="null"/> (no rows written), matching the feature's opt-in-and-off-by-default posture.
+    /// </param>
     public ProxyMiddleware(
         ILogger<ProxyMiddleware> logger,
         RequestInterceptor interceptor,
@@ -186,7 +211,10 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         IRateLimitHeaderCapture? rateLimitCapture = null,
         IUsageLedger? usageLedger = null,
         Router.Embeddings.PendingTaskEmbeddingCache? pendingTaskEmbeddingCache = null,
-        IOptions<Models.RoutingOptions>? routingOptions = null)
+        IOptions<Models.RoutingOptions>? routingOptions = null,
+        PendingRequestCostCache? pendingRequestCostCache = null,
+        PendingRequestProvenanceCache? pendingRequestProvenanceCache = null,
+        ITranscriptStore? transcriptStore = null)
     {
         _logger = logger;
         _interceptor = interceptor;
@@ -211,6 +239,9 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         _circuitBreaker = circuitBreaker ?? new CircuitBreaker();
         _toolCallNormalizerFactory = toolCallNormalizerFactory ?? new ToolCallNormalizerFactory();
         _pendingTaskEmbeddingCache = pendingTaskEmbeddingCache;
+        _pendingRequestCostCache = pendingRequestCostCache;
+        _pendingRequestProvenanceCache = pendingRequestProvenanceCache;
+        _transcriptStore = transcriptStore;
         _selfHostedRouterPricePerMillionTokens =
             routingOptions?.Value.SelfHostedRouterPricePerMillionTokens ?? new Models.RoutingOptions().SelfHostedRouterPricePerMillionTokens;
 
@@ -438,7 +469,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // exactly like an HTTP outage does.
             if (translator is IBedrockPayloadTranslator bedrockTranslator)
             {
-                if (await InvokeBedrockAsync(context, route, bedrockTranslator, rewrittenBody, requestedModelName, isFallback, hasNextCandidate, nextProviderDiffers, resolution.TaskEmbedding, resolution.RouterTokens, resolution.SubstitutionReason))
+                if (await InvokeBedrockAsync(context, route, bedrockTranslator, rewrittenBody, requestedModelName, isFallback, hasNextCandidate, nextProviderDiffers, resolution.TaskEmbedding, resolution.RouterTokens, resolution.SubstitutionReason, resolution.IsExploratory, resolution.Propensity, resolution.Classification, resolution.TaskText))
                 {
                     return;
                 }
@@ -844,7 +875,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                     // ResponseTextExtractor pick the right parser per request instead of assuming one shape per
                     // provider, which broke once "anthropic" became dual-mode.
                     var telemetryShapeProvider = translator is not null ? "openai" : route.Provider;
-                    await PublishTelemetryAsync(context, route, requestedModelName, isFallback, telemetryShapeProvider, rewrittenBody, capturedResponseBytes, nativeResponseBytes, isStreaming, latencyToHeadersMs, totalDurationMs, statusCode, context.RequestAborted, responseMessage.Headers, tailScanner, resolution.TaskEmbedding, resolution.RouterTokens, resolution.SubstitutionReason);
+                    await PublishTelemetryAsync(context, route, requestedModelName, isFallback, telemetryShapeProvider, rewrittenBody, capturedResponseBytes, nativeResponseBytes, isStreaming, latencyToHeadersMs, totalDurationMs, statusCode, context.RequestAborted, responseMessage.Headers, tailScanner, resolution.TaskEmbedding, resolution.RouterTokens, resolution.SubstitutionReason, resolution.IsExploratory, resolution.Propensity, resolution.Classification, resolution.TaskText);
                 }
                 catch (Exception ex)
                 {
@@ -990,13 +1021,32 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// <param name="taskEmbedding">The request's task embedding (see <see cref="ModelRouteResolutionResult.TaskEmbedding"/>), forwarded to <see cref="PublishTelemetryAsync"/>.</param>
     /// <param name="routerTokens">The router's own token consumption for this request (see <see cref="ModelRouteResolutionResult.RouterTokens"/>), forwarded to <see cref="PublishTelemetryAsync"/>.</param>
     /// <param name="resolutionReason">The resolution-time <see cref="RoutingSubstitutionReason"/> (see <see cref="ModelRouteResolutionResult.SubstitutionReason"/>), forwarded to <see cref="PublishTelemetryAsync"/> and the requested/routed response headers.</param>
+    /// <param name="isExploratory">See <see cref="ModelRouteResolutionResult.IsExploratory"/>, forwarded to <see cref="PublishTelemetryAsync"/>.</param>
+    /// <param name="propensity">See <see cref="ModelRouteResolutionResult.Propensity"/>, forwarded to <see cref="PublishTelemetryAsync"/>.</param>
+    /// <param name="classification">See <see cref="ModelRouteResolutionResult.Classification"/>, forwarded to <see cref="PublishTelemetryAsync"/>.</param>
+    /// <param name="taskText">See <see cref="ModelRouteResolutionResult.TaskText"/>, forwarded to <see cref="PublishTelemetryAsync"/>.</param>
     /// <returns>
     /// <see langword="true"/> if a response was written to the client (success, or a failure with no
     /// eligible next candidate) - the caller's cascade is over. <see langword="false"/> if the SDK call
     /// failed before anything was written and a next candidate should be tried - the caller should
     /// <c>continue</c> its loop.
     /// </returns>
-    private async Task<bool> InvokeBedrockAsync(HttpContext context, ResolvedModelRoute route, IBedrockPayloadTranslator translator, byte[] rewrittenBody, string requestedModelName, bool isFallback, bool hasNextCandidate, bool nextProviderDiffers, float[]? taskEmbedding, int routerTokens, RoutingSubstitutionReason resolutionReason)
+    private async Task<bool> InvokeBedrockAsync(
+        HttpContext context,
+        ResolvedModelRoute route,
+        IBedrockPayloadTranslator translator,
+        byte[] rewrittenBody,
+        string requestedModelName,
+        bool isFallback,
+        bool hasNextCandidate,
+        bool nextProviderDiffers,
+        float[]? taskEmbedding,
+        int routerTokens,
+        RoutingSubstitutionReason resolutionReason,
+        bool isExploratory = false,
+        double propensity = 1.0,
+        RequestClassification? classification = null,
+        string? taskText = null)
     {
         var circuitTarget = CircuitBreakerTargetKey.FromRoute(route);
         var nativeRequestBody = translator.TranslateRequest(rewrittenBody);
@@ -1149,7 +1199,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // its streaming chunks aren't SSE-framed, so the same capture approach doesn't apply. Always
             // null here - telemetry falls back to parsing the translated "openai"-shaped bytes, unchanged
             // from before this plan.
-            await PublishTelemetryAsync(context, route, requestedModelName, isFallback, "openai", rewrittenBody, capturedResponseBytes, nativeResponseBytes: null, isStreamingRequest, latencyToHeadersMs, totalDurationMs, StatusCodes.Status200OK, context.RequestAborted, upstreamHeaders: null, tailScanner: tailScanner, taskEmbedding: taskEmbedding, routerTokens: routerTokens, resolutionReason: resolutionReason);
+            await PublishTelemetryAsync(context, route, requestedModelName, isFallback, "openai", rewrittenBody, capturedResponseBytes, nativeResponseBytes: null, isStreamingRequest, latencyToHeadersMs, totalDurationMs, StatusCodes.Status200OK, context.RequestAborted, upstreamHeaders: null, tailScanner: tailScanner, taskEmbedding: taskEmbedding, routerTokens: routerTokens, resolutionReason: resolutionReason, isExploratory: isExploratory, propensity: propensity, classification: classification, taskText: taskText);
         }
         catch (Exception ex)
         {
@@ -1291,7 +1341,11 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         IncrementalUsageScanner? tailScanner = null,
         float[]? taskEmbedding = null,
         int routerTokens = 0,
-        RoutingSubstitutionReason resolutionReason = RoutingSubstitutionReason.None)
+        RoutingSubstitutionReason resolutionReason = RoutingSubstitutionReason.None,
+        bool isExploratory = false,
+        double propensity = 1.0,
+        RequestClassification? classification = null,
+        string? taskText = null)
     {
         var requestBody = TryParseJsonObject(rewrittenRequestBody);
         var resolvedSessionId = _sessionIdResolver.Resolve(context.Request.Headers, requestBody);
@@ -1556,6 +1610,51 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         if (taskEmbedding is not null)
         {
             _pendingTaskEmbeddingCache?.Set(correlationId, taskEmbedding);
+        }
+
+        // docs/router/self-organizing-classification-plan.md Phase T1c: mirrors the embedding cache
+        // Set above exactly - same correlation id, same "this is the earliest point the value is known
+        // alongside the correlation id" reasoning - so EmbeddingMemoryScoreObserver can recover the real
+        // cost and provenance once the verifier score arrives instead of writing cost 0.0 / certain
+        // non-exploratory provenance unconditionally.
+        _pendingRequestCostCache?.Set(correlationId, estimatedCostUsd ?? 0m);
+        _pendingRequestProvenanceCache?.Set(correlationId, isExploratory, propensity);
+
+        // docs/router/self-organizing-classification-plan.md Phase T1a/T1b: the transcript store's single
+        // insert. Best-effort and off the hot path in spirit (the response has already been fully sent to
+        // the client by this point) - gated on TranscriptOptions.Enabled so a disabled install creates no
+        // table and writes nothing, and wrapped in its own try/catch so a transcript-store failure can
+        // never surface as a routing failure, matching every other telemetry side-effect in this method.
+        if (_transcriptStore is not null)
+        {
+            try
+            {
+                await _transcriptStore.InsertAsync(
+                    new TranscriptRecord(
+                        Id: 0,
+                        CorrelationId: correlationId,
+                        CreatedAtUtc: DateTimeOffset.UtcNow,
+                        RequestedModel: requestedModelName,
+                        RoutedModel: route.ModelName,
+                        Dimension: classification?.Dimension,
+                        Difficulty: classification?.Difficulty,
+                        Language: classification?.Language,
+                        IsUtility: classification?.IsUtility ?? false,
+                        PromptText: taskText,
+                        ResponseText: responseText,
+                        Score: null,
+                        Cost: estimatedCostUsd,
+                        IsExploratory: isExploratory,
+                        Propensity: propensity,
+                        InputTokens: promptTokens,
+                        OutputTokens: completionTokens,
+                        MemoryEntryId: null),
+                    CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "Failed to write a transcript row for correlation {CorrelationId}; continuing without it.", correlationId);
+            }
         }
 
         // What routing this request cost us, charged at the self-hosted rate (research-doc §5.1: TotTok is

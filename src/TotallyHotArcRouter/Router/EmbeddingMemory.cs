@@ -91,19 +91,33 @@ public sealed class EmbeddingMemory
     /// <param name="cost">The monetary cost κ of serving this task.</param>
     /// <param name="verifierTrace">The Verifier's trace/explanation, if recorded.</param>
     /// <param name="cancellationToken">A cancellation token.</param>
+    /// <param name="isExploratory">
+    /// Whether the routing decision that chose <paramref name="chosenModel"/> was an epsilon-greedy
+    /// exploratory pick (docs/router/self-organizing-classification-plan.md Phase T1c). Defaults to
+    /// <see langword="false"/> so every pre-existing caller keeps compiling and behaving unchanged. Placed
+    /// after <paramref name="cancellationToken"/>, not before it, so every existing positional call site
+    /// (which ends in <paramref name="cancellationToken"/>) keeps compiling unchanged.
+    /// </param>
+    /// <param name="propensity">
+    /// The propensity of <paramref name="chosenModel"/> under the policy's own arm-selection
+    /// distribution. Defaults to <c>1.0</c> - certain selection - matching <paramref name="isExploratory"/>'s
+    /// default.
+    /// </param>
     public async Task<MemoryEntry> AddEntryAsync(
         float[] taskEmbedding,
         string chosenModel,
         double score,
         double cost,
         string? verifierTrace,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool isExploratory = false,
+        double propensity = 1.0)
     {
         ArgumentNullException.ThrowIfNull(taskEmbedding);
         ArgumentException.ThrowIfNullOrWhiteSpace(chosenModel);
 
         var persisted = await _store.AppendAsync(
-            new MemoryEntry(0, taskEmbedding, chosenModel, score, cost, verifierTrace, DateTimeOffset.UtcNow),
+            new MemoryEntry(0, taskEmbedding, chosenModel, score, cost, verifierTrace, DateTimeOffset.UtcNow, isExploratory, propensity),
             cancellationToken).ConfigureAwait(false);
 
         List<MemoryEntry>? evicted = null;

@@ -28,6 +28,22 @@ public class RoutingDecisionTests
         Assert.Equal(timestamp, decision.TimestampUtc);
         Assert.Equal(2, decision.CandidateScores.Count);
         Assert.False(decision.IsExploratory);
+        Assert.Equal(1.0, decision.Propensity, precision: 6);
+    }
+
+    /// <summary>
+    /// docs/router/self-organizing-classification-plan.md Phase T1c: propensity is an explicit, additive
+    /// optional constructor parameter that stores the value it was given.
+    /// </summary>
+    [Fact]
+    public void Constructor_PropensityGiven_IsReflectedOnTheDecision()
+    {
+        var timestamp = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+        var decision = new RoutingDecision(
+            "kimi-k2.5", 0.5, "exploration", timestamp, candidateScores: null, isExploratory: true, propensity: 0.0167);
+
+        Assert.Equal(0.0167, decision.Propensity, precision: 6);
     }
 
     /// <summary>
@@ -69,6 +85,7 @@ public class RoutingDecisionTests
         Assert.Equal(RouterConstants.FallbackReason, decision.Rationale);
         Assert.Empty(decision.CandidateScores);
         Assert.False(decision.IsExploratory);
+        Assert.Equal(1.0, decision.Propensity, precision: 6);
     }
 }
 
