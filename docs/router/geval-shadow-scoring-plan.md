@@ -1,6 +1,10 @@
 # G-Eval Shadow Scoring and Judge-Verifier Plan
 
-Status: **Proposed** (plan only — no phase has started).
+Status: **Proposed** (plan only — no phase has started). **Ordering** (per `src/PLAN.md`'s "Remaining
+work, in order"): G1 lands after the `self-organizing-classification-plan.md` T phases and *before*
+PLAN.md Phase N — the shadow table costs nothing on the hot path and G2's gate needs volume, so
+agreement data accumulates passively while the harness is built. G2 and G3 follow Phase N, gated on
+that accumulated data.
 
 This plan adds an LLM-as-judge scorer, built on the G-Eval recipe
 ([docs/research/2303.16634v3.md](../research/2303.16634v3.md)), to the router's scoring pipeline in
@@ -28,7 +32,8 @@ Two cross-cutting requirements apply from the first phase:
   syntax weight when `result.Executed` is false, so a prose answer — an algorithm explanation, a
   design review, any non-coding dimension — is scored on syntax validity alone. A brilliant answer
   and a useless one receive the same `u_i`.
-- **Naive LLM-as-judge is measurably noisy.** `src/PLAN.md` (Phase K notes) documents per-cell
+- **Naive LLM-as-judge is measurably noisy.** `src/PLAN.md`'s Settled deferrals (full evidence in
+  `data/README.md`'s "Known data-fidelity limit" section) document per-cell
   divergences up to 0.32 in the judge-scored CodeRouterBench dimensions (`algorithm`,
   `test_generation`), attributed to run-to-run LLM-as-Judge noise baked into the released CSV.
   G-Eval's probability-weighted scoring exists precisely to reduce that quantization/variance noise
@@ -262,4 +267,5 @@ the judge cleanly reverts non-executable dimensions to today's Tier-0 behavior.
 - `src/TotallyHotArcRouter/Telemetry/ResponseTextExtractor.cs` and
   `src/TotallyHotArcRouter/Proxy/ProxyMiddleware.cs` — where response text already exists in hand
   for the ephemeral cache.
-- `src/PLAN.md` Phase K notes — the measured LLM-as-Judge noise motivating probability weighting.
+- `src/PLAN.md` Settled deferrals + `data/README.md`'s "Known data-fidelity limit" — the measured
+  LLM-as-Judge noise motivating probability weighting.

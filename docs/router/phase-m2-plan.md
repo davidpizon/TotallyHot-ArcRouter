@@ -1,6 +1,7 @@
 # Phase M2 Implementation Plan — Requested vs. Routed, End to End
 
-**Status:** ready to implement. Supersedes nothing; this is the step-by-step build order for
+**Status:** implemented (commit `ffcc8fa`, "Ship Phase M2: requested-vs-routed telemetry end to end").
+Kept as the historical build-order record. Supersedes nothing; this was the step-by-step build order for
 [`orchestrator-live-path-plan.md`](orchestrator-live-path-plan.md) §M2, which remains the owning spec
 for *what* and *why*. This file is *how*, in dependency order, with exact files and line anchors as of
 commit `513cbb5` (M1 shipped).
@@ -329,8 +330,9 @@ indirectly and a small direct test is worth adding given it is now handling thre
 - **`README.md` / `docs/HANDBOOK.md`** — one line noting the three response headers exist, per
   orchestrator-live-path-plan.md §M4's own checklist (pulled forward since M2 is what actually adds
   them).
-- **`src/PLAN.md`** — flip Phase M's status line once M2 lands: still "M1 shipped, M2 shipped, M3-M4
-  next" (M3/M4 remain open; do not mark the whole phase M done).
+- **`src/PLAN.md`** — flip Phase M's status line once M2 lands. *(Done — M1–M4 have all since
+  shipped, and PLAN.md was later pruned back to unfinished work; the phase's narrative now lives in
+  `orchestrator-live-path-plan.md`.)*
 
 ---
 

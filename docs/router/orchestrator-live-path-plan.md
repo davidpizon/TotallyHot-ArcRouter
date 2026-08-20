@@ -3,11 +3,16 @@
 Puts the Orchestrator ensemble on the live routing path for every request the router actually decides,
 and makes every substitution it performs visible in telemetry and the GUI.
 
-**Status:** proposed — no sub-phase implemented.
-**Ordering:** after PLAN.md Phase L (shipped) and `live-feedback-learning-plan.md` Phases 1–3 (shipped);
-before PLAN.md Phase N. Independent of `live-feedback-learning-plan.md` Phase 4, which trains the
-`logreg` artifact — the two can land in either order, but this one is what makes that artifact reach a
-live decision at all.
+**Status:** shipped — all four sub-phases (M1–M4) implemented.
+M1: `CompositeRoutingPolicy` dispatches non-utility traffic to `OrchestratorRoutingPolicy` by default
+(`RoutingOptions.EnableOrchestratorPolicy` is the kill switch), with exploration lifted into the
+Orchestrator. M2: requested-vs-routed telemetry end to end (commit `ffcc8fa`; build order in
+[`phase-m2-plan.md`](phase-m2-plan.md)). M3: substitution steps in the GUI decision log plus the
+read-only `RoutingModeAdminService`/`RoutingModeAdmin.razor` Governance sub-tab (commit `78650e8`).
+M4: docs reconciliation. §M3.2's editable-toggle deferral is partially reopened by
+[`self-organizing-classification-plan.md`](self-organizing-classification-plan.md) Phase T6.
+**Ordering (historical):** landed after PLAN.md Phase L and `live-feedback-learning-plan.md` Phases 1–3;
+before PLAN.md Phase N.
 
 **Owning roadmap entry:** [`../../src/PLAN.md`](../../src/PLAN.md) Phase M. This file carries the
 detail; the roadmap carries the ordering and the exit bar.
