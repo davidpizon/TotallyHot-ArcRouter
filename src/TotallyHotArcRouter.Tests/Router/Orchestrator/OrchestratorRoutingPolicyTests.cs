@@ -120,6 +120,38 @@ public class OrchestratorRoutingPolicyTests
         Assert.False(decision.CandidateScores.ContainsKey("minimax-m2.7"));
     }
 
+    /// <summary>
+    /// docs/router/self-organizing-classification-plan.md Phase T3's exit bar: an ensemble integration
+    /// test confirms all five voters appear in a single decision's breakdown, once <c>cluster_best</c>
+    /// joins <c>dim_best</c>/<c>memory_kNN</c>/<c>logreg</c>/<c>llm_router</c>.
+    /// </summary>
+    [Fact]
+    public async Task DecideAsync_AllFiveVotersCastAVote_EachAppearsInTheBreakdown()
+    {
+        var voters = new IRoutingVoter[]
+        {
+            new FakeVoter(VoterNames.DimBest, "kimi-k2.5", confidence: 1.0),
+            new FakeVoter(VoterNames.MemoryKnn, "kimi-k2.5", confidence: 1.0),
+            new FakeVoter(VoterNames.LogReg, "glm-5", confidence: 1.0),
+            new FakeVoter(VoterNames.LlmRouter, "minimax-m2.7", confidence: 1.0),
+            new FakeVoter(VoterNames.ClusterBest, "kimi-k2.5", confidence: 1.0),
+        };
+        var policy = CreatePolicy(voters);
+        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [MiniMax, Glm, Kimi]);
+
+        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+
+        Assert.Equal("kimi-k2.5", decision.SelectedModel);
+        foreach (var voterName in new[] { VoterNames.DimBest, VoterNames.MemoryKnn, VoterNames.LogReg, VoterNames.LlmRouter, VoterNames.ClusterBest })
+        {
+            Assert.True(
+                decision.CandidateScores.ContainsKey($"voter:{voterName}:kimi-k2.5") ||
+                decision.CandidateScores.ContainsKey($"voter:{voterName}:glm-5") ||
+                decision.CandidateScores.ContainsKey($"voter:{voterName}:minimax-m2.7"),
+                $"Expected a breakdown entry for voter '{voterName}'.");
+        }
+    }
+
     [Fact]
     public async Task DecideAsync_EveryVoterAbstains_FallsBackToDefaultModel()
     {

@@ -55,6 +55,7 @@ The roadmap of remaining work, in order, is [`../src/PLAN.md`](../src/PLAN.md). 
 | [`router/orchestrator-live-path-plan.md`](router/orchestrator-live-path-plan.md) | Orchestrator on the live path, requested-vs-routed (shipped, M1–M4) |
 | [`router/live-feedback-learning-plan.md`](router/live-feedback-learning-plan.md) | Live feedback capture + embedding-backed `logreg` (Phases 1–4 shipped; 5–6 open) |
 | [`router/self-organizing-classification-plan.md`](router/self-organizing-classification-plan.md) | Transcripts, clustering, `cluster_best` voter (proposed, T1–T6) |
+| [`router/routing-roi-regret-plan.md`](router/routing-roi-regret-plan.md) | Routing ROI: expense + regret vs `dim_best`, fast drain, hard pause under load (approved, next up) |
 | [`router/geval-shadow-scoring-plan.md`](router/geval-shadow-scoring-plan.md) | G-Eval shadow judge and judge-verifier (proposed, G1–G3) |
 | [`router/regret-evaluation-harness-plan.md`](router/regret-evaluation-harness-plan.md) | PLAN.md Phase N's regret harness spec (proposed) |
 | [`router/tool-call-normalization.md`](router/tool-call-normalization.md) | Per-model tool-call dialect detection/normalization (Phases 0–5, 8 shipped) |

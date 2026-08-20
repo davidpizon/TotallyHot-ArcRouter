@@ -95,6 +95,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     private readonly PendingRequestCostCache? _pendingRequestCostCache;
     private readonly PendingRequestProvenanceCache? _pendingRequestProvenanceCache;
     private readonly ITranscriptStore? _transcriptStore;
+    private readonly InFlightRequestGauge? _inFlightGauge;
 
     // The rate the router's own tokens are charged at (see RoutingOptions.SelfHostedRouterPricePerMillionTokens).
     // Read once at construction rather than per request: it is a static amortization figure, not a catalog
@@ -190,6 +191,12 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// score is backfilled later by <see cref="Transcripts.TranscriptScoreObserver"/>. Defaults to
     /// <see langword="null"/> (no rows written), matching the feature's opt-in-and-off-by-default posture.
     /// </param>
+    /// <param name="inFlightGauge">
+    /// Optional in-flight request gauge (docs/router/routing-roi-regret-plan.md). When supplied, every
+    /// request is counted for the full duration of <see cref="InvokeAsync"/> so background analysis work
+    /// (the taxonomy-comparison drain) can hard-pause while traffic is being served. Defaults to
+    /// <see langword="null"/> (no tracking), so existing callers/tests are unaffected.
+    /// </param>
     public ProxyMiddleware(
         ILogger<ProxyMiddleware> logger,
         RequestInterceptor interceptor,
@@ -214,7 +221,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         IOptions<Models.RoutingOptions>? routingOptions = null,
         PendingRequestCostCache? pendingRequestCostCache = null,
         PendingRequestProvenanceCache? pendingRequestProvenanceCache = null,
-        ITranscriptStore? transcriptStore = null)
+        ITranscriptStore? transcriptStore = null,
+        InFlightRequestGauge? inFlightGauge = null)
     {
         _logger = logger;
         _interceptor = interceptor;
@@ -242,6 +250,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         _pendingRequestCostCache = pendingRequestCostCache;
         _pendingRequestProvenanceCache = pendingRequestProvenanceCache;
         _transcriptStore = transcriptStore;
+        _inFlightGauge = inFlightGauge;
         _selfHostedRouterPricePerMillionTokens =
             routingOptions?.Value.SelfHostedRouterPricePerMillionTokens ?? new Models.RoutingOptions().SelfHostedRouterPricePerMillionTokens;
 
@@ -273,6 +282,22 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
     /// <inheritdoc />
     public async Task InvokeAsync(HttpContext context, RequestDelegate next)
+    {
+        // The gauge scope spans the entire request - routing, upstream call, and response streaming -
+        // because background work pausing on "in flight" (see InFlightRequestGauge) must stay paused
+        // for exactly as long as a client could feel the contention.
+        using var _ = _inFlightGauge?.Track();
+        await InvokeCoreAsync(context, next);
+    }
+
+    /// <summary>
+    /// The whole of the request pipeline behind <see cref="InvokeAsync"/>, split out so the in-flight
+    /// accounting above wraps every exit path (including exceptions and streamed responses) in one
+    /// <c>using</c> scope rather than threading try/finally through this method's many returns.
+    /// </summary>
+    /// <param name="context">The HTTP context being served.</param>
+    /// <param name="next">The next middleware delegate (unused; the proxy is terminal).</param>
+    private async Task InvokeCoreAsync(HttpContext context, RequestDelegate next)
     {
         _logger.LogInformation("Proxy middleware caught request to {Path}", SanitizeForLog(context.Request.Path.ToString()));
 
@@ -469,7 +494,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // exactly like an HTTP outage does.
             if (translator is IBedrockPayloadTranslator bedrockTranslator)
             {
-                if (await InvokeBedrockAsync(context, route, bedrockTranslator, rewrittenBody, requestedModelName, isFallback, hasNextCandidate, nextProviderDiffers, resolution.TaskEmbedding, resolution.RouterTokens, resolution.SubstitutionReason, resolution.IsExploratory, resolution.Propensity, resolution.Classification, resolution.TaskText))
+                if (await InvokeBedrockAsync(context, route, bedrockTranslator, rewrittenBody, requestedModelName, isFallback, hasNextCandidate, nextProviderDiffers, resolution.TaskEmbedding, resolution.RouterTokens, resolution.SubstitutionReason, resolution.IsExploratory, resolution.Propensity, resolution.Classification, resolution.TaskText, resolution.DimBestModel))
                 {
                     return;
                 }
@@ -875,7 +900,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                     // ResponseTextExtractor pick the right parser per request instead of assuming one shape per
                     // provider, which broke once "anthropic" became dual-mode.
                     var telemetryShapeProvider = translator is not null ? "openai" : route.Provider;
-                    await PublishTelemetryAsync(context, route, requestedModelName, isFallback, telemetryShapeProvider, rewrittenBody, capturedResponseBytes, nativeResponseBytes, isStreaming, latencyToHeadersMs, totalDurationMs, statusCode, context.RequestAborted, responseMessage.Headers, tailScanner, resolution.TaskEmbedding, resolution.RouterTokens, resolution.SubstitutionReason, resolution.IsExploratory, resolution.Propensity, resolution.Classification, resolution.TaskText);
+                    await PublishTelemetryAsync(context, route, requestedModelName, isFallback, telemetryShapeProvider, rewrittenBody, capturedResponseBytes, nativeResponseBytes, isStreaming, latencyToHeadersMs, totalDurationMs, statusCode, context.RequestAborted, responseMessage.Headers, tailScanner, resolution.TaskEmbedding, resolution.RouterTokens, resolution.SubstitutionReason, resolution.IsExploratory, resolution.Propensity, resolution.Classification, resolution.TaskText, resolution.DimBestModel);
                 }
                 catch (Exception ex)
                 {
@@ -1025,6 +1050,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// <param name="propensity">See <see cref="ModelRouteResolutionResult.Propensity"/>, forwarded to <see cref="PublishTelemetryAsync"/>.</param>
     /// <param name="classification">See <see cref="ModelRouteResolutionResult.Classification"/>, forwarded to <see cref="PublishTelemetryAsync"/>.</param>
     /// <param name="taskText">See <see cref="ModelRouteResolutionResult.TaskText"/>, forwarded to <see cref="PublishTelemetryAsync"/>.</param>
+    /// <param name="dimBestModel">See <see cref="ModelRouteResolutionResult.DimBestModel"/>, forwarded to <see cref="PublishTelemetryAsync"/>.</param>
     /// <returns>
     /// <see langword="true"/> if a response was written to the client (success, or a failure with no
     /// eligible next candidate) - the caller's cascade is over. <see langword="false"/> if the SDK call
@@ -1046,7 +1072,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         bool isExploratory = false,
         double propensity = 1.0,
         RequestClassification? classification = null,
-        string? taskText = null)
+        string? taskText = null,
+        string? dimBestModel = null)
     {
         var circuitTarget = CircuitBreakerTargetKey.FromRoute(route);
         var nativeRequestBody = translator.TranslateRequest(rewrittenBody);
@@ -1199,7 +1226,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // its streaming chunks aren't SSE-framed, so the same capture approach doesn't apply. Always
             // null here - telemetry falls back to parsing the translated "openai"-shaped bytes, unchanged
             // from before this plan.
-            await PublishTelemetryAsync(context, route, requestedModelName, isFallback, "openai", rewrittenBody, capturedResponseBytes, nativeResponseBytes: null, isStreamingRequest, latencyToHeadersMs, totalDurationMs, StatusCodes.Status200OK, context.RequestAborted, upstreamHeaders: null, tailScanner: tailScanner, taskEmbedding: taskEmbedding, routerTokens: routerTokens, resolutionReason: resolutionReason, isExploratory: isExploratory, propensity: propensity, classification: classification, taskText: taskText);
+            await PublishTelemetryAsync(context, route, requestedModelName, isFallback, "openai", rewrittenBody, capturedResponseBytes, nativeResponseBytes: null, isStreamingRequest, latencyToHeadersMs, totalDurationMs, StatusCodes.Status200OK, context.RequestAborted, upstreamHeaders: null, tailScanner: tailScanner, taskEmbedding: taskEmbedding, routerTokens: routerTokens, resolutionReason: resolutionReason, isExploratory: isExploratory, propensity: propensity, classification: classification, taskText: taskText, dimBestModel: dimBestModel);
         }
         catch (Exception ex)
         {
@@ -1345,7 +1372,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         bool isExploratory = false,
         double propensity = 1.0,
         RequestClassification? classification = null,
-        string? taskText = null)
+        string? taskText = null,
+        string? dimBestModel = null)
     {
         var requestBody = TryParseJsonObject(rewrittenRequestBody);
         var resolvedSessionId = _sessionIdResolver.Resolve(context.Request.Headers, requestBody);
@@ -1618,7 +1646,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         // cost and provenance once the verifier score arrives instead of writing cost 0.0 / certain
         // non-exploratory provenance unconditionally.
         _pendingRequestCostCache?.Set(correlationId, estimatedCostUsd ?? 0m);
-        _pendingRequestProvenanceCache?.Set(correlationId, isExploratory, propensity);
+        _pendingRequestProvenanceCache?.Set(correlationId, isExploratory, propensity, classification?.Dimension);
 
         // docs/router/self-organizing-classification-plan.md Phase T1a/T1b: the transcript store's single
         // insert. Best-effort and off the hot path in spirit (the response has already been fully sent to
@@ -1648,7 +1676,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                         Propensity: propensity,
                         InputTokens: promptTokens,
                         OutputTokens: completionTokens,
-                        MemoryEntryId: null),
+                        MemoryEntryId: null,
+                        DimBestModel: dimBestModel),
                     CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)

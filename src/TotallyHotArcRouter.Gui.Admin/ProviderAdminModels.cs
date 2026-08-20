@@ -431,3 +431,32 @@ public sealed record UsageRollupBucketView(
     long CacheReadTokens,
     decimal CostUsd);
 
+/// <summary>
+/// One request's routing return-on-investment, as returned by <c>GET /admin/usage/routing-roi</c>
+/// (docs/router/self-organizing-classification-plan.md Phase T4) - the Cost Analytics "Routing ROI"
+/// screen's feed.
+/// </summary>
+/// <remarks>
+/// The baseline is what the frozen nine-dimension classifier alone would have chosen, so the figure reads
+/// as "what routing bought against the classifier we already had". Its cost side is an <b>estimate</b> -
+/// the counterfactual model's real token count for this request was never observed - and any surface
+/// rendering it says so.
+/// </remarks>
+/// <param name="ComparedAtUtc">When the comparison ran, not when the request was served.</param>
+/// <param name="SessionId">The conversation this request belonged to.</param>
+/// <param name="RoutedModel">The model that actually served the request.</param>
+/// <param name="BaselineModel">The model the frozen baseline would have chosen, or <see langword="null"/> when it abstained.</param>
+/// <param name="ActualCostUsd">What serving the request actually cost, or <see langword="null"/> when unknown.</param>
+/// <param name="BaselineEstimatedCostUsd">The estimated cost of the baseline's pick, or <see langword="null"/> when not estimable.</param>
+/// <param name="EstimatedNetSavingsUsd">Baseline minus actual: positive is a saving, negative a loss.</param>
+/// <param name="IsExploratory">Whether this was an epsilon-greedy probe rather than the ensemble's own pick.</param>
+public sealed record RoutingRoiPointView(
+    DateTimeOffset ComparedAtUtc,
+    string SessionId,
+    string RoutedModel,
+    string? BaselineModel,
+    decimal? ActualCostUsd,
+    decimal? BaselineEstimatedCostUsd,
+    decimal? EstimatedNetSavingsUsd,
+    bool IsExploratory);
+

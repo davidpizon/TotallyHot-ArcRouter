@@ -298,6 +298,95 @@ public sealed class RoutingOptions
     public bool EnableOrchestratorPolicy { get; init; } = true;
 
     /// <summary>
+    /// Gets the minimum total number of training samples (OOD bootstrap tasks plus live memory entries)
+    /// <see cref="Router.Orchestrator.IClusterTrainingService"/> requires before writing a new cluster
+    /// model artifact. Below this, the retrain is declined and the prior artifact (if any) is left in
+    /// place - mirrors <see cref="LogRegMinTrainingRows"/>'s "reject rather than install something
+    /// meaningless" guard (docs/router/self-organizing-classification-plan.md Phase T2c).
+    /// </summary>
+    [Range(1, 1_000_000)]
+    public int ClusterMinTrainingRows { get; init; } = 200;
+
+    /// <summary>
+    /// Gets the smallest cluster count <see cref="Router.Orchestrator.SphericalKMeansTrainer"/> tries when
+    /// sweeping for the best <c>k</c> (Phase T2b).
+    /// </summary>
+    [Range(1, 1_000)]
+    public int ClusterCountMin { get; init; } = 6;
+
+    /// <summary>
+    /// Gets the largest cluster count <see cref="Router.Orchestrator.SphericalKMeansTrainer"/> tries when
+    /// sweeping for the best <c>k</c>. See <see cref="ClusterCountMin"/>.
+    /// </summary>
+    [Range(1, 1_000)]
+    public int ClusterCountMax { get; init; } = 24;
+
+    /// <summary>
+    /// Gets the relative training weight applied to each live <c>memory_entries</c> row when computing
+    /// cluster centroids, relative to an OOD bootstrap row's fixed weight of <c>1.0</c> - mirrors
+    /// <see cref="LogRegLiveSampleWeight"/>'s reasoning: live traffic is the distribution actually being
+    /// served, while the OOD bootstrap set is only a prior (Phase T2d).
+    /// </summary>
+    [Range(0d, 1000d)]
+    public double ClusterLiveSampleWeight { get; init; } = 3.0;
+
+    /// <summary>
+    /// Gets the number of new <c>memory_entries</c> rows that must accumulate since the cluster
+    /// artifact's last recorded <see cref="Router.Orchestrator.ClusterModelArtifact.MemoryEntryCount"/>
+    /// before <c>Hosting.ClusterRetrainHostedService</c> automatically retrains (Phase T2g). Mirrors
+    /// <see cref="LogRegRetrainThreshold"/>'s role for the <c>logreg</c> voter.
+    /// </summary>
+    [Range(1, 1_000_000)]
+    public int ClusterRetrainThreshold { get; init; } = 500;
+
+    /// <summary>
+    /// Gets whether <c>Hosting.ClusterRetrainHostedService</c> automatically retrains the cluster model
+    /// once <see cref="ClusterRetrainThreshold"/> new memory entries have accumulated. The CLI flag
+    /// (<c>--retrain-clusters</c>) and, later, the Governance retrain button both bypass this flag - it
+    /// only gates the unattended background trigger. Mirrors <see cref="EnableAutomaticLogRegRetrain"/>.
+    /// </summary>
+    public bool EnableAutomaticClusterRetrain { get; init; } = true;
+
+    /// <summary>
+    /// Gets the <c>cluster_best</c> voter's fixed weight in the Orchestrator's weighted vote
+    /// (docs/router/self-organizing-classification-plan.md Phase T3). Unlike the four voters weighed in
+    /// research-doc §3.3's worked example, this weight has no published reference value - the learned
+    /// taxonomy is this plan's own addition to the ensemble, not part of the paper's design. Defaults to
+    /// the same order of magnitude as <see cref="LogRegVoterWeight"/> so a freshly-trained cluster model is
+    /// weighed comparably to the ensemble's other learned voter until an operator tunes it.
+    /// </summary>
+    [Range(0d, 100d)]
+    public double ClusterBestVoterWeight { get; init; } = 0.5;
+
+    /// <summary>
+    /// Gets whether the <c>cluster_best</c> voter participates in the Orchestrator's vote (Phase T3).
+    /// Enabled by default; the voter still abstains cleanly whenever no cluster model artifact has been
+    /// trained yet, so this flag is only needed to exclude it entirely.
+    /// </summary>
+    public bool EnableClusterBestVoter { get; init; } = true;
+
+    /// <summary>
+    /// Gets the minimum cosine similarity a request's task embedding must reach against its nearest
+    /// cluster centroid before <see cref="Router.Orchestrator.ClusterBestVoter"/> treats the request as
+    /// assigned to that cluster, rather than abstaining as "unclustered" (Phase T3). Defaults to the same
+    /// value <see cref="Router.Orchestrator.ClusterLedger.Build"/> already uses when aggregating the
+    /// ledger, so the threshold that excludes an entry from training is the same one that excludes a
+    /// request from scoring.
+    /// </summary>
+    [Range(-1d, 1d)]
+    public double ClusterAssignmentThreshold { get; init; } = 0.5;
+
+    /// <summary>
+    /// Gets the minimum number of observations a (cluster, model) ledger cell must hold before
+    /// <see cref="Router.Orchestrator.ClusterBestVoter"/> scores that candidate from it (Phase T3). Below
+    /// this floor the candidate is treated as unscored for this vote - mirrors
+    /// <see cref="LogRegMinTrainingRows"/>'s "reject rather than trust a fit from too few rows" guard,
+    /// applied per-cell instead of to the whole artifact.
+    /// </summary>
+    [Range(1, 1_000_000)]
+    public int ClusterBestMinObservations { get; init; } = 3;
+
+    /// <summary>
     /// Performs domain-level validation that is not fully expressible through data annotations.
     /// </summary>
     /// <exception cref="OptionsValidationException">Thrown when the routing option values are inconsistent.</exception>
@@ -344,6 +433,14 @@ public sealed class RoutingOptions
                 nameof(RoutingOptions),
                 typeof(RoutingOptions),
                 ["AlwaysBaselineModel must name a model when set; omit it entirely to declare no baseline."]);
+        }
+
+        if (ClusterCountMax < ClusterCountMin)
+        {
+            throw new OptionsValidationException(
+                nameof(RoutingOptions),
+                typeof(RoutingOptions),
+                [$"ClusterCountMax ({ClusterCountMax}) must be greater than or equal to ClusterCountMin ({ClusterCountMin})."]);
         }
     }
 }

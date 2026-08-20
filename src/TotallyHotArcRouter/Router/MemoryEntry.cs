@@ -25,6 +25,13 @@ namespace TotallyHot.ArcRouter.Router;
 /// the time it was chosen, mirroring <see cref="Models.RoutingDecision.Propensity"/>. Defaults to
 /// <c>1.0</c> - certain selection - for entries written before this provenance existed.
 /// </param>
+/// <param name="Dimension">
+/// The heuristic classifier's dimension label for this entry's request
+/// (<see cref="TotallyHot.ArcRouter.Router.Classification.RequestClassification.Dimension"/>), or <see langword="null"/> for an entry
+/// written before this label existed (docs/router/self-organizing-classification-plan.md Phase T2e). Feeds
+/// the cluster model's per-cluster heuristic-dimension histogram independently of whether transcript
+/// capture is enabled.
+/// </param>
 public sealed record MemoryEntry(
     long Id,
     float[] TaskEmbedding,
@@ -34,4 +41,5 @@ public sealed record MemoryEntry(
     string? VerifierTrace,
     DateTimeOffset CreatedAtUtc,
     bool IsExploratory = false,
-    double Propensity = 1.0);
+    double Propensity = 1.0,
+    string? Dimension = null);

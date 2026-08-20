@@ -41,7 +41,7 @@ public sealed class DimBestVoter : IRoutingVoter
     private readonly ILogger<DimBestVoter> _logger;
     private readonly string _liveMemoryPrefix;
     private readonly object _matrixLock = new();
-    private DimensionModelScoreMatrix? _matrix;
+    private DimensionLedger? _ledger;
     private bool _matrixLoadAttempted;
 
     /// <summary>
@@ -90,18 +90,13 @@ public sealed class DimBestVoter : IRoutingVoter
         ArgumentNullException.ThrowIfNull(context);
         cancellationToken.ThrowIfCancellationRequested();
 
-        EnsureMatrixLoaded();
-
-        var priorDimension = context.Dimension.StartsWith(_liveMemoryPrefix, StringComparison.Ordinal)
-            ? context.Dimension[_liveMemoryPrefix.Length..]
-            : context.Dimension;
+        var ledger = EnsureLedgerLoaded();
 
         string? bestModel = null;
         var bestScore = double.NegativeInfinity;
         foreach (var candidate in context.Candidates)
         {
-            var live = _routerMemory.GetAverageScore(context.Dimension, candidate.ModelName);
-            var blended = live ?? _matrix?.AverageScore(priorDimension, candidate.ModelName);
+            var blended = ledger.Predict(context.Dimension, candidate.ModelName);
             if (blended is null)
             {
                 continue;
@@ -121,38 +116,51 @@ public sealed class DimBestVoter : IRoutingVoter
     }
 
     /// <summary>
-    /// Loads the probing-split matrix on first use, tolerating an unsynced or unreadable corpus by leaving
-    /// <see cref="_matrix"/> <see langword="null"/> - see the class remarks.
+    /// Builds this voter's <see cref="DimensionLedger"/> on first use, loading the probing-split prior and
+    /// tolerating an unsynced or unreadable corpus by building a live-memory-only ledger instead - see the
+    /// class remarks.
     /// </summary>
-    private void EnsureMatrixLoaded()
+    /// <returns>The cached ledger.</returns>
+    private DimensionLedger EnsureLedgerLoaded()
     {
         lock (_matrixLock)
         {
             if (_matrixLoadAttempted)
             {
-                return;
+                return _ledger!;
             }
 
             _matrixLoadAttempted = true;
+            _ledger = new DimensionLedger(_routerMemory, LoadPriorMatrix(), _liveMemoryPrefix);
+            return _ledger;
+        }
+    }
 
-            if (!File.Exists(_database.DatabasePath))
-            {
-                _logger.LogInformation(
-                    "dim_best voter found no synced CodeRouterBench corpus at {DatabasePath}; scoring from live RouterMemory only.",
-                    _database.DatabasePath);
-                return;
-            }
+    /// <summary>
+    /// Reads the probing-split prior from the CodeRouterBench corpus, returning <see langword="null"/> when
+    /// the corpus is not synced on this machine or cannot be read.
+    /// </summary>
+    /// <returns>The probing-split matrix, or <see langword="null"/> when unavailable.</returns>
+    private DimensionModelScoreMatrix? LoadPriorMatrix()
+    {
+        if (!File.Exists(_database.DatabasePath))
+        {
+            _logger.LogInformation(
+                "dim_best voter found no synced CodeRouterBench corpus at {DatabasePath}; scoring from live RouterMemory only.",
+                _database.DatabasePath);
+            return null;
+        }
 
-            try
-            {
-                _matrix = DimensionModelScoreMatrix.FromDatabase(_database, "probing");
-            }
-            catch (SqliteException ex)
-            {
-                _logger.LogWarning(
-                    ex,
-                    "dim_best voter could not read the CodeRouterBench corpus; scoring from live RouterMemory only.");
-            }
+        try
+        {
+            return DimensionModelScoreMatrix.FromDatabase(_database, "probing");
+        }
+        catch (SqliteException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "dim_best voter could not read the CodeRouterBench corpus; scoring from live RouterMemory only.");
+            return null;
         }
     }
 }

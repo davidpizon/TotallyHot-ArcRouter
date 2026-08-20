@@ -40,7 +40,11 @@ public static class Program
             // docs/router/live-feedback-learning-plan.md Phase 4c: headless retrain trigger, stripped for
             // the same reason --sync-benchmark-data is - it must never reach the command-line configuration
             // provider as a stray "retrain-logreg" key.
-            var (runLogRegRetrain, remainingArgs) = ExtractFlag(afterBenchmarkFlag, "--retrain-logreg");
+            var (runLogRegRetrain, afterLogRegFlag) = ExtractFlag(afterBenchmarkFlag, "--retrain-logreg");
+
+            // docs/router/self-organizing-classification-plan.md Phase T2g: the cluster model's own
+            // headless retrain trigger, stripped for the same reason.
+            var (runClusterRetrain, remainingArgs) = ExtractFlag(afterLogRegFlag, "--retrain-clusters");
 
             // `using` (not a bare local) so the sync/retrain paths below, which return without ever calling
             // RunAsync, still dispose the container and everything singleton-scoped in it - SQLite
@@ -56,6 +60,12 @@ public static class Program
             if (runLogRegRetrain)
             {
                 await RunLogRegRetrainAsync(host.Services);
+                return;
+            }
+
+            if (runClusterRetrain)
+            {
+                await RunClusterRetrainAsync(host.Services);
                 return;
             }
 
@@ -249,6 +259,31 @@ public static class Program
         logger.LogInformation("logreg retrain finished with outcome {Kind}: {Message}", outcome.Kind, outcome.Message);
 
         if (outcome.Kind != LogRegTrainingResultKind.Trained)
+        {
+            Environment.ExitCode = 1;
+        }
+    }
+
+    /// <summary>
+    /// Runs one cluster model retrain to completion (docs/router/self-organizing-classification-plan.md
+    /// Phase T2g), following <see cref="RunLogRegRetrainAsync"/>'s headless-CLI shape: resolved directly
+    /// from the built (but not started) host, no Kestrel, process exits once the retrain completes. Sets a
+    /// non-zero <see cref="Environment.ExitCode"/> when the retrain declined for lack of data, so a CI or
+    /// scheduled-task caller can detect it.
+    /// </summary>
+    private static async Task RunClusterRetrainAsync(IServiceProvider services)
+    {
+        var logger = services.GetRequiredService<ILogger<IClusterTrainingService>>();
+        var trainingService = services.GetRequiredService<IClusterTrainingService>();
+
+        var progress = new Progress<int>(taskCount =>
+            logger.LogInformation("Cluster model retrain: embedded {TaskCount} OOD bootstrap task(s) so far.", taskCount));
+
+        var outcome = await trainingService.RetrainAsync(progress, CancellationToken.None);
+
+        logger.LogInformation("Cluster model retrain finished with outcome {Kind}: {Message}", outcome.Kind, outcome.Message);
+
+        if (outcome.Kind != ClusterTrainingResultKind.Trained)
         {
             Environment.ExitCode = 1;
         }

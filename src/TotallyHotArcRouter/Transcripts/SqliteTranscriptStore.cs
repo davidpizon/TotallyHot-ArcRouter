@@ -45,11 +45,11 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
             INSERT INTO request_transcripts (
                 correlation_id, created_at_utc, requested_model, routed_model, dimension, difficulty,
                 language, is_utility, prompt_text, response_text, score, cost, is_exploratory, propensity,
-                input_tokens, output_tokens, memory_entry_id)
+                input_tokens, output_tokens, memory_entry_id, dim_best_model)
             VALUES (
                 $correlationId, $createdAtUtc, $requestedModel, $routedModel, $dimension, $difficulty,
                 $language, $isUtility, $promptText, $responseText, $score, $cost, $isExploratory, $propensity,
-                $inputTokens, $outputTokens, $memoryEntryId);
+                $inputTokens, $outputTokens, $memoryEntryId, $dimBestModel);
             SELECT last_insert_rowid();
             """;
         command.Parameters.AddWithValue("$correlationId", record.CorrelationId);
@@ -69,6 +69,7 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         command.Parameters.AddWithValue("$inputTokens", (object?)record.InputTokens ?? DBNull.Value);
         command.Parameters.AddWithValue("$outputTokens", (object?)record.OutputTokens ?? DBNull.Value);
         command.Parameters.AddWithValue("$memoryEntryId", (object?)record.MemoryEntryId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$dimBestModel", (object?)record.DimBestModel ?? DBNull.Value);
 
         var id = (long)command.ExecuteScalar()!;
         return Task.FromResult<long?>(id);
@@ -146,7 +147,7 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
             SELECT
                 id, correlation_id, created_at_utc, requested_model, routed_model, dimension, difficulty,
                 language, is_utility, prompt_text, response_text, score, cost, is_exploratory, propensity,
-                input_tokens, output_tokens, memory_entry_id
+                input_tokens, output_tokens, memory_entry_id, dim_best_model
             FROM request_transcripts
             WHERE id = $id;
             """;
@@ -244,10 +245,69 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         return Task.FromResult(affectedRows);
     }
 
+    /// <inheritdoc />
+    public Task<IReadOnlyDictionary<long, string>> LoadPromptTextByMemoryEntryIdAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (!_options.Enabled)
+        {
+            return Task.FromResult<IReadOnlyDictionary<long, string>>(new Dictionary<long, string>());
+        }
+
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT memory_entry_id, prompt_text
+            FROM request_transcripts
+            WHERE memory_entry_id IS NOT NULL AND prompt_text IS NOT NULL;
+            """;
+
+        var promptTextByMemoryEntryId = new Dictionary<long, string>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            promptTextByMemoryEntryId[reader.GetInt64(0)] = reader.GetString(1);
+        }
+
+        return Task.FromResult<IReadOnlyDictionary<long, string>>(promptTextByMemoryEntryId);
+    }
+
     /// <summary>
     /// Reads a complete <see cref="TranscriptRecord"/> from a reader positioned at a row with all
     /// columns in their standard order.
     /// </summary>
+    /// <inheritdoc />
+    public Task<IReadOnlyDictionary<string, ModelTokenAverage>> LoadObservedTokenAveragesAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (!_options.Enabled)
+        {
+            return Task.FromResult<IReadOnlyDictionary<string, ModelTokenAverage>>(
+                new Dictionary<string, ModelTokenAverage>(StringComparer.Ordinal));
+        }
+
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT routed_model, AVG(input_tokens), AVG(output_tokens), COUNT(*)
+            FROM request_transcripts
+            WHERE input_tokens IS NOT NULL AND output_tokens IS NOT NULL
+            GROUP BY routed_model;
+            """;
+
+        var averages = new Dictionary<string, ModelTokenAverage>(StringComparer.Ordinal);
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            averages[reader.GetString(0)] = new ModelTokenAverage(
+                reader.GetDouble(1), reader.GetDouble(2), reader.GetInt32(3));
+        }
+
+        return Task.FromResult<IReadOnlyDictionary<string, ModelTokenAverage>>(averages);
+    }
+
     private static TranscriptRecord ReadTranscriptRecord(Microsoft.Data.Sqlite.SqliteDataReader reader)
     {
         return new TranscriptRecord(
@@ -268,6 +328,7 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
             Propensity: reader.GetDouble(14),
             InputTokens: reader.IsDBNull(15) ? null : reader.GetInt32(15),
             OutputTokens: reader.IsDBNull(16) ? null : reader.GetInt32(16),
-            MemoryEntryId: reader.IsDBNull(17) ? null : reader.GetInt64(17));
+            MemoryEntryId: reader.IsDBNull(17) ? null : reader.GetInt64(17),
+            DimBestModel: reader.IsDBNull(18) ? null : reader.GetString(18));
     }
 }

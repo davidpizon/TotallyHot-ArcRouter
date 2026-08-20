@@ -35,11 +35,38 @@ public sealed class TranscriptDatabase
             propensity         REAL    NOT NULL,
             input_tokens       INTEGER NULL,
             output_tokens      INTEGER NULL,
-            memory_entry_id    INTEGER NULL
+            memory_entry_id    INTEGER NULL,
+            dim_best_model     TEXT    NULL
         );
 
         CREATE INDEX IF NOT EXISTS ix_request_transcripts_correlation_id
             ON request_transcripts (correlation_id);
+
+        CREATE TABLE IF NOT EXISTS taxonomy_comparisons (
+            transcript_id             INTEGER PRIMARY KEY,
+            compared_at_utc           TEXT    NOT NULL,
+            session_id                TEXT    NOT NULL,
+            observed_score            REAL    NOT NULL,
+            dimension_predicted_score REAL    NULL,
+            cluster_predicted_score   REAL    NULL,
+            dimension_abs_error       REAL    NULL,
+            cluster_abs_error         REAL    NULL,
+            is_clustered              INTEGER NOT NULL,
+            is_exploratory            INTEGER NOT NULL,
+            routed_model              TEXT    NOT NULL,
+            baseline_model            TEXT    NULL,
+            actual_cost_usd           REAL    NULL,
+            baseline_estimated_cost_usd REAL  NULL,
+            estimated_net_savings_usd REAL    NULL,
+            baseline_predicted_score  REAL    NULL,
+            estimated_regret          REAL    NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_taxonomy_comparisons_session
+            ON taxonomy_comparisons (session_id);
+
+        CREATE INDEX IF NOT EXISTS ix_taxonomy_comparisons_compared_at
+            ON taxonomy_comparisons (compared_at_utc);
         """;
 
     /// <summary>The resolved absolute path of the database file.</summary>
@@ -94,8 +121,76 @@ public sealed class TranscriptDatabase
             pragma.ExecuteNonQuery();
         }
 
-        using var schema = connection.CreateCommand();
-        schema.CommandText = SchemaSql;
-        schema.ExecuteNonQuery();
+        using (var schema = connection.CreateCommand())
+        {
+            schema.CommandText = SchemaSql;
+            schema.ExecuteNonQuery();
+        }
+
+        MigrateDimBestModelColumn(connection);
+        MigrateTaxonomyComparisonRegretColumns(connection);
+    }
+
+    /// <summary>
+    /// Adds the <c>dim_best_model</c> column to <c>request_transcripts</c> if it is missing, so a
+    /// transcript database created by a Phase T1 build picks it up on startup instead of failing every
+    /// read with "no such column".
+    /// </summary>
+    /// <param name="connection">An open connection to the transcript database.</param>
+    /// <remarks>
+    /// <c>CREATE TABLE IF NOT EXISTS</c> is blind to a table that already exists with an older shape, and
+    /// this repo has no migration framework, so the check is an explicit <c>PRAGMA</c> - the same additive
+    /// convention <c>PriceCatalogDatabase.MigrateEnabledColumn</c> established. The column is nullable with
+    /// no backfill because none is possible: rows captured before Phase T4 never recorded what
+    /// <c>dim_best</c> would have picked, and inventing a value for them would fabricate exactly the
+    /// counterfactual this phase exists to measure honestly.
+    /// </remarks>
+    private static void MigrateDimBestModelColumn(SqliteConnection connection)
+    {
+        using (var pragma = connection.CreateCommand())
+        {
+            pragma.CommandText = "SELECT COUNT(*) FROM pragma_table_info('request_transcripts') WHERE name = 'dim_best_model';";
+            if (Convert.ToInt64(pragma.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) > 0)
+            {
+                return;
+            }
+        }
+
+        using var alter = connection.CreateCommand();
+        alter.CommandText = "ALTER TABLE request_transcripts ADD COLUMN dim_best_model TEXT NULL;";
+        alter.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Adds the <c>baseline_predicted_score</c> and <c>estimated_regret</c> columns to
+    /// <c>taxonomy_comparisons</c> if they are missing, so a database created by a pre-regret build
+    /// (docs/router/routing-roi-regret-plan.md) picks them up on startup instead of failing every write
+    /// with "no such column".
+    /// </summary>
+    /// <param name="connection">An open connection to the transcript database.</param>
+    /// <remarks>
+    /// Same additive <c>PRAGMA</c>-check convention as <see cref="MigrateDimBestModelColumn"/>. Both
+    /// columns are nullable with no backfill: existing comparison rows were computed without a regret
+    /// estimate, and recomputing one later would score against a ledger that has drifted since the row was
+    /// compared - <see langword="null"/> honestly means "not estimated when this row was written". The two
+    /// columns travel together, so one existence check covers both.
+    /// </remarks>
+    private static void MigrateTaxonomyComparisonRegretColumns(SqliteConnection connection)
+    {
+        using (var pragma = connection.CreateCommand())
+        {
+            pragma.CommandText = "SELECT COUNT(*) FROM pragma_table_info('taxonomy_comparisons') WHERE name = 'estimated_regret';";
+            if (Convert.ToInt64(pragma.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) > 0)
+            {
+                return;
+            }
+        }
+
+        using var alter = connection.CreateCommand();
+        alter.CommandText = """
+            ALTER TABLE taxonomy_comparisons ADD COLUMN baseline_predicted_score REAL NULL;
+            ALTER TABLE taxonomy_comparisons ADD COLUMN estimated_regret REAL NULL;
+            """;
+        alter.ExecuteNonQuery();
     }
 }

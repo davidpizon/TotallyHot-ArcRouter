@@ -81,5 +81,11 @@ public class TranscriptScoreObserverTests
 
         public Task<int> DeleteBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken = default) =>
             Task.FromResult(0);
+
+        public Task<IReadOnlyDictionary<long, string>> LoadPromptTextByMemoryEntryIdAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyDictionary<long, string>>(new Dictionary<long, string>());
+
+        public Task<IReadOnlyDictionary<string, ModelTokenAverage>> LoadObservedTokenAveragesAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyDictionary<string, ModelTokenAverage>>(new Dictionary<string, ModelTokenAverage>());
     }
 }

@@ -694,7 +694,10 @@ public static class MockData
                 var completionTokens = 250 + random.Next(0, 1300);
 
                 var cost = (promptTokens / 1_000_000m * inputPerM) + (completionTokens / 1_000_000m * outputPerM);
-                var roi = isFallback ? 0m : 60m + random.Next(0, 320) / 10m;      // 60.0 - 92.0 %
+                // A demo counterfactual: the baseline would have spent 1.6x-4.0x this turn's cost, except
+                // on a fallback turn where it would have been cheaper (a routing loss). Expressed as a
+                // baseline cost rather than a saved-percentage because that is what the real feed carries.
+                var baselineCost = isFallback ? cost * 0.7m : cost * (1.6m + (random.Next(0, 240) / 100m));
                 var toolSteps = 1 + random.Next(0, Math.Min(6, t + 2));
                 var cacheHit = t == 0 ? 0m : 40m + random.Next(0, 400) / 10m;      // 40.0 - 80.0 %
                 var spike = forceSpike || random.Next(0, 100) < 5;
@@ -706,14 +709,16 @@ public static class MockData
                     TimestampUtc: timestamp,
                     SessionId: sessionId,
                     Model: model,
-                    RoutingRoi: roi,
+                    BaselineCostUsd: baselineCost,
                     TotalCost: cost,
                     PromptTokens: promptTokens,
                     CompletionTokens: completionTokens,
                     ToolExecutionSteps: toolSteps,
                     CacheHitRate: cacheHit,
                     TimeToFirstTokenMs: ttft,
-                    ContextBufferPercent: contextPct));
+                    ContextBufferPercent: contextPct,
+                    BaselineModel: "demo-baseline",
+                    IsExploratory: isFallback));
             }
         }
 

@@ -28,7 +28,7 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT id, embedding, chosen_model, score, cost, verifier_trace, created_at_utc, is_exploratory, propensity
+            SELECT id, embedding, chosen_model, score, cost, verifier_trace, created_at_utc, is_exploratory, propensity, dimension
             FROM memory_entries
             ORDER BY id ASC;
             """;
@@ -52,8 +52,8 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO memory_entries (embedding, chosen_model, score, cost, verifier_trace, created_at_utc, is_exploratory, propensity)
-            VALUES ($embedding, $chosenModel, $score, $cost, $verifierTrace, $createdAtUtc, $isExploratory, $propensity);
+            INSERT INTO memory_entries (embedding, chosen_model, score, cost, verifier_trace, created_at_utc, is_exploratory, propensity, dimension)
+            VALUES ($embedding, $chosenModel, $score, $cost, $verifierTrace, $createdAtUtc, $isExploratory, $propensity, $dimension);
             SELECT last_insert_rowid();
             """;
         command.Parameters.AddWithValue("$embedding", ToBytes(entry.TaskEmbedding));
@@ -64,6 +64,7 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         command.Parameters.AddWithValue("$createdAtUtc", entry.CreatedAtUtc.ToString("O"));
         command.Parameters.AddWithValue("$isExploratory", entry.IsExploratory ? 1 : 0);
         command.Parameters.AddWithValue("$propensity", entry.Propensity);
+        command.Parameters.AddWithValue("$dimension", (object?)entry.Dimension ?? DBNull.Value);
 
         var id = (long)command.ExecuteScalar()!;
         return Task.FromResult(entry with { Id = id });
@@ -83,6 +84,17 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         return Task.CompletedTask;
     }
 
+    /// <inheritdoc />
+    public Task<long> GetMaxIdAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COALESCE(MAX(id), 0) FROM memory_entries;";
+        return Task.FromResult((long)command.ExecuteScalar()!);
+    }
+
     /// <summary>Materializes a <see cref="MemoryEntry"/> from the current row of a <c>memory_entries</c> reader.</summary>
     /// <param name="reader">A reader positioned on a row selected with the columns in <see cref="LoadAllAsync"/>'s query order.</param>
     /// <returns>The row's data as a <see cref="MemoryEntry"/>.</returns>
@@ -97,8 +109,9 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         var createdAtUtc = DateTimeOffset.Parse(reader.GetString(6), null, System.Globalization.DateTimeStyles.RoundtripKind);
         var isExploratory = reader.GetInt64(7) != 0;
         var propensity = reader.GetDouble(8);
+        var dimension = reader.IsDBNull(9) ? null : reader.GetString(9);
 
-        return new MemoryEntry(id, embedding, chosenModel, score, cost, verifierTrace, createdAtUtc, isExploratory, propensity);
+        return new MemoryEntry(id, embedding, chosenModel, score, cost, verifierTrace, createdAtUtc, isExploratory, propensity, dimension);
     }
 
     /// <summary>Encodes an embedding vector as a raw little-endian <c>float32</c> byte array for storage in the <c>embedding</c> BLOB column.</summary>

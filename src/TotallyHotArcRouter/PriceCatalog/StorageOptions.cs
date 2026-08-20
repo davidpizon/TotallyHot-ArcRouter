@@ -57,6 +57,14 @@ public sealed class StorageOptions
     public string TranscriptDatabasePath { get; init; } = @"%LOCALAPPDATA%\TotallyHot.ArcRouter\transcripts.db";
 
     /// <summary>
+    /// Gets the trained self-organizing cluster model artifact's file path
+    /// (docs/router/self-organizing-classification-plan.md Phase T2e). May contain the same tokens and
+    /// separators as <see cref="DatabasePath"/>, resolved by <see cref="ResolveClusterModelPath"/>.
+    /// Per-installation and never checked in, mirroring <see cref="LogRegModelPath"/>'s lifecycle.
+    /// </summary>
+    public string ClusterModelPath { get; init; } = @"%LOCALAPPDATA%\TotallyHot.ArcRouter\cluster_model.json";
+
+    /// <summary>
     /// Gets the number of days a <c>usage_ledger</c> row is retained before the startup health check's
     /// retention sweep deletes it, keyed on the row's <c>occurred_at_utc</c>. Defaults to 370 - a year plus
     /// slack, matching the token-monitor plan's bounded-archive discipline (long enough for annual
@@ -112,6 +120,12 @@ public sealed class StorageOptions
     /// separators, and returns an absolute path, via the same rules as <see cref="ResolveDatabasePath"/>.
     /// </summary>
     public string ResolveTranscriptDatabasePath() => ResolvePath(TranscriptDatabasePath);
+
+    /// <summary>
+    /// Expands environment-variable tokens in <see cref="ClusterModelPath"/>, normalizes separators, and
+    /// returns an absolute path, via the same rules as <see cref="ResolveDatabasePath"/>.
+    /// </summary>
+    public string ResolveClusterModelPath() => ResolvePath(ClusterModelPath);
 
     /// <summary>
     /// Shared expansion/normalization logic behind <see cref="ResolveDatabasePath"/> and

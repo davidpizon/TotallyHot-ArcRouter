@@ -57,7 +57,12 @@ public enum MetricRange
 /// <param name="TimestampUtc">When the turn was routed.</param>
 /// <param name="SessionId">The session (conversation) the turn belongs to.</param>
 /// <param name="Model">The model the router selected for the turn.</param>
-/// <param name="RoutingRoi">Cost-reduction percentage of the routing decision (0-100).</param>
+/// <param name="BaselineCostUsd">
+/// The estimated cost of the model the frozen nine-dimension baseline would have chosen, or
+/// <see langword="null"/> when no estimate exists (the baseline abstained, the model was never priced, or
+/// the comparison job has not reached this turn yet). Never defaulted to zero: a turn with no
+/// counterfactual is excluded from the ROI chart rather than drawn as a break-even bar.
+/// </param>
 /// <param name="TotalCost">The turn's estimated cost in USD.</param>
 /// <param name="PromptTokens">Prompt tokens sent for the turn.</param>
 /// <param name="CompletionTokens">Completion tokens generated for the turn.</param>
@@ -65,18 +70,26 @@ public enum MetricRange
 /// <param name="CacheHitRate">Prompt-cache hit rate for the turn (0-100).</param>
 /// <param name="TimeToFirstTokenMs">Latency to first token / response headers, in milliseconds.</param>
 /// <param name="ContextBufferPercent">Percentage of the model's context window used (0-100).</param>
+/// <param name="BaselineModel">The model the frozen baseline would have chosen, named in the ROI tooltip. <see langword="null"/> when it abstained.</param>
+/// <param name="IsExploratory">
+/// Whether this turn was an epsilon-greedy probe rather than the ensemble's own pick. The ROI chart
+/// renders these in a muted tone so a deliberate probe is not misread as a routing miss, while still
+/// counting toward the all-in net figure.
+/// </param>
 public sealed record MetricTurnPoint(
     DateTimeOffset TimestampUtc,
     string SessionId,
     string Model,
-    decimal RoutingRoi,
+    decimal? BaselineCostUsd,
     decimal TotalCost,
     int PromptTokens,
     int CompletionTokens,
     int ToolExecutionSteps,
     decimal CacheHitRate,
     int TimeToFirstTokenMs,
-    decimal ContextBufferPercent);
+    decimal ContextBufferPercent,
+    string? BaselineModel = null,
+    bool IsExploratory = false);
 
 /// <summary>A model and its deterministic display color (the chart legend / bar color).</summary>
 public sealed record CostModelColor(string Model, string Color);
@@ -207,8 +220,28 @@ public static class CostChartBuilder
         };
     }
 
-    // 1. Routing ROI - dual-directional bars (savings above 0, fallback remediation below 0).
-    /// <summary>Builds the Routing ROI chart: dual-directional bars of net savings, with fallback turns shown as remediation cost below zero.</summary>
+    // 1. Routing ROI - dual-directional bars: savings above 0, losses below.
+    /// <summary>
+    /// Builds the Routing ROI chart: dual-directional bars of estimated net savings against what the
+    /// frozen nine-dimension baseline would have chosen
+    /// (docs/router/self-organizing-classification-plan.md Phase T4), with losses below zero and
+    /// exploratory probes muted.
+    /// </summary>
+    /// <param name="turns">The turns in range, chronologically ordered.</param>
+    /// <returns>The chart model, empty when no turn in range has a counterfactual to compare against.</returns>
+    /// <remarks>
+    /// <para>
+    /// <b>Every figure here is an estimate, and the tooltip says so.</b> The baseline model was never asked
+    /// to serve these requests, so its cost is priced from its own observed-average token counts rather
+    /// than observed directly.
+    /// </para>
+    /// <para>
+    /// A turn whose baseline cost is unknown is <b>skipped</b>, not drawn at zero. Previous revisions of
+    /// this chart reconstructed a baseline from a cost-reduction percentage and invented a per-token
+    /// remediation rate for turns that had none; both produced confident-looking bars from numbers nothing
+    /// measured, and both are gone now that a real counterfactual exists.
+    /// </para>
+    /// </remarks>
     private static CostChartModel BuildRoi(IReadOnlyList<MetricTurnPoint> turns)
     {
         var pts = new List<CostChartPoint>(turns.Count);
@@ -217,40 +250,42 @@ public static class CostChartBuilder
         for (var i = 0; i < turns.Count; i++)
         {
             var t = turns[i];
-            decimal savings;
-            IReadOnlyList<string> tip;
-
-            if (t.RoutingRoi <= 0m)
+            if (t.BaselineCostUsd is not { } baseline)
             {
-                // Fallback / failure: a below-zero remediation cost. Fallback turns report ~$0 actual
-                // cost, so an estimate from the turn's token volume stands in for the wasted spend (no
-                // real remediation signal exists - see docs/gui/backlog.md).
-                savings = -((t.PromptTokens + t.CompletionTokens) / 1_000_000m * 2.5m);
-                tip =
-                [
-                    $"Model: {t.Model}",
-                    "Fallback / exploration failure",
-                    $"Est. remediation: -{Money(-savings)}",
-                ];
-            }
-            else
-            {
-                var roiFraction = Math.Min(t.RoutingRoi, 99.9m) / 100m;
-                var baseline = t.TotalCost / (1m - roiFraction);
-                savings = baseline - t.TotalCost;
-                tip =
-                [
-                    $"Actual Turn Cost: {Money(t.TotalCost)}",
-                    $"Worst-case Baseline: {Money(baseline)}",
-                    $"Net ROI: +{Money(savings)} ({t.RoutingRoi.ToString("F1", Inv)}% saved)",
-                ];
+                continue;
             }
 
+            var savings = baseline - t.TotalCost;
             net += savings;
-            pts.Add(new CostChartPoint(Ms(t), Label(i, t), t.Model, Color(t.Model), Round(savings, 4), 0m, savings < 0m, tip));
+
+            var baselineName = string.IsNullOrEmpty(t.BaselineModel) ? "baseline" : t.BaselineModel;
+            IReadOnlyList<string> tip =
+            [
+                $"Model: {t.Model}",
+                $"Actual Turn Cost: {Money(t.TotalCost)}",
+                $"Baseline ({baselineName}): {Money(baseline)} — estimate",
+                savings >= 0m
+                    ? $"Net saving: +{Money(savings)} — estimate"
+                    : $"Net loss: -{Money(-savings)} — estimate",
+                t.IsExploratory ? "Exploratory probe (deliberate)" : "Ensemble pick",
+            ];
+
+            // Exploratory turns keep their bar - they are part of the all-in net position - but render
+            // muted, so a probe that deliberately cost more is visually distinct from a routing miss.
+            var color = t.IsExploratory ? Mute(Color(t.Model)) : Color(t.Model);
+            pts.Add(new CostChartPoint(Ms(t), Label(i, t), t.Model, color, Round(savings, 4), 0m, savings < 0m, tip));
         }
 
-        return new CostChartModel(CostChartKind.DualDirectionalBars, "Routing ROI (net savings)", "$", Money(net), null, Models(turns), pts);
+        return pts.Count == 0
+            ? Empty(CostChartKind.DualDirectionalBars, "Routing ROI (net savings)", "$")
+            : new CostChartModel(
+                CostChartKind.DualDirectionalBars,
+                "Routing ROI (net savings, estimated)",
+                "$",
+                Money(net),
+                null,
+                Models(turns),
+                pts);
     }
 
     // 2. Total Turn Cost - stepped cumulative running total, area recolored per active model.
@@ -477,6 +512,26 @@ public static class CostChartBuilder
 
     /// <summary>Looks up the display color assigned to a model.</summary>
     private static string Color(string model) => ChartPalette.ColorFor(model);
+
+    /// <summary>
+    /// Desaturates a <c>#rrggbb</c> color toward mid-grey, keeping a model identifiable while marking its
+    /// bar as an exploratory probe rather than an ensemble pick.
+    /// </summary>
+    /// <param name="hex">The model's palette color.</param>
+    /// <returns>The muted color, or <paramref name="hex"/> unchanged when it is not a 6-digit hex triple.</returns>
+    private static string Mute(string hex)
+    {
+        if (hex.Length != 7 || hex[0] != '#'
+            || !int.TryParse(hex.AsSpan(1), NumberStyles.HexNumber, Inv, out var rgb))
+        {
+            return hex;
+        }
+
+        // Blend 55% toward mid-grey: enough separation to read at a glance without losing the model's hue.
+        static int Blend(int channel) => (int)((channel * 0.45) + (128 * 0.55));
+        var muted = (Blend((rgb >> 16) & 0xFF) << 16) | (Blend((rgb >> 8) & 0xFF) << 8) | Blend(rgb & 0xFF);
+        return "#" + muted.ToString("x6", Inv);
+    }
 
     /// <summary>Rounds a decimal value away from zero to the given number of digits.</summary>
     private static decimal Round(decimal value, int digits) => Math.Round(value, digits, MidpointRounding.AwayFromZero);

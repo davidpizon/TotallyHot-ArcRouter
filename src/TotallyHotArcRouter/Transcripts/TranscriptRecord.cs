@@ -34,6 +34,11 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// pass) links this transcript row to one. Left unused by every phase T1a-c ships; present now so a
 /// future backfill needs no further schema migration.
 /// </param>
+/// <param name="DimBestModel">
+/// The model the frozen nine-dimension <c>dim_best</c> voter alone would have chosen, captured at decision
+/// time (Phase T4), or <see langword="null"/> when it abstained, no policy was consulted, or the row
+/// predates this column.
+/// </param>
 public sealed record TranscriptRecord(
     long Id,
     string CorrelationId,
@@ -52,4 +57,5 @@ public sealed record TranscriptRecord(
     double Propensity,
     int? InputTokens,
     int? OutputTokens,
-    long? MemoryEntryId);
+    long? MemoryEntryId,
+    string? DimBestModel = null);

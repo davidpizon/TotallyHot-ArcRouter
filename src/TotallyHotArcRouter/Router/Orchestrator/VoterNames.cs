@@ -20,4 +20,7 @@ public static class VoterNames
 
     /// <summary>The fine-tuned-LLM voter (<see cref="LlmRouterVoter"/>).</summary>
     public const string LlmRouter = "llm_router";
+
+    /// <summary>The self-organizing-cluster voter (<see cref="ClusterBestVoter"/>), additive per docs/router/self-organizing-classification-plan.md Phase T3.</summary>
+    public const string ClusterBest = "cluster_best";
 }

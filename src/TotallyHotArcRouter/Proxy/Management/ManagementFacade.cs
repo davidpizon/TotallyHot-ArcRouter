@@ -47,6 +47,7 @@ public sealed class ManagementFacade
     private readonly PriceCatalogRepository? _priceCatalogRepository;
     private readonly ModelAliasOverrideStore? _overrideStore;
     private readonly IUsageRollupStore? _rollupStore;
+    private readonly TotallyHot.ArcRouter.Transcripts.ITaxonomyComparisonStore? _comparisonStore;
     private readonly ISecretWriter? _secretWriter;
     private readonly ISecretReader? _secretReader;
 
@@ -111,6 +112,11 @@ public sealed class ManagementFacade
     /// write-only invariant). Defaults to <see langword="null"/>, in which case a locked literal continues
     /// to be stored in configuration exactly as before the store existed.
     /// </param>
+    /// <param name="comparisonStore">
+    /// Optional store of Phase T4 taxonomy comparisons, backing <see cref="GetRoutingRoiAsync"/>. Defaults
+    /// to <see langword="null"/>, in which case that surface reports itself unavailable rather than
+    /// fabricating an empty history that would read as "no savings".
+    /// </param>
     /// <param name="secretReader">
     /// Optional reader for the protected secret store, used only for <see cref="DiscoverModelsAsync"/> and
     /// <see cref="RefreshFromEndpointAsync"/>'s outbound probe of the provider's own endpoint - so a
@@ -131,7 +137,8 @@ public sealed class ManagementFacade
         IUsageRollupStore? rollupStore = null,
         TimeSpan? rateLimitStalenessThreshold = null,
         ISecretWriter? secretWriter = null,
-        ISecretReader? secretReader = null)
+        ISecretReader? secretReader = null,
+        TotallyHot.ArcRouter.Transcripts.ITaxonomyComparisonStore? comparisonStore = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(environment);
@@ -146,6 +153,7 @@ public sealed class ManagementFacade
         _priceCatalogRepository = priceCatalogRepository;
         _overrideStore = overrideStore;
         _rollupStore = rollupStore;
+        _comparisonStore = comparisonStore;
         _rateLimitStalenessThreshold = rateLimitStalenessThreshold ?? DefaultRateLimitStalenessThreshold;
         _secretWriter = secretWriter;
         _secretReader = secretReader;
@@ -824,6 +832,66 @@ public sealed class ManagementFacade
         catch (Exception)
         {
             return ManagementResult<IReadOnlyList<UsageRollupBucket>>.Fail(ManagementErrorType.Internal, "Failed to read usage rollups.");
+        }
+    }
+
+    /// <summary>
+    /// The Cost Analytics "Routing ROI" feed (docs/router/self-organizing-classification-plan.md Phase
+    /// T4): every taxonomy comparison in a range, optionally narrowed to one session.
+    /// </summary>
+    /// <param name="from">Inclusive lower bound on comparison time.</param>
+    /// <param name="to">Exclusive upper bound; must be after <paramref name="from"/>.</param>
+    /// <param name="sessionId">A session to filter to, or <see langword="null"/> for every session.</param>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    /// <returns>The matching points, oldest first.</returns>
+    /// <remarks>
+    /// Reports <see cref="ManagementErrorType.Unavailable"/> rather than an empty list when no comparison
+    /// store is configured. The distinction matters: an empty list means "routing saved nothing measurable
+    /// in this range", while unavailable means "nothing has been measured at all", and collapsing the two
+    /// would let a disabled feature render as a break-even result.
+    /// </remarks>
+    public async Task<ManagementResult<IReadOnlyList<RoutingRoiPoint>>> GetRoutingRoiAsync(
+        DateTimeOffset from,
+        DateTimeOffset to,
+        string? sessionId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (_comparisonStore is null)
+        {
+            return ManagementResult<IReadOnlyList<RoutingRoiPoint>>.Fail(
+                ManagementErrorType.Unavailable, "Routing ROI comparisons are not available.");
+        }
+
+        if (to <= from)
+        {
+            return ManagementResult<IReadOnlyList<RoutingRoiPoint>>.Fail(
+                ManagementErrorType.InvalidRequest, "'to' must be after 'from'.");
+        }
+
+        try
+        {
+            var rows = await _comparisonStore.LoadSinceAsync(from, sessionId, cancellationToken).ConfigureAwait(false);
+            IReadOnlyList<RoutingRoiPoint> points =
+            [
+                .. rows
+                    .Where(r => r.ComparedAtUtc < to)
+                    .Select(r => new RoutingRoiPoint(
+                        r.ComparedAtUtc,
+                        r.SessionId,
+                        r.RoutedModel,
+                        r.BaselineModel,
+                        r.ActualCostUsd,
+                        r.BaselineEstimatedCostUsd,
+                        r.EstimatedNetSavingsUsd,
+                        r.IsExploratory)),
+            ];
+
+            return ManagementResult<IReadOnlyList<RoutingRoiPoint>>.Ok(points);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return ManagementResult<IReadOnlyList<RoutingRoiPoint>>.Fail(
+                ManagementErrorType.Internal, "Failed to read routing ROI comparisons.");
         }
     }
 

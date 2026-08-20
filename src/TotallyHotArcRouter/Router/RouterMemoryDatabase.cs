@@ -104,6 +104,7 @@ public sealed class RouterMemoryDatabase
         schema.ExecuteNonQuery();
 
         MigrateProvenanceColumns(connection);
+        MigrateDimensionColumn(connection);
     }
 
     // CREATE TABLE IF NOT EXISTS silently does nothing when the table already exists, so it cannot add a
@@ -132,6 +133,24 @@ public sealed class RouterMemoryDatabase
             using var alterPropensity = connection.CreateCommand();
             alterPropensity.CommandText = "ALTER TABLE memory_entries ADD COLUMN propensity REAL NOT NULL DEFAULT 1.0;";
             alterPropensity.ExecuteNonQuery();
+        }
+    }
+
+    // Same blind spot MigrateProvenanceColumns works around, for a column added by
+    // docs/router/self-organizing-classification-plan.md Phase T2. NULL default (not "unknown") because a
+    // pre-existing row genuinely has no recorded dimension label - the clustering histogram (Phase T2e)
+    // must be able to tell "never labeled" apart from a real dimension value.
+    /// <summary>
+    /// Adds the `dimension` column to `memory_entries` if missing, so databases created before Phase T2
+    /// pick it up on startup, with existing rows defaulting to an unlabeled <see langword="null"/>.
+    /// </summary>
+    private static void MigrateDimensionColumn(SqliteConnection connection)
+    {
+        if (!ColumnExists(connection, "memory_entries", "dimension"))
+        {
+            using var alterDimension = connection.CreateCommand();
+            alterDimension.CommandText = "ALTER TABLE memory_entries ADD COLUMN dimension TEXT NULL;";
+            alterDimension.ExecuteNonQuery();
         }
     }
 

@@ -15,15 +15,18 @@ public class CostChartBuilderTests
         DateTimeOffset timestamp,
         string sessionId = "s1",
         string model = "gpt-4o-mini",
-        decimal roi = 0m,
+        decimal? baselineCost = null,
         decimal cost = 0m,
         int promptTokens = 0,
         int completionTokens = 0,
         int toolSteps = 0,
         decimal cacheHit = 0m,
         int ttftMs = 0,
-        decimal contextPct = 0m) =>
-        new(timestamp, sessionId, model, roi, cost, promptTokens, completionTokens, toolSteps, cacheHit, ttftMs, contextPct);
+        decimal contextPct = 0m,
+        string? baselineModel = null,
+        bool isExploratory = false) =>
+        new(timestamp, sessionId, model, baselineCost, cost, promptTokens, completionTokens, toolSteps,
+            cacheHit, ttftMs, contextPct, baselineModel, isExploratory);
 
     [Fact]
     public void Build_NullPoints_Throws()
@@ -155,11 +158,13 @@ public class CostChartBuilderTests
     }
 
     [Fact]
-    public void Build_RoutingRoi_PositiveSavingsFromReductionPercent()
+    public void Build_RoutingRoi_SavingIsBaselineMinusActual()
     {
-        // roi = 80% on a $2 turn: baseline = 2 / (1 - 0.8) = 10, savings = 10 - 2 = 8.
+        // A $2 turn against a $10 baseline estimate is an $8 saving - read straight off the counterfactual
+        // rather than reconstructed from a percentage.
         var model = CostChartBuilder.Build(
-            [Point(Now.AddMinutes(-10), roi: 80m, cost: 2m)], CostMetric.RoutingRoi, MetricRange.Hour, null, Now);
+            [Point(Now.AddMinutes(-10), baselineCost: 10m, cost: 2m)],
+            CostMetric.RoutingRoi, MetricRange.Hour, null, Now);
 
         var p = Assert.Single(model.Points);
         Assert.Equal(8m, p.Value);
@@ -167,15 +172,73 @@ public class CostChartBuilderTests
     }
 
     [Fact]
-    public void Build_RoutingRoi_FallbackTurnIsNegativeAndFlagged()
+    public void Build_RoutingRoi_CostlierThanBaselineIsANegativeFlaggedBar()
     {
         var model = CostChartBuilder.Build(
-            [Point(Now.AddMinutes(-10), roi: 0m, cost: 0m, promptTokens: 4000)],
+            [Point(Now.AddMinutes(-10), baselineCost: 1m, cost: 3m)],
             CostMetric.RoutingRoi, MetricRange.Hour, null, Now);
 
         var p = Assert.Single(model.Points);
-        Assert.True(p.Value < 0m);
+        Assert.Equal(-2m, p.Value);
         Assert.True(p.Flag);
+    }
+
+    [Fact]
+    public void Build_RoutingRoi_TurnWithNoCounterfactualIsSkippedNotDrawnAtZero()
+    {
+        // The baseline abstained (or the comparison job has not reached this turn). A zero-height bar would
+        // read as "routing broke even", which is a measurement rather than the absence of one.
+        var model = CostChartBuilder.Build(
+            [Point(Now.AddMinutes(-10), baselineCost: null, cost: 3m)],
+            CostMetric.RoutingRoi, MetricRange.Hour, null, Now);
+
+        Assert.Empty(model.Points);
+    }
+
+    [Fact]
+    public void Build_RoutingRoi_LabelsEveryFigureAsAnEstimate()
+    {
+        var model = CostChartBuilder.Build(
+            [Point(Now.AddMinutes(-10), baselineCost: 10m, cost: 2m, baselineModel: "glm-5")],
+            CostMetric.RoutingRoi, MetricRange.Hour, null, Now);
+
+        var p = Assert.Single(model.Points);
+        Assert.Contains(p.Tip, line => line.Contains("glm-5", StringComparison.Ordinal) && line.Contains("estimate", StringComparison.Ordinal));
+        Assert.Contains(p.Tip, line => line.Contains("Net saving", StringComparison.Ordinal) && line.Contains("estimate", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_RoutingRoi_ExploratoryTurnIsMutedAndLabelled()
+    {
+        var turns = new[]
+        {
+            Point(Now.AddMinutes(-10), baselineCost: 10m, cost: 2m),
+            Point(Now.AddMinutes(-5), baselineCost: 10m, cost: 2m, isExploratory: true),
+        };
+
+        var model = CostChartBuilder.Build(turns, CostMetric.RoutingRoi, MetricRange.Hour, null, Now);
+
+        Assert.Equal(2, model.Points.Count);
+        // Same model, so the only difference is the exploratory muting - a probe must not read as a miss.
+        Assert.NotEqual(model.Points[0].Color, model.Points[1].Color);
+        Assert.Contains(model.Points[1].Tip, line => line.Contains("Exploratory probe", StringComparison.Ordinal));
+        Assert.Contains(model.Points[0].Tip, line => line.Contains("Ensemble pick", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_RoutingRoi_ExploratoryTurnsStillCountTowardTheNetHeadline()
+    {
+        // Splitting them visually is not the same as excluding them: the headline is the all-in position.
+        var turns = new[]
+        {
+            Point(Now.AddMinutes(-10), baselineCost: 10m, cost: 2m),
+            Point(Now.AddMinutes(-5), baselineCost: 1m, cost: 4m, isExploratory: true),
+        };
+
+        var model = CostChartBuilder.Build(turns, CostMetric.RoutingRoi, MetricRange.Hour, null, Now);
+
+        // 8 saved, then 3 lost on the probe.
+        Assert.Equal("$5.00", model.Headline);
     }
 
     [Fact]

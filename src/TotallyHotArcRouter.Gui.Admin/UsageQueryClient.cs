@@ -66,6 +66,32 @@ public sealed class UsageQueryClient
     }
 
     /// <summary>
+    /// Gets the Cost Analytics "Routing ROI" feed over an explicit range
+    /// (docs/router/self-organizing-classification-plan.md Phase T4).
+    /// </summary>
+    /// <param name="from">Inclusive lower bound on comparison time.</param>
+    /// <param name="to">Exclusive upper bound.</param>
+    /// <param name="sessionId">A session to filter to, or <see langword="null"/> for every session.</param>
+    /// <param name="cancellationToken">A token to cancel the request.</param>
+    /// <exception cref="ProviderAdminException">Comparisons are unavailable, the range was rejected, or the request failed.</exception>
+    public async Task<IReadOnlyList<RoutingRoiPointView>> GetRoutingRoiAsync(
+        DateTimeOffset from, DateTimeOffset to, string? sessionId = null, CancellationToken cancellationToken = default)
+    {
+        var url = "admin/usage/routing-roi" +
+            $"?from={Uri.EscapeDataString(from.ToString("O", CultureInfo.InvariantCulture))}" +
+            $"&to={Uri.EscapeDataString(to.ToString("O", CultureInfo.InvariantCulture))}";
+        if (!string.IsNullOrEmpty(sessionId))
+        {
+            url += $"&session={Uri.EscapeDataString(sessionId)}";
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        return Deserialize<List<RoutingRoiPointView>>(body);
+    }
+
+    /// <summary>
     /// Attaches the admin token (if configured), sends the request, and translates transport failures or
     /// non-success responses into a <see cref="ProviderAdminException"/>. Identical to
     /// <see cref="ProviderAdminClient"/>'s private helper of the same shape.

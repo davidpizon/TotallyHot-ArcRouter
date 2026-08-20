@@ -85,6 +85,7 @@ public sealed record ModelRouteResolutionResult
     /// <param name="propensity">See <see cref="Propensity"/>.</param>
     /// <param name="classification">See <see cref="Classification"/>.</param>
     /// <param name="taskText">See <see cref="TaskText"/>.</param>
+    /// <param name="dimBestModel">See <see cref="DimBestModel"/>.</param>
     private ModelRouteResolutionResult(
         bool isSuccess,
         IReadOnlyList<RouteCandidate>? candidates,
@@ -96,7 +97,8 @@ public sealed record ModelRouteResolutionResult
         bool isExploratory,
         double propensity,
         RequestClassification? classification,
-        string? taskText)
+        string? taskText,
+        string? dimBestModel)
     {
         IsSuccess = isSuccess;
         Candidates = candidates ?? [];
@@ -109,6 +111,7 @@ public sealed record ModelRouteResolutionResult
         Propensity = propensity;
         Classification = classification;
         TaskText = taskText;
+        DimBestModel = dimBestModel;
     }
 
     /// <summary>
@@ -220,6 +223,21 @@ public sealed record ModelRouteResolutionResult
     /// </summary>
     public string? TaskText { get; }
 
+    /// <summary>
+    /// Gets the model the frozen nine-dimension <c>dim_best</c> voter alone would have chosen for this
+    /// request, or <see langword="null"/> when it abstained or no policy was consulted -
+    /// docs/router/self-organizing-classification-plan.md Phase T4's counterfactual baseline.
+    /// </summary>
+    /// <remarks>
+    /// Captured here, at the moment the decision was made, rather than recomputed later: the ledgers
+    /// <c>dim_best</c> votes from move with every subsequent observation, so a recomputation would answer
+    /// "what would <c>dim_best</c> pick now", which is a different question from the one the savings
+    /// estimate asks. Left <see langword="null"/> rather than defaulted to the served model - an abstention
+    /// means the baseline expressed no preference, and crediting the router with beating a choice nobody
+    /// made would manufacture savings out of nothing.
+    /// </remarks>
+    public string? DimBestModel { get; }
+
     // A single-route Success(route, rewrittenBody) overload used to sit here. It was unreachable - every
     // caller goes through the candidate-list overload below, because even a no-fallback resolution builds
     // its one candidate through RequestInterceptor.BuildCandidate - and it constructed a RouteCandidate
@@ -239,6 +257,7 @@ public sealed record ModelRouteResolutionResult
     /// <param name="propensity">See <see cref="Propensity"/>.</param>
     /// <param name="classification">See <see cref="Classification"/>.</param>
     /// <param name="taskText">See <see cref="TaskText"/>.</param>
+    /// <param name="dimBestModel">See <see cref="DimBestModel"/>.</param>
     /// <exception cref="ArgumentException"><paramref name="candidates"/> is empty - a success must have at least the primary route, since <see cref="Route"/>/<see cref="RewrittenBody"/> index the first candidate.</exception>
     public static ModelRouteResolutionResult Success(
         IReadOnlyList<RouteCandidate> candidates,
@@ -249,7 +268,8 @@ public sealed record ModelRouteResolutionResult
         bool isExploratory = false,
         double propensity = 1.0,
         RequestClassification? classification = null,
-        string? taskText = null)
+        string? taskText = null,
+        string? dimBestModel = null)
     {
         ArgumentNullException.ThrowIfNull(candidates);
         if (candidates.Count == 0)
@@ -257,7 +277,7 @@ public sealed record ModelRouteResolutionResult
             throw new ArgumentException("A successful resolution must contain at least the primary route candidate.", nameof(candidates));
         }
 
-        return new(true, candidates, null, requestedModelName, substitutionReason, taskEmbedding, routerTokens, isExploratory, propensity, classification, taskText);
+        return new(true, candidates, null, requestedModelName, substitutionReason, taskEmbedding, routerTokens, isExploratory, propensity, classification, taskText, dimBestModel);
     }
 
     /// <summary>
@@ -269,6 +289,6 @@ public sealed record ModelRouteResolutionResult
     /// for the figure to appear on and no savings denominator it could distort.
     /// </remarks>
     public static ModelRouteResolutionResult Failure(string errorMessage) =>
-        new(false, null, errorMessage, null, RoutingSubstitutionReason.None, null, 0, false, 1.0, null, null);
+        new(false, null, errorMessage, null, RoutingSubstitutionReason.None, null, 0, false, 1.0, null, null, null);
 }
 

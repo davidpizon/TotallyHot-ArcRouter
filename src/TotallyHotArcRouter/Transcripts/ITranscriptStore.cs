@@ -82,4 +82,40 @@ public interface ITranscriptStore
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <returns>The number of rows actually deleted.</returns>
     Task<int> DeleteBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Loads the prompt text of every transcript row linked to a <c>memory_entries</c> row, keyed by
+    /// <c>memory_entry_id</c> - used by the cluster trainer's top-TF-IDF-term naming
+    /// (docs/router/self-organizing-classification-plan.md Phase T2e), the one piece of cluster-model
+    /// provenance that genuinely needs prompt text rather than just the dimension label already carried on
+    /// <see cref="Router.MemoryEntry.Dimension"/>. Returns an empty map if transcript capture is disabled
+    /// or no linked rows carry prompt text.
+    /// </summary>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    /// <returns>A map from <c>memory_entry_id</c> to that row's prompt text.</returns>
+    Task<IReadOnlyDictionary<long, string>> LoadPromptTextByMemoryEntryIdAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns each model's observed mean prompt and completion token counts across every captured row
+    /// that recorded both - the estimator
+    /// docs/router/self-organizing-classification-plan.md Phase T4 prices its counterfactual with.
+    /// </summary>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    /// <returns>A map from the routed model name (as captured) to its observed averages; empty when capture is disabled.</returns>
+    /// <remarks>
+    /// The counterfactual model's true token count for a given request is never observed - it was never
+    /// asked to serve it - so the phase's cost figure is explicitly an estimate, and this is what makes it
+    /// one. A model with no captured rows is absent from the map rather than defaulted, so a caller states
+    /// "no estimate" instead of pricing an invented token count.
+    /// </remarks>
+    Task<IReadOnlyDictionary<string, ModelTokenAverage>> LoadObservedTokenAveragesAsync(CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// One model's observed mean token usage across captured transcripts - the per-model estimator behind
+/// Phase T4's counterfactual cost figure.
+/// </summary>
+/// <param name="InputTokens">Mean prompt tokens observed for this model.</param>
+/// <param name="OutputTokens">Mean completion tokens observed for this model.</param>
+/// <param name="ObservationCount">How many captured rows back these means.</param>
+public sealed record ModelTokenAverage(double InputTokens, double OutputTokens, int ObservationCount);

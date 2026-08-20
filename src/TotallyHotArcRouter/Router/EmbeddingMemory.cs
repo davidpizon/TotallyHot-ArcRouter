@@ -103,6 +103,11 @@ public sealed class EmbeddingMemory
     /// distribution. Defaults to <c>1.0</c> - certain selection - matching <paramref name="isExploratory"/>'s
     /// default.
     /// </param>
+    /// <param name="dimension">
+    /// The heuristic classifier's dimension label for this request, or <see langword="null"/> when
+    /// unavailable (docs/router/self-organizing-classification-plan.md Phase T2e). Placed last so every
+    /// existing positional call site keeps compiling unchanged.
+    /// </param>
     public async Task<MemoryEntry> AddEntryAsync(
         float[] taskEmbedding,
         string chosenModel,
@@ -111,13 +116,14 @@ public sealed class EmbeddingMemory
         string? verifierTrace,
         CancellationToken cancellationToken = default,
         bool isExploratory = false,
-        double propensity = 1.0)
+        double propensity = 1.0,
+        string? dimension = null)
     {
         ArgumentNullException.ThrowIfNull(taskEmbedding);
         ArgumentException.ThrowIfNullOrWhiteSpace(chosenModel);
 
         var persisted = await _store.AppendAsync(
-            new MemoryEntry(0, taskEmbedding, chosenModel, score, cost, verifierTrace, DateTimeOffset.UtcNow, isExploratory, propensity),
+            new MemoryEntry(0, taskEmbedding, chosenModel, score, cost, verifierTrace, DateTimeOffset.UtcNow, isExploratory, propensity, dimension),
             cancellationToken).ConfigureAwait(false);
 
         List<MemoryEntry>? evicted = null;

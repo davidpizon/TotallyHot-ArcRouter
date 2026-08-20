@@ -114,10 +114,12 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddSingleton<Router.Orchestrator.MemoryKnnVoter>();
             services.AddSingleton<Router.Orchestrator.LogRegVoter>();
             services.AddSingleton<Router.Orchestrator.LlmRouterVoter>();
+            services.AddSingleton<Router.Orchestrator.ClusterBestVoter>();
             services.AddSingleton<Router.Orchestrator.IRoutingVoter>(sp => sp.GetRequiredService<Router.Orchestrator.DimBestVoter>());
             services.AddSingleton<Router.Orchestrator.IRoutingVoter>(sp => sp.GetRequiredService<Router.Orchestrator.MemoryKnnVoter>());
             services.AddSingleton<Router.Orchestrator.IRoutingVoter>(sp => sp.GetRequiredService<Router.Orchestrator.LogRegVoter>());
             services.AddSingleton<Router.Orchestrator.IRoutingVoter>(sp => sp.GetRequiredService<Router.Orchestrator.LlmRouterVoter>());
+            services.AddSingleton<Router.Orchestrator.IRoutingVoter>(sp => sp.GetRequiredService<Router.Orchestrator.ClusterBestVoter>());
             services.AddSingleton<Router.Orchestrator.OrchestratorRoutingPolicy>();
 
             // docs/router/live-feedback-learning-plan.md Phase 4: trains and hot-swaps the logreg voter's
@@ -126,6 +128,14 @@ namespace TotallyHot.ArcRouter.Hosting
             // button both resolve IEmbeddingLogRegTrainingService directly instead of going through it.
             services.AddSingleton<Router.Orchestrator.OodBootstrapSampleSource>();
             services.AddSingleton<Router.Orchestrator.IEmbeddingLogRegTrainingService, Router.Orchestrator.EmbeddingLogRegTrainingService>();
+
+            // docs/router/self-organizing-classification-plan.md Phase T2: trains and atomically writes the
+            // self-organizing cluster model's artifact. ClusterRetrainHostedService (registered below, with
+            // the other hosted services) is the automatic-threshold trigger; Program.cs's --retrain-clusters
+            // flag and Phase T5's Governance button both resolve IClusterTrainingService directly instead of
+            // going through it.
+            services.AddSingleton<Router.Orchestrator.OodClusterBootstrapSampleSource>();
+            services.AddSingleton<Router.Orchestrator.IClusterTrainingService, Router.Orchestrator.ClusterTrainingService>();
 
             // Tools
             services.AddTransient<CheckSyntax>();
@@ -259,6 +269,11 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddSingleton<TotallyHot.ArcRouter.Transcripts.ITranscriptStore, TotallyHot.ArcRouter.Transcripts.SqliteTranscriptStore>();
             services.AddSingleton<TotallyHot.ArcRouter.Transcripts.TranscriptScoreObserver>();
 
+            // docs/router/self-organizing-classification-plan.md Phase T4: the taxonomy comparison's own
+            // store, sharing TranscriptDatabase's file and its enabled gate - with no transcripts there is
+            // nothing to compare, so this needs no separate switch.
+            services.AddSingleton<TotallyHot.ArcRouter.Transcripts.ITaxonomyComparisonStore, TotallyHot.ArcRouter.Transcripts.SqliteTaxonomyComparisonStore>();
+
             services.AddSingleton<IRouterScoreObserver>(sp =>
             {
                 var observers = new List<IRouterScoreObserver>
@@ -275,6 +290,11 @@ namespace TotallyHot.ArcRouter.Hosting
                 return new Router.CompositeRouterScoreObserver(observers, sp.GetRequiredService<ILogger<Router.CompositeRouterScoreObserver>>());
             });
             services.AddSandbox();
+
+            // In-flight request gauge (docs/router/routing-roi-regret-plan.md): a singleton so
+            // ProxyMiddleware (incrementing per served request) and TaxonomyComparisonService
+            // (hard-pausing its comparison drain while the count is non-zero) observe one number.
+            services.AddSingleton<InFlightRequestGauge>();
 
             services.AddSingleton<ProxyMiddleware>();
 
@@ -438,6 +458,11 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddHostedService<TotallyHot.ArcRouter.Transcripts.EmbeddingBackfillService>();
             services.AddHostedService<TotallyHot.ArcRouter.Transcripts.TranscriptRetentionService>();
 
+            // docs/router/self-organizing-classification-plan.md Phase T4: drains the comparison queue on a
+            // timer. Deliberately off the request path - a comparison needs both a verifier score and a
+            // backfilled embedding, so it cannot run inline, and its results are explicitly not real-time.
+            services.AddHostedService<TotallyHot.ArcRouter.Transcripts.TaxonomyComparisonService>();
+
             // Hosted-service order matters: the generic host awaits each StartAsync in registration order,
             // so the startup checks (which pull the first pricing cycle) run to completion before
             // ProxyHostedService binds Kestrel below. The background poll loop is registered between them;
@@ -446,6 +471,7 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddHostedService<PriceCatalogIngestionHostedService>();
             services.AddHostedService<CostReconciliationHostedService>();
             services.AddHostedService<LogRegRetrainHostedService>();
+            services.AddHostedService<ClusterRetrainHostedService>();
 
             // ProxyServer's inner Kestrel host is handed an already-constructed ProxyMiddleware instance rather
             // than a copy of this IServiceCollection. It never gets its own IHostedService registrations, so it
@@ -489,7 +515,9 @@ namespace TotallyHot.ArcRouter.Hosting
                     llmRouterModelOverrideStore: sp.GetRequiredService<Router.TextGeneration.ILlmRouterModelOverrideStore>(),
                     llmRouterModelSyncService: sp.GetRequiredService<Router.TextGeneration.LlmRouterModelSyncService>(),
                     // Backs the Governance > Routing Mode panel's gRPC API (docs/router/orchestrator-live-path-plan.md §M3.2).
-                    routingOptions: sp.GetRequiredService<IOptions<RoutingOptions>>());
+                    routingOptions: sp.GetRequiredService<IOptions<RoutingOptions>>(),
+                    // Backs Cost Analytics' "Routing ROI" feed (docs/router/self-organizing-classification-plan.md Phase T4).
+                    taxonomyComparisonStore: sp.GetRequiredService<TotallyHot.ArcRouter.Transcripts.ITaxonomyComparisonStore>());
             });
 
             return services;
