@@ -44,8 +44,10 @@ var blended = live ?? _matrix?.AverageScore(priorDimension, candidate.ModelName)
 ```
 
 Live, execution-grounded feedback wins outright the moment a single observation exists; the probing-set
-prior only fills the gap before then. `RouterMemory`'s backing store is an unbounded growing list per
-(dimension, model), so this genuinely improves without limit. `EmbeddingLogRegTrainingService` does the
+prior only fills the gap before then. `RouterMemory`'s backing store is an unbounded running aggregate
+per (dimension, model) — a `ScoreAggregate` (sum, count) persisted to SQLite's `dimension_scores` table
+(see `memory-persistence.md`), whose observation count grows without bound — so this genuinely improves
+without limit. `EmbeddingLogRegTrainingService` does the
 same for training, blending live memory rows against the OOD bootstrap at
 `RoutingOptions.LogRegLiveSampleWeight` (default `3.0`). **Both were designed to age the benchmark out of
 the decision path, and both work. No change is proposed here.**
@@ -223,7 +225,8 @@ constructs, not routing policies the live proxy could register.
   constraint above; the harness reports it absent on ID test rather than silently substituting something
   else).
 - **LogReg** — reuses the existing `CodeRouterBench/LogRegTrainer.cs` TF-IDF artifact (already trained
-  from the OOD split, per PLAN.md Phase L's `logreg` history and Phase 6's relocation note). OOD only, for
+  from the OOD split, per `orchestrator-ensemble.md`'s `logreg` history and
+  `live-feedback-learning-plan.md` Phase 6's relocation note). OOD only, for
   the same reason.
 - **LinUCB / LinTS (categorical-context variant)** — `α = λ = 1` (LinUCB), `v = 0.5, λ = 1` (LinTS),
   one-hot context over dimension (× difficulty × language where the classifier exposes them), warm-started

@@ -85,7 +85,8 @@ upstream by Zhou et al., and this repository is a consumer of it.
   data-fidelity limit: individual `bug_fixing`, `algorithm`, and
   `test_generation` cells for GLM-5, Qwen3-Max, Qwen3.5-Plus, and MiniMax-M2.7 diverge from the
   published research-doc Table 10 by up to 0.32, though per-model row averages (AvgPerf) match to
-  within 0.05 for every model. This is a settled deferral (PLAN.md Phase K), not an open bug.
+  within 0.05 for every model. This is a settled deferral (PLAN.md's "Settled deferrals" list; full
+  evidence in `data/README.md`), not an open bug.
 
 ## License
 

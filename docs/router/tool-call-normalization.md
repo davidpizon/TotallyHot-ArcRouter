@@ -1,6 +1,6 @@
 # Universal Tool-Call Normalization: Provider & Model Capability Scanning
 
-> **Status: Phases 0–5 implemented; Phase 6 partial; Phase 7 proposed.** Dialect registry, capability
+> **Status: Phases 0–5 and 8 implemented; Phase 6 partial; Phase 7 proposed.** Dialect registry, capability
 > store, endpoint-flavor scanning, tiers 1–4 of dialect detection, the normalizing translator, and
 > emulation all ship today. Phase 4 deleted [`unified-api-translation.md`](unified-api-translation.md)
 > §4.5's provider-scoped tool-call echo guard and carried its whole test suite forward as the regression
@@ -8,11 +8,13 @@
 > investigation. Of Phase 6, the GUI's "Refresh from endpoint" action now triggers the scan and
 > per-model dialect display, as one router-side operation (`ManagementFacade.RefreshFromEndpointAsync`)
 > that also reconciles the model list itself — see [`docs/gui/provider-management.md`](../gui/provider-management.md)
-> for that side of it, which is model-list bookkeeping rather than tool-call normalization proper. Still
-> missing here are the response/telemetry diagnostics and the operator override, which means a wrong
-> classification is still only correctable by hand-writing the `model_tool_capabilities` row.
-> `EnableToolCallGuard` therefore also has not yet been removed. Native endpoints (Phase 7) remain
-> proposed only.
+> for that side of it, which is model-list bookkeeping rather than tool-call normalization proper. The
+> operator override shipped alongside Phase 8 (a per-model tool-dialect dropdown writing at
+> `DetectionConfidence.Operator` — see Phase 8's "Also shipped" note), so a wrong classification is
+> correctable from the GUI. Still missing from Phase 6 are the response/telemetry diagnostics, and
+> `EnableToolCallGuard` has not yet been removed — a self-contained follow-up now that its successor
+> exists. Native endpoints (Phase 7) remain proposed only. Phase 8 (constrained decoding) is
+> implemented.
 
 **Goal:** VS Code respects a model's intent to invoke a tool regardless of which provider and model
 served it.
@@ -508,11 +510,11 @@ on that provider, alongside reconciling the model list itself (added/removed mod
 route this rode on is kept as an independently callable building block, but the GUI itself now calls only
 the consolidated `refresh-from-endpoint` route.
 
-**Not shipped:** response headers, telemetry fields on `RoutingTelemetryEvent`, and — the larger
-remaining piece — an operator override reachable from the GUI. The `EnableToolCallGuard` toggle is
-therefore still in place: removing it needs the override to replace its only remaining job (a
-by-hand-writable escape hatch for a misclassified model). Spark does not yet read any header into its
-debug log.
+**Not shipped:** response headers and telemetry fields on `RoutingTelemetryEvent`. The operator
+override this section originally listed as the larger remaining piece has since shipped — with
+Phase 8, not here (see that phase's "Also shipped" note) — so the `EnableToolCallGuard` toggle's only
+remaining job is the one-release forced-on override, and deleting it is now a self-contained
+follow-up rather than a blocked one. Spark does not yet read any header into its debug log.
 
 *Tests:* `ScanCapabilitiesTests` covers the capability/dialect fields surfacing through
 `ListProviders()`; `RefreshFromEndpointTests` covers the consolidated operation's model-list
