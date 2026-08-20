@@ -86,6 +86,129 @@ router already selects among — the configured providers and the models they se
 Agent-as-a-Router framing. This plan introduces no new routing-target concept; every voter, baseline,
 and ledger below scores the same candidate set `OrchestratorRoutingPolicy` already sees.
 
+### Decision: this plan does not retire either benchmark split
+
+**Question this settles.** Once transcript capture, embedding backfill, and the learned cluster
+taxonomy are all live, is there still a reason to keep the CodeRouterBench ID test split or the OOD176
+split around?
+
+**Answer: yes to both, and the case for OOD gets stronger, not weaker, once this plan ships.**
+
+**ID test (2,919 tasks) — kept for a reason nothing in this plan touches.** `benchmark_id_results`
+`split = 'probing'` is already live routing infrastructure (`DimBestVoter.EnsureMatrixLoaded` loads
+`DimensionModelScoreMatrix.FromDatabase(_database, "probing")` — see
+`Router/Orchestrator/DimBestVoter.cs`), so the question is really about the held-out `id_test` half,
+which is evaluation-only, consumed by PLAN.md Phase N. `regret-evaluation-harness-plan.md` already
+settled why it cannot be replaced by live data: live traffic produces rows with exactly one filled
+cell (the model that actually served); epsilon-greedy exploration changes *which* cell gets filled,
+never fills a second one in the same row; and `CumReg` is defined on the per-task oracle
+`r*_i = max_j R_ij`, which requires a complete row. This plan does not change that arithmetic:
+
+- **T4's cluster-vs-dimension comparison is not a substitute.** It measures which of two taxonomies
+  this project built better explains *observed* quality (rolling MAE against what was actually
+  scored) — a relative measure between two things under test, not a distance from optimal. Only a
+  filled outcome row (which only the benchmark provides) answers "was the best available model
+  chosen."
+- **T1's propensity work moves toward a live regret *estimate*, not a measurement**, and inherits the
+  trap `regret-evaluation-harness-plan.md` already recorded: any surrogate oracle synthesized from
+  live data would need `logreg`'s (or now `cluster_best`'s) own regression heads, and scoring the
+  router with a component of the router biases the estimate downward exactly where the two share an
+  error mode. Estimate, not measurement — labeled as such if ever built.
+- **A tension this plan actually widens:** `cluster_best`, like `memory_kNN`/`logreg`/`llm_router`,
+  needs `VotingContext.TaskEmbedding`, so it cannot fire on `id_test` either — `benchmark_id_tasks`
+  carries no text for any voter to embed. Replaying the five-voter live ensemble against `id_test`
+  still reduces to `dim_best` casting the only non-abstaining vote, exactly as it does today for the
+  four-voter ensemble. `id_test` remains the only source of exact regret while becoming a *narrower*
+  slice of what live routing actually does — which is itself the argument for OOD as the second
+  replay target, not a reason to drop `id_test`.
+
+**OOD176 — this plan adds a second live dependency on it, making it strictly more load-bearing than
+today.** OOD is the only benchmark split with published task text, so it is the only offline corpus
+where the embedding-based voters (and any baseline built the same way) can run at all. One live-path
+component already depends on it for cold start: `OodBootstrapSampleSource` bootstraps the `logreg`
+artifact before live volume exists. **Phase T2d adds a second, structurally identical dependency**:
+the cluster model's own OOD bootstrap, so `cluster_best` is functional from a fresh install rather
+than abstaining until enough live traffic accumulates. This dependency also recurs, not just runs
+once — both artifacts carry an embedding-dimension guard, so any future change to
+`EmbeddingOptions.EmbeddingDimension` or the embedding model invalidates every trained artifact
+simultaneously, at which point even a high-traffic installation is back to cold start and OOD is the
+only corpus that can re-seed it.
+
+**Retention cost is already near zero**, which is why neither split is worth trading away for a small
+maintenance win: the corpus is sync-on-demand (~11.7 MB, not checked in — PLAN.md Phase K2), and every
+consumer already tolerates its absence by design (`DimBestVoter` degrades to live-memory-only scoring
+when the corpus isn't synced; `OodBootstrapSampleSource` and its T2d counterpart report "corpus not
+synced" and the dependent voter abstains rather than failing). Dropping either split would remove a
+capability this plan **increases** reliance on, to save storage the repository already keeps at
+sync-on-demand size.
+
+**Consequence for future plans:** neither `id_test` nor OOD176 is a candidate for removal as a result
+of self-organizing classification landing. Any future proposal to drop one needs new evidence, per
+this repository's "settled deferrals are not reopened without new evidence" convention — this section
+is that settlement for both splits with respect to this plan.
+
+### Decision: no task is ever executed more than once on a paid model
+
+**Operator decision, recorded verbatim, in two parts:**
+
+> "I absolutely do not want to run the same set of tasks multiple times. This is an unacceptable and
+> expensive operation."
+
+amended by the operator with one carve-out:
+
+> "tasks may be executed more than once on free models."
+
+Every request is served exactly once by exactly one model *for the response the client receives*, and
+**paid** backends never see the same task twice. This rules out, permanently and for every phase of
+this plan and any follow-on it spawns:
+
+- **Parallel fan-out across paid models** — routing one request to multiple paid models to compare
+  their answers directly.
+- **Duplicate serving / A-B re-execution on paid models** — re-sending previously served requests (or
+  any task suite) to paid backends to measure a policy change, including "replay the last N requests
+  under the new router state."
+- **Evaluation-motivated re-runs of the benchmark tasks against paid models** — the corpus's outcome
+  matrices were executed once, upstream, by the dataset's authors; this project never re-executes them
+  (`docs/HANDBOOK.md`'s "no API keys required" property already encodes this).
+
+**The free-model carve-out.** A task *may* additionally be executed on models whose candidate is
+flagged `RoutingCandidate.IsFree` — the flag `UtilityRoutingPolicy.ResolveCost` already cost-ranks at
+zero. This is a genuine measurement capability the dollar-cost ban does not otherwise allow: a task
+served once by the chosen model can also be run through free models in the background, producing
+**extra filled cells in the same outcome row** — real, same-task scores for the free subset of the
+candidate pool, plus extra `memory_entries` training rows at zero dollar cost. Boundaries that keep
+the carve-out inside this plan's existing ground rules, should any phase or follow-on implement it:
+
+- **Never on the hot path.** Free re-execution is background work, subject to the same
+  off-the-request-path rule as every other learning task; the client's response never waits on it.
+- **Dollar-free is not cost-free.** Compute, rate limits, and Verifier sandbox time are real; any
+  implementation is budget-bounded and configuration-gated, defaulting off like every other feature
+  this plan adds.
+- **Provenance is mandatory.** A score obtained by shadow execution on a free model is labeled as such
+  (distinct from the served response's score and from exploration), so selection-bias bookkeeping —
+  propensity, exploration-vs-exploitation labeling — stays honest. A same-task free-model comparison
+  is a *partial* row: it supports within-task comparisons among free models, and only among them; it
+  never yields the full-row oracle, because the paid cells stay empty.
+
+What the paid-model ban does **not** affect — named explicitly so it is never misread as banning the
+free alternatives that exist precisely because paid re-execution is off the table:
+
+- **Offline decision replay** (PLAN.md Phase N's harness): iterating stored benchmark outcome rows and
+  asking a policy which model it *would have* picked is pure table lookup plus local decision code —
+  zero model invocations, zero tokens, zero API spend, however many times it runs. Comparing router
+  states (e.g. cold-start versus current artifacts) this way re-runs *decisions*, never *tasks*.
+- **Shadow picks on live traffic** (Phase T4): recording what a baseline policy would have chosen for
+  a request that was served once — the alternative pick is computed, priced from observed per-model
+  averages, and labeled an estimate; the request itself is never served twice.
+- **Propensity-weighted estimation** (Phase T1): statistically reweighting outcomes that were each
+  observed exactly once.
+
+This is why the plan's measurement machinery (T4's comparison report, T1's propensity capture, and
+the Phase N replay it feeds) is built entirely from single-execution data plus labeled estimates,
+optionally enriched by free-model shadow scores where an operator enables them. Any future proposal
+that requires serving a task more than once **on a paid model** is rejected on this ground without
+further analysis, absent new evidence and an explicit reversal of this decision by the operator.
+
 ### Honest scope statement on data scarcity
 
 This plan increases the *volume* of live samples recovered (T1's embedding backfill turns a skipped
@@ -162,6 +285,14 @@ Carried forward from `live-feedback-learning-plan.md`, which apply with equal fo
 
 New for this plan:
 
+- **No task is ever executed more than once on a paid model.** Every request is served exactly once
+  by exactly one model — no parallel fan-out, no duplicate serving, no re-running task sets against
+  paid backends for evaluation. Comparison comes from stored outcomes (offline decision replay — zero
+  model invocations), clearly-labeled statistical estimates (shadow picks, propensity reweighting),
+  and — the one carve-out — optional, background, budget-bounded re-execution on
+  `RoutingCandidate.IsFree` models, whose scores are provenance-labeled as shadow executions. See
+  "Decision: no task is ever executed more than once on a paid model" above for the full scope and
+  the operator's recorded wording.
 - **Privacy-first transcripts.** Capture defaults **off** (`TranscriptOptions.Enabled = false`);
   retention is enforced (`RetentionDays`, `MaxRows`); the store lives in its own SQLite file under
   `%LOCALAPPDATA%\TotallyHot.ArcRouter\`, resolved through `StorageOptions` the same way
@@ -472,6 +603,16 @@ clamping, and a full persistence round-trip.
   store makes richer naming possible later; not attempted in T1-T6.
 - **Replacing epsilon-greedy exploration**, or any change to how exploration itself is selected — out
   of scope here exactly as it is in `live-feedback-learning-plan.md`.
+- **Retiring the CodeRouterBench ID test split or the OOD176 split.** Settled above ("Decision: this
+  plan does not retire either benchmark split") — `id_test` remains the only source of exact regret,
+  and this plan adds a second live dependency on OOD (T2d's cluster bootstrap), not a reason to drop
+  either.
+- **Any evaluation technique that serves a task more than once on a paid model** — parallel fan-out,
+  duplicate serving, or re-executing task suites against paid backends. Settled above ("Decision: no
+  task is ever executed more than once on a paid model"); rejected on that ground without further
+  analysis. Free-model shadow execution (the decision's carve-out) is permitted but not scheduled by
+  this plan — implementing it is its own future work item, subject to the boundaries the decision
+  records.
 
 ## Existing code this plan builds on
 
