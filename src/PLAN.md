@@ -325,6 +325,11 @@ the exploration setting, and all four PLAN.md Phase L voters' enablement/weight;
 `RoutingModeAdmin.razor` (backed by `RoutingModeStore`/`RoutingModeAdminClient`), renders it. No mutation
 controls - an editable toggle remains deferred to a separate config-management sub-project, per
 [`docs/router/orchestrator-live-path-plan.md`](../docs/router/orchestrator-live-path-plan.md) §M3.2.
+**Partially reopened (proposed, not yet started):** Phase T6 of
+[`docs/router/self-organizing-classification-plan.md`](../docs/router/self-organizing-classification-plan.md)
+is that config-management sub-project's first slice, scoped to exactly two settings (an adaptive-routing
+master switch and the live-memory sample size) via a new router-side mutable settings store and admin
+RPC; `RoutingModeAdminService` itself stays read-only.
 
 **M4 shipped.** `utility-model-routing.md`'s non-goal now records that Phase M considered and rejected
 superseding it; `RoutingOptions.PolicyName`'s doc marks it dead configuration and names
@@ -377,6 +382,15 @@ own stated ordering ("before PLAN.md Phase N... measuring voters that structural
 produce a benchmark of `dim_best` wearing an ensemble's name") is satisfied; Phase N may proceed. That
 plan's Phases 5-6 (Governance admin surface, TF-IDF namespace relocation) remain open but do not block
 Phase N.
+
+**Also sequenced ahead of Phase N (proposed, not yet started):**
+[`docs/router/self-organizing-classification-plan.md`](../docs/router/self-organizing-classification-plan.md)
+adds a live-traffic-only, self-organizing request taxonomy (a fifth, additive `cluster_best` voter,
+never replacing `dim_best` or the fixed nine-dimension vocabulary) and, along the way, closes three
+named prerequisites `docs/router/regret-evaluation-harness-plan.md` records as blocking any future
+live-regret arm: `RoutingDecision.IsExploratory` persisted nowhere, propensity never computed, and
+`EmbeddingMemoryScoreObserver` writing `cost: 0.0` unconditionally. Phase N does not require this plan
+to complete, but every phase of it removes a blocker Phase N would otherwise have to solve itself.
 
 Full plan, sub-phase breakdown (N1-N6), the metrics/oracle/regret math, the baseline set, and the
 ID-split text-availability constraint that shapes which baselines can run where:
