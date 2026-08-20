@@ -431,6 +431,13 @@ namespace TotallyHot.ArcRouter.Hosting
                     configuration.GetSection(McpOptions.SectionName).Bind(options));
             services.AddHostedService<McpHostedService>();
 
+            // docs/router/self-organizing-classification-plan.md Phase T1d-T1e: background services for
+            // embedding backfill and transcript retention. Both are registered unconditionally but are no-ops
+            // when their respective feature flags are off (Enabled for retention, EnableEmbeddingBackfill for
+            // backfill). Registered after the transcript store but before ProxyHostedService.
+            services.AddHostedService<TotallyHot.ArcRouter.Transcripts.EmbeddingBackfillService>();
+            services.AddHostedService<TotallyHot.ArcRouter.Transcripts.TranscriptRetentionService>();
+
             // Hosted-service order matters: the generic host awaits each StartAsync in registration order,
             // so the startup checks (which pull the first pricing cycle) run to completion before
             // ProxyHostedService binds Kestrel below. The background poll loop is registered between them;

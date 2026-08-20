@@ -9,6 +9,7 @@ using TotallyHot.ArcRouter.Router.Embeddings;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tests.CodeRouterBench;
 using TotallyHot.ArcRouter.Tests.PriceCatalog;
+using TotallyHot.ArcRouter.Transcripts;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -39,6 +40,9 @@ public class StartupHealthCheckHostedServiceTests
         var ingestionService = new PriceCatalogIngestionService(
             registry, repository, temp.CreateToggleStore(repository), NullLogger<PriceCatalogIngestionService>.Instance);
 
+        var transcriptDb = CreateTranscriptDatabase(temp);
+        var transcriptStore = new SqliteTranscriptStore(
+            transcriptDb, Options.Create(new TranscriptOptions()));
         var service = new StartupHealthCheckHostedService(
             NullLogger<StartupHealthCheckHostedService>.Instance,
             temp.Database,
@@ -55,8 +59,9 @@ public class StartupHealthCheckHostedServiceTests
             CreateEmbeddingMemory(temp),
             CreateBenchmarkDatabase(temp),
             CreateBenchmarkStatusService(temp),
-            CreateTranscriptDatabase(temp),
-            Options.Create(new TotallyHot.ArcRouter.Transcripts.TranscriptOptions()));
+            transcriptDb,
+            transcriptStore,
+            Options.Create(new TranscriptOptions()));
 
         await service.StartAsync(TestContext.Current.CancellationToken);
 
@@ -81,6 +86,9 @@ public class StartupHealthCheckHostedServiceTests
         var ingestionService = new PriceCatalogIngestionService(
             registry, repository, temp.CreateToggleStore(repository), NullLogger<PriceCatalogIngestionService>.Instance);
 
+        var transcriptDb = CreateTranscriptDatabase(temp);
+        var transcriptStore = new SqliteTranscriptStore(
+            transcriptDb, Options.Create(new TranscriptOptions()));
         var service = new StartupHealthCheckHostedService(
             NullLogger<StartupHealthCheckHostedService>.Instance,
             temp.Database,
@@ -97,8 +105,9 @@ public class StartupHealthCheckHostedServiceTests
             CreateEmbeddingMemory(temp),
             CreateBenchmarkDatabase(temp),
             CreateBenchmarkStatusService(temp),
-            CreateTranscriptDatabase(temp),
-            Options.Create(new TotallyHot.ArcRouter.Transcripts.TranscriptOptions()));
+            transcriptDb,
+            transcriptStore,
+            Options.Create(new TranscriptOptions()));
 
         await service.StartAsync(TestContext.Current.CancellationToken);
 
@@ -160,6 +169,10 @@ public class StartupHealthCheckHostedServiceTests
             registry, repository, temp.CreateToggleStore(repository), NullLogger<PriceCatalogIngestionService>.Instance);
         warmupState = embeddingClient is null ? null : new EmbeddingWarmupState();
 
+        var transcriptDb = CreateTranscriptDatabase(temp);
+        var transcriptStore = new SqliteTranscriptStore(
+            transcriptDb, Options.Create(new TranscriptOptions()));
+
         return new StartupHealthCheckHostedService(
             NullLogger<StartupHealthCheckHostedService>.Instance,
             temp.Database,
@@ -176,8 +189,9 @@ public class StartupHealthCheckHostedServiceTests
             CreateEmbeddingMemory(temp),
             CreateBenchmarkDatabase(temp),
             CreateBenchmarkStatusService(temp),
-            CreateTranscriptDatabase(temp),
-            Options.Create(new TotallyHot.ArcRouter.Transcripts.TranscriptOptions()),
+            transcriptDb,
+            transcriptStore,
+            Options.Create(new TranscriptOptions()),
             embeddingClient,
             warmupState);
     }

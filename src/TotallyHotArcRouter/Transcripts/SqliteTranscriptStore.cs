@@ -97,4 +97,177 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
 
         return Task.CompletedTask;
     }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<long>> LoadUnembeddedScoredAsync(int limit, CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (!_options.Enabled)
+        {
+            return Task.FromResult<IReadOnlyList<long>>(Array.Empty<long>());
+        }
+
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id FROM request_transcripts
+            WHERE memory_entry_id IS NULL AND score IS NOT NULL
+            ORDER BY id ASC
+            LIMIT $limit;
+            """;
+        command.Parameters.AddWithValue("$limit", limit);
+
+        var ids = new List<long>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            ids.Add(reader.GetInt64(0));
+        }
+
+        return Task.FromResult<IReadOnlyList<long>>(ids);
+    }
+
+    /// <inheritdoc />
+    public Task<TranscriptRecord?> GetTranscriptAsync(long id, CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(id);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (!_options.Enabled)
+        {
+            return Task.FromResult<TranscriptRecord?>(null);
+        }
+
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT
+                id, correlation_id, created_at_utc, requested_model, routed_model, dimension, difficulty,
+                language, is_utility, prompt_text, response_text, score, cost, is_exploratory, propensity,
+                input_tokens, output_tokens, memory_entry_id
+            FROM request_transcripts
+            WHERE id = $id;
+            """;
+        command.Parameters.AddWithValue("$id", id);
+
+        using var reader = command.ExecuteReader();
+        if (!reader.Read())
+        {
+            return Task.FromResult<TranscriptRecord?>(null);
+        }
+
+        var record = ReadTranscriptRecord(reader);
+        return Task.FromResult<TranscriptRecord?>(record);
+    }
+
+    /// <inheritdoc />
+    public Task LinkMemoryEntryAsync(long transcriptId, long memoryEntryId, CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(transcriptId);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(memoryEntryId);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (!_options.Enabled)
+        {
+            return Task.CompletedTask;
+        }
+
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE request_transcripts SET memory_entry_id = $memoryEntryId WHERE id = $transcriptId;";
+        command.Parameters.AddWithValue("$memoryEntryId", memoryEntryId);
+        command.Parameters.AddWithValue("$transcriptId", transcriptId);
+        command.ExecuteNonQuery();
+
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public Task<int> GetRowCountAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (!_options.Enabled)
+        {
+            return Task.FromResult(0);
+        }
+
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM request_transcripts;";
+
+        var count = (long)command.ExecuteScalar()!;
+        return Task.FromResult((int)count);
+    }
+
+    /// <inheritdoc />
+    public Task<int> DeleteOldestAsync(int count, CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (!_options.Enabled)
+        {
+            return Task.FromResult(0);
+        }
+
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            DELETE FROM request_transcripts
+            WHERE id IN (SELECT id FROM request_transcripts ORDER BY id ASC LIMIT $count);
+            """;
+        command.Parameters.AddWithValue("$count", count);
+
+        var affectedRows = command.ExecuteNonQuery();
+        return Task.FromResult(affectedRows);
+    }
+
+    /// <inheritdoc />
+    public Task<int> DeleteBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (!_options.Enabled)
+        {
+            return Task.FromResult(0);
+        }
+
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM request_transcripts WHERE created_at_utc < $cutoff;";
+        command.Parameters.AddWithValue("$cutoff", cutoff.ToString("O"));
+
+        var affectedRows = command.ExecuteNonQuery();
+        return Task.FromResult(affectedRows);
+    }
+
+    /// <summary>
+    /// Reads a complete <see cref="TranscriptRecord"/> from a reader positioned at a row with all
+    /// columns in their standard order.
+    /// </summary>
+    private static TranscriptRecord ReadTranscriptRecord(Microsoft.Data.Sqlite.SqliteDataReader reader)
+    {
+        return new TranscriptRecord(
+            Id: reader.GetInt64(0),
+            CorrelationId: reader.GetString(1),
+            CreatedAtUtc: DateTimeOffset.Parse(reader.GetString(2)),
+            RequestedModel: reader.GetString(3),
+            RoutedModel: reader.GetString(4),
+            Dimension: reader.IsDBNull(5) ? null : reader.GetString(5),
+            Difficulty: reader.IsDBNull(6) ? null : reader.GetString(6),
+            Language: reader.IsDBNull(7) ? null : reader.GetString(7),
+            IsUtility: reader.GetInt32(8) != 0,
+            PromptText: reader.IsDBNull(9) ? null : reader.GetString(9),
+            ResponseText: reader.IsDBNull(10) ? null : reader.GetString(10),
+            Score: reader.IsDBNull(11) ? null : reader.GetDouble(11),
+            Cost: reader.IsDBNull(12) ? null : (decimal)reader.GetDouble(12),
+            IsExploratory: reader.GetInt32(13) != 0,
+            Propensity: reader.GetDouble(14),
+            InputTokens: reader.IsDBNull(15) ? null : reader.GetInt32(15),
+            OutputTokens: reader.IsDBNull(16) ? null : reader.GetInt32(16),
+            MemoryEntryId: reader.IsDBNull(17) ? null : reader.GetInt64(17));
+    }
 }

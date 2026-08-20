@@ -39,6 +39,7 @@ public sealed class StartupHealthCheckHostedService : IHostedService
     private readonly CodeRouterBench.BenchmarkDatabase _benchmarkDatabase;
     private readonly CodeRouterBench.BenchmarkDataStatusService _benchmarkStatusService;
     private readonly Transcripts.TranscriptDatabase _transcriptDatabase;
+    private readonly Transcripts.ITranscriptStore _transcriptStore;
     private readonly Transcripts.TranscriptOptions _transcriptOptions;
     private readonly Router.Embeddings.IEmbeddingClient? _embeddingClient;
     private readonly Router.Embeddings.EmbeddingWarmupState? _embeddingWarmupState;
@@ -68,6 +69,7 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         CodeRouterBench.BenchmarkDatabase benchmarkDatabase,
         CodeRouterBench.BenchmarkDataStatusService benchmarkStatusService,
         Transcripts.TranscriptDatabase transcriptDatabase,
+        Transcripts.ITranscriptStore transcriptStore,
         IOptions<Transcripts.TranscriptOptions> transcriptOptions,
         Router.Embeddings.IEmbeddingClient? embeddingClient = null,
         Router.Embeddings.EmbeddingWarmupState? embeddingWarmupState = null)
@@ -88,6 +90,7 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         ArgumentNullException.ThrowIfNull(benchmarkDatabase);
         ArgumentNullException.ThrowIfNull(benchmarkStatusService);
         ArgumentNullException.ThrowIfNull(transcriptDatabase);
+        ArgumentNullException.ThrowIfNull(transcriptStore);
         ArgumentNullException.ThrowIfNull(transcriptOptions);
 
         _logger = logger;
@@ -106,6 +109,7 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         _benchmarkDatabase = benchmarkDatabase;
         _benchmarkStatusService = benchmarkStatusService;
         _transcriptDatabase = transcriptDatabase;
+        _transcriptStore = transcriptStore;
         _transcriptOptions = transcriptOptions.Value;
         _embeddingClient = embeddingClient;
         _embeddingWarmupState = embeddingWarmupState;
@@ -258,6 +262,24 @@ public sealed class StartupHealthCheckHostedService : IHostedService
             {
                 _transcriptDatabase.EnsureCreated();
                 _logger.LogInformation("Transcript capture is enabled; ensured transcript database at {Path}.", _transcriptDatabase.DatabasePath);
+
+                // Phase T1e: run one purge at startup to clean any retention-expired rows from before this restart.
+                try
+                {
+                    var cutoff = DateTimeOffset.UtcNow - TimeSpan.FromDays(_transcriptOptions.RetentionDays);
+                    var deleted = await _transcriptStore.DeleteBeforeAsync(cutoff, cancellationToken).ConfigureAwait(false);
+                    if (deleted > 0)
+                    {
+                        _logger.LogInformation(
+                            "Transcript retention startup purge deleted {DeletedRows} row(s) older than {RetentionDays} days.",
+                            deleted,
+                            _transcriptOptions.RetentionDays);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Transcript retention purge failed at startup; continuing.");
+                }
             }
             catch (Exception ex)
             {

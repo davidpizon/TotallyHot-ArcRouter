@@ -307,7 +307,7 @@ New for this plan:
 
 | Phase | Deliverable | Depends on | Status |
 |---|---|---|---|
-| T1 | Opt-in transcript capture; provenance columns (`IsExploratory`, propensity, real cost); embedding backfill | live-feedback-learning-plan.md Phases 1-4 | Partially shipped — 1a-1c done, 1d-1e proposed (see note below) |
+| T1 | Opt-in transcript capture; provenance columns (`IsExploratory`, propensity, real cost); embedding backfill | live-feedback-learning-plan.md Phases 1-4 | Shipped — 1a-1e complete |
 | T2 | Self-organizing clustering job over `memory_entries` embeddings | T1 (bootstrap path only needs the synced corpus) | Proposed |
 | T3 | `ClusterBestVoter` — fifth Orchestrator voter | T2 | Proposed |
 | T4 | Baseline comparison: learned clusters vs. the frozen 9-dimension categorizer | T1, T2, T3 | Proposed |
@@ -398,11 +398,11 @@ shape) set alongside the existing embedding cache in `ProxyMiddleware`. The `mem
 present in the transcript schema, per 1a's design, but left unused by every phase this pass ships — 1d's
 backfill is the first consumer.
 
-**1d (embedding backfill) and 1e (retention) remain out of scope** for this pass and are unimplemented:
-no background job yet scans scored transcript rows with no `memory_entry_id` and backfills
-`memory_entries`, and no retention purge (startup or periodic) yet enforces `RetentionDays`/`MaxRows` on
-`request_transcripts`. A future pass can build both without a further schema migration, since the
-`memory_entry_id` column and every other 1a column already exist.
+**1d (embedding backfill) and 1e (retention) are now complete.** A background `EmbeddingBackfillService`
+scans scored transcript rows with no `memory_entry_id` on a 5-minute check interval and backfills
+`memory_entries` by computing their embeddings off-path. A periodic `TranscriptRetentionService` enforces
+both the configured `RetentionDays` and `MaxRows` bounds, with a startup purge in
+`StartupHealthCheckHostedService` to clean retention-expired rows from before each restart.
 
 ## Phase T2 — Self-organizing clustering
 

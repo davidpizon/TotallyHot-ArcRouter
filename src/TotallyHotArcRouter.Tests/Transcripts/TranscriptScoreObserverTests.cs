@@ -63,5 +63,23 @@ public class TranscriptScoreObserverTests
             _updates.Add((correlationId, score));
             return Task.CompletedTask;
         }
+
+        public Task<IReadOnlyList<long>> LoadUnembeddedScoredAsync(int limit, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<long>>(Array.Empty<long>());
+
+        public Task<TranscriptRecord?> GetTranscriptAsync(long id, CancellationToken cancellationToken = default) =>
+            Task.FromResult<TranscriptRecord?>(null);
+
+        public Task LinkMemoryEntryAsync(long transcriptId, long memoryEntryId, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task<int> GetRowCountAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(0);
+
+        public Task<int> DeleteOldestAsync(int count, CancellationToken cancellationToken = default) =>
+            Task.FromResult(0);
+
+        public Task<int> DeleteBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken = default) =>
+            Task.FromResult(0);
     }
 }
