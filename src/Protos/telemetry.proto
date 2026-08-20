@@ -389,6 +389,41 @@ message RoutingModeResponse {
   repeated VoterMode voters = 4;
 }
 
+// The Governance UI's System Settings window's "Adaptive Routing" row
+// (docs/router/self-organizing-classification-plan.md Phase T6): reads and mutates the two
+// router_settings-backed overrides layered on top of RoutingOptions - EnableAdaptiveRouting and
+// EmbeddingMemoryCapacity. Deliberately a separate service from the read-only RoutingModeAdminService above
+// (§M3.2's settled "read-only reporting and settings mutation stay separate" convention) - this is the one
+// admin service on this endpoint that mutates RoutingOptions. Same shape as ClusterModelAdminService/
+// BenchmarkDataAdminService (unary read plus a mutating RPC), sharing the :5002 TLS loopback endpoint.
+service RouterSettingsAdminService {
+  // Returns the settings' currently effective values - i.e. IOptionsMonitor<RoutingOptions>.CurrentValue,
+  // which already reflects stored-override > appsettings.json > coded-default precedence - not the raw
+  // router_settings rows.
+  rpc GetRouterSettings (GetRouterSettingsRequest) returns (RouterSettingsResponse);
+
+  // Validates and persists both settings to router_settings, triggers the live-reload change token so
+  // IOptionsMonitor<RoutingOptions> picks them up immediately, and - when EmbeddingMemoryCapacity was
+  // lowered - trims memory_entries to the new bound before returning. Rejects an out-of-range capacity with
+  // a structured INVALID_ARGUMENT error rather than silently clamping it; the response always re-reads the
+  // post-mutation effective values, mirroring RetrainClusterModel's "true post-mutation state" convention.
+  rpc UpdateRouterSettings (UpdateRouterSettingsRequest) returns (RouterSettingsResponse);
+}
+
+message GetRouterSettingsRequest {}
+
+// embedding_memory_capacity's valid range, enforced by UpdateRouterSettings - INVALID_ARGUMENT rejects any
+// value outside it rather than clamping. Mirrors the GUI's own client-side min/max on the Sample Size input.
+message UpdateRouterSettingsRequest {
+  bool adaptive_routing_enabled = 1;
+  int32 embedding_memory_capacity = 2;
+}
+
+message RouterSettingsResponse {
+  bool adaptive_routing_enabled = 1;
+  int32 embedding_memory_capacity = 2;
+}
+
 // The Governance UI's Cluster Model panel (docs/router/self-organizing-classification-plan.md Phase T5):
 // reports the trained self-organizing cluster model's status and runs a retrain with streamed
 // bootstrap-embedding progress. Also surfaces the transcript retention settings that gate the corpus this

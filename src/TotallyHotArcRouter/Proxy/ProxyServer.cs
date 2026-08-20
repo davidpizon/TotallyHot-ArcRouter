@@ -170,11 +170,14 @@ namespace TotallyHot.ArcRouter.Proxy
         /// </param>
         /// <param name="llmRouterModelSyncService">Optional sync service backing the panel's sync action. See <paramref name="llmRouterModelOverrideStore"/>.</param>
         /// <param name="routingOptions">
-        /// Optional routing configuration. When supplied, <see cref="Router.RoutingModeAdminGrpcService"/> is
-        /// mapped onto the TLS <paramref name="grpcPort"/> so the Governance UI's Routing Mode panel can read
-        /// whether the Orchestrator is live, its voters' enablement/weight, and the exploration setting
-        /// (docs/router/orchestrator-live-path-plan.md §M3.2). Defaults to <see langword="null"/> (panel API
-        /// absent), so existing callers/tests that construct a plain forwarding server are unaffected.
+        /// Optional routing configuration backing <see cref="Router.RoutingModeAdminGrpcService"/>, which the
+        /// Governance UI's Routing Mode panel reads for whether the Orchestrator is live, its voters'
+        /// enablement/weight, and the exploration setting (docs/router/orchestrator-live-path-plan.md §M3.2).
+        /// Unlike the optional feature stores above, that service is mapped onto the TLS
+        /// <paramref name="grpcPort"/> <em>unconditionally</em> - routing configuration is core, not an add-on
+        /// that can be absent - so this parameter changes only the values reported, never whether the panel
+        /// API exists. Defaults to <see langword="null"/>, in which case <see cref="RoutingOptions"/>'s own
+        /// coded defaults are reported.
         /// </param>
         /// <param name="taxonomyComparisonStore">
         /// Backs <c>GET /admin/usage/routing-roi</c>, the Cost Analytics "Routing ROI" feed
@@ -195,7 +198,32 @@ namespace TotallyHot.ArcRouter.Proxy
         /// <param name="transcriptStore">Optional transcript store. See <paramref name="clusterTrainingService"/>.</param>
         /// <param name="transcriptOptions">Optional transcript retention configuration. See <paramref name="clusterTrainingService"/>.</param>
         /// <param name="storageOptions">Optional storage configuration naming the cluster model artifact's path. See <paramref name="clusterTrainingService"/>.</param>
-        public ProxyServer(ILogger<ProxyServer> logger, ProxyMiddleware proxyMiddleware, int port = 5001, TelemetryBroadcaster? telemetryBroadcaster = null, int grpcPort = DefaultGrpcPort, IProviderConfigStore? providerConfigStore = null, IEnvironmentVariableProvider? environment = null, HttpClient? managementHttpClient = null, string? managementToken = null, PriceSourceToggleStore? priceSourceToggleStore = null, PriceCatalogIngestionService? priceCatalogIngestionService = null, PriceCatalogOptions? priceCatalogOptions = null, ProviderBudgetStore? providerBudgetStore = null, ProviderEndpointScanner? endpointScanner = null, ToolCallCapabilityStore? toolCallCapabilityStore = null, PriceCatalogRepository? priceCatalogRepository = null, ModelAliasOverrideStore? modelAliasOverrideStore = null, IUsageRollupStore? usageRollupStore = null, ISecretWriter? secretWriter = null, ISecretReader? secretReader = null, CodeRouterBench.BenchmarkDataStatusService? benchmarkDataStatusService = null, CodeRouterBench.BenchmarkFileLedger? benchmarkFileLedger = null, CodeRouterBench.BenchmarkSyncService? benchmarkSyncService = null, CodeRouterBench.BenchmarkSyncOptions? benchmarkSyncOptions = null, Router.TextGeneration.ILlmRouterModelOverrideStore? llmRouterModelOverrideStore = null, Router.TextGeneration.LlmRouterModelSyncService? llmRouterModelSyncService = null, IOptions<RoutingOptions>? routingOptions = null, Transcripts.ITaxonomyComparisonStore? taxonomyComparisonStore = null, Router.Orchestrator.IClusterTrainingService? clusterTrainingService = null, Router.IMemoryEntryStore? memoryEntryStore = null, Transcripts.ITranscriptStore? transcriptStore = null, IOptions<Transcripts.TranscriptOptions>? transcriptOptions = null, IOptions<PriceCatalog.StorageOptions>? storageOptions = null)
+        /// <param name="routerSettingsStore">
+        /// Optional mutable settings store (docs/router/self-organizing-classification-plan.md Phase T6).
+        /// When supplied, <see cref="Router.RouterSettingsAdminGrpcService"/> is mapped onto the TLS
+        /// <paramref name="grpcPort"/> so the Governance UI's System Settings window can read and mutate
+        /// the adaptive-routing toggle and embedding-memory sample size. Defaults to
+        /// <see langword="null"/> (panel API absent).
+        /// </param>
+        /// <param name="routerSettingsReloadToken">
+        /// Optional live-reload trigger, signaled after a successful save so
+        /// <c>IOptionsMonitor&lt;RoutingOptions&gt;</c> recomputes immediately. Required alongside
+        /// <paramref name="routerSettingsStore"/> for the panel API to be mapped.
+        /// </param>
+        /// <param name="routingOptionsMonitor">
+        /// Optional live routing-options monitor, reported by <c>GetRouterSettings</c>/
+        /// <c>UpdateRouterSettings</c> as the currently effective values. Required alongside
+        /// <paramref name="routerSettingsStore"/> for the panel API to be mapped.
+        /// </param>
+        /// <param name="embeddingMemory">
+        /// Optional embedding-memory working set, trimmed synchronously by <c>UpdateRouterSettings</c>
+        /// when a save lowers the capacity, so the response reflects the trim rather than racing it. Not
+        /// required for the panel API to be mapped - when omitted, the reactive
+        /// <c>IOptionsMonitor.OnChange</c> trim still runs, just on its own schedule - and registered
+        /// independently of <paramref name="routerSettingsStore"/>'s group, so supplying it alone is never
+        /// silently dropped.
+        /// </param>
+        public ProxyServer(ILogger<ProxyServer> logger, ProxyMiddleware proxyMiddleware, int port = 5001, TelemetryBroadcaster? telemetryBroadcaster = null, int grpcPort = DefaultGrpcPort, IProviderConfigStore? providerConfigStore = null, IEnvironmentVariableProvider? environment = null, HttpClient? managementHttpClient = null, string? managementToken = null, PriceSourceToggleStore? priceSourceToggleStore = null, PriceCatalogIngestionService? priceCatalogIngestionService = null, PriceCatalogOptions? priceCatalogOptions = null, ProviderBudgetStore? providerBudgetStore = null, ProviderEndpointScanner? endpointScanner = null, ToolCallCapabilityStore? toolCallCapabilityStore = null, PriceCatalogRepository? priceCatalogRepository = null, ModelAliasOverrideStore? modelAliasOverrideStore = null, IUsageRollupStore? usageRollupStore = null, ISecretWriter? secretWriter = null, ISecretReader? secretReader = null, CodeRouterBench.BenchmarkDataStatusService? benchmarkDataStatusService = null, CodeRouterBench.BenchmarkFileLedger? benchmarkFileLedger = null, CodeRouterBench.BenchmarkSyncService? benchmarkSyncService = null, CodeRouterBench.BenchmarkSyncOptions? benchmarkSyncOptions = null, Router.TextGeneration.ILlmRouterModelOverrideStore? llmRouterModelOverrideStore = null, Router.TextGeneration.LlmRouterModelSyncService? llmRouterModelSyncService = null, IOptions<RoutingOptions>? routingOptions = null, Transcripts.ITaxonomyComparisonStore? taxonomyComparisonStore = null, Router.Orchestrator.IClusterTrainingService? clusterTrainingService = null, Router.IMemoryEntryStore? memoryEntryStore = null, Transcripts.ITranscriptStore? transcriptStore = null, IOptions<Transcripts.TranscriptOptions>? transcriptOptions = null, IOptions<PriceCatalog.StorageOptions>? storageOptions = null, Router.RouterSettingsStore? routerSettingsStore = null, Router.RouterSettingsReloadToken? routerSettingsReloadToken = null, IOptionsMonitor<RoutingOptions>? routingOptionsMonitor = null, Router.EmbeddingMemory? embeddingMemory = null)
         {
             ArgumentNullException.ThrowIfNull(logger);
             ArgumentNullException.ThrowIfNull(proxyMiddleware);
@@ -209,6 +237,21 @@ namespace TotallyHot.ArcRouter.Proxy
             // Own (and later dispose) the management client only when the caller didn't supply one.
             _ownedManagementHttpClient = managementHttpClient is null ? new HttpClient() : null;
             var managementClient = managementHttpClient ?? _ownedManagementHttpClient!;
+
+            // One expression per admin service, evaluated once here and used by both the service
+            // registration (ConfigureServices) and the endpoint mapping (UseEndpoints) below. Each of these
+            // conditions used to be written out twice, ~60-120 lines apart, with nothing keeping the two
+            // copies in sync: editing one and not the other yields a service that is mapped but whose
+            // dependencies were never registered, which fails on the first RPC call rather than at startup
+            // (MapGrpcService only reflects over the service type - it never constructs it), and no test
+            // calls these RPCs, so the suite would stay green through exactly that regression.
+            var mapPriceSourceAdmin = priceSourceToggleStore is not null && priceCatalogIngestionService is not null;
+            var mapBenchmarkDataAdmin = benchmarkDataStatusService is not null && benchmarkFileLedger is not null && benchmarkSyncService is not null;
+            var mapLlmRouterModelAdmin = llmRouterModelOverrideStore is not null && llmRouterModelSyncService is not null;
+            var mapClusterModelAdmin = clusterTrainingService is not null && memoryEntryStore is not null
+                && transcriptStore is not null && transcriptOptions is not null && storageOptions is not null;
+            var mapRouterSettingsAdmin = routerSettingsStore is not null && routerSettingsReloadToken is not null
+                && routingOptionsMonitor is not null;
 
             _host = Host.CreateDefaultBuilder()
                 .ConfigureWebHostDefaults(webBuilder =>
@@ -292,10 +335,10 @@ namespace TotallyHot.ArcRouter.Proxy
                         // Same reasoning as the broadcaster: the price catalog singletons live in the outer
                         // container, so PriceSourceAdminGrpcService can only be constructed here if they are
                         // handed across explicitly. Registered as a pair - the service needs both.
-                        if (priceSourceToggleStore is not null && priceCatalogIngestionService is not null)
+                        if (mapPriceSourceAdmin)
                         {
-                            services.AddSingleton(priceSourceToggleStore);
-                            services.AddSingleton(priceCatalogIngestionService);
+                            services.AddSingleton(priceSourceToggleStore!);
+                            services.AddSingleton(priceCatalogIngestionService!);
 
                             // The panel's countdown needs the poll cadence, and this inner container has no
                             // configuration bound into it - AddGrpc alone would leave the IOptions dependency
@@ -306,21 +349,21 @@ namespace TotallyHot.ArcRouter.Proxy
                         // Same reasoning again: the CodeRouterBench singletons live in the outer container,
                         // so BenchmarkDataAdminGrpcService can only be constructed here if they are handed
                         // across explicitly. Registered as a trio - the service needs all three.
-                        if (benchmarkDataStatusService is not null && benchmarkFileLedger is not null && benchmarkSyncService is not null)
+                        if (mapBenchmarkDataAdmin)
                         {
-                            services.AddSingleton(benchmarkDataStatusService);
-                            services.AddSingleton(benchmarkFileLedger);
-                            services.AddSingleton(benchmarkSyncService);
+                            services.AddSingleton(benchmarkDataStatusService!);
+                            services.AddSingleton(benchmarkFileLedger!);
+                            services.AddSingleton(benchmarkSyncService!);
                             services.AddSingleton(Options.Create(benchmarkSyncOptions ?? new CodeRouterBench.BenchmarkSyncOptions()));
                         }
 
                         // Same reasoning again: the llm_router model override store and sync service live
                         // in the outer container, so LlmRouterModelAdminGrpcService can only be
                         // constructed here if they are handed across explicitly.
-                        if (llmRouterModelOverrideStore is not null && llmRouterModelSyncService is not null)
+                        if (mapLlmRouterModelAdmin)
                         {
-                            services.AddSingleton(llmRouterModelOverrideStore);
-                            services.AddSingleton(llmRouterModelSyncService);
+                            services.AddSingleton(llmRouterModelOverrideStore!);
+                            services.AddSingleton(llmRouterModelSyncService!);
                         }
 
                         // Unlike the pairs above, RoutingModeAdminGrpcService's dependency is core
@@ -332,14 +375,34 @@ namespace TotallyHot.ArcRouter.Proxy
                         // in the outer container, so ClusterModelAdminGrpcService can only be constructed
                         // here if they are handed across explicitly. Registered as a group of five - the
                         // service needs all of them.
-                        if (clusterTrainingService is not null && memoryEntryStore is not null && transcriptStore is not null
-                            && transcriptOptions is not null && storageOptions is not null)
+                        if (mapClusterModelAdmin)
                         {
-                            services.AddSingleton(clusterTrainingService);
-                            services.AddSingleton(memoryEntryStore);
-                            services.AddSingleton(transcriptStore);
-                            services.AddSingleton(transcriptOptions);
-                            services.AddSingleton(storageOptions);
+                            services.AddSingleton(clusterTrainingService!);
+                            services.AddSingleton(memoryEntryStore!);
+                            services.AddSingleton(transcriptStore!);
+                            services.AddSingleton(transcriptOptions!);
+                            services.AddSingleton(storageOptions!);
+                        }
+
+                        // The Governance UI's System Settings panel API (Phase T6). Same reasoning again:
+                        // the settings store, reload token, and options monitor live in the outer
+                        // container, so RouterSettingsAdminGrpcService can only be constructed here if
+                        // they are handed across explicitly.
+                        if (mapRouterSettingsAdmin)
+                        {
+                            services.AddSingleton(routerSettingsStore!);
+                            services.AddSingleton(routerSettingsReloadToken!);
+                            services.AddSingleton(routingOptionsMonitor!);
+                        }
+
+                        // Registered independently of the gate above rather than nested inside it, matching
+                        // what this parameter's own documentation promises: it is optional even when the
+                        // rest of the group is present, so a caller supplying it must never have it
+                        // silently dropped. Its only consumer today is RouterSettingsAdminGrpcService, which
+                        // takes it as an optional constructor parameter and copes with it being absent.
+                        if (embeddingMemory is not null)
+                        {
+                            services.AddSingleton(embeddingMemory);
                         }
                     });
 
@@ -358,21 +421,21 @@ namespace TotallyHot.ArcRouter.Proxy
                             // The Governance UI's price-source panel API. Shares the TLS gRPC port with the
                             // telemetry stream - price data itself never crosses it (D5); this carries only
                             // feed metadata and the toggle/refresh commands.
-                            if (priceSourceToggleStore is not null && priceCatalogIngestionService is not null)
+                            if (mapPriceSourceAdmin)
                             {
                                 endpoints.MapGrpcService<PriceSourceAdminGrpcService>();
                             }
 
                             // The Governance UI's Benchmark Data panel API. Shares the TLS gRPC port with
                             // the telemetry stream and price-source admin service.
-                            if (benchmarkDataStatusService is not null && benchmarkFileLedger is not null && benchmarkSyncService is not null)
+                            if (mapBenchmarkDataAdmin)
                             {
                                 endpoints.MapGrpcService<CodeRouterBench.BenchmarkDataAdminGrpcService>();
                             }
 
                             // The Governance UI's Benchmark Data panel's "Local Voter Model" section API.
                             // Shares the TLS gRPC port with the telemetry stream and the other admin services.
-                            if (llmRouterModelOverrideStore is not null && llmRouterModelSyncService is not null)
+                            if (mapLlmRouterModelAdmin)
                             {
                                 endpoints.MapGrpcService<Router.TextGeneration.LlmRouterModelAdminGrpcService>();
                             }
@@ -384,10 +447,16 @@ namespace TotallyHot.ArcRouter.Proxy
 
                             // The Governance UI's Cluster Model panel API (Phase T5). Shares the TLS gRPC
                             // port with the telemetry stream and the other admin services.
-                            if (clusterTrainingService is not null && memoryEntryStore is not null && transcriptStore is not null
-                                && transcriptOptions is not null && storageOptions is not null)
+                            if (mapClusterModelAdmin)
                             {
                                 endpoints.MapGrpcService<Router.Orchestrator.ClusterModelAdminGrpcService>();
+                            }
+
+                            // The Governance UI's System Settings panel API (Phase T6). Shares the TLS
+                            // gRPC port with the telemetry stream and the other admin services.
+                            if (mapRouterSettingsAdmin)
+                            {
+                                endpoints.MapGrpcService<Router.RouterSettingsAdminGrpcService>();
                             }
 
                             // The Governance UI's provider/credential/model management API. Only mapped

@@ -3,6 +3,7 @@ using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Orchestrator;
 using TotallyHot.ArcRouter.Telemetry;
+using TotallyHot.ArcRouter.Tests.TestSupport;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -202,7 +203,7 @@ public class CompositeRoutingPolicyTests
         var orchestratorVoter = new FakeVoter(VoterNames.DimBest, "model-a", 1.0);
         var orchestrator = new OrchestratorRoutingPolicy(
             [orchestratorVoter],
-            Options.Create(new RoutingOptions { EnableExploration = true, ExplorationRate = 1.0 }),
+            new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions { EnableExploration = true, ExplorationRate = 1.0 }),
             NullLogger<OrchestratorRoutingPolicy>.Instance);
         var composite = new CompositeRoutingPolicy(
             utilityPolicy,
@@ -225,7 +226,7 @@ public class CompositeRoutingPolicyTests
     private static OrchestratorRoutingPolicy CreateOrchestrator(IEnumerable<IRoutingVoter> voters) =>
         new(
             voters,
-            Options.Create(new RoutingOptions { EnableExploration = false, ExplorationRate = 0 }),
+            new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions { EnableExploration = false, ExplorationRate = 0 }),
             NullLogger<OrchestratorRoutingPolicy>.Instance);
 
     private sealed class FakeVoter(string name, string modelName, double confidence) : IRoutingVoter

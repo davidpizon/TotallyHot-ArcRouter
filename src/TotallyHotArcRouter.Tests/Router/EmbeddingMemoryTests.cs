@@ -1,7 +1,7 @@
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router;
+using TotallyHot.ArcRouter.Tests.TestSupport;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Tests.Router;
 
@@ -122,6 +122,47 @@ public class EmbeddingMemoryTests
         Assert.Equal(3, results.Count);
     }
 
+    /// <summary>
+    /// docs/router/self-organizing-classification-plan.md Phase T6: lowering
+    /// <see cref="RoutingOptions.EmbeddingMemoryCapacity"/> at runtime (i.e. without a new
+    /// <see cref="EmbeddingMemory"/> instance) must trim the working set and delete the evicted rows from
+    /// the store, mirroring <see cref="AddEntryAsync_OverCapacity_EvictsOldestEntriesFirst"/> but driven by
+    /// an <see cref="IOptionsMonitor{TOptions}.OnChange"/> notification instead of a new append.
+    /// </summary>
+    [Fact]
+    public async Task OptionsMonitorChange_CapacityLowered_TrimsWorkingSetAndDeletesFromStore()
+    {
+        var store = new FakeMemoryEntryStore();
+        var monitor = new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions
+        {
+            EmbeddingSimilarityThreshold = -1.0,
+            MaxNeighborCount = 10,
+            EmbeddingMemoryCapacity = 20_000,
+        });
+        var memory = new EmbeddingMemory(store, monitor, NullLogger<EmbeddingMemory>.Instance);
+        await memory.InitializeAsync(TestContext.Current.CancellationToken);
+
+        await memory.AddEntryAsync(UnitVector(1, 0, 0), "model-oldest", 0.5, 0.01, null, TestContext.Current.CancellationToken);
+        await memory.AddEntryAsync(UnitVector(1, 0, 0), "model-second", 0.5, 0.01, null, TestContext.Current.CancellationToken);
+        await memory.AddEntryAsync(UnitVector(1, 0, 0), "model-newest", 0.5, 0.01, null, TestContext.Current.CancellationToken);
+
+        monitor.Set(new RoutingOptions
+        {
+            EmbeddingSimilarityThreshold = -1.0,
+            MaxNeighborCount = 10,
+            EmbeddingMemoryCapacity = 1,
+        });
+
+        // The OnChange callback fires the trim without awaiting it (see EmbeddingMemory's remarks), so
+        // await the same trim method directly here to observe its completion deterministically rather
+        // than polling or sleeping for a background task.
+        await memory.TrimToCurrentCapacityAsync(TestContext.Current.CancellationToken);
+
+        var remainingModel = Assert.Single(store.Entries);
+        Assert.Equal("model-newest", remainingModel.ChosenModel);
+        Assert.Single(memory.FindNearest(UnitVector(1, 0, 0)));
+    }
+
     private static EmbeddingMemory CreateMemory(
         IMemoryEntryStore store,
         double similarityThreshold,
@@ -129,7 +170,7 @@ public class EmbeddingMemoryTests
         int capacity = 20_000) =>
         new(
             store,
-            Options.Create(new RoutingOptions
+            new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions
             {
                 EmbeddingSimilarityThreshold = similarityThreshold,
                 MaxNeighborCount = maxNeighborCount,

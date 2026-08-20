@@ -1,6 +1,7 @@
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Orchestrator;
+using TotallyHot.ArcRouter.Tests.TestSupport;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -106,7 +107,7 @@ public class MemoryKnnVoterTests
     }
 
     private static EmbeddingMemory CreateMemory() =>
-        new(new FakeMemoryEntryStore(), Options.Create(new RoutingOptions { EmbeddingSimilarityThreshold = 0.5 }), NullLogger<EmbeddingMemory>.Instance);
+        new(new FakeMemoryEntryStore(), new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions { EmbeddingSimilarityThreshold = 0.5 }), NullLogger<EmbeddingMemory>.Instance);
 
     private sealed class FakeMemoryEntryStore : IMemoryEntryStore
     {

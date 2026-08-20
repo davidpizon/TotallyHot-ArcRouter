@@ -26,9 +26,12 @@ namespace TotallyHot.ArcRouter.Hosting
         /// Constructs the underlying <see cref="ProxyServer"/> from its dependencies. Optional
         /// parameters (telemetry, provider config store, environment, management HTTP client/token, price
         /// catalog services, the protected secret store's reader/writer, CodeRouterBench corpus services,
-        /// the llm_router model override store and sync service, routing configuration, the cluster
-        /// training service and its supporting stores) let callers omit pieces they don't need wired up,
-        /// mirroring <see cref="ProxyServer"/>'s own constructor.
+        /// the llm_router model override store and sync service, routing configuration, the taxonomy
+        /// comparison store, the cluster training service and its supporting stores, and the router
+        /// settings store with its reload token, options monitor, and embedding memory) let callers omit
+        /// pieces they don't need wired up, mirroring <see cref="ProxyServer"/>'s own constructor. Each
+        /// group is passed straight through; <see cref="ProxyServer"/> alone decides which admin gRPC
+        /// services that makes mappable.
         /// </summary>
         public ProxyHostedService(
             ILogger<ProxyHostedService> logger,
@@ -64,7 +67,11 @@ namespace TotallyHot.ArcRouter.Hosting
             TotallyHot.ArcRouter.Router.IMemoryEntryStore? memoryEntryStore = null,
             TotallyHot.ArcRouter.Transcripts.ITranscriptStore? transcriptStore = null,
             IOptions<TotallyHot.ArcRouter.Transcripts.TranscriptOptions>? transcriptOptions = null,
-            IOptions<StorageOptions>? storageOptions = null)
+            IOptions<StorageOptions>? storageOptions = null,
+            TotallyHot.ArcRouter.Router.RouterSettingsStore? routerSettingsStore = null,
+            TotallyHot.ArcRouter.Router.RouterSettingsReloadToken? routerSettingsReloadToken = null,
+            IOptionsMonitor<RoutingOptions>? routingOptionsMonitor = null,
+            TotallyHot.ArcRouter.Router.EmbeddingMemory? embeddingMemory = null)
         {
             _logger = logger;
             _proxyServer = new ProxyServer(
@@ -100,7 +107,11 @@ namespace TotallyHot.ArcRouter.Hosting
                 memoryEntryStore,
                 transcriptStore,
                 transcriptOptions,
-                storageOptions);
+                storageOptions,
+                routerSettingsStore,
+                routerSettingsReloadToken,
+                routingOptionsMonitor,
+                embeddingMemory);
         }
 
         /// <summary>

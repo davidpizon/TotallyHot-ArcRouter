@@ -71,26 +71,34 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
     private const string VoterKeyPrefix = "voter:";
 
     private readonly IReadOnlyList<IRoutingVoter> _voters;
-    private readonly RoutingOptions _options;
+    private readonly IOptionsMonitor<RoutingOptions> _optionsMonitor;
     private readonly ILogger<OrchestratorRoutingPolicy> _logger;
+
+    /// <summary>
+    /// The current routing options, read live on every access rather than captured once - so a
+    /// <see cref="RoutingOptions.EnableAdaptiveRouting"/> toggle
+    /// (docs/router/self-organizing-classification-plan.md Phase T6) takes effect on the very next decision
+    /// this policy makes, without a restart.
+    /// </summary>
+    private RoutingOptions Options => _optionsMonitor.CurrentValue;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="OrchestratorRoutingPolicy"/> class.
     /// </summary>
     /// <param name="voters">Every registered voter (see <see cref="VoterNames"/> for the recognized identities).</param>
-    /// <param name="options">Per-voter weights and enablement, and the fallback default model.</param>
+    /// <param name="optionsMonitor">Per-voter weights and enablement, and the fallback default model - read live.</param>
     /// <param name="logger">The logger.</param>
     public OrchestratorRoutingPolicy(
         IEnumerable<IRoutingVoter> voters,
-        IOptions<RoutingOptions> options,
+        IOptionsMonitor<RoutingOptions> optionsMonitor,
         ILogger<OrchestratorRoutingPolicy> logger)
     {
         ArgumentNullException.ThrowIfNull(voters);
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(optionsMonitor);
         ArgumentNullException.ThrowIfNull(logger);
 
         _voters = [.. voters];
-        _options = options.Value;
+        _optionsMonitor = optionsMonitor;
         _logger = logger;
     }
 
@@ -265,7 +273,7 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
             _logger.LogWarning(
                 "[ORCHESTRATOR] Every voter abstained for dimension {Dimension}; falling back to the default model.",
                 context.Dimension);
-            return RoutingDecision.CreateFallback(_options.DefaultModel);
+            return RoutingDecision.CreateFallback(Options.DefaultModel);
         }
 
         // Merge the two dictionaries for the exposed CandidateScores breakdown, with aggregate scores taking
@@ -291,7 +299,7 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
         // argmax itself drew from - so an exploratory pick can never bypass circuit-breaker or
         // enabled-state checks. Deliberately not reached on the all-abstain fallback path above: that is
         // already a degraded outcome and randomizing it would compound two unrelated failures.
-        var isExploratory = _options.EnableExploration && Random.Shared.NextDouble() < _options.ExplorationRate;
+        var isExploratory = Options.EnableExploration && Random.Shared.NextDouble() < Options.ExplorationRate;
         var selectedModel = isExploratory
             ? context.Candidates[Random.Shared.Next(context.Candidates.Count)].ModelName
             : best.Model;
@@ -300,7 +308,7 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
         // actually chosen is closed-form under epsilon-greedy. K is guaranteed > 0 by the
         // Candidates.Count == 0 check above, so this never divides by zero. eps is folded to 0 when
         // exploration itself is disabled, so a non-exploring policy always reports certain selection.
-        var eps = _options.EnableExploration ? _options.ExplorationRate : 0d;
+        var eps = Options.EnableExploration ? Options.ExplorationRate : 0d;
         var k = context.Candidates.Count;
         var propensity = isExploratory ? eps / k : (1d - eps) + (eps / k);
 
@@ -310,7 +318,7 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
                 "[ORCHESTRATOR] Exploring: selected {Model} at random instead of the argmax pick {ArgmaxModel} (rate {Rate}).",
                 selectedModel,
                 best.Model,
-                _options.ExplorationRate);
+                Options.ExplorationRate);
         }
 
         // aggregateScores (not the merged candidateScores below) is the source of truth for a real
@@ -319,7 +327,7 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
         var selectedScore = aggregateScores.TryGetValue(selectedModel, out var scoreForSelected) ? scoreForSelected : 0d;
         var confidence = effectiveWeight > 0 ? Math.Clamp(selectedScore / effectiveWeight, 0d, 1d) : 0d;
         var rationale = isExploratory
-            ? $"Orchestrator exploration selected '{selectedModel}' at random (rate {_options.ExplorationRate:F2}); argmax pick was '{best.Model}' with weighted score {best.Score:F2} across {participatingVoters} voting voter(s)."
+            ? $"Orchestrator exploration selected '{selectedModel}' at random (rate {Options.ExplorationRate:F2}); argmax pick was '{best.Model}' with weighted score {best.Score:F2} across {participatingVoters} voting voter(s)."
             : $"Orchestrator ensemble selected '{best.Model}' with weighted score {best.Score:F2} across {participatingVoters} voting voter(s).";
         var decision = new RoutingDecision(
             selectedModel,
@@ -430,11 +438,11 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
     /// <returns>The voter's configured weight.</returns>
     private double GetVoterWeight(string voterName) => voterName switch
     {
-        VoterNames.DimBest => _options.DimBestVoterWeight,
-        VoterNames.MemoryKnn => _options.MemoryKnnVoterWeight,
-        VoterNames.LogReg => _options.LogRegVoterWeight,
-        VoterNames.LlmRouter => _options.LlmRouterVoterWeight,
-        VoterNames.ClusterBest => _options.ClusterBestVoterWeight,
+        VoterNames.DimBest => Options.DimBestVoterWeight,
+        VoterNames.MemoryKnn => Options.MemoryKnnVoterWeight,
+        VoterNames.LogReg => Options.LogRegVoterWeight,
+        VoterNames.LlmRouter => Options.LlmRouterVoterWeight,
+        VoterNames.ClusterBest => Options.ClusterBestVoterWeight,
         _ => 1d,
     };
 
@@ -443,11 +451,13 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
     /// <returns><see langword="true"/> if the voter should participate; otherwise <see langword="false"/>.</returns>
     private bool IsVoterEnabled(string voterName) => voterName switch
     {
-        VoterNames.DimBest => _options.EnableDimBestVoter,
-        VoterNames.MemoryKnn => _options.EnableMemoryKnnVoter,
-        VoterNames.LogReg => _options.EnableLogRegVoter,
-        VoterNames.LlmRouter => _options.EnableLlmRouterVoter,
-        VoterNames.ClusterBest => _options.EnableClusterBestVoter,
+        VoterNames.DimBest => Options.EnableDimBestVoter,
+        VoterNames.MemoryKnn => Options.EnableMemoryKnnVoter,
+        VoterNames.LogReg => Options.EnableLogRegVoter,
+        VoterNames.LlmRouter => Options.EnableLlmRouterVoter,
+        // docs/router/self-organizing-classification-plan.md Phase T6: cluster_best is additionally
+        // gated on the adaptive-routing master switch, on top of its own EnableClusterBestVoter flag.
+        VoterNames.ClusterBest => Options.EnableClusterBestVoter && Options.EnableAdaptiveRouting,
         _ => true,
     };
 }

@@ -65,6 +65,29 @@ namespace TotallyHot.ArcRouter.Hosting
                     return true;
                 })
                 .ValidateOnStart();
+
+            // docs/router/self-organizing-classification-plan.md Phase T6: the SQLite-backed override
+            // layer, registered as an IConfigureOptions<RoutingOptions> step *after* the appsettings.json
+            // bind above - Options-pattern configure delegates run in registration order, so this one runs
+            // second and wins, giving "stored override > appsettings.json > coded default" precedence.
+            // RouterSettingsStore is deliberately built from a private RouterMemoryDatabase resolved
+            // straight from configuration rather than the DI singleton below (which itself needs
+            // IOptions<RoutingOptions>) - see RouterSettingsStore's remarks for why the DI singleton would
+            // be circular here.
+            services.AddSingleton(sp =>
+            {
+                var configuration = sp.GetRequiredService<IConfiguration>();
+                var configuredPath = configuration.GetSection(RoutingOptions.SectionName)[nameof(RoutingOptions.EmbeddingMemoryDatabasePath)];
+                var databaseOptions = Options.Create(new RoutingOptions
+                {
+                    EmbeddingMemoryDatabasePath = configuredPath ?? new RoutingOptions().EmbeddingMemoryDatabasePath,
+                });
+                return new RouterSettingsStore(new RouterMemoryDatabase(databaseOptions), sp.GetRequiredService<ILogger<RouterSettingsStore>>());
+            });
+            services.AddSingleton<Router.RouterSettingsReloadToken>();
+            services.AddSingleton<IOptionsChangeTokenSource<RoutingOptions>>(sp => sp.GetRequiredService<Router.RouterSettingsReloadToken>());
+            services.AddSingleton<IConfigureOptions<RoutingOptions>, Router.RouterSettingsConfigureOptions>();
+
             services.AddHttpClient(nameof(Router.Embeddings.OnnxEmbeddingClient));
             services.AddSingleton<Router.Embeddings.IEmbeddingClient, Router.Embeddings.OnnxEmbeddingClient>();
             services.AddSingleton<Router.Embeddings.EmbeddingWarmupState>();
@@ -282,7 +305,13 @@ namespace TotallyHot.ArcRouter.Hosting
                     sp.GetRequiredService<Router.EmbeddingMemoryScoreObserver>(),
                 };
 
-                if (sp.GetRequiredService<IOptions<TotallyHot.ArcRouter.Transcripts.TranscriptOptions>>().Value.Enabled)
+                // docs/router/self-organizing-classification-plan.md Phase T6: transcript-score
+                // backfill additionally requires the adaptive-routing master switch, on top of its own
+                // TranscriptOptions.Enabled flag. A plain IOptions snapshot is sufficient here (not the
+                // monitor) - this factory runs once, at this singleton's construction, so a later toggle
+                // has nothing to re-run regardless.
+                if (sp.GetRequiredService<IOptions<TotallyHot.ArcRouter.Transcripts.TranscriptOptions>>().Value.Enabled
+                    && sp.GetRequiredService<IOptions<RoutingOptions>>().Value.EnableAdaptiveRouting)
                 {
                     observers.Add(sp.GetRequiredService<TotallyHot.ArcRouter.Transcripts.TranscriptScoreObserver>());
                 }
@@ -523,7 +552,12 @@ namespace TotallyHot.ArcRouter.Hosting
                     memoryEntryStore: sp.GetRequiredService<Router.IMemoryEntryStore>(),
                     transcriptStore: sp.GetRequiredService<TotallyHot.ArcRouter.Transcripts.ITranscriptStore>(),
                     transcriptOptions: sp.GetRequiredService<IOptions<TotallyHot.ArcRouter.Transcripts.TranscriptOptions>>(),
-                    storageOptions: sp.GetRequiredService<IOptions<StorageOptions>>());
+                    storageOptions: sp.GetRequiredService<IOptions<StorageOptions>>(),
+                    // Backs the Governance UI's System Settings panel gRPC API (Phase T6).
+                    routerSettingsStore: sp.GetRequiredService<Router.RouterSettingsStore>(),
+                    routerSettingsReloadToken: sp.GetRequiredService<Router.RouterSettingsReloadToken>(),
+                    routingOptionsMonitor: sp.GetRequiredService<IOptionsMonitor<RoutingOptions>>(),
+                    embeddingMemory: sp.GetRequiredService<EmbeddingMemory>());
             });
 
             return services;
