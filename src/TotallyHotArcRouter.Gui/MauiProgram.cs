@@ -58,6 +58,9 @@ public static class MauiProgram
         // Backs the Governance tab's read-only Routing Mode panel. A singleton for the same reason,
         // sharing the TLS gRPC port (5002) with the stores above. See Services/RoutingModeStore.cs.
         builder.Services.AddSingleton<RoutingModeStore>();
+        // Backs the Governance tab's Cluster Model panel (Phase T5). A singleton for the same reason,
+        // sharing the TLS gRPC port (5002) with the stores above. See Services/ClusterModelAdminStore.cs.
+        builder.Services.AddSingleton<ClusterModelAdminStore>();
         // Backs the Model Distribution / Cost Analytics history / header ticker's real data (Phase 4,
         // §5.15). A singleton so its range-keyed cache survives tab switches; talks to the proxy's
         // /admin/usage API (port 5001), same as ProviderAdminStore. See Services/UsageStore.cs.

@@ -26,8 +26,9 @@ namespace TotallyHot.ArcRouter.Hosting
         /// Constructs the underlying <see cref="ProxyServer"/> from its dependencies. Optional
         /// parameters (telemetry, provider config store, environment, management HTTP client/token, price
         /// catalog services, the protected secret store's reader/writer, CodeRouterBench corpus services,
-        /// the llm_router model override store and sync service, routing configuration) let callers omit
-        /// pieces they don't need wired up, mirroring <see cref="ProxyServer"/>'s own constructor.
+        /// the llm_router model override store and sync service, routing configuration, the cluster
+        /// training service and its supporting stores) let callers omit pieces they don't need wired up,
+        /// mirroring <see cref="ProxyServer"/>'s own constructor.
         /// </summary>
         public ProxyHostedService(
             ILogger<ProxyHostedService> logger,
@@ -58,7 +59,12 @@ namespace TotallyHot.ArcRouter.Hosting
             ILlmRouterModelOverrideStore? llmRouterModelOverrideStore = null,
             LlmRouterModelSyncService? llmRouterModelSyncService = null,
             IOptions<RoutingOptions>? routingOptions = null,
-            TotallyHot.ArcRouter.Transcripts.ITaxonomyComparisonStore? taxonomyComparisonStore = null)
+            TotallyHot.ArcRouter.Transcripts.ITaxonomyComparisonStore? taxonomyComparisonStore = null,
+            TotallyHot.ArcRouter.Router.Orchestrator.IClusterTrainingService? clusterTrainingService = null,
+            TotallyHot.ArcRouter.Router.IMemoryEntryStore? memoryEntryStore = null,
+            TotallyHot.ArcRouter.Transcripts.ITranscriptStore? transcriptStore = null,
+            IOptions<TotallyHot.ArcRouter.Transcripts.TranscriptOptions>? transcriptOptions = null,
+            IOptions<StorageOptions>? storageOptions = null)
         {
             _logger = logger;
             _proxyServer = new ProxyServer(
@@ -89,7 +95,12 @@ namespace TotallyHot.ArcRouter.Hosting
                 llmRouterModelOverrideStore,
                 llmRouterModelSyncService,
                 routingOptions,
-                taxonomyComparisonStore);
+                taxonomyComparisonStore,
+                clusterTrainingService,
+                memoryEntryStore,
+                transcriptStore,
+                transcriptOptions,
+                storageOptions);
         }
 
         /// <summary>

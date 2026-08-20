@@ -182,7 +182,20 @@ namespace TotallyHot.ArcRouter.Proxy
         /// <see langword="null"/>, in which case that endpoint answers
         /// <see cref="Management.ManagementErrorType.Unavailable"/> rather than an empty history.
         /// </param>
-        public ProxyServer(ILogger<ProxyServer> logger, ProxyMiddleware proxyMiddleware, int port = 5001, TelemetryBroadcaster? telemetryBroadcaster = null, int grpcPort = DefaultGrpcPort, IProviderConfigStore? providerConfigStore = null, IEnvironmentVariableProvider? environment = null, HttpClient? managementHttpClient = null, string? managementToken = null, PriceSourceToggleStore? priceSourceToggleStore = null, PriceCatalogIngestionService? priceCatalogIngestionService = null, PriceCatalogOptions? priceCatalogOptions = null, ProviderBudgetStore? providerBudgetStore = null, ProviderEndpointScanner? endpointScanner = null, ToolCallCapabilityStore? toolCallCapabilityStore = null, PriceCatalogRepository? priceCatalogRepository = null, ModelAliasOverrideStore? modelAliasOverrideStore = null, IUsageRollupStore? usageRollupStore = null, ISecretWriter? secretWriter = null, ISecretReader? secretReader = null, CodeRouterBench.BenchmarkDataStatusService? benchmarkDataStatusService = null, CodeRouterBench.BenchmarkFileLedger? benchmarkFileLedger = null, CodeRouterBench.BenchmarkSyncService? benchmarkSyncService = null, CodeRouterBench.BenchmarkSyncOptions? benchmarkSyncOptions = null, Router.TextGeneration.ILlmRouterModelOverrideStore? llmRouterModelOverrideStore = null, Router.TextGeneration.LlmRouterModelSyncService? llmRouterModelSyncService = null, IOptions<RoutingOptions>? routingOptions = null, Transcripts.ITaxonomyComparisonStore? taxonomyComparisonStore = null)
+        /// <param name="clusterTrainingService">
+        /// Optional cluster-model training service. When supplied together with
+        /// <paramref name="memoryEntryStore"/>, <paramref name="transcriptStore"/>,
+        /// <paramref name="transcriptOptions"/>, and <paramref name="storageOptions"/>,
+        /// <see cref="Router.Orchestrator.ClusterModelAdminGrpcService"/> is mapped onto the TLS
+        /// <paramref name="grpcPort"/> so the Governance UI's Cluster Model panel can read the trained
+        /// artifact's status and run a retrain (docs/router/self-organizing-classification-plan.md Phase
+        /// T5). Defaults to <see langword="null"/> (panel API absent).
+        /// </param>
+        /// <param name="memoryEntryStore">Optional live memory entry store. See <paramref name="clusterTrainingService"/>.</param>
+        /// <param name="transcriptStore">Optional transcript store. See <paramref name="clusterTrainingService"/>.</param>
+        /// <param name="transcriptOptions">Optional transcript retention configuration. See <paramref name="clusterTrainingService"/>.</param>
+        /// <param name="storageOptions">Optional storage configuration naming the cluster model artifact's path. See <paramref name="clusterTrainingService"/>.</param>
+        public ProxyServer(ILogger<ProxyServer> logger, ProxyMiddleware proxyMiddleware, int port = 5001, TelemetryBroadcaster? telemetryBroadcaster = null, int grpcPort = DefaultGrpcPort, IProviderConfigStore? providerConfigStore = null, IEnvironmentVariableProvider? environment = null, HttpClient? managementHttpClient = null, string? managementToken = null, PriceSourceToggleStore? priceSourceToggleStore = null, PriceCatalogIngestionService? priceCatalogIngestionService = null, PriceCatalogOptions? priceCatalogOptions = null, ProviderBudgetStore? providerBudgetStore = null, ProviderEndpointScanner? endpointScanner = null, ToolCallCapabilityStore? toolCallCapabilityStore = null, PriceCatalogRepository? priceCatalogRepository = null, ModelAliasOverrideStore? modelAliasOverrideStore = null, IUsageRollupStore? usageRollupStore = null, ISecretWriter? secretWriter = null, ISecretReader? secretReader = null, CodeRouterBench.BenchmarkDataStatusService? benchmarkDataStatusService = null, CodeRouterBench.BenchmarkFileLedger? benchmarkFileLedger = null, CodeRouterBench.BenchmarkSyncService? benchmarkSyncService = null, CodeRouterBench.BenchmarkSyncOptions? benchmarkSyncOptions = null, Router.TextGeneration.ILlmRouterModelOverrideStore? llmRouterModelOverrideStore = null, Router.TextGeneration.LlmRouterModelSyncService? llmRouterModelSyncService = null, IOptions<RoutingOptions>? routingOptions = null, Transcripts.ITaxonomyComparisonStore? taxonomyComparisonStore = null, Router.Orchestrator.IClusterTrainingService? clusterTrainingService = null, Router.IMemoryEntryStore? memoryEntryStore = null, Transcripts.ITranscriptStore? transcriptStore = null, IOptions<Transcripts.TranscriptOptions>? transcriptOptions = null, IOptions<PriceCatalog.StorageOptions>? storageOptions = null)
         {
             ArgumentNullException.ThrowIfNull(logger);
             ArgumentNullException.ThrowIfNull(proxyMiddleware);
@@ -314,6 +327,20 @@ namespace TotallyHot.ArcRouter.Proxy
                         // configuration rather than an optional feature store, so it defaults to the
                         // caller's own RoutingOptions defaults instead of leaving the service unmapped.
                         services.AddSingleton(routingOptions ?? Options.Create(new RoutingOptions()));
+
+                        // Same reasoning again: the cluster training service and its supporting stores live
+                        // in the outer container, so ClusterModelAdminGrpcService can only be constructed
+                        // here if they are handed across explicitly. Registered as a group of five - the
+                        // service needs all of them.
+                        if (clusterTrainingService is not null && memoryEntryStore is not null && transcriptStore is not null
+                            && transcriptOptions is not null && storageOptions is not null)
+                        {
+                            services.AddSingleton(clusterTrainingService);
+                            services.AddSingleton(memoryEntryStore);
+                            services.AddSingleton(transcriptStore);
+                            services.AddSingleton(transcriptOptions);
+                            services.AddSingleton(storageOptions);
+                        }
                     });
 
                     webBuilder.Configure(app =>
@@ -354,6 +381,14 @@ namespace TotallyHot.ArcRouter.Proxy
                             // telemetry stream and the other admin services. Always mapped - see the
                             // routingOptions registration above.
                             endpoints.MapGrpcService<Router.RoutingModeAdminGrpcService>();
+
+                            // The Governance UI's Cluster Model panel API (Phase T5). Shares the TLS gRPC
+                            // port with the telemetry stream and the other admin services.
+                            if (clusterTrainingService is not null && memoryEntryStore is not null && transcriptStore is not null
+                                && transcriptOptions is not null && storageOptions is not null)
+                            {
+                                endpoints.MapGrpcService<Router.Orchestrator.ClusterModelAdminGrpcService>();
+                            }
 
                             // The Governance UI's provider/credential/model management API. Only mapped
                             // when a writable store is supplied; shares this plain-HTTP loopback port with

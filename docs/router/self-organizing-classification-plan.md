@@ -618,25 +618,43 @@ coverage rate.
 
 ## Phase T5 — Admin surface for cluster training
 
-Mirrors `live-feedback-learning-plan.md` Phase 5's pattern, itself modeled on
-`BenchmarkDataAdminService`.
+> **Status: shipped.** `ClusterModelAdminGrpcService` (`Router/Orchestrator/ClusterModelAdminGrpcService.cs`)
+> implements `GetClusterModelStatus` (reading `ClusterModelArtifactLoader.TryLoad` plus the live memory
+> entry count and transcript row count) and `RetrainClusterModel` (streaming `ClusterRetrainBootstrapProgress`
+> ticks from `IClusterTrainingService.RetrainAsync`'s `IProgress<int>` callback, then one terminal
+> `ClusterRetrainResult` carrying the outcome and the freshly re-read status - mirroring
+> `SyncBenchmarkData`'s "full state after the mutation" convention). Mapped by `ProxyServer` alongside the
+> other admin services, gated on all five of its dependencies (`IClusterTrainingService`,
+> `IMemoryEntryStore`, `ITranscriptStore`, `TranscriptOptions`, `StorageOptions`) being supplied together,
+> the same all-or-nothing pattern `BenchmarkDataAdminGrpcService`'s trio uses. The Governance `Cluster
+> Model` sub-tab (`ClusterModelAdmin.razor`, backed by `ClusterModelAdminStore`) follows
+> `RoutingModeAdmin.razor`'s simpler read-plus-button layout rather than `PriceSourcesAdmin.razor`'s
+> reorderable-list one - deliberate, since this pane has no per-item mutation, only one global retrain
+> action - with the "Train" / "Retrain" / "Training…" / router-unreachable button states the plan
+> specifies. Transcript retention (`RetentionDays`, `MaxRows`, current row count) is surfaced read-only,
+> since T5's spec asked only that it be shown here, not made editable (that remains T6-scoped, if ever).
 
 ```
 service ClusterModelAdminService {
   rpc GetClusterModelStatus (GetClusterModelStatusRequest) returns (ClusterModelStatusResponse);
-  rpc RetrainClusterModel (RetrainClusterModelRequest) returns (stream ClusterRetrainProgress);
+  rpc RetrainClusterModel (RetrainClusterModelRequest) returns (stream ClusterRetrainStreamEvent);
 }
 ```
 
-Status reports artifact presence, chosen k and how it was selected, per-cluster sizes and names,
-row-count provenance (bootstrap vs. live), training timestamp, and entries accumulated since the last
-retrain. A Governance sub-tab follows `PriceSourcesAdmin.razor`'s layout — header action button, status
-cards below — with button states matching the existing vocabulary ("Train" / "Retrain" /
-"Training…" / router-unreachable). Transcript retention settings are also surfaced here, since they
-are this pane's closest existing home.
+Status reports artifact presence, chosen k and how it was selected (`ClusterModelArtifact.TrainedFrom`,
+which already embeds the k-selection sweep's provenance), per-cluster sizes and names
+(`ClusterModelArtifact.DescribeCluster`), row-count provenance (bootstrap vs. live), training timestamp,
+and entries accumulated since the last retrain (current live entry count minus the artifact's recorded
+count, or every live entry when no artifact exists yet - the same comparison
+`ClusterRetrainHostedService`'s automatic trigger makes).
 
-**Exit:** service tests cover status, streaming retrain, and a decline-on-insufficient-data path;
-bUnit tests cover each button state, in-progress rendering, and the router-unreachable state.
+**Exit:** service tests cover the "no artifact yet" and trained status shapes, the transcript retention
+context, and streaming a trained/declined/already-running retrain
+(`ClusterModelAdminGrpcServiceTests`, 6 cases); client tests cover the wire-to-view mapping and error
+translation (`ClusterModelAdminClientTests`, 14 cases); bUnit tests cover the untrained and trained
+render states, the retention line, the router-unreachable state and its retry, a full train-then-result
+flow, and the in-progress "Training…" state with a live bootstrap-progress count
+(`ClusterModelAdminTests`, 7 cases).
 
 ## Phase T6 — System Settings: Adaptive Routing toggle + Sample Size
 

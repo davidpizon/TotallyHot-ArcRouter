@@ -1,0 +1,141 @@
+@* Governance > Cluster Model pane (docs/router/self-organizing-classification-plan.md Phase T5): reports
+   the trained self-organizing cluster model's status - artifact presence, chosen k, per-cluster sizes and
+   names, row-count provenance, training timestamp, entries accumulated since the last retrain - and runs a
+   retrain on demand with streamed bootstrap-embedding progress. Also surfaces the transcript retention
+   settings that gate the corpus this model trains from, since this pane is their closest existing home.
+   Talks to the proxy's ClusterModelAdminService gRPC API via the injected ClusterModelAdminStore. *@
+@implements IDisposable
+@inject ClusterModelAdminStore Store
+
+<div class="h-full overflow-y-auto pr-1">
+    @if (!Store.IsLoaded)
+    {
+        <div class="text-sm text-slate-500 p-4">Loading cluster model status…</div>
+    }
+    else if (!Store.IsReachable || Store.Status is null)
+    {
+        <div class="rounded-lg p-4 space-y-2 ds-surface-card-critical">
+            <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
+                <Icon Name="alert-triangle" Size="14" /> Router unreachable
+            </div>
+            <div class="text-xs text-slate-400">
+                Could not reach <span class="font-mono">@TelemetryChannelFactory.DefaultServerAddress</span>. Is the proxy running?
+            </div>
+            @if (!string.IsNullOrEmpty(Store.LastError))
+            {
+                <div class="text-xs text-slate-500 font-mono">@Store.LastError</div>
+            }
+            <button @onclick="Reload" class="btn btn-ghost">
+                Retry
+            </button>
+        </div>
+    }
+    else
+    {
+        var status = Store.Status;
+        <div class="flex items-center justify-between mb-3 gap-2">
+            <span class="text-xs text-slate-500 uppercase tracking-widest">Cluster Model</span>
+            <div class="flex items-center gap-2">
+                <button @onclick="Reload" disabled="@Store.IsRetraining" class="btn btn-ghost flex items-center gap-1.5">
+                    <Icon Name="rotate-ccw" Size="13" /> Refresh
+                </button>
+                <button @onclick="Retrain" disabled="@Store.IsRetraining" class="btn btn-secondary flex items-center gap-1.5">
+                    <Icon Name="play" Size="13" />
+                    @RetrainButtonLabel(status)
+                </button>
+            </div>
+        </div>
+
+        @if (Store.IsRetraining)
+        {
+            <div class="rounded-lg p-3 mb-3 text-xs text-slate-400 ds-surface-card">
+                Embedding OOD bootstrap tasks… @Store.BootstrapTasksEmbedded so far.
+            </div>
+        }
+        else if (!string.IsNullOrEmpty(Store.LastRetrainMessage))
+        {
+            <div class="rounded-lg p-3 mb-3 text-xs text-slate-400 ds-surface-card">
+                @Store.LastRetrainMessage
+            </div>
+        }
+
+        <div class="rounded-lg p-3 space-y-2.5 mb-3 ds-surface-card">
+            @if (!status.ArtifactPresent)
+            {
+                <div class="text-sm font-semibold state-disabled">No cluster model trained yet</div>
+                <div class="text-xs text-slate-500">@status.EntriesSinceLastRetrain live memory entr@(status.EntriesSinceLastRetrain == 1 ? "y" : "ies") accumulated so far.</div>
+            }
+            else
+            {
+                <div class="flex items-center justify-between gap-2">
+                    <span class="text-sm font-semibold state-enabled">@status.ChosenK cluster@(status.ChosenK == 1 ? "" : "s")</span>
+                    <span class="text-xs text-slate-500 font-mono">trained @status.TrainedAtUtc?.ToLocalTime().ToString("g", CultureInfo.InvariantCulture)</span>
+                </div>
+                <div class="text-xs text-slate-500">@status.TrainedFrom</div>
+                <div class="text-xs text-slate-500">
+                    @status.BootstrapTaskCount bootstrap task@(status.BootstrapTaskCount == 1 ? "" : "s"),
+                    @status.MemoryEntryCount live entr@(status.MemoryEntryCount == 1 ? "y" : "ies") at training time,
+                    @status.EntriesSinceLastRetrain new since.
+                </div>
+            }
+        </div>
+
+        @if (status.ArtifactPresent)
+        {
+            <div class="space-y-2 mb-3">
+                @foreach (var cluster in status.Clusters)
+                {
+                    <div class="rounded-lg p-3 flex items-center justify-between gap-2 ds-surface-card">
+                        <div class="flex items-center gap-2 min-w-0">
+                            <Icon Name="database" Size="14" />
+                            <span class="text-sm truncate">@cluster.Name</span>
+                        </div>
+                        <span class="text-xs font-mono text-slate-500">@cluster.Size</span>
+                    </div>
+                }
+            </div>
+        }
+
+        <div class="rounded-lg p-3 space-y-1 ds-surface-card">
+            <span class="text-xs text-slate-500 uppercase tracking-widest">Transcript Retention</span>
+            <div class="text-xs text-slate-400">
+                @status.CurrentTranscriptRowCount of @status.MaxTranscriptRows rows, purged after @status.RetentionDays day@(status.RetentionDays == 1 ? "" : "s").
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        Store.Changed += OnStoreChanged;
+        await Store.LoadAsync();
+    }
+
+    /// <summary>Re-renders when the store's state changes.</summary>
+    private void OnStoreChanged() => InvokeAsync(StateHasChanged);
+
+    /// <summary>Unsubscribes from <see cref="ClusterModelAdminStore.Changed"/>.</summary>
+    public void Dispose() => Store.Changed -= OnStoreChanged;
+
+    /// <summary>Reloads the status. Implements both the unreachable state's Retry button and the loaded state's Refresh button.</summary>
+    private Task Reload() => Store.LoadAsync();
+
+    /// <summary>Runs a retrain. Errors are left to <see cref="ClusterModelAdminStore.LastError"/>/<see cref="ClusterModelAdminStore.IsReachable"/> rather than surfaced here.</summary>
+    private async Task Retrain()
+    {
+        try
+        {
+            await Store.RetrainAsync();
+        }
+        catch (ClusterModelAdminException)
+        {
+            // Swallowed: the store already recorded IsReachable/LastError for the unreachable case, and a
+            // rejection's message is rendered from LastRetrainMessage/LastError by the markup above.
+        }
+    }
+
+    /// <summary>Train / Retrain / Training… - the three button states the plan specifies (the fourth, router-unreachable, is the whole pane's error state above).</summary>
+    private string RetrainButtonLabel(ClusterModelStatusInfo status) =>
+        Store.IsRetraining ? "Training…" : status.ArtifactPresent ? "Retrain" : "Train";
+}

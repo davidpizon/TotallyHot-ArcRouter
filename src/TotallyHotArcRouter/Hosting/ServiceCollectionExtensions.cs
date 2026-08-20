@@ -517,7 +517,13 @@ namespace TotallyHot.ArcRouter.Hosting
                     // Backs the Governance > Routing Mode panel's gRPC API (docs/router/orchestrator-live-path-plan.md §M3.2).
                     routingOptions: sp.GetRequiredService<IOptions<RoutingOptions>>(),
                     // Backs Cost Analytics' "Routing ROI" feed (docs/router/self-organizing-classification-plan.md Phase T4).
-                    taxonomyComparisonStore: sp.GetRequiredService<TotallyHot.ArcRouter.Transcripts.ITaxonomyComparisonStore>());
+                    taxonomyComparisonStore: sp.GetRequiredService<TotallyHot.ArcRouter.Transcripts.ITaxonomyComparisonStore>(),
+                    // Backs the Governance > Cluster Model panel's gRPC API (Phase T5).
+                    clusterTrainingService: sp.GetRequiredService<Router.Orchestrator.IClusterTrainingService>(),
+                    memoryEntryStore: sp.GetRequiredService<Router.IMemoryEntryStore>(),
+                    transcriptStore: sp.GetRequiredService<TotallyHot.ArcRouter.Transcripts.ITranscriptStore>(),
+                    transcriptOptions: sp.GetRequiredService<IOptions<TotallyHot.ArcRouter.Transcripts.TranscriptOptions>>(),
+                    storageOptions: sp.GetRequiredService<IOptions<StorageOptions>>());
             });
 
             return services;
