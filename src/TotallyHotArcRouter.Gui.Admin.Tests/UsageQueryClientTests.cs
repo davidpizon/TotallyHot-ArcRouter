@@ -144,6 +144,98 @@ public sealed class UsageQueryClientTests
         Assert.Empty(buckets);
     }
 
+    // --- GetRoutingRoiAsync ---
+
+    [Fact]
+    public async Task GetRoutingRoiAsync_SendsGetAndDeserializesTheCounterfactual()
+    {
+        const string json = """
+            [
+              {
+                "comparedAtUtc": "2026-01-05T10:00:00Z",
+                "sessionId": "session-7",
+                "routedModel": "kimi-k2.5",
+                "baselineModel": "glm-5",
+                "actualCostUsd": 0.02,
+                "baselineEstimatedCostUsd": 0.11,
+                "estimatedNetSavingsUsd": 0.09,
+                "isExploratory": true
+              }
+            ]
+            """;
+        var handler = new StubHandler(_ => Json(json));
+        var client = CreateClient(handler);
+
+        var from = DateTimeOffset.Parse("2026-01-01T00:00:00Z", CultureInfo.InvariantCulture);
+        var to = DateTimeOffset.Parse("2026-02-01T00:00:00Z", CultureInfo.InvariantCulture);
+
+        var points = await client.GetRoutingRoiAsync(from, to, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpMethod.Get, handler.LastRequest!.Method);
+        Assert.StartsWith(
+            "http://localhost:5001/admin/usage/routing-roi?", handler.LastRequest.RequestUri!.ToString(), StringComparison.Ordinal);
+
+        var point = Assert.Single(points);
+        Assert.Equal("session-7", point.SessionId);
+        Assert.Equal("kimi-k2.5", point.RoutedModel);
+        Assert.Equal("glm-5", point.BaselineModel);
+        Assert.Equal(0.09m, point.EstimatedNetSavingsUsd);
+        Assert.True(point.IsExploratory);
+    }
+
+    [Fact]
+    public async Task GetRoutingRoiAsync_OmitsTheSessionParameterWhenNotFiltering()
+    {
+        var handler = new StubHandler(_ => Json("[]"));
+        var client = CreateClient(handler);
+
+        var from = DateTimeOffset.Parse("2026-01-01T00:00:00Z", CultureInfo.InvariantCulture);
+        await client.GetRoutingRoiAsync(from, from.AddDays(1), cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain("session=", handler.LastRequest!.RequestUri!.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetRoutingRoiAsync_EscapesTheSessionParameter()
+    {
+        var handler = new StubHandler(_ => Json("[]"));
+        var client = CreateClient(handler);
+
+        var from = DateTimeOffset.Parse("2026-01-01T00:00:00Z", CultureInfo.InvariantCulture);
+        await client.GetRoutingRoiAsync(from, from.AddDays(1), "a&b", TestContext.Current.CancellationToken);
+
+        Assert.Contains("session=a%26b", handler.LastRequest!.RequestUri!.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetRoutingRoiAsync_NullCostsRoundTripAsNullNotZero()
+    {
+        // An abstaining baseline yields nulls; collapsing them to 0 would read as "routing broke even".
+        const string json = """
+            [
+              {
+                "comparedAtUtc": "2026-01-05T10:00:00Z",
+                "sessionId": "s",
+                "routedModel": "kimi-k2.5",
+                "baselineModel": null,
+                "actualCostUsd": 0.02,
+                "baselineEstimatedCostUsd": null,
+                "estimatedNetSavingsUsd": null,
+                "isExploratory": false
+              }
+            ]
+            """;
+        var client = CreateClient(new StubHandler(_ => Json(json)));
+
+        var from = DateTimeOffset.Parse("2026-01-01T00:00:00Z", CultureInfo.InvariantCulture);
+        var points = await client.GetRoutingRoiAsync(from, from.AddDays(30), cancellationToken: TestContext.Current.CancellationToken);
+
+        var point = Assert.Single(points);
+        Assert.Null(point.BaselineModel);
+        Assert.Null(point.BaselineEstimatedCostUsd);
+        Assert.Null(point.EstimatedNetSavingsUsd);
+    }
+
     // --- admin token header ---
 
     [Fact]

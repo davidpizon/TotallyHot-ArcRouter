@@ -57,7 +57,8 @@ namespace TotallyHot.ArcRouter.Hosting
             BenchmarkSyncOptions? benchmarkSyncOptions = null,
             ILlmRouterModelOverrideStore? llmRouterModelOverrideStore = null,
             LlmRouterModelSyncService? llmRouterModelSyncService = null,
-            IOptions<RoutingOptions>? routingOptions = null)
+            IOptions<RoutingOptions>? routingOptions = null,
+            TotallyHot.ArcRouter.Transcripts.ITaxonomyComparisonStore? taxonomyComparisonStore = null)
         {
             _logger = logger;
             _proxyServer = new ProxyServer(
@@ -87,7 +88,8 @@ namespace TotallyHot.ArcRouter.Hosting
                 benchmarkSyncOptions,
                 llmRouterModelOverrideStore,
                 llmRouterModelSyncService,
-                routingOptions);
+                routingOptions,
+                taxonomyComparisonStore);
         }
 
         /// <summary>

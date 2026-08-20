@@ -82,6 +82,41 @@ public static class ClusterLedger
         return result;
     }
 
+    /// <summary>
+    /// Returns the index and cosine similarity of the cluster centroid in <paramref name="artifact"/> nearest
+    /// <paramref name="embedding"/> - the same assignment rule <see cref="Build"/> uses per training entry,
+    /// exposed for a caller (e.g. <see cref="ClusterBestVoter"/>, Phase T3) that must assign one embedding at
+    /// vote time rather than aggregate a whole training set.
+    /// </summary>
+    /// <param name="artifact">The trained cluster model to assign against.</param>
+    /// <param name="embedding">The embedding to assign to its nearest centroid.</param>
+    public static (int ClusterIndex, double Similarity) AssignNearestCluster(ClusterModelArtifact artifact, float[] embedding)
+    {
+        ArgumentNullException.ThrowIfNull(artifact);
+        ArgumentNullException.ThrowIfNull(embedding);
+        return NearestCentroid(embedding, artifact.Centroids);
+    }
+
+    /// <summary>
+    /// Returns the learned taxonomy's predicted score for one (cluster, model) cell with
+    /// <paramref name="observedScore"/> removed from it first - the held-out prediction Phase T4's
+    /// mean-absolute-error comparison scores against, and the exact counterpart of
+    /// <see cref="DimensionLedger.PredictLeaveOneOut"/> on the other side of that comparison.
+    /// </summary>
+    /// <param name="cell">The ledger cell the observation landed in, or <see langword="null"/> when the cell has no observations.</param>
+    /// <param name="observedScore">The observation to exclude, already aggregated into <paramref name="cell"/> by the time this runs.</param>
+    /// <returns>
+    /// The mean of the cell's other observations, or <see langword="null"/> when the cell holds only this
+    /// one and no honest held-out prediction exists.
+    /// </returns>
+    /// <remarks>
+    /// The contamination this corrects is structural, not incidental: <see cref="Build"/> aggregates the
+    /// live <c>memory_entries</c> working set, which by comparison time already contains the very entry
+    /// being scored. Both taxonomies are corrected the same way so the comparison stays like-for-like.
+    /// </remarks>
+    public static double? PredictLeaveOneOut(ClusterModelScore? cell, double observedScore) =>
+        cell is null ? null : DimensionLedger.LeaveOneOutMean(cell.MeanScore, cell.ObservationCount, observedScore);
+
     /// <summary>Returns the index and cosine similarity of the centroid nearest <paramref name="embedding"/>.</summary>
     private static (int Index, double Similarity) NearestCentroid(float[] embedding, IReadOnlyList<float[]> centroids)
     {

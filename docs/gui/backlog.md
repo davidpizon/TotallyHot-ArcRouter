@@ -22,22 +22,33 @@ data sources in
   (`UsageStore.LoadRollupAsync`, Phase 4 §5.15) merged with live turns — it survives a GUI restart —
   falling back to the mock corpus only when there is neither (§5.15's exit criterion). Cache Hit Rate
   is live for real turns (`RoutingTelemetryEvent.CacheCreationTokens`/`CacheReadTokens` →
-  `LiveConversationMapper` → `CostChartBuilder.CacheHitRate`, see `../router/telemetry.md`). Three of
-  the seven metrics still have **no live source** and are populated by mock history only when it's
-  in use: Routing ROI (needs a "worst case" baseline cost that `ModelRouteResolver` doesn't compute
-  today — the same gap that keeps per-turn `RoutingRoi` at 0), Tool Steps, and Context Buffer — the
-  rollup table has no per-turn breakdown for these dimensions. Wiring these live means adding the
-  corresponding fields to `RoutingTelemetryEvent`/the proto and the mapper chain (see the field table
-  in `../router/telemetry.md`). **Deliberately deferred**, not a small follow-up: each of the three
-  needs a new domain concept nothing in the codebase computes today — a worst-case/baseline-cost
-  model for Routing ROI, a per-model context-window-size configuration for Context Buffer, and
-  within-turn tool-call introspection for Tool Steps — plus its own proto field and
-  `LiveConversationMapper`/`ModelRouteResolver` wiring. Populating any of them without that data
-  would mean inventing numbers, the same fabricated-data trap `model-price-catalog.md` and
-  `src/PLAN.md`'s Phase E multimodal-pricing decision already declined. If picked up, Tool Steps is
-  the smallest first step: it only requires parsing response bodies already captured by
-  `ResponseTextExtractor`, where Routing ROI and Context Buffer both need new pricing/config data
-  sources that don't exist yet.
+  `LiveConversationMapper` → `CostChartBuilder.CacheHitRate`, see `../router/telemetry.md`).
+  **Routing ROI is now live** — see the resolved item below. The remaining two,
+  Tool Steps and Context Buffer, still have **no live source** and are populated by mock history only
+  when it's in use; the rollup table has no per-turn breakdown for either dimension. Wiring them live
+  means adding the corresponding fields to `RoutingTelemetryEvent`/the proto and the mapper chain (see
+  the field table in `../router/telemetry.md`). **Deliberately deferred**, not a small follow-up: each
+  needs a domain concept nothing in the codebase computes today — a per-model context-window-size
+  configuration for Context Buffer, and within-turn tool-call introspection for Tool Steps — plus its
+  own proto field and `LiveConversationMapper` wiring. Populating either without that data would mean
+  inventing numbers, the same fabricated-data trap `model-price-catalog.md` and `src/PLAN.md`'s Phase E
+  multimodal-pricing decision already declined. Of the two, Tool Steps is the smaller: it only requires
+  parsing response bodies already captured by `ResponseTextExtractor`, where Context Buffer needs a
+  config data source that does not exist yet.
+- ~~**Routing ROI — needs a baseline cost nothing computes.**~~ **Done**
+  ([`../router/self-organizing-classification-plan.md`](../router/self-organizing-classification-plan.md)
+  Phase T4). Resolved by **redefining the baseline** rather than by building the worst-case-cost model
+  this item originally asked for: the chart now measures against what the frozen nine-dimension
+  `dim_best` voter alone would have chosen, which the router already decides on every request and now
+  persists (`request_transcripts.dim_best_model`). `TaxonomyComparisonService` prices that
+  counterfactual from the baseline model's own observed-average token counts and stores the net figure;
+  the tab polls `GET /admin/usage/routing-roi` every 30 seconds. Two fabricated inputs were deleted with
+  it — the baseline reconstructed from a cost-reduction percentage, and the invented `$2.50/M`
+  remediation rate for turns reporting no ROI. Every figure is labeled an estimate in its own tooltip,
+  since the counterfactual model's real token count for a given request is never observed; a turn with
+  no counterfactual is skipped rather than drawn at zero. Note this did **not** wire per-turn
+  `ConversationTurn.RoutingRoi` (the Live Stream turn card's percentage), which stays at 0 for live
+  turns — that surface reads a different, still-unsourced number.
 - ~~**Model Distribution** — real `TokenBucket`/`ModelShare` data.~~ **Done** (Phase 4 §5.15):
   `ModelDistribution.razor` fetches real buckets via `UsageStore.LoadRollupAsync`, grouped by day for
   the histogram and by model for the donut; the Day/Month/3-Month/6-Month/Year filter bar and the
@@ -58,9 +69,12 @@ data sources in
   unbuilt, so the price half of the card is not yet done.
 - ~~**Header ticker** (Total Saved / System Tokens / Avg. Cost Reduction) — still three hardcoded
   numbers~~. **Partially done** (Phase 4 §5.15): System Tokens is now real, from
-  `UsageStore.LoadSummaryAsync("all")`. Total Saved and Avg. Cost Reduction stay mock and are now
-  labeled "(demo)" — they need a worst-case-baseline ROI concept the token-tracking plan deliberately
-  didn't invent (same gap as Cost Analytics' Routing ROI metric above).
+  `UsageStore.LoadSummaryAsync("all")`. Total Saved and Avg. Cost Reduction stay mock and are still
+  labeled "(demo)". The blocker named here originally — the missing baseline-cost concept — is now
+  resolved by Phase T4's `dim_best` counterfactual (see the resolved Routing ROI item above), so these
+  two could be sourced from `GET /admin/usage/routing-roi` the same way the chart is. Phase T4 did not
+  do it: the ticker is a separate surface with its own aggregation, and repointing it was outside that
+  phase's scope. This is now a small, unblocked follow-up rather than a deferred one.
 - ~~**Dynamic chart axis ranges**~~ **Done** for Model Distribution's token histogram
   (`GroupedBarsModel.DynamicYMax`, Phase 4 §5.15) — computed from the actual data with headroom
   instead of a hardcoded 6M ceiling. The $0–$160 Cost Analytics savings scale is unaffected (that

@@ -353,6 +353,64 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
     public Task<RoutingDecision> DecideOutcomeAsync(RoutingContext context, RoutingSignals? signals, CancellationToken cancellationToken = default) =>
         DecideAsync(context, signals?.TaskEmbedding, signals?.TaskText, cancellationToken);
 
+    /// <summary>
+    /// Recovers which model a single voter picked from a decision's
+    /// <see cref="RoutingDecision.CandidateScores"/> breakdown - the counterfactual
+    /// docs/router/self-organizing-classification-plan.md Phase T4 prices its cost-savings estimate
+    /// against ("already present as a vote in <c>RoutingDecision.CandidateScores</c>, requiring no new
+    /// computation to obtain").
+    /// </summary>
+    /// <param name="decision">The decision whose breakdown to read.</param>
+    /// <param name="voterName">The voter's <see cref="IRoutingVoter.Name"/>, e.g. <see cref="VoterNames.DimBest"/>.</param>
+    /// <returns>
+    /// The model that voter contributed to, or <see langword="null"/> when it abstained (contributing no
+    /// breakdown entry at all) - the honest answer for "what would this voter alone have chosen", and never
+    /// substituted with the ensemble's own pick.
+    /// </returns>
+    /// <remarks>
+    /// A voter contributes at most one breakdown entry per decision, so in practice this finds either zero
+    /// or one match; the argmax is a defensive tie-break rather than a real aggregation, and ties resolve by
+    /// model name so the result never depends on dictionary enumeration order. Keys are parsed at the
+    /// <em>first</em> separator after the prefix, since a model id may itself contain a colon while a voter
+    /// name never does.
+    /// </remarks>
+    public static string? TryGetVoterPick(RoutingDecision decision, string voterName)
+    {
+        ArgumentNullException.ThrowIfNull(decision);
+        ArgumentException.ThrowIfNullOrWhiteSpace(voterName);
+
+        string? best = null;
+        var bestScore = double.NegativeInfinity;
+        foreach (var (key, score) in decision.CandidateScores)
+        {
+            if (!key.StartsWith(VoterKeyPrefix, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var remainder = key[VoterKeyPrefix.Length..];
+            var separator = remainder.IndexOf(':', StringComparison.Ordinal);
+            if (separator <= 0 || !remainder.AsSpan(0, separator).Equals(voterName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var model = remainder[(separator + 1)..];
+            if (model.Length == 0)
+            {
+                continue;
+            }
+
+            if (score > bestScore || (score == bestScore && string.CompareOrdinal(model, best) < 0))
+            {
+                bestScore = score;
+                best = model;
+            }
+        }
+
+        return best;
+    }
+
     /// <summary>Casts one voter's vote, degrading a thrown exception to an abstention rather than failing the whole decision.</summary>
     private async Task<VoterVote> CastVoteAsync(IRoutingVoter voter, VotingContext votingContext, CancellationToken cancellationToken)
     {
@@ -376,6 +434,7 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
         VoterNames.MemoryKnn => _options.MemoryKnnVoterWeight,
         VoterNames.LogReg => _options.LogRegVoterWeight,
         VoterNames.LlmRouter => _options.LlmRouterVoterWeight,
+        VoterNames.ClusterBest => _options.ClusterBestVoterWeight,
         _ => 1d,
     };
 
@@ -388,6 +447,7 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
         VoterNames.MemoryKnn => _options.EnableMemoryKnnVoter,
         VoterNames.LogReg => _options.EnableLogRegVoter,
         VoterNames.LlmRouter => _options.EnableLlmRouterVoter,
+        VoterNames.ClusterBest => _options.EnableClusterBestVoter,
         _ => true,
     };
 }

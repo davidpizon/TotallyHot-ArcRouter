@@ -176,7 +176,13 @@ namespace TotallyHot.ArcRouter.Proxy
         /// (docs/router/orchestrator-live-path-plan.md §M3.2). Defaults to <see langword="null"/> (panel API
         /// absent), so existing callers/tests that construct a plain forwarding server are unaffected.
         /// </param>
-        public ProxyServer(ILogger<ProxyServer> logger, ProxyMiddleware proxyMiddleware, int port = 5001, TelemetryBroadcaster? telemetryBroadcaster = null, int grpcPort = DefaultGrpcPort, IProviderConfigStore? providerConfigStore = null, IEnvironmentVariableProvider? environment = null, HttpClient? managementHttpClient = null, string? managementToken = null, PriceSourceToggleStore? priceSourceToggleStore = null, PriceCatalogIngestionService? priceCatalogIngestionService = null, PriceCatalogOptions? priceCatalogOptions = null, ProviderBudgetStore? providerBudgetStore = null, ProviderEndpointScanner? endpointScanner = null, ToolCallCapabilityStore? toolCallCapabilityStore = null, PriceCatalogRepository? priceCatalogRepository = null, ModelAliasOverrideStore? modelAliasOverrideStore = null, IUsageRollupStore? usageRollupStore = null, ISecretWriter? secretWriter = null, ISecretReader? secretReader = null, CodeRouterBench.BenchmarkDataStatusService? benchmarkDataStatusService = null, CodeRouterBench.BenchmarkFileLedger? benchmarkFileLedger = null, CodeRouterBench.BenchmarkSyncService? benchmarkSyncService = null, CodeRouterBench.BenchmarkSyncOptions? benchmarkSyncOptions = null, Router.TextGeneration.ILlmRouterModelOverrideStore? llmRouterModelOverrideStore = null, Router.TextGeneration.LlmRouterModelSyncService? llmRouterModelSyncService = null, IOptions<RoutingOptions>? routingOptions = null)
+        /// <param name="taxonomyComparisonStore">
+        /// Backs <c>GET /admin/usage/routing-roi</c>, the Cost Analytics "Routing ROI" feed
+        /// (docs/router/self-organizing-classification-plan.md Phase T4). Defaults to
+        /// <see langword="null"/>, in which case that endpoint answers
+        /// <see cref="Management.ManagementErrorType.Unavailable"/> rather than an empty history.
+        /// </param>
+        public ProxyServer(ILogger<ProxyServer> logger, ProxyMiddleware proxyMiddleware, int port = 5001, TelemetryBroadcaster? telemetryBroadcaster = null, int grpcPort = DefaultGrpcPort, IProviderConfigStore? providerConfigStore = null, IEnvironmentVariableProvider? environment = null, HttpClient? managementHttpClient = null, string? managementToken = null, PriceSourceToggleStore? priceSourceToggleStore = null, PriceCatalogIngestionService? priceCatalogIngestionService = null, PriceCatalogOptions? priceCatalogOptions = null, ProviderBudgetStore? providerBudgetStore = null, ProviderEndpointScanner? endpointScanner = null, ToolCallCapabilityStore? toolCallCapabilityStore = null, PriceCatalogRepository? priceCatalogRepository = null, ModelAliasOverrideStore? modelAliasOverrideStore = null, IUsageRollupStore? usageRollupStore = null, ISecretWriter? secretWriter = null, ISecretReader? secretReader = null, CodeRouterBench.BenchmarkDataStatusService? benchmarkDataStatusService = null, CodeRouterBench.BenchmarkFileLedger? benchmarkFileLedger = null, CodeRouterBench.BenchmarkSyncService? benchmarkSyncService = null, CodeRouterBench.BenchmarkSyncOptions? benchmarkSyncOptions = null, Router.TextGeneration.ILlmRouterModelOverrideStore? llmRouterModelOverrideStore = null, Router.TextGeneration.LlmRouterModelSyncService? llmRouterModelSyncService = null, IOptions<RoutingOptions>? routingOptions = null, Transcripts.ITaxonomyComparisonStore? taxonomyComparisonStore = null)
         {
             ArgumentNullException.ThrowIfNull(logger);
             ArgumentNullException.ThrowIfNull(proxyMiddleware);
@@ -367,7 +373,8 @@ namespace TotallyHot.ArcRouter.Proxy
                                     modelAliasOverrideStore,
                                     usageRollupStore,
                                     secretWriter: secretWriter,
-                                    secretReader: secretReader);
+                                    secretReader: secretReader,
+                                    comparisonStore: taxonomyComparisonStore);
                                 endpoints.MapProviderAdminEndpoints(facade, managementToken);
                                 endpoints.MapUsageAdminEndpoints(facade, managementToken);
                             }

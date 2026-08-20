@@ -129,6 +129,43 @@ public sealed class UsageStore
         }
     }
 
+    /// <summary>
+    /// Loads the Cost Analytics "Routing ROI" feed for a range and optional session
+    /// (docs/router/self-organizing-classification-plan.md Phase T4). Returns an empty list, rather than
+    /// throwing, when the proxy is unreachable or no comparisons have been recorded yet.
+    /// </summary>
+    /// <param name="from">Inclusive lower bound on comparison time.</param>
+    /// <param name="to">Exclusive upper bound.</param>
+    /// <param name="sessionId">A session to filter to, or <see langword="null"/> for every session.</param>
+    /// <param name="cancellationToken">A token to cancel the request.</param>
+    /// <returns>The matching points, or an empty list when unavailable.</returns>
+    /// <remarks>
+    /// Deliberately uncached, unlike <see cref="LoadRollupAsync"/>: the comparison job fills this table in
+    /// the background, so the answer for a fixed range genuinely changes over time and the tab polls for
+    /// it. Caching here would freeze the screen on whatever had been compared when it first rendered.
+    /// </remarks>
+    public async Task<IReadOnlyList<RoutingRoiPointView>> LoadRoutingRoiAsync(
+        DateTimeOffset from, DateTimeOffset to, string? sessionId = null, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await _client.GetRoutingRoiAsync(from, to, sessionId, cancellationToken).ConfigureAwait(false);
+            IsReachable = true;
+            return result;
+        }
+        catch (ProviderAdminException ex)
+        {
+            IsReachable = false;
+            LastError = ex.Message;
+            _logger?.LogWarning(ex, "Failed to load routing ROI comparisons from the management API.");
+            return [];
+        }
+        finally
+        {
+            IsLoaded = true;
+        }
+    }
+
     /// <summary>Cache key for <see cref="_rollupCache"/>: a rollup's full request shape, so distinct filter selections never collide.</summary>
     private readonly record struct RollupCacheKey(DateTimeOffset From, DateTimeOffset To, string Width, string GroupBy);
 }

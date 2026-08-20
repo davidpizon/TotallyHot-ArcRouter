@@ -31,11 +31,10 @@ Orchestrator ensemble (Phase L), the Orchestrator on the live path with requeste
 
 - **No measurement.** Nothing computes `R_ij`, the per-task oracle, `CumReg`, `AvgPerf`, `TotTok`,
   `$Total`, or `Perf/$`; every "the ensemble beats X" claim is still an assertion → **Phase N**.
-- **Live traffic is not yet usable as a training corpus.** CodeRouterBench's ID splits publish no task
-  text, so three of the four voters (and any text/embedding learner) can only ever train on live
-  traffic — which is not captured (no transcripts), loses samples (skipped embeddings are gone), and
-  carries no provenance (`IsExploratory` unpersisted, propensity uncomputed,
-  `EmbeddingMemoryScoreObserver` writes `cost: 0.0`) → **Phases T1–T6**.
+- ~~**Live traffic is not yet usable as a training corpus.**~~ **Closed by Phases T1–T4.** Transcripts
+  are captured opt-in with full provenance (`IsExploratory`, propensity, real cost), skipped embeddings
+  are recovered by backfill, and the learned cluster taxonomy is trained, voted on (`cluster_best`), and
+  measured against the frozen nine-dimension baseline.
 - **The Verifier is blind on non-executable dimensions** — a prose answer is scored on syntax alone →
   **Phases G1–G3**.
 - **The general (non-utility) live path has no cost term.** `UtilityRoutingPolicy` prices candidates;
@@ -48,7 +47,7 @@ flowchart LR
         LOOP["Classifier → 4-voter Orchestrator →<br/>model → Verifier → RouterMemory/EmbeddingMemory →<br/>back into the voters"]
     end
 
-    T["T1–T6: transcripts, provenance,<br/>clustering, cluster_best voter,<br/>settings surface"]
+    T["T5–T6: cluster-training admin pane,<br/>adaptive-routing settings surface<br/>(T1–T4 shipped)"]
     P5["live-feedback Phase 5:<br/>logreg admin pane"]
     G1["G1: shadow judge<br/>(accumulates, influences nothing)"]
     N["Phase N: regret harness<br/>(+ live-feedback Phase 6 relocation)"]
@@ -61,14 +60,16 @@ flowchart LR
 
 ## Remaining work, in order
 
-1. **Phases T1–T6 — self-organizing request classification.** Full plan:
-   [`../docs/router/self-organizing-classification-plan.md`](../docs/router/self-organizing-classification-plan.md)
-   (proposed, not started). Opt-in transcript capture with provenance (`IsExploratory`, propensity,
-   real cost), embedding backfill, spherical k-means clustering with an OOD bootstrap, a fifth
-   additive `cluster_best` voter, the clusters-vs-dimensions baseline comparison, the cluster-training
-   admin pane, and the System Settings adaptive-routing toggle. Sequenced **before Phase N** by that
-   plan's own ordering: T1 closes the three prerequisites the regret plan names as blocking any future
-   live-regret arm.
+1. **Phases T5–T6 — self-organizing request classification (remaining).** Full plan:
+   [`../docs/router/self-organizing-classification-plan.md`](../docs/router/self-organizing-classification-plan.md).
+   **T1–T4 have shipped**: opt-in transcript capture with provenance (`IsExploratory`, propensity, real
+   cost), embedding backfill, spherical k-means clustering with an OOD bootstrap, the fifth additive
+   `cluster_best` voter, and the clusters-vs-dimensions baseline comparison (leave-one-out MAE per
+   taxonomy, a `dim_best` cost counterfactual now backing Cost Analytics' Routing ROI screen, and the
+   promotion predicate — which authorizes writing a promotion plan and promotes nothing). Still open:
+   **T5**, the cluster-training admin pane, and **T6**, the System Settings adaptive-routing toggle plus
+   the router-side mutable settings store it needs. T1 already closed the three prerequisites the regret
+   plan names as blocking any future live-regret arm, so Phase N is no longer gated on this workstream.
 2. **Live-feedback Phase 5 — `logreg` admin surface.**
    [`../docs/router/live-feedback-learning-plan.md`](../docs/router/live-feedback-learning-plan.md)
    Phase 5 (proposed). A `RouterModelAdminService` gRPC service plus a Governance "Router Model" pane

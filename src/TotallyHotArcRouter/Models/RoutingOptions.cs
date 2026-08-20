@@ -348,6 +348,45 @@ public sealed class RoutingOptions
     public bool EnableAutomaticClusterRetrain { get; init; } = true;
 
     /// <summary>
+    /// Gets the <c>cluster_best</c> voter's fixed weight in the Orchestrator's weighted vote
+    /// (docs/router/self-organizing-classification-plan.md Phase T3). Unlike the four voters weighed in
+    /// research-doc §3.3's worked example, this weight has no published reference value - the learned
+    /// taxonomy is this plan's own addition to the ensemble, not part of the paper's design. Defaults to
+    /// the same order of magnitude as <see cref="LogRegVoterWeight"/> so a freshly-trained cluster model is
+    /// weighed comparably to the ensemble's other learned voter until an operator tunes it.
+    /// </summary>
+    [Range(0d, 100d)]
+    public double ClusterBestVoterWeight { get; init; } = 0.5;
+
+    /// <summary>
+    /// Gets whether the <c>cluster_best</c> voter participates in the Orchestrator's vote (Phase T3).
+    /// Enabled by default; the voter still abstains cleanly whenever no cluster model artifact has been
+    /// trained yet, so this flag is only needed to exclude it entirely.
+    /// </summary>
+    public bool EnableClusterBestVoter { get; init; } = true;
+
+    /// <summary>
+    /// Gets the minimum cosine similarity a request's task embedding must reach against its nearest
+    /// cluster centroid before <see cref="Router.Orchestrator.ClusterBestVoter"/> treats the request as
+    /// assigned to that cluster, rather than abstaining as "unclustered" (Phase T3). Defaults to the same
+    /// value <see cref="Router.Orchestrator.ClusterLedger.Build"/> already uses when aggregating the
+    /// ledger, so the threshold that excludes an entry from training is the same one that excludes a
+    /// request from scoring.
+    /// </summary>
+    [Range(-1d, 1d)]
+    public double ClusterAssignmentThreshold { get; init; } = 0.5;
+
+    /// <summary>
+    /// Gets the minimum number of observations a (cluster, model) ledger cell must hold before
+    /// <see cref="Router.Orchestrator.ClusterBestVoter"/> scores that candidate from it (Phase T3). Below
+    /// this floor the candidate is treated as unscored for this vote - mirrors
+    /// <see cref="LogRegMinTrainingRows"/>'s "reject rather than trust a fit from too few rows" guard,
+    /// applied per-cell instead of to the whole artifact.
+    /// </summary>
+    [Range(1, 1_000_000)]
+    public int ClusterBestMinObservations { get; init; } = 3;
+
+    /// <summary>
     /// Performs domain-level validation that is not fully expressible through data annotations.
     /// </summary>
     /// <exception cref="OptionsValidationException">Thrown when the routing option values are inconsistent.</exception>

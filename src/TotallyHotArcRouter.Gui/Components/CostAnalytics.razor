@@ -8,6 +8,7 @@
    turns from LiveDataStore; MockData.BuildMetricHistory is only the offline/no-proxy fallback, used when
    there's neither. *@
 @inject UsageStore UsageStore
+@implements IDisposable
 <div class="h-full flex flex-col gap-3 min-h-0">
     @* ── CONTROL BAR ── *@
     <div class="rounded-lg p-3 shrink-0 flex flex-col gap-3 ds-surface-card-bordered">
@@ -114,7 +115,7 @@
     // description doubles as the pill tooltip and the chart subtitle.
     private static readonly MetricDef[] MetricDefs =
     [
-        new(CostMetric.RoutingRoi, "Routing ROI", "Dual-directional bars: savings above 0, fallback remediation below"),
+        new(CostMetric.RoutingRoi, "Routing ROI", "Estimated savings vs. the frozen 9-dimension baseline: gains above 0, losses below"),
         new(CostMetric.TotalTurnCost, "Turn Cost", "Stepped cumulative cost, area colored by the active model"),
         new(CostMetric.Tokens, "Tokens", "Cumulative tokens with exponential-runaway detection"),
         new(CostMetric.ToolExecutionSteps, "Tool Steps", "Per-turn step bars, segmented by the model that handled each stretch"),
@@ -136,8 +137,15 @@
     private MetricRange _range = MetricRange.Week;
     private string _sessionScope = string.Empty;
 
+    // The Routing ROI metric alone is fed by the router's taxonomy-comparison store rather than by live
+    // turns or usage rollups (docs/router/self-organizing-classification-plan.md Phase T4). That data is
+    // produced by a background job, so it is polled on an interval instead of arriving with telemetry.
+    private static readonly TimeSpan RoiPollInterval = TimeSpan.FromSeconds(30);
+
     private IReadOnlyList<MetricTurnPoint> _corpus = [];
     private IReadOnlyList<MetricTurnPoint> _rollupHistory = [];
+    private IReadOnlyList<MetricTurnPoint> _roiHistory = [];
+    private Timer? _roiPollTimer;
     private CostChartModel _model = new(CostChartKind.DualDirectionalBars, "Routing ROI", "$", "—", null, [], []);
     private string _modelJson = "{}";
 
@@ -173,7 +181,7 @@
                 TimestampUtc: b.BucketStartUtc,
                 SessionId: FormattableString.Invariant($"rollup:{b.BucketStartUtc:yyyy-MM-dd}"),
                 Model: string.Empty,
-                RoutingRoi: 0m,
+                BaselineCostUsd: null,
                 TotalCost: b.CostUsd,
                 PromptTokens: (int)Math.Min(b.PromptTokens, int.MaxValue),
                 CompletionTokens: (int)Math.Min(b.CompletionTokens, int.MaxValue),
@@ -185,8 +193,57 @@
                 TimeToFirstTokenMs: 0,
                 ContextBufferPercent: 0m))
             .ToList();
+
+        await RefreshRoiAsync();
+        _roiPollTimer = new Timer(_ => _ = PollRoiAsync(), null, RoiPollInterval, RoiPollInterval);
         Recompute();
     }
+
+    /// <summary>
+    /// Re-fetches the Routing ROI feed and repaints, on the poll timer. Swallows nothing itself -
+    /// <see cref="UsageStore.LoadRoutingRoiAsync"/> already degrades an unreachable proxy to an empty
+    /// list - but runs through <c>InvokeAsync</c> because the timer fires off the renderer's thread.
+    /// </summary>
+    private async Task PollRoiAsync()
+    {
+        await InvokeAsync(async () =>
+        {
+            await RefreshRoiAsync();
+            Recompute();
+            StateHasChanged();
+        });
+    }
+
+    /// <summary>
+    /// Loads the routing-ROI comparison points for the full retained window and projects them onto the
+    /// chart's point shape. Only the fields the ROI chart reads are populated - these rows describe a
+    /// routing decision's cost counterfactual, not a turn's token or latency profile.
+    /// </summary>
+    private async Task RefreshRoiAsync()
+    {
+        var todayStartUtc = new DateTimeOffset(DateTimeOffset.UtcNow.Date, TimeSpan.Zero);
+        var points = await UsageStore.LoadRoutingRoiAsync(todayStartUtc.AddDays(-370), todayStartUtc.AddDays(1));
+        _roiHistory = points
+            .OrderBy(p => p.ComparedAtUtc)
+            .Select(p => new MetricTurnPoint(
+                TimestampUtc: p.ComparedAtUtc,
+                SessionId: p.SessionId,
+                Model: p.RoutedModel,
+                BaselineCostUsd: p.BaselineEstimatedCostUsd,
+                TotalCost: p.ActualCostUsd ?? 0m,
+                PromptTokens: 0,
+                CompletionTokens: 0,
+                ToolExecutionSteps: 0,
+                CacheHitRate: 0m,
+                TimeToFirstTokenMs: 0,
+                ContextBufferPercent: 0m,
+                BaselineModel: p.BaselineModel,
+                IsExploratory: p.IsExploratory))
+            .ToList();
+    }
+
+    /// <summary>Stops the Routing ROI poll timer when the tab is torn down.</summary>
+    public void Dispose() => _roiPollTimer?.Dispose();
 
     // Runs right after OnInitialized on first render, and again whenever the Dashboard re-renders on
     // LiveDataStore.Changed (new live telemetry) - keeps the chart auto-refreshing as new turns arrive.
@@ -229,6 +286,18 @@
     /// <summary>Builds the point corpus the chart model is derived from, combining rollup history, live turns, and (as a last resort) mock data.</summary>
     private IReadOnlyList<MetricTurnPoint> BuildCorpus(DateTimeOffset now)
     {
+        // Routing ROI has its own corpus: one point per compared routing decision, carrying the baseline
+        // counterfactual nothing else in this tab has. Live turns and usage rollups cannot contribute -
+        // neither knows what the frozen baseline would have chosen - so merging them in would only add
+        // points the ROI chart must skip. The mock fallback follows the same rule as the rest of the tab:
+        // demo data only when there is nothing real at all, never alongside live sessions.
+        if (_metric == CostMetric.RoutingRoi)
+        {
+            return _roiHistory.Count > 0 ? _roiHistory
+                : Conversations.Count == 0 ? MockData.BuildMetricHistory(now)
+                : [];
+        }
+
         var points = new List<MetricTurnPoint>();
 
         if (_rollupHistory.Count > 0)
@@ -248,7 +317,7 @@
                     TimestampUtc: turn.TimestampUtc,
                     SessionId: conversation.Id,
                     Model: turn.Model,
-                    RoutingRoi: turn.RoutingRoi,
+                    BaselineCostUsd: null,
                     TotalCost: turn.TotalCost,
                     PromptTokens: turn.PromptTokens,
                     CompletionTokens: turn.CompletionTokens,

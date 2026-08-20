@@ -136,13 +136,21 @@ public class ClusterTrainingServiceTests
         var bootstrapSource = new OodClusterBootstrapSampleSource(
             temp.Database, new FakeEmbeddingClient(text => [1, 0]), NullLogger<OodClusterBootstrapSampleSource>.Instance);
 
+        var storageOptions = Options.Create(new StorageOptions { ClusterModelPath = modelPath });
+        var voter = new ClusterBestVoter(
+            memoryStore,
+            Options.Create(new RoutingOptions()),
+            storageOptions,
+            NullLogger<ClusterBestVoter>.Instance);
+
         return new ClusterTrainingService(
             bootstrapSource,
             memoryStore,
             new NoOpTranscriptStore(),
+            voter,
             Options.Create(new RoutingOptions { ClusterLiveSampleWeight = 1.0, ClusterMinTrainingRows = minTrainingRows, ClusterCountMin = 2, ClusterCountMax = 3 }),
             Options.Create(new EmbeddingOptions { EmbeddingDimension = 2 }),
-            Options.Create(new StorageOptions { ClusterModelPath = modelPath }),
+            storageOptions,
             NullLogger<ClusterTrainingService>.Instance);
     }
 
@@ -224,5 +232,9 @@ public class ClusterTrainingServiceTests
 
         public Task<IReadOnlyDictionary<long, string>> LoadPromptTextByMemoryEntryIdAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyDictionary<long, string>>(new Dictionary<long, string>());
+
+        public Task<IReadOnlyDictionary<string, TotallyHot.ArcRouter.Transcripts.ModelTokenAverage>> LoadObservedTokenAveragesAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyDictionary<string, TotallyHot.ArcRouter.Transcripts.ModelTokenAverage>>(
+                new Dictionary<string, TotallyHot.ArcRouter.Transcripts.ModelTokenAverage>());
     }
 }

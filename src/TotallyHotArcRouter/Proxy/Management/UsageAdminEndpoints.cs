@@ -76,6 +76,24 @@ public static class UsageAdminEndpoints
             return ToResult(facade.GetUsageRollup(fromInstant, toInstant, width ?? "day", groupBy ?? "day"));
         });
 
+        // docs/router/self-organizing-classification-plan.md Phase T4: the Cost Analytics "Routing ROI"
+        // feed. Polled by the GUI rather than pushed over telemetry - the savings figure depends on the
+        // asynchronous comparison job, so it is deliberately not real-time and has no live event to ride.
+        group.MapGet("/routing-roi", async (string? from, string? to, string? session, CancellationToken cancellationToken) =>
+        {
+            if (!TryParseInstant(from, out var fromInstant))
+            {
+                return Error(StatusCodes.Status400BadRequest, "'from' must be a valid ISO 8601 instant.", "invalid_request_error");
+            }
+
+            if (!TryParseInstant(to, out var toInstant))
+            {
+                return Error(StatusCodes.Status400BadRequest, "'to' must be a valid ISO 8601 instant.", "invalid_request_error");
+            }
+
+            return ToResult(await facade.GetRoutingRoiAsync(fromInstant, toInstant, session, cancellationToken));
+        });
+
         // §5.12: reuses the exact same GetUsageRollup query the chart feed above does - export is a
         // rendering choice (CSV/JSON), never a second query path - so the two can never disagree on what
         // counts as "the same range" the way an independently-written export query could.

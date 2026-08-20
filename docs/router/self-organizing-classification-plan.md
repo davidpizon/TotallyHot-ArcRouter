@@ -309,8 +309,8 @@ New for this plan:
 |---|---|---|---|
 | T1 | Opt-in transcript capture; provenance columns (`IsExploratory`, propensity, real cost); embedding backfill | live-feedback-learning-plan.md Phases 1-4 | Shipped — 1a-1e complete |
 | T2 | Self-organizing clustering job over `memory_entries` embeddings | T1 (bootstrap path only needs the synced corpus) | Shipped — 2a-2g complete |
-| T3 | `ClusterBestVoter` — fifth Orchestrator voter | T2 | Proposed |
-| T4 | Baseline comparison: learned clusters vs. the frozen 9-dimension categorizer | T1, T2, T3 | Proposed |
+| T3 | `ClusterBestVoter` — fifth Orchestrator voter | T2 | Shipped |
+| T4 | Baseline comparison: learned clusters vs. the frozen 9-dimension categorizer | T1, T2, T3 | Shipped |
 | T5 | Admin surface for cluster training (Governance pane + gRPC + CLI) | T2 | Proposed |
 | T6 | System Settings: Adaptive Routing toggle + Sample Size, unified Save, router-side mutable settings | T1, T2, T3 | Proposed |
 
@@ -517,7 +517,60 @@ and ledger, the voter selects the expected candidate and correctly restricts to 
 .Candidates`; an ensemble integration test confirms all five voters appear in a single decision's
 breakdown.
 
+**Where things stand.** Shipped in this pass. `ClusterBestVoter` (`VoterNames.ClusterBest`, gated by the
+new `RoutingOptions.EnableClusterBestVoter` / `ClusterBestVoterWeight`) loads `cluster_model.json` lazily
+on first vote via `StorageOptions.ResolveClusterModelPath`, mirroring `LogRegVoter`'s
+load-once-cache-until-`Reload()` pattern; on a cache miss it also pulls the current
+`IMemoryEntryStore.LoadAllAsync` working set and builds the (cluster, model) ledger via the new
+`ClusterLedger.AssignNearestCluster` (a public wrapper around the same centroid-assignment logic
+`ClusterLedger.Build` already used internally). A request's task embedding is assigned to its nearest
+centroid; below `RoutingOptions.ClusterAssignmentThreshold` the request is "unclustered" and the voter
+abstains; a candidate whose ledger cell has fewer than `RoutingOptions.ClusterBestMinObservations`
+observations is excluded from scoring rather than trusted from a thin sample. `ClusterTrainingService`
+now takes `ClusterBestVoter` as a constructor dependency and calls `Reload()` after writing a new
+artifact, exactly as `EmbeddingLogRegTrainingService` already does for `LogRegVoter`, so a retrain takes
+effect without a process restart. Registered in `ServiceCollectionExtensions` alongside the other four
+voters (both by concrete type and as `IRoutingVoter`).
+
 ## Phase T4 — Baseline comparison: learned clusters vs. the frozen 9-dimension categorizer
+
+> **Status: shipped.** `TaxonomyComparisonService` drains a queue of scored, embedded transcript rows on a
+> five-minute timer and writes one `taxonomy_comparisons` row per request; `DimensionLedger` (extracted
+> from `DimBestVoter` so the measured rule is the voted rule) and `ClusterLedger` supply the two
+> predictions; `TaxonomyPromotionCriterion` implements the promotion predicate. Four implementation
+> decisions worth recording, since each departs from or sharpens what this section originally specified:
+>
+> - **Predictions are leave-one-out.** By the time the asynchronous job runs, the observation being scored
+>   has already been folded into *both* ledgers — `RouterMemory` via `RouterMemoryScoreObserver`, and the
+>   cluster ledger via the `memory_entries` rebuild. Scoring either taxonomy against a number it had
+>   already absorbed would report an optimistically biased error on both sides and feed that bias straight
+>   into the promotion criterion. Each prediction therefore removes its own observation from its cell
+>   first; a cell with only that one observation yields no prediction and is excluded from the error
+>   series rather than answered with a fabricated number.
+> - **The `dim_best` counterfactual is captured at decision time**, not recomputed later. It rides
+>   `AgenticRouteResult` → `ModelRouteResolutionResult` → `request_transcripts.dim_best_model`, the same
+>   path T1c built for `IsExploratory`/propensity. Recomputing it at comparison time would answer "what
+>   would `dim_best` pick *now*", a different question, since its ledgers move with every observation. An
+>   abstaining `dim_best` stores `NULL` and yields no savings figure — never the served model, which would
+>   manufacture a zero-savings counterfactual out of a decision nobody made.
+> - **Cluster assignment is recomputed per cycle, never stored**, because T2f's ledger-as-view makes
+>   cluster ids meaningless across retrains; a persisted assignment would silently rot.
+> - **The comparison runs off the request path entirely.** It needs a verifier score *and* a backfilled
+>   embedding, neither of which exists when the response is sent, so it cannot run inline. Comparison data
+>   is deliberately not real-time.
+>
+> The cost half is surfaced; the predictive-adequacy half is not. `GET /admin/usage/routing-roi` (via
+> `ManagementFacade.GetRoutingRoiAsync`) feeds the Cost Analytics **Routing ROI** screen, which the GUI
+> polls every 30 seconds rather than receiving over telemetry — there is no live event for a figure the
+> background job produces. This **redefines that chart's baseline** from a worst-case model to
+> `dim_best`'s own pick, which is what finally gives it a real data source: `docs/gui/backlog.md` had
+> deferred it precisely because no baseline cost existed. Two fabricated inputs were deleted in the
+> process — a baseline reconstructed from a cost-reduction percentage, and an invented `$2.50/M`
+> remediation rate for turns with no ROI. A turn with no counterfactual is now skipped rather than drawn
+> at zero. Exploratory turns are rendered in a muted tone but still count toward the net headline: a probe
+> is visually distinct from a routing miss without being excluded from the all-in position. The MAE series
+> stays in the store and the structured `[TAXONOMY-COMPARE]` logs, per its purpose as a promotion gate
+> rather than an operator metric.
 
 This phase is the literal implementation of the user's decision record. `HeuristicRequestClassifier`'s
 nine-dimension output is the **frozen baseline** — untouched by learning, exactly as it is today — and

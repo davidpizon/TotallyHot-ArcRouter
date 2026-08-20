@@ -19,6 +19,7 @@ public sealed class ClusterTrainingService : IClusterTrainingService
     private readonly OodClusterBootstrapSampleSource _bootstrapSource;
     private readonly IMemoryEntryStore _memoryEntryStore;
     private readonly ITranscriptStore _transcriptStore;
+    private readonly ClusterBestVoter _voter;
     private readonly RoutingOptions _routingOptions;
     private readonly EmbeddingOptions _embeddingOptions;
     private readonly string _modelPath;
@@ -31,6 +32,7 @@ public sealed class ClusterTrainingService : IClusterTrainingService
     /// <param name="bootstrapSource">Supplies OOD bootstrap training samples.</param>
     /// <param name="memoryEntryStore">Supplies live <c>memory_entries</c> training samples.</param>
     /// <param name="transcriptStore">Supplies prompt text for top-TF-IDF-term naming, when transcript capture is enabled.</param>
+    /// <param name="voter">The <c>cluster_best</c> voter to signal after a successful artifact swap.</param>
     /// <param name="routingOptions">The blend weight, k-sweep range, and degenerate-set threshold.</param>
     /// <param name="embeddingOptions">Supplies the embedding dimension every sample must match.</param>
     /// <param name="storageOptions">Supplies the model artifact's file path.</param>
@@ -39,6 +41,7 @@ public sealed class ClusterTrainingService : IClusterTrainingService
         OodClusterBootstrapSampleSource bootstrapSource,
         IMemoryEntryStore memoryEntryStore,
         ITranscriptStore transcriptStore,
+        ClusterBestVoter voter,
         IOptions<RoutingOptions> routingOptions,
         IOptions<EmbeddingOptions> embeddingOptions,
         IOptions<StorageOptions> storageOptions,
@@ -47,6 +50,7 @@ public sealed class ClusterTrainingService : IClusterTrainingService
         ArgumentNullException.ThrowIfNull(bootstrapSource);
         ArgumentNullException.ThrowIfNull(memoryEntryStore);
         ArgumentNullException.ThrowIfNull(transcriptStore);
+        ArgumentNullException.ThrowIfNull(voter);
         ArgumentNullException.ThrowIfNull(routingOptions);
         ArgumentNullException.ThrowIfNull(embeddingOptions);
         ArgumentNullException.ThrowIfNull(storageOptions);
@@ -55,6 +59,7 @@ public sealed class ClusterTrainingService : IClusterTrainingService
         _bootstrapSource = bootstrapSource;
         _memoryEntryStore = memoryEntryStore;
         _transcriptStore = transcriptStore;
+        _voter = voter;
         _routingOptions = routingOptions.Value;
         _embeddingOptions = embeddingOptions.Value;
         _modelPath = storageOptions.Value.ResolveClusterModelPath();
@@ -186,6 +191,7 @@ public sealed class ClusterTrainingService : IClusterTrainingService
         ClusterModelArtifactSerializer.Validate(artifact);
 
         await WriteArtifactAtomicallyAsync(artifact, cancellationToken).ConfigureAwait(false);
+        _voter.Reload();
 
         var trainedMessage =
             $"Trained {trainResult.ChosenK} cluster(s) from {bootstrapTaskCount} bootstrap task(s) and " +

@@ -89,6 +89,80 @@ public class SqliteTranscriptStoreTests : IDisposable
         Assert.False(File.Exists(_dbPath));
     }
 
+    [Fact]
+    public async Task InsertAsync_RoundTripsTheDimBestCounterfactual()
+    {
+        var database = CreateDatabase();
+        database.EnsureCreated();
+        var store = new SqliteTranscriptStore(database, Options.Create(new TranscriptOptions { Enabled = true }));
+
+        var id = await store.InsertAsync(
+            MakeRecord("corr-dimbest") with { DimBestModel = "glm-5" }, TestContext.Current.CancellationToken);
+
+        var row = await store.GetTranscriptAsync(id!.Value, TestContext.Current.CancellationToken);
+        Assert.Equal("glm-5", row!.DimBestModel);
+    }
+
+    [Fact]
+    public async Task InsertAsync_DimBestAbstained_StoresNullRatherThanTheServedModel()
+    {
+        var database = CreateDatabase();
+        database.EnsureCreated();
+        var store = new SqliteTranscriptStore(database, Options.Create(new TranscriptOptions { Enabled = true }));
+
+        // An abstention means the frozen baseline expressed no preference. Defaulting it to the served
+        // model would fabricate a zero-savings counterfactual out of a decision nobody made.
+        var id = await store.InsertAsync(MakeRecord("corr-abstain"), TestContext.Current.CancellationToken);
+
+        var row = await store.GetTranscriptAsync(id!.Value, TestContext.Current.CancellationToken);
+        Assert.Null(row!.DimBestModel);
+    }
+
+    [Fact]
+    public async Task EnsureCreated_DatabasePredatingPhaseT4_GainsTheDimBestColumn()
+    {
+        // A transcript database written by a Phase T1 build already exists with the older shape, and
+        // CREATE TABLE IF NOT EXISTS is blind to it - without the explicit PRAGMA migration every read
+        // would fail with "no such column".
+        Directory.CreateDirectory(_tempDirectory);
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_dbPath}"))
+        {
+            connection.Open();
+            using var create = connection.CreateCommand();
+            create.CommandText = """
+                CREATE TABLE request_transcripts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, correlation_id TEXT NOT NULL,
+                    created_at_utc TEXT NOT NULL, requested_model TEXT NOT NULL, routed_model TEXT NOT NULL,
+                    dimension TEXT NULL, difficulty TEXT NULL, language TEXT NULL, is_utility INTEGER NOT NULL,
+                    prompt_text TEXT NULL, response_text TEXT NULL, score REAL NULL, cost REAL NULL,
+                    is_exploratory INTEGER NOT NULL, propensity REAL NOT NULL, input_tokens INTEGER NULL,
+                    output_tokens INTEGER NULL, memory_entry_id INTEGER NULL);
+                """;
+            create.ExecuteNonQuery();
+        }
+
+        var database = CreateDatabase();
+        database.EnsureCreated();
+        var store = new SqliteTranscriptStore(database, Options.Create(new TranscriptOptions { Enabled = true }));
+
+        var id = await store.InsertAsync(
+            MakeRecord("corr-migrated") with { DimBestModel = "glm-5" }, TestContext.Current.CancellationToken);
+
+        var row = await store.GetTranscriptAsync(id!.Value, TestContext.Current.CancellationToken);
+        Assert.Equal("glm-5", row!.DimBestModel);
+    }
+
+    [Fact]
+    public void EnsureCreated_RunTwice_IsIdempotent()
+    {
+        var database = CreateDatabase();
+        database.EnsureCreated();
+        database.EnsureCreated();
+
+        // The second pass must not try to re-add a column that is already there.
+        Assert.True(File.Exists(_dbPath));
+    }
+
     private TranscriptDatabase CreateDatabase() =>
         new(Options.Create(new StorageOptions { TranscriptDatabasePath = _dbPath }));
 

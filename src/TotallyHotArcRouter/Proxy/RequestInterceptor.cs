@@ -313,6 +313,7 @@ namespace TotallyHot.ArcRouter.Proxy
             ResolvedModelRoute? route;
             var isExploratory = false;
             var propensity = 1.0;
+            string? dimBestModel = null;
 
             if (isAutoSelectRequest)
             {
@@ -332,6 +333,7 @@ namespace TotallyHot.ArcRouter.Proxy
                 route = autoSelected.Route;
                 isExploratory = autoSelected.IsExploratory;
                 propensity = autoSelected.Propensity;
+                dimBestModel = autoSelected.DimBestModel;
                 substitutionReason = RoutingSubstitutionReason.AutoSelect;
             }
             else if (!_modelRouteResolver.TryResolve(modelName, out route) || !_modelRouteResolver.IsModelEnabled(modelName))
@@ -361,6 +363,7 @@ namespace TotallyHot.ArcRouter.Proxy
                     route = agenticRoute.Route;
                     isExploratory = agenticRoute.IsExploratory;
                     propensity = agenticRoute.Propensity;
+                    dimBestModel = agenticRoute.DimBestModel;
                     substitutionReason = wasResolved
                         ? RoutingSubstitutionReason.ModelStopped
                         : RoutingSubstitutionReason.UnresolvedName;
@@ -447,7 +450,8 @@ namespace TotallyHot.ArcRouter.Proxy
                 isExploratory,
                 propensity,
                 classification,
-                taskText);
+                taskText,
+                dimBestModel);
         }
 
         /// <summary>
@@ -571,7 +575,11 @@ namespace TotallyHot.ArcRouter.Proxy
                             SanitizeForLog(selectedName!),
                             SanitizeForLog(liveDimension),
                             classification.IsUtility);
-                        return new AgenticRouteResult(selectedRoute, decision!.IsExploratory, decision.Propensity);
+                        return new AgenticRouteResult(
+                            selectedRoute,
+                            decision!.IsExploratory,
+                            decision.Propensity,
+                            Router.Orchestrator.OrchestratorRoutingPolicy.TryGetVoterPick(decision, Router.Orchestrator.VoterNames.DimBest));
                     }
                     else
                     {
@@ -598,7 +606,15 @@ namespace TotallyHot.ArcRouter.Proxy
         /// <param name="Route">The resolved route.</param>
         /// <param name="IsExploratory">Whether this was an epsilon-greedy exploratory pick.</param>
         /// <param name="Propensity">The propensity of the arm actually chosen.</param>
-        private sealed record AgenticRouteResult(ResolvedModelRoute Route, bool IsExploratory, double Propensity);
+        /// <param name="DimBestModel">
+        /// The model the frozen nine-dimension <c>dim_best</c> voter alone would have chosen, or
+        /// <see langword="null"/> when it abstained - Phase T4's counterfactual baseline.
+        /// </param>
+        private sealed record AgenticRouteResult(
+            ResolvedModelRoute Route,
+            bool IsExploratory,
+            double Propensity,
+            string? DimBestModel = null);
 
         /// <summary>
         /// Builds one <see cref="RoutingCandidate"/> per currently-eligible model (the same eligibility
