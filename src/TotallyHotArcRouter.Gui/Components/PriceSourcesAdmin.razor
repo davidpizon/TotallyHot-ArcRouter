@@ -5,7 +5,9 @@
    choice: see docs/router/model-price-catalog.md. *@
 @implements IDisposable
 @using System.Threading
+@using Microsoft.JSInterop
 @inject PriceSourceStore Store
+@inject IJSRuntime Js
 
 <div class="h-full overflow-y-auto pr-1">
     @if (!Store.IsLoaded)
@@ -65,7 +67,7 @@
             <div class="text-xs text-slate-500 p-4">No price sources are registered.</div>
         }
 
-        <div class="ds-card-stack" @onpointerup="OnPointerUp" @onpointerleave="CancelDragIfActive" @onpointercancel="CancelDragIfActive">
+        <div id="@FlipContainerId" class="ds-card-stack" @onpointerup="OnPointerUp" @onpointerleave="CancelDragIfActive" @onpointercancel="CancelDragIfActive">
             @{ var sources = DisplayOrder; }
             @for (var i = 0; i < sources.Count; i++)
             {
@@ -84,9 +86,18 @@
 
                    The lifted card is raised and made pointer-transparent so the pointer falls through to the
                    card beneath it - that card's @onpointerenter is what drives the live reflow. A short
-                   transition animates only the lift (shadow/scale); the slot change itself is instant because
-                   the list is re-keyed rather than transformed. *@
-                <div @key="source.Name" class="rounded-lg p-3 space-y-2.5 @(canDrag ? "drag-enabled" : "drag-disabled") @(isLifted ? "card-lifted" : "") ds-surface-card-draggable @borderClass"
+                   transition animates only the lift (box-shadow + a scale change, DESIGN.md §6); the slot change
+                   itself is instant while a drag is live, for a snappy 1:1 feel. Every card in this stack rests
+                   at scale(0.98) (see .ds-surface-card-draggable in app.css) and a lifted card returns to
+                   scale(1) - its own true box, never past it - so the "grow" cue never needs the list container
+                   to contain a box that outgrew its slot. The container (.ds-card-stack) still clips with a
+                   margin rather than flush against the box edge, but only for the box-shadow's own blur, which
+                   always paints outside the box regardless of scale - see DESIGN.md §5.4. Once the drag ends,
+                   OnPointerUp/OnAfterRenderAsync below run a FLIP pass (js/reorder-flip.js) that slides every
+                   card that actually moved into its settled position instead of letting it teleport there
+                   (DESIGN.md §5.3). data-flip-key is that pass's join key between the "before" and "after"
+                   measurement. *@
+                <div @key="source.Name" data-flip-key="@source.Name" class="rounded-lg p-3 space-y-2.5 @(canDrag ? "drag-enabled" : "drag-disabled") @(isLifted ? "card-lifted" : "") ds-surface-card-draggable @borderClass"
                      @onpointerdown="e => OnPointerDown(source, e)"
                      @onpointerenter="e => OnPointerEnter(source, e)">
                     @* Header: rank controls + name + toggle *@
@@ -94,34 +105,8 @@
                         <div class="flex items-start gap-2 min-w-0">
                             @if (canReorder)
                             {
-                                <div class="flex flex-col items-center shrink-0 -my-0.5" title="Drag to reorder, or use the arrows. Priority: higher wins a contested price.">
-                                    <Icon Name="grip-vertical" Size="12" Class="text-slate-600 mb-0.5" />
-                                    @if (index == 0)
-                                    {
-                                        <div class="p-0.5 ls-drag-placeholder"></div>
-                                    }
-                                    else
-                                    {
-                                        <button @onclick="() => MoveUp(index)"
-                                                disabled="@Store.IsRefreshing"
-                                                title="Rank higher"
-                                                class="rounded p-0.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
-                                            <Icon Name="chevron-up" Size="12" />
-                                        </button>
-                                    }
-                                    @if (index == sources.Count - 1)
-                                    {
-                                        <div class="p-0.5 ls-drag-placeholder"></div>
-                                    }
-                                    else
-                                    {
-                                        <button @onclick="() => MoveDown(index)"
-                                                disabled="@Store.IsRefreshing"
-                                                title="Rank lower"
-                                                class="rounded p-0.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
-                                            <Icon Name="chevron-down" Size="12" />
-                                        </button>
-                                    }
+                                <div class="flex items-center shrink-0" title="Drag to reorder. Priority: higher wins a contested price.">
+                                    <Icon Name="grip-vertical" Size="14" Class="text-slate-600" />
                                 </div>
                             }
                             <div class="min-w-0">
@@ -224,20 +209,26 @@
     /// <summary>Runs an ingestion cycle now. Implements the Pull Now button.</summary>
     private Task PullNow() => RunAsync(() => Store.RefreshAsync());
 
-    // Store.Sources is already ordered by rank (PriceSourceToggleStore.List() sorts descending), so a plain
-    // list swap by index followed by ReorderAsync is enough - no separate "current rank" bookkeeping needed.
-    /// <summary>Moves one source up a rank via the up-arrow control.</summary>
-    private Task MoveUp(int index) => Swap(index, index - 1);
+    // FLIP (First-Last-Invert-Play) reorder animation, wired through js/reorder-flip.js. The grab
+    // handle is the sole reorder affordance (DESIGN.md §5.3), so the only place cards change rank is
+    // the drag gesture below; this just makes the settle after a drop slide rather than teleport.
+    private const string FlipContainerId = "price-source-stack";
+    private const string FlipItemSelector = "[data-flip-key]";
+    private const int FlipDurationMs = 200; // --dur-default (MOTION.md §3)
+    private const string FlipEasing = "cubic-bezier(0.22, 1, 0.36, 1)"; // --ease-settle (MOTION.md §5)
 
-    /// <summary>Moves one source down a rank via the down-arrow control.</summary>
-    private Task MoveDown(int index) => Swap(index, index + 1);
+    private bool _pendingFlip;
 
-    /// <summary>Swaps two sources' ranks and persists the reordered list.</summary>
-    private Task Swap(int index, int otherIndex)
+    /// <summary>Plays the FLIP settle animation queued by <see cref="OnPointerUp"/>, once the reordered list has rendered.</summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        var names = Store.Sources.Select(s => s.Name).ToList();
-        (names[index], names[otherIndex]) = (names[otherIndex], names[index]);
-        return RunAsync(() => Store.ReorderAsync(names));
+        if (!_pendingFlip)
+        {
+            return;
+        }
+
+        _pendingFlip = false;
+        await Js.InvokeVoidAsync("reorderFlip.play", $"#{FlipContainerId}", FlipItemSelector, FlipDurationMs, FlipEasing);
     }
 
     // Drag state. While a drag (or its commit) is in flight the panel renders a private working order
@@ -248,9 +239,9 @@
 
     // True only once the drag has actually reflowed the list (the pointer crossed into another card),
     // not merely on pointerdown. _dragName alone goes true on every pointerdown - including one that
-    // lands on the toggle button or a rank arrow (pointerdown bubbles up to the card before the click
-    // completes) - so gating the lifted/pointer-events:none styling on _dragName alone would briefly make
-    // the card pointer-transparent on an ordinary click, before the click can reach that control.
+    // lands on the toggle button (pointerdown bubbles up to the card before the click completes) - so
+    // gating the lifted/pointer-events:none styling on _dragName alone would briefly make the card
+    // pointer-transparent on an ordinary click, before the click can reach that control.
     private bool _dragActive;
 
     /// <summary>
@@ -314,9 +305,9 @@
 
     /// <summary>
     /// Commits the reorder. A drag can jump several ranks at once, so the whole working order is sent
-    /// rather than the adjacent swap <see cref="Swap"/> does for the arrows. The working order stays on
-    /// screen across the round-trip (only the lift is dropped) so the cards do not flash back to their old
-    /// ranks while the server confirms.
+    /// as one list rather than a sequence of adjacent swaps. The working order stays on screen across
+    /// the round-trip (only the lift is dropped) so the cards do not flash back to their old ranks while
+    /// the server confirms; <see cref="OnAfterRenderAsync"/> then FLIP-animates the settle.
     /// </summary>
     private async Task OnPointerUp()
     {
@@ -335,6 +326,11 @@
             CancelDrag();
             return;
         }
+
+        // Measure every card's current position before handing rendering back to the store below -
+        // OnAfterRenderAsync plays the FLIP animation from these positions once that render lands.
+        await Js.InvokeVoidAsync("reorderFlip.capture", $"#{FlipContainerId}", FlipItemSelector);
+        _pendingFlip = true;
 
         try
         {

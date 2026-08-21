@@ -12,7 +12,11 @@ new and refactored components should be built against. Every section marks which
 
 **Platform constraint:** this is a Blazor Hybrid app in a WebView2 (Chromium) host. There is no
 Framer Motion, no GSAP, and no JS animation library — and no Tailwind build step, so `app.css` is
-hand-maintained. **All motion is CSS.** Snippets below are CSS only; that is not an omission.
+hand-maintained. **All motion is CSS.** Snippets below are CSS only; that is not an omission. The
+one exception is FLIP-style reorder (§6 Reorder Settle): CSS alone cannot measure where an element
+sat before a DOM reorder, so a small hand-rolled script (`js/reorder-flip.js`, same "JS reads the
+DOM, CSS drives the transition" split as `js/split-pane.js`) reads the before/after rects and sets
+the `transform`/`transition` the animation actually plays with — it is not an animation library.
 
 **Aspirational-design conformance (Phase 4 audit):** this motion system already satisfied
 `aspirational-design.md` §5's "motion as meaning" principle before adoption began — every trigger
@@ -135,9 +139,8 @@ direct-manipulation surface: the split-pane divider (`js/split-pane.js`), which 
 worse. Everywhere else, motion is triggered *indirectly* (a click opens a modal, data arrives over
 gRPC), which is the easing-curve case by definition.
 
-**If** a FLIP-style reorder animation is later added to the `PriceSourcesAdmin` drag-to-rank list —
-today slot changes are instant, and the list is re-keyed rather than transformed — use a single
-critically-damped curve rather than introducing a spring library:
+A FLIP-style reorder animation now runs on the `PriceSourcesAdmin` drag-to-rank list — see Reorder
+Settle in §6. It uses a single critically-damped curve rather than a spring library:
 
 ```css
 /* Snappy, no overshoot. Approximates stiffness 500 / damping 40 / mass 0.8. */
@@ -237,6 +240,35 @@ look like a slot machine. Stagger applies only on initial mount — see §7.
 }
 .row-enter { animation: row-enter var(--dur-default) var(--ease-out-expo); }
 ```
+
+### Reorder Settle — *Shipping*
+
+`PriceSourcesAdmin`'s drag-to-rank list (`DESIGN.md` §5.3). While a drag is live, the list reflows
+instantly on every `pointerenter` — that stays instant on purpose, so the dragged card tracks the
+gesture 1:1 with zero added lag (§5: springs/eased lag on a direct-manipulation surface would read as
+disconnected from the pointer). The FLIP pass only runs once, after the drop: `js/reorder-flip.js`
+records each card's rect just before the commit re-renders the list, then on the next
+`OnAfterRenderAsync` measures where everything actually landed and animates the delta away with
+`--ease-settle`. A card whose slot didn't change is untouched — the script skips zero-delta elements.
+
+```js
+// Called right before the reordering render (PriceSourcesAdmin.OnPointerUp, before it awaits the
+// store update): capture where every card sits now.
+reorderFlip.capture(containerSelector, itemSelector);
+
+// Called from OnAfterRenderAsync, once the reordered list has rendered: invert to the old position,
+// then clear the transform under a transition so the browser animates the return.
+reorderFlip.play(containerSelector, itemSelector, durationMs, easing);
+```
+
+```css
+/* Set inline by reorder-flip.js, not declared as a class rule - see the §"Platform constraint" note
+   above for why this pattern needs JS at all. Duration/easing: --dur-default / --ease-settle. */
+```
+
+Uses `--dur-default` (200ms) and `--ease-settle` (§5), not `--ease-out-expo`: this is a settle, not an
+arrival from off-screen, so the mirrored/no-overshoot spring approximation is the correct curve, not
+the enter family.
 
 ### Tooltip Fade — *Shipping*
 
@@ -447,6 +479,7 @@ Add to `app.css` below the compiled Tailwind blob:
 | `transition: all` retired on every selected-one-of-N control | `.tab-button`, `.tab-indicator`, `.gov-tab`, `.metric-button`, `.filter-button` |
 | Disclosure Collapse — two-way expand/contract via `grid-template-rows` | `.ls-disclosure`; `BenchmarkData` (Task Matrix + Local Voter Model), `ProvidersAdmin` add-model pane |
 | `prefers-reduced-motion` block | `app.css` |
+| Reorder Settle — FLIP slide on drop, grab-handle-only reorder (chevron rank buttons removed) | `PriceSourcesAdmin`; `js/reorder-flip.js` |
 
 ### Coded and wired — not confirmed in UI
 

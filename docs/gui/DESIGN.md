@@ -374,6 +374,105 @@ and rendered *nothing at all*: per §5.1 the compiled blob ships only the utilit
 used, and neither `mt-6` nor `mt-3` is among them, so the class was inert and the two cards sat flush.
 A missing utility fails silently; a missing token does not.
 
+### 5.3 Reorderable cards
+
+**A card that can be dragged into a new position must show a `grip-vertical` grab handle — never a
+click-to-move control (chevrons/arrows, "move up"/"move down" buttons).** `PriceSourcesAdmin`'s
+Price Data Sources list is the canonical example: each card in `.ds-card-stack` gets a
+`grip-vertical` icon (12–14px, `text-slate-600`) at its leading edge as the sole reorder affordance,
+titled `"Drag to reorder..."`. There is no separate arrow-button path — the handle isn't a label next
+to a different control, it *is* the control, made draggable by `@onpointerdown`/`@onpointerenter` on
+the card itself (see the remarks below).
+
+- **Pointer events, not HTML5 drag-and-drop.** WinUI's WebView2 — the host `BlazorWebView` uses on
+  Windows — never delivers in-page `dragstart`/`dragover` events (`microsoft-ui-xaml#10576`), so a
+  `draggable="true"` card is inert in this app. Reorder gestures are built on `pointerdown` /
+  `pointerenter` / `pointerup` instead, the same primitive `js/split-pane.js` already drags the
+  split-pane divider with.
+- **The dragged card is visually lifted** — `.card-lifted`: `box-shadow: 0 12px 28px -6px
+  rgba(0,0,0,.55)` + the `.ds-source-border-lifted` accent border-color, reserved for this state only
+  (§6). Every card in the stack rests at `transform: scale(0.98)`
+  (`.ds-surface-card-draggable`); the lifted card returns to `scale(1)` — its own true, already-laid-out
+  box, never past it. The list container still clips with a margin, but only for the box-shadow's own
+  blur (which always paints outside the box regardless of scale) — see §5.4. Other cards reflow live
+  under the pointer.
+- **The settle animates; the live reflow does not.** While the drag is in progress, cards reflowing
+  out of the dragged card's way happens instantly — any added lag there would make the drag feel
+  disconnected from the pointer. Once the card is dropped, the list's landing positions FLIP-animate
+  into place with `--ease-settle` rather than teleporting. See `MOTION.md` §6 "Reorder Settle" for the
+  full pattern and `js/reorder-flip.js` for the implementation; this is the one place in the app JS
+  reads layout to drive an animation, and it is not a general animation library — it stays scoped to
+  this one interaction.
+- **Do not also offer a click-based reorder control alongside the handle.** A prior version of this
+  list paired the handle with per-row up/down chevrons; they were removed rather than kept as a
+  second affordance, because two controls for the same action on the same card invites them to drift
+  out of sync (e.g. one path animating, the other not). If a non-pointer way to reorder is needed
+  later (keyboard, accessibility), it should replace the handle's own interaction model — keyboard
+  focus + arrow keys on the handle itself — not reintroduce a second visible control.
+
+### 5.4 Elements never extend past the application window
+
+**No visual element — a lifted/scaled card, a shadow, a tooltip, a dropdown, an animation's transient
+frame — may render outside the app's own window.** This is a fixed, non-resizable-below-content,
+single-window desktop app (§5): there is no outer chrome to imply "the rest continues off-screen,"
+so anything that visually escapes the window reads as a rendering bug, not a design choice, even if
+it is purely decorative and momentary.
+
+**Concrete case this rule exists for:** `PriceSourcesAdmin`'s lifted drag card. The original
+`.card-lifted { transform: scale(1.02) }` grows the card's own box past whatever it was laid out at —
+that's layout-neutral, so nothing about the box stopped it from growing past its pane, which sets
+`overflow-y-auto` only (Tailwind's utility never touches `overflow-x`, §5.1). Three fixes were tried
+before landing on the right one:
+
+1. **Plain `overflow: hidden` on the list container.** Stops the escape, but clips flush against the
+   box edge with zero room for the scale (or the box-shadow's own blur) to actually paint — the
+   card's own left/right border ends up partly *inside* the clipped region and disappears, which is a
+   different, equally visible bug.
+2. **Remove the scale, keep only `box-shadow` + border-color for the lift cue.** No box growth, so
+   nothing to clip — but with the container still clipping flush (fix 1's `overflow: hidden`), the
+   shadow's own blur (which also extends past the box) had nowhere to paint into either, so the lift
+   read as invisible.
+3. **Restore the scale, switch the container to `overflow: clip` + `overflow-clip-margin`.** The
+   margin paints a fixed halo around the container's box *before* clipping starts, so the scale and
+   the shadow both render. This fixed the invisible-shadow regression from fix 2, but the card still
+   grows to 1.02× its box — on a wide-enough pane, 1% of the card's width exceeds even a generous
+   fixed-pixel margin, and the card visibly extended past the window again.
+
+**The actual fix removes the box growth at its source, rather than sizing a container to tolerate
+it.** `.ds-surface-card-draggable` now rests at `transform: scale(0.98)` — every card in the stack is
+2% smaller than its laid-out box at all times — and `.card-lifted` returns it to `scale(1)`: its own
+true, already-allocated size, never past it. The "this card just got bigger" cue survives (it grows
+*relative to its resting neighbors*), but because nothing ever exceeds `scale(1)`, there is no box
+growth left for any container's size, pixel count, or percentage to get wrong — the failure mode fixes
+1–3 kept fighting simply doesn't exist anymore. `.ds-card-stack` still keeps `overflow: clip` +
+`overflow-clip-margin: 24px`, but now purely for the box-shadow's blur, which paints outside the box
+regardless of scale and always needed a margin, never a box-growth budget.
+
+**What this means in practice:**
+- **A lift/hover/emphasis effect should not be expressed by growing past the element's own laid-out
+  box.** Once an effect crosses `scale(1)` (or otherwise exceeds the box the layout engine already
+  gave the element), every container between it and the window has to be individually verified to
+  tolerate the exact amount of growth, at every window size the app can be resized to — a check that
+  is easy to get right once and then invalidate the next time the effect's value changes. Growing
+  *toward* the box's own size from a smaller resting state (as `.ds-surface-card-draggable` now does)
+  gets the same visual cue with a hard, static upper bound that needs no such check.
+- **Reserve `overflow: clip` + `overflow-clip-margin` for effects that only ever paint outside the
+  box, not for ones that grow the box itself.** A shadow or glow has no edge of its own to lose and a
+  fixed reach that doesn't scale with window size, so a fixed-pixel margin is a correct, permanent fit
+  for it. A box that can grow (scale, width/height, an untracked `translate`) does not have a fixed
+  reach at all — its overflow is a percentage of its own size, so no fixed margin can ever be
+  guaranteed sufficient at every width the app can be resized to. That growth isn't something for the
+  margin to accommodate; it's what should not exist in the first place.
+- **Tooltips and other floating UI stay exempt, but only because they already solve this
+  differently.** `.ls-tooltip` (`js/tooltips.js`) is a single body-level element repositioned via
+  `getBoundingClientRect()`/`window.innerWidth`/`window.innerHeight` math that clamps it inside the
+  viewport (§2 of `MOTION.md` — "floating never transforms") — it isn't exempt from the rule, it
+  satisfies it by a different mechanism (JS-computed clamping instead of CSS clipping) because a
+  tooltip's whole job is to render outside its trigger's own box.
+- **Clip at the narrowest container that actually owns the effect** — not an ancestor several levels
+  up, even `html,body,#root{overflow:hidden}` (§5). `.ds-card-stack` owns containment for every card
+  inside it so a future lift effect there doesn't reopen this bug from scratch.
+
 ## 6. Elevation & Depth
 
 Elevation is expressed sparingly, but the aspirational spec calls for heavier shadows than the
@@ -388,7 +487,7 @@ value, which remains the only surface that rises above floating UI:
 | Hover | Surface + `background-color: var(--surface-elevated-a)` and/or `--shadow-elevated` (`0 8px 8px rgba(0,0,0,0.3)`) | `.card-hover`/`.ds-card:hover` interactive cards |
 | Floating / elevated | Surface + `box-shadow: var(--shadow-lift)` (`0 4px 12px rgba(0,0,0,0.3)`) | Tooltips (`.ls-tooltip`), hover lift on `.btn-primary` |
 | Dialog | `#121212` + `box-shadow: var(--shadow-dialog)` (`0 8px 24px rgba(0,0,0,0.5)`) | Settings modal, Provider dialogs |
-| Dragging | Surface + `box-shadow: 0 12px 28px -6px rgba(0,0,0,.55)` + `transform: scale(1.02)` | The lifted card in `PriceSourcesAdmin`'s drag-to-rank list |
+| Dragging | Surface + `box-shadow: 0 12px 28px -6px rgba(0,0,0,.55)` + `.ds-source-border-lifted` accent border-color, rising from a `scale(0.98)` resting state to `scale(1)` — never past its own laid-out box (§5.4). `.ds-card-stack`'s `overflow: clip; overflow-clip-margin: 24px` contains only the shadow's blur | The lifted card in `PriceSourcesAdmin`'s drag-to-rank list |
 
 Floating/hover UI uses the lighter 0.3-opacity shadow; modals/dialogs use the heavier 0.5-opacity
 shadow — this two-tier split (rather than one shared value) is the one elevation change adoption
@@ -449,7 +548,8 @@ following classes have been added to support this, on top of the earlier round b
 - `.ds-dashboard-ticker` — Dashboard ticker row border/background
 - `.ls-console-line` — `ConsoleTab` line wrapping (the per-level text color stays inline, exception 1
   above)
-- `.ls-drag-placeholder` — `PriceSourcesAdmin` reorder-arrow placeholder sizing
+- `.ls-drag-placeholder` — `PriceSourcesAdmin` reorder-arrow placeholder sizing (removed along with
+  the arrow buttons themselves once the grab handle became the sole reorder affordance, §5.3)
 - `.drag-enabled`/`.drag-disabled` cursor + `.drag-enabled.card-lifted` — replaced
   `PriceSourcesAdmin`'s conditional `style="cursor:@cursor"` with class binding
 - `.ls-provider-budget-chart`, `.ls-provider-trend-chart` — `ProvidersAdmin` chart container sizing

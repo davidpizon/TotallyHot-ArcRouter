@@ -194,6 +194,13 @@
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
   --ease-in-quart: cubic-bezier(0.5, 0, 0.75, 0);
+  /* Critically-damped, no overshoot (MOTION.md §5) - approximates stiffness 500 / damping 40 /
+     mass 0.8 without a spring library. Used by js/reorder-flip.js to slide a reordered card into
+     its settled slot; not referenced from a CSS rule here because the FLIP transition is set
+     inline by that script (it needs the duration/easing at the moment it measures the DOM), so the
+     value is duplicated as a JS-side string constant in PriceSourcesAdmin.razor - keep the two in
+     sync if this changes. */
+  --ease-settle: cubic-bezier(0.22, 1, 0.36, 1);
 
   /* -------------------------------------------------------------------------
      Aspirational design tokens (docs/gui/aspirational-design.md §1-3, §6).
@@ -616,9 +623,11 @@ input[type="number"]:focus {
   background: var(--text-muted);
 }
 
+/* No transform here - see .ds-surface-card-draggable.card-lifted below (DESIGN.md §5.4) for why the
+   "grow" on lift is expressed as returning to scale(1) from a 2%-smaller resting state, rather than
+   growing past scale(1) the way it originally did. */
 .card-lifted {
   box-shadow: 0 12px 28px -6px rgba(0, 0, 0, 0.55);
-  transform: scale(1.02);
   position: relative;
   z-index: 10;
   pointer-events: none;
@@ -1087,6 +1096,28 @@ input[type="number"]:focus {
    Do NOT reach for Tailwind's space-y-* here. The blob is generated output with no build step, so
    it ships only the utilities the mock happened to use — .mt-6 and .mt-3 are both absent, which is
    why Benchmark Data's `mt-6` rendered no margin at all. A token cannot silently evaporate. */
+.ds-card-stack {
+  /* No element may extend past the app window (DESIGN.md §5.4). PriceSourcesAdmin's lifted card
+     originally grew past its own laid-out box (.card-lifted: transform: scale(1.02)) and bled past
+     this pane's right/left edge into the rest of the window - the outer pane only sets overflow-y
+     (Tailwind's overflow-y-auto never touches overflow-x), so nothing upstream of the stack clipped
+     it. This is the containment boundary for every effect any card in the stack uses, so a future one
+     doesn't reopen the same bug.
+
+     The lift no longer grows the box at all - .ds-surface-card-draggable rests at scale(0.98) and
+     .card-lifted returns it to scale(1), its own true box, never past it - so the only thing left to
+     contain here is the box-shadow's blur, which always paints outside the box regardless of scale.
+     `overflow: hidden` clips flush against the box edge with no room for that blur to render, which
+     is why it looked like the shadow had vanished when that was tried. `overflow: clip` +
+     `overflow-clip-margin` paints a fixed halo *before* clipping kicks in, sized to .card-lifted's own
+     box-shadow reach (`0 12px 28px -6px` → ~22px past the box edge on any side, since the -6px spread
+     first shrinks the shadow's base rect before the 28px blur extends outward), rounded up. If this
+     shadow value ever changes, recompute the margin against it - it is not a round number picked to
+     "probably be enough." */
+  overflow: clip;
+  overflow-clip-margin: 24px;
+}
+
 .ds-card-stack > * + * {
   margin-top: var(--space-card-gap);
 }
@@ -1101,12 +1132,26 @@ input[type="number"]:focus {
   border-radius: var(--radius-card);
 }
 
-/* ---- Draggable card variant (inherits surface-card, adds transition for drag lift) ---- */
+/* ---- Draggable card variant (inherits surface-card, adds transition for drag lift) ----
+   Resting state is 2% *smaller* than its laid-out box (transform: scale(0.98)), not full size. A
+   lifted card returns to scale(1) - its own true, already-allocated box - rather than growing past
+   it. That reads as the same "this card just got bigger" cue as growing past 100% did, but nothing
+   ever exceeds the space the layout already gave the card, so there is no box-growth overflow left
+   for any container to contain (DESIGN.md §5.4) - unlike the shadow, which still needs
+   .ds-card-stack's overflow-clip-margin, a scale that never exceeds 1 needs no clipping strategy at
+   all. Higher-specificity compound selector, not source order, is what makes .card-lifted win here -
+   both classes land on the same element and this rule appears later in the file. */
 .ds-surface-card-draggable {
   background: var(--surface-card);
   border: 1px solid var(--border-button);
   border-radius: var(--radius-card);
-  transition: box-shadow 0.15s ease, transform 0.15s ease;
+  transform: scale(0.98);
+  transition: box-shadow var(--dur-fast) var(--ease-standard),
+              transform var(--dur-fast) var(--ease-standard);
+}
+
+.ds-surface-card-draggable.card-lifted {
+  transform: scale(1);
 }
 
 .ds-surface-elevated {
@@ -1281,11 +1326,6 @@ input[type="number"] {
 .ls-console-line {
   white-space: pre-wrap;
   word-break: break-word;
-}
-
-.ls-drag-placeholder {
-  width: 12px;
-  height: 12px;
 }
 
 .ls-provider-budget-chart {

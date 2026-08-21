@@ -19,6 +19,9 @@ public sealed class PriceSourcesAdminTests
     {
         var ctx = new Bunit.BunitContext();
         ctx.Services.AddSingleton(new PriceSourceStore(client));
+        // reorderFlip.capture/play are a cosmetic drag-settle animation - Loose so a drag test doesn't
+        // have to stub out every rect/transition call to reach the reorder it's actually asserting on.
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
         return ctx;
     }
 
@@ -252,21 +255,20 @@ public sealed class PriceSourcesAdminTests
     }
 
     [Fact]
-    public void SingleSource_HasNoReorderControls()
+    public void SingleSource_HasNoGrabHandle()
     {
         using var ctx = NewContext(new FakeClient(
             new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10)));
 
         var cut = ctx.Render<PriceSourcesAdmin>();
 
-        // Nothing to reorder against with one source - showing arrows that can never do anything is worse
-        // than not showing them.
-        cut.Markup.Should().NotContain("Rank higher");
-        cut.Markup.Should().NotContain("Rank lower");
+        // Nothing to reorder against with one source - showing a handle that can never do anything is worse
+        // than not showing it.
+        cut.Markup.Should().NotContain("Drag to reorder");
     }
 
     [Fact]
-    public void TwoSources_TopRowsUpButtonIsRemoved_BottomRowsDownButtonIsRemoved()
+    public void TwoSources_EachCardHasAGrabHandle()
     {
         var client = new FakeClient(
             new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10),
@@ -275,17 +277,14 @@ public sealed class PriceSourcesAdminTests
 
         var cut = ctx.Render<PriceSourcesAdmin>();
 
-        var upButtons = cut.FindAll("button").Where(b => b.GetAttribute("title") == "Rank higher").ToList();
-        var downButtons = cut.FindAll("button").Where(b => b.GetAttribute("title") == "Rank lower").ToList();
-        // litellm is first (higher rank): no Up button at all. openrouter is last: no Down button at all.
-        Assert.Single(upButtons);
-        Assert.Single(downButtons);
-        Assert.False(upButtons[0].HasAttribute("disabled"));
-        Assert.False(downButtons[0].HasAttribute("disabled"));
+        // The grab handle is the only reorder affordance (DESIGN.md §5.3) - no per-row buttons at all.
+        cut.FindAll("[title='Drag to reorder. Priority: higher wins a contested price.']").Should().HaveCount(2);
+        cut.FindAll("button").Should().NotContain(b =>
+            b.GetAttribute("title") == "Rank higher" || b.GetAttribute("title") == "Rank lower");
     }
 
     [Fact]
-    public void Clicking_move_down_on_the_top_source_swaps_the_order()
+    public void Dragging_the_top_card_onto_the_bottom_card_moves_it_to_last()
     {
         var client = new FakeClient(
             new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10),
@@ -293,28 +292,14 @@ public sealed class PriceSourcesAdminTests
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<PriceSourcesAdmin>();
-        cut.FindAll("button").First(b => b.GetAttribute("title") == "Rank lower").Click();
+        Card(cut, 0).PointerDown(new PointerEventArgs { Button = 0 });
+        Card(cut, 1).PointerEnter(new PointerEventArgs { Buttons = 1 });
+        cut.Find("div.ds-card-stack").PointerUp();
 
         client.ReorderCount.Should().Be(1);
         client.LastReorderRequest.Should().Equal("openrouter", "litellm");
         // The panel re-renders from the fake's own reordering, so openrouter should now read #1.
         cut.Markup.Should().Contain("#1");
-    }
-
-    [Fact]
-    public void Clicking_move_up_on_the_bottom_source_swaps_the_order()
-    {
-        var client = new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10),
-            new PriceSourceStatus("openrouter", Enabled: true, PriorityScore: -10, PriceCount: 5));
-        using var ctx = NewContext(client);
-
-        var cut = ctx.Render<PriceSourcesAdmin>();
-        // The bottom row's Up button, not the top row's (which is disabled) - both share the same title.
-        cut.FindAll("button").Last(b => b.GetAttribute("title") == "Rank higher").Click();
-
-        client.ReorderCount.Should().Be(1);
-        client.LastReorderRequest.Should().Equal("openrouter", "litellm");
     }
 
     [Fact]
@@ -416,7 +401,9 @@ public sealed class PriceSourcesAdminTests
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<PriceSourcesAdmin>();
-        cut.FindAll("button").First(b => b.GetAttribute("title") == "Rank lower").Click();
+        Card(cut, 0).PointerDown(new PointerEventArgs { Button = 0 });
+        Card(cut, 1).PointerEnter(new PointerEventArgs { Buttons = 1 });
+        cut.Find("div.ds-card-stack").PointerUp();
 
         cut.Markup.Should().Contain("must name every existing price source");
     }
