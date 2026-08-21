@@ -90,10 +90,11 @@ public sealed class PriceSourceAdminGrpcService : Contract.PriceSourceAdminServi
                 "The submitted order must name every existing price source exactly once."));
         }
 
-        // Re-run ingestion under the new order immediately, so contested cells resolve to the newly
-        // preferred source now rather than at the next scheduled poll (D6's reasoning, applied to rank
-        // instead of the enabled flag).
-        return await RunCycleAndBuildResponseAsync(context.CancellationToken).ConfigureAwait(false);
+        // Re-resolve contested cells under the new order immediately, from prices already in storage - no
+        // live pull. This is the panel's only reorder side effect now: "Pull Now" is the sole action that
+        // reaches out to a source over the network.
+        var summary = await _ingestionService.RecomputeWinnersAsync(context.CancellationToken).ConfigureAwait(false);
+        return BuildResponse(summary);
     }
 
     /// <summary>
@@ -104,13 +105,22 @@ public sealed class PriceSourceAdminGrpcService : Contract.PriceSourceAdminServi
         CancellationToken cancellationToken)
     {
         var summary = await _ingestionService.RunCycleAsync(cancellationToken).ConfigureAwait(false);
+        return BuildResponse(summary);
+    }
 
+    /// <summary>
+    /// Assembles a <see cref="Contract.RefreshPriceSourcesResponse"/> from an ingestion or recompute summary,
+    /// including the fresh price count, per-source outcomes (empty for a recompute - no fetch occurred), the
+    /// current schedule, and the current source list.
+    /// </summary>
+    private Contract.RefreshPriceSourcesResponse BuildResponse(IngestionCycleSummary summary)
+    {
         var response = new Contract.RefreshPriceSourcesResponse
         {
             FreshPriceCount = summary.FreshPriceCount,
 
-            // Built after the cycle, so it carries the anchor the cycle just set: the caller's countdown
-            // restarts off this response rather than needing a follow-up List.
+            // Built after the operation, so it carries whatever anchor is current: a live pull's own new
+            // anchor, or - for a recompute, which never moves the anchor - the one already in place.
             Schedule = BuildSchedule(),
         };
 

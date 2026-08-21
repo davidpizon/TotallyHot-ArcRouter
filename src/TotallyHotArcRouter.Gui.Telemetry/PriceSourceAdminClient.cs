@@ -202,8 +202,9 @@ public sealed class PriceSourceAdminClient : IPriceSourceAdminClient, IDisposabl
         }
     }
 
-    // ReorderPriceSources returns the same wire shape as RefreshPriceSources - it triggers the same
-    // ingestion cycle - so both map through here.
+    // ReorderPriceSources returns the same wire shape as RefreshPriceSources because the client needs the
+    // same information either way (updated sources, schedule, fresh count) - not because the same cycle ran.
+    // A reorder recomputes from storage rather than pulling, so its Outcomes is always empty.
     /// <summary>Converts a gRPC-contract refresh/reorder response into the client's <see cref="PriceRefreshResult"/>.</summary>
     private static PriceRefreshResult MapRefreshResult(Contract.RefreshPriceSourcesResponse response)
     {

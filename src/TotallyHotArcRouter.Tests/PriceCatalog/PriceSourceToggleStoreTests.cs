@@ -185,6 +185,25 @@ public class PriceSourceToggleStoreTests
     }
 
     [Fact]
+    public void Reorder_AloneDoesNotRecomputeServedPrices()
+    {
+        // Reorder only owns the rank; re-resolving contested cells under the new order is the caller's job
+        // (the gRPC service, the MCP tool) via PriceCatalogIngestionService.RecomputeWinnersAsync - this store
+        // must not call it itself.
+        using var temp = new TempDatabase();
+        temp.SeedExtraSource("high", enabled: true, priorityScore: 10);
+        var repository = temp.CreateRepository();
+        using var store = temp.CreateToggleStore(repository);
+        repository.UpsertPrices("high", 10, [new TotallyHot.ArcRouter.PriceCatalog.Sources.NormalizedPrice("gpt-4o", "openai", 2.50m, 10.00m, null, null, null)], DateTimeOffset.UtcNow);
+        repository.UpsertPrices(PriceCatalogOptions.LiteLlmSourceName, 0, [new TotallyHot.ArcRouter.PriceCatalog.Sources.NormalizedPrice("gpt-4o", "openai", 999m, 999m, null, null, null)], DateTimeOffset.UtcNow);
+
+        Assert.True(store.Reorder([PriceCatalogOptions.LiteLlmSourceName, "high", PriceCatalogOptions.OpenRouterSourceName]));
+
+        // Still "high"'s number - the reorder itself did not touch model_prices.
+        Assert.Equal(2.50m, repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24))!.InputPerMillionTokens);
+    }
+
+    [Fact]
     public void Reorder_InvalidSet_ReturnsFalseAndDoesNotRaiseChanged()
     {
         using var temp = new TempDatabase();

@@ -1,5 +1,6 @@
 using TotallyHot.ArcRouter.Mcp.Tools;
 using TotallyHot.ArcRouter.PriceCatalog;
+using TotallyHot.ArcRouter.PriceCatalog.Sources;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tests.PriceCatalog;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -52,17 +53,51 @@ public sealed class PriceSourceMcpToolsTests
     }
 
     [Fact]
-    public void ReorderPriceSources_InvalidNameSet_ReturnsError()
+    public async Task ReorderPriceSourcesAsync_InvalidNameSet_ReturnsError()
     {
         using var temp = new TempDatabase();
         var tools = CreateTools(temp, temp.CreateToggleStore());
 
-        var result = tools.ReorderPriceSources(["not-a-real-source"]);
+        var result = await tools.ReorderPriceSourcesAsync(["not-a-real-source"], TestContext.Current.CancellationToken);
 
         var errorProperty = result.GetType().GetProperty("error");
         Assert.NotNull(errorProperty);
         Assert.NotNull(errorProperty!.GetValue(result));
     }
+
+    [Fact]
+    public async Task ReorderPriceSourcesAsync_ValidNameSet_RecomputesContestedCellImmediately()
+    {
+        // The whole point of wiring recompute into the MCP tool: an MCP-driven reorder must flip a
+        // contested cell's winner using only stored observations, with no fetch in between - parity with
+        // the Governance panel's drag-to-reorder.
+        using var temp = new TempDatabase();
+        temp.SeedExtraSource("openrouter", enabled: true, priorityScore: 5);
+        var repository = temp.CreateRepository();
+        var toggleStore = temp.CreateToggleStore(repository);
+
+        // litellm (priority 0, seeded default) starts behind openrouter (priority 5).
+        repository.UpsertPrices("litellm", 0, [Price("gpt-4o", "openai", 2.00m, 8.00m)], DateTimeOffset.UtcNow);
+        repository.UpsertPrices("openrouter", 5, [Price("gpt-4o", "openai", 3.00m, 12.00m)], DateTimeOffset.UtcNow);
+
+        Assert.Equal(3.00m, repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24))!.InputPerMillionTokens);
+
+        var registry = Mock.Of<IPriceSourceRegistry>();
+        var ingestionService = new PriceCatalogIngestionService(registry, repository, toggleStore, NullLogger<PriceCatalogIngestionService>.Instance);
+        var tools = new PriceSourceMcpTools(toggleStore, ingestionService, Mock.Of<IModelPriceLookup>());
+
+        var result = await tools.ReorderPriceSourcesAsync(["litellm", "openrouter"], TestContext.Current.CancellationToken);
+
+        var successProperty = result.GetType().GetProperty("success");
+        Assert.NotNull(successProperty);
+        Assert.Equal(true, successProperty!.GetValue(result));
+        // litellm now outranks openrouter, and its own stored observation was never re-fetched - this
+        // value can only have come from model_price_observations.
+        Assert.Equal(2.00m, repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24))!.InputPerMillionTokens);
+    }
+
+    private static NormalizedPrice Price(string model, string provider, decimal input, decimal output) =>
+        new(model, provider, input, output, null, null, null);
 
     [Fact]
     public async Task RefreshPriceSourcesAsync_NoEnabledSources_ReturnsSummaryWithNoOutcomes()

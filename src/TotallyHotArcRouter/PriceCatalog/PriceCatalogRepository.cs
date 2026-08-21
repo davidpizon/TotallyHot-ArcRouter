@@ -115,18 +115,15 @@ public sealed class PriceCatalogRepository
     }
 
     /// <summary>
-    /// Upserts a batch of normalized prices from one source in a single transaction. The conflict target
-    /// is the <c>(model, provider)</c> cell (D7). Whether a given row actually overwrites an existing one is
-    /// gated by <c>priority_score</c>: the incoming source's rank must be greater than or equal to the
-    /// incumbent's, or the write is silently skipped rather than clobbering a better-ranked source's number
-    /// based on nothing but poll timing. Missing providers, models, and the source itself are created on
-    /// demand.
+    /// Upserts a batch of normalized prices from one source into that source's own rows in
+    /// <c>model_price_observations</c>, in a single transaction, then calls <see cref="RecomputeWinners"/> so
+    /// <c>model_prices</c> - the served winner per cell - reflects this batch immediately. The observation
+    /// write itself is unconditional; there is no priority gate here, since arbitrating which source's price
+    /// is actually served for a contested <c>(model, provider)</c> cell is <see cref="RecomputeWinners"/>'s
+    /// job, over every source's stored observation, not just this batch's. Missing providers, models, and the
+    /// source itself are created on demand.
     /// </summary>
-    /// <returns>
-    /// The number of price rows actually written - i.e. that passed the priority gate - not the number
-    /// attempted. With one enabled source this is always every row in <paramref name="prices"/>: a source
-    /// compared against its own previous row always satisfies "greater than or equal".
-    /// </returns>
+    /// <returns>The number of observation rows written, i.e. <c>prices.Count</c> on success.</returns>
     public int UpsertPrices(
         string sourceName,
         int priorityScore,
@@ -160,14 +157,22 @@ public sealed class PriceCatalogRepository
             var modelId = GetOrCreateModelId(connection, transaction, modelIdentifier);
 
             // The alias records the source's own name against whatever internal model id it resolved to (the
-            // configured ModelName on a hit, the raw key on a miss). Written unconditionally, even when the
-            // priority gate below rejects the price row - a losing source's naming of a model is still a fact
-            // worth keeping, and the alias table has no priority concept of its own.
+            // configured ModelName on a hit, the raw key on a miss). Written unconditionally, same as the
+            // observation row itself now - neither has a priority concept of its own.
             UpsertAlias(connection, transaction, sourceId, modelId, price.ModelIdentifier);
-            written += UpsertPriceRow(connection, transaction, modelId, providerId, sourceId, price, timestamp, isApproximate);
+            UpsertPriceRow(connection, transaction, modelId, providerId, sourceId, price, timestamp, isApproximate);
+            written++;
         }
 
         transaction.Commit();
+
+        // Recomputed on its own connection, after commit: RecomputeWinners re-reads model_price_observations,
+        // so it must see this batch's writes as committed rows, not as an in-flight transaction it can't see.
+        if (written > 0)
+        {
+            RecomputeWinners();
+        }
+
         return written;
     }
 
@@ -698,16 +703,12 @@ public sealed class PriceCatalogRepository
         command.ExecuteNonQuery();
     }
 
-    // Returns 1 when the row was inserted or the priority gate let it overwrite the incumbent, 0 when a
-    // conflicting row exists and the gate rejected the write (SQLite's ON CONFLICT ... WHERE leaves the row
-    // untouched rather than erroring, so a rejection is silent unless the caller checks affected rows - which
-    // is exactly what the return value here is for).
     /// <summary>
-    /// Inserts or updates the price row for (model, provider), gated by source priority: a conflicting
-    /// existing row is only overwritten when the incoming source's priority score is greater than or equal
-    /// to the incumbent's. Returns 1 if the row was written, 0 if the priority gate rejected the write.
+    /// Inserts or updates one source's own observation row for (model, provider) in
+    /// <c>model_price_observations</c>, unconditionally - there is no priority gate here. Contested-cell
+    /// arbitration happens later, in <see cref="RecomputeWinners"/>.
     /// </summary>
-    private static int UpsertPriceRow(
+    private static void UpsertPriceRow(
         SqliteConnection connection,
         SqliteTransaction transaction,
         int modelId,
@@ -719,17 +720,8 @@ public sealed class PriceCatalogRepository
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        // The WHERE clause is the priority gate: it compares the incoming row's source rank against the
-        // CURRENT incumbent's (model_prices.aggregator_source_id, read before this statement's own update -
-        // SQLite evaluates ON CONFLICT's WHERE against the pre-update row), both resolved by a subquery into
-        // aggregator_sources since priority_score lives there, not on model_prices itself. ">=" rather than
-        // ">" deliberately: equal ranks must still let a source refresh its own previous row, which is the
-        // ordinary "no other source involved" case this whole gate has to keep working correctly.
-        //
-        // On a fresh INSERT (no conflict) this WHERE is never evaluated - there is no "incumbent" to compare
-        // against - so a first-ever row for a cell is always written regardless of rank.
         command.CommandText = """
-            INSERT INTO model_prices (
+            INSERT INTO model_price_observations (
                 model_id, provider_id, aggregator_source_id,
                 standard_input_price, standard_output_price, cached_input_price, cache_write_input_price,
                 batch_input_price, batch_output_price, last_updated_utc, is_approximate)
@@ -737,8 +729,7 @@ public sealed class PriceCatalogRepository
                 $model, $provider, $source,
                 $stdIn, $stdOut, $cachedIn, $cacheWrite,
                 $batchIn, $batchOut, $updated, $approximate)
-            ON CONFLICT(model_id, provider_id) DO UPDATE SET
-                aggregator_source_id    = excluded.aggregator_source_id,
+            ON CONFLICT(model_id, provider_id, aggregator_source_id) DO UPDATE SET
                 standard_input_price    = excluded.standard_input_price,
                 standard_output_price   = excluded.standard_output_price,
                 cached_input_price      = excluded.cached_input_price,
@@ -746,9 +737,7 @@ public sealed class PriceCatalogRepository
                 batch_input_price       = excluded.batch_input_price,
                 batch_output_price      = excluded.batch_output_price,
                 last_updated_utc        = excluded.last_updated_utc,
-                is_approximate          = excluded.is_approximate
-            WHERE (SELECT priority_score FROM aggregator_sources WHERE source_id = excluded.aggregator_source_id)
-                  >= (SELECT priority_score FROM aggregator_sources WHERE source_id = model_prices.aggregator_source_id);
+                is_approximate          = excluded.is_approximate;
             """;
         command.Parameters.AddWithValue("$model", modelId);
         command.Parameters.AddWithValue("$provider", providerId);
@@ -761,6 +750,62 @@ public sealed class PriceCatalogRepository
         command.Parameters.AddWithValue("$batchOut", (object?)price.BatchOutputPrice ?? DBNull.Value);
         command.Parameters.AddWithValue("$updated", timestamp);
         command.Parameters.AddWithValue("$approximate", isApproximate ? 1 : 0);
+        command.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Re-derives <c>model_prices</c> - the served winner per <c>(model, provider)</c> cell - from every
+    /// enabled source's last-known observation in <c>model_price_observations</c> and the sources' current
+    /// <c>priority_score</c> ranking. Ties (equal priority) favor the most recently observed row. Performs
+    /// no network I/O: unlike <see cref="UpsertPriceRow"/>'s old incremental priority gate, which only ever
+    /// compared an incoming row against the current incumbent, this is a full re-derivation over everything
+    /// currently on hand - which is what a reorder needs, since the newly top-ranked source's price was not
+    /// necessarily the incoming row in any recent upsert.
+    /// </summary>
+    /// <remarks>
+    /// A disabled source is excluded via the same <c>aggregator_sources.enabled</c> join <see cref="ReadPrice"/>
+    /// already applies (D6): its observations never win, no matter their rank or recency. A cell with no
+    /// observation from any currently enabled source is left untouched in <c>model_prices</c> - it is already
+    /// excluded from reads by that same join, so there is nothing to clear.
+    /// </remarks>
+    /// <returns>
+    /// The number of <c>(model, provider)</c> cells recomputed, i.e. that have at least one observation from
+    /// a currently enabled source.
+    /// </returns>
+    public int RecomputeWinners()
+    {
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            WITH ranked AS (
+                SELECT o.*, s.priority_score,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY o.model_id, o.provider_id
+                           ORDER BY s.priority_score DESC, o.last_updated_utc DESC
+                       ) AS rn
+                FROM model_price_observations o
+                JOIN aggregator_sources s ON s.source_id = o.aggregator_source_id
+                WHERE s.enabled = 1
+            )
+            INSERT INTO model_prices (
+                model_id, provider_id, aggregator_source_id,
+                standard_input_price, standard_output_price, cached_input_price, cache_write_input_price,
+                batch_input_price, batch_output_price, last_updated_utc, is_approximate)
+            SELECT model_id, provider_id, aggregator_source_id,
+                   standard_input_price, standard_output_price, cached_input_price, cache_write_input_price,
+                   batch_input_price, batch_output_price, last_updated_utc, is_approximate
+            FROM ranked WHERE rn = 1
+            ON CONFLICT(model_id, provider_id) DO UPDATE SET
+                aggregator_source_id    = excluded.aggregator_source_id,
+                standard_input_price    = excluded.standard_input_price,
+                standard_output_price   = excluded.standard_output_price,
+                cached_input_price      = excluded.cached_input_price,
+                cache_write_input_price = excluded.cache_write_input_price,
+                batch_input_price       = excluded.batch_input_price,
+                batch_output_price      = excluded.batch_output_price,
+                last_updated_utc        = excluded.last_updated_utc,
+                is_approximate          = excluded.is_approximate;
+            """;
         return command.ExecuteNonQuery();
     }
 

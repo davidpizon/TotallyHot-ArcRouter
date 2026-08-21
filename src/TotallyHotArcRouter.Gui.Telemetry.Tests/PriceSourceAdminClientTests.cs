@@ -278,6 +278,27 @@ public class PriceSourceAdminClientTests
     }
 
     [Fact]
+    public async Task ReorderAsync_emptyOutcomes_mapsToAnEmptyOutcomeList()
+    {
+        // A real reorder recomputes from storage rather than fetching, so the server's Outcomes is always
+        // empty (no fetch occurred) - the client must map that faithfully rather than choking on it.
+        var stub = new StubClient
+        {
+            ReorderResponse = new Contract.RefreshPriceSourcesResponse
+            {
+                FreshPriceCount = 2505,
+                Sources = { Source("litellm", enabled: true, rank: 1, prices: 2505) },
+            },
+        };
+        using var client = new PriceSourceAdminClient(stub);
+
+        var result = await client.ReorderAsync(["litellm", "openrouter"], TestContext.Current.CancellationToken);
+
+        result.Outcomes.Should().BeEmpty();
+        result.FreshPriceCount.Should().Be(2505);
+    }
+
+    [Fact]
     public async Task ReorderAsync_rejection_isSurfacedWithTheServersDetail()
     {
         var stub = new StubClient

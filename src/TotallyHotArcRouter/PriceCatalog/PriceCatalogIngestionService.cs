@@ -88,13 +88,18 @@ public sealed class PriceCatalogIngestionService
     /// <see cref="PriceCatalogOptions.PollIntervalHours"/>.
     /// </summary>
     /// <remarks>
-    /// Every cycle re-anchors this, whichever caller ran it - the poll loop, the startup check, or the
-    /// Governance panel's Pull Now / toggle / reorder. That is what makes "any cycle resets the clock" true
-    /// of the poll loop and of the panel's countdown alike, from one fact rather than two that could drift.
+    /// Every live-pull cycle re-anchors this, whichever caller ran it - the poll loop, the startup check, or
+    /// the Governance panel's Pull Now. That is what makes "any pull resets the clock" true of the poll loop
+    /// and of the panel's countdown alike, from one fact rather than two that could drift.
     /// <para>
     /// It moves on <em>completion</em>, not success: a cycle in which every source failed still consumed the
     /// interval and still pushes the next poll out by a full one. This is why the countdown cannot be derived
     /// from any source's <c>last_updated_utc</c>, which only moves on a successful write.
+    /// </para>
+    /// <para>
+    /// A reorder does <em>not</em> move this: <see cref="RecomputeWinnersAsync"/> re-resolves contested cells
+    /// from prices already in storage without any network pull, so it hasn't consumed any of the poll
+    /// interval and the countdown to the next real pull should carry on undisturbed.
     /// </para>
     /// </remarks>
     public DateTimeOffset ScheduleAnchorUtc =>
@@ -118,6 +123,34 @@ public sealed class PriceCatalogIngestionService
             // so a cycle that threw still counts: it consumed the interval either way, and an anchor that
             // only moved on success would leave a persistently failing feed being retried in a tight loop.
             Interlocked.Exchange(ref _scheduleAnchorTicks, DateTimeOffset.UtcNow.UtcTicks);
+            _cycleGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Re-resolves every contested <c>(model, provider)</c> cell from prices already in storage, under the
+    /// sources' current priority order - no network I/O, unlike <see cref="RunCycleAsync"/>. Backs the
+    /// Governance panel's drag-to-reorder and the equivalent MCP tool: reordering must make the new priority
+    /// actually take effect immediately, without waiting on - or forcing - a live pull. Shares
+    /// <see cref="RunCycleAsync"/>'s single-flight gate, since both write <c>model_prices</c>, but does
+    /// <em>not</em> re-anchor <see cref="ScheduleAnchorUtc"/>: it consumed none of the poll interval.
+    /// </summary>
+    public async Task<IngestionCycleSummary> RecomputeWinnersAsync(CancellationToken cancellationToken)
+    {
+        await _cycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var changed = _repository.RecomputeWinners();
+            if (changed > 0)
+            {
+                _priceCatalog?.Invalidate();
+            }
+
+            var freshPriceCount = _repository.CountFreshPrices(FreshnessFloor);
+            return new IngestionCycleSummary(freshPriceCount, Outcomes: []);
+        }
+        finally
+        {
             _cycleGate.Release();
         }
     }

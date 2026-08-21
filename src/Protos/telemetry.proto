@@ -52,12 +52,13 @@ service PriceSourceAdminService {
   // arrives mid-cycle waits for that cycle rather than starting a second one.
   rpc RefreshPriceSources (RefreshPriceSourcesRequest) returns (RefreshPriceSourcesResponse);
 
-  // Rewrites every source's rank from the submitted order (highest priority first) and then runs an
-  // ingestion cycle before returning, so contested cells re-resolve under the new order immediately rather
-  // than waiting for the next scheduled poll - the same reasoning D6 applies to disabling a source. The
-  // request must name every existing source exactly once; a partial list is rejected outright rather than
-  // best-effort applied. Returns the same shape as RefreshPriceSources for that reason - it triggers the
-  // same cycle and the caller needs the same information from it.
+  // Rewrites every source's rank from the submitted order (highest priority first) and then re-resolves
+  // every contested cell from prices already in storage under the new order, so the new priority takes
+  // effect immediately - without waiting for, or triggering, a live pull from any source. The request must
+  // name every existing source exactly once; a partial list is rejected outright rather than best-effort
+  // applied. Returns the same shape as RefreshPriceSources because the caller needs the same information
+  // (updated sources, schedule, fresh count) - not because a fetch cycle ran; outcomes is always empty here,
+  // since no source was fetched.
   rpc ReorderPriceSources (ReorderPriceSourcesRequest) returns (RefreshPriceSourcesResponse);
 }
 

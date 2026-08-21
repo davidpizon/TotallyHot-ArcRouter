@@ -51,16 +51,25 @@ public sealed class PriceSourceMcpTools
             : new { error = $"Price source '{sourceName}' not found.", type = "NotFound" };
     }
 
-    /// <summary>Rewrites every price source's priority rank from a full name order.</summary>
+    /// <summary>
+    /// Rewrites every price source's priority rank from a full name order, then re-resolves every contested
+    /// cell from prices already in storage under the new order - no live pull. Mirrors the Governance panel's
+    /// drag-to-reorder so an MCP-driven reorder takes effect just as immediately.
+    /// </summary>
     [McpServerTool(Name = "reorder_price_sources")]
     [Description("Rewrites every price source's priority rank from the given name order (highest priority first). The name set must match every existing source exactly once.")]
-    public object ReorderPriceSources(
-        [Description("Every source's registry name, in the desired priority order.")] IReadOnlyList<string> namesInPriorityOrder)
+    public async Task<object> ReorderPriceSourcesAsync(
+        [Description("Every source's registry name, in the desired priority order.")] IReadOnlyList<string> namesInPriorityOrder,
+        CancellationToken cancellationToken)
     {
         var applied = _toggleStore.Reorder(namesInPriorityOrder);
-        return applied
-            ? new { success = true }
-            : new { error = "The name set does not match every existing price source exactly once.", type = "InvalidRequest" };
+        if (!applied)
+        {
+            return new { error = "The name set does not match every existing price source exactly once.", type = "InvalidRequest" };
+        }
+
+        await _ingestionService.RecomputeWinnersAsync(cancellationToken).ConfigureAwait(false);
+        return new { success = true };
     }
 
     /// <summary>Runs one price-catalog ingestion cycle now.</summary>

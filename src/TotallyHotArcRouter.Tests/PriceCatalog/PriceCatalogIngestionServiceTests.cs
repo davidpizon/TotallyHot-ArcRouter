@@ -249,6 +249,56 @@ public class PriceCatalogIngestionServiceTests
     }
 
     [Fact]
+    public async Task RecomputeWinnersAsync_NeverCallsAnySourceFetch()
+    {
+        // The literal "no live pull" contract: RecomputeWinnersAsync never touches the registry, so a source
+        // whose fetch always throws must never get the chance to.
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+        using var toggleStore = temp.CreateToggleStore(repository);
+        var service = Build(new FakeRegistry(new ExplodingSource("litellm")), repository, toggleStore);
+
+        await service.RecomputeWinnersAsync(TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task RecomputeWinnersAsync_FlipsContestedCellFromStorage_WithNoFetch()
+    {
+        using var temp = new TempDatabase();
+        temp.SeedExtraSource("high", enabled: true, priorityScore: 10);
+        var repository = temp.CreateRepository();
+        using var toggleStore = temp.CreateToggleStore(repository);
+        repository.UpsertPrices("high", 10, [new NormalizedPrice("gpt-4o", "openai", 2.50m, 10.00m, null, null, null)], DateTimeOffset.UtcNow);
+        repository.UpsertPrices(PriceCatalogOptions.LiteLlmSourceName, 0, [new NormalizedPrice("gpt-4o", "openai", 999m, 999m, null, null, null)], DateTimeOffset.UtcNow);
+        Assert.Equal(2.50m, repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24))!.InputPerMillionTokens);
+
+        Assert.True(toggleStore.Reorder([PriceCatalogOptions.LiteLlmSourceName, "high", PriceCatalogOptions.OpenRouterSourceName]));
+        var service = Build(new FakeRegistry(new ExplodingSource("litellm")), repository, toggleStore);
+
+        var summary = await service.RecomputeWinnersAsync(TestContext.Current.CancellationToken);
+
+        Assert.Empty(summary.Outcomes); // no fetch occurred, so there is nothing to report per-source
+        Assert.Equal(999m, repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24))!.InputPerMillionTokens);
+    }
+
+    [Fact]
+    public async Task RecomputeWinnersAsync_DoesNotReanchorTheSchedule()
+    {
+        // Only a live pull consumes the poll interval - a recompute reads storage, so the countdown to the
+        // next real pull must carry on undisturbed.
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+        using var toggleStore = temp.CreateToggleStore(repository);
+        var service = Build(new FakeRegistry(), repository, toggleStore);
+        var seeded = service.ScheduleAnchorUtc;
+        await Task.Delay(10, TestContext.Current.CancellationToken);
+
+        await service.RecomputeWinnersAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(seeded, service.ScheduleAnchorUtc);
+    }
+
+    [Fact]
     public async Task RunCycleAsync_ConcurrentCallers_AreSerialized()
     {
         using var temp = new TempDatabase();
@@ -361,6 +411,19 @@ public class PriceCatalogIngestionServiceTests
 
         public Task<IReadOnlyList<NormalizedPrice>> FetchAsync(CancellationToken cancellationToken) =>
             throw new HttpRequestException("simulated source outage");
+    }
+
+    /// <summary>
+    /// Fails the test outright if its fetch is ever invoked - stronger than <see cref="ThrowingSource"/>,
+    /// which models an ordinary source failure a cycle is expected to tolerate. Used to prove a code path
+    /// makes no live pull at all, not merely that it survives one failing.
+    /// </summary>
+    private sealed class ExplodingSource(string name) : IPriceSourceClient
+    {
+        public string Name => name;
+
+        public Task<IReadOnlyList<NormalizedPrice>> FetchAsync(CancellationToken cancellationToken) =>
+            throw new InvalidOperationException($"{name}.FetchAsync was called - this path must never make a live pull.");
     }
 
     /// <summary>
