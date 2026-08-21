@@ -325,10 +325,10 @@ the header, dismissal behavior, close API, and dynamic scrolling identical regar
   `p-3` (`0.75rem` all sides). **Define it in exactly one place** (`<main>` itself) and let every tab
   inherit it; do not give an individual pane its own separate outer margin. This was inflated to a
   percentage-based value at one point specifically to give `PriceSourcesAdmin`'s lifted card room to
-  grow (§5.4) — an app-wide layout change made to solve a problem local to one card in one tab. It was
-  reverted once the lift stopped growing the card's box at all, which is the current, permanent state
-  of that effect — see §5.4 for why "grow the box, then make the container big enough to tolerate it"
-  was the wrong direction for that problem in the first place.
+  grow — an app-wide layout change made to solve a problem local to one card in one tab — and reverted
+  once that card was detached from the layout instead (§5.4, §5.5). Note that this 12px *is* what
+  `reorderFlip._place` ends up measuring as the lifted card's grow budget, so changing it changes how
+  much that card grows; it measures rather than assumes, so nothing breaks, but the two are linked.
 
 ### 5.1 Available Tailwind Spacing Utilities
 
@@ -390,27 +390,54 @@ click-to-move control (chevrons/arrows, "move up"/"move down" buttons).** `Price
 Price Data Sources list is the canonical example: each card in `.ds-card-stack` gets a
 `grip-vertical` icon (12–14px, `text-slate-600`) at its leading edge as the sole reorder affordance,
 titled `"Drag to reorder..."`. There is no separate arrow-button path — the handle isn't a label next
-to a different control, it *is* the control, made draggable by `@onpointerdown`/`@onpointerenter` on
-the card itself (see the remarks below).
+to a different control, it *is* the control, made draggable by `@onpointerdown` on the card itself
+(see the remarks below).
 
 - **Pointer events, not HTML5 drag-and-drop.** WinUI's WebView2 — the host `BlazorWebView` uses on
   Windows — never delivers in-page `dragstart`/`dragover` events (`microsoft-ui-xaml#10576`), so a
   `draggable="true"` card is inert in this app. Reorder gestures are built on `pointerdown` /
-  `pointerenter` / `pointerup` instead, the same primitive `js/split-pane.js` already drags the
-  split-pane divider with.
-- **The dragged card is visually lifted** — `.card-lifted`: `box-shadow: 0 12px 28px -6px
-  rgba(0,0,0,.55)` + the `.ds-source-border-lifted` accent border-color, reserved for this state only
-  (§6). No transform — the card's box never changes size, lifted or resting, so every card stays a
-  uniform width and there's nothing for any container to contain except the box-shadow's own blur,
-  which `.ds-card-stack`'s `overflow-clip-margin` covers — see §5.4 for why every sizing-based version
-  of this effect was tried and reverted. Other cards reflow live under the pointer.
-- **The settle animates; the live reflow does not.** While the drag is in progress, cards reflowing
-  out of the dragged card's way happens instantly — any added lag there would make the drag feel
-  disconnected from the pointer. Once the card is dropped, the list's landing positions FLIP-animate
-  into place with `--ease-settle` rather than teleporting. See `MOTION.md` §6 "Reorder Settle" for the
-  full pattern and `js/reorder-flip.js` for the implementation; this is the one place in the app JS
-  reads layout to drive an animation, and it is not a general animation library — it stays scoped to
+  `pointermove` / `pointerup` instead, the same primitive `js/split-pane.js` already drags the
+  split-pane divider with. The move and up listeners live on `document`, not on the card or the list,
+  so a drag survives the pointer leaving the list and still ends wherever it is released.
+- **Each card sits in a slot.** `.ds-card-slot` is the in-flow layout unit — it carries the card-stack
+  gap, it carries `data-flip-key` for the settle, and it holds its row open at a measured height while
+  the card inside is detached. The card is what gets picked up; the slot is what stays put.
+- **The dragged card follows the cursor, and is detached to do it** — `.card-lifted`: `box-shadow:
+  0 12px 28px -12px rgba(0,0,0,.55)` + the `.ds-source-border-lifted` accent border-color, reserved for
+  this state only (§6). `js/reorder-flip.js` adds `.card-pinned`, which switches it to `position: fixed`
+  tracking the pointer on Y and grows it ~10px per side. It has to leave the flow to do that: the pane
+  around the list is a scroll container, and those always clip at their padding box, so an in-flow card
+  could never follow a cursor past it (§5.4). The grow is sized in **pixels from the measured rect**,
+  never as a percentage — see §5.5. **Y axis only**: these cards are full-width, so horizontal movement
+  would carry no meaning.
+- **A press becomes a drag only after it travels.** Below a 3px threshold a press is a click. This
+  matters because `pointerdown` on the enable/disable toggle bubbles up to the card — lifting on the
+  bare press would make every toggle click flicker.
+- **The rank is decided from the dragged card's own position, not from what's under the cursor.** JS
+  measures every slot once at drag start, then picks the rank whose accumulated offset is nearest the
+  card's top edge. This is the variable-height generalisation of the usual `round(y / rowHeight)` — our
+  cards differ in height (a failed-pull banner makes one taller), so there is no single row height to
+  divide by, and the real heights are accumulated instead.
+- **Both the shuffle and the drop animate.** Cards displaced by the drag glide into their new slots via
+  the FLIP pass rather than jumping, and on release the card settles into its slot instead of snapping
+  there. See `MOTION.md` §6 "Reorder Settle" and "Lift Detach". This is the one place in the app where
+  JS reads layout to drive an animation, and it is not a general animation library — it stays scoped to
   this one interaction.
+- **JS owns the card's position; Blazor owns the order.** Pointer tracking cannot round-trip through
+  interop — at 60–120 events per second the card visibly lags the cursor — so `js/reorder-flip.js`
+  moves the card frame to frame and calls back into the component (`DragStarted`, `MoveDraggedTo`,
+  `EndDrag`) only when the rank actually changes, a handful of times per drag. The JS never inserts,
+  removes, or reorders DOM nodes; it only reads rects and writes inline styles, so Blazor stays the
+  single owner of the tree.
+- **The detached state is rendered by Blazor *and* set by JS.** `.card-pinned` appears in the Razor
+  class expression and is added by `classList` in the same frame the drag starts. Both are required
+  and neither is redundant — see §5.5, which explains why a JS-only class is destroyed by the very
+  next render and what that costs.
+- **`EndDrag` fires after the release animation, not on `pointerup`.** It clears the drag state, and
+  that render drops `.card-pinned` — announcing it while the card is still settling puts the card back
+  in the flow mid-animation with viewport coordinates still on it, which is the §5.5 failure again.
+  The commit is therefore delayed by the settle (~200ms), which nothing perceives; the working order
+  stays on screen throughout regardless.
 - **Do not also offer a click-based reorder control alongside the handle.** A prior version of this
   list paired the handle with per-row up/down chevrons; they were removed rather than kept as a
   second affordance, because two controls for the same action on the same card invites them to drift
@@ -462,46 +489,131 @@ and reverted before landing on the one that stuck:
    what mattered, twice, at two different inset sizes. An app-wide layout change (every tab's content
    inset) also isn't a proportionate fix for a bug local to one card in one tab.
 
-**The actual fix removes the box growth entirely — no version of "grow, then make room for the
-growth" proved reliable.** `.card-lifted` no longer transforms at all; the lift is `box-shadow` + the
-`.ds-source-border-lifted` accent border-color only. `<main>`'s padding is back to the original
-`p-3` (§5) — the app-wide inset increase existed solely to accommodate a growth effect that no longer
-exists, so it was reverted along with it. `.ds-card-stack` keeps `overflow: clip;
-overflow-clip-margin: 24px`, sized to the box-shadow's own reach — the one thing here that still
-paints outside a card's box, on every window size, unconditionally.
+6. **Remove the growth entirely — `box-shadow` + border-color only, no transform at all.** Nothing
+   grows, so nothing can escape. Correct, and it shipped for a while, but it spends the whole visual
+   cue to buy containment.
+
+**Why five of those six were fighting the wrong element.** The clip chain from the card outward is:
+
+| # | Element | overflow | h-padding |
+|---|---|---|---|
+| 1 | `.ds-card-stack` | `clip` + 24px clip-margin | 0 |
+| 2 | **the pane — `PriceSourcesAdmin.razor:12`** | **`auto` — a scroll container** | **0 left**, 4px right |
+| 3 | `<main>` | `hidden` | 12px |
+| 4–7 | app shell / `#root` / `body` / `html` | `hidden` | 0 |
+
+Every attempt above adjusted layer 1 or layer 3. **Nothing ever touched layer 2, and layer 2 is a
+scroll container** — `overflow-y: auto` forces the used value of `overflow-x` to `auto` too, and a
+scroll container always clips at its padding box. `overflow-clip-margin` does not apply to `auto`, and
+its left padding is `0`. So the card's left edge was being sliced there every single time, no matter
+what happened above or below it. **An in-flow descendant of a scroller can never paint outside it.**
+That is a hard CSS constraint, not a tuning problem — which is why no margin anywhere ever fixed it,
+including the one in attempt 5 whose arithmetic checked out.
+
+**The actual fix takes the card out of the chain rather than widening anything in it.** `.card-pinned`
+switches the card to `position: fixed` — clipped by the viewport and nothing else — and only then
+grows it. `<main>` keeps its original `p-3`, and `.ds-card-stack` was eventually stripped of its
+`overflow` entirely (see the warning below). The full contract for detaching an element this way is
+**§5.5**, which is the sanctioned exception to this section's rule.
+
+> **`overflow: clip` does not behave like `overflow: hidden` here, and the difference bites.** `hidden`
+> only clips descendants whose containing block is inside it — and a fixed-position element's
+> containing block is the viewport, so it escapes. `clip` applies a paint-time clip to the whole
+> subtree regardless of containing block, so it **does** clip fixed descendants. `.ds-card-stack`
+> carried `overflow: clip` through several of the attempts above; it went unnoticed for as long as the
+> card was pinned over its own slot, always inside that box, and made the card vanish outright the
+> moment it started following the cursor out of it. If a container that hosts a detached element needs
+> containing, contain the effect, not the container.
 
 **What this means in practice:**
-- **If a box-growing effect keeps escaping containment despite the math checking out, stop trying to
-  contain the growth and remove it instead.** Three different containment strategies (flush clip,
-  clip-with-margin, clip-with-margin-plus-app-wide-inset) were tried against the same `scale(1.02)`
-  effect, and the last one *should* have worked by the numbers and still didn't hold up in practice.
-  At that point the growth itself — not the specific containment value — is the thing to change.
-  Box-shadow and border-color changes cost nothing to contain because they either don't grow the box
-  (border-color) or have a reach that's fixed and small regardless of what's going on with `transform`
-  (box-shadow) — prefer effects with that property over ones that grow the box, especially once a
-  growing effect has already needed more than one containment fix.
-- **Don't solve "the growth can escape" by making the growth disappear on the *element* (fix 4) if the
-  growth itself was the point.** Shrinking the resting state so growth never crosses `scale(1)` does
-  stop the escape, but it trades one bug for a different one — every element carrying that resting
-  shrink now renders at a size that depends on its container's width, which reads as inconsistent
-  across screens.
-- **An app-wide layout change (§5's shared `<main>` inset) is a proportionate fix only for an app-wide
-  problem.** Inflating every tab's content margin to solve one card's growth in one tab is a bigger
-  change than the bug warrants, and it has to be reverted in lockstep if the effect it was there for
-  is later removed — which is exactly what happened here. Prefer a fix scoped to where the problem
-  actually is.
+- **Enumerate the whole clip chain before adjusting anything in it.** Five fixes in a row adjusted a
+  container that was not the one clipping. The cheapest possible check — walk every ancestor and write
+  down its `overflow` and padding — would have found layer 2 immediately. Note especially that
+  Tailwind's `overflow-y-auto` *looks* like it only touches one axis but forces both to `auto`.
+- **A scroll container cannot be given breathing room.** If the thing that must not be clipped lives
+  inside a scroller, the only options are to not overflow, or to leave the flow (§5.5). There is no
+  third answer, and no amount of padding, `overflow-clip-margin`, or ancestor inset is one.
+- **Growth sized as a percentage of the element can always outrun a fixed containment budget.** Attempts
+  3 and 5 both died on this: `scale(1.02)` grows `0.01 × width` per side, so on a wide window it
+  exceeds any fixed pixel margin. If an effect must grow, size it in pixels **against a measured
+  budget** (§5.5), not as a percentage.
+- **Don't solve "the growth can escape" by making the growth depend on the container (attempt 4).**
+  Shrinking the resting state so growth never crosses `scale(1)` does stop the escape, but every
+  element carrying that resting shrink then renders at a size that varies with its container's width,
+  which reads as inconsistent sizing across screens.
+- **An app-wide layout change (attempt 5's shared `<main>` inset) is a proportionate fix only for an
+  app-wide problem.** Inflating every tab's content margin to solve one card in one tab is a bigger
+  change than the bug warrants, and it has to be reverted in lockstep with the effect it was added for.
 - **Reserve `overflow: clip` + `overflow-clip-margin` for effects with a reach that's fixed regardless
-  of window size** — a shadow's blur, a glow. It's not a substitute for not growing the box in the
-  first place when growing the box has already proven unreliable to contain.
-- **Tooltips and other floating UI stay exempt, but only because they already solve this
-  differently.** `.ls-tooltip` (`js/tooltips.js`) is a single body-level element repositioned via
-  `getBoundingClientRect()`/`window.innerWidth`/`window.innerHeight` math that clamps it inside the
-  viewport (§2 of `MOTION.md` — "floating never transforms") — it isn't exempt from the rule, it
-  satisfies it by a different mechanism (JS-computed clamping instead of CSS clipping) because a
-  tooltip's whole job is to render outside its trigger's own box.
-- **Clip at the narrowest container that actually owns the effect** — not an ancestor several levels
-  up, even `html,body,#root{overflow:hidden}` (§5). `.ds-card-stack` owns containment for every card
-  inside it so a future lift effect there doesn't reopen this bug from scratch.
+  of window size** — a shadow's blur, a glow. It is not a way to contain something that grows, and it
+  must never sit on an ancestor of a detached element (§5.5) since it clips fixed descendants too.
+
+### 5.5 Detached elements
+
+**The sanctioned exception to §5.4.** An element may render outside its parent container — and must
+then not be clipped by it — when it is *simulating existence outside the layout* rather than
+participating in it. Three qualify today: `.ls-tooltip`, the four modal `.overlay-backdrop`/
+`.overlay-panel` dialogs, and `PriceSourcesAdmin`'s lifted drag card. An ordinary hover or emphasis
+state does **not** qualify; it is still part of the layout and §5.4 applies to it in full.
+
+**To qualify, a detached element must:**
+
+- **Use `position: fixed`, never `absolute`.** A positioned ancestor re-traps an absolute element in
+  the clip chain. Fixed elements are clipped only by the viewport. Note this needs no portal or
+  reparenting — all three cases stay exactly where they are in the DOM, so Blazor's event wiring,
+  bubbling, and `@key` identity are untouched. (`.ls-tooltip` is body-level for its own reasons — it's
+  a singleton shared by every trigger — not because detaching required it.)
+- **Compute its geometry from `getBoundingClientRect()` and clamp against `window.innerWidth` /
+  `innerHeight`.** `tooltips.js` clamps its position this way; `reorderFlip._beginLift` clamps its
+  *grow* the same way. Never assume a budget — measure it, because the thing you'd be assuming is some
+  ancestor's padding, and that's exactly what §5.4's attempt 5 got wrong.
+- **Size any growth in pixels against that measured budget, never as a percentage.** Percentage growth
+  scales with the element and will outrun any fixed budget at some window size.
+- **Claim a documented z-index tier.** Current inventory, and nothing may be inserted without updating
+  this table:
+
+  | z-index | What | Note |
+  |---|---|---|
+  | `10` | `.card-lifted` | Was a local claim inside the stack; once pinned it is **app-wide**. Must stay under 50. |
+  | `50` | `.z-50` — all four modals | A drag can't start while a modal is open, but a modal opened another way must cover the card. |
+  | `100` | `.ls-tooltip`, `#blazor-error-ui` | Nothing sits above these. |
+
+- **Hold its old slot open, if it came out of a list.** A detached element leaves the flow, so whatever
+  it vacated collapses. `.ds-card-slot` exists for this: it stays in flow and takes an explicit height
+  while its card is pinned, so the list below doesn't jump on pickup.
+- **Release on every path that can end its detached state.** For the drag card there are seven (drop,
+  drop-that-was-a-click, `pointerleave`, OS `pointercancel`, a release the window never saw, a rejected
+  commit, disposal). Rather than calling `unpin` from each, `PriceSourcesAdmin` reconciles from the
+  rendered state in `OnAfterRenderAsync` — every one of those paths re-renders, so all of them
+  converge and none can be forgotten.
+
+**The invariant that keeps all of this working — and the two ways it will break.**
+
+1. **No ancestor may acquire `transform`, `filter`, `perspective`, `backdrop-filter`, `contain`, or
+   `will-change`.** Any one of those establishes a containing block for `position: fixed` descendants,
+   which silently pulls the element back into the clip chain. The failure mode is a subtly mis-placed
+   element, not an error.
+2. **No ancestor may acquire `overflow: clip`.** Unlike `hidden`, it clips fixed-position descendants
+   too (§5.4). The failure mode here is the element vanishing outright once it moves outside that
+   ancestor's box — which is exactly how it presented.
+
+**A detached element's class must be rendered by Blazor, not only added by JS.** Blazor rewrites an
+element's entire `class` attribute on any render that changes it, so a class only ever added via
+`classList` survives until the next render and no further. That is not a cosmetic loss: the inline
+`top`/`left` that make the detachment meaningful are *viewport* coordinates, so an element that falls
+back to `position: relative` is displaced by that full amount and thrown out of the layout. JS may add
+the class as well — `.card-pinned` is added from both sides, so the card detaches on the current frame
+rather than an interop round-trip later — but Blazor rendering it is what makes it stick.
+
+`.panel-enter` (`Dashboard.razor:102`) is the live example to be careful around for invariant 1: its
+keyframe animates `transform: scale(0.995) → scale(1)`, so while running it **is** a containing block.
+It fires only on tab switch, has no `animation-fill-mode`, and is finished ~200ms later, long before
+any drag can start — which is why it is safe today and why it should be left alone.
+
+`.panel-enter` (`Dashboard.razor:102`) is the live example to be careful around: its keyframe animates
+`transform: scale(0.995) → scale(1)`, so while running it **is** a containing block. It fires only on
+tab switch, has no `animation-fill-mode`, and is finished ~200ms later, long before any drag can
+start — which is why it's safe today and why it should be left alone.
 
 ## 6. Elevation & Depth
 
@@ -517,13 +629,18 @@ value, which remains the only surface that rises above floating UI:
 | Hover | Surface + `background-color: var(--surface-elevated-a)` and/or `--shadow-elevated` (`0 8px 8px rgba(0,0,0,0.3)`) | `.card-hover`/`.ds-card:hover` interactive cards |
 | Floating / elevated | Surface + `box-shadow: var(--shadow-lift)` (`0 4px 12px rgba(0,0,0,0.3)`) | Tooltips (`.ls-tooltip`), hover lift on `.btn-primary` |
 | Dialog | `#121212` + `box-shadow: var(--shadow-dialog)` (`0 8px 24px rgba(0,0,0,0.5)`) | Settings modal, Provider dialogs |
-| Dragging | Surface + `box-shadow: 0 12px 28px -6px rgba(0,0,0,.55)` + `.ds-source-border-lifted` accent border-color. No transform — the card's box never changes size (§5.4), so the only thing `.ds-card-stack`'s `overflow: clip; overflow-clip-margin: 24px` has to contain is the shadow's own reach | The lifted card in `PriceSourcesAdmin`'s drag-to-rank list |
+| Dragging | Surface + `box-shadow: 0 12px 28px -12px rgba(0,0,0,.55)` + `.ds-source-border-lifted` accent border-color, plus a ~10px-per-side grow once `.card-pinned` detaches it and it starts following the cursor (§5.5). Not contained — it's out of the clip chain entirely | The lifted card in `PriceSourcesAdmin`'s drag-to-rank list |
 
 Floating/hover UI uses the lighter 0.3-opacity shadow; modals/dialogs use the heavier 0.5-opacity
 shadow — this two-tier split (rather than one shared value) is the one elevation change adoption
 introduced; new floating UI should pick whichever tier matches its role rather than inventing a third
 opacity. The drag-lift value is reserved for the card physically under the pointer and should not be
 reused for static elevation.
+
+The drag-lift shadow's `-12px` spread is load-bearing, not a taste call: sideways reach is
+`blur/2 + spread`, so that spread sets how much of the measured budget the shadow claims before the
+card's own grow gets what's left (`SHADOW_REACH_PX` in `js/reorder-flip.js`). Changing it changes how
+much the card can grow — recompute both together.
 
 ## 7. Inline Styles Policy & Refactoring Status
 

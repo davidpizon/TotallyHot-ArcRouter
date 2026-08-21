@@ -67,7 +67,9 @@
             <div class="text-xs text-slate-500 p-4">No price sources are registered.</div>
         }
 
-        <div id="@FlipContainerId" class="ds-card-stack" @onpointerup="OnPointerUp" @onpointerleave="CancelDragIfActive" @onpointercancel="CancelDragIfActive">
+        @* No pointerup/pointerleave here: js/reorder-flip.js listens on document instead, so a drag
+           survives the pointer leaving the list and still ends if it is released anywhere on screen. *@
+        <div id="@FlipContainerId" class="ds-card-stack">
             @{ var sources = DisplayOrder; }
             @for (var i = 0; i < sources.Count; i++)
             {
@@ -84,24 +86,39 @@
                    markup rather than stripped, which reaches the browser as an invalid attribute name and takes
                    the whole render down.
 
-                   The lifted card is raised and made pointer-transparent so the pointer falls through to the
-                   card beneath it - that card's @onpointerenter is what drives the live reflow. A short
-                   transition animates only the lift (box-shadow, DESIGN.md §6); the slot change itself is
-                   instant while a drag is live, for a snappy 1:1 feel. No card in this stack, lifted or resting,
-                   ever changes size - several sizing-based lift effects were tried (a scale that grows past the
-                   card's own box, a scale that rests smaller and grows back to true size) and every one either
-                   let the card escape the app window on some window size, or made cards render at inconsistent
-                   widths across screens. Box-shadow + the .ds-source-border-lifted accent border-color carry
-                   the cue instead, so there is no growth for any container to contain - see DESIGN.md §5.4.
-                   .ds-card-stack's overflow-clip-margin still exists, but only for the box-shadow's own blur,
-                   which paints outside a card's box regardless of scale. Once the drag ends, OnPointerUp/OnAfterRenderAsync below
-                   run a FLIP pass (js/reorder-flip.js) that slides every
-                   card that actually moved into its settled position instead of letting it teleport there
-                   (DESIGN.md §5.3). data-flip-key is that pass's join key between the "before" and "after"
-                   measurement. *@
-                <div @key="source.Name" data-flip-key="@source.Name" class="rounded-lg p-3 space-y-2.5 @(canDrag ? "drag-enabled" : "drag-disabled") @(isLifted ? "card-lifted" : "") ds-surface-card-draggable @borderClass"
-                     @onpointerdown="e => OnPointerDown(source, e)"
-                     @onpointerenter="e => OnPointerEnter(source, e)">
+                   Two nested elements per source, and the split is load-bearing:
+
+                   The SLOT (.ds-card-slot) is the layout unit. It is always in flow and never transformed, so
+                   it is the honest position of this row - which is why it, not the card, carries @key and
+                   data-flip-key. The FLIP pass therefore always measures true layout even while the card inside
+                   it is position: fixed, so a lifted card needs no special-casing there. It also means play()'s
+                   inline transform lands on the slot rather than fighting the card's own scale.
+
+                   The CARD is what gets picked up, and it follows the cursor. .card-pinned is what detaches it
+                   (position: fixed, tracking the pointer on Y) and .card-lifted carries the shadow and accent
+                   border.
+
+                   BOTH are rendered here, and js/reorder-flip.js ALSO adds .card-pinned itself the instant the
+                   press becomes a drag. That duplication is deliberate and load-bearing in both directions:
+                   JS adds it first so the card detaches with no interop round-trip of latency, and Blazor
+                   renders it so that the very next render - which DragStarted itself triggers, and which
+                   rewrites this whole class attribute - does not wipe it back off. Losing it mid-drag does not
+                   merely un-style the card: the inline top/left JS is writing are viewport coordinates, so a
+                   card that falls back to position: relative gets flung hundreds of pixels out of the list.
+
+                   Detaching is what makes any of this possible: the pane
+                   around this stack is a scroll container, and a scroll container always clips at its padding
+                   box, so an in-flow card can never follow a cursor past it no matter how much room its
+                   containers are given - see DESIGN.md §5.4 for the five attempts that failed on exactly that,
+                   and §5.5 for the rule.
+
+                   Only pointerdown is handled here. Everything after it - tracking, deciding when the order
+                   changes, and ending the drag - happens in JS and comes back through the [JSInvokable]
+                   methods below, because routing pointermove through interop at 60-120Hz would visibly lag the
+                   card behind the cursor. *@
+                <div @key="source.Name" data-flip-key="@source.Name" class="ds-card-slot">
+                <div class="rounded-lg p-3 space-y-2.5 @(canDrag ? "drag-enabled" : "drag-disabled") @(isLifted ? "card-lifted card-pinned" : "") ds-surface-card-draggable @borderClass"
+                     @onpointerdown="e => OnPointerDown(source, e)">
                     @* Header: rank controls + name + toggle *@
                     <div class="flex items-start justify-between gap-2">
                         <div class="flex items-start gap-2 min-w-0">
@@ -162,6 +179,7 @@
                         </div>
                     }
                 </div>
+                </div>
             }
         </div>
     }
@@ -190,11 +208,20 @@
     /// <summary>Re-renders when the store's state changes.</summary>
     private void OnStoreChanged() => InvokeAsync(StateHasChanged);
 
-    /// <summary>Unsubscribes from <see cref="PriceSourceStore.Changed"/> and stops the countdown timer.</summary>
+    /// <summary>
+    /// Unsubscribes from <see cref="PriceSourceStore.Changed"/>, stops the countdown timer, and drops the
+    /// reference the JS drag calls back through.
+    /// </summary>
+    /// <remarks>
+    /// A drag can be live at this point (a tab switch tears the whole subtree down mid-gesture). This is
+    /// synchronous and cannot await interop to tell JS to stop, so the JS side guards instead: its pointer
+    /// handlers check <c>document.contains</c> and tear themselves down once the card leaves the DOM.
+    /// </remarks>
     public void Dispose()
     {
         Store.Changed -= OnStoreChanged;
         _tick?.Dispose();
+        _selfRef?.Dispose();
     }
 
     /// <summary>Clears the inline error and reloads price sources. Implements the unreachable state's Retry button.</summary>
@@ -221,7 +248,19 @@
 
     private bool _pendingFlip;
 
-    /// <summary>Plays the FLIP settle animation queued by <see cref="OnPointerUp"/>, once the reordered list has rendered.</summary>
+    // Handed to js/reorder-flip.js so the drag can call back in. Created once and reused: a new
+    // reference per drag would leak one per gesture.
+    private DotNetObjectReference<PriceSourcesAdmin>? _selfRef;
+
+    /// <summary>
+    /// Plays the FLIP settle animation queued by the JS drag, once the reordered list has rendered.
+    /// </summary>
+    /// <remarks>
+    /// Runs both mid-drag and on drop. Mid-drag the JS captures the outgoing positions immediately before
+    /// calling <see cref="MoveDraggedTo"/>, so this animates the other cards gliding into their new slots
+    /// rather than jumping; the dragged card's own slot is skipped JS-side, since transforming it would
+    /// re-trap the detached card inside the clip chain (DESIGN.md §5.5).
+    /// </remarks>
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!_pendingFlip)
@@ -239,11 +278,10 @@
     private string? _dragName;
     private List<PriceSourceStatus>? _order;
 
-    // True only once the drag has actually reflowed the list (the pointer crossed into another card),
-    // not merely on pointerdown. _dragName alone goes true on every pointerdown - including one that
-    // lands on the toggle button (pointerdown bubbles up to the card before the click completes) - so
-    // gating the lifted/pointer-events:none styling on _dragName alone would briefly make the card
-    // pointer-transparent on an ordinary click, before the click can reach that control.
+    // True only once the press has actually become a drag - JS reports this via DragStarted once the
+    // pointer has travelled its threshold. A bare pointerdown must not set it: pointerdown on the
+    // enable/disable toggle bubbles up to the card, and lifting on that would make every toggle click
+    // flicker. This is what .card-lifted renders on.
     private bool _dragActive;
 
     /// <summary>
@@ -252,13 +290,23 @@
     /// </summary>
     private IReadOnlyList<PriceSourceStatus> DisplayOrder => _order ?? Store.Sources;
 
+    /// <summary>
+    /// Arms a drag and hands it to <c>js/reorder-flip.js</c>, which owns it from here.
+    /// </summary>
     /// <remarks>
+    /// <para>
     /// Reordering is built on pointer events rather than HTML5 drag-and-drop because WinUI's WebView2 - the
     /// host BlazorWebView uses on Windows - never delivers in-page drag events (microsoft-ui-xaml#10576).
     /// A draggable card there is inert. Pointer events are ordinary DOM events and unaffected, which is why
     /// split-pane.js already drags with them.
+    /// </para>
+    /// <para>
+    /// Only the press is handled in C#. Tracking the pointer from here would mean one interop round-trip per
+    /// pointermove - 60-120 a second - which lags the card visibly behind the cursor, so JS owns the card's
+    /// position and calls back only when the target index actually changes.
+    /// </para>
     /// </remarks>
-    private void OnPointerDown(PriceSourceStatus source, PointerEventArgs e)
+    private async Task OnPointerDown(PriceSourceStatus source, PointerEventArgs e)
     {
         // Button 0 is the primary button; a right-click is asking for a context menu, not a reorder.
         if (e.Button != 0 || Store.Sources.Count < 2 || Store.IsRefreshing)
@@ -269,32 +317,53 @@
         _dragName = source.Name;
         _order = Store.Sources.ToList();
         _dragActive = false;
+        _selfRef ??= DotNetObjectReference.Create(this);
+
+        await Js.InvokeVoidAsync(
+            "reorderFlip.startDrag",
+            $"#{FlipContainerId}",
+            FlipItemSelector,
+            source.Name,
+            e.ClientY,
+            _selfRef);
     }
 
     /// <summary>
-    /// The pointer has moved onto another card: slide the dragged card into that card's slot so the list
-    /// reflows live. A plain click (including one on the toggle or the rank arrows, which bubbles up to
-    /// here) never reaches a second card, so it leaves the order untouched.
+    /// Called from JS once the press has travelled far enough to count as a drag, which is when the card
+    /// is detached. Renders the lift; the card is already following the cursor by this point.
     /// </summary>
-    private void OnPointerEnter(PriceSourceStatus source, PointerEventArgs e)
+    [JSInvokable]
+    public async Task DragStarted()
     {
-        if (_dragName is null || _order is null || source.Name == _dragName)
+        if (_dragName is null)
         {
             return;
         }
 
-        // Buttons is a bitmask of what is held down right now. Bit 0 clear means the press already ended
-        // somewhere we never saw the release (outside the window, say), so the drag is over - without this
-        // the cards would keep following the cursor with no button down.
-        if ((e.Buttons & 1) == 0)
+        _dragActive = true;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// Called from JS when the dragged card has moved closest to a different rank. Moves it there in the
+    /// working order so the other cards reflow around it.
+    /// </summary>
+    /// <param name="index">The rank the card should now occupy, from the JS-side position math.</param>
+    /// <remarks>
+    /// JS captures the outgoing card positions immediately before calling this, so the re-render it causes
+    /// is FLIP-animated by <see cref="OnAfterRenderAsync"/> and the other cards glide rather than jump.
+    /// </remarks>
+    [JSInvokable]
+    public async Task MoveDraggedTo(int index)
+    {
+        if (_dragName is null || _order is null)
         {
-            CancelDrag();
             return;
         }
 
         var from = _order.FindIndex(s => s.Name == _dragName);
-        var to = _order.FindIndex(s => s.Name == source.Name);
-        if (from < 0 || to < 0)
+        var to = Math.Clamp(index, 0, _order.Count - 1);
+        if (from < 0 || from == to)
         {
             return;
         }
@@ -303,15 +372,22 @@
         _order.RemoveAt(from);
         _order.Insert(to, dragged);
         _dragActive = true;
+        _pendingFlip = true;
+
+        await InvokeAsync(StateHasChanged);
     }
 
     /// <summary>
-    /// Commits the reorder. A drag can jump several ranks at once, so the whole working order is sent
-    /// as one list rather than a sequence of adjacent swaps. The working order stays on screen across
-    /// the round-trip (only the lift is dropped) so the cards do not flash back to their old ranks while
-    /// the server confirms; <see cref="OnAfterRenderAsync"/> then FLIP-animates the settle.
+    /// Called from JS when the pointer is released after a real drag. Commits the reorder.
     /// </summary>
-    private async Task OnPointerUp()
+    /// <remarks>
+    /// A drag can jump several ranks at once, so the whole working order is sent as one list rather than a
+    /// sequence of adjacent swaps. The working order deliberately stays on screen across the round-trip so
+    /// the cards do not flash back to their old ranks while the router confirms - which is also what keeps
+    /// the slot still while JS animates the released card down into it.
+    /// </remarks>
+    [JSInvokable]
+    public async Task EndDrag()
     {
         var order = _order;
         _dragName = null;
@@ -324,15 +400,11 @@
         var names = order.Select(s => s.Name).ToList();
         if (names.SequenceEqual(Store.Sources.Select(s => s.Name)))
         {
-            // A click, or a drag that ended back where it started: nothing to persist.
+            // A drag that ended back where it started: nothing to persist.
             CancelDrag();
+            await InvokeAsync(StateHasChanged);
             return;
         }
-
-        // Measure every card's current position before handing rendering back to the store below -
-        // OnAfterRenderAsync plays the FLIP animation from these positions once that render lands.
-        await Js.InvokeVoidAsync("reorderFlip.capture", $"#{FlipContainerId}", FlipItemSelector);
-        _pendingFlip = true;
 
         try
         {
@@ -343,6 +415,7 @@
             // Hand rendering back to the store: on success its order now matches, on failure it reverts.
             _order = null;
             _dragActive = false;
+            await InvokeAsync(StateHasChanged);
         }
     }
 
@@ -352,24 +425,6 @@
         _dragName = null;
         _order = null;
         _dragActive = false;
-    }
-
-    /// <summary>
-    /// Cancels a drag only if one is actually in progress. Wired to pointerleave/pointercancel on the
-    /// list container instead of <see cref="CancelDrag"/> directly: <see cref="OnPointerUp"/> clears
-    /// <see cref="_dragName"/> the instant the commit starts but deliberately keeps <see cref="_order"/>
-    /// rendered until the round-trip finishes, so the cards don't flash back to their old ranks while the
-    /// server confirms. If the pointer leaves the list (or the OS cancels the pointer, e.g. a touch
-    /// scroll) during that in-flight window, an unconditional cancel would blow away that working order
-    /// and reintroduce exactly the flash this was built to avoid - so this only acts while a drag (not a
-    /// commit) is actually live.
-    /// </summary>
-    private void CancelDragIfActive()
-    {
-        if (_dragName is not null)
-        {
-            CancelDrag();
-        }
     }
 
     /// <summary>

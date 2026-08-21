@@ -13,10 +13,12 @@ new and refactored components should be built against. Every section marks which
 **Platform constraint:** this is a Blazor Hybrid app in a WebView2 (Chromium) host. There is no
 Framer Motion, no GSAP, and no JS animation library — and no Tailwind build step, so `app.css` is
 hand-maintained. **All motion is CSS.** Snippets below are CSS only; that is not an omission. The
-one exception is FLIP-style reorder (§6 Reorder Settle): CSS alone cannot measure where an element
-sat before a DOM reorder, so a small hand-rolled script (`js/reorder-flip.js`, same "JS reads the
-DOM, CSS drives the transition" split as `js/split-pane.js`) reads the before/after rects and sets
-the `transform`/`transition` the animation actually plays with — it is not an animation library.
+exceptions are the two drag-list patterns in §6, Reorder Settle and Lift Detach, which both need a
+measurement CSS cannot make: where an element sat *before* a DOM reorder, and how much room an element
+actually has before it would leave the window. Both live in one small hand-rolled script
+(`js/reorder-flip.js`) with the same "JS reads the DOM, CSS drives the transition" split as
+`js/split-pane.js` — it reads rects and writes the values the CSS transition then plays with. It is
+not an animation library.
 
 **Aspirational-design conformance (Phase 4 audit):** this motion system already satisfied
 `aspirational-design.md` §5's "motion as meaning" principle before adoption began — every trigger
@@ -133,14 +135,20 @@ rules currently use bare `ease` (`.card-hover`, `.ls-divider`) — see §8 drift
 
 **This system intentionally defines no spring presets.**
 
-Springs model momentum carried over from direct manipulation, and this app has exactly one
-direct-manipulation surface: the split-pane divider (`js/split-pane.js`), which tracks the pointer
-1:1 while dragging. Adding a spring there would introduce lag between cursor and divider — strictly
-worse. Everywhere else, motion is triggered *indirectly* (a click opens a modal, data arrives over
-gRPC), which is the easing-curve case by definition.
+Springs model momentum carried over from direct manipulation, and this app has exactly two
+direct-manipulation surfaces: the split-pane divider (`js/split-pane.js`) and the dragged price-source
+card (`js/reorder-flip.js`). Both track the pointer 1:1 while dragging, and a spring on either would
+introduce lag between cursor and element — strictly worse. Everywhere else, motion is triggered
+*indirectly* (a click opens a modal, data arrives over gRPC), which is the easing-curve case by
+definition.
 
-A FLIP-style reorder animation now runs on the `PriceSourcesAdmin` drag-to-rank list — see Reorder
-Settle in §6. It uses a single critically-damped curve rather than a spring library:
+**"Direct manipulation" means the element under the pointer, not everything the gesture touches.** The
+cards a drag displaces are *reacting*, not being manipulated, so they animate (Reorder Settle, §6) —
+only the card actually being held is exempt. Conflating the two is what previously kept the whole list
+snapping instantly.
+
+Both the reorder settle and the card's release use a single critically-damped curve rather than a
+spring library:
 
 ```css
 /* Snappy, no overshoot. Approximates stiffness 500 / damping 40 / mass 0.8. */
@@ -243,17 +251,15 @@ look like a slot machine. Stagger applies only on initial mount — see §7.
 
 ### Reorder Settle — *Shipping*
 
-`PriceSourcesAdmin`'s drag-to-rank list (`DESIGN.md` §5.3). While a drag is live, the list reflows
-instantly on every `pointerenter` — that stays instant on purpose, so the dragged card tracks the
-gesture 1:1 with zero added lag (§5: springs/eased lag on a direct-manipulation surface would read as
-disconnected from the pointer). The FLIP pass only runs once, after the drop: `js/reorder-flip.js`
-records each card's rect just before the commit re-renders the list, then on the next
-`OnAfterRenderAsync` measures where everything actually landed and animates the delta away with
-`--ease-settle`. A card whose slot didn't change is untouched — the script skips zero-delta elements.
+`PriceSourcesAdmin`'s drag-to-rank list (`DESIGN.md` §5.3). Cards displaced by the drag glide into
+their new slots rather than jumping — `js/reorder-flip.js` records each slot's rect immediately before
+the reorder re-renders the list, then on the next `OnAfterRenderAsync` measures where everything
+landed and animates the delta away with `--ease-settle`. A slot that didn't move is untouched; the
+script skips zero-delta elements.
 
 ```js
-// Called right before the reordering render (PriceSourcesAdmin.OnPointerUp, before it awaits the
-// store update): capture where every card sits now.
+// Called right before the reordering render - by the JS drag on every rank change, so the shuffle is
+// animated, not just the drop.
 reorderFlip.capture(containerSelector, itemSelector);
 
 // Called from OnAfterRenderAsync, once the reordered list has rendered: invert to the old position,
@@ -261,14 +267,72 @@ reorderFlip.capture(containerSelector, itemSelector);
 reorderFlip.play(containerSelector, itemSelector, durationMs, easing);
 ```
 
-```css
-/* Set inline by reorder-flip.js, not declared as a class rule - see the §"Platform constraint" note
-   above for why this pattern needs JS at all. Duration/easing: --dur-default / --ease-settle. */
-```
-
 Uses `--dur-default` (200ms) and `--ease-settle` (§5), not `--ease-out-expo`: this is a settle, not an
 arrival from off-screen, so the mirrored/no-overshoot spring approximation is the correct curve, not
 the enter family.
+
+**This pattern used to run only on drop, and the mid-drag reflow was deliberately instant** — the
+reasoning being §5's rule that eased lag on a direct-manipulation surface reads as disconnected from
+the pointer. That reasoning was half right and the conclusion was wrong. It holds for **the element
+under the pointer**, which must track it 1:1 and does (see Lift Detach below — `top` is deliberately
+excluded from that element's transition list for exactly this reason). It does **not** hold for the
+*other* cards: they are not being manipulated, they are reacting, and reacting instantly reads as a
+flicker rather than as responsiveness. Direct-manipulation immediacy is a property the dragged element
+owes the pointer, not a property every element on screen owes it.
+
+**Both `capture` and `play` address the slot wrapper (`.ds-card-slot`), not the card** — the slot is
+what carries `data-flip-key`. Slots are always in flow and never transformed, so they always measure
+true layout even while the card inside one is detached and `position: fixed` (`DESIGN.md` §5.5). That
+is not incidental: keying on the card instead would give the detached card a meaningless FLIP delta,
+and `play`'s inline `transform` would fight the pinned card's own `scale()`.
+
+### Lift Detach — *Shipping*
+
+The pickup half of the same gesture. `PriceSourcesAdmin`'s dragged card is switched to
+`position: fixed`, follows the pointer on Y, and is grown ~10px per side, so it rises above the scroll
+container that would otherwise clip it (`DESIGN.md` §5.5 has the full contract; this section covers
+only the timing).
+
+**Which properties are in which transition list is the whole design here:**
+
+```css
+.card-pinned {
+  transform: scale(var(--lift-scale, 1));
+  transition: transform var(--dur-fast) var(--ease-standard);
+}
+
+.card-dropping {
+  transition: top       var(--dur-default) var(--ease-settle),
+              transform var(--dur-default) var(--ease-settle);
+}
+```
+
+- **`top` is absent while dragging, on purpose.** It is rewritten on every `pointermove`; a transition
+  there would put the card visibly behind the cursor. This is the one surface in the app that must
+  track a gesture 1:1, and §5's no-springs rule is really about this element specifically.
+- **`transform` is present, so the grow eases in** at `--dur-fast` when `.card-pinned` is added.
+- **`.card-dropping` opts `top` in for the release**, so the card glides into its slot instead of
+  snapping there from wherever the cursor left it — which can be most of a row away. Both classes come
+  off together when that transition ends, which is also what returns the card to the flow.
+
+`--lift-scale` is written by JS from the measured rect, not authored as a constant — a fixed
+`scale(1.02)` grows 1% of the card's own width per side, which on a wide window lands outside the app
+window. Per §1 rule 3 this is a state cue, not decoration, so `prefers-reduced-motion` (§8) correctly
+collapses only its *duration*: the grow still happens, instantly. Do not add a `transform: none`
+override for reduced motion — that would delete the signal rather than the motion.
+
+**The animation owns the state teardown, not the other way round.** `EndDrag` — which clears the
+component's drag state, and therefore re-renders the card without `.card-pinned` — is called from the
+`transitionend` handler, not from `pointerup`. Announcing the release first would strip the class
+while the card was still mid-settle, dropping it back into the flow with viewport coordinates still on
+it and flinging it out of the list.
+
+This generalises past this one pattern: **whenever a transition animates an element that only exists
+in that position because of some state, the state must outlive the transition.** In an
+`animation`-based pattern that is usually free, because the element is unmounted only after the
+animation it was mounted for has run. In a `transition`-based one it is not free, and the mistake
+looks like a rendering bug rather than a timing bug — which is what makes it expensive to find.
+Whatever ends the animation should be what releases the state.
 
 ### Tooltip Fade — *Shipping*
 
@@ -459,10 +523,16 @@ Add to `app.css` below the compiled Tailwind blob:
   --ease-out-quart:    cubic-bezier(.25, 1, .5, 1);
   --ease-in-quart:     cubic-bezier(.5, 0, .75, 0);
   --ease-in-out-sine:  cubic-bezier(.37, 0, .63, 1);
+  --ease-settle:       cubic-bezier(.22, 1, .36, 1);
 }
 ```
 
 `--dur-entrance` is now defined in `app.css` alongside the rest (§3 explains why it's unused today).
+
+`--ease-settle` (§5) is the critically-damped curve the drag-list patterns use — Reorder Settle and the
+release half of Lift Detach. It is duplicated as a JS-side string constant in `PriceSourcesAdmin.razor`
+(`FlipEasing`), because the FLIP pass sets its transition inline at the moment it measures the DOM and
+cannot read a custom property from there. Keep the two in step.
 
 ---
 
@@ -479,7 +549,8 @@ Add to `app.css` below the compiled Tailwind blob:
 | `transition: all` retired on every selected-one-of-N control | `.tab-button`, `.tab-indicator`, `.gov-tab`, `.metric-button`, `.filter-button` |
 | Disclosure Collapse — two-way expand/contract via `grid-template-rows` | `.ls-disclosure`; `BenchmarkData` (Task Matrix + Local Voter Model), `ProvidersAdmin` add-model pane |
 | `prefers-reduced-motion` block | `app.css` |
-| Reorder Settle — FLIP slide on drop, grab-handle-only reorder (chevron rank buttons removed) | `PriceSourcesAdmin`; `js/reorder-flip.js` |
+| Reorder Settle — FLIP slide on every rank change and on drop, grab-handle-only reorder (chevron rank buttons removed) | `PriceSourcesAdmin`; `js/reorder-flip.js` |
+| Lift Detach — dragged card detached from the clip chain and following the cursor, grow in / settle into slot on release | `.card-pinned` / `.card-dropping`; `js/reorder-flip.js` `startDrag` |
 
 ### Coded and wired — not confirmed in UI
 
