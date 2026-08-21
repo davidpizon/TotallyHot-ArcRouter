@@ -241,6 +241,7 @@
      makes it the single source of truth rather than a number re-guessed per pane. */
   --space-card-gap: 0.75rem;
 
+
   --radius-card: 8px;
   --radius-control: 12px;
   --radius-pill: 9999px;
@@ -623,9 +624,14 @@ input[type="number"]:focus {
   background: var(--text-muted);
 }
 
-/* No transform here - see .ds-surface-card-draggable.card-lifted below (DESIGN.md §5.4) for why the
-   "grow" on lift is expressed as returning to scale(1) from a 2%-smaller resting state, rather than
-   growing past scale(1) the way it originally did. */
+/* No transform/scale here, on purpose (DESIGN.md §5.4): the lifted card must never render outside
+   the app window, and every way of growing the card's own box past its laid-out size (transform:
+   scale(1.02) with a fixed-pixel or percentage clip margin downstream, resting cards pre-shrunk so
+   "growing" tops out at their true size) either escaped the window on some window size, or fought
+   .card-lifted's box-shadow (whose own reach is fixed regardless of scale), or changed every card's
+   on-screen width in a way that read as inconsistent across screens. Box-shadow + the
+   .ds-source-border-lifted accent border-color carry the "lifted" cue with the card's box never
+   changing size at all - nothing to contain, because nothing grows. */
 .card-lifted {
   box-shadow: 0 12px 28px -6px rgba(0, 0, 0, 0.55);
   position: relative;
@@ -1097,23 +1103,19 @@ input[type="number"]:focus {
    it ships only the utilities the mock happened to use — .mt-6 and .mt-3 are both absent, which is
    why Benchmark Data's `mt-6` rendered no margin at all. A token cannot silently evaporate. */
 .ds-card-stack {
-  /* No element may extend past the app window (DESIGN.md §5.4). PriceSourcesAdmin's lifted card
-     originally grew past its own laid-out box (.card-lifted: transform: scale(1.02)) and bled past
-     this pane's right/left edge into the rest of the window - the outer pane only sets overflow-y
-     (Tailwind's overflow-y-auto never touches overflow-x), so nothing upstream of the stack clipped
-     it. This is the containment boundary for every effect any card in the stack uses, so a future one
-     doesn't reopen the same bug.
+  /* No element may extend past the app window (DESIGN.md §5.4). .card-lifted's box never changes
+     size, so the only thing that can paint outside a card's own box here is its box-shadow's blur -
+     which always does, regardless of scale, since box-shadow is never clipped to its own element by
+     default. The pane wrapping this stack only sets overflow-y (Tailwind's overflow-y-auto never
+     touches overflow-x, §5.1), so this is the containment boundary.
 
-     The lift no longer grows the box at all - .ds-surface-card-draggable rests at scale(0.98) and
-     .card-lifted returns it to scale(1), its own true box, never past it - so the only thing left to
-     contain here is the box-shadow's blur, which always paints outside the box regardless of scale.
-     `overflow: hidden` clips flush against the box edge with no room for that blur to render, which
-     is why it looked like the shadow had vanished when that was tried. `overflow: clip` +
-     `overflow-clip-margin` paints a fixed halo *before* clipping kicks in, sized to .card-lifted's own
-     box-shadow reach (`0 12px 28px -6px` → ~22px past the box edge on any side, since the -6px spread
-     first shrinks the shadow's base rect before the 28px blur extends outward), rounded up. If this
-     shadow value ever changes, recompute the margin against it - it is not a round number picked to
-     "probably be enough." */
+     `overflow: hidden` would clip flush against the box edge with no room for the blur to render at
+     all - the shadow would just vanish (an earlier iteration hit exactly this while a transform-based
+     grow effect was also in play). `overflow: clip` + `overflow-clip-margin` paints a fixed halo
+     *before* clipping kicks in, sized to .card-lifted's own box-shadow reach (`0 12px 28px -6px` →
+     ~22px past the box edge on any side, since the -6px spread first shrinks the shadow's base rect
+     before the 28px blur extends outward), rounded up. If that shadow value ever changes, recompute
+     the margin against it - it is not a round number picked to "probably be enough." */
   overflow: clip;
   overflow-clip-margin: 24px;
 }
@@ -1133,25 +1135,13 @@ input[type="number"]:focus {
 }
 
 /* ---- Draggable card variant (inherits surface-card, adds transition for drag lift) ----
-   Resting state is 2% *smaller* than its laid-out box (transform: scale(0.98)), not full size. A
-   lifted card returns to scale(1) - its own true, already-allocated box - rather than growing past
-   it. That reads as the same "this card just got bigger" cue as growing past 100% did, but nothing
-   ever exceeds the space the layout already gave the card, so there is no box-growth overflow left
-   for any container to contain (DESIGN.md §5.4) - unlike the shadow, which still needs
-   .ds-card-stack's overflow-clip-margin, a scale that never exceeds 1 needs no clipping strategy at
-   all. Higher-specificity compound selector, not source order, is what makes .card-lifted win here -
-   both classes land on the same element and this rule appears later in the file. */
+   No card in this stack ever changes size (DESIGN.md §5.4) - .card-lifted's box-shadow is the only
+   thing that changes, so box-shadow is the only property this transitions. */
 .ds-surface-card-draggable {
   background: var(--surface-card);
   border: 1px solid var(--border-button);
   border-radius: var(--radius-card);
-  transform: scale(0.98);
-  transition: box-shadow var(--dur-fast) var(--ease-standard),
-              transform var(--dur-fast) var(--ease-standard);
-}
-
-.ds-surface-card-draggable.card-lifted {
-  transform: scale(1);
+  transition: box-shadow var(--dur-fast) var(--ease-standard);
 }
 
 .ds-surface-elevated {

@@ -320,6 +320,15 @@ the header, dismissal behavior, close API, and dynamic scrolling identical regar
   hit target and a 2px `rounded` grip mark.
 - **Scrollbars**: thin (4px) custom scrollbar, `var(--border-button)` (`#4d4d4d`) thumb on
   `var(--surface-base)` (`#121212`) track, `var(--border-light)` (`#7c7c7c`) on hover.
+- **`<main>`'s padding (`Dashboard.razor`) is the app's single content inset, shared by every tab** —
+  Live Stream, Cost Analytics, Model Distribution, Governance, Console — at the pre-existing
+  `p-3` (`0.75rem` all sides). **Define it in exactly one place** (`<main>` itself) and let every tab
+  inherit it; do not give an individual pane its own separate outer margin. This was inflated to a
+  percentage-based value at one point specifically to give `PriceSourcesAdmin`'s lifted card room to
+  grow (§5.4) — an app-wide layout change made to solve a problem local to one card in one tab. It was
+  reverted once the lift stopped growing the card's box at all, which is the current, permanent state
+  of that effect — see §5.4 for why "grow the box, then make the container big enough to tolerate it"
+  was the wrong direction for that problem in the first place.
 
 ### 5.1 Available Tailwind Spacing Utilities
 
@@ -391,11 +400,10 @@ the card itself (see the remarks below).
   split-pane divider with.
 - **The dragged card is visually lifted** — `.card-lifted`: `box-shadow: 0 12px 28px -6px
   rgba(0,0,0,.55)` + the `.ds-source-border-lifted` accent border-color, reserved for this state only
-  (§6). Every card in the stack rests at `transform: scale(0.98)`
-  (`.ds-surface-card-draggable`); the lifted card returns to `scale(1)` — its own true, already-laid-out
-  box, never past it. The list container still clips with a margin, but only for the box-shadow's own
-  blur (which always paints outside the box regardless of scale) — see §5.4. Other cards reflow live
-  under the pointer.
+  (§6). No transform — the card's box never changes size, lifted or resting, so every card stays a
+  uniform width and there's nothing for any container to contain except the box-shadow's own blur,
+  which `.ds-card-stack`'s `overflow-clip-margin` covers — see §5.4 for why every sizing-based version
+  of this effect was tried and reverted. Other cards reflow live under the pointer.
 - **The settle animates; the live reflow does not.** While the drag is in progress, cards reflowing
   out of the dragged card's way happens instantly — any added lag there would make the drag feel
   disconnected from the pointer. Once the card is dropped, the list's landing positions FLIP-animate
@@ -418,11 +426,11 @@ single-window desktop app (§5): there is no outer chrome to imply "the rest con
 so anything that visually escapes the window reads as a rendering bug, not a design choice, even if
 it is purely decorative and momentary.
 
-**Concrete case this rule exists for:** `PriceSourcesAdmin`'s lifted drag card. The original
-`.card-lifted { transform: scale(1.02) }` grows the card's own box past whatever it was laid out at —
-that's layout-neutral, so nothing about the box stopped it from growing past its pane, which sets
-`overflow-y-auto` only (Tailwind's utility never touches `overflow-x`, §5.1). Three fixes were tried
-before landing on the right one:
+**Concrete case this rule exists for:** `PriceSourcesAdmin`'s lifted drag card. `.card-lifted {
+transform: scale(1.02) }` grows the card's own box past whatever it was laid out at — that's
+layout-neutral, so nothing about the box stopped it from growing past its pane, which sets
+`overflow-y-auto` only (Tailwind's utility never touches `overflow-x`, §5.1). Five fixes were tried
+and reverted before landing on the one that stuck:
 
 1. **Plain `overflow: hidden` on the list container.** Stops the escape, but clips flush against the
    box edge with zero room for the scale (or the box-shadow's own blur) to actually paint — the
@@ -437,32 +445,54 @@ before landing on the right one:
    the shadow both render. This fixed the invisible-shadow regression from fix 2, but the card still
    grows to 1.02× its box — on a wide-enough pane, 1% of the card's width exceeds even a generous
    fixed-pixel margin, and the card visibly extended past the window again.
+4. **Rest every card 2% *smaller* (`scale(0.98)`), let the lifted card return to `scale(1)`.** No
+   value ever exceeds the card's own laid-out box, so nothing escapes at any window width — this
+   genuinely fixed the overflow. But it made every card's rendered width a function of the window's
+   width (2% of a wide window is a bigger pixel shrink than 2% of a narrow one), which reads as
+   *inconsistent card sizing across screens* rather than a deliberate design — a different, subtler
+   problem than the one it fixed.
+5. **Keep cards a uniform, unscaled width; reserve `--main-inset-x` (`calc(24px + 3%)`, then a plain
+   `2%`) on `<main>` instead.** The idea — move the growth budget off the element and onto the one
+   shared container — was sound, and the math for it checks out: at any card/window width, the scale's
+   1%-per-side growth plus the shadow's ~22px reach both fit comfortably inside that inset. In
+   practice the card was still reported cut off at the (larger) inset boundary after this change
+   shipped. The exact mechanism was never conclusively identified — possibilities include an
+   `overflow-clip-margin`/WebView2 rendering interaction with the transformed, `z-index`-raised
+   element that the arithmetic above doesn't capture — but *what actually escaped kept escaping* is
+   what mattered, twice, at two different inset sizes. An app-wide layout change (every tab's content
+   inset) also isn't a proportionate fix for a bug local to one card in one tab.
 
-**The actual fix removes the box growth at its source, rather than sizing a container to tolerate
-it.** `.ds-surface-card-draggable` now rests at `transform: scale(0.98)` — every card in the stack is
-2% smaller than its laid-out box at all times — and `.card-lifted` returns it to `scale(1)`: its own
-true, already-allocated size, never past it. The "this card just got bigger" cue survives (it grows
-*relative to its resting neighbors*), but because nothing ever exceeds `scale(1)`, there is no box
-growth left for any container's size, pixel count, or percentage to get wrong — the failure mode fixes
-1–3 kept fighting simply doesn't exist anymore. `.ds-card-stack` still keeps `overflow: clip` +
-`overflow-clip-margin: 24px`, but now purely for the box-shadow's blur, which paints outside the box
-regardless of scale and always needed a margin, never a box-growth budget.
+**The actual fix removes the box growth entirely — no version of "grow, then make room for the
+growth" proved reliable.** `.card-lifted` no longer transforms at all; the lift is `box-shadow` + the
+`.ds-source-border-lifted` accent border-color only. `<main>`'s padding is back to the original
+`p-3` (§5) — the app-wide inset increase existed solely to accommodate a growth effect that no longer
+exists, so it was reverted along with it. `.ds-card-stack` keeps `overflow: clip;
+overflow-clip-margin: 24px`, sized to the box-shadow's own reach — the one thing here that still
+paints outside a card's box, on every window size, unconditionally.
 
 **What this means in practice:**
-- **A lift/hover/emphasis effect should not be expressed by growing past the element's own laid-out
-  box.** Once an effect crosses `scale(1)` (or otherwise exceeds the box the layout engine already
-  gave the element), every container between it and the window has to be individually verified to
-  tolerate the exact amount of growth, at every window size the app can be resized to — a check that
-  is easy to get right once and then invalidate the next time the effect's value changes. Growing
-  *toward* the box's own size from a smaller resting state (as `.ds-surface-card-draggable` now does)
-  gets the same visual cue with a hard, static upper bound that needs no such check.
-- **Reserve `overflow: clip` + `overflow-clip-margin` for effects that only ever paint outside the
-  box, not for ones that grow the box itself.** A shadow or glow has no edge of its own to lose and a
-  fixed reach that doesn't scale with window size, so a fixed-pixel margin is a correct, permanent fit
-  for it. A box that can grow (scale, width/height, an untracked `translate`) does not have a fixed
-  reach at all — its overflow is a percentage of its own size, so no fixed margin can ever be
-  guaranteed sufficient at every width the app can be resized to. That growth isn't something for the
-  margin to accommodate; it's what should not exist in the first place.
+- **If a box-growing effect keeps escaping containment despite the math checking out, stop trying to
+  contain the growth and remove it instead.** Three different containment strategies (flush clip,
+  clip-with-margin, clip-with-margin-plus-app-wide-inset) were tried against the same `scale(1.02)`
+  effect, and the last one *should* have worked by the numbers and still didn't hold up in practice.
+  At that point the growth itself — not the specific containment value — is the thing to change.
+  Box-shadow and border-color changes cost nothing to contain because they either don't grow the box
+  (border-color) or have a reach that's fixed and small regardless of what's going on with `transform`
+  (box-shadow) — prefer effects with that property over ones that grow the box, especially once a
+  growing effect has already needed more than one containment fix.
+- **Don't solve "the growth can escape" by making the growth disappear on the *element* (fix 4) if the
+  growth itself was the point.** Shrinking the resting state so growth never crosses `scale(1)` does
+  stop the escape, but it trades one bug for a different one — every element carrying that resting
+  shrink now renders at a size that depends on its container's width, which reads as inconsistent
+  across screens.
+- **An app-wide layout change (§5's shared `<main>` inset) is a proportionate fix only for an app-wide
+  problem.** Inflating every tab's content margin to solve one card's growth in one tab is a bigger
+  change than the bug warrants, and it has to be reverted in lockstep if the effect it was there for
+  is later removed — which is exactly what happened here. Prefer a fix scoped to where the problem
+  actually is.
+- **Reserve `overflow: clip` + `overflow-clip-margin` for effects with a reach that's fixed regardless
+  of window size** — a shadow's blur, a glow. It's not a substitute for not growing the box in the
+  first place when growing the box has already proven unreliable to contain.
 - **Tooltips and other floating UI stay exempt, but only because they already solve this
   differently.** `.ls-tooltip` (`js/tooltips.js`) is a single body-level element repositioned via
   `getBoundingClientRect()`/`window.innerWidth`/`window.innerHeight` math that clamps it inside the
@@ -487,7 +517,7 @@ value, which remains the only surface that rises above floating UI:
 | Hover | Surface + `background-color: var(--surface-elevated-a)` and/or `--shadow-elevated` (`0 8px 8px rgba(0,0,0,0.3)`) | `.card-hover`/`.ds-card:hover` interactive cards |
 | Floating / elevated | Surface + `box-shadow: var(--shadow-lift)` (`0 4px 12px rgba(0,0,0,0.3)`) | Tooltips (`.ls-tooltip`), hover lift on `.btn-primary` |
 | Dialog | `#121212` + `box-shadow: var(--shadow-dialog)` (`0 8px 24px rgba(0,0,0,0.5)`) | Settings modal, Provider dialogs |
-| Dragging | Surface + `box-shadow: 0 12px 28px -6px rgba(0,0,0,.55)` + `.ds-source-border-lifted` accent border-color, rising from a `scale(0.98)` resting state to `scale(1)` — never past its own laid-out box (§5.4). `.ds-card-stack`'s `overflow: clip; overflow-clip-margin: 24px` contains only the shadow's blur | The lifted card in `PriceSourcesAdmin`'s drag-to-rank list |
+| Dragging | Surface + `box-shadow: 0 12px 28px -6px rgba(0,0,0,.55)` + `.ds-source-border-lifted` accent border-color. No transform — the card's box never changes size (§5.4), so the only thing `.ds-card-stack`'s `overflow: clip; overflow-clip-margin: 24px` has to contain is the shadow's own reach | The lifted card in `PriceSourcesAdmin`'s drag-to-rank list |
 
 Floating/hover UI uses the lighter 0.3-opacity shadow; modals/dialogs use the heavier 0.5-opacity
 shadow — this two-tier split (rather than one shared value) is the one elevation change adoption

@@ -86,14 +86,16 @@
 
                    The lifted card is raised and made pointer-transparent so the pointer falls through to the
                    card beneath it - that card's @onpointerenter is what drives the live reflow. A short
-                   transition animates only the lift (box-shadow + a scale change, DESIGN.md §6); the slot change
-                   itself is instant while a drag is live, for a snappy 1:1 feel. Every card in this stack rests
-                   at scale(0.98) (see .ds-surface-card-draggable in app.css) and a lifted card returns to
-                   scale(1) - its own true box, never past it - so the "grow" cue never needs the list container
-                   to contain a box that outgrew its slot. The container (.ds-card-stack) still clips with a
-                   margin rather than flush against the box edge, but only for the box-shadow's own blur, which
-                   always paints outside the box regardless of scale - see DESIGN.md §5.4. Once the drag ends,
-                   OnPointerUp/OnAfterRenderAsync below run a FLIP pass (js/reorder-flip.js) that slides every
+                   transition animates only the lift (box-shadow, DESIGN.md §6); the slot change itself is
+                   instant while a drag is live, for a snappy 1:1 feel. No card in this stack, lifted or resting,
+                   ever changes size - several sizing-based lift effects were tried (a scale that grows past the
+                   card's own box, a scale that rests smaller and grows back to true size) and every one either
+                   let the card escape the app window on some window size, or made cards render at inconsistent
+                   widths across screens. Box-shadow + the .ds-source-border-lifted accent border-color carry
+                   the cue instead, so there is no growth for any container to contain - see DESIGN.md §5.4.
+                   .ds-card-stack's overflow-clip-margin still exists, but only for the box-shadow's own blur,
+                   which paints outside a card's box regardless of scale. Once the drag ends, OnPointerUp/OnAfterRenderAsync below
+                   run a FLIP pass (js/reorder-flip.js) that slides every
                    card that actually moved into its settled position instead of letting it teleport there
                    (DESIGN.md §5.3). data-flip-key is that pass's join key between the "before" and "after"
                    measurement. *@
