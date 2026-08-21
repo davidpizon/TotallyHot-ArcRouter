@@ -53,7 +53,8 @@ public sealed class ScanCapabilitiesTests : IDisposable
         IProviderConfigStore store,
         ProviderEndpointScanner? scanner = null,
         ToolCallCapabilityStore? capabilityStore = null) =>
-        new(store, Mock.Of<IEnvironmentVariableProvider>(), new HttpClient(), null, scanner, capabilityStore);
+        new(store, Mock.Of<IEnvironmentVariableProvider>(), new HttpClient(),
+            new ManagementFacadeDependencies { EndpointScanner = scanner, CapabilityStore = capabilityStore });
 
     // ----- The explicit scan endpoint -----
 

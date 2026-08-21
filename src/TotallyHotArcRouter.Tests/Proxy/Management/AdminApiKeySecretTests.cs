@@ -26,8 +26,7 @@ public sealed class AdminApiKeySecretTests
             new InMemoryProviderConfigStore(SeedOptions()),
             Mock.Of<IEnvironmentVariableProvider>(),
             new HttpClient(),
-            secretWriter: secretWriter,
-            secretReader: secretReader);
+            new ManagementFacadeDependencies { SecretWriter = secretWriter, SecretReader = secretReader });
 
     [Fact]
     public void SetSecret_RecognizedAnthropicAdminKeyName_WritesToStore()

@@ -34,9 +34,12 @@ public sealed class UsageAdminFacadeTests
             store ?? new InMemoryProviderConfigStore(SeedOptions()),
             Mock.Of<IEnvironmentVariableProvider>(),
             new HttpClient(),
-            budgetStore,
-            rollupStore: rollupStore,
-            comparisonStore: comparisonStore);
+            new ManagementFacadeDependencies
+            {
+                BudgetStore = budgetStore,
+                RollupStore = rollupStore,
+                ComparisonStore = comparisonStore,
+            });
 
     [Fact]
     public async Task GetRoutingRoiAsync_NoComparisonStore_IsUnavailableNotEmpty()

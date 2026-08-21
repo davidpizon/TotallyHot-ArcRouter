@@ -44,11 +44,16 @@ public sealed class ProviderAdminEndpointsTests
             middleware,
             port: 0,
             grpcPort: 0,
-            providerConfigStore: store,
-            environment: environment,
-            managementHttpClient: managementHttpClient,
-            managementToken: managementToken,
-            providerBudgetStore: budgetStore);
+            dependencies: new ProxyServerDependencies
+            {
+                ManagementToken = managementToken,
+                ManagementApi = new ManagementApiDependencies(store)
+                {
+                    Environment = environment,
+                    HttpClient = managementHttpClient,
+                    BudgetStore = budgetStore,
+                },
+            });
     }
 
     private static string BaseAddress(ProxyServer server) =>

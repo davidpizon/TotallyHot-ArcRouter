@@ -40,10 +40,13 @@ public sealed class ManagementFacadeTests
             store ?? new InMemoryProviderConfigStore(SeedOptions()),
             Mock.Of<IEnvironmentVariableProvider>(),
             new HttpClient(),
-            budgetStore,
-            priceCatalogRepository: priceCatalogRepository,
-            overrideStore: overrideStore,
-            rateLimitStalenessThreshold: rateLimitStalenessThreshold);
+            new ManagementFacadeDependencies
+            {
+                BudgetStore = budgetStore,
+                PriceCatalogRepository = priceCatalogRepository,
+                OverrideStore = overrideStore,
+                RateLimitStalenessThreshold = rateLimitStalenessThreshold,
+            });
 
     [Fact]
     public void ListProviders_NeverReturnsALockedHeaderValue()
