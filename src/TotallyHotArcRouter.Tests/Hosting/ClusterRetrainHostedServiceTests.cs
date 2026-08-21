@@ -3,6 +3,7 @@ using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Orchestrator;
+using TotallyHot.ArcRouter.Tests.TestSupport;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -52,15 +53,37 @@ public class ClusterRetrainHostedServiceTests
         Assert.Equal(0, trainingService.CallCount);
     }
 
+    /// <summary>
+    /// docs/router/self-organizing-classification-plan.md Phase T6: automatic cluster retraining is now
+    /// additionally gated on <see cref="RoutingOptions.EnableAdaptiveRouting"/>, even when
+    /// <see cref="RoutingOptions.EnableAutomaticClusterRetrain"/> is on and the threshold is crossed.
+    /// </summary>
+    [Fact]
+    public async Task CheckAndRetrainAsync_AdaptiveRoutingDisabled_NeverRetrainsRegardlessOfCount()
+    {
+        var trainingService = new RecordingTrainingService();
+        var memoryStore = new FakeMemoryEntryStore(entryCount: 10_000);
+        var service = CreateService(trainingService, memoryStore, threshold: 500, enabled: true, enableAdaptiveRouting: false);
+
+        await service.CheckAndRetrainAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, trainingService.CallCount);
+    }
+
     private static ClusterRetrainHostedService CreateService(
-        IClusterTrainingService trainingService, IMemoryEntryStore memoryStore, int threshold, bool enabled)
+        IClusterTrainingService trainingService, IMemoryEntryStore memoryStore, int threshold, bool enabled, bool enableAdaptiveRouting = true)
     {
         var modelPath = Path.Combine(Path.GetTempPath(), "arcrouter-tests", Guid.NewGuid().ToString("N"), "cluster_model.json");
         return new ClusterRetrainHostedService(
             NullLogger<ClusterRetrainHostedService>.Instance,
             trainingService,
             memoryStore,
-            Options.Create(new RoutingOptions { ClusterRetrainThreshold = threshold, EnableAutomaticClusterRetrain = enabled }),
+            new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions
+            {
+                ClusterRetrainThreshold = threshold,
+                EnableAutomaticClusterRetrain = enabled,
+                EnableAdaptiveRouting = enableAdaptiveRouting,
+            }),
             Options.Create(new StorageOptions { ClusterModelPath = modelPath }));
     }
 

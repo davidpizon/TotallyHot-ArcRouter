@@ -387,6 +387,26 @@ public sealed class RoutingOptions
     public int ClusterBestMinObservations { get; init; } = 3;
 
     /// <summary>
+    /// Gets whether adaptive routing is enabled: the master gate for
+    /// docs/router/self-organizing-classification-plan.md's own features - transcript capture (Phase T1),
+    /// the cluster-retrain hosted service (Phase T2), and the <c>cluster_best</c> voter (Phase T3) - each of
+    /// which also checks this flag in addition to its own individual per-feature flag (Phase T6). Off by
+    /// default: a fresh install writes no transcripts, retrains no cluster model, and never scores
+    /// <c>cluster_best</c> until an operator opts in. Deliberately narrow in scope - it does <b>not</b> gate
+    /// anything already shipped (the Orchestrator itself, <c>dim_best</c>, <c>memory_kNN</c>, <c>logreg</c>,
+    /// <c>llm_router</c>, or exploration), which keep their own existing defaults regardless of this
+    /// setting.
+    /// </summary>
+    /// <remarks>
+    /// Overridable at runtime through the <c>router_settings</c> SQLite table
+    /// (<see cref="Router.RouterSettingsStore"/>), which - when a stored value is present - beats whatever
+    /// <c>appsettings.json</c> bound here, which in turn beats this property's own coded default. A stored
+    /// override takes effect immediately via <see cref="Microsoft.Extensions.Options.IOptionsMonitor{TOptions}"/>,
+    /// without a process restart - see <see cref="Router.RouterSettingsAdminGrpcService"/>.
+    /// </remarks>
+    public bool EnableAdaptiveRouting { get; init; }
+
+    /// <summary>
     /// Performs domain-level validation that is not fully expressible through data annotations.
     /// </summary>
     /// <exception cref="OptionsValidationException">Thrown when the routing option values are inconsistent.</exception>

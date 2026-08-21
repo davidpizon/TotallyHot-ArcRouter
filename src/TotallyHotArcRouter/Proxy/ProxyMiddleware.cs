@@ -96,6 +96,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     private readonly PendingRequestProvenanceCache? _pendingRequestProvenanceCache;
     private readonly ITranscriptStore? _transcriptStore;
     private readonly InFlightRequestGauge? _inFlightGauge;
+    private readonly IOptionsMonitor<Models.RoutingOptions>? _routingOptionsMonitor;
 
     // The rate the router's own tokens are charged at (see RoutingOptions.SelfHostedRouterPricePerMillionTokens).
     // Read once at construction rather than per request: it is a static amortization figure, not a catalog
@@ -197,6 +198,14 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// (the taxonomy-comparison drain) can hard-pause while traffic is being served. Defaults to
     /// <see langword="null"/> (no tracking), so existing callers/tests are unaffected.
     /// </param>
+    /// <param name="routingOptionsMonitor">
+    /// Optional live routing-options monitor (docs/router/self-organizing-classification-plan.md Phase T6),
+    /// consulted alongside <see cref="Transcripts.TranscriptOptions.Enabled"/> at the transcript-insert
+    /// site so a <see cref="Models.RoutingOptions.EnableAdaptiveRouting"/> toggle stops (or resumes) new
+    /// transcript writes without a restart. Defaults to <see langword="null"/>, which is treated as
+    /// adaptive routing being disabled - matching <see cref="Models.RoutingOptions.EnableAdaptiveRouting"/>'s
+    /// own off-by-default coded value.
+    /// </param>
     public ProxyMiddleware(
         ILogger<ProxyMiddleware> logger,
         RequestInterceptor interceptor,
@@ -222,7 +231,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         PendingRequestCostCache? pendingRequestCostCache = null,
         PendingRequestProvenanceCache? pendingRequestProvenanceCache = null,
         ITranscriptStore? transcriptStore = null,
-        InFlightRequestGauge? inFlightGauge = null)
+        InFlightRequestGauge? inFlightGauge = null,
+        IOptionsMonitor<Models.RoutingOptions>? routingOptionsMonitor = null)
     {
         _logger = logger;
         _interceptor = interceptor;
@@ -251,6 +261,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         _pendingRequestProvenanceCache = pendingRequestProvenanceCache;
         _transcriptStore = transcriptStore;
         _inFlightGauge = inFlightGauge;
+        _routingOptionsMonitor = routingOptionsMonitor;
         _selfHostedRouterPricePerMillionTokens =
             routingOptions?.Value.SelfHostedRouterPricePerMillionTokens ?? new Models.RoutingOptions().SelfHostedRouterPricePerMillionTokens;
 
@@ -1653,7 +1664,9 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         // the client by this point) - gated on TranscriptOptions.Enabled so a disabled install creates no
         // table and writes nothing, and wrapped in its own try/catch so a transcript-store failure can
         // never surface as a routing failure, matching every other telemetry side-effect in this method.
-        if (_transcriptStore is not null)
+        // Phase T6 adds RoutingOptions.EnableAdaptiveRouting as a second, live gate - read from the
+        // monitor (not captured once) so toggling it stops or resumes writes without a restart.
+        if (_transcriptStore is not null && (_routingOptionsMonitor?.CurrentValue.EnableAdaptiveRouting ?? false))
         {
             try
             {

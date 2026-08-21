@@ -51,7 +51,8 @@ public sealed class RefreshFromEndpointTests : IDisposable
         HttpMessageHandler discoveryHandler,
         ProviderEndpointScanner? scanner = null,
         ToolCallCapabilityStore? capabilityStore = null) =>
-        new(store, Mock.Of<IEnvironmentVariableProvider>(), new HttpClient(discoveryHandler), null, scanner, capabilityStore);
+        new(store, Mock.Of<IEnvironmentVariableProvider>(), new HttpClient(discoveryHandler),
+            new ManagementFacadeDependencies { EndpointScanner = scanner, CapabilityStore = capabilityStore });
 
     private static DelegatingHandlerStub DiscoveryHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler) =>
         new(handler);

@@ -6,12 +6,13 @@ using TotallyHot.ArcRouter.Models;
 namespace TotallyHot.ArcRouter.Router;
 
 /// <summary>
-/// Owns the SQLite connection string and schema for both of the router's learned-memory tables: the
-/// embedding-keyed <see cref="MemoryEntry"/> working set (<c>memory_entries</c>, PLAN.md Phase J) and the
-/// dimension-keyed score aggregates behind <see cref="RouterMemory"/> (<c>dimension_scores</c>). A dedicated
-/// file, separate from <see cref="TotallyHot.ArcRouter.PriceCatalog.PriceCatalogDatabase"/>'s
-/// <c>agent_telemetry.db</c> - router memory has its own lifecycle and locking needs, independent of
-/// price-catalog refreshes.
+/// Owns the SQLite connection string and schema for the router's learned-memory and settings tables: the
+/// embedding-keyed <see cref="MemoryEntry"/> working set (<c>memory_entries</c>, PLAN.md Phase J), the
+/// dimension-keyed score aggregates behind <see cref="RouterMemory"/> (<c>dimension_scores</c>), and the
+/// mutable settings key/value store behind <see cref="RouterSettingsStore"/> (<c>router_settings</c>,
+/// docs/router/self-organizing-classification-plan.md Phase T6). A dedicated file, separate from
+/// <see cref="TotallyHot.ArcRouter.PriceCatalog.PriceCatalogDatabase"/>'s <c>agent_telemetry.db</c> - router
+/// memory has its own lifecycle and locking needs, independent of price-catalog refreshes.
 /// </summary>
 public sealed class RouterMemoryDatabase
 {
@@ -43,6 +44,11 @@ public sealed class RouterMemoryDatabase
             sum              REAL    NOT NULL,
             count            INTEGER NOT NULL,
             PRIMARY KEY (dimension, model)
+        );
+
+        CREATE TABLE IF NOT EXISTS router_settings (
+            key              TEXT    PRIMARY KEY,
+            value            TEXT    NOT NULL
         );
         """;
 

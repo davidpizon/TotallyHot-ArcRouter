@@ -74,71 +74,19 @@ public sealed class ManagementFacade
     /// <param name="store">The writable provider/model configuration store.</param>
     /// <param name="environment">Accessor used to resolve provider credentials for model discovery.</param>
     /// <param name="httpClient">HTTP client used to query a provider's live model list.</param>
-    /// <param name="budgetStore">
-    /// Optional per-provider budget store. When null, providers report no caps/spend and budget edits
-    /// answer <see cref="ManagementErrorType.Unavailable"/>.
-    /// </param>
-    /// <param name="endpointScanner">
-    /// Optional endpoint-flavor scanner. When null, capability scanning is unavailable and
-    /// <see cref="ScanCapabilitiesAsync"/> answers <see cref="ManagementErrorType.Unavailable"/>.
-    /// </param>
-    /// <param name="capabilityStore">
-    /// Optional store the scan results are persisted to. Null has the same effect as a null scanner - both
-    /// are needed for a scan to be meaningful.
-    /// </param>
-    /// <param name="priceCatalogRepository">
-    /// Optional price-catalog repository, read for each Anthropic provider's captured
-    /// <c>anthropic-ratelimit-*</c> header snapshot (<c>docs/router/anthropic-reported-usage-plan.md</c> §5).
-    /// When null, every provider's <see cref="ProviderView.RateLimit"/> is <see langword="null"/> - "no
-    /// rate-limit data observed yet", identical to a repository with no captured headers for that provider.
-    /// </param>
-    /// <param name="overrideStore">
-    /// Optional operator price-override store backing <c>PUT/DELETE /admin/price-overrides</c> (§5.7). When
-    /// null, override reads/writes answer <see cref="ManagementErrorType.Unavailable"/>.
-    /// </param>
-    /// <param name="rollupStore">
-    /// Optional Phase 4 rollup store backing <c>GET /admin/usage/summary</c> and <c>GET /admin/usage/rollup</c>
-    /// (§5.15). When null, both answer <see cref="ManagementErrorType.Unavailable"/>.
-    /// </param>
-    /// <param name="rateLimitStalenessThreshold">
-    /// How old a captured rate-limit snapshot may be before <see cref="ProviderRateLimitView.IsStale"/> is
-    /// set (§5.9). Defaults to 15 minutes.
-    /// </param>
-    /// <param name="secretWriter">
-    /// Optional writer for the protected secret store (<c>docs/router/secrets-at-rest-plan.md</c> §3). When
-    /// supplied, a locked literal header written through <see cref="UpsertProviderAsync"/> is stored here
-    /// instead of in <c>model-routing.json</c> - see <see cref="ResolveHeader"/>. This is the only secret
-    /// dependency this facade can use to write; it deliberately has no way to read a value back (§4's
-    /// write-only invariant). Defaults to <see langword="null"/>, in which case a locked literal continues
-    /// to be stored in configuration exactly as before the store existed.
-    /// </param>
-    /// <param name="comparisonStore">
-    /// Optional store of Phase T4 taxonomy comparisons, backing <see cref="GetRoutingRoiAsync"/>. Defaults
-    /// to <see langword="null"/>, in which case that surface reports itself unavailable rather than
-    /// fabricating an empty history that would read as "no savings".
-    /// </param>
-    /// <param name="secretReader">
-    /// Optional reader for the protected secret store, used only for <see cref="DiscoverModelsAsync"/> and
-    /// <see cref="RefreshFromEndpointAsync"/>'s outbound probe of the provider's own endpoint - so a
-    /// provider whose credential has been migrated to the store can still be discovered from. Never consulted
-    /// while building any value this facade returns to a caller (see <see cref="BuildProvidersResponse"/>),
-    /// so injecting this alongside <paramref name="secretWriter"/> does not weaken §4's invariant that no
-    /// management surface ever reads a secret's value back.
+    /// <param name="dependencies">
+    /// The optional collaborators, carried as one named object rather than a dozen positional nullable
+    /// arguments - see <see cref="ManagementFacadeDependencies"/>, whose members document what each one
+    /// enables and what its absence makes unavailable. Defaults to <see langword="null"/>, which behaves
+    /// identically to supplying an instance with every member unset: the facade still manages providers and
+    /// models, and every surface needing an absent collaborator answers
+    /// <see cref="ManagementErrorType.Unavailable"/>.
     /// </param>
     public ManagementFacade(
         IProviderConfigStore store,
         IEnvironmentVariableProvider environment,
         HttpClient httpClient,
-        ProviderBudgetStore? budgetStore = null,
-        ProviderEndpointScanner? endpointScanner = null,
-        ToolCallCapabilityStore? capabilityStore = null,
-        PriceCatalogRepository? priceCatalogRepository = null,
-        ModelAliasOverrideStore? overrideStore = null,
-        IUsageRollupStore? rollupStore = null,
-        TimeSpan? rateLimitStalenessThreshold = null,
-        ISecretWriter? secretWriter = null,
-        ISecretReader? secretReader = null,
-        TotallyHot.ArcRouter.Transcripts.ITaxonomyComparisonStore? comparisonStore = null)
+        ManagementFacadeDependencies? dependencies = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(environment);
@@ -147,16 +95,16 @@ public sealed class ManagementFacade
         _store = store;
         _environment = environment;
         _httpClient = httpClient;
-        _budgetStore = budgetStore;
-        _endpointScanner = endpointScanner;
-        _capabilityStore = capabilityStore;
-        _priceCatalogRepository = priceCatalogRepository;
-        _overrideStore = overrideStore;
-        _rollupStore = rollupStore;
-        _comparisonStore = comparisonStore;
-        _rateLimitStalenessThreshold = rateLimitStalenessThreshold ?? DefaultRateLimitStalenessThreshold;
-        _secretWriter = secretWriter;
-        _secretReader = secretReader;
+        _budgetStore = dependencies?.BudgetStore;
+        _endpointScanner = dependencies?.EndpointScanner;
+        _capabilityStore = dependencies?.CapabilityStore;
+        _priceCatalogRepository = dependencies?.PriceCatalogRepository;
+        _overrideStore = dependencies?.OverrideStore;
+        _rollupStore = dependencies?.RollupStore;
+        _comparisonStore = dependencies?.ComparisonStore;
+        _rateLimitStalenessThreshold = dependencies?.RateLimitStalenessThreshold ?? DefaultRateLimitStalenessThreshold;
+        _secretWriter = dependencies?.SecretWriter;
+        _secretReader = dependencies?.SecretReader;
         _dialectResolver = new ModelDialectResolver(httpClient, environment);
     }
 

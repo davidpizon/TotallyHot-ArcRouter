@@ -9,6 +9,7 @@ using TotallyHot.ArcRouter.Router.Embeddings;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tests.CodeRouterBench;
 using TotallyHot.ArcRouter.Tests.PriceCatalog;
+using TotallyHot.ArcRouter.Tests.TestSupport;
 using TotallyHot.ArcRouter.Transcripts;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -229,7 +230,7 @@ public class StartupHealthCheckHostedServiceTests
     {
         var database = CreateRouterMemoryDatabase(temp);
         var store = new SqliteMemoryEntryStore(database);
-        return new EmbeddingMemory(store, Options.Create(new RoutingOptions()), NullLogger<EmbeddingMemory>.Instance);
+        return new EmbeddingMemory(store, new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions()), NullLogger<EmbeddingMemory>.Instance);
     }
 
     private static BenchmarkDatabase CreateBenchmarkDatabase(TempDatabase temp)

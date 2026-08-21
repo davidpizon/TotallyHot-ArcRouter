@@ -1,14 +1,6 @@
-using TotallyHot.ArcRouter.CodeRouterBench;
-using TotallyHot.ArcRouter.Models;
-using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
-using TotallyHot.ArcRouter.Proxy.Management;
-using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
-using TotallyHot.ArcRouter.Router.TextGeneration;
-using TotallyHot.ArcRouter.Telemetry;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -23,73 +15,30 @@ namespace TotallyHot.ArcRouter.Hosting
         private readonly ProxyServer _proxyServer;
 
         /// <summary>
-        /// Constructs the underlying <see cref="ProxyServer"/> from its dependencies. Optional
-        /// parameters (telemetry, provider config store, environment, management HTTP client/token, price
-        /// catalog services, the protected secret store's reader/writer, CodeRouterBench corpus services,
-        /// the llm_router model override store and sync service, routing configuration) let callers omit
-        /// pieces they don't need wired up, mirroring <see cref="ProxyServer"/>'s own constructor.
+        /// Constructs the underlying <see cref="ProxyServer"/> from its dependencies, which are forwarded
+        /// verbatim - this type adds hosted-service lifecycle logging and nothing else, so it deliberately
+        /// mirrors <see cref="ProxyServer"/>'s own constructor rather than reshaping what it is given.
         /// </summary>
+        /// <param name="logger">The logger for this hosted service's own start/stop lifecycle messages.</param>
+        /// <param name="proxyLogger">The logger handed to the underlying <see cref="ProxyServer"/>.</param>
+        /// <param name="proxyMiddleware">The already-constructed middleware instance used to handle every request.</param>
+        /// <param name="port">The localhost port Kestrel listens on for plain HTTP/1.1 LLM-forwarding traffic.</param>
+        /// <param name="grpcPort">The dedicated localhost port for the TLS-secured gRPC endpoint.</param>
+        /// <param name="dependencies">
+        /// The feature groups hand-carried into <see cref="ProxyServer"/>'s inner DI container; see
+        /// <see cref="ProxyServerDependencies"/>. Defaults to <see langword="null"/>, giving a plain
+        /// proxy-forwarding server with no admin surfaces beyond the always-mapped ones.
+        /// </param>
         public ProxyHostedService(
             ILogger<ProxyHostedService> logger,
             ILogger<ProxyServer> proxyLogger,
             ProxyMiddleware proxyMiddleware,
             int port = 5001,
-            TelemetryBroadcaster? telemetryBroadcaster = null,
             int grpcPort = ProxyServer.DefaultGrpcPort,
-            IProviderConfigStore? providerConfigStore = null,
-            IEnvironmentVariableProvider? environment = null,
-            HttpClient? managementHttpClient = null,
-            string? managementToken = null,
-            PriceSourceToggleStore? priceSourceToggleStore = null,
-            PriceCatalogIngestionService? priceCatalogIngestionService = null,
-            PriceCatalogOptions? priceCatalogOptions = null,
-            ProviderBudgetStore? providerBudgetStore = null,
-            ProviderEndpointScanner? endpointScanner = null,
-            ToolCallCapabilityStore? toolCallCapabilityStore = null,
-            PriceCatalogRepository? priceCatalogRepository = null,
-            ModelAliasOverrideStore? modelAliasOverrideStore = null,
-            IUsageRollupStore? usageRollupStore = null,
-            ISecretWriter? secretWriter = null,
-            ISecretReader? secretReader = null,
-            BenchmarkDataStatusService? benchmarkDataStatusService = null,
-            BenchmarkFileLedger? benchmarkFileLedger = null,
-            BenchmarkSyncService? benchmarkSyncService = null,
-            BenchmarkSyncOptions? benchmarkSyncOptions = null,
-            ILlmRouterModelOverrideStore? llmRouterModelOverrideStore = null,
-            LlmRouterModelSyncService? llmRouterModelSyncService = null,
-            IOptions<RoutingOptions>? routingOptions = null,
-            TotallyHot.ArcRouter.Transcripts.ITaxonomyComparisonStore? taxonomyComparisonStore = null)
+            ProxyServerDependencies? dependencies = null)
         {
             _logger = logger;
-            _proxyServer = new ProxyServer(
-                proxyLogger,
-                proxyMiddleware,
-                port,
-                telemetryBroadcaster,
-                grpcPort,
-                providerConfigStore,
-                environment,
-                managementHttpClient,
-                managementToken,
-                priceSourceToggleStore,
-                priceCatalogIngestionService,
-                priceCatalogOptions,
-                providerBudgetStore,
-                endpointScanner,
-                toolCallCapabilityStore,
-                priceCatalogRepository,
-                modelAliasOverrideStore,
-                usageRollupStore,
-                secretWriter,
-                secretReader,
-                benchmarkDataStatusService,
-                benchmarkFileLedger,
-                benchmarkSyncService,
-                benchmarkSyncOptions,
-                llmRouterModelOverrideStore,
-                llmRouterModelSyncService,
-                routingOptions,
-                taxonomyComparisonStore);
+            _proxyServer = new ProxyServer(proxyLogger, proxyMiddleware, port, grpcPort, dependencies);
         }
 
         /// <summary>

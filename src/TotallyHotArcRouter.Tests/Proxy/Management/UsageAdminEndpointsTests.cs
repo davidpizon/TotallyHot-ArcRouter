@@ -44,10 +44,15 @@ public sealed class UsageAdminEndpointsTests
             middleware,
             port: 0,
             grpcPort: 0,
-            providerConfigStore: store,
-            environment: environment,
-            managementToken: managementToken,
-            usageRollupStore: rollupStore);
+            dependencies: new ProxyServerDependencies
+            {
+                ManagementToken = managementToken,
+                ManagementApi = new ManagementApiDependencies(store)
+                {
+                    Environment = environment,
+                    UsageRollupStore = rollupStore,
+                },
+            });
     }
 
     private static string BaseAddress(ProxyServer server) =>

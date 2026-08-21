@@ -389,6 +389,118 @@ message RoutingModeResponse {
   repeated VoterMode voters = 4;
 }
 
+// The Governance UI's System Settings window's "Adaptive Routing" row
+// (docs/router/self-organizing-classification-plan.md Phase T6): reads and mutates the two
+// router_settings-backed overrides layered on top of RoutingOptions - EnableAdaptiveRouting and
+// EmbeddingMemoryCapacity. Deliberately a separate service from the read-only RoutingModeAdminService above
+// (§M3.2's settled "read-only reporting and settings mutation stay separate" convention) - this is the one
+// admin service on this endpoint that mutates RoutingOptions. Same shape as ClusterModelAdminService/
+// BenchmarkDataAdminService (unary read plus a mutating RPC), sharing the :5002 TLS loopback endpoint.
+service RouterSettingsAdminService {
+  // Returns the settings' currently effective values - i.e. IOptionsMonitor<RoutingOptions>.CurrentValue,
+  // which already reflects stored-override > appsettings.json > coded-default precedence - not the raw
+  // router_settings rows.
+  rpc GetRouterSettings (GetRouterSettingsRequest) returns (RouterSettingsResponse);
+
+  // Validates and persists both settings to router_settings, triggers the live-reload change token so
+  // IOptionsMonitor<RoutingOptions> picks them up immediately, and - when EmbeddingMemoryCapacity was
+  // lowered - trims memory_entries to the new bound before returning. Rejects an out-of-range capacity with
+  // a structured INVALID_ARGUMENT error rather than silently clamping it; the response always re-reads the
+  // post-mutation effective values, mirroring RetrainClusterModel's "true post-mutation state" convention.
+  rpc UpdateRouterSettings (UpdateRouterSettingsRequest) returns (RouterSettingsResponse);
+}
+
+message GetRouterSettingsRequest {}
+
+// embedding_memory_capacity's valid range, enforced by UpdateRouterSettings - INVALID_ARGUMENT rejects any
+// value outside it rather than clamping. Mirrors the GUI's own client-side min/max on the Sample Size input.
+message UpdateRouterSettingsRequest {
+  bool adaptive_routing_enabled = 1;
+  int32 embedding_memory_capacity = 2;
+}
+
+message RouterSettingsResponse {
+  bool adaptive_routing_enabled = 1;
+  int32 embedding_memory_capacity = 2;
+}
+
+// The Governance UI's Cluster Model panel (docs/router/self-organizing-classification-plan.md Phase T5):
+// reports the trained self-organizing cluster model's status and runs a retrain with streamed
+// bootstrap-embedding progress. Also surfaces the transcript retention settings that gate the corpus this
+// model trains from, since this panel is their closest existing home - see
+// TotallyHot.ArcRouter.Transcripts.TranscriptOptions. Same shape as the other admin services (unary status
+// read plus one streaming mutation RPC), sharing the :5002 TLS loopback endpoint.
+service ClusterModelAdminService {
+  // Returns the current artifact's status (or the honest "no artifact yet" state) plus transcript
+  // retention context.
+  rpc GetClusterModelStatus (GetClusterModelStatusRequest) returns (ClusterModelStatusResponse);
+
+  // Runs IClusterTrainingService.RetrainAsync, streaming one ClusterRetrainBootstrapProgress event per
+  // OOD bootstrap embedding tick, then exactly one ClusterRetrainResult carrying the outcome and the
+  // fresh post-mutation status - mirrors SyncBenchmarkData's "full state after the mutation" convention.
+  rpc RetrainClusterModel (RetrainClusterModelRequest) returns (stream ClusterRetrainStreamEvent);
+}
+
+message GetClusterModelStatusRequest {}
+
+message RetrainClusterModelRequest {}
+
+// One trained artifact's status, or the honest "no artifact yet" state (artifact_present = false, every
+// other artifact-derived field at its proto3 zero value) on a fresh install. retention_days,
+// max_transcript_rows, and current_transcript_row_count are always populated regardless of
+// artifact_present - they describe the transcript corpus this model trains from, not the model itself.
+message ClusterModelStatusResponse {
+  bool artifact_present = 1;
+  int32 chosen_k = 2;
+  google.protobuf.Timestamp trained_at_utc = 3;
+  // Human-readable provenance: source mix, the k-selection sweep's outcome, and the training date -
+  // ClusterModelArtifact.TrainedFrom verbatim.
+  string trained_from = 4;
+  // Parallel to cluster_names: cluster_sizes[i] is the training-sample count for cluster_names[i].
+  repeated int32 cluster_sizes = 5;
+  repeated string cluster_names = 6;
+  int32 bootstrap_task_count = 7;
+  int32 memory_entry_count = 8;
+  // Live memory_entries rows accumulated since this artifact's memory_entry_count was recorded (or,
+  // when artifact_present is false, every live entry that exists) - the same threshold comparison
+  // Hosting.ClusterRetrainHostedService makes, surfaced for an operator deciding whether to retrain by
+  // hand.
+  int32 entries_since_last_retrain = 9;
+  int32 retention_days = 10;
+  int32 max_transcript_rows = 11;
+  int32 current_transcript_row_count = 12;
+}
+
+enum ClusterRetrainResultKind {
+  CLUSTER_RETRAIN_RESULT_KIND_UNSPECIFIED = 0;
+  CLUSTER_RETRAIN_RESULT_KIND_TRAINED = 1;
+  CLUSTER_RETRAIN_RESULT_KIND_DECLINED = 2;
+  CLUSTER_RETRAIN_RESULT_KIND_ALREADY_RUNNING = 3;
+}
+
+// One bootstrap-embedding progress tick during a retrain - IClusterTrainingService.RetrainAsync's
+// IProgress<int> callback, reporting OOD bootstrap tasks embedded so far.
+message ClusterRetrainBootstrapProgress {
+  int32 tasks_embedded = 1;
+}
+
+// The retrain's outcome: which ClusterTrainingResultKind category it fell into, a human-readable
+// message, and the fresh status computed immediately afterward.
+message ClusterRetrainResult {
+  ClusterRetrainResultKind kind = 1;
+  string message = 2;
+  ClusterModelStatusResponse status = 3;
+}
+
+// One message on the RetrainClusterModel stream: zero or more bootstrap_progress events (only while an
+// OOD corpus is synced and being embedded), followed by exactly one result as the final message.
+message ClusterRetrainStreamEvent {
+  oneof event {
+    ClusterRetrainBootstrapProgress bootstrap_progress = 1;
+    ClusterRetrainResult result = 2;
+  }
+}
+
 // Envelope: exactly one of these is set per message, matching SignalR's per-message-type dispatch
 // ("RoutingTelemetry" / "LogLine" client methods) with a single Protobuf idiom.
 message TelemetryEvent {

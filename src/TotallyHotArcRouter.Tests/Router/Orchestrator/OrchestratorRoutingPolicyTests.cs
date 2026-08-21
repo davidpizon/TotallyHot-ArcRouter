@@ -1,3 +1,4 @@
+using TotallyHot.ArcRouter.Tests.TestSupport;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Orchestrator;
@@ -448,7 +449,7 @@ public class OrchestratorRoutingPolicyTests
         };
         var policy = new OrchestratorRoutingPolicy(
             voters,
-            Options.Create(new RoutingOptions
+            new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions
             {
                 DefaultModel = "kimi-k2.5",
                 DimBestVoterWeight = 0.5,
@@ -535,7 +536,7 @@ public class OrchestratorRoutingPolicyTests
         var voters = new IRoutingVoter[] { new FakeVoter(VoterNames.DimBest, "kimi-k2.5", confidence: 1.0) };
         var policy = new OrchestratorRoutingPolicy(
             voters,
-            Options.Create(new RoutingOptions { DefaultModel = "kimi-k2.5", DimBestVoterWeight = 0d }),
+            new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions { DefaultModel = "kimi-k2.5", DimBestVoterWeight = 0d }),
             NullLogger<OrchestratorRoutingPolicy>.Instance);
         var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi]);
 
@@ -583,7 +584,7 @@ public class OrchestratorRoutingPolicyTests
         double explorationRate = 0d) =>
         new(
             voters,
-            Options.Create(new RoutingOptions
+            new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions
             {
                 DefaultModel = defaultModel,
                 DimBestVoterWeight = 0.9,
@@ -595,6 +596,11 @@ public class OrchestratorRoutingPolicyTests
                 // is off by default here - only the exploration-focused tests below opt in explicitly.
                 EnableExploration = enableExploration,
                 ExplorationRate = explorationRate,
+                // docs/router/self-organizing-classification-plan.md Phase T6: cluster_best now also
+                // requires the adaptive-routing master switch, on top of EnableClusterBestVoter. This
+                // helper's tests exercise the ensemble in general, not T6's own gating (which has its
+                // own dedicated tests), so it opts in here to keep cluster_best participating as before.
+                EnableAdaptiveRouting = true,
             }),
             NullLogger<OrchestratorRoutingPolicy>.Instance);
 

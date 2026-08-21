@@ -46,7 +46,8 @@ public sealed class ProtectedSecretHeaderTests
     };
 
     private static ManagementFacade CreateFacade(IProviderConfigStore store, ProtectedSecretStore secretStore) =>
-        new(store, Mock.Of<IEnvironmentVariableProvider>(), new HttpClient(), secretWriter: secretStore, secretReader: secretStore);
+        new(store, Mock.Of<IEnvironmentVariableProvider>(), new HttpClient(),
+            new ManagementFacadeDependencies { SecretWriter = secretStore, SecretReader = secretStore });
 
     [Fact]
     public async Task UpsertProviderAsync_LockedLiteralHeader_IsStoredProtectedNotLiteral()

@@ -155,7 +155,8 @@ public sealed class ModelToolDialectOverrideTests : IDisposable
         });
 
         return new ManagementFacade(
-            store, Mock.Of<IEnvironmentVariableProvider>(), new HttpClient(), null, null, capabilityStore);
+            store, Mock.Of<IEnvironmentVariableProvider>(), new HttpClient(),
+            new ManagementFacadeDependencies { CapabilityStore = capabilityStore });
     }
 
     public void Dispose() => _temp.Dispose();

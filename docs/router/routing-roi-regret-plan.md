@@ -1,6 +1,7 @@
 # Routing ROI: Expense + Regret vs dim_best, Fast Drain, and Hard Pause Under Load
 
-**Status:** approved, next item to address (see `src/PLAN.md`).
+**Status:** shipped. See `docs/router/self-organizing-classification-plan.md` Phase T4's status block for
+the delivered summary.
 **Builds on:** [`self-organizing-classification-plan.md`](self-organizing-classification-plan.md) Phase T4 (shipped).
 
 ## Context

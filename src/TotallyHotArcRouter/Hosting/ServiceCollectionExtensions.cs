@@ -65,6 +65,29 @@ namespace TotallyHot.ArcRouter.Hosting
                     return true;
                 })
                 .ValidateOnStart();
+
+            // docs/router/self-organizing-classification-plan.md Phase T6: the SQLite-backed override
+            // layer, registered as an IConfigureOptions<RoutingOptions> step *after* the appsettings.json
+            // bind above - Options-pattern configure delegates run in registration order, so this one runs
+            // second and wins, giving "stored override > appsettings.json > coded default" precedence.
+            // RouterSettingsStore is deliberately built from a private RouterMemoryDatabase resolved
+            // straight from configuration rather than the DI singleton below (which itself needs
+            // IOptions<RoutingOptions>) - see RouterSettingsStore's remarks for why the DI singleton would
+            // be circular here.
+            services.AddSingleton(sp =>
+            {
+                var configuration = sp.GetRequiredService<IConfiguration>();
+                var configuredPath = configuration.GetSection(RoutingOptions.SectionName)[nameof(RoutingOptions.EmbeddingMemoryDatabasePath)];
+                var databaseOptions = Options.Create(new RoutingOptions
+                {
+                    EmbeddingMemoryDatabasePath = configuredPath ?? new RoutingOptions().EmbeddingMemoryDatabasePath,
+                });
+                return new RouterSettingsStore(new RouterMemoryDatabase(databaseOptions), sp.GetRequiredService<ILogger<RouterSettingsStore>>());
+            });
+            services.AddSingleton<Router.RouterSettingsReloadToken>();
+            services.AddSingleton<IOptionsChangeTokenSource<RoutingOptions>>(sp => sp.GetRequiredService<Router.RouterSettingsReloadToken>());
+            services.AddSingleton<IConfigureOptions<RoutingOptions>, Router.RouterSettingsConfigureOptions>();
+
             services.AddHttpClient(nameof(Router.Embeddings.OnnxEmbeddingClient));
             services.AddSingleton<Router.Embeddings.IEmbeddingClient, Router.Embeddings.OnnxEmbeddingClient>();
             services.AddSingleton<Router.Embeddings.EmbeddingWarmupState>();
@@ -282,7 +305,13 @@ namespace TotallyHot.ArcRouter.Hosting
                     sp.GetRequiredService<Router.EmbeddingMemoryScoreObserver>(),
                 };
 
-                if (sp.GetRequiredService<IOptions<TotallyHot.ArcRouter.Transcripts.TranscriptOptions>>().Value.Enabled)
+                // docs/router/self-organizing-classification-plan.md Phase T6: transcript-score
+                // backfill additionally requires the adaptive-routing master switch, on top of its own
+                // TranscriptOptions.Enabled flag. A plain IOptions snapshot is sufficient here (not the
+                // monitor) - this factory runs once, at this singleton's construction, so a later toggle
+                // has nothing to re-run regardless.
+                if (sp.GetRequiredService<IOptions<TotallyHot.ArcRouter.Transcripts.TranscriptOptions>>().Value.Enabled
+                    && sp.GetRequiredService<IOptions<RoutingOptions>>().Value.EnableAdaptiveRouting)
                 {
                     observers.Add(sp.GetRequiredService<TotallyHot.ArcRouter.Transcripts.TranscriptScoreObserver>());
                 }
@@ -489,35 +518,74 @@ namespace TotallyHot.ArcRouter.Hosting
                     sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ProxyHostedService>>(),
                     sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ProxyServer>>(),
                     sp.GetRequiredService<ProxyMiddleware>(),
-                    telemetryBroadcaster: sp.GetRequiredService<TelemetryBroadcaster>(),
-                    providerConfigStore: sp.GetRequiredService<IProviderConfigStore>(),
-                    environment: sp.GetRequiredService<IEnvironmentVariableProvider>(),
-                    managementToken: ManagementAccessToken.GetOrCreate(),
-                    priceSourceToggleStore: sp.GetRequiredService<PriceSourceToggleStore>(),
-                    priceCatalogIngestionService: sp.GetRequiredService<PriceCatalogIngestionService>(),
-                    priceCatalogOptions: sp.GetRequiredService<IOptions<PriceCatalogOptions>>().Value,
-                    providerBudgetStore: sp.GetRequiredService<ProviderBudgetStore>(),
-                    // Passed across for the same reason as the price-catalog singletons: the inner host has
-                    // its own container, so the REST facade it builds cannot resolve these from this one.
-                    endpointScanner: sp.GetRequiredService<ProviderEndpointScanner>(),
-                    toolCallCapabilityStore: sp.GetRequiredService<ToolCallCapabilityStore>(),
-                    priceCatalogRepository: sp.GetRequiredService<PriceCatalogRepository>(),
-                    modelAliasOverrideStore: sp.GetRequiredService<ModelAliasOverrideStore>(),
-                    usageRollupStore: sp.GetRequiredService<IUsageRollupStore>(),
-                    secretWriter: sp.GetRequiredService<ISecretWriter>(),
-                    secretReader: sp.GetRequiredService<ISecretReader>(),
-                    // Backs the Governance > Benchmark Data panel's gRPC API (Phase 4).
-                    benchmarkDataStatusService: sp.GetRequiredService<BenchmarkDataStatusService>(),
-                    benchmarkFileLedger: sp.GetRequiredService<BenchmarkFileLedger>(),
-                    benchmarkSyncService: sp.GetRequiredService<BenchmarkSyncService>(),
-                    benchmarkSyncOptions: sp.GetRequiredService<IOptions<BenchmarkSyncOptions>>().Value,
-                    // Backs the Governance > Benchmark Data panel's "Local Voter Model" gRPC API.
-                    llmRouterModelOverrideStore: sp.GetRequiredService<Router.TextGeneration.ILlmRouterModelOverrideStore>(),
-                    llmRouterModelSyncService: sp.GetRequiredService<Router.TextGeneration.LlmRouterModelSyncService>(),
-                    // Backs the Governance > Routing Mode panel's gRPC API (docs/router/orchestrator-live-path-plan.md §M3.2).
-                    routingOptions: sp.GetRequiredService<IOptions<RoutingOptions>>(),
-                    // Backs Cost Analytics' "Routing ROI" feed (docs/router/self-organizing-classification-plan.md Phase T4).
-                    taxonomyComparisonStore: sp.GetRequiredService<TotallyHot.ArcRouter.Transcripts.ITaxonomyComparisonStore>());
+                    dependencies: new ProxyServerDependencies
+                    {
+                        Telemetry = sp.GetRequiredService<TelemetryBroadcaster>(),
+                        // The always-present per-user token that gates every /admin request and every gRPC
+                        // call by default - the same token the MCP endpoint requires, so both management
+                        // surfaces are gated identically out of the box.
+                        ManagementToken = ManagementAccessToken.GetOrCreate(),
+                        // Backs the Governance > Routing Mode panel's gRPC API (docs/router/orchestrator-live-path-plan.md §M3.2).
+                        RoutingOptions = sp.GetRequiredService<IOptions<RoutingOptions>>(),
+
+                        // The /admin/* management REST API. The writable config store makes edits reload the
+                        // router live; the rest is what the REST facade needs, passed across for the same
+                        // reason as everything else here - the inner host has its own container and cannot
+                        // resolve any of it from this one.
+                        ManagementApi = new ManagementApiDependencies(sp.GetRequiredService<IProviderConfigStore>())
+                        {
+                            Environment = sp.GetRequiredService<IEnvironmentVariableProvider>(),
+                            BudgetStore = sp.GetRequiredService<ProviderBudgetStore>(),
+                            EndpointScanner = sp.GetRequiredService<ProviderEndpointScanner>(),
+                            CapabilityStore = sp.GetRequiredService<ToolCallCapabilityStore>(),
+                            PriceCatalogRepository = sp.GetRequiredService<PriceCatalogRepository>(),
+                            ModelAliasOverrideStore = sp.GetRequiredService<ModelAliasOverrideStore>(),
+                            UsageRollupStore = sp.GetRequiredService<IUsageRollupStore>(),
+                            SecretWriter = sp.GetRequiredService<ISecretWriter>(),
+                            SecretReader = sp.GetRequiredService<ISecretReader>(),
+                            // Backs Cost Analytics' "Routing ROI" feed (docs/router/self-organizing-classification-plan.md Phase T4).
+                            TaxonomyComparisonStore = sp.GetRequiredService<TotallyHot.ArcRouter.Transcripts.ITaxonomyComparisonStore>(),
+                        },
+
+                        // Backs the Governance > Price Sources panel's gRPC API.
+                        PriceSourceAdmin = new PriceSourceAdminDependencies(
+                            sp.GetRequiredService<PriceSourceToggleStore>(),
+                            sp.GetRequiredService<PriceCatalogIngestionService>())
+                        {
+                            Options = sp.GetRequiredService<IOptions<PriceCatalogOptions>>().Value,
+                        },
+
+                        // Backs the Governance > Benchmark Data panel's gRPC API (Phase 4).
+                        BenchmarkDataAdmin = new BenchmarkDataAdminDependencies(
+                            sp.GetRequiredService<BenchmarkDataStatusService>(),
+                            sp.GetRequiredService<BenchmarkFileLedger>(),
+                            sp.GetRequiredService<BenchmarkSyncService>())
+                        {
+                            Options = sp.GetRequiredService<IOptions<BenchmarkSyncOptions>>().Value,
+                        },
+
+                        // Backs the Governance > Benchmark Data panel's "Local Voter Model" gRPC API.
+                        LlmRouterModelAdmin = new LlmRouterModelAdminDependencies(
+                            sp.GetRequiredService<Router.TextGeneration.ILlmRouterModelOverrideStore>(),
+                            sp.GetRequiredService<Router.TextGeneration.LlmRouterModelSyncService>()),
+
+                        // Backs the Governance > Cluster Model panel's gRPC API (Phase T5).
+                        ClusterModelAdmin = new ClusterModelAdminDependencies(
+                            sp.GetRequiredService<Router.Orchestrator.IClusterTrainingService>(),
+                            sp.GetRequiredService<Router.IMemoryEntryStore>(),
+                            sp.GetRequiredService<TotallyHot.ArcRouter.Transcripts.ITranscriptStore>(),
+                            sp.GetRequiredService<IOptions<TotallyHot.ArcRouter.Transcripts.TranscriptOptions>>(),
+                            sp.GetRequiredService<IOptions<StorageOptions>>()),
+
+                        // Backs the Governance UI's System Settings window gRPC API (Phase T6).
+                        RouterSettingsAdmin = new RouterSettingsAdminDependencies(
+                            sp.GetRequiredService<Router.RouterSettingsStore>(),
+                            sp.GetRequiredService<Router.RouterSettingsReloadToken>(),
+                            sp.GetRequiredService<IOptionsMonitor<RoutingOptions>>())
+                        {
+                            EmbeddingMemory = sp.GetRequiredService<EmbeddingMemory>(),
+                        },
+                    });
             });
 
             return services;

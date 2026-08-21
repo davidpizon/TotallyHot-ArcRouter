@@ -89,9 +89,11 @@ public sealed class ModelDialectDetectionTests : IDisposable
             store,
             environment,
             new HttpClient(handler),
-            null,
-            new ProviderEndpointScanner(new HttpClient(handler), environment),
-            capabilityStore);
+            new ManagementFacadeDependencies
+            {
+                EndpointScanner = new ProviderEndpointScanner(new HttpClient(handler), environment),
+                CapabilityStore = capabilityStore,
+            });
     }
 
     private ToolCallCapabilityStore CapabilityStore() => _temp.CreateToolCallCapabilityStore();

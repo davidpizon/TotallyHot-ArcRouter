@@ -14,31 +14,53 @@ namespace TotallyHot.ArcRouter.Router;
 /// <remarks>
 /// At the 20,000-entry FIFO bound research-doc §3.3 specifies, a brute-force cosine scan over the
 /// in-memory working set is well inside the hot-path budget - a vector index is not warranted.
+/// <see cref="RoutingOptions.EmbeddingMemoryCapacity"/> is read live from <see cref="IOptionsMonitor{TOptions}"/>
+/// rather than captured once (docs/router/self-organizing-classification-plan.md Phase T6): a stored
+/// <see cref="RouterSettingsStore"/> override lowering the capacity must trim the working set immediately,
+/// not only after a restart, so this class subscribes to <see cref="IOptionsMonitor{TOptions}.OnChange"/> and
+/// re-runs the same trim <see cref="InitializeAsync"/> and <see cref="AddEntryAsync"/> already perform.
 /// </remarks>
-public sealed class EmbeddingMemory
+public sealed class EmbeddingMemory : IDisposable
 {
     private readonly IMemoryEntryStore _store;
-    private readonly RoutingOptions _options;
+    private readonly IOptionsMonitor<RoutingOptions> _optionsMonitor;
     private readonly ILogger<EmbeddingMemory> _logger;
     private readonly object _syncLock = new();
     private readonly List<MemoryEntry> _entries = [];
+    private readonly IDisposable? _changeSubscription;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="EmbeddingMemory"/> class.
     /// </summary>
     /// <param name="store">The persistence layer.</param>
-    /// <param name="options">The routing options, providing the similarity threshold, neighbor count, and FIFO capacity.</param>
+    /// <param name="optionsMonitor">The routing options monitor, providing the similarity threshold, neighbor count, and FIFO capacity - read live so a runtime capacity change (Phase T6) takes effect without a restart.</param>
     /// <param name="logger">The logger.</param>
-    public EmbeddingMemory(IMemoryEntryStore store, IOptions<RoutingOptions> options, ILogger<EmbeddingMemory> logger)
+    public EmbeddingMemory(IMemoryEntryStore store, IOptionsMonitor<RoutingOptions> optionsMonitor, ILogger<EmbeddingMemory> logger)
     {
         ArgumentNullException.ThrowIfNull(store);
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(optionsMonitor);
         ArgumentNullException.ThrowIfNull(logger);
 
         _store = store;
-        _options = options.Value;
+        _optionsMonitor = optionsMonitor;
         _logger = logger;
+
+        // Fire-and-forget on purpose: OnChange's callback is synchronous and must not block the options
+        // system's notification dispatch. A caller that needs the trim to have actually completed before
+        // it proceeds (e.g. RouterSettingsAdminGrpcService reporting the post-mutation state) calls
+        // TrimToCurrentCapacityAsync directly and awaits it instead of relying on this reactive path.
+        _changeSubscription = _optionsMonitor.OnChange(OnOptionsChanged);
     }
+
+    /// <summary>
+    /// The <see cref="IOptionsMonitor{TOptions}.OnChange"/> callback: fires <see cref="TrimToCurrentCapacityAsync"/>
+    /// without awaiting it, since the callback itself is synchronous and must not block the options
+    /// system's notification dispatch. A caller that needs the trim to have actually completed before it
+    /// proceeds (e.g. <see cref="RouterSettingsAdminGrpcService"/> reporting the post-mutation state) calls
+    /// <see cref="TrimToCurrentCapacityAsync"/> directly and awaits it instead of relying on this path.
+    /// </summary>
+    private void OnOptionsChanged(RoutingOptions changedOptions, string? name) =>
+        _ = TrimToCurrentCapacityAsync(CancellationToken.None);
 
     /// <summary>
     /// Loads the working set from the store. Must be called once before <see cref="FindNearest"/>
@@ -51,32 +73,13 @@ public sealed class EmbeddingMemory
     {
         var loaded = await _store.LoadAllAsync(cancellationToken).ConfigureAwait(false);
 
-        List<MemoryEntry> evicted = [];
         lock (_syncLock)
         {
             _entries.Clear();
             _entries.AddRange(loaded);
-
-            var overflow = _entries.Count - _options.EmbeddingMemoryCapacity;
-            if (overflow > 0)
-            {
-                evicted = _entries.GetRange(0, overflow);
-                _entries.RemoveRange(0, overflow);
-            }
         }
 
-        foreach (var evictedEntry in evicted)
-        {
-            await _store.DeleteAsync(evictedEntry.Id, cancellationToken).ConfigureAwait(false);
-        }
-
-        if (evicted.Count > 0)
-        {
-            _logger.LogInformation(
-                "Trimmed {EvictedCount} oldest embedding memory entries on load to stay within the {Capacity}-entry FIFO bound.",
-                evicted.Count,
-                _options.EmbeddingMemoryCapacity);
-        }
+        await TrimToCurrentCapacityAsync(cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation("Initialized embedding memory with {EntryCount} entries.", _entries.Count);
     }
@@ -126,33 +129,51 @@ public sealed class EmbeddingMemory
             new MemoryEntry(0, taskEmbedding, chosenModel, score, cost, verifierTrace, DateTimeOffset.UtcNow, isExploratory, propensity, dimension),
             cancellationToken).ConfigureAwait(false);
 
-        List<MemoryEntry>? evicted = null;
         lock (_syncLock)
         {
             _entries.Add(persisted);
-
-            var overflow = _entries.Count - _options.EmbeddingMemoryCapacity;
-            if (overflow > 0)
-            {
-                evicted = _entries.GetRange(0, overflow);
-                _entries.RemoveRange(0, overflow);
-            }
         }
 
-        if (evicted is not null)
-        {
-            foreach (var evictedEntry in evicted)
-            {
-                await _store.DeleteAsync(evictedEntry.Id, cancellationToken).ConfigureAwait(false);
-            }
-
-            _logger.LogInformation(
-                "Evicted {EvictedCount} oldest embedding memory entries to stay within the {Capacity}-entry FIFO bound.",
-                evicted.Count,
-                _options.EmbeddingMemoryCapacity);
-        }
+        await TrimToCurrentCapacityAsync(cancellationToken).ConfigureAwait(false);
 
         return persisted;
+    }
+
+    /// <summary>
+    /// Trims the working set down to <see cref="RoutingOptions.EmbeddingMemoryCapacity"/>'s current value,
+    /// oldest-first, deleting evicted rows from the store. A no-op when the working set is already within
+    /// bound. Shared by <see cref="InitializeAsync"/>, <see cref="AddEntryAsync"/>, and the
+    /// <see cref="IOptionsMonitor{TOptions}.OnChange"/> subscription registered in the constructor, so a
+    /// runtime capacity change (docs/router/self-organizing-classification-plan.md Phase T6) enforces the
+    /// same bound through the same path as every other trim.
+    /// </summary>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    public async Task TrimToCurrentCapacityAsync(CancellationToken cancellationToken = default)
+    {
+        var capacity = _optionsMonitor.CurrentValue.EmbeddingMemoryCapacity;
+
+        List<MemoryEntry> evicted;
+        lock (_syncLock)
+        {
+            var overflow = _entries.Count - capacity;
+            if (overflow <= 0)
+            {
+                return;
+            }
+
+            evicted = _entries.GetRange(0, overflow);
+            _entries.RemoveRange(0, overflow);
+        }
+
+        foreach (var evictedEntry in evicted)
+        {
+            await _store.DeleteAsync(evictedEntry.Id, cancellationToken).ConfigureAwait(false);
+        }
+
+        _logger.LogInformation(
+            "Trimmed {EvictedCount} oldest embedding memory entries to stay within the {Capacity}-entry FIFO bound.",
+            evicted.Count,
+            capacity);
     }
 
     /// <summary>
@@ -165,6 +186,8 @@ public sealed class EmbeddingMemory
     {
         ArgumentNullException.ThrowIfNull(queryEmbedding);
 
+        var options = _optionsMonitor.CurrentValue;
+
         List<MemoryEntry> snapshot;
         lock (_syncLock)
         {
@@ -173,9 +196,9 @@ public sealed class EmbeddingMemory
 
         return snapshot
             .Select(entry => (Entry: entry, Similarity: CosineSimilarity(queryEmbedding, entry.TaskEmbedding)))
-            .Where(candidate => candidate.Similarity >= _options.EmbeddingSimilarityThreshold)
+            .Where(candidate => candidate.Similarity >= options.EmbeddingSimilarityThreshold)
             .OrderByDescending(candidate => candidate.Similarity)
-            .Take(_options.MaxNeighborCount)
+            .Take(options.MaxNeighborCount)
             .ToList();
     }
 
@@ -206,4 +229,7 @@ public sealed class EmbeddingMemory
 
         return dot / (Math.Sqrt(leftMagnitude) * Math.Sqrt(rightMagnitude));
     }
+
+    /// <summary>Unsubscribes from <see cref="IOptionsMonitor{TOptions}.OnChange"/>.</summary>
+    public void Dispose() => _changeSubscription?.Dispose();
 }

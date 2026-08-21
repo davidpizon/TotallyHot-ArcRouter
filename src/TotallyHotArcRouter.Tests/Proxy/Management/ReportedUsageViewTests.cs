@@ -38,7 +38,7 @@ public sealed class ReportedUsageViewTests
         var repository = new PriceCatalogRepository(temp.Database);
         var facade = new ManagementFacade(
             new InMemoryProviderConfigStore(SeedOptions()), Mock.Of<IEnvironmentVariableProvider>(), new HttpClient(),
-            priceCatalogRepository: repository);
+            new ManagementFacadeDependencies { PriceCatalogRepository = repository });
 
         var provider = Assert.Single(facade.ListProviders().Providers);
 
@@ -58,7 +58,7 @@ public sealed class ReportedUsageViewTests
             fetchedAt);
         var facade = new ManagementFacade(
             new InMemoryProviderConfigStore(SeedOptions()), Mock.Of<IEnvironmentVariableProvider>(), new HttpClient(),
-            priceCatalogRepository: repository);
+            new ManagementFacadeDependencies { PriceCatalogRepository = repository });
 
         var provider = Assert.Single(facade.ListProviders().Providers);
 
