@@ -188,19 +188,20 @@ public class PriceCatalogRepositoryTests
     [Fact]
     public void UpsertPrices_HigherPrioritySourceWins_RegardlessOfWriteOrder()
     {
-        // The core correctness fix: without the gate, whichever source polls LAST wins a contested cell,
-        // which is exactly the "confidently wrong number" the whole priority design exists to prevent.
+        // The core correctness fix: whichever source polls LAST does not win a contested cell just by
+        // writing last - RecomputeWinners re-derives the served winner from priority_score on every upsert,
+        // not from write order. Unlike the old write-time priority gate, the losing write is still retained
+        // (in model_price_observations) rather than discarded - it just isn't the one served.
         using var temp = new TempDatabase();
         temp.SeedExtraSource("high", enabled: true, priorityScore: 10);
         temp.SeedExtraSource("low", enabled: true, priorityScore: 0);
         var repository = temp.CreateRepository();
 
-        // The low-priority source writes SECOND, after the high-priority source - if the gate didn't exist,
-        // last-writer-wins would let it clobber the better number.
+        // The low-priority source writes SECOND, after the high-priority source.
         repository.UpsertPrices("high", 10, new[] { Price("gpt-4o", "openai", 2.50m, 10.00m) }, DateTimeOffset.UtcNow);
         var written = repository.UpsertPrices("low", 0, new[] { Price("gpt-4o", "openai", 999m, 999m) }, DateTimeOffset.UtcNow);
 
-        Assert.Equal(0, written); // the gate rejected it - nothing was actually written
+        Assert.Equal(1, written); // the observation is retained even though it does not win
         var price = repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24));
         Assert.Equal(2.50m, price!.InputPerMillionTokens);
     }
@@ -312,30 +313,33 @@ public class PriceCatalogRepositoryTests
     }
 
     [Fact]
-    public void ReorderSources_TakesEffectOnTheNextUpsert()
+    public void ReorderSources_ThenRecomputeWinners_FlipsContestedCellImmediately()
     {
-        // Reordering doesn't retroactively rewrite existing rows by itself - it changes the rank the NEXT
-        // ingestion cycle's gate reads. The panel's auto-triggered refresh is what makes that immediate.
+        // Reordering alone doesn't retouch model_prices - it only rewrites priority_score. It is
+        // RecomputeWinners, run over what's already in model_price_observations, that makes the new order
+        // take effect - with no intervening UpsertPrices call, i.e. no live pull.
         using var temp = new TempDatabase();
         temp.SeedExtraSource("high", enabled: true, priorityScore: 10);
         temp.SeedExtraSource("low", enabled: true, priorityScore: 0);
         var repository = temp.CreateRepository();
         repository.UpsertPrices("high", 10, new[] { Price("gpt-4o", "openai", 2.50m, 10.00m) }, DateTimeOffset.UtcNow);
+        repository.UpsertPrices("low", 0, new[] { Price("gpt-4o", "openai", 999m, 999m) }, DateTimeOffset.UtcNow);
+        Assert.Equal(2.50m, repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24))!.InputPerMillionTokens);
 
         Assert.True(repository.ReorderSources(["low", "high", PriceCatalogOptions.LiteLlmSourceName, PriceCatalogOptions.OpenRouterSourceName]));
-        var written = repository.UpsertPrices("low", 0, new[] { Price("gpt-4o", "openai", 999m, 999m) }, DateTimeOffset.UtcNow);
+        var changed = repository.RecomputeWinners();
 
-        Assert.Equal(1, written);
+        Assert.True(changed > 0);
         var price = repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24));
         Assert.Equal(999m, price!.InputPerMillionTokens);
     }
 
     [Fact]
-    public void UpsertPrices_TwoSourcesNamingOneModelDifferently_ResolveToOneCell_AndPriorityGateApplies()
+    public void UpsertPrices_TwoSourcesNamingOneModelDifferently_ResolveToOneCell_AndPriorityApplies()
     {
         // The D3 payoff: LiteLLM names the model "gpt-4o" and OpenRouter "openai/gpt-4o". Pre-D3 these landed
         // in two different `models` rows and never contested a cell (D7's "0 real collisions"); resolved onto
-        // one configured identity, they now share a cell - which is the FIRST time the priority gate actually
+        // one configured identity, they now share a cell - which is the FIRST time priority actually
         // arbitrates two different sources rather than a source against itself.
         using var temp = new TempDatabase();
         temp.Database.EnsureCreated(); // seeds litellm (0) and openrouter (-10)
@@ -345,8 +349,8 @@ public class PriceCatalogRepositoryTests
         repository.UpsertPrices("litellm", 0, new[] { Price("gpt-4o", "openai", 2.50m, 10.00m) }, DateTimeOffset.UtcNow);
         var written = repository.UpsertPrices("openrouter", -10, new[] { Price("openai/gpt-4o", "openai", 999m, 999m) }, DateTimeOffset.UtcNow);
 
-        // openrouter (rank -10) cannot clobber litellm's (rank 0) number in the now-shared cell.
-        Assert.Equal(0, written);
+        // openrouter's observation is retained even though it does not win the now-shared cell.
+        Assert.Equal(1, written);
 
         // Resolves on the client-facing ModelName and carries litellm's price, not openrouter's.
         var price = repository.GetFreshPrice(new ModelKey("gpt-5.4", "openai"), TimeSpan.FromHours(24));
@@ -734,6 +738,96 @@ public class PriceCatalogRepositoryTests
         var buckets = repository.GetRateLimitHistory("does-not-exist", DateTimeOffset.UtcNow.AddDays(-1));
 
         Assert.Empty(buckets);
+    }
+
+    [Fact]
+    public void RecomputeWinners_ThreeSourcesContestOneCell_PicksHighestPriority()
+    {
+        using var temp = new TempDatabase();
+        temp.SeedExtraSource("a", enabled: true, priorityScore: 1);
+        temp.SeedExtraSource("b", enabled: true, priorityScore: 2);
+        temp.SeedExtraSource("c", enabled: true, priorityScore: 3);
+        var repository = temp.CreateRepository();
+
+        repository.UpsertPrices("a", 1, new[] { Price("gpt-4o", "openai", 1.00m, 1.00m) }, DateTimeOffset.UtcNow);
+        repository.UpsertPrices("b", 2, new[] { Price("gpt-4o", "openai", 2.00m, 2.00m) }, DateTimeOffset.UtcNow);
+        repository.UpsertPrices("c", 3, new[] { Price("gpt-4o", "openai", 3.00m, 3.00m) }, DateTimeOffset.UtcNow);
+
+        Assert.Equal(3.00m, repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24))!.InputPerMillionTokens);
+
+        // Reorder so "a" now outranks everything, then recompute with no intervening UpsertPrices call - the
+        // literal "no live pull" contract: the flip can only have come from a's already-stored observation.
+        Assert.True(repository.ReorderSources(["a", "c", "b", PriceCatalogOptions.LiteLlmSourceName, PriceCatalogOptions.OpenRouterSourceName]));
+        repository.RecomputeWinners();
+
+        Assert.Equal(1.00m, repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24))!.InputPerMillionTokens);
+    }
+
+    [Fact]
+    public void RecomputeWinners_DisabledSourceNeverWins_EvenWithHighestPriorityAndMostRecentObservation()
+    {
+        using var temp = new TempDatabase();
+        temp.SeedExtraSource("disabled-high", enabled: true, priorityScore: 100);
+        temp.SeedExtraSource("enabled-low", enabled: true, priorityScore: 1);
+        var repository = temp.CreateRepository();
+
+        repository.UpsertPrices("enabled-low", 1, new[] { Price("gpt-4o", "openai", 2.00m, 2.00m) }, DateTimeOffset.UtcNow);
+        repository.UpsertPrices("disabled-high", 100, new[] { Price("gpt-4o", "openai", 999m, 999m) }, DateTimeOffset.UtcNow);
+        repository.SetSourceEnabled("disabled-high", enabled: false);
+
+        repository.RecomputeWinners();
+
+        // disabled-high has both the highest priority and the most recent write, yet must never win (D6).
+        Assert.Equal(2.00m, repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24))!.InputPerMillionTokens);
+    }
+
+    [Fact]
+    public void RecomputeWinners_SourceNeverPolled_ContributesNothing_AndDoesNotThrow()
+    {
+        // A source that is enabled but has never fetched anything has no row in model_price_observations for
+        // any cell - RecomputeWinners must simply skip it, not treat that as an error.
+        using var temp = new TempDatabase();
+        temp.SeedExtraSource("never-polled", enabled: true, priorityScore: 100);
+        var repository = temp.CreateRepository();
+
+        repository.UpsertPrices("litellm", 0, new[] { Price("gpt-4o", "openai", 2.00m, 2.00m) }, DateTimeOffset.UtcNow);
+
+        var changed = repository.RecomputeWinners();
+
+        Assert.True(changed > 0);
+        Assert.Equal(2.00m, repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24))!.InputPerMillionTokens);
+    }
+
+    [Fact]
+    public void UpsertPrices_LosingSourcesObservation_IsRetainedInModelPriceObservations()
+    {
+        // The core storage fix this feature depends on: unlike model_prices (winner-only), every enabled
+        // source's own observation for a contested cell must survive, even the losing one's.
+        using var temp = new TempDatabase();
+        temp.SeedExtraSource("high", enabled: true, priorityScore: 10);
+        temp.SeedExtraSource("low", enabled: true, priorityScore: 0);
+        var repository = temp.CreateRepository();
+
+        repository.UpsertPrices("high", 10, new[] { Price("gpt-4o", "openai", 2.50m, 10.00m) }, DateTimeOffset.UtcNow);
+        repository.UpsertPrices("low", 0, new[] { Price("gpt-4o", "openai", 999m, 999m) }, DateTimeOffset.UtcNow);
+
+        using var connection = temp.Database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT s.source_name, o.standard_input_price
+            FROM model_price_observations o
+            JOIN aggregator_sources s ON s.source_id = o.aggregator_source_id
+            ORDER BY s.source_name;
+            """;
+        using var reader = command.ExecuteReader();
+        var observed = new Dictionary<string, decimal>();
+        while (reader.Read())
+        {
+            observed[reader.GetString(0)] = reader.GetDecimal(1);
+        }
+
+        Assert.Equal(2.50m, observed["high"]);
+        Assert.Equal(999m, observed["low"]); // retained even though it lost the cell
     }
 
     private static int CountHistoryRows(PriceCatalogDatabase database, string providerKey)

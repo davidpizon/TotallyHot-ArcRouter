@@ -1,4 +1,5 @@
 using TotallyHot.ArcRouter.PriceCatalog;
+using TotallyHot.ArcRouter.PriceCatalog.Sources;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 
 namespace TotallyHot.ArcRouter.Tests.PriceCatalog;
@@ -42,6 +43,26 @@ public class PriceCatalogDatabaseTests
         Assert.Contains("aggregator_sources", tables);
         Assert.Contains("model_prices", tables);
         Assert.Contains("multimodal_prices", tables);
+        Assert.Contains("model_price_observations", tables);
+    }
+
+    [Fact]
+    public void EnsureCreated_OnAPreExistingDatabase_AddsObservationsTable_WithoutDisturbingModelPrices()
+    {
+        // model_price_observations is a new, purely additive table (CREATE TABLE IF NOT EXISTS) - an install
+        // upgrading from before this feature existed must gain it on the next startup without losing
+        // whatever model_prices already held.
+        using var temp = new TempDatabase();
+        temp.Database.EnsureCreated();
+        var repository = new PriceCatalogRepository(temp.Database);
+        repository.UpsertPrices("litellm", 0, [new NormalizedPrice("gpt-4o", "openai", 2.50m, 10.00m, null, null, null)], DateTimeOffset.UtcNow);
+
+        temp.Database.EnsureCreated();
+
+        Assert.Contains("model_price_observations", ReadTableNames(temp.Database));
+        var price = repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24));
+        Assert.NotNull(price);
+        Assert.Equal(2.50m, price!.InputPerMillionTokens);
     }
 
     [Fact]

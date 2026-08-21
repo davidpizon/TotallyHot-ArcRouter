@@ -157,11 +157,13 @@ public sealed class PriceSourceStore : IDisposable
         RunCycleAsync(() => _client.RefreshAsync(cancellationToken));
 
     /// <summary>
-    /// Rewrites every source's rank from <paramref name="namesInPriorityOrder"/>'s position, then runs an
-    /// ingestion cycle so contested cells re-resolve under the new order immediately - the panel's up/down
-    /// controls call this rather than a separate "just save the order" method, because an order that hasn't
-    /// been applied to the catalog yet is a promise, not a fact. Shares <see cref="IsRefreshing"/> with
-    /// <see cref="RefreshAsync"/>: both are "please wait, a cycle is running" from the panel's point of view.
+    /// Rewrites every source's rank from <paramref name="namesInPriorityOrder"/>'s position, then recomputes
+    /// the served price for every contested cell from prices already in storage under the new order - no
+    /// network pull. The panel's drag-to-reorder control calls this rather than a separate "just save the
+    /// order" method, because an order that hasn't been applied to the catalog yet is a promise, not a fact;
+    /// the recompute, not a live pull, is what makes it one. Shares <see cref="IsRefreshing"/> with
+    /// <see cref="RefreshAsync"/>: both are "please wait, an update is running" from the panel's point of view,
+    /// even though only <see cref="RefreshAsync"/> reaches out to a source over the network.
     /// </summary>
     /// <exception cref="PriceSourceAdminException">
     /// The reorder was rejected (the name set didn't match every existing source), or the router is
@@ -184,6 +186,10 @@ public sealed class PriceSourceStore : IDisposable
         {
             var result = await operation();
             Sources = result.Sources;
+
+            // A reorder's recompute carries no outcomes (no fetch happened), so this clears any outcome
+            // banner left over from an earlier manual pull rather than letting it linger and read as if it
+            // described the reorder that just ran.
             LastRefreshOutcomes = result.Outcomes;
 
             // The cycle that just ran re-anchored the schedule, so this is what resets the countdown after a

@@ -343,6 +343,27 @@ public sealed class PriceCatalogDatabase
             UNIQUE(model_id, provider_id)
         );
 
+        -- Every enabled source's own last-known price per (model, provider) cell, independent of which source
+        -- currently wins. model_prices stores only the winner; this table is what lets RecomputeWinners()
+        -- re-derive that winner from a new priority order without a live pull - a losing source's price would
+        -- otherwise never be retained anywhere. aggregator_source_id joins into the uniqueness key (unlike
+        -- model_prices' UNIQUE(model_id, provider_id)) so every source keeps its own row per cell.
+        CREATE TABLE IF NOT EXISTS model_price_observations (
+            observation_id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            model_id                INTEGER NOT NULL REFERENCES models(model_id),
+            provider_id             INTEGER NOT NULL REFERENCES providers(provider_id),
+            aggregator_source_id    INTEGER NOT NULL REFERENCES aggregator_sources(source_id),
+            standard_input_price    REAL,
+            standard_output_price   REAL,
+            cached_input_price      REAL,
+            cache_write_input_price REAL,
+            batch_input_price       REAL,
+            batch_output_price      REAL,
+            last_updated_utc        TEXT NOT NULL,
+            is_approximate          INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(model_id, provider_id, aggregator_source_id)
+        );
+
         -- Operator-authored overrides for the §5.7 resolution ladder's top rung (ResolutionRung.OperatorOverride):
         -- the recourse an operator has when no automatic rung resolves a model. Keyed on (source_name,
         -- aggregator_model_key) - the same aggregator naming UpsertPrices already resolves per row - mapping

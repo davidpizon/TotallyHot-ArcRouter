@@ -147,9 +147,9 @@ public sealed class PriceSourceToggleStore : IDisposable
 
     /// <summary>
     /// Rewrites every source's rank from <paramref name="namesInPriorityOrder"/>'s position and raises
-    /// <see cref="Changed"/>. Does not itself trigger a refresh - the caller (the gRPC service) does that,
-    /// since re-resolving contested cells under the new order is a full ingestion cycle, not a cache
-    /// invalidation this store owns.
+    /// <see cref="Changed"/>. Does not itself re-resolve contested cells under the new order - the caller
+    /// (the gRPC service, the MCP tool) does that via <see cref="PriceCatalogIngestionService.RecomputeWinnersAsync"/>,
+    /// since this store owns the rank itself, not what gets served under it.
     /// </summary>
     /// <returns>
     /// <see langword="false"/> when the name set doesn't match every existing source exactly once; nothing is

@@ -316,6 +316,25 @@ public sealed class PriceSourcesAdminTests
     }
 
     [Fact]
+    public async Task Reordering_after_a_pull_clears_the_stale_outcome_banner()
+    {
+        // A reorder recomputes from storage rather than pulling, so it must not leave an earlier manual
+        // pull's outcome banner on screen looking like it describes the reorder that just happened.
+        var client = new FakeClient(
+            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10),
+            new PriceSourceStatus("openrouter", Enabled: true, PriorityScore: -10, PriceCount: 5));
+        using var ctx = NewContext(client);
+
+        var cut = ctx.Render<PriceSourcesAdmin>();
+        cut.FindAll("button").First(b => b.TextContent.Contains("Pull Now", StringComparison.Ordinal)).Click();
+        cut.Markup.Should().Contain("Last pull refreshed");
+
+        await DragAsync(cut, from: 0, toIndex: 1);
+
+        cut.Markup.Should().NotContain("Last pull refreshed");
+    }
+
+    [Fact]
     public async Task A_drag_that_ends_on_the_rank_it_started_from_does_not_reorder()
     {
         var client = new FakeClient(
@@ -638,7 +657,8 @@ public sealed class PriceSourcesAdminTests
             // MoveUp/MoveDown pass its test by accident.
             var byName = _sources.ToDictionary(s => s.Name);
             _sources = [.. namesInPriorityOrder.Select(name => byName[name])];
-            _anchor = DateTimeOffset.UtcNow;
+            // Deliberately does NOT touch _anchor: a reorder recomputes from storage, it does not pull, so
+            // it must not reset the countdown the way RefreshAsync's re-anchor does above.
             return Task.FromResult(new PriceRefreshResult(
                 [],
                 _sources.Sum(s => s.PriceCount),
