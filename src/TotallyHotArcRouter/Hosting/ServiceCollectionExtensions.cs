@@ -577,6 +577,12 @@ namespace TotallyHot.ArcRouter.Hosting
                             sp.GetRequiredService<IOptions<TotallyHot.ArcRouter.Transcripts.TranscriptOptions>>(),
                             sp.GetRequiredService<IOptions<StorageOptions>>()),
 
+                        // Backs the Governance > Router Model panel's gRPC API (live-feedback-learning-plan.md Phase 5).
+                        LogRegModelAdmin = new LogRegModelAdminDependencies(
+                            sp.GetRequiredService<Router.Orchestrator.IEmbeddingLogRegTrainingService>(),
+                            sp.GetRequiredService<Router.IMemoryEntryStore>(),
+                            sp.GetRequiredService<IOptions<StorageOptions>>()),
+
                         // Backs the Governance UI's System Settings window gRPC API (Phase T6).
                         RouterSettingsAdmin = new RouterSettingsAdminDependencies(
                             sp.GetRequiredService<Router.RouterSettingsStore>(),

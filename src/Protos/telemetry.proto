@@ -502,6 +502,78 @@ message ClusterRetrainStreamEvent {
   }
 }
 
+// The Governance UI's Router Model panel (docs/router/live-feedback-learning-plan.md Phase 5): reports
+// the trained logreg voter's status and runs a retrain with streamed bootstrap-embedding progress. Same
+// shape as ClusterModelAdminService above (unary status read plus one streaming mutation RPC), sharing
+// the :5002 TLS loopback endpoint - this is the logreg voter's admin surface the way ClusterModelAdminService
+// is the cluster_best voter's.
+service RouterModelAdminService {
+  // Returns the current artifact's status (or the honest "no artifact yet" state) plus the retrain
+  // threshold/live-sample-weight context that always applies regardless of artifact presence.
+  rpc GetLogRegModelStatus (GetLogRegModelStatusRequest) returns (LogRegModelStatusResponse);
+
+  // Runs IEmbeddingLogRegTrainingService.RetrainAsync, streaming one LogRegRetrainBootstrapProgress event
+  // per OOD bootstrap embedding tick, then exactly one LogRegRetrainResult carrying the outcome and the
+  // fresh post-mutation status - mirrors RetrainClusterModel's "full state after the mutation" convention.
+  rpc RetrainLogRegModel (RetrainLogRegModelRequest) returns (stream LogRegRetrainStreamEvent);
+}
+
+message GetLogRegModelStatusRequest {}
+
+message RetrainLogRegModelRequest {}
+
+// One trained artifact's status, or the honest "no artifact yet" state (artifact_present = false, every
+// other artifact-derived field at its proto3 zero value) on a fresh install. retrain_threshold and
+// live_sample_weight are always populated regardless of artifact_present - they describe the retrain
+// configuration, not the model itself.
+message LogRegModelStatusResponse {
+  bool artifact_present = 1;
+  int32 embedding_dimension = 2;
+  // The artifact file's on-disk last-write time, since EmbeddingLogRegModelArtifact itself carries no
+  // trained-at field (its provenance date lives only inside trained_from's free text).
+  google.protobuf.Timestamp trained_at_utc = 3;
+  string trained_from = 4;
+  int32 bootstrap_task_count = 5;
+  int32 memory_entry_count = 6;
+  int32 models_represented = 7;
+  // Live memory_entries rows accumulated since this artifact's memory_entry_count was recorded (or,
+  // when artifact_present is false, every live entry that exists) - the same threshold comparison
+  // Hosting.LogRegRetrainHostedService makes, surfaced for an operator deciding whether to retrain by hand.
+  int32 entries_since_last_retrain = 8;
+  int32 retrain_threshold = 9;
+  double live_sample_weight = 10;
+}
+
+enum LogRegRetrainResultKind {
+  LOG_REG_RETRAIN_RESULT_KIND_UNSPECIFIED = 0;
+  LOG_REG_RETRAIN_RESULT_KIND_TRAINED = 1;
+  LOG_REG_RETRAIN_RESULT_KIND_DECLINED = 2;
+  LOG_REG_RETRAIN_RESULT_KIND_ALREADY_RUNNING = 3;
+}
+
+// One bootstrap-embedding progress tick during a retrain - IEmbeddingLogRegTrainingService.RetrainAsync's
+// IProgress<int> callback, reporting OOD bootstrap tasks embedded so far.
+message LogRegRetrainBootstrapProgress {
+  int32 tasks_embedded = 1;
+}
+
+// The retrain's outcome: which LogRegTrainingResultKind category it fell into, a human-readable message,
+// and the fresh status computed immediately afterward.
+message LogRegRetrainResult {
+  LogRegRetrainResultKind kind = 1;
+  string message = 2;
+  LogRegModelStatusResponse status = 3;
+}
+
+// One message on the RetrainLogRegModel stream: zero or more bootstrap_progress events (only while an OOD
+// corpus is synced and being embedded), followed by exactly one result as the final message.
+message LogRegRetrainStreamEvent {
+  oneof event {
+    LogRegRetrainBootstrapProgress bootstrap_progress = 1;
+    LogRegRetrainResult result = 2;
+  }
+}
+
 // Envelope: exactly one of these is set per message, matching SignalR's per-message-type dispatch
 // ("RoutingTelemetry" / "LogLine" client methods) with a single Protobuf idiom.
 message TelemetryEvent {

@@ -61,6 +61,10 @@ public static class MauiProgram
         // Backs the Governance tab's Cluster Model panel (Phase T5). A singleton for the same reason,
         // sharing the TLS gRPC port (5002) with the stores above. See Services/ClusterModelAdminStore.cs.
         builder.Services.AddSingleton<ClusterModelAdminStore>();
+        // Backs the Governance tab's Router Model panel (live-feedback-learning-plan.md Phase 5). A
+        // singleton for the same reason, sharing the TLS gRPC port (5002) with the stores above. See
+        // Services/LogRegModelAdminStore.cs.
+        builder.Services.AddSingleton<LogRegModelAdminStore>();
         // Backs the System Settings window's Adaptive Routing row (Phase T6). A singleton for the same
         // reason, sharing the TLS gRPC port (5002) with the stores above. See Services/RouterSettingsAdminStore.cs.
         builder.Services.AddSingleton<RouterSettingsAdminStore>();
