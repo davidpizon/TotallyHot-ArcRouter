@@ -17,7 +17,7 @@
     {
         <div class="rounded-lg p-4 space-y-2 ds-surface-card-critical">
             <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
-                <Icon Name="alert-triangle" Size="14" /> Router unreachable
+                <Icon Name="alert-triangle" Size="20" /> Router unreachable
             </div>
             @* The store's own endpoint, not the default constant: naming an address the client was never
                pointed at is worse than naming none while diagnosing a connectivity failure. *@
@@ -71,7 +71,7 @@
                             disabled="@Store.IsSyncing"
                             title="@(status.Reason)"
                             class="btn btn-secondary flex items-center gap-1.5">
-                        <Icon Name="rotate-ccw" Size="13" />
+                        <Icon Name="refresh" Size="20" />
                         @ActionLabel()
                     </button>
                 </div>
@@ -107,7 +107,7 @@
                 <button @onclick="() => _filesExpanded = !_filesExpanded"
                         aria-expanded="@(_filesExpanded ? "true" : "false")"
                         class="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300 transition-colors">
-                    <Icon Name="@(_filesExpanded ? "chevron-up" : "chevron-down")" Size="12" />
+                    <Icon Name="@(_filesExpanded ? "chevron-up" : "chevron-down")" Size="20" />
                     @(_filesExpanded ? "Hide files" : $"Show {status.Files.Count} files")
                 </button>
 
@@ -136,7 +136,7 @@
                                     {
                                         <div class="rounded px-2 py-1.5 text-xs ds-outcome-critical">
                                             <span class="flex items-center gap-1.5 text-red-300">
-                                                <span aria-hidden="true"><Icon Name="alert-triangle" Size="12" /></span> @error
+                                                <span aria-hidden="true"><Icon Name="alert-triangle" Size="20" /></span> @error
                                             </span>
                                         </div>
                                     }
@@ -161,7 +161,7 @@
             {
                 <div class="rounded-lg p-4 space-y-2 ds-surface-card-critical">
                     <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
-                        <Icon Name="alert-triangle" Size="14" /> Router unreachable
+                        <Icon Name="alert-triangle" Size="20" /> Router unreachable
                     </div>
                     <div class="text-xs text-slate-400">
                         @if (VoterStore.ServerAddress is { Length: > 0 } voterServerAddress)
@@ -203,7 +203,7 @@
                             <button @onclick="RunVoterAction"
                                     disabled="@VoterStore.IsSyncing"
                                     class="btn btn-secondary flex items-center gap-1.5">
-                                <Icon Name="rotate-ccw" Size="13" />
+                                <Icon Name="refresh" Size="20" />
                                 @VoterActionLabel()
                             </button>
                         </div>
@@ -242,7 +242,7 @@
                         <button @onclick="() => _voterFilesExpanded = !_voterFilesExpanded"
                                 aria-expanded="@(_voterFilesExpanded ? "true" : "false")"
                                 class="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300 transition-colors">
-                            <Icon Name="@(_voterFilesExpanded ? "chevron-up" : "chevron-down")" Size="12" />
+                            <Icon Name="@(_voterFilesExpanded ? "chevron-up" : "chevron-down")" Size="20" />
                             @(_voterFilesExpanded ? "Hide files" : $"Show {voterStatus.Files.Count} files")
                         </button>
 
@@ -275,7 +275,7 @@
                                             {
                                                 <div class="rounded px-2 py-1.5 text-xs ds-outcome-critical">
                                                     <span class="flex items-center gap-1.5 text-red-300">
-                                                        <span aria-hidden="true"><Icon Name="alert-triangle" Size="12" /></span> @voterError
+                                                        <span aria-hidden="true"><Icon Name="alert-triangle" Size="20" /></span> @voterError
                                                     </span>
                                                 </div>
                                             }

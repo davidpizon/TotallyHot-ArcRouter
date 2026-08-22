@@ -14,7 +14,7 @@
             <button @onclick="OnCancel"
                     aria-label="@(IsNew ? "Close add provider dialog" : $"Close edit dialog for provider {Key}")"
                     class="text-slate-400 hover:text-slate-200 transition-colors">
-                <Icon Name="x" Size="16" />
+                <Icon Name="x" Size="20" />
             </button>
         </div>
 
@@ -67,7 +67,7 @@
                     <div class="text-xs text-slate-500 uppercase tracking-wider">Custom Headers</div>
                     <button type="button" data-testid="add-header" @onclick="AddHeader"
                             class="btn-small-action">
-                        <Icon Name="plus" Size="12" /> Add header
+                        <Icon Name="plus" Size="20" /> Add header
                     </button>
                 </div>
                 <div class="text-xs text-slate-600 mb-1.5">
@@ -95,7 +95,7 @@
                                            class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input @(isDuplicate ? "border-red-500 text-red-400" : "")" />
                                     <button type="button" title="Remove header" @onclick="() => RemoveHeader(header)"
                                             class="text-red-400 hover:text-red-300 transition-colors shrink-0 p-1">
-                                        <Icon Name="x" Size="12" />
+                                        <Icon Name="x" Size="20" />
                                     </button>
                                 </div>
                                 @if (isDuplicate)

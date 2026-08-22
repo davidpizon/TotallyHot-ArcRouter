@@ -83,7 +83,7 @@ Source of truth: `src/TotallyHotArcRouter.Gui/wwwroot/css/app.css` (compiled Tai
 
 ## ICONOGRAPHY
 
-The source describes icons as **"small inline SVG glyphs"** (`Components/Icon.razor`) — a single custom glyph component, not a named icon library, and no actual `.svg`/icon-font files are committed to the repo to copy. **Substitution flagged**: this design system's `Icon` component (`components/core/Icon.jsx`) sources glyphs from **Lucide** (via `unpkg.com/lucide-static`, recolored with a CSS `mask-image` so it always matches the current text color) as the closest available match to the described minimal-stroke style. If real icon assets from the Razor components become available, swap them in and drop the CDN dependency.
+The source dashboard standardizes on **[Heroicons](https://heroicons.com/) Solid** (24×24, MIT-licensed) — every glyph in `Components/Icon.razor` is Heroicons path data embedded verbatim (see `docs/gui/DESIGN.md` §4.3). This design system's `Icon` component (`components/core/Icon.jsx`) matches that standard: it fetches the same Heroicons Solid glyphs from `unpkg.com/heroicons`, recolored with a CSS `mask-image` so it always matches the current text color, rather than embedding path data. This is no longer a flagged substitution — both surfaces agree on the same icon set and naming.
 
 - No icon font is used or implied by the source.
 - No PNG icons — everything implied is vector/inline SVG.

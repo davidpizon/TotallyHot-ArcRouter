@@ -11,7 +11,7 @@
             <button @onclick="OnClose"
                     aria-label="Close system settings"
                     class="text-slate-400 hover:text-slate-200 transition-colors">
-                <Icon Name="x" Size="16" />
+                <Icon Name="x" Size="20" />
             </button>
         </div>
 
@@ -41,7 +41,7 @@
 
             @* Destructive zone label *@
             <div class="flex items-center gap-2 text-xs text-amber-400 font-medium uppercase tracking-widest">
-                <Icon Name="alert-triangle" Size="12" />
+                <Icon Name="alert-triangle" Size="20" />
                 <span>Destructive Actions Zone</span>
             </div>
 
@@ -50,12 +50,12 @@
                 <div class="grid grid-cols-2 gap-3">
                     <button @onclick="@(() => StartAction("reset"))"
                             class="btn btn-ghost-warning flex items-center justify-center gap-2">
-                        <Icon Name="rotate-ccw" Size="14" />
+                        <Icon Name="refresh" Size="20" />
                         Reset Stats
                     </button>
                     <button @onclick="@(() => StartAction("purge"))"
                             class="btn btn-ghost-critical flex items-center justify-center gap-2">
-                        <Icon Name="trash" Size="14" />
+                        <Icon Name="trash" Size="20" />
                         Clear History
                     </button>
                 </div>

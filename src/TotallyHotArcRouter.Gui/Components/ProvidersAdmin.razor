@@ -15,7 +15,7 @@
     {
         <div class="rounded-lg p-4 space-y-2 ds-surface-card-critical">
             <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
-                <Icon Name="alert-triangle" Size="14" /> Proxy management API unreachable
+                <Icon Name="alert-triangle" Size="20" /> Proxy management API unreachable
             </div>
             <div class="text-xs text-slate-400">
                 Could not reach <span class="font-mono">@ProviderAdminStore.DefaultManagementAddress</span>. Is the proxy running?
@@ -36,7 +36,7 @@
             <span class="text-xs text-slate-500 uppercase tracking-widest">Configured Providers</span>
             <button @onclick="OpenAdd"
                     class="btn btn-secondary flex items-center gap-1.5">
-                <Icon Name="plus" Size="13" /> Add Provider
+                <Icon Name="plus" Size="20" /> Add Provider
             </button>
         </div>
 
@@ -57,7 +57,7 @@
                     <div class="flex items-start justify-between gap-2">
                         <div class="min-w-0">
                             <div class="flex items-center gap-2 flex-wrap">
-                                <Icon Name="server" Size="14" />
+                                <Icon Name="server" Size="20" />
                                 <span class="text-sm font-semibold @(provider.Enabled ? "state-enabled" : "state-disabled")">@(string.IsNullOrWhiteSpace(provider.Name) ? provider.Key : provider.Name)</span>
                                 @* One pill per API flavor the last endpoint scan detected. Absent entirely
                                    until "Refresh" has run at least once (EndpointCapabilities is null until
@@ -70,9 +70,9 @@
                             <div class="text-xs text-slate-500 mt-0.5 font-mono truncate">@provider.BaseUrl</div>
                         </div>
                         <div class="flex items-center gap-1 shrink-0">
-                            <button title="Edit" @onclick="() => OpenEdit(provider)"
+                            <button title="Config" @onclick="() => OpenEdit(provider)"
                                     class="rounded p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700 transition-colors">
-                                <Icon Name="settings" Size="14" />
+                                <Icon Name="sliders" Size="20" />
                             </button>
                             @* Refreshes models and re-scans API capabilities in one call - see
                                RefreshFromEndpoint below. Shares the Stop/Play/Remove tooltip pattern rather
@@ -82,7 +82,7 @@
                                     aria-label="@($"Refresh provider {provider.Key}")"
                                     aria-describedby="ls-tooltip"
                                     class="rounded p-1.5 flex items-center justify-center ls-card-action">
-                                <Icon Name="rotate-ccw" Size="14" />
+                                <Icon Name="refresh" Size="20" />
                             </button>
                             @* Stop/Play and Remove use the shared floating tooltip (js/tooltips.js) rather
                                than title=, so the label isn't clipped by this pane's scroll container and
@@ -93,14 +93,14 @@
                                     aria-label="@(provider.Enabled ? $"Stop provider {provider.Key}" : $"Start provider {provider.Key}")"
                                     aria-describedby="ls-tooltip"
                                     class="rounded p-1.5 flex items-center justify-center ls-card-action @(provider.Enabled ? "ls-card-action-stop" : "ls-card-action-play")">
-                                <Icon Name="@(provider.Enabled ? "stop" : "play")" Size="14" />
+                                <Icon Name="@(provider.Enabled ? "stop" : "play")" Size="20" />
                             </button>
                             <button @onclick="() => RemoveProvider(provider)"
                                     data-tip="Remove"
                                     aria-label="@($"Remove provider {provider.Key}")"
                                     aria-describedby="ls-tooltip"
                                     class="rounded p-1.5 flex items-center justify-center ls-card-action ls-card-action-remove">
-                                <Icon Name="trash" Size="14" />
+                                <Icon Name="trash" Size="20" />
                             </button>
                         </div>
                     </div>
@@ -159,11 +159,11 @@
                                                     aria-label="@(model.Enabled ? $"Stop model {model.ModelName}" : $"Start model {model.ModelName}")"
                                                     aria-describedby="ls-tooltip"
                                                     class="rounded p-1 flex items-center justify-center ls-card-action @(model.Enabled ? "ls-card-action-stop" : "ls-card-action-play")">
-                                                <Icon Name="@(model.Enabled ? "stop" : "play")" Size="12" />
+                                                <Icon Name="@(model.Enabled ? "stop" : "play")" Size="16" />
                                             </button>
                                             <button title="Remove model" @onclick="() => RemoveModel(provider.Key, model.ModelName)"
                                                     class="text-red-400 hover:text-red-300 transition-colors">
-                                                <Icon Name="x" Size="12" />
+                                                <Icon Name="x" Size="16" />
                                             </button>
                                         </div>
                                     </div>
