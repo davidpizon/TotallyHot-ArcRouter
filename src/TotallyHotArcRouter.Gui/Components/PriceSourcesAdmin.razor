@@ -18,7 +18,7 @@
     {
         <div class="rounded-lg p-4 space-y-2 ds-surface-card-critical">
             <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
-                <Icon Name="alert-triangle" Size="14" /> Router unreachable
+                <Icon Name="alert-triangle" Size="20" /> Router unreachable
             </div>
             <div class="text-xs text-slate-400">
                 Could not reach <span class="font-mono">@TelemetryChannelFactory.DefaultServerAddress</span>. Is the proxy running?
@@ -42,14 +42,14 @@
                 @if (Store.Schedule is not null)
                 {
                     <span class="flex items-center gap-1.5 text-xs text-slate-500" title="@DescribeSchedule()">
-                        <Icon Name="clock" Size="12" />
+                        <Icon Name="clock" Size="20" />
                         @DescribeCountdown()
                     </span>
                 }
                 <button @onclick="PullNow"
                         disabled="@Store.IsRefreshing"
                         class="btn btn-secondary flex items-center gap-1.5">
-                    <Icon Name="rotate-ccw" Size="13" />
+                    <Icon Name="refresh" Size="20" />
                     @(Store.IsRefreshing ? "Pulling…" : "Pull Now")
                 </button>
             </div>
@@ -130,7 +130,7 @@
                             }
                             <div class="min-w-0">
                                 <div class="flex items-center gap-2">
-                                    <Icon Name="database" Size="14" />
+                                    <Icon Name="database" Size="20" />
                                     <span class="text-sm font-semibold @(source.Enabled ? "state-enabled" : "state-disabled")">
                                         @source.Name
                                     </span>

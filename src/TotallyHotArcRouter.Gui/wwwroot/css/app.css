@@ -132,11 +132,13 @@
 }
 
 /* Square icon buttons in a card's action row (Governance > Providers). The box matches the
-   Tailwind-styled Edit/Remove buttons beside them — a 14px glyph inside p-1.5 is already a 26x26
-   square — so these rules only carry the semantic colors, which are outside the slate/red/emerald
-   utility palette and so need real :hover rules rather than inline style. Radius stays `rounded`
-   (4px), deliberately NOT pill/circular: these are dense per-row actions, and pill/circular
-   geometry is reserved for explicit CTA buttons (see .btn-* below) - see DESIGN.md §4. */
+   Tailwind-styled Edit/Remove buttons beside them — a 20px Heroicons Solid glyph inside p-1.5 is
+   already a 32x32 square (the nested per-model-row buttons use p-1 and a 16px glyph instead, for
+   24x24 — see ProvidersAdmin.razor's model row) — so these rules only carry the semantic colors,
+   which are outside the slate/red/emerald utility palette and so need real :hover rules rather
+   than inline style. Radius stays `rounded` (4px), deliberately NOT pill/circular: these are dense
+   per-row actions, and pill/circular geometry is reserved for explicit CTA buttons (see .btn-*
+   below) - see DESIGN.md §4, §4.3. */
 .ls-card-action {
   color: var(--text-secondary);
   transition: color var(--dur-fast) var(--ease-standard),

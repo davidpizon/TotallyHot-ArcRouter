@@ -1,28 +1,48 @@
 import React from "react";
 
-// The source dashboard renders "small inline SVG glyphs" (Components/Icon.razor) but no actual
-// glyph files are committed to the repo to copy in. Lucide is used here as the closest CDN match —
-// same minimal 1.5-2px stroke style already implied by the dashboard's icon usage (settings gear,
-// search, chevrons, alert triangle). This is a flagged substitution; see readme.md Iconography.
+// The source dashboard renders Heroicons Solid glyphs, embedded verbatim in Components/Icon.razor
+// (see docs/gui/DESIGN.md §4.3). This mockup fetches the same icon set from the Heroicons npm
+// package's flat CDN layout instead of embedding path data, recolored with a CSS mask-image so it
+// always matches the current text color.
 const SLUG = {
-  settings: "settings",
-  search: "search",
-  close: "x",
+  settings: "cog-6-tooth",
+  search: "magnifying-glass",
+  close: "x-mark",
   "chevron-down": "chevron-down",
   "chevron-right": "chevron-right",
-  "alert-triangle": "triangle-alert",
-  info: "info",
+  "alert-triangle": "exclamation-triangle",
+  info: "information-circle",
   "check-circle": "check-circle",
-  "alert-circle": "alert-circle",
-  activity: "activity",
-  dot: "circle",
-  "trend-up": "trending-up",
-  bot: "bot",
+  "alert-circle": "exclamation-circle",
+  activity: "signal",
+  "trend-up": "arrow-trending-up",
+  bot: "cpu-chip",
 };
 
 export function Icon({ name, size = 16, color = "var(--text-secondary)", style, ...rest }) {
+  // "dot" has no Heroicons Solid equivalent (a bare filled circle isn't a glyph in that set) - render
+  // it as a plain CSS-filled circle instead of faking a mask-image fetch.
+  if (name === "dot") {
+    return (
+      <span
+        role="img"
+        aria-label={name}
+        style={{
+          display: "inline-block",
+          width: size,
+          height: size,
+          borderRadius: "50%",
+          backgroundColor: color,
+          flexShrink: 0,
+          ...style,
+        }}
+        {...rest}
+      />
+    );
+  }
+
   const slug = SLUG[name] || name;
-  const url = `https://unpkg.com/lucide-static@latest/icons/${slug}.svg`;
+  const url = `https://unpkg.com/heroicons@2.1.5/24/solid/${slug}.svg`;
   return (
     <span
       role="img"

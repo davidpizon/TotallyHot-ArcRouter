@@ -179,15 +179,16 @@ actually appear in `app.css`.
   Governance › Benchmark Data's Task Matrix and Local Voter Model cards each stack two of these while
   their own sync runs: a cumulative bar over the whole update, and beneath it a per-file bar labelled
   with the file currently downloading. Both bars are rendered only for the sync's duration.
-- **Card action buttons** (the glyph row in a Governance › Providers card header) — a 26×26 square
-  (`rounded p-1.5` around a 14px `Icon`), `rounded` 4px, deliberately **not** pill/circular, 150ms
+- **Card action buttons** (the glyph row in a Governance › Providers card header) — a 32×32 square
+  (`rounded p-1.5` around a 20px `Icon`), `rounded` 4px, deliberately **not** pill/circular, 150ms
   `transition-colors`. Edit stays on the slate ramp via Tailwind utilities (recolored to the new
   neutral tokens); the semantic ones live in `.ls-card-action-*` because their hexes are off the
   utility palette: Stop `var(--accent)` (`#1ed760`), Play `#10b981`, Remove `#dc2626`. Remove is the
   card's only destructive glyph — a second, separate delete control is not the pattern — and it opens
   a type-to-confirm dialog (`RemoveProviderDialog`, built on the §4.1 shell) rather than acting on the
   click. **These dense per-row action buttons are the one deliberate exception to §4.2's pill/circular
-  button geometry** — see §4.2 for why.
+  button geometry** — see §4.2 for why. See §4.3 for the icon standard behind every `Icon` referenced
+  in this document.
 - **Inputs** (Live Stream conversation search, form fields) — `background: var(--surface-interactive)`
   (`#1f1f1f`), `border: 1px solid var(--border-light)`, `color: var(--text-primary)`; on focus the
   border becomes the accent `var(--accent)` with a green focus ring (150ms `border-color` transition).
@@ -239,7 +240,7 @@ All are `min-height: 44px` (touch target), uppercase with `1.4px` letter-spacing
 `transform: scale(0.98)` on `:active` for tactile press feedback, matching the aspirational spec's
 button motion (§4 of `aspirational-design.md`).
 
-**Deliberate exception: dense per-row icon actions stay square, not pill/circular.** The 26×26
+**Deliberate exception: dense per-row icon actions stay square, not pill/circular.** The 32×32
 Edit/Stop/Play/Remove glyphs in a Governance › Providers card row (`.ls-card-action*`, §4 above) are
 NOT converted to `.btn-circular` even though the aspirational spec's circular-button use case ("quick
 actions") could describe them. Reason: "Data density without claustrophobia" is one of the five
@@ -268,7 +269,7 @@ The shell, verbatim:
             <button @onclick="OnClose"
                     aria-label="Close window title"
                     class="text-slate-400 hover:text-slate-200 transition-colors">
-                <Icon Name="x" Size="16" />
+                <Icon Name="x" Size="20" />
             </button>
         </div>
         <div class="overlay-content p-5 space-y-4">
@@ -287,7 +288,7 @@ The load-bearing details:
 | Panel | `.overlay-panel`, `rounded-lg`, `border-slate-700` (→ `var(--border-button)`), `background:#121212` — the deepest surface (`--surface-base`), not the card surface. **Dynamic sizing via CSS**: max-width `min(90vw, 700px)`, min-width `min(100% - 2rem, 400px)`, max-height `calc(100vh - 120px)` to fit viewport; `display: flex; flex-direction: column` for layout |
 | Header | `px-5 py-4`, `border-b border-slate-700`, title left / close `x` right. **Always stays fixed** during content scroll |
 | Title | `text-sm font-semibold text-slate-200 tracking-wide uppercase` — **not** a large heading |
-| Close glyph | `<Icon Name="x" Size="16" />`, `slate-400`→`slate-200` on hover, 150ms `transition-colors`. **Requires an `aria-label`** — the button's only content is an SVG, so without one a screen reader announces an unnamed button |
+| Close glyph | `<Icon Name="x" Size="20" />`, `slate-400`→`slate-200` on hover, 150ms `transition-colors`. **Requires an `aria-label`** — the button's only content is an SVG, so without one a screen reader announces an unnamed button |
 | Content area | **Must wrap body in `.overlay-content`** for scrollable content: `<div class="overlay-content p-5 space-y-3/4">`. This enables vertical scrolling when content exceeds `max-height`, while keeping header and footer fixed |
 | Body | `p-5` with `space-y-3`/`space-y-4` between blocks. Primary/secondary/destructive action buttons in the body use `.btn-*` (§4.2), not ad hoc `rounded` + inline-color styling. **No horizontal overflow**: if fields risk wrapping, stack them vertically rather than shrinking |
 | Close API | A `[Parameter] public EventCallback OnClose` (or `OnCancel`) — the window never closes itself |
@@ -304,6 +305,66 @@ The load-bearing details:
 
 Deviate only where the content genuinely demands it — a wider panel for a table, say — and keep
 the header, dismissal behavior, close API, and dynamic scrolling identical regardless.
+
+### 4.3 Icons
+
+**Standard: [Heroicons](https://heroicons.com/) Solid, 24×24, MIT-licensed
+(`github.com/tailwindlabs/heroicons`, `optimized/24/solid/`).** Every glyph in `Icon.razor` is
+embedded verbatim as Heroicons' own `<path fill-rule="evenodd" d="..." clip-rule="evenodd"/>` data —
+`fill="currentColor" stroke="none"` on the shared `<svg>` wrapper, no hand-drawn stroke primitives.
+This replaced an earlier ad hoc set of 27 hand-drawn stroke icons that had drifted into real bugs: two
+call sites referenced icon names (`trash-2`, `bot`) that didn't exist in the switch and silently
+rendered nothing, and `trash`/`delete` had become two different glyphs for the same "remove this"
+meaning. Heroicons closes both gaps and gives future icon additions a canonical name to look up
+instead of inventing a new hand-drawn primitive.
+
+**Heroicons also ships a "Mini" variant** (20×20, meant for icons under 20px) alongside Solid. **This
+app is Solid-only for now** — Mini is a deliberate future pass, not adopted here. Don't "fix" the
+16px dense-inline tier below into Mini without revisiting this section first.
+
+**Size convention — three tiers:**
+
+| Tier | Size | Where | Why |
+|---|---|---|---|
+| Default | **20px** | Tab bar, card header action rows, alerts/badges, modal close glyphs, search, settings — the large majority of call sites | Heroicons' own Solid-vs-Mini threshold |
+| Dense-inline exception | **16px** | `TurnCard.razor`'s inline step icons (sit next to `text-xs` stat-strip text); `ProvidersAdmin.razor`'s nested per-model row Stop/Play/Remove icons (~20-24px row height) | Jumping straight to 20px would visually dominate rows built around "data density without claustrophobia" (§1) |
+| Unchanged | **12–14px** | `grip-vertical` (`PriceSourcesAdmin.razor`'s drag handle, §5.3) | Hand-drawn, not a Heroicons glyph — not subject to the Solid-threshold rationale |
+
+**The one hand-drawn exception: `grip-vertical`.** Heroicons ships no drag-handle glyph — the nearest
+candidates, `ellipsis-vertical` and `bars-3`, both read as a "more options" menu trigger, which would
+mislead users about the *drag* affordance §5.3 documents. Two columns of filled dots stays hand-drawn
+as the one glyph in the app not sourced from Heroicons.
+
+**Old-name → Heroicons-name reference** (the `Icon.razor` `case` label is the stable name every call
+site uses; only the glyph inside changed):
+
+| `Icon` name | Heroicons solid file | Notes |
+|---|---|---|
+| `activity` | `signal` | Live Stream tab |
+| `bar-chart` | `chart-bar` | Cost Analytics tab |
+| `trending-up` | `arrow-trending-up` | Model Distribution tab |
+| `shield-check` | `shield-check` | Governance tab |
+| `search` | `magnifying-glass` | |
+| `alert-triangle` | `exclamation-triangle` | most-used glyph in the app |
+| `check-circle` | `check-circle` | |
+| `clock` | `clock` | |
+| `copy` | `square-2-stack` | Heroicons' canonical duplicate/copy glyph |
+| `x` | `x-mark` | |
+| `trash` | `trash` | absorbs the former `delete` case — one canonical "remove" glyph |
+| `terminal` | `command-line` | |
+| `plus` | `plus` | |
+| `lock` | `lock-closed` | |
+| `unlock` | `lock-open` | |
+| `server` | `server-stack` | two-rack visual, matching the previous hand-drawn glyph |
+| `database` | `circle-stack` | |
+| `grip-vertical` | *(hand-drawn — no Heroicons equivalent)* | see above and §5.3 |
+| `chevron-up` / `chevron-down` | `chevron-up` / `chevron-down` | |
+| `play` | `play` | |
+| `stop` | `stop` | |
+| `settings` | `cog-6-tooth` | Heroicons v2's canonical settings gear |
+| `refresh` | `arrow-path` | |
+| `sliders` | `adjustments-horizontal` | "Config" glyph on a provider card |
+| `cpu-chip` | `cpu-chip` | routing/voter model row icon (fixed the former undefined `bot` reference) |
 
 ## 5. Layout & Spacing
 
@@ -391,7 +452,8 @@ Price Data Sources list is the canonical example: each card in `.ds-card-stack` 
 `grip-vertical` icon (12–14px, `text-slate-600`) at its leading edge as the sole reorder affordance,
 titled `"Drag to reorder..."`. There is no separate arrow-button path — the handle isn't a label next
 to a different control, it *is* the control, made draggable by `@onpointerdown` on the card itself
-(see the remarks below).
+(see the remarks below). `grip-vertical` is the one glyph in the app not sourced from Heroicons — see
+§4.3 for why.
 
 - **Pointer events, not HTML5 drag-and-drop.** WinUI's WebView2 — the host `BlazorWebView` uses on
   Windows — never delivers in-page `dragstart`/`dragover` events (`microsoft-ui-xaml#10576`), so a

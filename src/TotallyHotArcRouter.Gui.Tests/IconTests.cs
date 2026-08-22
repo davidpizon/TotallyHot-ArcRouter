@@ -18,14 +18,14 @@ public sealed class IconTests
     [InlineData("copy")]
     [InlineData("x")]
     [InlineData("trash")]
-    [InlineData("rotate-ccw")]
+    [InlineData("refresh")]
     [InlineData("terminal")]
     [InlineData("plus")]
-    [InlineData("key")]
     [InlineData("server")]
     [InlineData("lock")]
     [InlineData("unlock")]
     [InlineData("settings")]
+    [InlineData("cpu-chip")]
     public void Renders_an_svg_for_every_known_glyph_name(string name)
     {
         using var ctx = new Bunit.BunitContext();

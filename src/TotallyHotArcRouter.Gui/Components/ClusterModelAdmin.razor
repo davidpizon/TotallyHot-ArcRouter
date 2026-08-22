@@ -16,7 +16,7 @@
     {
         <div class="rounded-lg p-4 space-y-2 ds-surface-card-critical">
             <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
-                <Icon Name="alert-triangle" Size="14" /> Router unreachable
+                <Icon Name="alert-triangle" Size="20" /> Router unreachable
             </div>
             <div class="text-xs text-slate-400">
                 Could not reach <span class="font-mono">@TelemetryChannelFactory.DefaultServerAddress</span>. Is the proxy running?
@@ -37,10 +37,10 @@
             <span class="text-xs text-slate-500 uppercase tracking-widest">Cluster Model</span>
             <div class="flex items-center gap-2">
                 <button @onclick="Reload" disabled="@Store.IsRetraining" class="btn btn-ghost flex items-center gap-1.5">
-                    <Icon Name="rotate-ccw" Size="13" /> Refresh
+                    <Icon Name="refresh" Size="20" /> Refresh
                 </button>
                 <button @onclick="Retrain" disabled="@Store.IsRetraining" class="btn btn-secondary flex items-center gap-1.5">
-                    <Icon Name="play" Size="13" />
+                    <Icon Name="play" Size="20" />
                     @RetrainButtonLabel(status)
                 </button>
             </div>
@@ -87,7 +87,7 @@
                 {
                     <div class="rounded-lg p-3 flex items-center justify-between gap-2 ds-surface-card">
                         <div class="flex items-center gap-2 min-w-0">
-                            <Icon Name="database" Size="14" />
+                            <Icon Name="database" Size="20" />
                             <span class="text-sm truncate">@cluster.Name</span>
                         </div>
                         <span class="text-xs font-mono text-slate-500">@cluster.Size</span>

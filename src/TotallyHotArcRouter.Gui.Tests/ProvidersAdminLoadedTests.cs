@@ -381,7 +381,7 @@ public sealed class ProvidersAdminLoadedTests
         using var ctx = NewContext(transport);
         var cut = RenderLoaded(ctx);
 
-        cut.FindAll("button[title='Edit']")[0].Click();
+        cut.FindAll("button[title='Config']")[0].Click();
 
         // The round-trip bug: OpenEdit used to hardcode "Other", so an Anthropic provider always reopened
         // as Other and lost its type on the next save.
@@ -395,7 +395,7 @@ public sealed class ProvidersAdminLoadedTests
         var transport = new StubTransport();
         using var ctx = NewContext(transport);
         var cut = RenderLoaded(ctx);
-        cut.FindAll("button[title='Edit']")[0].Click();
+        cut.FindAll("button[title='Config']")[0].Click();
 
         FindDialogButton(cut, "Save").Click();
 
@@ -410,7 +410,7 @@ public sealed class ProvidersAdminLoadedTests
         var transport = new StubTransport();
         using var ctx = NewContext(transport);
         var cut = RenderLoaded(ctx);
-        cut.FindAll("button[title='Edit']")[0].Click();
+        cut.FindAll("button[title='Config']")[0].Click();
 
         FindDialogButton(cut, "Cancel").Click();
 
@@ -424,7 +424,7 @@ public sealed class ProvidersAdminLoadedTests
         var transport = new StubTransport();
         using var ctx = NewContext(transport);
         var cut = RenderLoaded(ctx);
-        cut.FindAll("button[title='Edit']")[0].Click();
+        cut.FindAll("button[title='Config']")[0].Click();
         transport.NextFailure = "BaseUrl must be an absolute URI.";
 
         FindDialogButton(cut, "Save").Click();
