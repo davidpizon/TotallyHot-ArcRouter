@@ -1,0 +1,150 @@
+using TotallyHot.ArcRouter.Gui.Telemetry;
+using AwesomeAssertions;
+using Grpc.Core;
+using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
+
+namespace TotallyHot.ArcRouter.Gui.Telemetry.Tests;
+
+/// <summary>
+/// Tests for <see cref="RouterSettingsAdminClient"/> - the wire-to-view mapping and error translation
+/// behind the System Settings window's Adaptive Routing row.
+/// </summary>
+/// <remarks>
+/// Driven through a subclassed generated stub rather than a live server, mirroring
+/// <c>RoutingModeAdminClientTests</c>. This project is plain net10.0, so unlike the bUnit modal tests these
+/// run in CI.
+/// </remarks>
+public class RouterSettingsAdminClientTests
+{
+    [Fact]
+    public async Task GetAsync_maps_the_effective_values_off_the_wire()
+    {
+        var stub = new StubClient
+        {
+            GetResponse = new Contract.RouterSettingsResponse { AdaptiveRoutingEnabled = true, EmbeddingMemoryCapacity = 15_000 },
+        };
+        using var client = new RouterSettingsAdminClient(stub);
+
+        var settings = await client.GetAsync(TestContext.Current.CancellationToken);
+
+        settings.Should().Be(new RouterSettingsInfo(true, 15_000));
+    }
+
+    [Fact]
+    public async Task UpdateAsync_sends_both_fields_and_maps_the_post_mutation_response()
+    {
+        var stub = new StubClient
+        {
+            UpdateResponse = new Contract.RouterSettingsResponse { AdaptiveRoutingEnabled = true, EmbeddingMemoryCapacity = 5_000 },
+        };
+        using var client = new RouterSettingsAdminClient(stub);
+
+        var settings = await client.UpdateAsync(true, 5_000, TestContext.Current.CancellationToken);
+
+        settings.Should().Be(new RouterSettingsInfo(true, 5_000));
+        stub.LastUpdateRequest.Should().NotBeNull();
+        stub.LastUpdateRequest!.AdaptiveRoutingEnabled.Should().BeTrue();
+        stub.LastUpdateRequest.EmbeddingMemoryCapacity.Should().Be(5_000);
+    }
+
+    [Fact]
+    public async Task GetAsync_unavailable_becomes_a_plain_language_message()
+    {
+        var stub = new StubClient { GetFailure = new RpcException(new Status(StatusCode.Unavailable, "failed to connect")) };
+        using var client = new RouterSettingsAdminClient(stub);
+
+        var ex = await Assert.ThrowsAsync<RouterSettingsAdminException>(() => client.GetAsync(TestContext.Current.CancellationToken));
+
+        ex.Message.Should().Be("Could not read the router settings: the router is not reachable.");
+        ex.InnerException.Should().BeOfType<RpcException>();
+        ex.IsUnavailable.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task UpdateAsync_a_rejection_keeps_the_servers_own_detail_and_is_not_flagged_unavailable()
+    {
+        var stub = new StubClient
+        {
+            UpdateFailure = new RpcException(new Status(StatusCode.InvalidArgument, "embedding_memory_capacity must be between 500 and 50000 (got 1)")),
+        };
+        using var client = new RouterSettingsAdminClient(stub);
+
+        var ex = await Assert.ThrowsAsync<RouterSettingsAdminException>(
+            () => client.UpdateAsync(false, 1, TestContext.Current.CancellationToken));
+
+        ex.Message.Should().Be("Could not save the router settings: embedding_memory_capacity must be between 500 and 50000 (got 1)");
+        ex.IsUnavailable.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Disposing_a_client_over_a_caller_supplied_stub_does_not_dispose_the_callers_channel()
+    {
+        var client = new RouterSettingsAdminClient(new StubClient());
+
+        client.Dispose();
+        client.Dispose();
+    }
+
+    [Fact]
+    public void The_address_overload_owns_the_channel_it_creates()
+    {
+        var client = new RouterSettingsAdminClient("https://127.0.0.1:65001");
+
+        client.Dispose();
+    }
+
+    [Fact]
+    public void The_default_address_overload_targets_the_proxys_grpc_port()
+    {
+        using var client = new RouterSettingsAdminClient();
+
+        client.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void Rejects_a_null_stub()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            new RouterSettingsAdminClient((Contract.RouterSettingsAdminService.RouterSettingsAdminServiceClient)null!));
+    }
+
+    /// <summary>
+    /// A generated-client test double. Overrides only the <c>CallOptions</c> overload: the generated
+    /// convenience overloads delegate to it, so this intercepts both call shapes.
+    /// </summary>
+    private sealed class StubClient : Contract.RouterSettingsAdminService.RouterSettingsAdminServiceClient
+    {
+        public Contract.RouterSettingsResponse GetResponse { get; init; } = new();
+
+        public RpcException? GetFailure { get; init; }
+
+        public Contract.RouterSettingsResponse UpdateResponse { get; init; } = new();
+
+        public RpcException? UpdateFailure { get; init; }
+
+        public Contract.UpdateRouterSettingsRequest? LastUpdateRequest { get; private set; }
+
+        public override AsyncUnaryCall<Contract.RouterSettingsResponse> GetRouterSettingsAsync(
+            Contract.GetRouterSettingsRequest request,
+            CallOptions options) =>
+            new(
+                GetFailure is null ? Task.FromResult(GetResponse) : Task.FromException<Contract.RouterSettingsResponse>(GetFailure),
+                Task.FromResult(new Metadata()),
+                () => Status.DefaultSuccess,
+                () => [],
+                () => { });
+
+        public override AsyncUnaryCall<Contract.RouterSettingsResponse> UpdateRouterSettingsAsync(
+            Contract.UpdateRouterSettingsRequest request,
+            CallOptions options)
+        {
+            LastUpdateRequest = request;
+            return new(
+                UpdateFailure is null ? Task.FromResult(UpdateResponse) : Task.FromException<Contract.RouterSettingsResponse>(UpdateFailure),
+                Task.FromResult(new Metadata()),
+                () => Status.DefaultSuccess,
+                () => [],
+                () => { });
+        }
+    }
+}

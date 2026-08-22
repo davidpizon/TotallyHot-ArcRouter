@@ -16,8 +16,9 @@ a **Verifier**, and a **Memory**, selecting under the cost-aware reward
 (Phase I), the embedding memory (Phase J), the benchmark corpus in SQLite (Phases K/K2), the four-voter
 Orchestrator ensemble (Phase L), the Orchestrator on the live path with requested-vs-routed telemetry
 (Phase M, M1–M4), live feedback capture plus the embedding-backed `logreg` trainer
-(`live-feedback-learning-plan.md` Phases 1–4), and Routing ROI's expense-and-regret comparison
-(`routing-roi-regret-plan.md`) have all shipped. Narratives:
+(`live-feedback-learning-plan.md` Phases 1–4), Routing ROI's expense-and-regret comparison
+(`routing-roi-regret-plan.md`), and self-organizing request classification end to end
+(`self-organizing-classification-plan.md` Phases T1–T6) have all shipped. Narratives:
 
 | Shipped work | Owning doc |
 |---|---|
@@ -28,15 +29,17 @@ Orchestrator ensemble (Phase L), the Orchestrator on the live path with requeste
 | Phase M (M1–M4) — Orchestrator on the live path, requested-vs-routed end to end | [`../docs/router/orchestrator-live-path-plan.md`](../docs/router/orchestrator-live-path-plan.md), [`../docs/router/phase-m2-plan.md`](../docs/router/phase-m2-plan.md) |
 | Live-feedback Phases 1–4 — importer repair, feedback capture, embedding-backed `logreg`, training | [`../docs/router/live-feedback-learning-plan.md`](../docs/router/live-feedback-learning-plan.md) |
 | Routing ROI — regret vs `dim_best`, one-minute full drain, hard pause under load | [`../docs/router/routing-roi-regret-plan.md`](../docs/router/routing-roi-regret-plan.md), [`../docs/router/self-organizing-classification-plan.md`](../docs/router/self-organizing-classification-plan.md) (Phase T4 status block) |
+| Phases T1–T6 — transcript capture, self-organizing clustering, `cluster_best` voter, baseline comparison, Cluster Model admin pane, System Settings adaptive-routing toggle | [`../docs/router/self-organizing-classification-plan.md`](../docs/router/self-organizing-classification-plan.md) |
 
 **What is still missing**, and which remaining workstream owns it:
 
 - **No measurement.** Nothing computes `R_ij`, the per-task oracle, `CumReg`, `AvgPerf`, `TotTok`,
   `$Total`, or `Perf/$`; every "the ensemble beats X" claim is still an assertion → **Phase N**.
-- ~~**Live traffic is not yet usable as a training corpus.**~~ **Closed by Phases T1–T4.** Transcripts
+- ~~**Live traffic is not yet usable as a training corpus.**~~ **Closed by Phases T1–T6.** Transcripts
   are captured opt-in with full provenance (`IsExploratory`, propensity, real cost), skipped embeddings
-  are recovered by backfill, and the learned cluster taxonomy is trained, voted on (`cluster_best`), and
-  measured against the frozen nine-dimension baseline.
+  are recovered by backfill, the learned cluster taxonomy is trained, voted on (`cluster_best`), and
+  measured against the frozen nine-dimension baseline, and the System Settings window exposes the
+  adaptive-routing toggle and sample size operators use to turn it on.
 - **The Verifier is blind on non-executable dimensions** — a prose answer is scored on syntax alone →
   **Phases G1–G3**.
 - **The general (non-utility) live path has no cost term.** `UtilityRoutingPolicy` prices candidates;
@@ -49,46 +52,34 @@ flowchart LR
         LOOP["Classifier → 4-voter Orchestrator →<br/>model → Verifier → RouterMemory/EmbeddingMemory →<br/>back into the voters"]
     end
 
-    T["T6: adaptive-routing settings surface<br/>(T1–T5 shipped)"]
     P5["live-feedback Phase 5:<br/>logreg admin pane"]
     G1["G1: shadow judge<br/>(accumulates, influences nothing)"]
     N["Phase N: regret harness<br/>(+ live-feedback Phase 6 relocation)"]
     G23["G2 → G3: judge calibration,<br/>then judge as verifier for<br/>non-executable dimensions"]
 
-    LOOP --> T --> P5 --> G1 --> N --> G23
-    T -.->|"closes N's three<br/>live-arm blockers"| N
+    LOOP --> P5 --> G1 --> N --> G23
     G1 -.->|"shadow data gates"| G23
 ```
 
 ## Remaining work, in order
 
-1. **Phase T6 — self-organizing request classification (remaining, next up).** Full plan:
-   [`../docs/router/self-organizing-classification-plan.md`](../docs/router/self-organizing-classification-plan.md).
-   **T1–T5 have shipped**: opt-in transcript capture with provenance (`IsExploratory`, propensity, real
-   cost), embedding backfill, spherical k-means clustering with an OOD bootstrap, the fifth additive
-   `cluster_best` voter, the clusters-vs-dimensions baseline comparison (leave-one-out MAE per
-   taxonomy, a `dim_best` cost counterfactual now backing Cost Analytics' Routing ROI screen, and the
-   promotion predicate — which authorizes writing a promotion plan and promotes nothing), and the
-   Governance "Cluster Model" admin pane (`ClusterModelAdminService`, status plus a streamed retrain).
-   Still open: **T6**, the System Settings adaptive-routing toggle plus the router-side mutable settings
-   store it needs. T1 already closed the three prerequisites the regret plan names as blocking any future
-   live-regret arm, so Phase N is no longer gated on this workstream.
-2. **Live-feedback Phase 5 — `logreg` admin surface.**
+1. **Live-feedback Phase 5 — `logreg` admin surface.**
    [`../docs/router/live-feedback-learning-plan.md`](../docs/router/live-feedback-learning-plan.md)
    Phase 5 (proposed). A `RouterModelAdminService` gRPC service plus a Governance "Router Model" pane
    mirroring `BenchmarkDataAdminService`. Non-blocking for Phase N; natural to land with or right
-   after T5, which builds the same pane pattern for cluster training.
-3. **Phase G1 — shadow judge.**
+   after the self-organizing-classification-plan's Cluster Model pane (T5), which built the same
+   pattern.
+2. **Phase G1 — shadow judge.**
    [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md)
    (proposed). The G-Eval judge scores in parallel with `VerifierScorer` into a side table and
    influences nothing. Deliberately sequenced *before* Phase N so agreement data accumulates passively
    while the harness is built — G2's gate needs volume, and shadow rows cost nothing on the hot path.
-4. **Phase N — regret evaluation harness.** Detail below; full component spec:
+3. **Phase N — regret evaluation harness.** Detail below; full component spec:
    [`../docs/router/regret-evaluation-harness-plan.md`](../docs/router/regret-evaluation-harness-plan.md)
    (N1–N6). Also carries live-feedback Phase 6's remaining item (relocating the TF-IDF
    `LogRegTrainer` machinery into a Phase-N-facing namespace), deferred by that plan to land alongside
    the harness itself.
-5. **Phases G2 → G3 — judge calibration, then judge-as-verifier.** G2's agreement/calibration analysis
+4. **Phases G2 → G3 — judge calibration, then judge-as-verifier.** G2's agreement/calibration analysis
    runs once G1 has accumulated shadow data; G3 (the judge as scorer of record for non-executable
    dimensions only, with `is_judge_scored` provenance) is gated on G2's criteria and never starts if
    the gate fails.
@@ -98,9 +89,9 @@ flowchart LR
 **Prerequisite status:** `live-feedback-learning-plan.md` Phase 4 shipped — all four Orchestrator
 voters can cast a real vote on live traffic instead of three of them abstaining for lack of an input,
 satisfying that plan's own ordering requirement ("measuring voters that structurally cannot fire would
-produce a benchmark of `dim_best` wearing an ensemble's name"). The T phases (item 1 above) are
-sequenced ahead of N because every phase of them removes a blocker N would otherwise have to solve
-itself, but N does not require them to complete.
+produce a benchmark of `dim_best` wearing an ensemble's name"). The self-organizing-classification-plan's
+T phases shipped ahead of N because every phase of them removed a blocker N would otherwise have had to
+solve itself, but N never required them to complete.
 
 - Implement the metrics of research-doc §5.1 and A.2: reward matrix `R_ij = ε₁·s_ij + ε₂·κ_ij`,
   per-task oracle `a*_i = argmax_j R_ij`, cumulative regret `CumReg_N = Σ(r*_i − r_i(a_i))`, plus
