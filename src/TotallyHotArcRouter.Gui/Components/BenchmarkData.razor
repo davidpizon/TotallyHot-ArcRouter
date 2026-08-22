@@ -51,6 +51,15 @@
             </div>
         }
 
+        <div class="flex items-center mb-3">
+            <button @onclick="RunResync"
+                    disabled="@(Store.IsSyncing || VoterStore.IsSyncing)"
+                    class="ml-auto btn btn-secondary flex items-center gap-1.5">
+                <Icon Name="refresh" Size="20" />
+                @ResyncLabel()
+            </button>
+        </div>
+
         @if (Store.Status is { } status)
         {
             @if (status.State == BenchmarkDataAdminState.CheckFailed && !string.IsNullOrEmpty(status.Reason))
@@ -68,7 +77,7 @@
                         Task Matrix
                     </span>
                     <button @onclick="RunAction"
-                            disabled="@Store.IsSyncing"
+                            disabled="@(Store.IsSyncing || status.State != BenchmarkDataAdminState.Update)"
                             title="@(status.Reason)"
                             class="btn btn-secondary flex items-center gap-1.5">
                         <Icon Name="refresh" Size="20" />
@@ -201,7 +210,7 @@
                                 Local Voter Model
                             </span>
                             <button @onclick="RunVoterAction"
-                                    disabled="@VoterStore.IsSyncing"
+                                    disabled="@(VoterStore.IsSyncing || voterStatus.Current != false)"
                                     class="btn btn-secondary flex items-center gap-1.5">
                                 <Icon Name="refresh" Size="20" />
                                 @VoterActionLabel()
@@ -345,35 +354,37 @@
     }
 
     /// <summary>
-    /// The header button's label, reflecting the corpus's freshness state directly - "Re-verify" once
-    /// every file matches the published tree (the button stays enabled in this state, mirroring the Local
-    /// Voter Model panel's <see cref="VoterActionLabel"/>: re-running the sync is the only way to confirm
-    /// the ledger's recorded checksums still match what's actually on disk), "Update" when at least one
-    /// file does not match, "Check Failed" when the last probe could not reach Hugging Face - and
-    /// "Updating…" for the duration of a sync.
+    /// The top-of-page Resync button's label: "Resyncing…" while either card's store is mid-sync,
+    /// otherwise "Resync".
     /// </summary>
-    private string ActionLabel()
-    {
-        if (Store.IsSyncing)
-        {
-            return "Updating…";
-        }
-
-        return Store.Status?.State switch
-        {
-            BenchmarkDataAdminState.Current => "Re-verify",
-            BenchmarkDataAdminState.Update => "Update",
-            BenchmarkDataAdminState.CheckFailed => "Check Failed",
-            _ => "Check Failed",
-        };
-    }
+    private string ResyncLabel() => Store.IsSyncing || VoterStore.IsSyncing ? "Resyncing…" : "Resync";
 
     /// <summary>
-    /// Runs the action the header button's current state implies: a stale corpus (Update) or an
-    /// already-current one (Current, i.e. "Re-verify") both sync - the sync itself re-probes Hugging Face
-    /// and only re-downloads files whose ledger checksum no longer matches, so re-verifying a current
-    /// corpus is cheap. An unknown freshness (CheckFailed, or no status yet) rechecks rather than
-    /// downloading blind.
+    /// Runs both cards' sync operations together: the same call <see cref="RunAction"/> and
+    /// <see cref="RunVoterAction"/> make individually, so a single Resync click updates the corpus and the
+    /// local voter model in one step. Each already reports its own failures into its own card's error
+    /// banner, so running them concurrently is safe.
+    /// </summary>
+    private Task RunResync() => Task.WhenAll(RunAction(), RunVoterAction());
+
+    /// <summary>
+    /// The Task Matrix header button's label. The button is only enabled while an update is actually
+    /// available, so the label just needs to distinguish that from a failed freshness probe: "Check
+    /// Failed" when the last probe could not reach Hugging Face (surfaced even though the button stays
+    /// disabled in this state - re-checking is the top Resync button's job), "Updating…" for the duration
+    /// of a sync, and "Update" otherwise.
+    /// </summary>
+    private string ActionLabel() => Store.Status?.State switch
+    {
+        _ when Store.IsSyncing => "Updating…",
+        BenchmarkDataAdminState.CheckFailed => "Check Failed",
+        _ => "Update",
+    };
+
+    /// <summary>
+    /// Updates the corpus. Only reachable while the header button is enabled (an update is available), but
+    /// still recheck-first when freshness is unknown (CheckFailed, or no status yet) rather than
+    /// downloading blind - mirrors the top-of-page Resync button's per-card logic.
     /// </summary>
     private Task RunAction() =>
         Store.Status?.State is BenchmarkDataAdminState.Update or BenchmarkDataAdminState.Current
@@ -566,17 +577,14 @@
     }
 
     /// <summary>
-    /// The Local Voter Model header button's label: "Re-verify" once every file is cached (the button
-    /// stays enabled in this state, unlike the corpus panel's <see cref="ActionLabel"/>/Store.Status.State
-    /// pairing, since checksum verification is in-memory only and doesn't survive a process restart -
-    /// re-running the sync is the only way to confirm already-cached files are still intact), "Update"
-    /// when at least one file is missing, "Updating…" for the duration of a sync. Unlike
-    /// <see cref="ActionLabel"/>, there is no "Check Failed" state - the base URL is a fixed pin, not a
-    /// rolling ref, so there is nothing to recheck against.
+    /// The Local Voter Model header button's label. The button is only enabled while an update is
+    /// available (mirrors <see cref="ActionLabel"/>, minus the corpus panel's "Check Failed" state - the
+    /// base URL is a fixed pin, not a rolling ref, so there is nothing to recheck against), so the label
+    /// just distinguishes "Updating…", for the duration of a sync, from "Update" otherwise.
     /// </summary>
-    private string VoterActionLabel() =>
-        VoterStore.IsSyncing ? "Updating…" : VoterStore.Status?.Current == true ? "Re-verify" : "Update";
+    private string VoterActionLabel() => VoterStore.IsSyncing ? "Updating…" : "Update";
 
+    /// <summary>Updates the Local Voter Model. Only reachable while the header button is enabled (an update is available).</summary>
     private Task RunVoterAction() => RunVoterAsync(() => VoterStore.SyncAsync());
 
     /// <summary>The display label for one voter file's current sync stage.</summary>
