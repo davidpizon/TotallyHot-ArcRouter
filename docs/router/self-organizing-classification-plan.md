@@ -312,7 +312,7 @@ New for this plan:
 | T3 | `ClusterBestVoter` — fifth Orchestrator voter | T2 | Shipped |
 | T4 | Baseline comparison: learned clusters vs. the frozen 9-dimension categorizer | T1, T2, T3 | Shipped |
 | T5 | Admin surface for cluster training (Governance pane + gRPC + CLI) | T2 | Proposed |
-| T6 | System Settings: Adaptive Routing toggle + Sample Size, unified Save, router-side mutable settings | T1, T2, T3 | Proposed |
+| T6 | System Settings: Adaptive Routing toggle + Sample Size, unified Save, router-side mutable settings | T1, T2, T3 | Shipped |
 
 ---
 
@@ -657,6 +657,21 @@ flow, and the in-progress "Training…" state with a live bootstrap-progress cou
 (`ClusterModelAdminTests`, 7 cases).
 
 ## Phase T6 — System Settings: Adaptive Routing toggle + Sample Size
+
+> **Status: shipped.** Router side: `router_settings` key/value table on `RouterMemoryDatabase`,
+> `RouterSettingsStore` (`AdaptiveRoutingEnabledKey`/`EmbeddingMemoryCapacityKey`, stored-override >
+> appsettings.json > coded-default precedence via `RouterSettingsConfigureOptions`), and
+> `RouterSettingsAdminGrpcService` (`GetRouterSettings`/`UpdateRouterSettings`, `[500, 50000]` capacity
+> clamp, synchronous `EmbeddingMemory.TrimToCurrentCapacityAsync` on a lowered capacity) all landed ahead
+> of this GUI work. GUI side: `RouterSettingsAdminClient`/`IRouterSettingsAdminClient`
+> (`TotallyHotArcRouter.Gui.Telemetry`) and the `RouterSettingsAdminStore` view-model
+> (`TotallyHotArcRouter.Gui/Services`) mirror `ClusterModelAdminClient`/`ClusterModelAdminStore`'s
+> reachability-tolerant shape. `SettingsModal.razor` gained the Adaptive Routing toggle plus Sample Size
+> input (client-side `[500, 50000]` clamp on blur, the amber warning tooltip below 20000), and the
+> telemetry address's dedicated Save button was removed in favor of one footer Save that persists both
+> concerns and reports their outcomes independently. Full bUnit coverage in
+> `SettingsModalTests.cs`/`DashboardTests.cs` and client-mapping coverage in
+> `RouterSettingsAdminClientTests.cs`.
 
 Adds the two GUI controls the user specified directly onto the existing "System Settings" window
 (`SettingsModal.razor`), and the router-side machinery that makes them do something rather than sit as

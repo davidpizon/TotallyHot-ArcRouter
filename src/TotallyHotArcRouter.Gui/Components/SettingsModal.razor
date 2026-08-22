@@ -1,6 +1,10 @@
-@* System settings modal: telemetry connection settings plus destructive actions gated behind a typed confirmation word. *@
+@* System settings modal: telemetry connection settings, the adaptive-routing toggle and sample size
+   (docs/router/self-organizing-classification-plan.md Phase T6), plus destructive actions gated behind a
+   typed confirmation word. *@
+@using TotallyHot.ArcRouter.Gui.Telemetry
 @inject LiveDataStore LiveDataStore
 @inject IGuiSettingsStore SettingsStore
+@inject RouterSettingsAdminStore RouterSettingsStore
 <div class="overlay-backdrop fixed inset-0 z-50 flex items-center justify-center"
      @onclick="OnClose">
     <div class="overlay-panel w-full max-w-md rounded-lg border border-slate-700"
@@ -21,23 +25,57 @@
                 <label for="telemetry-address" class="text-xs text-slate-400 font-medium uppercase tracking-widest">
                     Telemetry Server Address
                 </label>
-                <div class="flex gap-2">
-                    <input id="telemetry-address"
-                           type="text"
-                           value="@_telemetryAddress"
-                           @oninput="OnTelemetryAddressInput"
-                           class="flex-1 px-3 py-2 text-sm font-mono ds-input" />
-                    <button @onclick="SaveTelemetryAddress"
-                            disabled="@string.IsNullOrWhiteSpace(_telemetryAddress)"
-                            class="btn btn-ghost">
-                        Save
-                    </button>
-                </div>
+                <input id="telemetry-address"
+                       type="text"
+                       value="@_telemetryAddress"
+                       @oninput="OnTelemetryAddressInput"
+                       class="w-full px-3 py-2 text-sm font-mono ds-input" />
                 @if (_telemetryAddressSaved)
                 {
                     <p class="text-xs text-emerald-400">Saved. Restart the app to connect to the new address.</p>
                 }
             </div>
+
+            @* Adaptive routing (docs/router/self-organizing-classification-plan.md Phase T6) *@
+            <div class="space-y-2">
+                <label class="text-xs text-slate-400 font-medium uppercase tracking-widest">
+                    Adaptive Routing
+                </label>
+                <div class="flex items-center gap-3">
+                    <button @onclick="ToggleAdaptiveRouting"
+                            aria-label="Toggle adaptive routing"
+                            class="shrink-0 flex items-center gap-1.5 rounded px-2 py-1 text-xs font-semibold border transition-colors @(_adaptiveRoutingEnabled ? "toggle-enabled" : "toggle-disabled")">
+                        <span class="w-1.5 h-1.5 rounded-full @(_adaptiveRoutingEnabled ? "toggle-dot-enabled" : "toggle-dot-disabled")"></span>
+                        @(_adaptiveRoutingEnabled ? "On" : "Off")
+                    </button>
+                    <input id="sample-size"
+                           type="number"
+                           min="@MinEmbeddingMemoryCapacity"
+                           max="@MaxEmbeddingMemoryCapacity"
+                           step="1"
+                           value="@_sampleSizeText"
+                           @oninput="OnSampleSizeInput"
+                           @onchange="OnSampleSizeChange"
+                           class="w-28 px-3 py-2 text-sm font-mono ds-input" />
+                    <span class="text-xs text-slate-500">Sample Size</span>
+                    @if (ShowSampleSizeWarning)
+                    {
+                        <span class="ls-tip" tabindex="0" aria-describedby="ls-tooltip"
+                              data-tip="a sample size of 20000 is recommended.">
+                            <Icon Name="alert-triangle" Size="16" Class="text-amber-400" />
+                        </span>
+                    }
+                </div>
+                @if (_routerSettingsMessage is not null)
+                {
+                    <p class="text-xs @(_routerSettingsSaveFailed ? "text-red-400" : "text-emerald-400")">@_routerSettingsMessage</p>
+                }
+            </div>
+
+            @* Unified save *@
+            <button @onclick="SaveAll" disabled="@_saving" class="btn btn-ghost w-full">
+                @(_saving ? "Saving…" : "Save")
+            </button>
 
             @* Destructive zone label *@
             <div class="flex items-center gap-2 text-xs text-amber-400 font-medium uppercase tracking-widest">
@@ -101,12 +139,27 @@
     [Parameter]
     public EventCallback OnClose { get; set; }
 
+    /// <summary>The inclusive lower bound accepted for Sample Size, mirroring <c>RouterSettingsAdminGrpcService.MinEmbeddingMemoryCapacity</c>.</summary>
+    private const int MinEmbeddingMemoryCapacity = 500;
+
+    /// <summary>The inclusive upper bound accepted for Sample Size, mirroring <c>RouterSettingsAdminGrpcService.MaxEmbeddingMemoryCapacity</c>.</summary>
+    private const int MaxEmbeddingMemoryCapacity = 50_000;
+
+    /// <summary>The Sample Size below which the warning icon/tooltip renders, matching <c>RoutingOptions</c>'s shipped default.</summary>
+    private const int RecommendedEmbeddingMemoryCapacity = 20_000;
+
     private string? _activeAction;
     private string _confirmText = string.Empty;
     private ElementReference _confirmInput;
     private bool _focusPending;
     private string _telemetryAddress = string.Empty;
     private bool _telemetryAddressSaved;
+    private bool _adaptiveRoutingEnabled;
+    private int _embeddingMemoryCapacity = RecommendedEmbeddingMemoryCapacity;
+    private string _sampleSizeText = RecommendedEmbeddingMemoryCapacity.ToString();
+    private bool _saving;
+    private string? _routerSettingsMessage;
+    private bool _routerSettingsSaveFailed;
 
     /// <summary>The exact word the operator must type to confirm the active destructive action.</summary>
     private string Required => _activeAction == "reset" ? "RESET" : "PURGE";
@@ -114,9 +167,23 @@
     /// <summary>Whether the typed confirmation text exactly matches <see cref="Required"/>.</summary>
     private bool IsConfirmed => _confirmText == Required;
 
-    protected override void OnInitialized()
+    // Read off the live (possibly out-of-bounds or unparsable) text rather than the clamped
+    // _embeddingMemoryCapacity, which only updates on blur/save - otherwise the warning would lag a full
+    // keystroke behind what the operator actually typed.
+    /// <summary>Whether the warning icon/tooltip should render for the Sample Size text as currently typed.</summary>
+    private bool ShowSampleSizeWarning => int.TryParse(_sampleSizeText, out var parsed) && parsed < RecommendedEmbeddingMemoryCapacity;
+
+    protected override async Task OnInitializedAsync()
     {
         _telemetryAddress = SettingsStore.Load().TelemetryServerAddress;
+
+        await RouterSettingsStore.LoadAsync();
+        if (RouterSettingsStore.Settings is { } settings)
+        {
+            _adaptiveRoutingEnabled = settings.AdaptiveRoutingEnabled;
+            _embeddingMemoryCapacity = settings.EmbeddingMemoryCapacity;
+            _sampleSizeText = settings.EmbeddingMemoryCapacity.ToString();
+        }
     }
 
     /// <summary>Updates the address field and clears any stale "Saved" confirmation from a previous save.</summary>
@@ -124,6 +191,75 @@
     {
         _telemetryAddress = (string?)e.Value ?? string.Empty;
         _telemetryAddressSaved = false;
+    }
+
+    /// <summary>Flips the adaptive-routing toggle and clears any stale save outcome from a previous attempt.</summary>
+    private void ToggleAdaptiveRouting()
+    {
+        _adaptiveRoutingEnabled = !_adaptiveRoutingEnabled;
+        ClearRouterSettingsMessage();
+    }
+
+    // Only tracks the raw text here - deliberately does NOT parse into _embeddingMemoryCapacity on every
+    // keystroke. The input's value is bound to _sampleSizeText (not the int), so an in-progress edit that
+    // doesn't currently parse (e.g. the field cleared to type a new number) is preserved verbatim instead of
+    // being clobbered by a stale re-render of the last-known-good integer.
+    /// <summary>Tracks the Sample Size input's raw text as the operator types, and clears any stale save outcome.</summary>
+    private void OnSampleSizeInput(ChangeEventArgs e)
+    {
+        _sampleSizeText = (string?)e.Value ?? string.Empty;
+        ClearRouterSettingsMessage();
+    }
+
+    /// <summary>Parses and clamps the Sample Size once the operator leaves the field.</summary>
+    private void OnSampleSizeChange(ChangeEventArgs e)
+    {
+        _sampleSizeText = (string?)e.Value ?? string.Empty;
+        ClampSampleSize();
+    }
+
+    /// <summary>
+    /// Parses <see cref="_sampleSizeText"/> into <see cref="_embeddingMemoryCapacity"/> (keeping the prior
+    /// value on a parse failure), clamps into <see cref="MinEmbeddingMemoryCapacity"/>/
+    /// <see cref="MaxEmbeddingMemoryCapacity"/> - defense in depth ahead of the server-side clamp
+    /// <c>RouterSettingsAdminGrpcService.UpdateRouterSettings</c> actually enforces - and resyncs the
+    /// display text to the clamped canonical value.
+    /// </summary>
+    private void ClampSampleSize()
+    {
+        if (int.TryParse(_sampleSizeText, out var parsed))
+        {
+            _embeddingMemoryCapacity = parsed;
+        }
+
+        _embeddingMemoryCapacity = Math.Clamp(_embeddingMemoryCapacity, MinEmbeddingMemoryCapacity, MaxEmbeddingMemoryCapacity);
+        _sampleSizeText = _embeddingMemoryCapacity.ToString();
+    }
+
+    /// <summary>Clears the router settings' save outcome message, e.g. because the operator edited a field after a prior save attempt.</summary>
+    private void ClearRouterSettingsMessage()
+    {
+        _routerSettingsMessage = null;
+        _routerSettingsSaveFailed = false;
+    }
+
+    // Runs both persistence paths from the one footer button. Outcomes are reported per-concern rather than
+    // blended: the telemetry address keeps its own "Saved" note, and the router settings report "Applied" or
+    // the router-unreachable/rejection state independently, mirroring PriceSourcesAdmin's own gRPC error
+    // rendering (docs/router/self-organizing-classification-plan.md Phase T6).
+    /// <summary>Persists the telemetry address (if changed) and the adaptive-routing settings in one action.</summary>
+    private async Task SaveAll()
+    {
+        _saving = true;
+        try
+        {
+            SaveTelemetryAddress();
+            await SaveRouterSettings();
+        }
+        finally
+        {
+            _saving = false;
+        }
     }
 
     /// <summary>Trims and persists the typed telemetry address, then shows the "Saved" confirmation.</summary>
@@ -138,6 +274,29 @@
         _telemetryAddress = trimmed;
         SettingsStore.Save(SettingsStore.Load() with { TelemetryServerAddress = trimmed });
         _telemetryAddressSaved = true;
+    }
+
+    // Reads the outcome off RouterSettingsAdminStore's own IsReachable/LastError rather than recomputing a
+    // message from the caught exception - the store already resolved unreachable-vs-rejected via
+    // IRouterSettingsAdminClient's isUnavailable flag, so recomputing it here would just duplicate that logic.
+    /// <summary>Clamps the Sample Size, then persists both adaptive-routing settings through <see cref="RouterSettingsAdminStore"/>.</summary>
+    private async Task SaveRouterSettings()
+    {
+        ClampSampleSize();
+
+        try
+        {
+            await RouterSettingsStore.UpdateAsync(_adaptiveRoutingEnabled, _embeddingMemoryCapacity);
+            _routerSettingsMessage = "Applied";
+            _routerSettingsSaveFailed = false;
+        }
+        catch (RouterSettingsAdminException)
+        {
+            _routerSettingsMessage = RouterSettingsStore.IsReachable
+                ? RouterSettingsStore.LastError
+                : "Could not reach the router. Is the proxy running?";
+            _routerSettingsSaveFailed = true;
+        }
     }
 
     /// <summary>Opens the type-to-confirm step for the given destructive action and queues focus on its input.</summary>
