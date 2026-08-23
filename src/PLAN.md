@@ -30,6 +30,7 @@ admin surface (`live-feedback-learning-plan.md` Phases 1–5), Routing ROI's exp
 | Live-feedback Phases 1–5 — importer repair, feedback capture, embedding-backed `logreg`, training, Governance admin surface | [`../docs/router/live-feedback-learning-plan.md`](../docs/router/live-feedback-learning-plan.md) |
 | Routing ROI — regret vs `dim_best`, one-minute full drain, hard pause under load | [`../docs/router/routing-roi-regret-plan.md`](../docs/router/routing-roi-regret-plan.md), [`../docs/router/self-organizing-classification-plan.md`](../docs/router/self-organizing-classification-plan.md) (Phase T4 status block) |
 | Phases T1–T6 — transcript capture, self-organizing clustering, `cluster_best` voter, baseline comparison, Cluster Model admin pane, System Settings adaptive-routing toggle | [`../docs/router/self-organizing-classification-plan.md`](../docs/router/self-organizing-classification-plan.md) |
+| Phase G1 — shadow judge observer (`PendingResponseTextCache`, `JudgeShadowScoreObserver`/`GEvalJudgeClient`/`JudgeModelSelector`/drain worker, `judge_shadow_scores` side table, `is_judge_scored` provenance columns), off by default, judging on a free Providers-screen model | [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md) |
 
 **What is still missing**, and which remaining workstream owns it:
 
@@ -40,42 +41,44 @@ admin surface (`live-feedback-learning-plan.md` Phases 1–5), Routing ROI's exp
   are recovered by backfill, the learned cluster taxonomy is trained, voted on (`cluster_best`), and
   measured against the frozen nine-dimension baseline, and the System Settings window exposes the
   adaptive-routing toggle and sample size operators use to turn it on.
-- **The Verifier is blind on non-executable dimensions** — a prose answer is scored on syntax alone →
-  **Phases G1–G3**.
+- ~~**The Verifier is blind on non-executable dimensions.**~~ **G1 shipped.** The shadow judge
+  (`TotallyHot.ArcRouter.Judge`) now scores every request in parallel with `VerifierScorer` into
+  `judge_shadow_scores`, off by default, influencing nothing. Non-executable dimensions are still
+  syntax-only scored on the routing hot path until **G3**, gated on **G2**'s calibration analysis over
+  the shadow data G1 is now accumulating.
 - **The general (non-utility) live path has no cost term.** `UtilityRoutingPolicy` prices candidates;
   the Orchestrator does not. T1's real-cost wiring makes the reward computable from live data; putting
   a cost term into the general path's selection is otherwise unscheduled.
 
 ```mermaid
 flowchart LR
-    subgraph shipped["Shipped — the live C-A-F loop"]
+    subgraph shipped["Shipped — the live C-A-F loop + G1"]
         LOOP["Classifier → 4-voter Orchestrator →<br/>model → Verifier → RouterMemory/EmbeddingMemory →<br/>back into the voters"]
+        G1["G1: shadow judge<br/>(accumulates, influences nothing)"]
+        LOOP -.-> G1
     end
 
-    G1["G1: shadow judge<br/>(accumulates, influences nothing)"]
     N["Phase N: regret harness<br/>(+ live-feedback Phase 6 relocation)"]
     G23["G2 → G3: judge calibration,<br/>then judge as verifier for<br/>non-executable dimensions"]
 
-    LOOP --> G1 --> N --> G23
+    LOOP --> N --> G23
     G1 -.->|"shadow data gates"| G23
 ```
 
 ## Remaining work, in order
 
-1. **Phase G1 — shadow judge.**
-   [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md)
-   (proposed). The G-Eval judge scores in parallel with `VerifierScorer` into a side table and
-   influences nothing. Deliberately sequenced *before* Phase N so agreement data accumulates passively
-   while the harness is built — G2's gate needs volume, and shadow rows cost nothing on the hot path.
-2. **Phase N — regret evaluation harness.** Detail below; full component spec:
+1. **Phase N — regret evaluation harness.** Detail below; full component spec:
    [`../docs/router/regret-evaluation-harness-plan.md`](../docs/router/regret-evaluation-harness-plan.md)
    (N1–N6). Also carries live-feedback Phase 6's remaining item (relocating the TF-IDF
    `LogRegTrainer` machinery into a Phase-N-facing namespace), deferred by that plan to land alongside
-   the harness itself.
-3. **Phases G2 → G3 — judge calibration, then judge-as-verifier.** G2's agreement/calibration analysis
-   runs once G1 has accumulated shadow data; G3 (the judge as scorer of record for non-executable
-   dimensions only, with `is_judge_scored` provenance) is gated on G2's criteria and never starts if
-   the gate fails.
+   the harness itself. Phase G1 (shipped; see the shipped-work table above) already accumulates shadow
+   judge data passively in the background while this harness is built, so G2's gate has volume by the
+   time it's ready.
+2. **Phases G2 → G3 — judge calibration, then judge-as-verifier.**
+   [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md). G2's
+   agreement/calibration analysis runs once G1 has accumulated shadow data; G3 (the judge as scorer of
+   record for non-executable dimensions only, with `is_judge_scored` provenance) is gated on G2's
+   criteria and never starts if the gate fails.
 
 ### Phase N: roadmap-level scope and exit bar
 
@@ -148,6 +151,23 @@ solve itself, but N never required them to complete.
   (Phase M3.2's editable-toggle deferral is *partially* reopened, deliberately, by
   [`../docs/router/self-organizing-classification-plan.md`](../docs/router/self-organizing-classification-plan.md)
   Phase T6, scoped to exactly two settings.)
+- **G1's auto-CoT is a static per-dimension prompt constant, not generated-and-cached** —
+  `GEvalJudgeClient.DimensionCriteria` is a hardcoded dictionary rather than a per-dimension prompt
+  generated once by a separate LLM call and cached with artifact-version guards; `JudgeOptions.PromptVersion`
+  still exists so a future move to generated-and-cached CoT is a version bump, not a schema change.
+  **G1's n-sample fallback is a single best-effort numeric parse**, not the G-Eval paper's full n-sample
+  estimation, when the judge backbone exposes no logprobs at all. Both are the plan's own allowed "iteration"
+  minimum. Rationale: [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md)
+  Phase G1's status blockquote.
+- **The judge backbone is a Providers-screen free model, not the hardcoded local endpoint G1 shipped** —
+  `JudgeOptions.BaseUrl`/`Model` are removed. `JudgeModelSelector` resolves a route per call from the
+  operator's own provider configuration (provider flagged `IsFree`, provider and model enabled, not a
+  Bedrock route), and abstains when none is eligible rather than recording a fabricated score. The judge's
+  own configuration (`Enabled`, `ModelName`) moved out of `appsettings.json` into `router_settings` behind
+  the System Settings window, which also makes `Enabled` a live toggle — including the gate that authorizes
+  retaining raw response text in memory. Rationale:
+  [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md) §1a's
+  revision note.
 
 ---
 

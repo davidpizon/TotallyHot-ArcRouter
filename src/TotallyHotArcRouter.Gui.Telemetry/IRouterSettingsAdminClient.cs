@@ -1,7 +1,8 @@
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
 
 /// <summary>
-/// The router-settings read/write operations the System Settings window's Adaptive Routing row needs. An
+/// The router-settings read/write operations the System Settings window's Adaptive Routing and Shadow Judge
+/// rows need. An
 /// interface so <c>RouterSettingsAdminStore</c> can be unit-tested against a fake without a live proxy or a
 /// gRPC channel, mirroring <see cref="IClusterModelAdminClient"/>.
 /// </summary>
@@ -11,10 +12,17 @@ public interface IRouterSettingsAdminClient
     /// <exception cref="RouterSettingsAdminException">The call failed or the router is unreachable.</exception>
     Task<RouterSettingsInfo> GetAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>Validates and persists both settings, returning the fresh post-mutation effective values.</summary>
-    /// <exception cref="RouterSettingsAdminException">The call was rejected (e.g. an out-of-range capacity) or the router is unreachable.</exception>
+    /// <summary>Validates and persists every setting, returning the fresh post-mutation effective values.</summary>
+    /// <param name="adaptiveRoutingEnabled">Whether adaptive routing is enabled.</param>
+    /// <param name="embeddingMemoryCapacity">The embedding-memory capacity; rejected when out of range.</param>
+    /// <param name="judgeEnabled">Whether the G-Eval shadow judge is enabled.</param>
+    /// <param name="judgeModelName">The chosen judge backbone, or an empty string for automatic selection; rejected when it names a model that is not currently eligible.</param>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    /// <exception cref="RouterSettingsAdminException">The call was rejected (e.g. an out-of-range capacity, or an ineligible judge model) or the router is unreachable.</exception>
     Task<RouterSettingsInfo> UpdateAsync(
         bool adaptiveRoutingEnabled,
         int embeddingMemoryCapacity,
+        bool judgeEnabled,
+        string judgeModelName,
         CancellationToken cancellationToken = default);
 }

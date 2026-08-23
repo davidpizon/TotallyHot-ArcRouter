@@ -32,6 +32,16 @@ public sealed class RouterSettingsStore
     /// <summary>The <c>router_settings</c> key for <see cref="Models.RoutingOptions.EmbeddingMemoryCapacity"/>, stored as its base-10 integer string.</summary>
     public const string EmbeddingMemoryCapacityKey = "EmbeddingMemoryCapacity";
 
+    /// <summary>The <c>router_settings</c> key for <see cref="Judge.JudgeOptions.Enabled"/>, stored as <c>"0"</c>/<c>"1"</c>.</summary>
+    public const string JudgeEnabledKey = "JudgeEnabled";
+
+    /// <summary>
+    /// The <c>router_settings</c> key for <see cref="Judge.JudgeOptions.ModelName"/>, stored as the
+    /// client-facing model name verbatim. An empty stored value means "automatic" just as an absent row
+    /// does - the operator explicitly choosing automatic and never having chosen at all are the same state.
+    /// </summary>
+    public const string JudgeModelNameKey = "JudgeModelName";
+
     private readonly RouterMemoryDatabase _database;
     private readonly ILogger<RouterSettingsStore> _logger;
 
@@ -85,8 +95,22 @@ public sealed class RouterSettingsStore
         return false;
     }
 
+    /// <summary>Reads a stored string override, if one has been set.</summary>
+    /// <param name="key">The setting key, e.g. <see cref="JudgeModelNameKey"/>.</param>
+    /// <param name="value">The stored value, when present; <see cref="string.Empty"/> otherwise.</param>
+    /// <returns><see langword="true"/> if a row exists for <paramref name="key"/>; otherwise <see langword="false"/>.</returns>
+    /// <remarks>
+    /// Unlike <see cref="TryGetBool"/> and <see cref="TryGetInt"/> this cannot fail to parse, so a present
+    /// row always reports <see langword="true"/> - including one holding the empty string, which callers
+    /// are free to treat as its own meaningful value rather than as an absent override.
+    /// </remarks>
+    public bool TryGetString(string key, out string value) => TryGetRaw(key, out value);
+
     /// <summary>Persists a boolean override, replacing any prior value for <paramref name="key"/>.</summary>
     public void SetBool(string key, bool value) => SetRaw(key, value ? "1" : "0");
+
+    /// <summary>Persists a string override, replacing any prior value for <paramref name="key"/>.</summary>
+    public void SetString(string key, string value) => SetRaw(key, value);
 
     /// <summary>Persists an integer override, replacing any prior value for <paramref name="key"/>.</summary>
     public void SetInt(string key, int value) => SetRaw(key, value.ToString(CultureInfo.InvariantCulture));

@@ -39,5 +39,38 @@ public class SystemSandboxHostFactsTests
             Assert.False(facts.IsCgroupV2Available);
         }
     }
+
+    [Fact]
+    public void IsWindows_MatchesRuntimeInformation()
+    {
+        var facts = new SystemSandboxHostFacts();
+
+        Assert.Equal(OperatingSystem.IsWindows(), facts.IsWindows);
+    }
+
+    /// <summary>
+    /// On Windows this makes a real <c>CreateJobObjectW</c> call, so the assertion is genuine rather than
+    /// mocked: Job Objects have shipped in every supported Windows release, and a host that cannot create
+    /// one is a host the sandbox could never jail on. Off Windows the property must short-circuit to false
+    /// without touching kernel32 at all - exercising that short-circuit is the behavior under test there,
+    /// mirroring how the cgroup/KVM tests above are written.
+    /// </summary>
+    [Fact]
+    public void IsJobObjectAvailable_TrueOnWindows_FalseElsewhere()
+    {
+        var facts = new SystemSandboxHostFacts();
+
+        Assert.Equal(OperatingSystem.IsWindows(), facts.IsJobObjectAvailable);
+    }
+
+    /// <summary>The probe is cached, so repeated reads must agree rather than re-entering the kernel each time.</summary>
+    [Fact]
+    public void IsJobObjectAvailable_IsStableAcrossReadsAndInstances()
+    {
+        var first = new SystemSandboxHostFacts().IsJobObjectAvailable;
+        var second = new SystemSandboxHostFacts().IsJobObjectAvailable;
+
+        Assert.Equal(first, second);
+    }
 }
 

@@ -4,7 +4,7 @@ using Microsoft.Extensions.Logging;
 namespace TotallyHot.ArcRouter.Gui.Services;
 
 /// <summary>
-/// Singleton view-model backing the System Settings window's Adaptive Routing row. Wraps
+/// Singleton view-model backing the System Settings window's Adaptive Routing and Shadow Judge rows. Wraps
 /// <see cref="RouterSettingsAdminClient"/> (the tested, platform-agnostic logic in
 /// TotallyHot.ArcRouter.Gui.Telemetry) with the same "singleton + Changed event + best-effort,
 /// reachability-tolerant" shape as <see cref="ClusterModelAdminStore"/>, so the UI survives modal
@@ -88,12 +88,22 @@ public sealed class RouterSettingsAdminStore : IDisposable
     }
 
     /// <summary>
-    /// Validates and persists both settings, updating <see cref="Settings"/> to the fresh post-mutation
+    /// Validates and persists every setting, updating <see cref="Settings"/> to the fresh post-mutation
     /// effective values on success. The exception propagates on failure so the caller can render the
     /// specific outcome inline; <see cref="IsReachable"/>/<see cref="LastError"/> are still updated first.
     /// </summary>
+    /// <param name="adaptiveRoutingEnabled">Whether adaptive routing is enabled.</param>
+    /// <param name="embeddingMemoryCapacity">The embedding-memory capacity.</param>
+    /// <param name="judgeEnabled">Whether the G-Eval shadow judge is enabled.</param>
+    /// <param name="judgeModelName">The chosen judge backbone, or an empty string for automatic selection.</param>
+    /// <param name="cancellationToken">A cancellation token.</param>
     /// <exception cref="RouterSettingsAdminException">The save was rejected or the router is unreachable.</exception>
-    public async Task UpdateAsync(bool adaptiveRoutingEnabled, int embeddingMemoryCapacity, CancellationToken cancellationToken = default)
+    public async Task UpdateAsync(
+        bool adaptiveRoutingEnabled,
+        int embeddingMemoryCapacity,
+        bool judgeEnabled,
+        string judgeModelName,
+        CancellationToken cancellationToken = default)
     {
         IsSaving = true;
         Changed?.Invoke();
@@ -101,7 +111,7 @@ public sealed class RouterSettingsAdminStore : IDisposable
         try
         {
             Settings = await _client
-                .UpdateAsync(adaptiveRoutingEnabled, embeddingMemoryCapacity, cancellationToken)
+                .UpdateAsync(adaptiveRoutingEnabled, embeddingMemoryCapacity, judgeEnabled, judgeModelName, cancellationToken)
                 .ConfigureAwait(false);
             IsReachable = true;
             IsLoaded = true;

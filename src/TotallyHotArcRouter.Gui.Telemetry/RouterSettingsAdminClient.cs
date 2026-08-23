@@ -26,15 +26,31 @@ public sealed class RouterSettingsAdminException : Exception
 
 /// <summary>
 /// The router settings' currently effective values (docs/router/self-organizing-classification-plan.md
-/// Phase T6), as read or written by the System Settings window's Adaptive Routing row.
+/// Phase T6; docs/router/geval-shadow-scoring-plan.md), as read or written by the System Settings window's
+/// Adaptive Routing and Shadow Judge rows.
 /// </summary>
 /// <param name="AdaptiveRoutingEnabled">Whether adaptive routing's transcript capture, cluster retraining, and <c>cluster_best</c> voter are enabled.</param>
 /// <param name="EmbeddingMemoryCapacity">The maximum number of embedding-memory entries retained before oldest-first eviction.</param>
-public sealed record RouterSettingsInfo(bool AdaptiveRoutingEnabled, int EmbeddingMemoryCapacity);
+/// <param name="JudgeEnabled">Whether the G-Eval shadow judge is enabled. Also governs whether raw response text is retained in memory for judging.</param>
+/// <param name="JudgeModelName">
+/// The operator's chosen judge backbone, as a client-facing model name; empty means automatic (the first
+/// eligible free model). This is the stored setting, not necessarily what will run - a pick that stops
+/// being eligible is substituted at call time without the setting changing.
+/// </param>
+/// <param name="EligibleJudgeModels">
+/// Every model currently able to serve as the judge backbone, in configuration order. Empty when no free
+/// provider is configured, which is the honest "the judge has nothing to call" state rather than an error.
+/// </param>
+public sealed record RouterSettingsInfo(
+    bool AdaptiveRoutingEnabled,
+    int EmbeddingMemoryCapacity,
+    bool JudgeEnabled,
+    string JudgeModelName,
+    IReadOnlyList<string> EligibleJudgeModels);
 
 /// <summary>
 /// Client for the proxy's <c>RouterSettingsAdminService</c> - the System Settings window's Adaptive Routing
-/// read and write surface. Lives in this plain <c>net10.0</c> library rather than the Windows-only MAUI
+/// and Shadow Judge read and write surface. Lives in this plain <c>net10.0</c> library rather than the Windows-only MAUI
 /// project so CI can unit-test it, exactly like <see cref="ClusterModelAdminClient"/>.
 /// </summary>
 public sealed class RouterSettingsAdminClient : IRouterSettingsAdminClient, IDisposable
@@ -85,6 +101,8 @@ public sealed class RouterSettingsAdminClient : IRouterSettingsAdminClient, IDis
     public async Task<RouterSettingsInfo> UpdateAsync(
         bool adaptiveRoutingEnabled,
         int embeddingMemoryCapacity,
+        bool judgeEnabled,
+        string judgeModelName,
         CancellationToken cancellationToken = default)
     {
         try
@@ -95,6 +113,8 @@ public sealed class RouterSettingsAdminClient : IRouterSettingsAdminClient, IDis
                     {
                         AdaptiveRoutingEnabled = adaptiveRoutingEnabled,
                         EmbeddingMemoryCapacity = embeddingMemoryCapacity,
+                        JudgeEnabled = judgeEnabled,
+                        JudgeModelName = judgeModelName ?? string.Empty,
                     },
                     cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
@@ -108,7 +128,12 @@ public sealed class RouterSettingsAdminClient : IRouterSettingsAdminClient, IDis
 
     /// <summary>Converts a gRPC-contract response into the client's <see cref="RouterSettingsInfo"/>.</summary>
     private static RouterSettingsInfo Map(Contract.RouterSettingsResponse response) =>
-        new(response.AdaptiveRoutingEnabled, response.EmbeddingMemoryCapacity);
+        new(
+            response.AdaptiveRoutingEnabled,
+            response.EmbeddingMemoryCapacity,
+            response.JudgeEnabled,
+            response.JudgeModelName,
+            response.EligibleJudgeModels.ToList());
 
     // Unavailable means the proxy isn't running - an ordinary state for a GUI that can outlive it - so it
     // gets a plain-language message rather than a gRPC status dump, and is flagged so the caller can tell a

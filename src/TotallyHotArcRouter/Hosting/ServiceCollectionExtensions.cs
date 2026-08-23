@@ -297,6 +297,33 @@ namespace TotallyHot.ArcRouter.Hosting
             // nothing to compare, so this needs no separate switch.
             services.AddSingleton<TotallyHot.ArcRouter.Transcripts.ITaxonomyComparisonStore, TotallyHot.ArcRouter.Transcripts.SqliteTaxonomyComparisonStore>();
 
+            // docs/router/geval-shadow-scoring-plan.md Phase G1: the shadow judge. Every collaborator
+            // (cache, queue, client, store, observer) is registered unconditionally - PendingResponseTextCache
+            // and JudgeShadowScoreQueue are inert until something writes to them, and
+            // SqliteJudgeShadowScoreStore shares RouterMemoryDatabase's file/schema, already created
+            // unconditionally above.
+            //
+            // JudgeOptions is deliberately NOT bound from appsettings.json. Its two operator-facing settings
+            // live in the router_settings table and are layered on by JudgeSettingsConfigureOptions, the
+            // JudgeOptions counterpart of RouterSettingsConfigureOptions - so the judge is configured from
+            // the System Settings window, and its backbone is whichever free model the operator set up in
+            // the Providers screen (JudgeModelSelector), never a hardcoded endpoint.
+            //
+            // Enabled is therefore a *live* flag, which is why the observer below joins the fan-out
+            // unconditionally and gates per call instead - a construction-time check could never see a
+            // later toggle. Same reasoning at the drain worker, the retention loop, and ProxyMiddleware's
+            // response-text retention site.
+            services.AddOptions<TotallyHot.ArcRouter.Judge.JudgeOptions>()
+                .ValidateDataAnnotations();
+            services.AddSingleton<IConfigureOptions<TotallyHot.ArcRouter.Judge.JudgeOptions>, TotallyHot.ArcRouter.Judge.JudgeSettingsConfigureOptions>();
+            services.AddHttpClient(TotallyHot.ArcRouter.Judge.GEvalJudgeClient.HttpClientName);
+            services.AddSingleton<TotallyHot.ArcRouter.Judge.PendingResponseTextCache>();
+            services.AddSingleton<TotallyHot.ArcRouter.Judge.IJudgeShadowScoreQueue, TotallyHot.ArcRouter.Judge.JudgeShadowScoreQueue>();
+            services.AddSingleton<TotallyHot.ArcRouter.Judge.JudgeModelSelector>();
+            services.AddSingleton<TotallyHot.ArcRouter.Judge.IJudgeClient, TotallyHot.ArcRouter.Judge.GEvalJudgeClient>();
+            services.AddSingleton<TotallyHot.ArcRouter.Judge.IJudgeShadowScoreStore, TotallyHot.ArcRouter.Judge.SqliteJudgeShadowScoreStore>();
+            services.AddSingleton<TotallyHot.ArcRouter.Judge.JudgeShadowScoreObserver>();
+
             services.AddSingleton<IRouterScoreObserver>(sp =>
             {
                 var observers = new List<IRouterScoreObserver>
@@ -315,6 +342,13 @@ namespace TotallyHot.ArcRouter.Hosting
                 {
                     observers.Add(sp.GetRequiredService<TotallyHot.ArcRouter.Transcripts.TranscriptScoreObserver>());
                 }
+
+                // docs/router/geval-shadow-scoring-plan.md Phase G1: unlike the transcript observer above,
+                // this one joins the fan-out unconditionally and checks JudgeOptions.Enabled itself on every
+                // ObserveAsync. JudgeOptions.Enabled is operator-toggleable from System Settings, and this
+                // factory runs exactly once - a check here would freeze the judge in whatever state the
+                // process started in.
+                observers.Add(sp.GetRequiredService<TotallyHot.ArcRouter.Judge.JudgeShadowScoreObserver>());
 
                 return new Router.CompositeRouterScoreObserver(observers, sp.GetRequiredService<ILogger<Router.CompositeRouterScoreObserver>>());
             });
@@ -486,6 +520,13 @@ namespace TotallyHot.ArcRouter.Hosting
             // backfill). Registered after the transcript store but before ProxyHostedService.
             services.AddHostedService<TotallyHot.ArcRouter.Transcripts.EmbeddingBackfillService>();
             services.AddHostedService<TotallyHot.ArcRouter.Transcripts.TranscriptRetentionService>();
+
+            // docs/router/geval-shadow-scoring-plan.md Phase G1: the shadow judge's drain worker and
+            // retention purge. Both are registered unconditionally and keep running regardless, no-opping
+            // per job / per tick while JudgeOptions.Enabled is false - that flag is toggleable at runtime,
+            // so neither may exit at startup on reading it once.
+            services.AddHostedService<TotallyHot.ArcRouter.Judge.JudgeShadowScoreDrainService>();
+            services.AddHostedService<TotallyHot.ArcRouter.Judge.JudgeShadowScoreRetentionService>();
 
             // docs/router/self-organizing-classification-plan.md Phase T4: drains the comparison queue on a
             // timer. Deliberately off the request path - a comparison needs both a verifier score and a

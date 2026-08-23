@@ -21,30 +21,63 @@ public class RouterSettingsAdminClientTests
     {
         var stub = new StubClient
         {
-            GetResponse = new Contract.RouterSettingsResponse { AdaptiveRoutingEnabled = true, EmbeddingMemoryCapacity = 15_000 },
+            GetResponse = new Contract.RouterSettingsResponse
+            {
+                AdaptiveRoutingEnabled = true,
+                EmbeddingMemoryCapacity = 15_000,
+                JudgeEnabled = true,
+                JudgeModelName = "free-judge",
+                EligibleJudgeModels = { "free-judge", "other-free" },
+            },
         };
         using var client = new RouterSettingsAdminClient(stub);
 
         var settings = await client.GetAsync(TestContext.Current.CancellationToken);
 
-        settings.Should().Be(new RouterSettingsInfo(true, 15_000));
+        settings.AdaptiveRoutingEnabled.Should().BeTrue();
+        settings.EmbeddingMemoryCapacity.Should().Be(15_000);
+        settings.JudgeEnabled.Should().BeTrue();
+        settings.JudgeModelName.Should().Be("free-judge");
+        settings.EligibleJudgeModels.Should().Equal("free-judge", "other-free");
     }
 
     [Fact]
-    public async Task UpdateAsync_sends_both_fields_and_maps_the_post_mutation_response()
+    public async Task UpdateAsync_sends_every_field_and_maps_the_post_mutation_response()
     {
         var stub = new StubClient
         {
-            UpdateResponse = new Contract.RouterSettingsResponse { AdaptiveRoutingEnabled = true, EmbeddingMemoryCapacity = 5_000 },
+            UpdateResponse = new Contract.RouterSettingsResponse
+            {
+                AdaptiveRoutingEnabled = true,
+                EmbeddingMemoryCapacity = 5_000,
+                JudgeEnabled = true,
+                JudgeModelName = "free-judge",
+            },
         };
         using var client = new RouterSettingsAdminClient(stub);
 
-        var settings = await client.UpdateAsync(true, 5_000, TestContext.Current.CancellationToken);
+        var settings = await client.UpdateAsync(true, 5_000, true, "free-judge", TestContext.Current.CancellationToken);
 
-        settings.Should().Be(new RouterSettingsInfo(true, 5_000));
+        settings.EmbeddingMemoryCapacity.Should().Be(5_000);
+        settings.JudgeEnabled.Should().BeTrue();
+        settings.JudgeModelName.Should().Be("free-judge");
         stub.LastUpdateRequest.Should().NotBeNull();
         stub.LastUpdateRequest!.AdaptiveRoutingEnabled.Should().BeTrue();
         stub.LastUpdateRequest.EmbeddingMemoryCapacity.Should().Be(5_000);
+        stub.LastUpdateRequest.JudgeEnabled.Should().BeTrue();
+        stub.LastUpdateRequest.JudgeModelName.Should().Be("free-judge");
+    }
+
+    /// <summary>A null model name is the "automatic" choice, and must reach the wire as an empty string rather than throwing.</summary>
+    [Fact]
+    public async Task UpdateAsync_null_judge_model_name_is_sent_as_empty()
+    {
+        var stub = new StubClient { UpdateResponse = new Contract.RouterSettingsResponse() };
+        using var client = new RouterSettingsAdminClient(stub);
+
+        await client.UpdateAsync(false, 5_000, false, null!, TestContext.Current.CancellationToken);
+
+        stub.LastUpdateRequest!.JudgeModelName.Should().BeEmpty();
     }
 
     [Fact]
@@ -70,7 +103,7 @@ public class RouterSettingsAdminClientTests
         using var client = new RouterSettingsAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<RouterSettingsAdminException>(
-            () => client.UpdateAsync(false, 1, TestContext.Current.CancellationToken));
+            () => client.UpdateAsync(false, 1, false, string.Empty, TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not save the router settings: embedding_memory_capacity must be between 500 and 50000 (got 1)");
         ex.IsUnavailable.Should().BeFalse();

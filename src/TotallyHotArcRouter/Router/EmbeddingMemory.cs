@@ -108,8 +108,16 @@ public sealed class EmbeddingMemory : IDisposable
     /// </param>
     /// <param name="dimension">
     /// The heuristic classifier's dimension label for this request, or <see langword="null"/> when
-    /// unavailable (docs/router/self-organizing-classification-plan.md Phase T2e). Placed last so every
-    /// existing positional call site keeps compiling unchanged.
+    /// unavailable (docs/router/self-organizing-classification-plan.md Phase T2e). Placed after
+    /// <paramref name="propensity"/>, not before it, so every existing positional call site keeps
+    /// compiling unchanged.
+    /// </param>
+    /// <param name="isJudgeScored">
+    /// Whether <paramref name="score"/> was produced by the G-Eval judge rather than
+    /// <see cref="Sandbox.Scoring.VerifierScorer"/> (docs/router/geval-shadow-scoring-plan.md
+    /// §Provenance). Defaults to <see langword="false"/> - through Phase G1/G2 no caller ever passes
+    /// <see langword="true"/>; the parameter exists so Phase G3 needs no further signature change. Placed
+    /// last so every existing positional call site keeps compiling unchanged.
     /// </param>
     public async Task<MemoryEntry> AddEntryAsync(
         float[] taskEmbedding,
@@ -120,13 +128,14 @@ public sealed class EmbeddingMemory : IDisposable
         CancellationToken cancellationToken = default,
         bool isExploratory = false,
         double propensity = 1.0,
-        string? dimension = null)
+        string? dimension = null,
+        bool isJudgeScored = false)
     {
         ArgumentNullException.ThrowIfNull(taskEmbedding);
         ArgumentException.ThrowIfNullOrWhiteSpace(chosenModel);
 
         var persisted = await _store.AppendAsync(
-            new MemoryEntry(0, taskEmbedding, chosenModel, score, cost, verifierTrace, DateTimeOffset.UtcNow, isExploratory, propensity, dimension),
+            new MemoryEntry(0, taskEmbedding, chosenModel, score, cost, verifierTrace, DateTimeOffset.UtcNow, isExploratory, propensity, dimension, isJudgeScored),
             cancellationToken).ConfigureAwait(false);
 
         lock (_syncLock)
