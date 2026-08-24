@@ -17,7 +17,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="AWSSDK.BedrockRuntime" Version="4.0.101.1" />
+    <PackageReference Include="AWSSDK.BedrockRuntime" Version="4.0.101.3" />
     <!-- AwesomeAssertions: the Apache-2.0 community fork of FluentAssertions. FluentAssertions 8.x moved to
          the Xceed Community License, which permits non-commercial use only and restricts *use*, not just
          redistribution - so it would constrain how this repository itself may be licensed and used. See
