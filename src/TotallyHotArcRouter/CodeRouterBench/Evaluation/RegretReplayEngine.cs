@@ -32,6 +32,15 @@ public static class RegretReplayEngine
             // police itself.
             var context = new RegretReplayContext(task.TaskId, task.Dimension, [.. task.Cells.Keys]);
             var selectedModelId = router.Route(context);
+
+            // Online baselines (LinUCB/LinTS) get fed back exactly the reward of the arm they picked -
+            // never another candidate's cell - so the same no-leakage property holds for the update path.
+            if (selectedModelId is not null && router is IOnlineRegretBaselineRouter online
+                && task.Cells.TryGetValue(selectedModelId, out var selectedCell))
+            {
+                online.Update(context, selectedModelId, weights.Reward(selectedCell));
+            }
+
             result.Record(task, selectedModelId, weights);
         }
 

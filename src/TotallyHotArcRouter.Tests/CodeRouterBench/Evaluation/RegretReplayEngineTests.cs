@@ -98,6 +98,27 @@ public class RegretReplayEngineTests
     }
 
     [Fact]
+    public void Replay_OnlineBaseline_ReceivesOnlyItsOwnSelectedCellsReward()
+    {
+        var spy = new UpdateSpyBaseline();
+        RegretTaskOutcome[] tasks =
+        [
+            new("t1", "code_generation", new Dictionary<string, RegretOutcomeCell>
+            {
+                ["claude-opus-4-6"] = new(Score: 0.8, CostUsd: 0.02, TotalTokens: 1000),
+                ["claude-sonnet-4-5"] = new(Score: 1.0, CostUsd: 0.01, TotalTokens: 800),
+            }),
+        ];
+
+        RegretReplayEngine.Replay(tasks, spy, Weights);
+
+        var (context, selectedModelId, reward) = Assert.Single(spy.Updates);
+        Assert.Equal("t1", context.TaskId);
+        Assert.Equal("claude-opus-4-6", selectedModelId);
+        Assert.Equal(Weights.Reward(new RegretOutcomeCell(0.8, 0.02, 1000)), reward, precision: 9);
+    }
+
+    [Fact]
     public void Record_SelectedModelNotInOutcome_Throws()
     {
         var result = new RegretReplayResult { RouterName = "test" };
@@ -124,5 +145,21 @@ public class RegretReplayEngineTests
                 && context.CandidateModelIds is ["claude-opus-4-6"];
             return context.CandidateModelIds[0];
         }
+    }
+
+    // Records every Update call so a test can assert online baselines are fed exactly the selected
+    // model's own reward, never another candidate's.
+    private sealed class UpdateSpyBaseline : IOnlineRegretBaselineRouter
+    {
+        public List<(RegretReplayContext Context, string ModelId, double Reward)> Updates { get; } = [];
+
+        public string Name => "update_spy";
+
+        public string? Route(RegretReplayContext context) => context.CandidateModelIds
+            .OrderBy(id => id, StringComparer.Ordinal)
+            .First();
+
+        public void Update(RegretReplayContext context, string selectedModelId, double reward) =>
+            Updates.Add((context, selectedModelId, reward));
     }
 }

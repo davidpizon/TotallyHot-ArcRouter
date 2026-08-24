@@ -5,7 +5,7 @@ Orchestrator ("the ensemble beats every single voter," "loop-complete routing be
 an assertion into a measurement, replaying CodeRouterBench through the router's actual decision code and
 a family of comparison baselines under one reward.
 
-**Status:** in progress — N1 and N2 shipped (see their status notes below); N3-N6 remain. **Ordering:**
+**Status:** in progress — N1, N2, and N3 shipped (see their status notes below); N4-N6 remain. **Ordering:**
 after `docs/router/live-feedback-learning-plan.md` Phases 1-4 (shipped) — see that plan's own note that
 measuring voters which structurally cannot fire would produce a benchmark of `dim_best` wearing an
 ensemble's name. Phases 5-6 of that plan remain open and do not block this one.
@@ -282,10 +282,22 @@ Landed incrementally; each is independently testable and mergeable.
   `OrchestratorRoutingPolicy`'s own tie-break. Exit criterion met:
   `DimensionBestBaselineTests.Replay_FrozenPriorDisagreesWithTruePerTaskWinner_RegretReflectsIt` uses a
   fixture where the frozen prior and the true per-task winner disagree and asserts nonzero `CumReg`.
-- **N3 — Bandits (categorical context, ID + OOD).** LinUCB and LinTS, warm-start from the probing split,
-  online per-arm updates during replay. Exit: a fixture where one arm is strictly better converges to
-  picking it with high probability by the end of the stream; seed 42 warm-start is deterministic and
-  reproduced test-to-test.
+- **N3 — Bandits (categorical context, ID + OOD). Shipped.** `LinUcbBaseline` (`α = λ = 1`) and
+  `LinThompsonSamplingBaseline` (`v = 0.5, λ = 1`, seeded `Random`, default seed `42`), both built on a new
+  shared `CategoricalContextBanditBaselineBase`. Context is one-hot over `RegretReplayContext.Dimension` —
+  the only signal the ID split's baselines have — which makes the general LinUCB/LinTS ridge matrix `A = λI
+  + Σx·xᵀ` diagonal by construction, so each (arm, dimension) pair reduces to a scalar pull-count/reward-sum
+  pair with no matrix inverse needed. Online updates required extending the harness itself: a new
+  `IOnlineRegretBaselineRouter.Update(context, selectedModelId, reward)` interface, called by
+  `RegretReplayEngine.Replay` immediately after `Route` commits and only with the *selected* model's own
+  reward — preserving N1's no-leakage property for the update path, not just the selection path.
+  `WarmStart(probingTasks, weights)` runs the bandit's own `Route`/`Update` loop over the probing split
+  before the scored stream, so "warm-started on the probing set" reuses the same online mechanics rather
+  than a separate code path. Exit criterion met:
+  `LinUcbBaselineTests.Replay_OneArmStrictlyBetter_ConvergesToPickingIt` and the LinTS equivalent both
+  assert `AvgPerf` converges toward the strictly-better arm's score over 200 tasks;
+  `LinThompsonSamplingBaselineTests.Replay_SameSeed_IsDeterministicAcrossRuns` and
+  `WarmStart_SeededTwice_ProducesIdenticalPostWarmStartRoute` assert seed-42 reproducibility bit-for-bit.
 - **N4 — kNN Retrieval + LogReg baselines (OOD only).** Reuses/relocates `LogRegTrainer`. Exit: both report
   "not computable — no task text" when pointed at `id_test`, and produce a real, non-placeholder score on
   OOD from the synced corpus.
