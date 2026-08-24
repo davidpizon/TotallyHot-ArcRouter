@@ -50,6 +50,27 @@ public sealed class RouterMemoryDatabase
             key              TEXT    PRIMARY KEY,
             value            TEXT    NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS judge_shadow_scores (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            correlation_id        TEXT    NOT NULL,
+            created_at_utc        TEXT    NOT NULL,
+            dimension             TEXT    NOT NULL,
+            model                 TEXT    NOT NULL,
+            verifier_score        REAL    NOT NULL,
+            judge_score           REAL    NOT NULL,
+            judge_model           TEXT    NOT NULL,
+            judge_prompt_version  TEXT    NOT NULL,
+            judge_latency_ms      INTEGER NOT NULL,
+            used_logprobs         INTEGER NOT NULL,
+            executed              INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_judge_shadow_scores_correlation_id
+            ON judge_shadow_scores (correlation_id);
+
+        CREATE INDEX IF NOT EXISTS ix_judge_shadow_scores_created_at
+            ON judge_shadow_scores (created_at_utc);
         """;
 
     /// <summary>The resolved absolute path of the database file.</summary>
@@ -111,6 +132,7 @@ public sealed class RouterMemoryDatabase
 
         MigrateProvenanceColumns(connection);
         MigrateDimensionColumn(connection);
+        MigrateIsJudgeScoredColumn(connection);
     }
 
     // CREATE TABLE IF NOT EXISTS silently does nothing when the table already exists, so it cannot add a
@@ -157,6 +179,26 @@ public sealed class RouterMemoryDatabase
             using var alterDimension = connection.CreateCommand();
             alterDimension.CommandText = "ALTER TABLE memory_entries ADD COLUMN dimension TEXT NULL;";
             alterDimension.ExecuteNonQuery();
+        }
+    }
+
+    // Same blind spot MigrateProvenanceColumns/MigrateDimensionColumn work around, for a column added by
+    // docs/router/geval-shadow-scoring-plan.md Phase G1e. Landed early (G1 always writes 0/false) so every
+    // learning consumer can be written against the final schema once, rather than needing a second
+    // migration when Phase G3 first sets it to 1 - the same "land the provenance bit early" precedent
+    // IsExploratory already set (see MigrateProvenanceColumns's remarks).
+    /// <summary>
+    /// Adds the `is_judge_scored` column to `memory_entries` if missing, so databases created before Phase
+    /// G1 pick it up on startup, with existing (and every G1/G2-era) row defaulting to 0 - execution- or
+    /// heuristic-grounded, not judge-graded.
+    /// </summary>
+    private static void MigrateIsJudgeScoredColumn(SqliteConnection connection)
+    {
+        if (!ColumnExists(connection, "memory_entries", "is_judge_scored"))
+        {
+            using var alterIsJudgeScored = connection.CreateCommand();
+            alterIsJudgeScored.CommandText = "ALTER TABLE memory_entries ADD COLUMN is_judge_scored INTEGER NOT NULL DEFAULT 0;";
+            alterIsJudgeScored.ExecuteNonQuery();
         }
     }
 

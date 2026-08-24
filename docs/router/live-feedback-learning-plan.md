@@ -9,9 +9,9 @@ embedding-backed `logreg`, but they only reach `OrchestratorRoutingPolicy`, whic
 registered for live traffic today (`CompositeRoutingPolicy`, dispatching to `UtilityRoutingPolicy` /
 `AgentRouterPolicy`, is) — see the "Live status today" table below for the current, post-merge picture.
 
-**Status:** in progress — Phases 1-4 shipped (importer defect repair, feedback-capture wiring, the
-embedding-backed `logreg` voter, and its trainer); Phases 5-6 (admin surface, TF-IDF relocation) remain
-proposed/partially shipped. **Ordering:** before PLAN.md Phase N. Phase N's regret harness
+**Status:** in progress — Phases 1-5 shipped (importer defect repair, feedback-capture wiring, the
+embedding-backed `logreg` voter, its trainer, and the Governance admin surface); Phase 6 (TF-IDF
+relocation) remains partially shipped (namespace relocation open). **Ordering:** before PLAN.md Phase N. Phase N's regret harness
 measures voter quality; measuring voters that structurally cannot fire would produce a benchmark of
 `dim_best` wearing an ensemble's name.
 
@@ -142,7 +142,7 @@ flowchart LR
 | 2 | Wire feedback capture: prompt text, embeddings, `memory_entries` writes | — | Shipped |
 | 3 | Embedding-backed `logreg` voter reading a local artifact | 2 | Shipped |
 | 4 | Training: OOD bootstrap + continual retrain from memory | 1, 3 | Shipped |
-| 5 | gRPC admin surface + Governance pane + CLI flag | 4 | Proposed |
+| 5 | gRPC admin surface + Governance pane + CLI flag | 4 | Shipped |
 | 6 | Relocate TF-IDF machinery to the Phase N harness; delete the placeholder | 3 | Proposed |
 
 ---
@@ -344,30 +344,54 @@ embeddings, not real ONNX inference).
   `EmbeddingLogRegTrainingServiceTests`, `LogRegRetrainHostedServiceTests` - all fixture-based, no real
   ONNX inference, full suite (1,811 tests) green in ~26s.
 
-## Phase 5 — Admin surface
+## Phase 5 — Admin surface — **shipped**
 
-Mirrors `BenchmarkDataAdminService`, which this repository already established as the pattern for
-"expose a long-running local operation to a GUI that only speaks gRPC."
+Mirrors `ClusterModelAdminService` (Phase T5's pane, which itself established this shape for the
+`logreg` voter's admin surface too - same status-plus-streaming-retrain RPC pair, same store/panel split)
+rather than `BenchmarkDataAdminService` directly, since Cluster Model's artifact-per-installation lifecycle
+is the closer analog to `EmbeddingLogRegModelArtifact`'s.
 
-```
+```proto
 service RouterModelAdminService {
   rpc GetLogRegModelStatus (GetLogRegModelStatusRequest) returns (LogRegModelStatusResponse);
-  rpc RetrainLogRegModel (RetrainLogRegModelRequest) returns (stream LogRegRetrainProgress);
+  rpc RetrainLogRegModel (RetrainLogRegModelRequest) returns (stream LogRegRetrainStreamEvent);
 }
 ```
 
-Status reports whether an artifact exists, its provenance, row counts by source, training timestamp,
-embedding dimension, and entries accumulated since the last retrain. Retrain streams progress
-(embedding the bootstrap set is the slow stage worth showing) and a terminal outcome.
+`LogRegModelStatusResponse` reports artifact presence, embedding dimension, provenance (`trained_from`),
+bootstrap/memory row counts, `models_represented` (`ClassWeights.Count`), entries accumulated since the
+last retrain, and the retrain threshold/live-sample-weight context (always populated, mirroring Cluster
+Model's transcript-retention fields). **One deviation from this section's original wording:**
+`EmbeddingLogRegModelArtifact` carries no `TrainedAtUtc` field (unlike `ClusterModelArtifact`) - its
+training date lives only inside `TrainedFrom`'s free text. Rather than fabricate one, `trained_at_utc` is
+the artifact file's on-disk last-write time (`File.GetLastWriteTimeUtc`), which is honest provenance, not
+a synthesized value. `RetrainLogRegModel` streams one `LogRegRetrainBootstrapProgress` event per OOD
+bootstrap embedding tick, then exactly one `LogRegRetrainResult` carrying the outcome and the fresh
+post-mutation status - identical shape to `RetrainClusterModel`.
 
-GUI: a **Router Model** pane in Governance, following `PriceSourcesAdmin.razor`'s layout — a header row
-carrying the single action button, cards below for status. Button states mirror the benchmark pane's
-vocabulary: "Train" / "Retrain" / "Training…" (disabled), plus the router-unreachable state
-`PriceSourcesAdmin` already renders. Any dialog copies the `SettingsModal.razor` shell per the
-repository's window contract (`docs/gui/DESIGN.md` §4.1).
+Shipped as:
 
-**Exit:** service tests cover status, streaming retrain, and a retrain that declines on insufficient
-data; bUnit tests cover each button state, in-progress rendering, and the unreachable state.
+- `Router/Orchestrator/LogRegModelAdminGrpcService.cs` - the gRPC service, structurally identical to
+  `ClusterModelAdminGrpcService` (status build + streaming retrain + result-kind mapping).
+- `Proxy/ProxyServerDependencies.cs`'s `LogRegModelAdminDependencies` group (training service, memory
+  entry store, storage options). `IOptions<RoutingOptions>` is deliberately **not** a group member -
+  `ProxyServerDependencies.RoutingOptions` already arrives unconditionally, so duplicating it here would
+  only re-register the same `IOptions<RoutingOptions>` a second time.
+- `Proxy/ProxyServer.cs` / `Hosting/ServiceCollectionExtensions.cs` wire the group and map the endpoint,
+  following the cluster-model block's exact pattern.
+- GUI: `TotallyHotArcRouter.Gui.Telemetry/LogRegModelAdminClient.cs` (+ `ILogRegModelAdminClient`),
+  `TotallyHotArcRouter.Gui/Services/LogRegModelAdminStore.cs`, and a **Router Model** pane
+  (`Components/RouterModelAdmin.razor`) added to `Governance.razor`'s tab list, following
+  `ClusterModelAdmin.razor`'s layout and button-state vocabulary ("Train" / "Retrain" / "Training…" /
+  router-unreachable) exactly. Registered as a MAUI singleton in `MauiProgram.cs`.
+
+**Exit:** `LogRegModelAdminGrpcServiceTests` (6 tests: no-artifact status, trained status, retrain-config
+context, trained/declined/already-running streaming outcomes) - all passing. `LogRegModelAdminClientTests`
+(14 tests: wire mapping, result-kind mapping, unavailable vs. rejection error translation, disposal) - all
+passing. `RouterModelAdminTests` (7 bUnit tests: no-artifact state, trained state, retrain-configuration
+context, router-unreachable state, retry, streamed training progress) - all passing. Full solution build:
+zero warnings, zero errors. Full `TotallyHotArcRouter.Tests` suite: 2012 passed, 8 skipped (pre-existing,
+environment-gated), 0 failed.
 
 ## Phase 6 — Relocate the TF-IDF machinery; delete the placeholder — **partially shipped**
 

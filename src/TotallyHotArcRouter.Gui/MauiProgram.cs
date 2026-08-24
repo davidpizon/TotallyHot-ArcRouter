@@ -33,6 +33,9 @@ public static class MauiProgram
         // Services/GuiSettingsStore.cs. Registered before LiveDataStore so its factory below can read
         // the persisted address.
         builder.Services.AddSingleton<IGuiSettingsStore>(_ => new GuiSettingsStore());
+        // App-wide error-toast notifications (see Services/ToastService.cs and Components/ToastHost.razor).
+        // Registered before ProviderAdminStore so DI can inject it there.
+        builder.Services.AddSingleton<ToastService>();
         // Live routing telemetry from the TotallyHot.ArcRouter proxy (see Services/LiveDataStore.cs). A
         // singleton so the gRPC stream and accumulated conversation state survive navigation between
         // tabs; Dashboard.razor starts the connection on first render. The server address comes from
@@ -61,6 +64,10 @@ public static class MauiProgram
         // Backs the Governance tab's Cluster Model panel (Phase T5). A singleton for the same reason,
         // sharing the TLS gRPC port (5002) with the stores above. See Services/ClusterModelAdminStore.cs.
         builder.Services.AddSingleton<ClusterModelAdminStore>();
+        // Backs the Governance tab's Router Model panel (live-feedback-learning-plan.md Phase 5). A
+        // singleton for the same reason, sharing the TLS gRPC port (5002) with the stores above. See
+        // Services/LogRegModelAdminStore.cs.
+        builder.Services.AddSingleton<LogRegModelAdminStore>();
         // Backs the System Settings window's Adaptive Routing row (Phase T6). A singleton for the same
         // reason, sharing the TLS gRPC port (5002) with the stores above. See Services/RouterSettingsAdminStore.cs.
         builder.Services.AddSingleton<RouterSettingsAdminStore>();

@@ -50,6 +50,7 @@ public sealed class ManagementFacade
     private readonly TotallyHot.ArcRouter.Transcripts.ITaxonomyComparisonStore? _comparisonStore;
     private readonly ISecretWriter? _secretWriter;
     private readonly ISecretReader? _secretReader;
+    private readonly IProviderInteractionStatusStore? _interactionStatus;
 
     // Constructed here rather than injected, unlike the endpoint scanner beside it. The resolver's only
     // dependencies are the HTTP client and environment accessor this facade already holds, so injecting it
@@ -105,6 +106,7 @@ public sealed class ManagementFacade
         _rateLimitStalenessThreshold = dependencies?.RateLimitStalenessThreshold ?? DefaultRateLimitStalenessThreshold;
         _secretWriter = dependencies?.SecretWriter;
         _secretReader = dependencies?.SecretReader;
+        _interactionStatus = dependencies?.InteractionStatusStore;
         _dialectResolver = new ModelDialectResolver(httpClient, environment);
     }
 
@@ -163,6 +165,8 @@ public sealed class ManagementFacade
         var capabilities = await ScanAndPersistCapabilitiesAsync(
             key, provider, ExplicitCapabilityScanBudget, cancellationToken).ConfigureAwait(false);
 
+        RecordScanOutcome(key, "Scan capabilities", capabilities);
+
         // Tier 1-3 dialect detection for every model on this provider, now that the flags saying which
         // native metadata APIs are reachable have just been refreshed. Best-effort and non-blocking on the
         // result: the operator asked which flavors the endpoint answers, and that question has been
@@ -170,6 +174,26 @@ public sealed class ManagementFacade
         await TryResolveDialectsAsync(key, provider, capabilities, ModelsFor(key), cancellationToken).ConfigureAwait(false);
 
         return ManagementResult<ProviderEndpointCapabilities>.Ok(capabilities);
+    }
+
+    /// <summary>
+    /// Records a capability scan's outcome against <see cref="_interactionStatus"/>: a <see cref="ProviderEndpointCapabilities.ScanError"/>
+    /// is always a failure; otherwise the scan is a success even when no flavor was detected (the endpoint
+    /// answered - it just isn't any of the flavors this router recognizes).
+    /// </summary>
+    /// <param name="key">The provider key that was scanned.</param>
+    /// <param name="operation">A short label for the interaction, used verbatim in the recorded status.</param>
+    /// <param name="capabilities">The scan's result.</param>
+    private void RecordScanOutcome(string key, string operation, ProviderEndpointCapabilities capabilities)
+    {
+        if (capabilities.ScanError is { } scanError)
+        {
+            _interactionStatus?.RecordFailure(key, operation, scanError);
+        }
+        else
+        {
+            _interactionStatus?.RecordSuccess(key, operation);
+        }
     }
 
     /// <summary>
@@ -330,6 +354,7 @@ public sealed class ManagementFacade
         if (result.Success)
         {
             TryDeleteProviderSecrets(key);
+            _interactionStatus?.Remove(key);
         }
 
         return result;
@@ -871,6 +896,19 @@ public sealed class ManagementFacade
         }
 
         var result = await DiscoverModelsCoreAsync(provider, cancellationToken).ConfigureAwait(false);
+
+        // Supported: false with no Error is simply "this provider has no OpenAI-shaped /v1/models" (hosted
+        // Anthropic, Bedrock) - expected and not a failure. Only a populated Error - a real transport/auth
+        // problem - is worth flagging on the card.
+        if (result.Error is { } error)
+        {
+            _interactionStatus?.RecordFailure(providerKey, "Discover models", error);
+        }
+        else
+        {
+            _interactionStatus?.RecordSuccess(providerKey, "Discover models");
+        }
+
         return ManagementResult<DiscoverModelsResponse>.Ok(result);
     }
 
@@ -907,14 +945,49 @@ public sealed class ManagementFacade
             await ReconcileModelsAsync(key, discovery.Models, cancellationToken).ConfigureAwait(false);
         }
 
+        ProviderEndpointCapabilities? capabilities = null;
         if (_endpointScanner is not null && _capabilityStore is not null)
         {
-            var capabilities = await ScanAndPersistCapabilitiesAsync(
+            capabilities = await ScanAndPersistCapabilitiesAsync(
                 key, provider, ExplicitCapabilityScanBudget, cancellationToken).ConfigureAwait(false);
             await TryResolveDialectsAsync(key, provider, capabilities, ModelsFor(key), cancellationToken).ConfigureAwait(false);
         }
 
+        RecordRefreshOutcome(key, discovery, capabilities);
+
         return ManagementResult<ProvidersResponse>.Ok(BuildProvidersResponse());
+    }
+
+    /// <summary>
+    /// Records "Refresh from endpoint"'s combined outcome against <see cref="_interactionStatus"/>. Discovery
+    /// reporting <see cref="DiscoverModelsResponse.Error"/> is not automatically a failure - a provider with
+    /// no OpenAI-shaped <c>/v1/models</c> (hosted Anthropic, Bedrock) always reports one, and that is
+    /// expected. It is only treated as a failure when the capability scan does not corroborate that the
+    /// endpoint is reachable and authenticating: either the scan itself errored, or it completed but
+    /// recognized none of the API flavors it probes for, or no scan ran at all to corroborate the discovery
+    /// failure one way or the other. This is what turns an invalid/expired API key - the motivating case -
+    /// into a visible warning, while a healthy Anthropic-only provider stays silent.
+    /// </summary>
+    /// <param name="key">The provider key that was refreshed.</param>
+    /// <param name="discovery">The model-discovery result.</param>
+    /// <param name="capabilities">The capability scan's result, or <see langword="null"/> when no scan ran (no scanner/capability store wired up).</param>
+    private void RecordRefreshOutcome(string key, DiscoverModelsResponse discovery, ProviderEndpointCapabilities? capabilities)
+    {
+        if (discovery.Error is null)
+        {
+            _interactionStatus?.RecordSuccess(key, "Refresh from endpoint");
+            return;
+        }
+
+        var flavorDetected = capabilities is { ScanError: null } detected &&
+            (detected.OpenAiCompatible || detected.AnthropicCompatible || detected.LmStudioNative || detected.OllamaNative);
+        if (flavorDetected)
+        {
+            _interactionStatus?.RecordSuccess(key, "Refresh from endpoint");
+            return;
+        }
+
+        _interactionStatus?.RecordFailure(key, "Refresh from endpoint", discovery.Error);
     }
 
     /// <summary>
@@ -1049,7 +1122,8 @@ public sealed class ManagementFacade
                     WindowKind: budget.WindowKind is { Length: > 0 } ? budget.WindowKind : "Monthly",
                     NextResetUtc: budget.NextResetUtc,
                     HasStoredAdminKey: _secretReader?.TryRead(AdminKeySecretName(kvp.Key), out _) ?? false,
-                    ReportedUsage: BuildReportedUsageView(kvp.Key));
+                    ReportedUsage: BuildReportedUsageView(kvp.Key),
+                    LastInteraction: _interactionStatus?.Get(kvp.Key));
             })
             .OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -1744,6 +1818,12 @@ public static class HeaderValueSource
 /// repository is wired up or nothing has been fetched yet (no Admin API key configured, or the first cycle
 /// hasn't run).
 /// </param>
+/// <param name="LastInteraction">
+/// The outcome of the most recent admin-initiated interaction with this provider (refresh from endpoint,
+/// capability scan, discovery), or <see langword="null"/> when no interaction status store is wired up or
+/// none has happened yet since the router started. Backs the Governance card's warning icon - see
+/// <see cref="ProviderInteractionStatusStore"/>.
+/// </param>
 public sealed record ProviderView(
     string Key,
     string? Name,
@@ -1764,7 +1844,8 @@ public sealed record ProviderView(
     string WindowKind = "Monthly",
     DateTimeOffset? NextResetUtc = null,
     bool HasStoredAdminKey = false,
-    ProviderReportedUsageView? ReportedUsage = null);
+    ProviderReportedUsageView? ReportedUsage = null,
+    ProviderInteractionStatus? LastInteraction = null);
 
 /// <summary>
 /// A provider's own reported per-model daily token usage (docs/router/secrets-at-rest-plan.md §8.1), as

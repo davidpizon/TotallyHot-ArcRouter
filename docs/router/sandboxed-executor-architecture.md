@@ -55,7 +55,9 @@ design constraints — not raw throughput.
   learning, not paper-grade resolved-rate metrics.
 - **No** provider-cache-hit accounting or exact dollar reconciliation (the paper treats monetary
   cost as a secondary reference metric; so do we).
-- **No** Windows/macOS *execution* isolation. Those platforms get Tier-0 only (see §12).
+- **No** Windows/macOS *execution* isolation. Those platforms get Tier-0 only (see §12). Windows
+  isolation capability is *detected and reported* (Job Objects — see §12.1), but nothing acts on it:
+  detection is a prerequisite for a future Windows runtime, not a runtime.
 
 ## 2. Threat model
 
@@ -513,6 +515,35 @@ KVM), execution tiers are disabled, `Enabled` is forced false with a logged
 `degradedReason`, and the Verifier uses **Tier 0 only** (`s_syntax` + the HTTP-outcome heuristic the
 proxy already has). This matches the app's cross-platform posture (Serilog EventLog / netsh proxy are
 Windows features; the sandbox is a Linux feature) without breaking startup anywhere.
+
+### 12.1 Windows capability detection
+
+The probe distinguishes *which* non-Linux state a host is in rather than reporting a single
+`host-not-linux` for every one. On Windows it checks for **Job Objects** — the counterpart of cgroups v2,
+supplying the same resource leash (memory cap, CPU-time cap, active-process cap, kill-on-close cleanup of
+the process tree) that `MemoryMaxBytes`/`PidsMax`/`MaxWallClockMs` would bind to. `SystemSandboxHostFacts`
+answers by creating a real Job Object and closing it, not by inferring from an OS version — the same
+"test the capability, not the version" rule the `/dev/kvm` and cgroup-mount checks follow.
+
+| Host | `degradedReason` | Execution |
+|---|---|---|
+| Linux + cgroups v2 | *(none)* | Tier 1, and Tier 2 with KVM |
+| Linux, no cgroups v2 | `cgroup-v2-unavailable` | Tier 0 |
+| Windows, Job Objects present | `windows-job-objects-detected-no-runtime` | Tier 0 |
+| Windows, Job Objects absent | `windows-job-objects-unavailable` | Tier 0 |
+| macOS / other | `host-not-linux` | Tier 0 |
+
+**Detection never enables execution.** `IsExecutionAvailable` stays false on Windows regardless: DI
+registers every Tier-1/Tier-2 runtime behind `OperatingSystem.IsLinux()`, so a Windows process has no
+runtime to promote to, and flipping the flag would only produce a Tier-0 result mislabeled
+`no-runtime-registered`. `SandboxCapabilityProbeTests` pins this invariant.
+
+**A Windows Tier 1 would be weaker than the Linux one, and §2's air-gap guarantee is Linux-scoped.**
+Job Objects supply the *leash* only. Windows has no seccomp equivalent (no syscall allowlist) and no cheap
+network-namespace equivalent, so a Job-Object jail on its own would still reach the network — the
+no-egress property asserted for Tier 1 would not hold. Closing that gap means a restricted or
+low-integrity token plus AppContainer or per-process firewall rules, all of which are out of scope here
+and none of which should be assumed by anything reading `IsJobObjectAvailable`.
 
 ## 13. Phased implementation plan
 

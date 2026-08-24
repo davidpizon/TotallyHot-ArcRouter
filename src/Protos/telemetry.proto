@@ -390,10 +390,13 @@ message RoutingModeResponse {
   repeated VoterMode voters = 4;
 }
 
-// The Governance UI's System Settings window's "Adaptive Routing" row
-// (docs/router/self-organizing-classification-plan.md Phase T6): reads and mutates the two
-// router_settings-backed overrides layered on top of RoutingOptions - EnableAdaptiveRouting and
-// EmbeddingMemoryCapacity. Deliberately a separate service from the read-only RoutingModeAdminService above
+// The Governance UI's System Settings window's "Adaptive Routing" and "Shadow Judge" rows
+// (docs/router/self-organizing-classification-plan.md Phase T6, docs/router/geval-shadow-scoring-plan.md):
+// reads and mutates the router_settings-backed overrides layered on top of RoutingOptions
+// (EnableAdaptiveRouting, EmbeddingMemoryCapacity) and JudgeOptions (Enabled, ModelName). The judge
+// settings share this service because they share the router_settings table and the window's single Save
+// button - one write, one reload token trigger, one response carrying the whole post-mutation state.
+// Deliberately a separate service from the read-only RoutingModeAdminService above
 // (§M3.2's settled "read-only reporting and settings mutation stay separate" convention) - this is the one
 // admin service on this endpoint that mutates RoutingOptions. Same shape as ClusterModelAdminService/
 // BenchmarkDataAdminService (unary read plus a mutating RPC), sharing the :5002 TLS loopback endpoint.
@@ -418,11 +421,32 @@ message GetRouterSettingsRequest {}
 message UpdateRouterSettingsRequest {
   bool adaptive_routing_enabled = 1;
   int32 embedding_memory_capacity = 2;
+
+  // The shadow judge's master switch (docs/router/geval-shadow-scoring-plan.md). Also authorizes retaining
+  // raw response text in memory long enough to judge it, so switching it off stops that retention too.
+  bool judge_enabled = 3;
+
+  // The operator's chosen judge backbone, as a client-facing model name from the Providers screen. Empty
+  // means automatic - take the first eligible free model. A non-empty name that is not currently eligible
+  // is rejected with INVALID_ARGUMENT rather than silently falling back, so the window cannot save a
+  // choice that would not actually be honored.
+  string judge_model_name = 4;
 }
 
 message RouterSettingsResponse {
   bool adaptive_routing_enabled = 1;
   int32 embedding_memory_capacity = 2;
+  bool judge_enabled = 3;
+
+  // The stored choice, echoed back verbatim - empty for automatic. This is the operator's setting, not
+  // necessarily the model that will run: an eligible-at-save-time pick can stop being eligible later, and
+  // the selector falls back at that point without rewriting the setting.
+  string judge_model_name = 4;
+
+  // Every model currently eligible to serve as the judge backbone - free provider, provider and model both
+  // enabled, OpenAI-compatible - in configuration order. Populates the window's dropdown, and is empty when
+  // no free provider is configured, which is the honest "the judge has nothing to call" state.
+  repeated string eligible_judge_models = 5;
 }
 
 // The Governance UI's Cluster Model panel (docs/router/self-organizing-classification-plan.md Phase T5):
@@ -499,6 +523,78 @@ message ClusterRetrainStreamEvent {
   oneof event {
     ClusterRetrainBootstrapProgress bootstrap_progress = 1;
     ClusterRetrainResult result = 2;
+  }
+}
+
+// The Governance UI's Router Model panel (docs/router/live-feedback-learning-plan.md Phase 5): reports
+// the trained logreg voter's status and runs a retrain with streamed bootstrap-embedding progress. Same
+// shape as ClusterModelAdminService above (unary status read plus one streaming mutation RPC), sharing
+// the :5002 TLS loopback endpoint - this is the logreg voter's admin surface the way ClusterModelAdminService
+// is the cluster_best voter's.
+service RouterModelAdminService {
+  // Returns the current artifact's status (or the honest "no artifact yet" state) plus the retrain
+  // threshold/live-sample-weight context that always applies regardless of artifact presence.
+  rpc GetLogRegModelStatus (GetLogRegModelStatusRequest) returns (LogRegModelStatusResponse);
+
+  // Runs IEmbeddingLogRegTrainingService.RetrainAsync, streaming one LogRegRetrainBootstrapProgress event
+  // per OOD bootstrap embedding tick, then exactly one LogRegRetrainResult carrying the outcome and the
+  // fresh post-mutation status - mirrors RetrainClusterModel's "full state after the mutation" convention.
+  rpc RetrainLogRegModel (RetrainLogRegModelRequest) returns (stream LogRegRetrainStreamEvent);
+}
+
+message GetLogRegModelStatusRequest {}
+
+message RetrainLogRegModelRequest {}
+
+// One trained artifact's status, or the honest "no artifact yet" state (artifact_present = false, every
+// other artifact-derived field at its proto3 zero value) on a fresh install. retrain_threshold and
+// live_sample_weight are always populated regardless of artifact_present - they describe the retrain
+// configuration, not the model itself.
+message LogRegModelStatusResponse {
+  bool artifact_present = 1;
+  int32 embedding_dimension = 2;
+  // The artifact file's on-disk last-write time, since EmbeddingLogRegModelArtifact itself carries no
+  // trained-at field (its provenance date lives only inside trained_from's free text).
+  google.protobuf.Timestamp trained_at_utc = 3;
+  string trained_from = 4;
+  int32 bootstrap_task_count = 5;
+  int32 memory_entry_count = 6;
+  int32 models_represented = 7;
+  // Live memory_entries rows accumulated since this artifact's memory_entry_count was recorded (or,
+  // when artifact_present is false, every live entry that exists) - the same threshold comparison
+  // Hosting.LogRegRetrainHostedService makes, surfaced for an operator deciding whether to retrain by hand.
+  int32 entries_since_last_retrain = 8;
+  int32 retrain_threshold = 9;
+  double live_sample_weight = 10;
+}
+
+enum LogRegRetrainResultKind {
+  LOG_REG_RETRAIN_RESULT_KIND_UNSPECIFIED = 0;
+  LOG_REG_RETRAIN_RESULT_KIND_TRAINED = 1;
+  LOG_REG_RETRAIN_RESULT_KIND_DECLINED = 2;
+  LOG_REG_RETRAIN_RESULT_KIND_ALREADY_RUNNING = 3;
+}
+
+// One bootstrap-embedding progress tick during a retrain - IEmbeddingLogRegTrainingService.RetrainAsync's
+// IProgress<int> callback, reporting OOD bootstrap tasks embedded so far.
+message LogRegRetrainBootstrapProgress {
+  int32 tasks_embedded = 1;
+}
+
+// The retrain's outcome: which LogRegTrainingResultKind category it fell into, a human-readable message,
+// and the fresh status computed immediately afterward.
+message LogRegRetrainResult {
+  LogRegRetrainResultKind kind = 1;
+  string message = 2;
+  LogRegModelStatusResponse status = 3;
+}
+
+// One message on the RetrainLogRegModel stream: zero or more bootstrap_progress events (only while an OOD
+// corpus is synced and being embedded), followed by exactly one result as the final message.
+message LogRegRetrainStreamEvent {
+  oneof event {
+    LogRegRetrainBootstrapProgress bootstrap_progress = 1;
+    LogRegRetrainResult result = 2;
   }
 }
 

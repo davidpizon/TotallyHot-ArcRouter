@@ -1,10 +1,11 @@
 # G-Eval Shadow Scoring and Judge-Verifier Plan
 
-Status: **Proposed** (plan only — no phase has started). **Ordering** (per `src/PLAN.md`'s "Remaining
-work, in order"): G1 lands after the `self-organizing-classification-plan.md` T phases and *before*
-PLAN.md Phase N — the shadow table costs nothing on the hot path and G2's gate needs volume, so
-agreement data accumulates passively while the harness is built. G2 and G3 follow Phase N, gated on
-that accumulated data.
+Status: **G1 shipped** (shadow judge observer, ephemeral response-text cache, `judge_shadow_scores` side
+table, `is_judge_scored` provenance columns). **G2/G3 proposed**, gated on accumulated shadow data.
+**Ordering** (per `src/PLAN.md`'s "Remaining work, in order"): G1 lands after the
+`self-organizing-classification-plan.md` T phases and *before* PLAN.md Phase N — the shadow table costs
+nothing on the hot path and G2's gate needs volume, so agreement data accumulates passively while the
+harness is built. G2 and G3 follow Phase N, gated on that accumulated data.
 
 This plan adds an LLM-as-judge scorer, built on the G-Eval recipe
 ([docs/research/2303.16634v3.md](../research/2303.16634v3.md)), to the router's scoring pipeline in
@@ -116,6 +117,13 @@ is gone from process memory afterward. Nothing is written to disk. A missing ent
 capacity eviction, capture raced) is a lost judging opportunity, not an error — logged and dropped,
 matching every other best-effort observation path.
 
+**Gated on the judge actually being on.** `ProxyMiddleware` retains nothing unless
+`JudgeOptions.Enabled` is true *at that moment*, read from `IOptionsMonitor` rather than captured at
+construction. Since that flag is toggleable from the System Settings window, and since it is precisely
+what authorizes holding raw response text in memory at all, switching the judge off has to stop retention
+immediately rather than at the next restart. Same live-gate posture as T6's `EnableAdaptiveRouting` gate
+on transcript writes, a few lines below it in the same method.
+
 **Bounded memory:** worst case is (in-flight unjudged responses × capped text size). The cache caps
 per-entry text at a configurable byte limit (default aligned with
 `SandboxOptions.MaxCapturedOutputBytes`'s philosophy) and total entries at a configurable capacity,
@@ -154,7 +162,7 @@ late that they can't.
 
 | Phase | Deliverable | Depends on | Status |
 |---|---|---|---|
-| G1 | Shadow judge observer, `PendingResponseTextCache`, `judge_shadow_scores` side table, `is_judge_scored` columns (always 0) | none (T1 optional) | Proposed |
+| G1 | Shadow judge observer, `PendingResponseTextCache`, `judge_shadow_scores` side table, `is_judge_scored` columns (always 0) | none (T1 optional) | **Shipped** |
 | G2 | Agreement/calibration analysis surface over the shadow table; go/no-go criteria for G3 | G1 + accumulated shadow data | Proposed |
 | G3 | Judge as scorer of record for non-executable dimensions; first `is_judge_scored = 1` rows | G2 gate passed | Proposed |
 
@@ -162,7 +170,44 @@ late that they can't.
 
 ## Phase G1 — Shadow judge observer
 
-**1a. Judge backbone.** A configurable, locally served OpenAI-compatible endpoint (LM Studio /
+> **Status: shipped.** `TotallyHot.ArcRouter.Judge` (`src/TotallyHotArcRouter/Judge/`): `JudgeOptions`
+> (off by default; **not bound from `appsettings.json`** — see §1a), `JudgeModelSelector` (resolves a free
+> Providers-screen model per call), `PendingResponseTextCache`
+> (TTL + capacity + per-entry char cap, mirroring `PendingTaskEmbeddingCache`), `GEvalJudgeClient`
+> (`IJudgeClient` over the selected provider's OpenAI-compatible chat-completions endpoint,
+> probability-weighted 1-5 scoring from `logprobs`/`top_logprobs` with a single-sample fallback),
+> `JudgeShadowScoreObserver`
+> (`IRouterScoreObserver`, enqueues onto a bounded `JudgeShadowScoreQueue` and returns immediately - shed,
+> never block, on a full channel), `JudgeShadowScoreDrainService` (a `BackgroundService` draining the
+> channel continuously, `TryTake`s the cached response text, calls the judge, writes one
+> `judge_shadow_scores` row, always drains the cache slot), and `JudgeShadowScoreRetentionService` (5-minute
+> `PeriodicTimer` purge, mirroring `TranscriptRetentionService`). `judge_shadow_scores` and
+> `memory_entries.is_judge_scored` are additive migrations on `RouterMemoryDatabase` (its existing
+> `judge_shadow_scores` table is unconditionally created; only the observer that would ever write to it is
+> conditionally registered). Wired into `ProxyMiddleware` (a new optional `pendingResponseTextCache`
+> parameter, populated at the same point `responseSummary` is already computed) and
+> `ServiceCollectionExtensions` (mirroring the `TranscriptScoreObserver` conditional-registration pattern
+> exactly). Covered by `src/TotallyHotArcRouter.Tests/Judge/*` - cache TTL/capacity/truncation, queue
+> shed-on-full, observer enqueue/skip/full-channel, G-Eval logprob-weighted and fallback parsing, SQLite
+> store CRUD + migration idempotency, drain-service text-always-consumed behavior, retention purge, and an
+> explicit byte-identical-`memory_entries`-with-and-without-the-judge-observer test proving shadow mode
+> never influences routing.
+>
+> **Two scoped-down deviations from this section's original text**, both explicitly allowed by this plan's
+> own "acceptable G1 minimum, per the plan's own allowance for iteration" language and recorded in
+> `src/PLAN.md`'s Settled deferrals:
+> 1. **Auto-CoT is a static per-dimension prompt constant, not generated-and-cached.** §1a below describes
+>    "cached auto-CoT steps ... generated once per dimension and cached with the artifact conventions the
+>    codebase already uses." `GEvalJudgeClient.DimensionCriteria` is instead a hardcoded dictionary of
+>    per-dimension G-Eval criteria authored directly in code. `JudgeOptions.PromptVersion` still exists and
+>    is stamped on every shadow row, so a future move to generated-and-cached CoT is a version bump, not a
+>    schema change.
+> 2. **The n-sample estimation fallback is a single best-effort numeric parse**, not the paper's full
+>    n-sample estimation, when the backbone exposes no logprobs at all. `GEvalJudgeClient` parses the first
+>    1-5 digit in the message content and normalizes it; there is no repeated sampling or averaging.
+
+**1a. Judge backbone.** *(Revised after G1 shipped — see the revision note below.)* A configurable,
+locally served OpenAI-compatible endpoint (LM Studio /
 llama.cpp / Ollama — the operator chooses; the plan assumes only "local and free"). Prefer token
 logprobs for G-Eval's probability weighting — one inference call per score; fall back to the paper's
 n-sample estimation only when the serving stack exposes no logprobs, with the sample count
@@ -171,6 +216,31 @@ per-dimension criteria + cached auto-CoT steps + form-filling cue); the auto-CoT
 per dimension and cached with the artifact conventions the codebase already uses (embedding-model
 and prompt-version guards, mirroring the trained-artifact guards in
 `self-organizing-classification-plan.md`).
+
+> **Revision — the backbone is a Providers-screen model, not a hardcoded endpoint.** As originally
+> shipped, §1a was two `JudgeOptions` defaults: `BaseUrl = http://localhost:1234/api/v1/chat` and
+> `Model = qwen2.5-7b-instruct`. Nothing validated either, and that default path does not match LM Studio's
+> OpenAI-compatible route (`/v1/chat/completions`) — a misconfiguration indistinguishable from "no traffic
+> yet", since the drain worker swallows failures. Both properties are **removed**. `JudgeModelSelector`
+> instead resolves a route from the operator's own provider configuration on every call, and
+> `GEvalJudgeClient` reaches it with the forwarding path's own primitives
+> (`ProviderUrlBuilder.BuildPassthroughUrl`, `ResolvedModelRoute.ExtraHeaders`). Eligibility is: provider
+> flagged `IsFree` (a *known* zero — judging runs on every scored request, so an accidentally-paid backbone
+> would bill continuously), provider and model both enabled, and **not** a Bedrock route, which is not
+> OpenAI-shaped and cannot be reached without the SigV4 SDK client. The judge deliberately does **not** loop
+> back through our own proxy: a judge call re-entering `ProxyMiddleware` would be sandbox-scored and would
+> enqueue a further judging job. With no eligible model the judge **abstains** — no row, no fabricated
+> score — matching `LogRegVoter`/`ClusterBestVoter`'s no-placeholder posture. The operator picks a specific
+> backbone, or leaves it automatic, from the System Settings window; an ineligible pick falls back to the
+> first eligible model and the substitution is logged.
+>
+> **Configuration moved out of `appsettings.json` entirely.** `JudgeOptions.Enabled` and the new
+> `JudgeOptions.ModelName` are `router_settings` rows layered on by `JudgeSettingsConfigureOptions` — the
+> `JudgeOptions` counterpart of T6's `RouterSettingsConfigureOptions`, with `RouterSettingsReloadToken` now
+> serving both options types so one Save reloads both. `Enabled` is therefore **live**: the observer joins
+> the fan-out unconditionally and gates per call, the drain worker and retention loop gate per job/tick
+> rather than exiting at startup, and — see §Raw-text preservation — `ProxyMiddleware` reads the flag from
+> the monitor before retaining any response text.
 
 **1b. `PendingResponseTextCache`.** As specified in §Raw-text preservation. Registered in DI beside
 `PendingTaskEmbeddingCache`; populated in `ProxyMiddleware` where response text is already
@@ -214,6 +284,14 @@ calendar time).
   exactly the bias the paper warns about, quantified on local traffic.
 - **Surface**: a read-only admin/gRPC status view (following the trainer-status precedent in
   `self-organizing-classification-plan.md` T5), not a GUI build-out — numbers first.
+
+**Segment on `judge_model`.** The backbone is now whichever free Providers-screen model the selector
+resolved for each row (§1a's revision note), and automatic fallback can change it mid-accumulation when a
+provider is toggled. Every analysis above must therefore group by `judge_model` rather than assume one
+backbone across the table — a mixed sample would otherwise blend two models' calibration into one
+meaningless correlation. `used_logprobs` deserves the same treatment: rows scored through the
+single-sample fallback carry exactly the quantization noise probability weighting exists to remove, so
+they are not comparable with logprob-weighted rows.
 
 **Gate for G3 (all required):** (1) on *executed* rows, judge rank-correlates with the verifier at
 or above a configured floor — the judge must at least reproduce ground truth where ground truth

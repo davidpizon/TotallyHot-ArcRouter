@@ -92,6 +92,7 @@ namespace TotallyHot.ArcRouter.Proxy
             var benchmarkDataAdmin = dependencies?.BenchmarkDataAdmin;
             var llmRouterModelAdmin = dependencies?.LlmRouterModelAdmin;
             var clusterModelAdmin = dependencies?.ClusterModelAdmin;
+            var logRegModelAdmin = dependencies?.LogRegModelAdmin;
             var routerSettingsAdmin = dependencies?.RouterSettingsAdmin;
 
             // Own (and later dispose) the management client only when the caller didn't supply one. Note this
@@ -231,6 +232,18 @@ namespace TotallyHot.ArcRouter.Proxy
                             services.AddSingleton(clusterModelAdmin.StorageOptions);
                         }
 
+                        // Same reasoning again: the logreg training service and its supporting store live
+                        // in the outer container, so LogRegModelAdminGrpcService can only be constructed
+                        // here if they are handed across explicitly. Its IOptions<RoutingOptions> dependency
+                        // is already covered by the unconditional registration above, so only the
+                        // training-specific pair is registered here.
+                        if (logRegModelAdmin is not null)
+                        {
+                            services.AddSingleton(logRegModelAdmin.TrainingService);
+                            services.AddSingleton(logRegModelAdmin.MemoryEntryStore);
+                            services.AddSingleton(logRegModelAdmin.StorageOptions);
+                        }
+
                         // The Governance UI's System Settings panel API (Phase T6). Same reasoning again:
                         // the settings store, reload token, and options monitor live in the outer
                         // container, so RouterSettingsAdminGrpcService can only be constructed here if
@@ -296,6 +309,14 @@ namespace TotallyHot.ArcRouter.Proxy
                                 endpoints.MapGrpcService<Router.Orchestrator.ClusterModelAdminGrpcService>();
                             }
 
+                            // The Governance UI's Router Model panel API (live-feedback-learning-plan.md
+                            // Phase 5). Shares the TLS gRPC port with the telemetry stream and the other
+                            // admin services.
+                            if (logRegModelAdmin is not null)
+                            {
+                                endpoints.MapGrpcService<Router.Orchestrator.LogRegModelAdminGrpcService>();
+                            }
+
                             // The Governance UI's System Settings panel API (Phase T6). Shares the TLS
                             // gRPC port with the telemetry stream and the other admin services.
                             if (routerSettingsAdmin is not null)
@@ -325,6 +346,10 @@ namespace TotallyHot.ArcRouter.Proxy
                                         SecretWriter = managementApi.SecretWriter,
                                         SecretReader = managementApi.SecretReader,
                                         ComparisonStore = managementApi.TaxonomyComparisonStore,
+                                        // Pure in-memory and dependency-free, so it's constructed directly
+                                        // here rather than threaded through ManagementApiOptions like the
+                                        // other collaborators above - there is nothing for a caller to wire.
+                                        InteractionStatusStore = new ProviderInteractionStatusStore(),
                                     });
                                 endpoints.MapProviderAdminEndpoints(facade, managementToken);
                                 endpoints.MapUsageAdminEndpoints(facade, managementToken);

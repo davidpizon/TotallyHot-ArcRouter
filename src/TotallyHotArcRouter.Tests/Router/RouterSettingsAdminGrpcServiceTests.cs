@@ -3,8 +3,10 @@ using Grpc.Core;
 using Grpc.Core.Testing;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router;
+using TotallyHot.ArcRouter.Tests.Proxy;
 using TotallyHot.ArcRouter.Tests.TestSupport;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
@@ -110,11 +112,85 @@ public sealed class RouterSettingsAdminGrpcServiceTests
     }
 
     [Fact]
+    public async Task GetRouterSettings_ReportsTheJudgeSettingsAndTheEligibleBackboneList()
+    {
+        var service = CreateService(
+            judgeMonitor: new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions { Enabled = true, ModelName = "free-judge" }));
+
+        var response = await service.GetRouterSettings(new Contract.GetRouterSettingsRequest(), CreateContext());
+
+        response.JudgeEnabled.Should().BeTrue();
+        response.JudgeModelName.Should().Be("free-judge");
+        response.EligibleJudgeModels.Should().Equal("free-judge");
+    }
+
+    [Fact]
+    public async Task UpdateRouterSettings_PersistsTheJudgeSettings()
+    {
+        var store = CreateStore();
+        var service = CreateService(store: store);
+
+        await service.UpdateRouterSettings(
+            new Contract.UpdateRouterSettingsRequest
+            {
+                AdaptiveRoutingEnabled = false,
+                EmbeddingMemoryCapacity = 20_000,
+                JudgeEnabled = true,
+                JudgeModelName = "free-judge",
+            },
+            CreateContext());
+
+        store.TryGetBool(RouterSettingsStore.JudgeEnabledKey, out var enabled).Should().BeTrue();
+        enabled.Should().BeTrue();
+        store.TryGetString(RouterSettingsStore.JudgeModelNameKey, out var modelName).Should().BeTrue();
+        modelName.Should().Be("free-judge");
+    }
+
+    /// <summary>
+    /// Empty is the explicit "automatic" choice and must always be accepted - including when no free
+    /// provider exists at all, so the operator can still switch the judge on ahead of configuring one.
+    /// </summary>
+    [Fact]
+    public async Task UpdateRouterSettings_EmptyJudgeModelName_IsAcceptedAsAutomatic()
+    {
+        var store = CreateStore();
+        var service = CreateService(store: store, judgeModelSelector: CreateJudgeModelSelector(freeModelName: null));
+
+        await service.UpdateRouterSettings(
+            new Contract.UpdateRouterSettingsRequest { EmbeddingMemoryCapacity = 20_000, JudgeModelName = string.Empty },
+            CreateContext());
+
+        store.TryGetString(RouterSettingsStore.JudgeModelNameKey, out var modelName).Should().BeTrue();
+        modelName.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Rejected rather than coerced: silently saving a model the selector would not call leaves the window
+    /// displaying a setting that is not actually in force.
+    /// </summary>
+    [Fact]
+    public async Task UpdateRouterSettings_IneligibleJudgeModel_IsRejectedAndNothingIsPersisted()
+    {
+        var store = CreateStore();
+        var service = CreateService(store: store);
+
+        var act = () => service.UpdateRouterSettings(
+            new Contract.UpdateRouterSettingsRequest { EmbeddingMemoryCapacity = 20_000, JudgeModelName = "not-a-free-model" },
+            CreateContext());
+
+        (await act.Should().ThrowAsync<RpcException>())
+            .Which.StatusCode.Should().Be(StatusCode.InvalidArgument);
+        store.TryGetString(RouterSettingsStore.JudgeModelNameKey, out _).Should().BeFalse();
+    }
+
+    [Fact]
     public void Constructor_ThrowsOnNullStore()
     {
         var act = () => new RouterSettingsAdminGrpcService(
             null!,
             new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions()),
+            new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions()),
+            CreateJudgeModelSelector(),
             new RouterSettingsReloadToken(),
             NullLogger<RouterSettingsAdminGrpcService>.Instance);
         act.Should().Throw<ArgumentNullException>();
@@ -123,12 +199,36 @@ public sealed class RouterSettingsAdminGrpcServiceTests
     private static RouterSettingsAdminGrpcService CreateService(
         RouterSettingsStore? store = null,
         RouterSettingsReloadToken? reloadToken = null,
-        StaticOptionsMonitor<RoutingOptions>? monitor = null) =>
+        StaticOptionsMonitor<RoutingOptions>? monitor = null,
+        StaticOptionsMonitor<JudgeOptions>? judgeMonitor = null,
+        JudgeModelSelector? judgeModelSelector = null) =>
         new(
             store ?? CreateStore(),
             monitor ?? new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions()),
+            judgeMonitor ?? new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions()),
+            judgeModelSelector ?? CreateJudgeModelSelector(),
             reloadToken ?? new RouterSettingsReloadToken(),
             NullLogger<RouterSettingsAdminGrpcService>.Instance);
+
+    /// <summary>
+    /// A selector over one free model, so the judge-model validation has something eligible to accept.
+    /// Pass <paramref name="freeModelName"/> as null for the no-free-provider case.
+    /// </summary>
+    private static JudgeModelSelector CreateJudgeModelSelector(string? freeModelName = "free-judge") =>
+        new(
+            freeModelName is null
+                ? ModelRouteResolverTestFactory.Create(
+                    modelName: "paid-only",
+                    providerModelId: "paid-only",
+                    baseUrl: "https://api.openai.com",
+                    isFree: false)
+                : ModelRouteResolverTestFactory.Create(
+                    modelName: freeModelName,
+                    providerModelId: freeModelName,
+                    baseUrl: "http://localhost:1234/v1",
+                    isFree: true),
+            new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions()),
+            NullLogger<JudgeModelSelector>.Instance);
 
     private static RouterSettingsStore CreateStore()
     {

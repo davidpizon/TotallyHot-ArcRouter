@@ -112,6 +112,50 @@ public class SqliteMemoryEntryStoreTests : IDisposable
         Assert.Equal(1.0, entry.Propensity, 6);
     }
 
+    /// <summary>
+    /// docs/router/geval-shadow-scoring-plan.md §Provenance: is_judge_scored round-trips through the store
+    /// like every other column, and defaults to false for a caller that doesn't set it.
+    /// </summary>
+    [Fact]
+    public async Task LoadAllAsync_RoundTripsIsJudgeScored()
+    {
+        var store = new SqliteMemoryEntryStore(_database);
+        var embedding = new float[] { 0.1f, -0.2f, 0.75f };
+        await store.AppendAsync(
+            new MemoryEntry(0, embedding, "model-c", 0.87, 0.0042, null, DateTimeOffset.UtcNow, IsJudgeScored: true),
+            TestContext.Current.CancellationToken);
+        await store.AppendAsync(MakeEntry([1, 0, 0], "model-default"), TestContext.Current.CancellationToken);
+
+        var loaded = await store.LoadAllAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(loaded.Single(e => e.ChosenModel == "model-c").IsJudgeScored);
+        Assert.False(loaded.Single(e => e.ChosenModel == "model-default").IsJudgeScored);
+    }
+
+    /// <summary>
+    /// docs/router/geval-shadow-scoring-plan.md Phase G1e: a database created before the is_judge_scored
+    /// column existed picks it up on the next EnsureCreated call, with existing rows defaulting to false.
+    /// </summary>
+    [Fact]
+    public async Task EnsureCreated_PreExistingDatabaseWithoutIsJudgeScoredColumn_MigratesWithDefault()
+    {
+        using (var connection = _database.OpenConnection())
+        using (var alter = connection.CreateCommand())
+        {
+            alter.CommandText = "ALTER TABLE memory_entries DROP COLUMN is_judge_scored;";
+            alter.ExecuteNonQuery();
+        }
+
+        _database.EnsureCreated();
+        _database.EnsureCreated(); // Idempotency: a second call must not throw or duplicate the column.
+
+        var store = new SqliteMemoryEntryStore(_database);
+        await store.AppendAsync(MakeEntry([1, 0, 0], "model-post-migration"), TestContext.Current.CancellationToken);
+        var loaded = await store.LoadAllAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(Assert.Single(loaded).IsJudgeScored);
+    }
+
     [Fact]
     public async Task LoadAllAsync_OrdersByIdAscending()
     {

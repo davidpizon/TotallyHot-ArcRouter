@@ -35,21 +35,36 @@ public sealed class SettingsModalTests
     /// <summary>A controllable <see cref="IRouterSettingsAdminClient"/> double, mirroring the router-side default (adaptive routing off, capacity 20000).</summary>
     private sealed class FakeRouterSettingsAdminClient : IRouterSettingsAdminClient
     {
-        public RouterSettingsInfo Settings { get; set; } = new(AdaptiveRoutingEnabled: false, EmbeddingMemoryCapacity: 20_000);
+        public RouterSettingsInfo Settings { get; set; } = new(
+            AdaptiveRoutingEnabled: false,
+            EmbeddingMemoryCapacity: 20_000,
+            JudgeEnabled: false,
+            JudgeModelName: "",
+            EligibleJudgeModels: ["free-judge"]);
 
         public RouterSettingsAdminException? Failure { get; set; }
 
         public Task<RouterSettingsInfo> GetAsync(CancellationToken cancellationToken = default) =>
             Failure is null ? Task.FromResult(Settings) : Task.FromException<RouterSettingsInfo>(Failure);
 
-        public Task<RouterSettingsInfo> UpdateAsync(bool adaptiveRoutingEnabled, int embeddingMemoryCapacity, CancellationToken cancellationToken = default)
+        public Task<RouterSettingsInfo> UpdateAsync(
+            bool adaptiveRoutingEnabled,
+            int embeddingMemoryCapacity,
+            bool judgeEnabled,
+            string judgeModelName,
+            CancellationToken cancellationToken = default)
         {
             if (Failure is not null)
             {
                 return Task.FromException<RouterSettingsInfo>(Failure);
             }
 
-            Settings = new RouterSettingsInfo(adaptiveRoutingEnabled, embeddingMemoryCapacity);
+            Settings = new RouterSettingsInfo(
+                adaptiveRoutingEnabled,
+                embeddingMemoryCapacity,
+                judgeEnabled,
+                judgeModelName,
+                Settings.EligibleJudgeModels);
             return Task.FromResult(Settings);
         }
     }
@@ -221,7 +236,7 @@ public sealed class SettingsModalTests
     [Fact]
     public void Loads_a_persisted_adaptive_routing_toggle_and_sample_size()
     {
-        var client = new FakeRouterSettingsAdminClient { Settings = new RouterSettingsInfo(true, 5_000) };
+        var client = new FakeRouterSettingsAdminClient { Settings = new RouterSettingsInfo(true, 5_000, JudgeEnabled: false, JudgeModelName: "", EligibleJudgeModels: ["free-judge"]) };
         using var ctx = NewContext(out _, out _, out _, client);
 
         var cut = ctx.Render<SettingsModal>();
@@ -239,6 +254,73 @@ public sealed class SettingsModalTests
         cut.Find("button[aria-label='Toggle adaptive routing']").Click();
 
         cut.Markup.Should().Contain("On");
+    }
+
+    [Fact]
+    public void The_judge_model_dropdown_offers_automatic_plus_every_eligible_free_model()
+    {
+        var client = new FakeRouterSettingsAdminClient
+        {
+            Settings = new RouterSettingsInfo(false, 20_000, JudgeEnabled: true, JudgeModelName: "free-b", EligibleJudgeModels: ["free-a", "free-b"]),
+        };
+        using var ctx = NewContext(out _, out _, out _, client);
+
+        var cut = ctx.Render<SettingsModal>();
+
+        var options = cut.Find("#judge-model").QuerySelectorAll("option").Select(o => o.GetAttribute("value")).ToArray();
+        options.Should().Equal("", "free-a", "free-b");
+    }
+
+    /// <summary>
+    /// A stored pick that is no longer eligible shows as Automatic, matching what the selector will actually
+    /// do - re-offering the dead name would let the operator save a choice the server now rejects.
+    /// </summary>
+    [Fact]
+    public void An_ineligible_stored_judge_model_falls_back_to_automatic_in_the_dropdown()
+    {
+        var client = new FakeRouterSettingsAdminClient
+        {
+            Settings = new RouterSettingsInfo(false, 20_000, JudgeEnabled: true, JudgeModelName: "gone-away", EligibleJudgeModels: ["free-a"]),
+        };
+        using var ctx = NewContext(out _, out _, out var routerSettingsStore, client);
+
+        var cut = ctx.Render<SettingsModal>();
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Save").Click();
+
+        routerSettingsStore.Settings!.JudgeModelName.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void With_no_free_provider_the_dropdown_is_disabled_and_explains_why()
+    {
+        var client = new FakeRouterSettingsAdminClient
+        {
+            Settings = new RouterSettingsInfo(false, 20_000, JudgeEnabled: false, JudgeModelName: "", EligibleJudgeModels: []),
+        };
+        using var ctx = NewContext(out _, out _, out _, client);
+
+        var cut = ctx.Render<SettingsModal>();
+
+        cut.Find("#judge-model").HasAttribute("disabled").Should().BeTrue();
+        cut.Markup.Should().Contain("No free model is configured");
+    }
+
+    [Fact]
+    public void The_save_button_persists_the_judge_toggle_and_model()
+    {
+        var client = new FakeRouterSettingsAdminClient
+        {
+            Settings = new RouterSettingsInfo(false, 20_000, JudgeEnabled: false, JudgeModelName: "", EligibleJudgeModels: ["free-a", "free-b"]),
+        };
+        using var ctx = NewContext(out _, out _, out var routerSettingsStore, client);
+
+        var cut = ctx.Render<SettingsModal>();
+        cut.Find("button[aria-label='Toggle shadow judge']").Click();
+        cut.Find("#judge-model").Change("free-b");
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Save").Click();
+
+        routerSettingsStore.Settings!.JudgeEnabled.Should().BeTrue();
+        routerSettingsStore.Settings.JudgeModelName.Should().Be("free-b");
     }
 
     [Fact]
@@ -281,7 +363,8 @@ public sealed class SettingsModalTests
 
         settingsStore.Load().TelemetryServerAddress.Should().Be("https://example.test:7777");
         cut.Markup.Should().Contain("Restart the app");
-        routerSettingsStore.Settings.Should().Be(new RouterSettingsInfo(true, 15_000));
+        routerSettingsStore.Settings!.AdaptiveRoutingEnabled.Should().BeTrue();
+        routerSettingsStore.Settings.EmbeddingMemoryCapacity.Should().Be(15_000);
         cut.Markup.Should().Contain("Applied");
     }
 

@@ -52,7 +52,7 @@ public sealed class BenchmarkDataTests
     }
 
     [Fact]
-    public void Current_state_renders_an_enabled_reverify_button_and_the_file_is_hidden_behind_the_disclosure()
+    public void Current_state_renders_a_disabled_update_button_and_the_file_is_hidden_behind_the_disclosure()
     {
         var syncedAt = DateTimeOffset.UtcNow.AddHours(-1);
         using var ctx = NewContext(new FakeClient(BenchmarkDataAdminState.Current,
@@ -67,10 +67,10 @@ public sealed class BenchmarkDataTests
         disclosure.ClassList.Should().NotContain("open");
         disclosure.HasAttribute("inert").Should().BeTrue();
 
-        // Mirrors the Local Voter Model panel's "Current" state: the button stays clickable so the
-        // operator can re-verify the corpus against Hugging Face rather than trusting the ledger forever.
-        var button = cut.FindAll("button").First(b => b.TextContent.Contains("Re-verify", StringComparison.Ordinal));
-        button.HasAttribute("disabled").Should().BeFalse();
+        // The per-card button is disabled once current - there is nothing for it to update - and
+        // re-verifying against Hugging Face is now the top-of-page Resync button's job.
+        var button = cut.FindAll("button").First(b => b.TextContent.Contains("Update", StringComparison.Ordinal));
+        button.HasAttribute("disabled").Should().BeTrue();
 
         cut.FindAll("button").First(b => b.TextContent.Contains("Show", StringComparison.Ordinal)).Click();
 
@@ -167,7 +167,7 @@ public sealed class BenchmarkDataTests
     }
 
     [Fact]
-    public void CheckFailed_state_renders_the_reason_and_an_enabled_button()
+    public void CheckFailed_state_renders_the_reason_and_a_disabled_button()
     {
         using var ctx = NewContext(new FakeClient(BenchmarkDataAdminState.CheckFailed, Reason: "failed to connect"));
 
@@ -175,8 +175,10 @@ public sealed class BenchmarkDataTests
 
         cut.Markup.Should().Contain("Check Failed");
         cut.Markup.Should().Contain("failed to connect");
+        // The per-card button stays disabled (an unknown freshness is not "an update is available"); the
+        // label still surfaces "Check Failed" rather than a plain "Update" so the reason is visible.
         var button = cut.FindAll("button").First(b => b.TextContent.Contains("Check Failed", StringComparison.Ordinal));
-        button.HasAttribute("disabled").Should().BeFalse();
+        button.HasAttribute("disabled").Should().BeTrue();
     }
 
     [Fact]
@@ -190,35 +192,86 @@ public sealed class BenchmarkDataTests
         cut.FindAll("button").First(b => b.TextContent.Contains("Update", StringComparison.Ordinal)).Click();
 
         client.SyncCount.Should().Be(1);
-        // Once current, the button relabels to "Re-verify" (still enabled) rather than a static "Current".
-        cut.FindAll("button").Should().Contain(b => b.TextContent.Contains("Re-verify", StringComparison.Ordinal));
+        // Once current, the button keeps its "Update" label but disables itself rather than exposing a
+        // clickable "Re-verify"/"Current" affordance.
+        var button = cut.FindAll("button").First(b => b.TextContent.Contains("Update", StringComparison.Ordinal));
+        button.HasAttribute("disabled").Should().BeTrue();
     }
 
     [Fact]
-    public void Clicking_reverify_on_a_current_corpus_runs_a_sync_rather_than_a_recheck()
+    public void Resyncing_a_current_corpus_runs_a_sync_rather_than_a_recheck()
     {
+        // The individual per-card button disables itself once current, so this "Current -> sync, not
+        // recheck" behavior (re-running the sync is the only way to confirm the ledger's recorded
+        // checksums still match what's on disk) is now only reachable through the top Resync button.
         var client = new FakeClient(BenchmarkDataAdminState.Current,
             new BenchmarkFileStatusInfo("models.json", Synced: true, SizeBytes: 1_400, RowCount: 3, DateTimeOffset.UtcNow));
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<BenchmarkData>();
-        cut.FindAll("button").First(b => b.TextContent.Contains("Re-verify", StringComparison.Ordinal)).Click();
+        cut.FindAll("button").First(b => b.TextContent.Contains("Resync", StringComparison.Ordinal)).Click();
 
         client.SyncCount.Should().Be(1);
         client.RecheckCount.Should().Be(0);
     }
 
     [Fact]
-    public void Clicking_check_failed_rechecks_rather_than_syncing_blind()
+    public void Resyncing_a_checkfailed_corpus_rechecks_rather_than_syncing_blind()
     {
+        // Same reasoning as Resyncing_a_current_corpus_runs_a_sync_rather_than_a_recheck: the per-card
+        // button is disabled in CheckFailed, so retrying the check now goes through Resync.
         var client = new FakeClient(BenchmarkDataAdminState.CheckFailed, Reason: "boom");
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<BenchmarkData>();
-        cut.FindAll("button").First(b => b.TextContent.Contains("Check Failed", StringComparison.Ordinal)).Click();
+        cut.FindAll("button").First(b => b.TextContent.Contains("Resync", StringComparison.Ordinal)).Click();
 
         client.RecheckCount.Should().Be(1);
         client.SyncCount.Should().Be(0);
+    }
+
+    [Fact]
+    public void Resync_runs_both_cards_operations_together()
+    {
+        var client = new FakeClient(BenchmarkDataAdminState.Update,
+            new BenchmarkFileStatusInfo("models.json", Synced: false, SizeBytes: 0, RowCount: 0, SyncedAtUtc: null));
+        var voterClient = new FakeVoterClient
+        {
+            Files = [new LlmRouterModelFileStatusInfo("model.onnx", Synced: false, SizeBytes: 0, SyncedAtUtc: null, ChecksumVerified: false, IsOptional: false)],
+        };
+        using var ctx = NewContext(client, voterClient);
+
+        var cut = ctx.Render<BenchmarkData>();
+        cut.FindAll("button").First(b => b.TextContent.Contains("Resync", StringComparison.Ordinal)).Click();
+
+        client.SyncCount.Should().Be(1);
+        voterClient.SyncCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Resync_is_disabled_while_either_card_is_syncing()
+    {
+        var tcs = new TaskCompletionSource();
+        var client = new FakeClient(BenchmarkDataAdminState.Update,
+            new BenchmarkFileStatusInfo("models.json", Synced: false, SizeBytes: 0, RowCount: 0, SyncedAtUtc: null))
+        {
+            HoldBeforeFinalStatus = tcs.Task,
+        };
+        using var ctx = NewContext(client);
+        var cut = ctx.Render<BenchmarkData>();
+
+        await cut.InvokeAsync(() =>
+            cut.FindAll("button").First(b => b.TextContent.Contains("Update", StringComparison.Ordinal)).Click());
+
+        cut.WaitForAssertion(() =>
+            cut.FindAll("button").First(b => b.TextContent.Contains("Resync", StringComparison.Ordinal))
+                .HasAttribute("disabled").Should().BeTrue());
+
+        tcs.SetResult();
+
+        cut.WaitForAssertion(() =>
+            cut.FindAll("button").First(b => b.TextContent.Contains("Resync", StringComparison.Ordinal))
+                .HasAttribute("disabled").Should().BeFalse());
     }
 
     [Fact]
@@ -310,22 +363,29 @@ public sealed class BenchmarkDataTests
     }
 
     [Fact]
-    public void Voter_current_state_renders_an_enabled_reverify_button_that_reruns_sync()
+    public void Voter_current_state_renders_a_disabled_update_button()
     {
-        // Unlike the corpus panel, the voter's "Current" state must stay clickable: checksum verification
-        // is in-memory only and doesn't survive a process restart, so re-running the sync is the only way
-        // to confirm already-cached files are still intact.
+        // The voter section's own button (last "Update" button in the DOM, after the Task Matrix panel's)
+        // disables itself once current - there is nothing for it to update. Re-running the sync to
+        // re-verify already-cached files (checksum verification is in-memory only and doesn't survive a
+        // process restart) is now the top Resync button's job.
         var voterClient = new FakeVoterClient();
         using var ctx = NewContext(new FakeClient(BenchmarkDataAdminState.Current), voterClient);
 
         var cut = ctx.Render<BenchmarkData>();
 
-        // The Task Matrix panel's own button also reads "Re-verify" when its corpus is current, and it
-        // renders first in the DOM - the voter section's button is the last one.
-        var button = cut.FindAll("button").Last(b => b.TextContent.Contains("Re-verify", StringComparison.Ordinal));
-        button.HasAttribute("disabled").Should().BeFalse();
+        var button = cut.FindAll("button").Last(b => b.TextContent.Contains("Update", StringComparison.Ordinal));
+        button.HasAttribute("disabled").Should().BeTrue();
+    }
 
-        button.Click();
+    [Fact]
+    public void Resyncing_a_current_voter_model_reruns_sync()
+    {
+        var voterClient = new FakeVoterClient();
+        using var ctx = NewContext(new FakeClient(BenchmarkDataAdminState.Current), voterClient);
+
+        var cut = ctx.Render<BenchmarkData>();
+        cut.FindAll("button").First(b => b.TextContent.Contains("Resync", StringComparison.Ordinal)).Click();
 
         voterClient.SyncCount.Should().Be(1);
     }
@@ -385,8 +445,10 @@ public sealed class BenchmarkDataTests
 
         cut.FindAll("[role=progressbar]").Should().BeEmpty();
 
+        // The Task Matrix panel's own "Update" button is disabled here (its corpus is Current), so
+        // Last(), not First(), reaches the voter section's enabled one.
         await cut.InvokeAsync(() =>
-            cut.FindAll("button").First(b => b.TextContent.Contains("Update", StringComparison.Ordinal)).Click());
+            cut.FindAll("button").Last(b => b.TextContent.Contains("Update", StringComparison.Ordinal)).Click());
 
         cut.WaitForAssertion(() => cut.FindAll("[role=progressbar]").Should().HaveCount(2));
         cut.Markup.Should().Contain("model.onnx");
@@ -456,7 +518,8 @@ public sealed class BenchmarkDataTests
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<BenchmarkData>();
-        cut.FindAll("button").First(b => b.TextContent.Contains("Check Failed", StringComparison.Ordinal)).Click();
+        // The per-card button is disabled in CheckFailed, so this now goes through Resync.
+        cut.FindAll("button").First(b => b.TextContent.Contains("Resync", StringComparison.Ordinal)).Click();
 
         cut.Markup.Should().NotContain("Router unreachable");
         cut.Markup.Should().Contain("Could not recheck the benchmark data");

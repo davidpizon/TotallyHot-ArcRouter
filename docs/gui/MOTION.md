@@ -344,6 +344,21 @@ Opacity only, per the §2 floating-layer constraint. Already correct in `app.css
 .ls-tooltip.visible { opacity: 1; }
 ```
 
+### Toast Enter/Exit — *Shipping*
+
+App-wide error notifications (`ToastHost.razor`). Enters with the standard row/panel enter treatment;
+exits (both auto-dismiss and the manual close glyph) are instant removal rather than an animated exit -
+Blazor's `@if`/`@foreach` unmount is immediate, and a toast the operator has already read or dismissed is
+not worth a farewell animation per §3's "exits are faster than enters" rule taken to its limit.
+
+```css
+@keyframes toast-enter {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.ls-toast { animation: toast-enter var(--dur-default) var(--ease-out-expo); }
+```
+
 ### Disclosure Collapse — *Shipping*
 
 The two-way companion to Disclosure Expand, for a card that should **grow and shrink smoothly** —
@@ -551,6 +566,7 @@ cannot read a custom property from there. Keep the two in step.
 | `prefers-reduced-motion` block | `app.css` |
 | Reorder Settle — FLIP slide on every rank change and on drop, grab-handle-only reorder (chevron rank buttons removed) | `PriceSourcesAdmin`; `js/reorder-flip.js` |
 | Lift Detach — dragged card detached from the clip chain and following the cursor, grow in / settle into slot on release | `.card-pinned` / `.card-dropping`; `js/reorder-flip.js` `startDrag` |
+| Toast Enter/Exit — slide/fade in on show, instant removal on dismiss | `ToastHost.razor`; `.ls-toast` |
 
 ### Coded and wired — not confirmed in UI
 

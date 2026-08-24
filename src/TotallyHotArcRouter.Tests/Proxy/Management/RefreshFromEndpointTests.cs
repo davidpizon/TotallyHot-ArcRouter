@@ -50,9 +50,15 @@ public sealed class RefreshFromEndpointTests : IDisposable
         IProviderConfigStore store,
         HttpMessageHandler discoveryHandler,
         ProviderEndpointScanner? scanner = null,
-        ToolCallCapabilityStore? capabilityStore = null) =>
+        ToolCallCapabilityStore? capabilityStore = null,
+        IProviderInteractionStatusStore? interactionStatusStore = null) =>
         new(store, Mock.Of<IEnvironmentVariableProvider>(), new HttpClient(discoveryHandler),
-            new ManagementFacadeDependencies { EndpointScanner = scanner, CapabilityStore = capabilityStore });
+            new ManagementFacadeDependencies
+            {
+                EndpointScanner = scanner,
+                CapabilityStore = capabilityStore,
+                InteractionStatusStore = interactionStatusStore,
+            });
 
     private static DelegatingHandlerStub DiscoveryHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler) =>
         new(handler);
@@ -221,6 +227,137 @@ public sealed class RefreshFromEndpointTests : IDisposable
         // null "never scanned" state.
         Assert.NotNull(provider.EndpointCapabilities);
         Assert.False(provider.EndpointCapabilities!.OpenAiCompatible);
+    }
+
+    // ----- DiscoverModelsAsync also records an interaction outcome -----
+
+    [Fact]
+    public async Task DiscoverModels_OnSuccess_RecordsASuccessfulInteraction()
+    {
+        var interactionStatus = new ProviderInteractionStatusStore();
+        var facade = Facade(StoreWithProvider(), DiscoveryOk(OpenAiBody), interactionStatusStore: interactionStatus);
+
+        await facade.DiscoverModelsAsync("lmstudio", TestContext.Current.CancellationToken);
+
+        Assert.True(interactionStatus.Get("lmstudio")!.Ok);
+    }
+
+    [Fact]
+    public async Task DiscoverModels_WhenUnsupported_RecordsAFailure()
+    {
+        // Discovery itself has no capability scan to corroborate against - it always records a discovery
+        // Error as a failure, unlike RefreshFromEndpointAsync's more forgiving combined rule.
+        var interactionStatus = new ProviderInteractionStatusStore();
+        var facade = Facade(StoreWithProvider(), DiscoveryUnsupported(), interactionStatusStore: interactionStatus);
+
+        await facade.DiscoverModelsAsync("lmstudio", TestContext.Current.CancellationToken);
+
+        var status = interactionStatus.Get("lmstudio");
+        Assert.NotNull(status);
+        Assert.False(status!.Ok);
+        Assert.Equal("Discover models", status.Operation);
+    }
+
+    // ----- LastInteraction (the GUI's warning-icon/toast source) -----
+
+    [Fact]
+    public async Task RefreshFromEndpoint_OnSuccess_RecordsAndSurfacesASuccessfulInteraction()
+    {
+        var interactionStatus = new ProviderInteractionStatusStore();
+        var facade = Facade(StoreWithProvider(), DiscoveryOk(OpenAiBody), interactionStatusStore: interactionStatus);
+
+        var result = await facade.RefreshFromEndpointAsync("lmstudio", TestContext.Current.CancellationToken);
+
+        var provider = Assert.Single(result.Value!.Providers);
+        Assert.NotNull(provider.LastInteraction);
+        Assert.True(provider.LastInteraction!.Ok);
+        Assert.Equal("Refresh from endpoint", provider.LastInteraction.Operation);
+        Assert.True(interactionStatus.Get("lmstudio")!.Ok);
+    }
+
+    [Fact]
+    public async Task RefreshFromEndpoint_WhenDiscoveryFailsAndNoScanCorroboratesIt_RecordsAFailure()
+    {
+        // The motivating bug: an expired/invalid API key. Discovery reports a 401 and no capability scan is
+        // wired up to corroborate it either way, so the failure must be recorded rather than silently
+        // dropped - which is exactly what happened before this store existed.
+        var discoveryUnauthorized = DiscoveryHandler(
+            _ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized)));
+        var interactionStatus = new ProviderInteractionStatusStore();
+        var facade = Facade(StoreWithProvider(), discoveryUnauthorized, interactionStatusStore: interactionStatus);
+
+        var result = await facade.RefreshFromEndpointAsync("lmstudio", TestContext.Current.CancellationToken);
+
+        var provider = Assert.Single(result.Value!.Providers);
+        Assert.NotNull(provider.LastInteraction);
+        Assert.False(provider.LastInteraction!.Ok);
+        Assert.Contains("401", provider.LastInteraction.Message);
+    }
+
+    [Fact]
+    public async Task RefreshFromEndpoint_WhenDiscoveryIsUnsupportedButTheScanDetectsAFlavor_RecordsSuccess()
+    {
+        // A healthy provider with no OpenAI-shaped /v1/models (hosted Anthropic, Bedrock) always reports a
+        // discovery Error - that alone must not read as a failure once the capability scan corroborates the
+        // endpoint is reachable and authenticating.
+        var capabilities = CapabilityStore();
+        var interactionStatus = new ProviderInteractionStatusStore();
+        var facade = Facade(
+            StoreWithProvider(),
+            DiscoveryUnsupported(),
+            AlwaysOk(OpenAiBody),
+            capabilities,
+            interactionStatus);
+
+        var result = await facade.RefreshFromEndpointAsync("lmstudio", TestContext.Current.CancellationToken);
+
+        var provider = Assert.Single(result.Value!.Providers);
+        Assert.NotNull(provider.LastInteraction);
+        Assert.True(provider.LastInteraction!.Ok);
+    }
+
+    [Fact]
+    public async Task RefreshFromEndpoint_WhenDiscoveryFailsAndTheScanAlsoDetectsNothing_RecordsAFailure()
+    {
+        var capabilities = CapabilityStore();
+        var interactionStatus = new ProviderInteractionStatusStore();
+        var facade = Facade(
+            StoreWithProvider(),
+            DiscoveryUnsupported(),
+            AlwaysNotFound(),
+            capabilities,
+            interactionStatus);
+
+        var result = await facade.RefreshFromEndpointAsync("lmstudio", TestContext.Current.CancellationToken);
+
+        var provider = Assert.Single(result.Value!.Providers);
+        Assert.NotNull(provider.LastInteraction);
+        Assert.False(provider.LastInteraction!.Ok);
+    }
+
+    [Fact]
+    public async Task RefreshFromEndpoint_ANewlySuccessfulRefresh_ClearsAPriorFailure()
+    {
+        var interactionStatus = new ProviderInteractionStatusStore();
+        interactionStatus.RecordFailure("lmstudio", "Refresh from endpoint", "stale failure");
+        var facade = Facade(StoreWithProvider(), DiscoveryOk(OpenAiBody), interactionStatusStore: interactionStatus);
+
+        var result = await facade.RefreshFromEndpointAsync("lmstudio", TestContext.Current.CancellationToken);
+
+        Assert.True(Assert.Single(result.Value!.Providers).LastInteraction!.Ok);
+    }
+
+    [Fact]
+    public async Task RefreshFromEndpoint_WithoutAnInteractionStatusStoreWired_StillSucceeds()
+    {
+        // ManagementFacade is constructible without this store too (ProxyServer builds its own instance) -
+        // BuildProvidersResponse must degrade to a null LastInteraction rather than throw.
+        var facade = Facade(StoreWithProvider(), DiscoveryOk(OpenAiBody));
+
+        var result = await facade.RefreshFromEndpointAsync("lmstudio", TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success);
+        Assert.Null(Assert.Single(result.Value!.Providers).LastInteraction);
     }
 
     public void Dispose() => _temp.Dispose();

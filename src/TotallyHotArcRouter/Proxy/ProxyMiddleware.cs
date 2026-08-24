@@ -6,6 +6,7 @@ using System.Text.Json.Serialization;
 using Amazon.BedrockRuntime;
 using Amazon.BedrockRuntime.Model;
 using Amazon.Runtime;
+using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Bedrock;
 using TotallyHot.ArcRouter.Proxy.Translation;
@@ -94,9 +95,11 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     private readonly Router.Embeddings.PendingTaskEmbeddingCache? _pendingTaskEmbeddingCache;
     private readonly PendingRequestCostCache? _pendingRequestCostCache;
     private readonly PendingRequestProvenanceCache? _pendingRequestProvenanceCache;
+    private readonly PendingResponseTextCache? _pendingResponseTextCache;
     private readonly ITranscriptStore? _transcriptStore;
     private readonly InFlightRequestGauge? _inFlightGauge;
     private readonly IOptionsMonitor<Models.RoutingOptions>? _routingOptionsMonitor;
+    private readonly IOptionsMonitor<Judge.JudgeOptions>? _judgeOptionsMonitor;
 
     // The rate the router's own tokens are charged at (see RoutingOptions.SelfHostedRouterPricePerMillionTokens).
     // Read once at construction rather than per request: it is a static amortization figure, not a catalog
@@ -185,6 +188,14 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// <see cref="RequestInterceptor"/>) and its later-arriving verifier score. Defaults to
     /// <see langword="null"/> (no entries recorded), so existing callers/tests are unaffected.
     /// </param>
+    /// <param name="pendingResponseTextCache">
+    /// Optional bridge (docs/router/geval-shadow-scoring-plan.md §Raw-text preservation) between this
+    /// request's already-extracted response text and the shadow judge's later-arriving background job -
+    /// mirrors <paramref name="pendingTaskEmbeddingCache"/>'s role exactly, for a different value.
+    /// Populated at the same point <paramref name="responseTextExtractor"/>'s result is already in hand, so
+    /// this adds retention, not parsing. Defaults to <see langword="null"/> (no entries recorded), so
+    /// existing callers/tests are unaffected.
+    /// </param>
     /// <param name="transcriptStore">
     /// Optional opt-in transcript store (docs/router/self-organizing-classification-plan.md Phase T1a/T1b).
     /// When supplied and transcript capture is enabled, one row is inserted per served request with the
@@ -205,6 +216,14 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// transcript writes without a restart. Defaults to <see langword="null"/>, which is treated as
     /// adaptive routing being disabled - matching <see cref="Models.RoutingOptions.EnableAdaptiveRouting"/>'s
     /// own off-by-default coded value.
+    /// </param>
+    /// <param name="judgeOptionsMonitor">
+    /// Optional live shadow-judge options monitor, consulted at the response-text retention site so raw
+    /// response text is held for judging only while <see cref="Judge.JudgeOptions.Enabled"/> is actually
+    /// on. Read live rather than captured because that flag is operator-toggleable at runtime, and this is
+    /// the gate that decides whether raw text is retained at all - it must go off the moment the operator
+    /// says so, not at the next restart. Defaults to <see langword="null"/>, treated as the judge being
+    /// disabled, matching <see cref="Judge.JudgeOptions.Enabled"/>'s own off-by-default coded value.
     /// </param>
     public ProxyMiddleware(
         ILogger<ProxyMiddleware> logger,
@@ -230,9 +249,11 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         IOptions<Models.RoutingOptions>? routingOptions = null,
         PendingRequestCostCache? pendingRequestCostCache = null,
         PendingRequestProvenanceCache? pendingRequestProvenanceCache = null,
+        PendingResponseTextCache? pendingResponseTextCache = null,
         ITranscriptStore? transcriptStore = null,
         InFlightRequestGauge? inFlightGauge = null,
-        IOptionsMonitor<Models.RoutingOptions>? routingOptionsMonitor = null)
+        IOptionsMonitor<Models.RoutingOptions>? routingOptionsMonitor = null,
+        IOptionsMonitor<Judge.JudgeOptions>? judgeOptionsMonitor = null)
     {
         _logger = logger;
         _interceptor = interceptor;
@@ -259,9 +280,11 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         _pendingTaskEmbeddingCache = pendingTaskEmbeddingCache;
         _pendingRequestCostCache = pendingRequestCostCache;
         _pendingRequestProvenanceCache = pendingRequestProvenanceCache;
+        _pendingResponseTextCache = pendingResponseTextCache;
         _transcriptStore = transcriptStore;
         _inFlightGauge = inFlightGauge;
         _routingOptionsMonitor = routingOptionsMonitor;
+        _judgeOptionsMonitor = judgeOptionsMonitor;
         _selfHostedRouterPricePerMillionTokens =
             routingOptions?.Value.SelfHostedRouterPricePerMillionTokens ?? new Models.RoutingOptions().SelfHostedRouterPricePerMillionTokens;
 
@@ -1658,6 +1681,19 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         // non-exploratory provenance unconditionally.
         _pendingRequestCostCache?.Set(correlationId, estimatedCostUsd ?? 0m);
         _pendingRequestProvenanceCache?.Set(correlationId, isExploratory, propensity, classification?.Dimension);
+
+        // docs/router/geval-shadow-scoring-plan.md §Raw-text preservation: the response text is already in
+        // hand from the TryExtractText call above (responseSummary's source) - this adds retention only,
+        // for JudgeShadowScoreObserver's later-arriving background job to recover by TryTake. Gated on
+        // extraction having actually succeeded (responseText is only assigned when TryExtractText returns
+        // true) and on the judge being switched on right now - read from the monitor, not captured once,
+        // exactly like the EnableAdaptiveRouting gate below. That live read is the whole point here: the
+        // judge toggle is what authorizes retaining raw response text in memory at all, so switching it off
+        // has to stop retention immediately rather than at the next restart.
+        if (responseSummary is not null && (_judgeOptionsMonitor?.CurrentValue.Enabled ?? false))
+        {
+            _pendingResponseTextCache?.Set(correlationId, responseText);
+        }
 
         // docs/router/self-organizing-classification-plan.md Phase T1a/T1b: the transcript store's single
         // insert. Best-effort and off the hot path in spirit (the response has already been fully sent to

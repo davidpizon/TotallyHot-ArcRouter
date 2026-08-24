@@ -1307,6 +1307,29 @@ input[type="number"] {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* Error-toast stack (ToastHost), fixed to the top-center of the app window, above every tab/modal. z-index
+   500 is the toast layer reserved in aspirational-design.md #369 - higher than .overlay-backdrop's 50, so a
+   toast stays visible even while a modal is open. */
+@keyframes toast-enter {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.ls-toast-host {
+  position: fixed;
+  top: 88px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 500;
+  pointer-events: none;
+}
+
+.ls-toast {
+  width: min(90vw, 380px);
+  animation: toast-enter var(--dur-default) var(--ease-out-expo);
+  pointer-events: auto;
+}
+
 .disclosure-enter {
   animation: disclosure-enter var(--dur-default) var(--ease-out-expo);
   animation-fill-mode: backwards;

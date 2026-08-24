@@ -366,6 +366,24 @@ site uses; only the glyph inside changed):
 | `sliders` | `adjustments-horizontal` | "Config" glyph on a provider card |
 | `cpu-chip` | `cpu-chip` | routing/voter model row icon (fixed the former undefined `bot` reference) |
 
+### 4.4 Toasts
+
+App-wide error notifications (`ToastHost.razor`, driven by `ToastService`), used when a failure needs to
+be visible even though its source component has already re-rendered past the moment it happened - e.g.
+`ProvidersAdmin`'s "Refresh from endpoint" succeeding at the HTTP level while the router's own discovery
+failed underneath it (an expired API key). One `ToastHost` instance lives in `Dashboard.razor`'s shell, so
+a toast is visible regardless of which Governance sub-tab is active.
+
+- **Placement:** fixed, top-center, `top: 88px` (clear of the header/ticker), `z-index: 500` - the toast
+  layer reserved above `.overlay-backdrop` (`z-50`), so a toast stays visible even while a modal is open.
+- **Surface:** `.ds-surface-card-critical`, matching the "Proxy management API unreachable" banner's
+  critical-state styling elsewhere in Governance.
+- **Content:** `alert-triangle` icon (amber, `text-amber-400`, 20px), a bold title, a muted message line,
+  and an `x` close glyph (16px) - errors only, no success toasts.
+- **Stacking:** multiple toasts stack vertically, newest last, each independently dismissible.
+- **Dismissal:** auto-dismisses after 6 seconds (`ToastService.AutoDismissAfter`) or on the close glyph,
+  whichever comes first. See `MOTION.md` for the enter/exit timing.
+
 ## 5. Layout & Spacing
 
 - **Fixed, non-scrolling shell**: `html,body,#root{height:100%;overflow:hidden}` — the whole app is

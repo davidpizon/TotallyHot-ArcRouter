@@ -130,6 +130,21 @@ public sealed class ProvidersAdminLoadedTests
         return cut;
     }
 
+    /// <summary>Same as <see cref="NewContext"/>, but also registers a <see cref="ToastService"/> so a mutation's toast can be asserted on.</summary>
+    private static (BunitContext Context, ToastService Toasts) NewContextWithToasts(StubTransport transport)
+    {
+        var toasts = new ToastService();
+        var ctx = new BunitContext();
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
+        ctx.Services.AddSingleton(toasts);
+        ctx.Services.AddSingleton(new ProviderAdminStore(
+            managementAddress: "http://127.0.0.1:59995",
+            adminToken: "test-token",
+            transport: transport,
+            toasts: toasts));
+        return (ctx, toasts);
+    }
+
     /// <summary>
     /// Finds a button by label <em>inside the open modal</em>. Scoping matters: each provider card carries
     /// its own budget "Save", and those precede the dialog in the DOM - an unscoped
@@ -261,6 +276,48 @@ public sealed class ProvidersAdminLoadedTests
 
         cut.WaitForAssertion(() => transport.Requests.Should().Contain(r =>
             r.Path.EndsWith("admin/providers/anthropic/refresh-from-endpoint", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void A_provider_whose_last_interaction_failed_shows_a_warning_icon()
+    {
+        var transport = new StubTransport { ResponseOverride = ProvidersJsonWithFailedInteraction };
+        using var ctx = NewContext(transport);
+
+        var cut = RenderLoaded(ctx);
+
+        cut.Markup.Should().Contain("Refresh from endpoint failed");
+        cut.Markup.Should().Contain("Provider returned 401");
+    }
+
+    [Fact]
+    public void A_provider_with_no_recorded_interaction_shows_no_warning_icon()
+    {
+        // ProvidersJson (the default fixture) carries no lastInteraction on any provider.
+        var transport = new StubTransport();
+        using var ctx = NewContext(transport);
+
+        var cut = RenderLoaded(ctx);
+
+        cut.Markup.Should().NotContain("Refresh from endpoint failed");
+    }
+
+    [Fact]
+    public void Refreshing_a_provider_whose_refresh_failed_raises_a_toast()
+    {
+        // The motivating bug: RefreshFromEndpointAsync returns 200 OK even when the router's discovery
+        // failed (an expired API key), so ProvidersAdmin.RunAsync's own thrown-exception catch never fires -
+        // ProviderAdminStore.RefreshFromEndpointAsync must notice via LastInteraction and raise the toast
+        // itself.
+        var transport = new StubTransport { ResponseOverride = ProvidersJsonWithFailedInteraction };
+        var (ctx, toasts) = NewContextWithToasts(transport);
+        using var _ = ctx;
+        var cut = RenderLoaded(ctx);
+
+        cut.Find("button[aria-label='Refresh provider openai']").Click();
+
+        cut.WaitForAssertion(() => toasts.Toasts.Should().ContainSingle());
+        toasts.Toasts[0].Message.Should().Contain("401");
     }
 
     [Fact]
@@ -713,6 +770,49 @@ public sealed class ProvidersAdminLoadedTests
                 "projections": {
                   "tokens": { "timeToExhaustion": "00:19:00", "burnRatePerMinute": 2210.5 }
                 }
+              }
+            }
+          ]
+        }
+        """;
+
+    // Same anthropic/ollama/openai providers as ProvidersJson, but openai's lastInteraction carries a
+    // failed "Refresh from endpoint" - the expired-API-key scenario that motivated the warning icon/toast.
+    private const string ProvidersJsonWithFailedInteraction = """
+        {
+          "providers": [
+            {
+              "key": "anthropic",
+              "name": "Anthropic Prod",
+              "baseUrl": "https://api.anthropic.com",
+              "authHeaderName": "x-api-key",
+              "authHeaderScheme": "",
+              "hasApiKey": true,
+              "apiKeyEnvVar": null,
+              "providerType": "Anthropic",
+              "models": [],
+              "headers": [],
+              "isFree": false,
+              "enabled": true
+            },
+            {
+              "key": "openai",
+              "name": "OpenAI",
+              "baseUrl": "https://api.openai.com/v1",
+              "authHeaderName": "Authorization",
+              "authHeaderScheme": "Bearer",
+              "hasApiKey": false,
+              "apiKeyEnvVar": "OPENAI_API_KEY",
+              "providerType": "OpenAI",
+              "models": [],
+              "headers": [],
+              "isFree": false,
+              "enabled": true,
+              "lastInteraction": {
+                "ok": false,
+                "operation": "Refresh from endpoint",
+                "message": "Provider returned 401 for https://api.openai.com/v1/models.",
+                "atUtc": "2026-08-24T09:00:00Z"
               }
             }
           ]

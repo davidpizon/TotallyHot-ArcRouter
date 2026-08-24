@@ -57,6 +57,12 @@ namespace TotallyHot.ArcRouter.Gui.Admin;
 /// currently populated for <c>anthropic</c> only, or <see langword="null"/> when nothing has been fetched
 /// yet (no Admin API key configured, or the first cycle hasn't run).
 /// </param>
+/// <param name="LastInteraction">
+/// The outcome of the most recent admin-initiated interaction with this provider (refresh from endpoint,
+/// capability scan, discovery), or <see langword="null"/> when none has happened since the proxy started.
+/// Drives the warning icon shown next to the provider name in Governance &gt; Providers when the last
+/// interaction failed - e.g. an expired API key.
+/// </param>
 public sealed record ProviderAdminView(
     string Key,
     string? Name,
@@ -77,7 +83,20 @@ public sealed record ProviderAdminView(
     string WindowKind = "Monthly",
     DateTimeOffset? NextResetUtc = null,
     bool HasStoredAdminKey = false,
-    ProviderReportedUsageAdminView? ReportedUsage = null);
+    ProviderReportedUsageAdminView? ReportedUsage = null,
+    ProviderInteractionStatusAdminView? LastInteraction = null);
+
+/// <summary>
+/// The outcome of the most recent admin-initiated interaction with one provider (refresh from endpoint,
+/// capability scan, discovery), mirroring the proxy's <c>ProviderInteractionStatus</c>. Backs the
+/// Governance card's warning icon: a card whose <see cref="Ok"/> is <see langword="false"/> shows a
+/// tooltip naming <see cref="Operation"/> and <see cref="Message"/>.
+/// </summary>
+/// <param name="Ok">Whether the interaction succeeded.</param>
+/// <param name="Operation">A short label for the interaction (e.g. <c>"Refresh from endpoint"</c>).</param>
+/// <param name="Message">A human-readable failure reason, or <see langword="null"/> when <paramref name="Ok"/> is set.</param>
+/// <param name="AtUtc">When the interaction completed.</param>
+public sealed record ProviderInteractionStatusAdminView(bool Ok, string Operation, string? Message, DateTimeOffset AtUtc);
 
 /// <summary>A provider's own reported per-model daily token usage (docs/router/secrets-at-rest-plan.md §8.1), mirroring the proxy's <c>ProviderReportedUsageView</c>.</summary>
 /// <param name="Rows">Every currently-stored row, ordered by day then model.</param>

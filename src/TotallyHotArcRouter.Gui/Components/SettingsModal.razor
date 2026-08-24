@@ -1,6 +1,7 @@
 @* System settings modal: telemetry connection settings, the adaptive-routing toggle and sample size
-   (docs/router/self-organizing-classification-plan.md Phase T6), plus destructive actions gated behind a
-   typed confirmation word. *@
+   (docs/router/self-organizing-classification-plan.md Phase T6), the shadow-judge toggle and backbone
+   picker (docs/router/geval-shadow-scoring-plan.md), plus destructive actions gated behind a typed
+   confirmation word. *@
 @using TotallyHot.ArcRouter.Gui.Telemetry
 @inject LiveDataStore LiveDataStore
 @inject IGuiSettingsStore SettingsStore
@@ -66,6 +67,40 @@
                         </span>
                     }
                 </div>
+            </div>
+
+            @* Shadow judge (docs/router/geval-shadow-scoring-plan.md). The model list offers only free,
+               enabled, OpenAI-compatible models from the Providers screen - the same list the server
+               validates a save against. *@
+            <div class="space-y-2">
+                <label class="text-xs text-slate-400 font-medium uppercase tracking-widest">
+                    Shadow Judge
+                </label>
+                <div class="flex items-center gap-3">
+                    <button @onclick="ToggleJudgeEnabled"
+                            aria-label="Toggle shadow judge"
+                            class="shrink-0 flex items-center gap-1.5 rounded px-2 py-1 text-xs font-semibold border transition-colors @(_judgeEnabled ? "toggle-enabled" : "toggle-disabled")">
+                        <span class="w-1.5 h-1.5 rounded-full @(_judgeEnabled ? "toggle-dot-enabled" : "toggle-dot-disabled")"></span>
+                        @(_judgeEnabled ? "On" : "Off")
+                    </button>
+                    <select id="judge-model"
+                            value="@_judgeModelName"
+                            @onchange="OnJudgeModelChange"
+                            disabled="@(_eligibleJudgeModels.Count == 0)"
+                            class="flex-1 min-w-0 px-3 py-2 text-sm font-mono ds-input">
+                        <option value="">Automatic</option>
+                        @foreach (var model in _eligibleJudgeModels)
+                        {
+                            <option value="@model">@model</option>
+                        }
+                    </select>
+                </div>
+                @if (_eligibleJudgeModels.Count == 0)
+                {
+                    <p class="text-xs text-amber-400">
+                        No free model is configured. Mark a provider as free in Providers to give the judge a backbone.
+                    </p>
+                }
                 @if (_routerSettingsMessage is not null)
                 {
                     <p class="text-xs @(_routerSettingsSaveFailed ? "text-red-400" : "text-emerald-400")">@_routerSettingsMessage</p>
@@ -157,6 +192,9 @@
     private bool _adaptiveRoutingEnabled;
     private int _embeddingMemoryCapacity = RecommendedEmbeddingMemoryCapacity;
     private string _sampleSizeText = RecommendedEmbeddingMemoryCapacity.ToString();
+    private bool _judgeEnabled;
+    private string _judgeModelName = string.Empty;
+    private IReadOnlyList<string> _eligibleJudgeModels = [];
     private bool _saving;
     private string? _routerSettingsMessage;
     private bool _routerSettingsSaveFailed;
@@ -183,6 +221,15 @@
             _adaptiveRoutingEnabled = settings.AdaptiveRoutingEnabled;
             _embeddingMemoryCapacity = settings.EmbeddingMemoryCapacity;
             _sampleSizeText = settings.EmbeddingMemoryCapacity.ToString();
+            _judgeEnabled = settings.JudgeEnabled;
+            _eligibleJudgeModels = settings.EligibleJudgeModels;
+
+            // A stored pick that is no longer eligible is shown as Automatic rather than as a phantom
+            // option: that is what the selector will actually do at call time, and re-offering the dead
+            // name would let the operator "save" a choice the server would now reject.
+            _judgeModelName = _eligibleJudgeModels.Contains(settings.JudgeModelName, StringComparer.OrdinalIgnoreCase)
+                ? settings.JudgeModelName
+                : string.Empty;
         }
     }
 
@@ -197,6 +244,20 @@
     private void ToggleAdaptiveRouting()
     {
         _adaptiveRoutingEnabled = !_adaptiveRoutingEnabled;
+        ClearRouterSettingsMessage();
+    }
+
+    /// <summary>Flips the shadow-judge toggle and clears any stale save outcome from a previous attempt.</summary>
+    private void ToggleJudgeEnabled()
+    {
+        _judgeEnabled = !_judgeEnabled;
+        ClearRouterSettingsMessage();
+    }
+
+    /// <summary>Tracks the judge-model selection; an empty value is the explicit "Automatic" choice.</summary>
+    private void OnJudgeModelChange(ChangeEventArgs e)
+    {
+        _judgeModelName = (string?)e.Value ?? string.Empty;
         ClearRouterSettingsMessage();
     }
 
@@ -279,16 +340,27 @@
     // Reads the outcome off RouterSettingsAdminStore's own IsReachable/LastError rather than recomputing a
     // message from the caught exception - the store already resolved unreachable-vs-rejected via
     // IRouterSettingsAdminClient's isUnavailable flag, so recomputing it here would just duplicate that logic.
-    /// <summary>Clamps the Sample Size, then persists both adaptive-routing settings through <see cref="RouterSettingsAdminStore"/>.</summary>
+    /// <summary>Clamps the Sample Size, then persists the adaptive-routing and shadow-judge settings through <see cref="RouterSettingsAdminStore"/>.</summary>
     private async Task SaveRouterSettings()
     {
         ClampSampleSize();
 
         try
         {
-            await RouterSettingsStore.UpdateAsync(_adaptiveRoutingEnabled, _embeddingMemoryCapacity);
+            await RouterSettingsStore.UpdateAsync(
+                _adaptiveRoutingEnabled,
+                _embeddingMemoryCapacity,
+                _judgeEnabled,
+                _judgeModelName);
             _routerSettingsMessage = "Applied";
             _routerSettingsSaveFailed = false;
+
+            // The eligible list is recomputed server-side on every response, so a provider toggled in another
+            // window since this modal opened is reflected here without a reopen.
+            if (RouterSettingsStore.Settings is { } saved)
+            {
+                _eligibleJudgeModels = saved.EligibleJudgeModels;
+            }
         }
         catch (RouterSettingsAdminException)
         {

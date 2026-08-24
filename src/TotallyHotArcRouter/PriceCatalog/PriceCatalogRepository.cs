@@ -257,12 +257,23 @@ public sealed class PriceCatalogRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceName);
 
         using var connection = _database.OpenConnection();
+        using var transaction = connection.BeginTransaction();
+
         using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = "UPDATE aggregator_sources SET enabled = $enabled WHERE source_name = $name;";
         command.Parameters.AddWithValue("$enabled", enabled ? 1 : 0);
         command.Parameters.AddWithValue("$name", sourceName);
 
-        return command.ExecuteNonQuery() > 0;
+        var rowsAffected = command.ExecuteNonQuery();
+        if (rowsAffected > 0)
+        {
+            transaction.Commit();
+            return true;
+        }
+
+        transaction.Rollback();
+        return false;
     }
 
     /// <summary>

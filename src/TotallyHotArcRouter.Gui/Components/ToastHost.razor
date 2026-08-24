@@ -1,0 +1,41 @@
+@* App-wide error-toast stack, rendered once from Dashboard.razor's shell. Subscribes to ToastService the
+   same way every store-backed component subscribes to its store's Changed event - see the pattern in
+   ProvidersAdmin.razor's own IDisposable/OnInitialized pair. *@
+@implements IDisposable
+@inject ToastService Toasts
+
+@if (Toasts.Toasts.Count > 0)
+{
+    <div class="ls-toast-host flex flex-col items-center gap-2">
+        @foreach (var toast in Toasts.Toasts)
+        {
+            <div @key="toast.Id" class="ls-toast rounded-lg px-4 py-3 shadow-lg flex items-start gap-3 ds-surface-card-critical">
+                <Icon Name="alert-triangle" Size="20" Class="text-amber-400 shrink-0" />
+                <div class="min-w-0">
+                    <div class="text-sm font-semibold text-slate-200">@toast.Title</div>
+                    <div class="text-xs text-slate-400">@toast.Message</div>
+                </div>
+                <button @onclick="() => Toasts.Dismiss(toast.Id)"
+                        aria-label="Dismiss notification"
+                        class="text-slate-400 hover:text-slate-200 transition-colors shrink-0">
+                    <Icon Name="x" Size="16" />
+                </button>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    protected override void OnInitialized()
+    {
+        Toasts.Changed += HandleChanged;
+    }
+
+    /// <summary>Re-renders on the next UI thread tick whenever a toast is shown or dismissed.</summary>
+    private void HandleChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Toasts.Changed -= HandleChanged;
+    }
+}

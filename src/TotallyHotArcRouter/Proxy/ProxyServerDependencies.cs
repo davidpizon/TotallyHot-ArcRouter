@@ -70,6 +70,9 @@ public sealed record ProxyServerDependencies
     /// <summary>The Governance UI's Cluster Model panel API (Phase T5). <see langword="null"/> leaves it unmapped.</summary>
     public ClusterModelAdminDependencies? ClusterModelAdmin { get; init; }
 
+    /// <summary>The Governance UI's Router Model panel API (live-feedback-learning-plan.md Phase 5). <see langword="null"/> leaves it unmapped.</summary>
+    public LogRegModelAdminDependencies? LogRegModelAdmin { get; init; }
+
     /// <summary>The Governance UI's System Settings window API (Phase T6). <see langword="null"/> leaves it unmapped.</summary>
     public RouterSettingsAdminDependencies? RouterSettingsAdmin { get; init; }
 }
@@ -188,6 +191,21 @@ public sealed record ClusterModelAdminDependencies(
     IMemoryEntryStore MemoryEntryStore,
     ITranscriptStore TranscriptStore,
     IOptions<TranscriptOptions> TranscriptOptions,
+    IOptions<StorageOptions> StorageOptions);
+
+/// <summary>
+/// Backs <see cref="LogRegModelAdminGrpcService"/>, the Governance UI's Router Model panel
+/// (docs/router/live-feedback-learning-plan.md Phase 5), which reads the trained <c>logreg</c> voter
+/// artifact's status and runs a retrain. The service's third dependency, <c>IOptions&lt;RoutingOptions&gt;</c>,
+/// is not a member here because <see cref="ProxyServerDependencies.RoutingOptions"/> above already arrives
+/// unconditionally - re-declaring it in this group would only duplicate that registration.
+/// </summary>
+/// <param name="TrainingService">Performs the retrain.</param>
+/// <param name="MemoryEntryStore">The live memory entries a retrain draws on.</param>
+/// <param name="StorageOptions">Names the path the trained logreg model artifact is written to.</param>
+public sealed record LogRegModelAdminDependencies(
+    IEmbeddingLogRegTrainingService TrainingService,
+    IMemoryEntryStore MemoryEntryStore,
     IOptions<StorageOptions> StorageOptions);
 
 /// <summary>

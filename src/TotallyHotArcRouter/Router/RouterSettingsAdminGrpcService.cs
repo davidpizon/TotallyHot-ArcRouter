@@ -1,20 +1,24 @@
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Models;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Router;
 
 /// <summary>
-/// gRPC service backing the Governance UI's System Settings window's "Adaptive Routing" row
-/// (docs/router/self-organizing-classification-plan.md Phase T6): reads and mutates the two
-/// <see cref="RouterSettingsStore"/>-backed overrides layered on top of <see cref="RoutingOptions"/> -
-/// <see cref="RoutingOptions.EnableAdaptiveRouting"/> and <see cref="RoutingOptions.EmbeddingMemoryCapacity"/>.
+/// gRPC service backing the Governance UI's System Settings window's "Adaptive Routing" and "Shadow Judge"
+/// rows (docs/router/self-organizing-classification-plan.md Phase T6;
+/// docs/router/geval-shadow-scoring-plan.md): reads and mutates every
+/// <see cref="RouterSettingsStore"/>-backed override - <see cref="RoutingOptions.EnableAdaptiveRouting"/>
+/// and <see cref="RoutingOptions.EmbeddingMemoryCapacity"/> on <see cref="RoutingOptions"/>,
+/// <see cref="JudgeOptions.Enabled"/> and <see cref="JudgeOptions.ModelName"/> on <see cref="JudgeOptions"/>.
 /// Mapped by <see cref="TotallyHot.ArcRouter.Proxy.ProxyServer"/> onto the same loopback TLS endpoint as
 /// <c>TelemetryService</c> and the other admin services.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The one admin service on this endpoint that mutates <see cref="RoutingOptions"/> -
 /// <see cref="RoutingModeAdminGrpcService"/> stays deliberately read-only (§M3.2's settled "read-only
 /// reporting and settings mutation stay separate" convention). A successful <see cref="UpdateRouterSettings"/>
@@ -23,6 +27,14 @@ namespace TotallyHot.ArcRouter.Router;
 /// capacity was lowered - awaits <see cref="EmbeddingMemory.TrimToCurrentCapacityAsync"/> directly rather
 /// than relying solely on that reactive path, so the response's re-read values are guaranteed to reflect
 /// the trim rather than racing it.
+/// </para>
+/// <para>
+/// The judge settings live here rather than in a service of their own because they share this one's whole
+/// mechanism: the same <c>router_settings</c> table, the same reload token (which
+/// <see cref="RouterSettingsReloadToken"/> serves for both options types), and the same Save button. Their
+/// one addition is a validated field - a chosen judge model must be currently eligible per
+/// <see cref="JudgeModelSelector"/>, checked here the way the capacity bounds are.
+/// </para>
 /// </remarks>
 public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdminService.RouterSettingsAdminServiceBase
 {
@@ -34,6 +46,8 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
 
     private readonly RouterSettingsStore _store;
     private readonly IOptionsMonitor<RoutingOptions> _optionsMonitor;
+    private readonly IOptionsMonitor<JudgeOptions> _judgeOptionsMonitor;
+    private readonly JudgeModelSelector _judgeModelSelector;
     private readonly RouterSettingsReloadToken _reloadToken;
     private readonly EmbeddingMemory? _embeddingMemory;
     private readonly ILogger<RouterSettingsAdminGrpcService> _logger;
@@ -41,6 +55,8 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
     /// <summary>Initializes a new instance of the <see cref="RouterSettingsAdminGrpcService"/> class.</summary>
     /// <param name="store">The settings store persisted mutations are written to.</param>
     /// <param name="optionsMonitor">Reports the currently effective values after precedence is applied.</param>
+    /// <param name="judgeOptionsMonitor">Reports the shadow judge's currently effective settings, the same way <paramref name="optionsMonitor"/> does for routing.</param>
+    /// <param name="judgeModelSelector">Supplies the eligible judge-backbone list, both to populate the dropdown and to validate a save against it.</param>
     /// <param name="reloadToken">Triggered after a successful write so <paramref name="optionsMonitor"/> recomputes immediately.</param>
     /// <param name="logger">The logger.</param>
     /// <param name="embeddingMemory">
@@ -53,17 +69,23 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
     public RouterSettingsAdminGrpcService(
         RouterSettingsStore store,
         IOptionsMonitor<RoutingOptions> optionsMonitor,
+        IOptionsMonitor<JudgeOptions> judgeOptionsMonitor,
+        JudgeModelSelector judgeModelSelector,
         RouterSettingsReloadToken reloadToken,
         ILogger<RouterSettingsAdminGrpcService> logger,
         EmbeddingMemory? embeddingMemory = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(optionsMonitor);
+        ArgumentNullException.ThrowIfNull(judgeOptionsMonitor);
+        ArgumentNullException.ThrowIfNull(judgeModelSelector);
         ArgumentNullException.ThrowIfNull(reloadToken);
         ArgumentNullException.ThrowIfNull(logger);
 
         _store = store;
         _optionsMonitor = optionsMonitor;
+        _judgeOptionsMonitor = judgeOptionsMonitor;
+        _judgeModelSelector = judgeModelSelector;
         _reloadToken = reloadToken;
         _embeddingMemory = embeddingMemory;
         _logger = logger;
@@ -89,14 +111,31 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
                 $"embedding_memory_capacity must be between {MinEmbeddingMemoryCapacity} and {MaxEmbeddingMemoryCapacity} (got {request.EmbeddingMemoryCapacity})."));
         }
 
+        // Rejected rather than silently coerced to automatic: saving a model the selector would not
+        // actually call leaves the window showing a choice that is not in force, which is precisely the
+        // confusion the eligible-list-and-validate pair exists to prevent. Empty is always valid - it is
+        // the explicit "automatic" choice, not a missing one.
+        var judgeModelName = request.JudgeModelName ?? string.Empty;
+        if (!string.IsNullOrEmpty(judgeModelName) &&
+            !_judgeModelSelector.ListEligibleModels().Contains(judgeModelName, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new RpcException(new Status(
+                StatusCode.InvalidArgument,
+                $"judge_model_name '{judgeModelName}' is not an eligible judge backbone. It must name a model on a free, enabled provider, or be empty for automatic selection."));
+        }
+
         _store.SetBool(RouterSettingsStore.AdaptiveRoutingEnabledKey, request.AdaptiveRoutingEnabled);
         _store.SetInt(RouterSettingsStore.EmbeddingMemoryCapacityKey, request.EmbeddingMemoryCapacity);
+        _store.SetBool(RouterSettingsStore.JudgeEnabledKey, request.JudgeEnabled);
+        _store.SetString(RouterSettingsStore.JudgeModelNameKey, judgeModelName);
         _reloadToken.Trigger();
 
         _logger.LogInformation(
-            "Router settings updated: AdaptiveRoutingEnabled={AdaptiveRoutingEnabled} EmbeddingMemoryCapacity={EmbeddingMemoryCapacity}",
+            "Router settings updated: AdaptiveRoutingEnabled={AdaptiveRoutingEnabled} EmbeddingMemoryCapacity={EmbeddingMemoryCapacity} JudgeEnabled={JudgeEnabled} JudgeModelName={JudgeModelName}",
             request.AdaptiveRoutingEnabled,
-            request.EmbeddingMemoryCapacity);
+            request.EmbeddingMemoryCapacity,
+            request.JudgeEnabled,
+            judgeModelName);
 
         // Awaited directly rather than left to EmbeddingMemory's own OnChange subscription, so the
         // re-read below (and thus this response) reflects the trim's completion rather than racing it -
@@ -113,10 +152,21 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
     private Contract.RouterSettingsResponse BuildResponse()
     {
         var options = _optionsMonitor.CurrentValue;
-        return new Contract.RouterSettingsResponse
+        var judgeOptions = _judgeOptionsMonitor.CurrentValue;
+
+        var response = new Contract.RouterSettingsResponse
         {
             AdaptiveRoutingEnabled = options.EnableAdaptiveRouting,
             EmbeddingMemoryCapacity = options.EmbeddingMemoryCapacity,
+            JudgeEnabled = judgeOptions.Enabled,
+            JudgeModelName = judgeOptions.ModelName,
         };
+
+        // Recomputed on every read rather than cached: provider and model enablement change from the
+        // Providers screen independently of this window, so a list captured earlier could offer a model
+        // that has since stopped being eligible.
+        response.EligibleJudgeModels.AddRange(_judgeModelSelector.ListEligibleModels());
+
+        return response;
     }
 }
