@@ -66,6 +66,16 @@
                                 {
                                     <span class="rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider font-semibold ds-badge-success">@api</span>
                                 }
+                                @* Persists until the next successful interaction with this provider (refresh,
+                                   scan, or save) - see ManagementFacade.RefreshFromEndpointAsync's
+                                   RecordRefreshOutcome. Reuses the shared floating tooltip rather than
+                                   title= for the same clipping/keyboard reasons as the action buttons below. *@
+                                @if (provider.LastInteraction is { Ok: false } failure)
+                                {
+                                    <span data-tip="@FailureTip(failure)" aria-describedby="ls-tooltip" class="text-amber-400 flex items-center">
+                                        <Icon Name="alert-triangle" Size="16" />
+                                    </span>
+                                }
                             </div>
                             <div class="text-xs text-slate-500 mt-0.5 font-mono truncate">@provider.BaseUrl</div>
                         </div>
@@ -664,6 +674,10 @@
     {
         await RunAsync(() => Store.RefreshFromEndpointAsync(key));
     }
+
+    /// <summary>The warning icon's tooltip text for a provider whose last admin interaction failed.</summary>
+    private static string FailureTip(ProviderInteractionStatusAdminView failure) =>
+        $"{failure.Operation} failed {FormatUtc(failure.AtUtc)}: {failure.Message}";
 
     /// <summary>The API-flavor badge labels a provider's last capability scan detected, if any.</summary>
     private static IEnumerable<string> DetectedApis(ProviderEndpointCapabilitiesView? capabilities)

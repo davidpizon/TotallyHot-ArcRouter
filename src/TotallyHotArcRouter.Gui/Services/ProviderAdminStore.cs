@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Linq;
 using TotallyHot.ArcRouter.Gui.Admin;
 using Microsoft.Extensions.Logging;
 
@@ -21,6 +22,7 @@ public sealed class ProviderAdminStore
 
     private readonly ProviderAdminClient _client;
     private readonly ILogger<ProviderAdminStore>? _logger;
+    private readonly ToastService? _toasts;
 
     /// <summary>Initializes a new instance of the <see cref="ProviderAdminStore"/> class.</summary>
     /// <param name="logger">Optional logger.</param>
@@ -39,13 +41,19 @@ public sealed class ProviderAdminStore
     /// takes its <see cref="HttpClient"/> from the caller for the same reason; this extends that seam the
     /// one level up that <c>ProvidersAdmin</c> needs.
     /// </param>
+    /// <param name="toasts">
+    /// App-wide error-toast notifications; <see langword="null"/> (a test's default) simply skips raising
+    /// toasts. See <see cref="ToastService"/>.
+    /// </param>
     public ProviderAdminStore(
         ILogger<ProviderAdminStore>? logger = null,
         string managementAddress = DefaultManagementAddress,
         string? adminToken = null,
-        HttpMessageHandler? transport = null)
+        HttpMessageHandler? transport = null,
+        ToastService? toasts = null)
     {
         _logger = logger;
+        _toasts = toasts;
         var normalized = managementAddress.EndsWith('/') ? managementAddress : managementAddress + "/";
         var httpClient = transport is null ? new HttpClient() : new HttpClient(transport);
         httpClient.BaseAddress = new Uri(normalized);
@@ -112,6 +120,7 @@ public sealed class ProviderAdminStore
             IsReachable = false;
             LastError = ex.Message;
             _logger?.LogWarning(ex, "Failed to load providers from the management API.");
+            _toasts?.ShowError("Providers unreachable", ex.Message);
         }
         finally
         {
@@ -204,24 +213,50 @@ public sealed class ProviderAdminStore
     /// flavors and re-runs dialect detection. All of this happens on the router in one request; this method
     /// just triggers it and publishes the fresh result, the same as every other mutation here.
     /// </summary>
-    /// <exception cref="ProviderAdminException">The provider is unknown or the request failed.</exception>
-    public Task RefreshFromEndpointAsync(string key, CancellationToken cancellationToken = default) =>
-        MutateAsync(() => _client.RefreshFromEndpointAsync(key, cancellationToken));
+    /// <remarks>
+    /// This is the one call where a rejected credential (e.g. an expired API key) does not surface as a
+    /// thrown <see cref="ProviderAdminException"/> - the request itself still succeeds, since the router
+    /// noticed the discovery/scan failed and simply left the model list untouched (see
+    /// <c>ManagementFacade.RefreshFromEndpointAsync</c>). The failure instead travels back inside the
+    /// refreshed provider's own <see cref="ProviderAdminView.LastInteraction"/>, which this method checks
+    /// after the mutation to raise the toast the caller would otherwise never see.
+    /// </remarks>
+    /// <exception cref="ProviderAdminException">The provider is unknown or the request failed outright.</exception>
+    public async Task RefreshFromEndpointAsync(string key, CancellationToken cancellationToken = default)
+    {
+        await MutateAsync(() => _client.RefreshFromEndpointAsync(key, cancellationToken));
+
+        var provider = Providers.FirstOrDefault(p => string.Equals(p.Key, key, StringComparison.OrdinalIgnoreCase));
+        if (provider?.LastInteraction is { Ok: false } failure)
+        {
+            _toasts?.ShowError($"{provider.Name ?? provider.Key}: {failure.Operation} failed", failure.Message ?? "Unknown error.");
+        }
+    }
 
     /// <summary>
     /// Shared implementation behind the provider mutation methods: runs the given write operation and
     /// publishes its returned provider list, letting a <see cref="ProviderAdminException"/> propagate
-    /// untouched so the caller can surface it inline.
+    /// untouched (after raising a toast) so the caller can also surface it inline.
     /// </summary>
     private async Task MutateAsync(Func<Task<IReadOnlyList<ProviderAdminView>>> mutation)
     {
-        // Success publishes the server's returned list; a ProviderAdminException (e.g. a validation 400)
-        // propagates so the UI can show the message inline, leaving the current list untouched.
-        Providers = await mutation();
-        IsReachable = true;
-        IsLoaded = true;
-        LastError = null;
-        Changed?.Invoke();
+        try
+        {
+            // Success publishes the server's returned list; a ProviderAdminException (e.g. a validation 400)
+            // propagates so the UI can show the message inline, leaving the current list untouched.
+            Providers = await mutation();
+            IsReachable = true;
+            IsLoaded = true;
+            LastError = null;
+            Changed?.Invoke();
+        }
+        catch (ProviderAdminException ex)
+        {
+            // Every admin pane's mutations flow through this one method, so this is the single place a
+            // toast covers a rejected save/refresh/toggle/etc. app-wide - not just the Providers pane.
+            _toasts?.ShowError("Action failed", ex.Message);
+            throw;
+        }
     }
 
     /// <summary>
@@ -271,6 +306,7 @@ public sealed class ProviderAdminStore
             IsReachable = false;
             LastError = ex.Message;
             _logger?.LogWarning(ex, "Failed to load price overrides from the management API.");
+            _toasts?.ShowError("Price overrides unreachable", ex.Message);
         }
         finally
         {
@@ -290,14 +326,22 @@ public sealed class ProviderAdminStore
 
     private async Task MutatePriceOverridesAsync(Func<Task<IReadOnlyList<PriceOverrideView>>> mutation, CancellationToken cancellationToken)
     {
-        PriceOverrides = await mutation();
-        // An override can change whether a model resolves (or whether the resolved price is approximate),
-        // so the diagnosis view has to be refreshed alongside the override list itself, not just on the
-        // next explicit LoadPriceOverridesAsync call.
-        PriceResolutionDiagnosis = await _client.GetPriceResolutionDiagnosisAsync(cancellationToken);
-        IsReachable = true;
-        LastError = null;
-        Changed?.Invoke();
+        try
+        {
+            PriceOverrides = await mutation();
+            // An override can change whether a model resolves (or whether the resolved price is approximate),
+            // so the diagnosis view has to be refreshed alongside the override list itself, not just on the
+            // next explicit LoadPriceOverridesAsync call.
+            PriceResolutionDiagnosis = await _client.GetPriceResolutionDiagnosisAsync(cancellationToken);
+            IsReachable = true;
+            LastError = null;
+            Changed?.Invoke();
+        }
+        catch (ProviderAdminException ex)
+        {
+            _toasts?.ShowError("Action failed", ex.Message);
+            throw;
+        }
     }
 }
 

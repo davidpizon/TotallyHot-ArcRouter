@@ -52,9 +52,15 @@ public sealed class ScanCapabilitiesTests : IDisposable
     private static ManagementFacade Facade(
         IProviderConfigStore store,
         ProviderEndpointScanner? scanner = null,
-        ToolCallCapabilityStore? capabilityStore = null) =>
+        ToolCallCapabilityStore? capabilityStore = null,
+        IProviderInteractionStatusStore? interactionStatusStore = null) =>
         new(store, Mock.Of<IEnvironmentVariableProvider>(), new HttpClient(),
-            new ManagementFacadeDependencies { EndpointScanner = scanner, CapabilityStore = capabilityStore });
+            new ManagementFacadeDependencies
+            {
+                EndpointScanner = scanner,
+                CapabilityStore = capabilityStore,
+                InteractionStatusStore = interactionStatusStore,
+            });
 
     // ----- The explicit scan endpoint -----
 
@@ -242,6 +248,33 @@ public sealed class ScanCapabilitiesTests : IDisposable
         Assert.NotNull(stored);
         Assert.False(stored!.OpenAiCompatible);
         Assert.False(string.IsNullOrWhiteSpace(stored.ScanError));
+    }
+
+    // ----- Scan outcome also feeds LastInteraction -----
+
+    [Fact]
+    public async Task ScanCapabilities_OnSuccess_RecordsASuccessfulInteraction()
+    {
+        var interactionStatus = new ProviderInteractionStatusStore();
+        var facade = Facade(StoreWithProvider(), AlwaysOk(OpenAiBody), CapabilityStore(), interactionStatus);
+
+        await facade.ScanCapabilitiesAsync("lmstudio", TestContext.Current.CancellationToken);
+
+        Assert.True(interactionStatus.Get("lmstudio")!.Ok);
+    }
+
+    [Fact]
+    public async Task ScanCapabilities_WhenTheScanErrors_RecordsAFailure()
+    {
+        var interactionStatus = new ProviderInteractionStatusStore();
+        var facade = Facade(StoreWithProvider(), AlwaysThrows(), CapabilityStore(), interactionStatus);
+
+        await facade.ScanCapabilitiesAsync("lmstudio", TestContext.Current.CancellationToken);
+
+        var status = interactionStatus.Get("lmstudio");
+        Assert.NotNull(status);
+        Assert.False(status!.Ok);
+        Assert.Equal("Scan capabilities", status.Operation);
     }
 
     // ----- The best-effort scan on provider save -----

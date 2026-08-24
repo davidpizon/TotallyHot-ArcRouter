@@ -208,6 +208,16 @@ flowchart TD
    tabs this one never reads `MockData` - it's live-only, since a log line has no meaningful
    mock/demo equivalent.
 
+### Toast host (`ToastHost.razor`)
+
+Rendered once in the shell, after `<main>` and before the settings modal, so it floats above every tab
+and (thanks to its `z-index: 500`) above the settings modal too. Driven by `ToastService`, a singleton
+subscribed the same way every other store-backed component subscribes to its store's `Changed` event.
+Any admin store can call `ToastService.ShowError` to surface a failure that would otherwise go unnoticed
+- e.g. `ProviderAdminStore.RefreshFromEndpointAsync` raising one when the router's "Refresh from
+endpoint" succeeded at the HTTP level but the underlying discovery failed (an expired provider API key).
+See [`DESIGN.md`](DESIGN.md) §4.4 and [`MOTION.md`](MOTION.md)'s Toast Enter/Exit pattern.
+
 ### Settings modal (`SettingsModal.razor`)
 
 Opened via the header's **Settings** button. A centered modal (dimmed/blurred backdrop, click-outside to

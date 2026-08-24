@@ -63,4 +63,11 @@ public sealed record ManagementFacadeDependencies
 
     /// <summary>Backs Cost Analytics' "Routing ROI" feed, <c>GET /admin/usage/routing-roi</c> (Phase T4).</summary>
     public ITaxonomyComparisonStore? ComparisonStore { get; init; }
+
+    /// <summary>
+    /// Tracks the outcome of the most recent admin-initiated interaction with each provider (refresh from
+    /// endpoint, capability scan, discovery), surfaced via <see cref="ProviderView.LastInteraction"/>. When
+    /// absent, every provider simply reports no interaction history.
+    /// </summary>
+    public IProviderInteractionStatusStore? InteractionStatusStore { get; init; }
 }

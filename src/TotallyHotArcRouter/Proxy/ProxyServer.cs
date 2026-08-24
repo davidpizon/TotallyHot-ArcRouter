@@ -346,6 +346,10 @@ namespace TotallyHot.ArcRouter.Proxy
                                         SecretWriter = managementApi.SecretWriter,
                                         SecretReader = managementApi.SecretReader,
                                         ComparisonStore = managementApi.TaxonomyComparisonStore,
+                                        // Pure in-memory and dependency-free, so it's constructed directly
+                                        // here rather than threaded through ManagementApiOptions like the
+                                        // other collaborators above - there is nothing for a caller to wire.
+                                        InteractionStatusStore = new ProviderInteractionStatusStore(),
                                     });
                                 endpoints.MapProviderAdminEndpoints(facade, managementToken);
                                 endpoints.MapUsageAdminEndpoints(facade, managementToken);

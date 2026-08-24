@@ -33,6 +33,9 @@ public static class MauiProgram
         // Services/GuiSettingsStore.cs. Registered before LiveDataStore so its factory below can read
         // the persisted address.
         builder.Services.AddSingleton<IGuiSettingsStore>(_ => new GuiSettingsStore());
+        // App-wide error-toast notifications (see Services/ToastService.cs and Components/ToastHost.razor).
+        // Registered before ProviderAdminStore so DI can inject it there.
+        builder.Services.AddSingleton<ToastService>();
         // Live routing telemetry from the TotallyHot.ArcRouter proxy (see Services/LiveDataStore.cs). A
         // singleton so the gRPC stream and accumulated conversation state survive navigation between
         // tabs; Dashboard.razor starts the connection on first render. The server address comes from

@@ -63,6 +63,19 @@ flowchart LR
 - **`TotallyHot.ArcRouter.Gui.Admin`** (plain `net10.0`) holds the DTOs and `ProviderAdminClient` HTTP logic,
   unit-tested in CI. **`ProviderAdminStore`** (MAUI) is the thin singleton the UI binds to, mirroring
   `LiveDataStore`.
+- **A failed refresh/scan/discovery is visible, not silent.** `RefreshFromEndpointAsync` still returns
+  `200 OK` even when the provider rejected the request outright (e.g. an expired API key) - the model
+  list reconciliation and capability scan are independent of whether discovery itself succeeded, so
+  the request as a whole "succeeds" with nothing changed. `ProviderInteractionStatusStore`
+  (in-memory, keyed by provider, reset on router restart) separately records the outcome of each
+  admin-initiated interaction and is surfaced as `ProviderView.LastInteraction` /
+  `ProviderAdminView.LastInteraction`. The Governance card shows a persistent amber warning icon and
+  tooltip while the last interaction failed, and `ProviderAdminStore.RefreshFromEndpointAsync` raises
+  an app-wide toast (`ToastService`, `docs/gui/dashboard.md`) the moment it happens - the warning
+  clears on the provider's next successful interaction, never on a timer. A discovery `Error` alone is
+  not treated as a failure when the capability scan corroborates the endpoint is reachable and
+  authenticating (e.g. hosted Anthropic has no OpenAI-shaped `/v1/models`, so discovery always reports
+  unsupported even though the provider is healthy) - see `ManagementFacade.RecordRefreshOutcome`.
 
 ## Provider types
 

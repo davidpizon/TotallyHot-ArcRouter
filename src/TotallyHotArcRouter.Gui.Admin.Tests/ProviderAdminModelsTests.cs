@@ -48,6 +48,51 @@ public sealed class ProviderAdminModelsTests
     }
 
     [Fact]
+    public void ProviderInteractionStatusAdminView_RecordEquality_ComparesAllFields()
+    {
+        var at = DateTimeOffset.Parse("2026-07-31T00:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
+        var a = new ProviderInteractionStatusAdminView(false, "Refresh from endpoint", "Provider returned 401.", at);
+        var b = new ProviderInteractionStatusAdminView(false, "Refresh from endpoint", "Provider returned 401.", at);
+        var nowOk = a with { Ok = true, Message = null };
+
+        Assert.Equal(a, b);
+        Assert.NotEqual(a, nowOk);
+        Assert.Contains("Refresh from endpoint", a.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ProviderAdminView_LastInteraction_DefaultsToNull()
+    {
+        var view = new ProviderAdminView("openai", "OpenAI API", "https://api.openai.com", "Authorization", [], []);
+
+        Assert.Null(view.LastInteraction);
+    }
+
+    [Fact]
+    public void ProviderAdminView_RoundTripsLastInteraction()
+    {
+        var options = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        var at = DateTimeOffset.Parse("2026-08-24T09:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
+        var view = new ProviderAdminView(
+            "openai",
+            "OpenAI API",
+            "https://api.openai.com",
+            "Authorization",
+            [],
+            [],
+            LastInteraction: new ProviderInteractionStatusAdminView(false, "Refresh from endpoint", "Provider returned 401 for https://api.openai.com/v1/models.", at));
+
+        var json = System.Text.Json.JsonSerializer.Serialize(view, options);
+        var roundTripped = System.Text.Json.JsonSerializer.Deserialize<ProviderAdminView>(json, options)!;
+
+        Assert.NotNull(roundTripped.LastInteraction);
+        Assert.False(roundTripped.LastInteraction!.Ok);
+        Assert.Equal("Refresh from endpoint", roundTripped.LastInteraction.Operation);
+        Assert.Equal(view.LastInteraction!.Message, roundTripped.LastInteraction.Message);
+        Assert.Equal(view.LastInteraction!.AtUtc, roundTripped.LastInteraction.AtUtc);
+    }
+
+    [Fact]
     public void ProviderHeaderWriteModel_RecordEquality_ComparesAllFields()
     {
         var a = new ProviderHeaderWriteModel("anthropic-version", "2023-06-01", null);
