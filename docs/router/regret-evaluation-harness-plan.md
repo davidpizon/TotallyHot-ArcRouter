@@ -5,10 +5,10 @@ Orchestrator ("the ensemble beats every single voter," "loop-complete routing be
 an assertion into a measurement, replaying CodeRouterBench through the router's actual decision code and
 a family of comparison baselines under one reward.
 
-**Status:** proposed. **Ordering:** after `docs/router/live-feedback-learning-plan.md` Phases 1-4
-(shipped) — see that plan's own note that measuring voters which structurally cannot fire would produce a
-benchmark of `dim_best` wearing an ensemble's name. Phases 5-6 of that plan remain open and do not block
-this one.
+**Status:** in progress — N1 and N2 shipped (see their status notes below); N3-N6 remain. **Ordering:**
+after `docs/router/live-feedback-learning-plan.md` Phases 1-4 (shipped) — see that plan's own note that
+measuring voters which structurally cannot fire would produce a benchmark of `dim_best` wearing an
+ensemble's name. Phases 5-6 of that plan remain open and do not block this one.
 
 ## Why this doc exists
 
@@ -265,13 +265,23 @@ voter infrastructure too, not evaluation-only.
 
 Landed incrementally; each is independently testable and mergeable.
 
-- **N1 — Metrics core + replay engine + Always-*m*.** `RegretReplayResult`, `RegretReplayEngine`,
-  `IRegretBaselineRouter`, the Always-*m* baseline, reward-matrix/oracle computation. Minimum slice that
-  produces a real number. Exit: replaying Always-Opus over a fixture outcome matrix matches a hand-computed
-  `CumReg`/`AvgPerf`/`Perf/$`.
-- **N2 — DimensionBest baseline.** Reuses `DimensionModelScoreMatrix.FromDatabase`. Exit: on a fixture
-  matrix where the frozen prior and the true per-task winner disagree, `CumReg` reflects the disagreement
-  (not zero).
+- **N1 — Metrics core + replay engine + Always-*m*. Shipped.** `RegretReplayResult`, `RegretReplayEngine`,
+  `IRegretBaselineRouter`, `AlwaysModelBaseline`, reward-matrix/oracle computation, all under
+  `src/TotallyHotArcRouter/CodeRouterBench/Evaluation/`. `RegretReplayContext` carries only
+  dimension + per-task candidate ids (derived from that task's own outcome cells, not a fixed global
+  roster — the candidate-set decision this doc left open) so a baseline's `Route` can never see the
+  outcome row before committing, enforced at the `RegretReplayEngine` call boundary rather than trusted
+  per-implementation. `Route` is synchronous (`string? Route(RegretReplayContext)`) since N1/N2's
+  baselines do no I/O; a baseline returns `null` for a task it cannot route (its target model was never
+  scored on it), and that task is excluded from its metrics rather than counted as a zero. Exit
+  criterion met: `RegretReplayEngineTests.Replay_AlwaysOpus_MatchesHandComputedMetrics` replays
+  Always-Opus over a fixture outcome matrix and asserts hand-computed `CumReg`/`AvgPerf`/`TotTok`/`$Total`/`Perf/$`.
+- **N2 — DimensionBest baseline. Shipped.** `DimensionBestBaseline` wraps the existing
+  `DimensionModelScoreMatrix.FromDatabase` (frozen probing-split prior, deliberately not
+  `DimBestVoter`'s live-memory-preferring version), ties broken by ordinal model id to match
+  `OrchestratorRoutingPolicy`'s own tie-break. Exit criterion met:
+  `DimensionBestBaselineTests.Replay_FrozenPriorDisagreesWithTruePerTaskWinner_RegretReflectsIt` uses a
+  fixture where the frozen prior and the true per-task winner disagree and asserts nonzero `CumReg`.
 - **N3 — Bandits (categorical context, ID + OOD).** LinUCB and LinTS, warm-start from the probing split,
   online per-arm updates during replay. Exit: a fixture where one arm is strictly better converges to
   picking it with high probability by the end of the stream; seed 42 warm-start is deterministic and
