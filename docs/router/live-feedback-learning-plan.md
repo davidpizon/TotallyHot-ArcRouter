@@ -143,7 +143,7 @@ flowchart LR
 | 3 | Embedding-backed `logreg` voter reading a local artifact | 2 | Shipped |
 | 4 | Training: OOD bootstrap + continual retrain from memory | 1, 3 | Shipped |
 | 5 | gRPC admin surface + Governance pane + CLI flag | 4 | Shipped |
-| 6 | Relocate TF-IDF machinery to the Phase N harness; delete the placeholder | 3 | Proposed |
+| 6 | Relocate TF-IDF machinery to the Phase N harness; delete the placeholder | 3 | Partially shipped — placeholder deleted; namespace relocation open |
 
 ---
 
@@ -430,6 +430,56 @@ standard, publish what was obtained and name the deviation rather than implying 
 the tree and the csproj (done); the reconciliation test skips or passes but never throws on either a
 synced or unsynced corpus (done); full suite passes with `memory_entries` empty *and* populated (done);
 namespace relocation (open, tracked above).
+
+## Embedding-model provenance on `memory_entries`
+
+Shipped alongside the phases above, and recorded here because this plan owns `memory_entries`.
+
+**The gap.** Every consumer of a stored embedding — `EmbeddingMemory.FindNearest`, the `logreg` trainer,
+the cluster trainer, and both artifact-backed voters — originally guarded compatibility by comparing
+**vector length** alone. That check catches a change to `EmbeddingOptions.EmbeddingDimension` loudly, and
+misses a change of embedding *model* at the same dimensionality entirely. 1024 is a common embedding
+width, so swapping BGE-large for another 1024-dimensional model left every length guard passing while the
+stored and freshly-computed vectors described unrelated coordinate spaces. Nothing warned, because
+nothing recorded which model had produced a given vector. `EmbeddingLogRegModelArtifact`'s own
+documentation already *claimed* that "changing `EmbeddingOptions.EmbeddingDimension` or the model URL
+invalidates a trained artifact" — only the first half was true.
+
+**What shipped.**
+
+- `IEmbeddingClient.ModelIdentity`, an additive default-interface property (the convention
+  `IRoutingPolicy.DecideOutcomeAsync` established, so the test fakes need no change).
+  `OnnxEmbeddingClient` returns its configured `ModelUrl`. The **producer names itself** rather than each
+  write site re-deriving the identity from configuration, so the recorded value describes what actually
+  ran, not what config says should have.
+- An additive `embedding_model` column on `memory_entries` (`RouterMemoryDatabase.MigrateEmbeddingModelColumn`),
+  stamped by both write paths — `EmbeddingMemory.AddEntryAsync` and `EmbeddingBackfillService`.
+- `MemoryEntry.MatchesEmbeddingModel`, applied by `FindNearest` and both trainers; and an
+  `EmbeddingModel` field on both trained artifacts, checked by `LogRegVoter` and `ClusterBestVoter`.
+
+**Why a null identity is read optimistically.** Rows and artifacts predating the column carry no identity.
+They are treated as **matching** the current model, not as mismatched. Treating null as a mismatch would
+silently discard every existing installation's entire accumulated corpus on the first startup after
+upgrading — a far worse outcome than the rare case it would protect against, and one the operator would
+have no way to anticipate. This is the same reasoning `RouterMemoryDatabase.MigrateProvenanceColumns`
+already applies to its own backfilled defaults: default to how the pre-existing rows actually behaved.
+The migration itself writes NULL rather than backfilling the current identity, because inventing an
+attribution this code cannot know would violate the "never fabricate" ground rule above.
+
+**Mismatched rows are filtered, never deleted.** A non-matching entry is skipped at read time and ages
+out naturally through the FIFO. Nothing purges it, deliberately: the rows remain available should a
+re-embedding path ever be built (see the recovery gap recorded in `../src/PLAN.md`).
+
+**A latent bug this also fixed.** `EmbeddingMemory.CosineSimilarity` throws on a length mismatch, and
+`FindNearest` previously scanned the whole working set with no pre-filter. After a dimension change the
+first surviving old entry therefore aborted the entire retrieval. Nothing failed visibly —
+`OrchestratorRoutingPolicy.CastVoteAsync` catches every non-cancellation exception and converts it to an
+abstention — but `memory_kNN` then abstained through an exception-and-error-log path on *every* request
+until the stale entries aged out of a 20,000-entry window. The routing outcome was always correct; the
+route to it was not. `FindNearest` now excludes incomparable entries before computing any similarity, so
+the voter abstains through the same clean "no usable data" path `LogRegVoter` and `ClusterBestVoter`
+already used. `CosineSimilarity` keeps its throw: reaching it with mismatched lengths is a genuine
+programming error, and softening it to a silent zero would hide the next such bug.
 
 ## Deliberately out of scope
 

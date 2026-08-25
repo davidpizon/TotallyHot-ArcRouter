@@ -6,7 +6,7 @@ The router keeps two independent learned memories, both persisted to the same SQ
 | Memory | Keyed by | Table | Bound | Feeds |
 |---|---|---|---|---|
 | `RouterMemory` | dimension → model | `dimension_scores` | one row per (dimension, model) | `dim_best` voter, `AgentAsARouter`, `UtilityRoutingPolicy`, `RequestInterceptor` |
-| `EmbeddingMemory` | task embedding | `memory_entries` | FIFO, `EmbeddingMemoryCapacity` (20,000) | `memory_kNN` voter, `logreg` training |
+| `EmbeddingMemory` | task embedding | `memory_entries` | FIFO, `EmbeddingMemoryCapacity` (20,000) | `memory_kNN` voter, `cluster_best` voter, `logreg` training, cluster training |
 
 This document covers the first. `EmbeddingMemory` is specified in PLAN.md Phase J and
 `docs/router/live-feedback-learning-plan.md`.

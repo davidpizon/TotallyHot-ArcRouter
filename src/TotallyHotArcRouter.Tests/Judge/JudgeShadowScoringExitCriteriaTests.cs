@@ -125,6 +125,7 @@ public class JudgeShadowScoringExitCriteriaTests
         new(
             store,
             new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions { EmbeddingSimilarityThreshold = 0.0, MaxNeighborCount = 10, EmbeddingMemoryCapacity = 100 }),
+            new StubEmbeddingClient(),
             NullLogger<EmbeddingMemory>.Instance);
 
     private sealed class FakeMemoryEntryStore : IMemoryEntryStore

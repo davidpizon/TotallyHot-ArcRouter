@@ -8,6 +8,7 @@ using TotallyHot.ArcRouter.Tests.CodeRouterBench;
 using TotallyHot.ArcRouter.Transcripts;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Tests.TestSupport;
 
 namespace TotallyHot.ArcRouter.Tests.Router.Orchestrator;
 
@@ -139,6 +140,7 @@ public class ClusterTrainingServiceTests
         var storageOptions = Options.Create(new StorageOptions { ClusterModelPath = modelPath });
         var voter = new ClusterBestVoter(
             memoryStore,
+            new StubEmbeddingClient(),
             Options.Create(new RoutingOptions()),
             storageOptions,
             NullLogger<ClusterBestVoter>.Instance);
@@ -146,6 +148,7 @@ public class ClusterTrainingServiceTests
         return new ClusterTrainingService(
             bootstrapSource,
             memoryStore,
+            new StubEmbeddingClient(),
             new NoOpTranscriptStore(),
             voter,
             Options.Create(new RoutingOptions { ClusterLiveSampleWeight = 1.0, ClusterMinTrainingRows = minTrainingRows, ClusterCountMin = 2, ClusterCountMax = 3 }),

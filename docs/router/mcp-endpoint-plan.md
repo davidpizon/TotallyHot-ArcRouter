@@ -1,5 +1,13 @@
 # Secure MCP endpoint + hardened REST over one shared ManagementFacade
 
+> **Status: implemented.** This plan had no status banner for some time, which left it reading as a
+> proposal after it had shipped. What exists today: `src/TotallyHotArcRouter/Mcp/` (`McpServer`,
+> `McpHostedService`, `McpBearerAuthMiddleware`, `McpOptions`, and the `Tools/` surface),
+> `Proxy/Management/ManagementFacade.cs` as the single shared core, and
+> `Proxy/Management/ManagementAccessToken.cs` backing the `X-Admin-Token` header that
+> `ProviderAdminEndpoints`/`UsageAdminEndpoints` now require on every `/admin/*` request. See
+> [`mcp-endpoint.md`](mcp-endpoint.md) for the as-built reference.
+
 ## Context
 
 ArcRouter runs as a long-lived loopback proxy daemon. Its management surfaces today are: the GUI's REST `/admin/*` API (providers, models, budgets) on plain-HTTP port 5001, and a TLS gRPC service on port 5002 (telemetry stream + price-source admin). We are adding an **MCP (Model Context Protocol) endpoint** so an MCP client (Claude Desktop/Code or any agent) can manage the router — and, in the same pass, **hardening the existing REST admin API** so both surfaces share one secure core.

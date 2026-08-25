@@ -1,11 +1,10 @@
 # Routing Telemetry
 
-> **Status: Implemented, but unverified in this repo's environment.** This repo's Linux CI/agent
-> environment has no .NET SDK and cannot install one (network policy blocks the installer), so
-> everything below was written by careful manual review against the existing, presumably-working
-> code — it has never been compiled or run here. Treat it as review-verified, not test-verified,
-> until it's built on a machine with the .NET 10 SDK. The server-side pieces do have unit test
-> coverage (see "Tests" below) that should be run there to confirm.
+> **Status: Implemented and test-verified.** An earlier revision of this banner said the telemetry
+> pipeline had "never been compiled or run here" because the authoring environment was a Linux agent
+> with no .NET SDK. That constraint no longer applies: the solution builds on the maintainer's Windows
+> workstation and in `.github/workflows/dotnet-ci.yml`, and the server-side unit tests listed under
+> "Tests" below run green as part of the full suite. Treat this document as test-verified.
 
 ## Purpose
 

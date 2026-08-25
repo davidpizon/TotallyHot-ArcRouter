@@ -107,7 +107,7 @@ public class MemoryKnnVoterTests
     }
 
     private static EmbeddingMemory CreateMemory() =>
-        new(new FakeMemoryEntryStore(), new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions { EmbeddingSimilarityThreshold = 0.5 }), NullLogger<EmbeddingMemory>.Instance);
+        new(new FakeMemoryEntryStore(), new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions { EmbeddingSimilarityThreshold = 0.5 }), new StubEmbeddingClient(), NullLogger<EmbeddingMemory>.Instance);
 
     private sealed class FakeMemoryEntryStore : IMemoryEntryStore
     {

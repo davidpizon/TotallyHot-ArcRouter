@@ -26,6 +26,7 @@ public static class ClusterModelArtifactSerializer
         var dto = new Dto
         {
             EmbeddingDimension = artifact.EmbeddingDimension,
+            EmbeddingModel = artifact.EmbeddingModel,
             Centroids = [.. artifact.Centroids],
             ChosenK = artifact.ChosenK,
             TrainedAtUtc = artifact.TrainedAtUtc,
@@ -60,7 +61,8 @@ public static class ClusterModelArtifactSerializer
             [.. dto.ClusterTopTerms.Select(t => (IReadOnlyList<string>)t)],
             dto.TrainedFrom,
             dto.BootstrapTaskCount,
-            dto.MemoryEntryCount);
+            dto.MemoryEntryCount,
+            dto.EmbeddingModel);
         Validate(artifact);
         return artifact;
     }
@@ -172,5 +174,9 @@ public static class ClusterModelArtifactSerializer
         /// <summary>Gets or sets the number of live memory entries that contributed to training.</summary>
         [JsonPropertyName("memoryEntryCount")]
         public int MemoryEntryCount { get; set; }
+
+        /// <summary>Gets or sets the identity of the embedding model this artifact was fitted against, or null for a pre-provenance artifact.</summary>
+        [JsonPropertyName("embeddingModel")]
+        public string? EmbeddingModel { get; set; }
     }
 }

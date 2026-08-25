@@ -32,6 +32,7 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// </remarks>
 public sealed class LogRegVoter : IRoutingVoter
 {
+    private readonly Embeddings.IEmbeddingClient? _embeddingClient;
     private readonly ILogger<LogRegVoter> _logger;
     private readonly string _modelPath;
     private readonly object _loadLock = new();
@@ -45,12 +46,22 @@ public sealed class LogRegVoter : IRoutingVoter
     /// vote, not in this constructor - so a missing file never fails DI startup.
     /// </summary>
     /// <param name="logger">The logger.</param>
+    /// <param name="embeddingClient">
+    /// Supplies the current <see cref="Embeddings.IEmbeddingClient.ModelIdentity"/>, compared against the
+    /// loaded artifact's own so a same-dimension embedding-model swap abstains instead of scoring against
+    /// weights fitted in a coordinate space that no longer exists.
+    /// </param>
     /// <param name="storageOptions">Supplies the model artifact's file path.</param>
-    public LogRegVoter(ILogger<LogRegVoter> logger, IOptions<StorageOptions> storageOptions)
+    public LogRegVoter(
+        ILogger<LogRegVoter> logger,
+        IOptions<StorageOptions> storageOptions,
+        Embeddings.IEmbeddingClient embeddingClient)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(storageOptions);
+        ArgumentNullException.ThrowIfNull(embeddingClient);
 
+        _embeddingClient = embeddingClient;
         _logger = logger;
         _modelPath = storageOptions.Value.ResolveLogRegModelPath();
     }
@@ -62,6 +73,12 @@ public sealed class LogRegVoter : IRoutingVoter
     /// </summary>
     /// <param name="logger">The logger.</param>
     /// <param name="model">The model artifact to score against.</param>
+    /// <param name="embeddingClient">
+    /// The client whose <see cref="Embeddings.IEmbeddingClient.ModelIdentity"/> the artifact's own is
+    /// compared against, or <see langword="null"/> to skip that comparison. Optional because this seam
+    /// exists for tests that supply an artifact directly and mostly do not care about embedding-model
+    /// provenance; a test that does care passes one rather than being forced to construct the disk path.
+    /// </param>
     /// <exception cref="FormatException">
     /// <paramref name="model"/> fails <see cref="EmbeddingLogRegModelArtifactSerializer.Validate"/> - e.g.
     /// a wrong-length class-weight vector or a non-finite weight value. Validating here, not just in
@@ -70,12 +87,16 @@ public sealed class LogRegVoter : IRoutingVoter
     /// <c>Deserialize</c> - from installing a malformed artifact that would otherwise throw
     /// <see cref="IndexOutOfRangeException"/> later while scoring.
     /// </exception>
-    public LogRegVoter(ILogger<LogRegVoter> logger, EmbeddingLogRegModelArtifact model)
+    public LogRegVoter(
+        ILogger<LogRegVoter> logger,
+        EmbeddingLogRegModelArtifact model,
+        Embeddings.IEmbeddingClient? embeddingClient = null)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(model);
         EmbeddingLogRegModelArtifactSerializer.Validate(model);
 
+        _embeddingClient = embeddingClient;
         _logger = logger;
         _modelPath = string.Empty;
         _model = model;
@@ -111,6 +132,21 @@ public sealed class LogRegVoter : IRoutingVoter
                 "logreg voter received a {ActualDimension}-dimensional embedding but its model was trained at {ExpectedDimension}; abstaining.",
                 context.TaskEmbedding.Length,
                 model.EmbeddingDimension);
+            return Task.FromResult(VoterVote.Abstain(Name));
+        }
+
+        if (_embeddingClient is not null &&
+            model.EmbeddingModel is not null &&
+            !string.Equals(model.EmbeddingModel, _embeddingClient.ModelIdentity, StringComparison.Ordinal))
+        {
+            // The same-dimension model swap the length check above structurally cannot see: the weights
+            // were fitted in a coordinate space the current client no longer produces, so scoring against
+            // them is arithmetic on unrelated numbers. A null EmbeddingModel is a pre-provenance artifact
+            // and is trusted, on the same reasoning MemoryEntry.MatchesEmbeddingModel documents.
+            _logger.LogWarning(
+                "logreg voter model was trained against embedding model {TrainedModel} but the current client is {CurrentModel}; abstaining until retrained.",
+                model.EmbeddingModel,
+                _embeddingClient.ModelIdentity);
             return Task.FromResult(VoterVote.Abstain(Name));
         }
 

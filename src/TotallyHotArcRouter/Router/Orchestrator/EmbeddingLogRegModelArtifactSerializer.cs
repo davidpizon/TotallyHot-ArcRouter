@@ -26,6 +26,7 @@ public static class EmbeddingLogRegModelArtifactSerializer
         var dto = new Dto
         {
             EmbeddingDimension = artifact.EmbeddingDimension,
+            EmbeddingModel = artifact.EmbeddingModel,
             ClassWeights = artifact.ClassWeights.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
             TrainedFrom = artifact.TrainedFrom,
             BootstrapTaskCount = artifact.BootstrapTaskCount,
@@ -50,7 +51,8 @@ public static class EmbeddingLogRegModelArtifactSerializer
             dto.ClassWeights,
             dto.TrainedFrom,
             dto.BootstrapTaskCount,
-            dto.MemoryEntryCount);
+            dto.MemoryEntryCount,
+            dto.EmbeddingModel);
         Validate(artifact);
         return artifact;
     }
@@ -130,5 +132,9 @@ public static class EmbeddingLogRegModelArtifactSerializer
         /// <summary>Gets or sets the number of live memory entries that contributed to training.</summary>
         [JsonPropertyName("memoryEntryCount")]
         public int MemoryEntryCount { get; set; }
+
+        /// <summary>Gets or sets the identity of the embedding model this artifact was fitted against, or null for a pre-provenance artifact.</summary>
+        [JsonPropertyName("embeddingModel")]
+        public string? EmbeddingModel { get; set; }
     }
 }

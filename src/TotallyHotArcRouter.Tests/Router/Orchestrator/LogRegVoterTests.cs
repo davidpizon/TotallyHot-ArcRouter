@@ -4,6 +4,7 @@ using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Orchestrator;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Tests.TestSupport;
 
 namespace TotallyHot.ArcRouter.Tests.Router.Orchestrator;
 
@@ -106,7 +107,7 @@ public class LogRegVoterTests
         {
             LogRegModelPath = Path.Combine(Path.GetTempPath(), "arcrouter-tests", Guid.NewGuid().ToString("N"), "logreg_voter_model.json"),
         });
-        var voter = new LogRegVoter(NullLogger<LogRegVoter>.Instance, storageOptions);
+        var voter = new LogRegVoter(NullLogger<LogRegVoter>.Instance, storageOptions, new StubEmbeddingClient());
         var context = new VotingContext(
             "live:bug_fixing",
             [new RoutingCandidate("model-x", "openai", IsFree: false)],
@@ -124,7 +125,7 @@ public class LogRegVoterTests
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, "logreg_voter_model.json");
         var storageOptions = Options.Create(new StorageOptions { LogRegModelPath = path });
-        var voter = new LogRegVoter(NullLogger<LogRegVoter>.Instance, storageOptions);
+        var voter = new LogRegVoter(NullLogger<LogRegVoter>.Instance, storageOptions, new StubEmbeddingClient());
         var context = new VotingContext(
             "live:bug_fixing",
             [new RoutingCandidate("model-x", "openai", IsFree: false)],

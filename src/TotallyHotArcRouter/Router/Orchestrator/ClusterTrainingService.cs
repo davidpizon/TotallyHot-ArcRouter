@@ -18,6 +18,7 @@ public sealed class ClusterTrainingService : IClusterTrainingService
 {
     private readonly OodClusterBootstrapSampleSource _bootstrapSource;
     private readonly IMemoryEntryStore _memoryEntryStore;
+    private readonly Embeddings.IEmbeddingClient _embeddingClient;
     private readonly ITranscriptStore _transcriptStore;
     private readonly ClusterBestVoter _voter;
     private readonly RoutingOptions _routingOptions;
@@ -31,6 +32,11 @@ public sealed class ClusterTrainingService : IClusterTrainingService
     /// </summary>
     /// <param name="bootstrapSource">Supplies OOD bootstrap training samples.</param>
     /// <param name="memoryEntryStore">Supplies live <c>memory_entries</c> training samples.</param>
+    /// <param name="embeddingClient">
+    /// Supplies <see cref="Embeddings.IEmbeddingClient.ModelIdentity"/> - used both to reject live entries
+    /// produced by a different embedding model and to stamp the resulting artifact with the identity its
+    /// centroids live in. Only the identity property is read; no inference runs here.
+    /// </param>
     /// <param name="transcriptStore">Supplies prompt text for top-TF-IDF-term naming, when transcript capture is enabled.</param>
     /// <param name="voter">The <c>cluster_best</c> voter to signal after a successful artifact swap.</param>
     /// <param name="routingOptions">The blend weight, k-sweep range, and degenerate-set threshold.</param>
@@ -40,6 +46,7 @@ public sealed class ClusterTrainingService : IClusterTrainingService
     public ClusterTrainingService(
         OodClusterBootstrapSampleSource bootstrapSource,
         IMemoryEntryStore memoryEntryStore,
+        Embeddings.IEmbeddingClient embeddingClient,
         ITranscriptStore transcriptStore,
         ClusterBestVoter voter,
         IOptions<RoutingOptions> routingOptions,
@@ -49,6 +56,7 @@ public sealed class ClusterTrainingService : IClusterTrainingService
     {
         ArgumentNullException.ThrowIfNull(bootstrapSource);
         ArgumentNullException.ThrowIfNull(memoryEntryStore);
+        ArgumentNullException.ThrowIfNull(embeddingClient);
         ArgumentNullException.ThrowIfNull(transcriptStore);
         ArgumentNullException.ThrowIfNull(voter);
         ArgumentNullException.ThrowIfNull(routingOptions);
@@ -58,6 +66,7 @@ public sealed class ClusterTrainingService : IClusterTrainingService
 
         _bootstrapSource = bootstrapSource;
         _memoryEntryStore = memoryEntryStore;
+        _embeddingClient = embeddingClient;
         _transcriptStore = transcriptStore;
         _voter = voter;
         _routingOptions = routingOptions.Value;
@@ -108,10 +117,12 @@ public sealed class ClusterTrainingService : IClusterTrainingService
             _logger.LogInformation(ex, "Cluster model retrain proceeding without an OOD bootstrap.");
         }
 
+        var modelIdentity = _embeddingClient.ModelIdentity;
         var liveEntries = await _memoryEntryStore.LoadAllAsync(cancellationToken).ConfigureAwait(false);
         var liveSamples = new List<ClusterTrainingSample>();
         var liveEntriesById = new List<MemoryEntry>();
         var memoryEntryCount = 0;
+        var skippedForModelMismatch = 0;
         foreach (var entry in liveEntries)
         {
             if (entry.TaskEmbedding.Length != dimension)
@@ -126,9 +137,27 @@ public sealed class ClusterTrainingService : IClusterTrainingService
                 continue;
             }
 
+            if (!entry.MatchesEmbeddingModel(modelIdentity))
+            {
+                // Same silent hazard EmbeddingLogRegTrainingService guards against, and it bites harder
+                // here: centroids averaged across two incomparable coordinate spaces would place every
+                // cluster somewhere meaningless, and ClusterBestVoter would then score live requests
+                // against them with no outward sign anything was wrong. Counted, reported once below.
+                skippedForModelMismatch++;
+                continue;
+            }
+
             liveSamples.Add(new ClusterTrainingSample(entry.TaskEmbedding, entry.Dimension, _routingOptions.ClusterLiveSampleWeight));
             liveEntriesById.Add(entry);
             memoryEntryCount++;
+        }
+
+        if (skippedForModelMismatch > 0)
+        {
+            _logger.LogWarning(
+                "Skipped {SkippedCount} memory entry/entries produced by a different embedding model than the current {ModelIdentity}; they are retained in the store but cannot be clustered.",
+                skippedForModelMismatch,
+                modelIdentity);
         }
 
         var samples = new List<ClusterTrainingSample>(bootstrapSamples.Count + liveSamples.Count);
@@ -187,7 +216,8 @@ public sealed class ClusterTrainingService : IClusterTrainingService
             topTerms,
             trainedFrom,
             bootstrapTaskCount,
-            memoryEntryCount);
+            memoryEntryCount,
+            modelIdentity);
         ClusterModelArtifactSerializer.Validate(artifact);
 
         await WriteArtifactAtomicallyAsync(artifact, cancellationToken).ConfigureAwait(false);

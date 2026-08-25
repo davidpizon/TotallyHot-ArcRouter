@@ -12,7 +12,7 @@ store, a self-organizing clustering job over accumulated task embeddings, a fift
 over the learned clusters, an honest comparison against the frozen 9-dimension baseline, and the
 GUI/admin surface an operator uses to turn it on.
 
-**Status:** proposed. **Ordering:** after `docs/router/live-feedback-learning-plan.md` Phases 1-4
+**Status:** shipped — T1-T6 all complete. **Ordering:** after `docs/router/live-feedback-learning-plan.md` Phases 1-4
 (shipped), which this plan builds directly on top of; **before PLAN.md Phase N** (the regret harness).
 Landing first matters for a reason beyond sequencing convenience — Phase T1 below fills in three named
 prerequisites `regret-evaluation-harness-plan.md` records as blocking any future live-regret arm
@@ -311,7 +311,7 @@ New for this plan:
 | T2 | Self-organizing clustering job over `memory_entries` embeddings | T1 (bootstrap path only needs the synced corpus) | Shipped — 2a-2g complete |
 | T3 | `ClusterBestVoter` — fifth Orchestrator voter | T2 | Shipped |
 | T4 | Baseline comparison: learned clusters vs. the frozen 9-dimension categorizer | T1, T2, T3 | Shipped |
-| T5 | Admin surface for cluster training (Governance pane + gRPC + CLI) | T2 | Proposed |
+| T5 | Admin surface for cluster training (Governance pane + gRPC + CLI) | T2 | Shipped |
 | T6 | System Settings: Adaptive Routing toggle + Sample Size, unified Save, router-side mutable settings | T1, T2, T3 | Shipped |
 
 ---
@@ -430,14 +430,23 @@ the embedding dimension recorded and enforced on every subsequent load; a `Semap
 single-flight guard so a retrain never runs concurrently with itself; an atomic write via a temp file
 plus `File.Move` so a reader never sees a torn artifact.
 
-**2d. OOD cold-start bootstrap.** When live rows fall short of `ClusterMinTrainingRows` but a synced
-corpus exists, cluster over the 176 embedded `benchmark_ood_tasks` prompts, reusing
+**2d. OOD cold-start bootstrap.** When a synced corpus exists, cluster over the 176 embedded
+`benchmark_ood_tasks` prompts, reusing
 `OodBootstrapSampleSource`'s embed-and-iterate pattern, so `cluster_best` has something to score before
 live volume accumulates — the same role `EmbeddingLogRegTrainer`'s OOD bootstrap plays for `logreg`.
 Live rows blend in as they arrive, live weighted above bootstrap using the same
 `LogRegLiveSampleWeight`-style convention, and the source mix is recorded in provenance. Without a
 synced corpus, this path reports "corpus not synced" and the voter continues to abstain — the same
 posture `logreg`'s bootstrap takes when nothing is synced.
+
+> **Correction (verified against `ClusterTrainingService.RetrainCoreAsync`, not just this doc).** An
+> earlier revision of this paragraph made the bootstrap *conditional* — "when live rows fall short of
+> `ClusterMinTrainingRows`". The shipped trainer loads and blends the bootstrap **unconditionally** on
+> every retrain, exactly as `EmbeddingLogRegTrainingService` does, and `ClusterMinTrainingRows` gates the
+> *combined* sample count rather than selecting between two sources. The code is the intended design —
+> the blend weighting (`ClusterLiveSampleWeight`, live above bootstrap) is what makes live traffic
+> dominate as it accumulates, so there is nothing for a cutover to do. The wording, not the behavior,
+> was wrong.
 
 **2e. Artifact.** `%LOCALAPPDATA%\TotallyHot.ArcRouter\cluster_model.json`: centroids, chosen k,
 embedding dimension, trained-at timestamp, per-cluster sizes, a **per-cluster heuristic-dimension

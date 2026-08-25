@@ -41,6 +41,15 @@ namespace TotallyHot.ArcRouter.Router;
 /// written against the final schema once, and can weight, discount, or exclude judge-graded rows from the
 /// day Phase G3 first writes one.
 /// </param>
+/// <param name="EmbeddingModel">
+/// The identity of the embedding model that produced <paramref name="TaskEmbedding"/>
+/// (<see cref="Embeddings.IEmbeddingClient.ModelIdentity"/>), or <see langword="null"/> for an entry
+/// written before this provenance existed. Exists because vector length alone cannot detect a swap
+/// between two <em>different</em> embedding models that happen to share a dimensionality: the stored and
+/// freshly-computed vectors then occupy incomparable coordinate spaces while every length guard passes,
+/// so kNN retrieval and both trainers would silently blend meaningless numbers. See
+/// <see cref="MatchesEmbeddingModel"/> for how null is interpreted.
+/// </param>
 public sealed record MemoryEntry(
     long Id,
     float[] TaskEmbedding,
@@ -52,4 +61,33 @@ public sealed record MemoryEntry(
     bool IsExploratory = false,
     double Propensity = 1.0,
     string? Dimension = null,
-    bool IsJudgeScored = false);
+    bool IsJudgeScored = false,
+    string? EmbeddingModel = null)
+{
+    /// <summary>
+    /// Whether <see cref="TaskEmbedding"/> is comparable to a vector freshly produced by the embedding
+    /// client identified by <paramref name="currentModelIdentity"/> - the guard every consumer of stored
+    /// embeddings applies before using this entry.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A null <see cref="EmbeddingModel"/> matches anything, deliberately.</b> Rows written before the
+    /// column existed carry no identity, and the only honest reading of them is the one that is also
+    /// almost always true: they were produced by whatever embedding model the installation is still
+    /// configured with, because nothing had changed it. Treating null as a <em>mismatch</em> would
+    /// silently discard every existing installation's entire accumulated corpus on the first startup
+    /// after upgrading - a data loss far worse than the rare case it would protect against, and one the
+    /// operator would have no way to see coming. This is the same reasoning
+    /// <c>RouterMemoryDatabase.MigrateProvenanceColumns</c> applies to its own backfilled defaults:
+    /// default to how the pre-existing rows actually behaved.
+    /// </para>
+    /// <para>
+    /// The vector-length check that consumers already perform remains the backstop for the loud half of
+    /// this problem (a dimension change); this identity check exists for the silent half (a same-dimension
+    /// model swap), which no length comparison can detect.
+    /// </para>
+    /// </remarks>
+    /// <param name="currentModelIdentity">The identity reported by the live <see cref="Embeddings.IEmbeddingClient.ModelIdentity"/>.</param>
+    public bool MatchesEmbeddingModel(string currentModelIdentity) =>
+        EmbeddingModel is null || string.Equals(EmbeddingModel, currentModelIdentity, StringComparison.Ordinal);
+}

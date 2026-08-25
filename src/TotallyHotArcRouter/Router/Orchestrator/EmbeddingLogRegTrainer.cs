@@ -28,6 +28,12 @@ public static class EmbeddingLogRegTrainer
     /// <param name="trainedFrom">The provenance string to stamp on the resulting artifact - see <see cref="EmbeddingLogRegModelArtifact.TrainedFrom"/>.</param>
     /// <param name="bootstrapTaskCount">The number of OOD bootstrap tasks that contributed to <paramref name="samples"/>, for <see cref="EmbeddingLogRegModelArtifact.BootstrapTaskCount"/>.</param>
     /// <param name="memoryEntryCount">The number of live memory entries that contributed to <paramref name="samples"/>, for <see cref="EmbeddingLogRegModelArtifact.MemoryEntryCount"/>.</param>
+    /// <param name="embeddingModel">
+    /// The identity of the embedding client whose vectors <paramref name="samples"/> were produced by,
+    /// recorded on the artifact so a consumer can refuse to score against it after a same-dimension
+    /// embedding-model swap. Defaults to <see langword="null"/> - unrecorded - for callers that do not
+    /// track it.
+    /// </param>
     /// <param name="epochs">The number of full gradient-descent passes per model head.</param>
     /// <param name="learningRate">The gradient-descent step size.</param>
     /// <param name="l2Regularization">The L2 penalty applied to every non-bias weight each epoch.</param>
@@ -39,6 +45,7 @@ public static class EmbeddingLogRegTrainer
         string trainedFrom,
         int bootstrapTaskCount,
         int memoryEntryCount,
+        string? embeddingModel = null,
         int epochs = 200,
         double learningRate = 0.1,
         double l2Regularization = 0.01)
@@ -80,7 +87,8 @@ public static class EmbeddingLogRegTrainer
             classWeights,
             trainedFrom,
             bootstrapTaskCount,
-            memoryEntryCount);
+            memoryEntryCount,
+            embeddingModel);
     }
 
     /// <summary>

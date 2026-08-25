@@ -31,6 +31,7 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 public sealed class ClusterBestVoter : IRoutingVoter
 {
     private readonly IMemoryEntryStore _memoryEntryStore;
+    private readonly Embeddings.IEmbeddingClient _embeddingClient;
     private readonly RoutingOptions _routingOptions;
     private readonly ILogger<ClusterBestVoter> _logger;
     private readonly string _modelPath;
@@ -46,21 +47,29 @@ public sealed class ClusterBestVoter : IRoutingVoter
     /// loaded lazily on first vote, not in this constructor - so a missing file never fails DI startup.
     /// </summary>
     /// <param name="memoryEntryStore">Supplies the live <c>memory_entries</c> working set the ledger is recomputed from.</param>
+    /// <param name="embeddingClient">
+    /// Supplies the current <see cref="Embeddings.IEmbeddingClient.ModelIdentity"/>, compared against the
+    /// artifact's own so a same-dimension embedding-model swap abstains instead of scoring against
+    /// centroids from a coordinate space that no longer exists.
+    /// </param>
     /// <param name="routingOptions">The assignment threshold and per-cell observation floor.</param>
     /// <param name="storageOptions">Supplies the model artifact's file path.</param>
     /// <param name="logger">The logger.</param>
     public ClusterBestVoter(
         IMemoryEntryStore memoryEntryStore,
+        Embeddings.IEmbeddingClient embeddingClient,
         IOptions<RoutingOptions> routingOptions,
         IOptions<StorageOptions> storageOptions,
         ILogger<ClusterBestVoter> logger)
     {
         ArgumentNullException.ThrowIfNull(memoryEntryStore);
+        ArgumentNullException.ThrowIfNull(embeddingClient);
         ArgumentNullException.ThrowIfNull(routingOptions);
         ArgumentNullException.ThrowIfNull(storageOptions);
         ArgumentNullException.ThrowIfNull(logger);
 
         _memoryEntryStore = memoryEntryStore;
+        _embeddingClient = embeddingClient;
         _routingOptions = routingOptions.Value;
         _logger = logger;
         _modelPath = storageOptions.Value.ResolveClusterModelPath();
@@ -94,6 +103,20 @@ public sealed class ClusterBestVoter : IRoutingVoter
                 "cluster_best voter received a {ActualDimension}-dimensional embedding but its model was trained at {ExpectedDimension}; abstaining.",
                 context.TaskEmbedding.Length,
                 artifact.EmbeddingDimension);
+            return VoterVote.Abstain(Name);
+        }
+
+        if (artifact.EmbeddingModel is not null &&
+            !string.Equals(artifact.EmbeddingModel, _embeddingClient.ModelIdentity, StringComparison.Ordinal))
+        {
+            // The same-dimension model swap the length check above structurally cannot see: these
+            // centroids describe a coordinate space the current client no longer produces, so the nearest
+            // one to a fresh embedding is meaningless. A null EmbeddingModel is a pre-provenance artifact
+            // and is trusted, on the same reasoning MemoryEntry.MatchesEmbeddingModel documents.
+            _logger.LogWarning(
+                "cluster_best voter model was trained against embedding model {TrainedModel} but the current client is {CurrentModel}; abstaining until retrained.",
+                artifact.EmbeddingModel,
+                _embeddingClient.ModelIdentity);
             return VoterVote.Abstain(Name);
         }
 

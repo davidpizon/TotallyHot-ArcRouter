@@ -12,9 +12,10 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// </summary>
 /// <param name="EmbeddingDimension">
 /// The embedding dimension this artifact was trained at (e.g. BGE-large's 1024). Changing
-/// <c>EmbeddingOptions.EmbeddingDimension</c> or the model URL invalidates a trained artifact;
+/// <c>EmbeddingOptions.EmbeddingDimension</c> invalidates a trained artifact;
 /// <see cref="LogRegVoter"/> refuses to score a differently-sized embedding and abstains rather than
-/// silently misindexing weights.
+/// silently misindexing weights. A change of embedding <em>model</em> at the same dimension is caught by
+/// <see cref="EmbeddingModel"/> instead - this field cannot see it.
 /// </param>
 /// <param name="ClassWeights">
 /// One weight vector per candidate model class, keyed by <see cref="Models.ModelNameCanonicalizer.Canonicalize"/>
@@ -30,9 +31,19 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// </param>
 /// <param name="BootstrapTaskCount">The number of OOD bootstrap tasks (Phase 4a) that contributed to this artifact, or 0 if none.</param>
 /// <param name="MemoryEntryCount">The number of live <c>memory_entries</c> rows (Phase 4b) that contributed to this artifact, or 0 if none.</param>
+/// <param name="EmbeddingModel">
+/// The identity of the embedding model whose vectors this artifact was fitted against
+/// (<see cref="Router.Embeddings.IEmbeddingClient.ModelIdentity"/>), or <see langword="null"/> for an
+/// artifact trained before this provenance existed. <see cref="EmbeddingDimension"/> alone cannot make
+/// the invalidation guarantee this type's own documentation claims: two different embedding models
+/// frequently share a dimensionality, and swapping between them leaves every length check passing while
+/// the weights below refer to a coordinate space that no longer exists. A consumer compares this against
+/// the live client and abstains on a mismatch, exactly as it does for a dimension mismatch.
+/// </param>
 public sealed record EmbeddingLogRegModelArtifact(
     int EmbeddingDimension,
     IReadOnlyDictionary<string, double[]> ClassWeights,
     string TrainedFrom,
     int BootstrapTaskCount,
-    int MemoryEntryCount);
+    int MemoryEntryCount,
+    string? EmbeddingModel = null);
