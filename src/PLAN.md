@@ -13,29 +13,40 @@ a **Verifier**, and a **Memory**, selecting under the cost-aware reward
 ## Where things stand
 
 **The C-A-F loop is closed and live.** The classifier (Phase H), the cost-aware `IRoutingPolicy` seam
-(Phase I), the embedding memory (Phase J), the benchmark corpus in SQLite (Phases K/K2), the four-voter
-Orchestrator ensemble (Phase L), the Orchestrator on the live path with requested-vs-routed telemetry
-(Phase M, M1–M4), live feedback capture plus the embedding-backed `logreg` trainer and its Governance
-admin surface (`live-feedback-learning-plan.md` Phases 1–5), Routing ROI's expense-and-regret comparison
-(`routing-roi-regret-plan.md`), and self-organizing request classification end to end
-(`self-organizing-classification-plan.md` Phases T1–T6) have all shipped. Narratives:
+(Phase I), the embedding memory (Phase J), the benchmark corpus in SQLite (Phases K/K2), the
+Orchestrator ensemble (Phase L — four voters, joined later by a fifth, `cluster_best`, from Phase T3),
+the Orchestrator on the live path with requested-vs-routed telemetry (Phase M, M1–M4), live feedback
+capture plus the embedding-backed `logreg` trainer and its Governance admin surface
+(`live-feedback-learning-plan.md` Phases 1–5), Routing ROI's expense-and-regret comparison
+(`routing-roi-regret-plan.md`), self-organizing request classification end to end
+(`self-organizing-classification-plan.md` Phases T1–T6), and the first three sub-phases of the regret
+harness (`regret-evaluation-harness-plan.md` N1–N3) have all shipped. Narratives:
 
 | Shipped work | Owning doc |
 |---|---|
 | Phases H, I — classifier, `IRoutingPolicy`, cost-aware utility routing | [`../docs/router/utility-model-routing.md`](../docs/router/utility-model-routing.md) (§B1–B5 status blockquotes) |
 | Phases G, J — feedback loop reconnection, `RouterMemory` + `EmbeddingMemory` persistence | [`../docs/router/memory-persistence.md`](../docs/router/memory-persistence.md) |
 | Phases K, K2 — CodeRouterBench synced into SQLite | [`../docs/router/coderouterbench-sqlite-migration-plan.md`](../docs/router/coderouterbench-sqlite-migration-plan.md), [`../data/README.md`](../data/README.md), [`../docs/router/model-identity-canonicalization.md`](../docs/router/model-identity-canonicalization.md) |
-| Phase L — the four-voter Orchestrator ensemble | [`../docs/router/orchestrator-ensemble.md`](../docs/router/orchestrator-ensemble.md) |
+| Phase L — the Orchestrator ensemble (four voters; `cluster_best` added as a fifth by Phase T3) | [`../docs/router/orchestrator-ensemble.md`](../docs/router/orchestrator-ensemble.md) |
 | Phase M (M1–M4) — Orchestrator on the live path, requested-vs-routed end to end | [`../docs/router/orchestrator-live-path-plan.md`](../docs/router/orchestrator-live-path-plan.md), [`../docs/router/phase-m2-plan.md`](../docs/router/phase-m2-plan.md) |
 | Live-feedback Phases 1–5 — importer repair, feedback capture, embedding-backed `logreg`, training, Governance admin surface | [`../docs/router/live-feedback-learning-plan.md`](../docs/router/live-feedback-learning-plan.md) |
 | Routing ROI — regret vs `dim_best`, one-minute full drain, hard pause under load | [`../docs/router/routing-roi-regret-plan.md`](../docs/router/routing-roi-regret-plan.md), [`../docs/router/self-organizing-classification-plan.md`](../docs/router/self-organizing-classification-plan.md) (Phase T4 status block) |
 | Phases T1–T6 — transcript capture, self-organizing clustering, `cluster_best` voter, baseline comparison, Cluster Model admin pane, System Settings adaptive-routing toggle | [`../docs/router/self-organizing-classification-plan.md`](../docs/router/self-organizing-classification-plan.md) |
+| Phase N (N1–N3) — regret metrics core (`RegretReplayResult`), the no-leakage streaming replay engine (`RegretReplayEngine`), and the Always-*m* / DimensionBest / LinUCB / LinTS baselines | [`../docs/router/regret-evaluation-harness-plan.md`](../docs/router/regret-evaluation-harness-plan.md) (N1–N3 status notes) |
 | Phase G1 — shadow judge observer (`PendingResponseTextCache`, `JudgeShadowScoreObserver`/`GEvalJudgeClient`/`JudgeModelSelector`/drain worker, `judge_shadow_scores` side table, `is_judge_scored` provenance columns), off by default, judging on a free Providers-screen model | [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md) |
 
 **What is still missing**, and which remaining workstream owns it:
 
-- **No measurement.** Nothing computes `R_ij`, the per-task oracle, `CumReg`, `AvgPerf`, `TotTok`,
-  `$Total`, or `Perf/$`; every "the ensemble beats X" claim is still an assertion → **Phase N**.
+- **Measurement is built but has not been run.** An earlier revision of this bullet said "nothing
+  computes `R_ij`, the per-task oracle, `CumReg`, `AvgPerf`, `TotTok`, or `Perf/$`" — that is no longer
+  true, and had not been for some time. **N1–N3 shipped:** `RegretReplayResult` computes all five
+  metrics against the per-task oracle `a*_i = argmax_j R_ij`, `RegretReplayEngine` runs the offline
+  streaming replay with no-leakage enforced at the call boundary, and four of the six comparison
+  baselines exist (Always-*m*, DimensionBest, LinUCB, LinTS). **N4–N6 remain:** the kNN-retrieval and
+  LogReg baselines (OOD only — the ID split publishes no task text), the Orchestrator arm plus the full
+  comparison report, and the CLI/GUI surface for re-running the harness. Because N5 has not run, no
+  comparison report exists, so every "the ensemble beats X" claim is still **unmeasured** — the harness
+  to settle it is largely built, but it has not yet been pointed at the corpus → **Phase N (N4–N6)**.
 - ~~**Live traffic is not yet usable as a training corpus.**~~ **Closed by Phases T1–T6.** Transcripts
   are captured opt-in with full provenance (`IsExploratory`, propensity, real cost), skipped embeddings
   are recovered by backfill, the learned cluster taxonomy is trained, voted on (`cluster_best`), and
@@ -46,28 +57,44 @@ admin surface (`live-feedback-learning-plan.md` Phases 1–5), Routing ROI's exp
   `judge_shadow_scores`, off by default, influencing nothing. Non-executable dimensions are still
   syntax-only scored on the routing hot path until **G3**, gated on **G2**'s calibration analysis over
   the shadow data G1 is now accumulating.
+- **A live corpus cannot be re-keyed after an embedding-model change.** `memory_entries` stores the
+  embedding vector but never the prompt text (a deliberate choice — `live-feedback-learning-plan.md`'s
+  "Deliberately out of scope" rejects turning router memory into a transcript store), so vectors produced
+  by a superseded embedding model cannot be recomputed and are simply filtered out until they age out of
+  the FIFO. `request_transcripts.prompt_text` *does* hold the text needed to re-embed them, but only when
+  transcript capture is enabled, only within its retention bounds (30 days / 50,000 rows), and no job
+  currently does it: `EmbeddingBackfillService` scans `WHERE memory_entry_id IS NULL`, which by
+  construction excludes exactly the already-linked rows a re-key would need. Closing this would mean a
+  background re-embedding pass over linked transcript rows — the same shape as the existing backfill.
+  Unscheduled; recorded so the limitation is tracked rather than rediscovered. Provenance for detecting
+  the condition shipped with `live-feedback-learning-plan.md`'s "Embedding-model provenance" section.
 - **The general (non-utility) live path has no cost term.** `UtilityRoutingPolicy` prices candidates;
   the Orchestrator does not. T1's real-cost wiring makes the reward computable from live data; putting
   a cost term into the general path's selection is otherwise unscheduled.
 
 ```mermaid
 flowchart LR
-    subgraph shipped["Shipped — the live C-A-F loop + G1"]
-        LOOP["Classifier → 4-voter Orchestrator →<br/>model → Verifier → RouterMemory/EmbeddingMemory →<br/>back into the voters"]
+    subgraph shipped["Shipped — the live C-A-F loop, G1, and N1–N3"]
+        LOOP["Classifier → 5-voter Orchestrator →<br/>model → Verifier → RouterMemory/EmbeddingMemory →<br/>back into the voters"]
         G1["G1: shadow judge<br/>(accumulates, influences nothing)"]
+        N13["N1–N3: metrics core, replay<br/>engine, 4 of 6 baselines"]
         LOOP -.-> G1
     end
 
-    N["Phase N: regret harness<br/>(+ live-feedback Phase 6 relocation)"]
+    N["Phase N (N4–N6): kNN/LogReg baselines,<br/>Orchestrator arm + comparison report, CLI/GUI<br/>(+ live-feedback Phase 6 relocation)"]
     G23["G2 → G3: judge calibration,<br/>then judge as verifier for<br/>non-executable dimensions"]
 
     LOOP --> N --> G23
+    N13 --> N
     G1 -.->|"shadow data gates"| G23
 ```
 
 ## Remaining work, in order
 
-1. **Phase N — regret evaluation harness.** Detail below; full component spec:
+1. **Phase N (N4–N6) — finish the regret evaluation harness.** N1–N3 shipped (see the shipped-work
+   table above); what remains is the kNN-retrieval and LogReg baselines, the Orchestrator arm and its
+   comparison report, and the CLI/GUI surface. Detail below; full component spec and per-sub-phase
+   status notes:
    [`../docs/router/regret-evaluation-harness-plan.md`](../docs/router/regret-evaluation-harness-plan.md)
    (N1–N6). Also carries live-feedback Phase 6's remaining item (relocating the TF-IDF
    `LogRegTrainer` machinery into a Phase-N-facing namespace), deferred by that plan to land alongside
@@ -82,21 +109,28 @@ flowchart LR
 
 ### Phase N: roadmap-level scope and exit bar
 
-**Prerequisite status:** `live-feedback-learning-plan.md` Phase 4 shipped — all four Orchestrator
-voters can cast a real vote on live traffic instead of three of them abstaining for lack of an input,
-satisfying that plan's own ordering requirement ("measuring voters that structurally cannot fire would
+**Prerequisite status:** `live-feedback-learning-plan.md` Phase 4 shipped — every Orchestrator voter
+can now cast a real vote on live traffic instead of three of the original four abstaining for lack of an
+input, satisfying that plan's own ordering requirement ("measuring voters that structurally cannot fire would
 produce a benchmark of `dim_best` wearing an ensemble's name"). The self-organizing-classification-plan's
 T phases shipped ahead of N because every phase of them removed a blocker N would otherwise have had to
 solve itself, but N never required them to complete.
 
-- Implement the metrics of research-doc §5.1 and A.2: reward matrix `R_ij = ε₁·s_ij + ε₂·κ_ij`,
-  per-task oracle `a*_i = argmax_j R_ij`, cumulative regret `CumReg_N = Σ(r*_i − r_i(a_i))`, plus
-  `AvgPerf`, `TotTok`, `$Total`, and `Perf/$`.
-- Offline streaming replay over the restored matrices — no live API calls, matching the handbook's
-  "no API keys required" property.
-- Implement the comparison baselines as C-A-F configurations (research-doc Table 4): Always-*m*,
-  DimensionBest, frozen-kNN retrieval, LogReg, and the LinUCB/LinTS contextual bandits
-  (`α = λ = 1`; `v = 0.5, λ = 1`; warm-started on the probing set, seed 42).
+- ~~Implement the metrics of research-doc §5.1 and A.2~~ — **shipped (N1).** `RegretReplayResult`
+  computes the reward matrix `R_ij = ε₁·s_ij + ε₂·κ_ij` (via `RewardWeights`), the per-task oracle
+  `a*_i = argmax_j R_ij`, cumulative regret `CumReg_N = Σ(r*_i − r_i(a_i))`, plus `AvgPerf`, `TotTok`,
+  `$Total`, and `Perf/$`.
+- ~~Offline streaming replay over the restored matrices~~ — **shipped (N1).** `RegretReplayEngine`
+  makes no live API calls, matching the handbook's "no API keys required" property, and enforces
+  no-leakage at the call boundary rather than trusting each baseline to police itself.
+- Implement the comparison baselines as C-A-F configurations (research-doc Table 4). **Four of six
+  shipped (N1–N3):** Always-*m* (`AlwaysModelBaseline`), DimensionBest (`DimensionBestBaseline`), and
+  the LinUCB/LinTS contextual bandits (`α = λ = 1`; `v = 0.5, λ = 1`; warm-started on the probing set,
+  seed 42) over a shared `CategoricalContextBanditBaselineBase`. **Remaining (N4):** frozen-kNN
+  retrieval and LogReg — both need task text, so both are OOD-only.
+- **Remaining (N5):** wire `OrchestratorRoutingPolicy` in as its own arm and produce the comparison
+  report that the exit criterion below is judged against. **Remaining (N6):** the CLI/GUI surface for
+  re-running the harness on demand.
 - **Exit — the real acceptance criterion for this whole plan:** on the restored ID test split the
   Orchestrator reproduces the paper's regret *ordering* (ArcRouter < DimensionBest < static
   classifiers < bandits < single models) and beats DimensionBest on `CumReg`. Absolute parity with

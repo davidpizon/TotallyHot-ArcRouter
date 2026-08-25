@@ -157,7 +157,12 @@ public sealed class EmbeddingBackfillService : BackgroundService
                     VerifierTrace: null,
                     CreatedAtUtc: transcript.CreatedAtUtc,
                     IsExploratory: transcript.IsExploratory,
-                    Propensity: transcript.Propensity);
+                    Propensity: transcript.Propensity,
+                    // Stamped from the client that just produced this vector, exactly as
+                    // EmbeddingMemory.AddEntryAsync does for the request-path writes. Backfilled entries
+                    // are computed here and now, so they carry the current identity - not whatever model
+                    // was configured when the underlying transcript row was originally captured.
+                    EmbeddingModel: _embeddingClient.ModelIdentity);
 
                 var persistedEntry = await _memoryEntryStore.AppendAsync(memoryEntry, cancellationToken)
                     .ConfigureAwait(false);

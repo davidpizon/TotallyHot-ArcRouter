@@ -7,6 +7,7 @@ using TotallyHot.ArcRouter.Router.Orchestrator;
 using TotallyHot.ArcRouter.Tests.CodeRouterBench;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Tests.TestSupport;
 
 namespace TotallyHot.ArcRouter.Tests.Router.Orchestrator;
 
@@ -31,7 +32,7 @@ public class EmbeddingLogRegTrainingServiceTests
         }
 
         var modelPath = TempModelPath();
-        var voter = new LogRegVoter(NullLogger<LogRegVoter>.Instance, Options.Create(new StorageOptions { LogRegModelPath = modelPath }));
+        var voter = new LogRegVoter(NullLogger<LogRegVoter>.Instance, Options.Create(new StorageOptions { LogRegModelPath = modelPath }), new StubEmbeddingClient());
         var service = CreateService(memoryStore, voter, modelPath, out _);
 
         try
@@ -64,7 +65,7 @@ public class EmbeddingLogRegTrainingServiceTests
         memoryStore.Add(UnitVector(1, 0), "model-a", 1.0);
 
         var modelPath = TempModelPath();
-        var voter = new LogRegVoter(NullLogger<LogRegVoter>.Instance, Options.Create(new StorageOptions { LogRegModelPath = modelPath }));
+        var voter = new LogRegVoter(NullLogger<LogRegVoter>.Instance, Options.Create(new StorageOptions { LogRegModelPath = modelPath }), new StubEmbeddingClient());
         var service = CreateService(memoryStore, voter, modelPath, out _);
 
         try
@@ -90,7 +91,7 @@ public class EmbeddingLogRegTrainingServiceTests
         }
 
         var modelPath = TempModelPath();
-        var voter = new LogRegVoter(NullLogger<LogRegVoter>.Instance, Options.Create(new StorageOptions { LogRegModelPath = modelPath }));
+        var voter = new LogRegVoter(NullLogger<LogRegVoter>.Instance, Options.Create(new StorageOptions { LogRegModelPath = modelPath }), new StubEmbeddingClient());
         var service = CreateService(memoryStore, voter, modelPath, out _);
 
         try
@@ -118,7 +119,7 @@ public class EmbeddingLogRegTrainingServiceTests
         memoryStore.Add([1, 0, 0], "model-c", 1.0); // 3-dim, doesn't match the 2-dim fixture below
 
         var modelPath = TempModelPath();
-        var voter = new LogRegVoter(NullLogger<LogRegVoter>.Instance, Options.Create(new StorageOptions { LogRegModelPath = modelPath }));
+        var voter = new LogRegVoter(NullLogger<LogRegVoter>.Instance, Options.Create(new StorageOptions { LogRegModelPath = modelPath }), new StubEmbeddingClient());
         var service = CreateService(memoryStore, voter, modelPath, out _);
 
         try
@@ -144,6 +145,7 @@ public class EmbeddingLogRegTrainingServiceTests
         return new EmbeddingLogRegTrainingService(
             bootstrapSource,
             memoryStore,
+            new StubEmbeddingClient(),
             voter,
             Options.Create(new RoutingOptions { LogRegLiveSampleWeight = 1.0, LogRegMinTrainingRows = 20, LogRegMinModelsRepresented = 2 }),
             Options.Create(new EmbeddingOptions { EmbeddingDimension = 2 }),

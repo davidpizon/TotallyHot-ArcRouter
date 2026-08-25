@@ -4,14 +4,17 @@ using Grpc.Core.Testing;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router;
+using TotallyHot.ArcRouter.Router.Orchestrator;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Tests.Router;
 
 /// <summary>
-/// Covers <see cref="RoutingModeAdminGrpcService.GetRoutingMode"/>: it must report exactly the four
-/// PLAN.md Phase L voters with their configured enablement/weight, and the orchestrator/exploration
-/// settings currently bound into <see cref="RoutingOptions"/>.
+/// Covers <see cref="RoutingModeAdminGrpcService.GetRoutingMode"/>: it must report <em>every</em> voter
+/// with its configured enablement/weight, and the orchestrator/exploration settings currently bound into
+/// <see cref="RoutingOptions"/>. An earlier revision of this suite asserted a four-name sequence, which
+/// is what let the service keep omitting <c>cluster_best</c> after Phase T3 added it - the sequence
+/// assertion below is deliberately exhaustive so a future voter cannot be dropped silently.
 /// </summary>
 public sealed class RoutingModeAdminGrpcServiceTests
 {
@@ -30,7 +33,7 @@ public sealed class RoutingModeAdminGrpcServiceTests
             writeOptionsSetter: _ => { });
 
     [Fact]
-    public async Task GetRoutingMode_ReportsTheFourVotersInFixedOrderWithTheirConfiguredWeights()
+    public async Task GetRoutingMode_ReportsEveryVoterInFixedOrderWithTheirConfiguredWeights()
     {
         var options = new RoutingOptions
         {
@@ -45,6 +48,8 @@ public sealed class RoutingModeAdminGrpcServiceTests
             LogRegVoterWeight = 0.43,
             EnableLlmRouterVoter = true,
             LlmRouterVoterWeight = 0.64,
+            EnableClusterBestVoter = true,
+            ClusterBestVoterWeight = 0.5,
         };
         var service = new RoutingModeAdminGrpcService(Options.Create(options));
 
@@ -53,11 +58,14 @@ public sealed class RoutingModeAdminGrpcServiceTests
         response.OrchestratorEnabled.Should().Be(true);
         response.ExplorationEnabled.Should().Be(true);
         response.ExplorationRate.Should().Be(0.05);
-        response.Voters.Select(v => v.Name).Should().Equal("dim_best", "memory_kNN", "logreg", "llm_router");
+        response.Voters.Select(v => v.Name).Should()
+            .Equal(VoterNames.DimBest, VoterNames.MemoryKnn, VoterNames.LogReg, VoterNames.LlmRouter, VoterNames.ClusterBest);
         response.Voters[0].Enabled.Should().BeTrue();
         response.Voters[0].Weight.Should().Be(0.9);
         response.Voters[2].Enabled.Should().BeFalse();
         response.Voters[2].Weight.Should().Be(0.43);
+        response.Voters[4].Enabled.Should().BeTrue();
+        response.Voters[4].Weight.Should().Be(0.5);
     }
 
     [Fact]

@@ -133,6 +133,7 @@ public sealed class RouterMemoryDatabase
         MigrateProvenanceColumns(connection);
         MigrateDimensionColumn(connection);
         MigrateIsJudgeScoredColumn(connection);
+        MigrateEmbeddingModelColumn(connection);
     }
 
     // CREATE TABLE IF NOT EXISTS silently does nothing when the table already exists, so it cannot add a
@@ -199,6 +200,27 @@ public sealed class RouterMemoryDatabase
             using var alterIsJudgeScored = connection.CreateCommand();
             alterIsJudgeScored.CommandText = "ALTER TABLE memory_entries ADD COLUMN is_judge_scored INTEGER NOT NULL DEFAULT 0;";
             alterIsJudgeScored.ExecuteNonQuery();
+        }
+    }
+
+    // Same blind spot the three migrations above work around. NULL default - not the current model's
+    // identity - because backfilling a concrete identity would be a fabrication: this code cannot know
+    // which model produced a row written before the column existed. NULL is the honest "unrecorded", and
+    // MemoryEntry.MatchesEmbeddingModel deliberately reads it as "assume current" so that upgrading does
+    // not silently discard an existing installation's whole corpus. See that method's remarks for why the
+    // optimistic reading is the correct one rather than merely the convenient one.
+    /// <summary>
+    /// Adds the `embedding_model` column to `memory_entries` if missing, so databases created before this
+    /// provenance existed pick it up on startup, with existing rows left <see langword="null"/> - unrecorded
+    /// rather than falsely attributed.
+    /// </summary>
+    private static void MigrateEmbeddingModelColumn(SqliteConnection connection)
+    {
+        if (!ColumnExists(connection, "memory_entries", "embedding_model"))
+        {
+            using var alterEmbeddingModel = connection.CreateCommand();
+            alterEmbeddingModel.CommandText = "ALTER TABLE memory_entries ADD COLUMN embedding_model TEXT NULL;";
+            alterEmbeddingModel.ExecuteNonQuery();
         }
     }
 

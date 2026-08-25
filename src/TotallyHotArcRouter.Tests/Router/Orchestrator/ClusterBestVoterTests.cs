@@ -4,6 +4,7 @@ using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Orchestrator;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Tests.TestSupport;
 
 namespace TotallyHot.ArcRouter.Tests.Router.Orchestrator;
 
@@ -187,6 +188,7 @@ public class ClusterBestVoterTests
         string modelPath, IMemoryEntryStore store, double assignmentThreshold = 0.5, int minObservations = 1) =>
         new(
             store,
+            new StubEmbeddingClient(),
             Options.Create(new RoutingOptions { ClusterAssignmentThreshold = assignmentThreshold, ClusterBestMinObservations = minObservations }),
             Options.Create(new StorageOptions { ClusterModelPath = modelPath }),
             NullLogger<ClusterBestVoter>.Instance);

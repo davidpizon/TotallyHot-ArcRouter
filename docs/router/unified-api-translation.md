@@ -514,7 +514,10 @@ is not selected by a fixed `Provider` key:
   with a logged warning — this is a heuristic best-effort rewrite, not a real upstream protocol error, so
   it must never drop or truncate a response the way a genuine `GeminiStreamException` legitimately does.
 
-**Tests:** `src/TotallyHotArcRouter.Tests/Proxy/Translation/ToolCallEchoGuardTranslatorTests.cs` — direct
+**Tests:** the former `ToolCallEchoGuardTranslatorTests.cs` no longer exists — [`tool-call-normalization.md`](tool-call-normalization.md) Phase 4 deleted the provider-scoped echo
+guard and carried its entire suite forward into
+`src/TotallyHotArcRouter.Tests/Proxy/Translation/ToolCalling/ToolCallNormalizingTranslatorTests.cs`,
+which is the regression contract for everything described below — direct
 `Push`/`Flush` coverage of both tag variants, the exact token-by-token fragment sequence captured live
 from the real LM Studio repro, content correctly preserved before/after a tag, multiple sequential tool
 calls, the fail-open path (malformed JSON and the schema-echo shape) with a verified logged warning, an

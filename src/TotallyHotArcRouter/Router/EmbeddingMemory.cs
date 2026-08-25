@@ -24,6 +24,7 @@ public sealed class EmbeddingMemory : IDisposable
 {
     private readonly IMemoryEntryStore _store;
     private readonly IOptionsMonitor<RoutingOptions> _optionsMonitor;
+    private readonly Embeddings.IEmbeddingClient _embeddingClient;
     private readonly ILogger<EmbeddingMemory> _logger;
     private readonly object _syncLock = new();
     private readonly List<MemoryEntry> _entries = [];
@@ -34,15 +35,26 @@ public sealed class EmbeddingMemory : IDisposable
     /// </summary>
     /// <param name="store">The persistence layer.</param>
     /// <param name="optionsMonitor">The routing options monitor, providing the similarity threshold, neighbor count, and FIFO capacity - read live so a runtime capacity change (Phase T6) takes effect without a restart.</param>
+    /// <param name="embeddingClient">
+    /// Supplies <see cref="Embeddings.IEmbeddingClient.ModelIdentity"/> - stamped onto every entry written
+    /// here and compared against on every retrieval. Only the identity property is read; no inference is
+    /// ever run from this class, so taking the dependency costs nothing at construction time.
+    /// </param>
     /// <param name="logger">The logger.</param>
-    public EmbeddingMemory(IMemoryEntryStore store, IOptionsMonitor<RoutingOptions> optionsMonitor, ILogger<EmbeddingMemory> logger)
+    public EmbeddingMemory(
+        IMemoryEntryStore store,
+        IOptionsMonitor<RoutingOptions> optionsMonitor,
+        Embeddings.IEmbeddingClient embeddingClient,
+        ILogger<EmbeddingMemory> logger)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(optionsMonitor);
+        ArgumentNullException.ThrowIfNull(embeddingClient);
         ArgumentNullException.ThrowIfNull(logger);
 
         _store = store;
         _optionsMonitor = optionsMonitor;
+        _embeddingClient = embeddingClient;
         _logger = logger;
 
         // Fire-and-forget on purpose: OnChange's callback is synchronous and must not block the options
@@ -135,7 +147,9 @@ public sealed class EmbeddingMemory : IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(chosenModel);
 
         var persisted = await _store.AppendAsync(
-            new MemoryEntry(0, taskEmbedding, chosenModel, score, cost, verifierTrace, DateTimeOffset.UtcNow, isExploratory, propensity, dimension, isJudgeScored),
+            new MemoryEntry(
+                0, taskEmbedding, chosenModel, score, cost, verifierTrace, DateTimeOffset.UtcNow,
+                isExploratory, propensity, dimension, isJudgeScored, _embeddingClient.ModelIdentity),
             cancellationToken).ConfigureAwait(false);
 
         lock (_syncLock)
@@ -188,14 +202,40 @@ public sealed class EmbeddingMemory : IDisposable
     /// <summary>
     /// Finds the top neighbors for a query embedding by cosine similarity, filtered to
     /// <see cref="RoutingOptions.EmbeddingSimilarityThreshold"/> and capped at
-    /// <see cref="RoutingOptions.MaxNeighborCount"/>, ordered by descending similarity.
+    /// <see cref="RoutingOptions.MaxNeighborCount"/>, ordered by descending similarity. Entries whose
+    /// stored vector is not comparable to <paramref name="queryEmbedding"/> are excluded before any
+    /// similarity is computed - see the remarks.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why incomparable entries are filtered here rather than left to fail.</b> Before this filter
+    /// existed, a change to the embedding model left the FIFO holding vectors of the previous dimension
+    /// while fresh queries arrived at the new one; <see cref="CosineSimilarity"/> throws on a length
+    /// mismatch, so the first surviving old entry aborted the entire retrieval. Nothing broke visibly -
+    /// <c>OrchestratorRoutingPolicy.CastVoteAsync</c> catches every non-cancellation exception and turns
+    /// it into an abstention - but <c>memory_kNN</c> then abstained through an exception-and-error-log
+    /// path on <em>every</em> request until the stale entries aged out of a 20,000-entry window, which at
+    /// ordinary traffic takes a very long time. Skipping them reaches the identical routing outcome by an
+    /// honest route: the voter sees no usable neighbors and abstains cleanly, which is the designed answer
+    /// to "I have no data" and exactly what <see cref="Orchestrator.LogRegVoter"/> and
+    /// <see cref="Orchestrator.ClusterBestVoter"/> already do for their own artifacts.
+    /// </para>
+    /// <para>
+    /// Two independent conditions make an entry incomparable and both are checked, because neither
+    /// implies the other: a differing vector length (a dimension change - loud, and what the throw used to
+    /// surface) and a differing <see cref="MemoryEntry.EmbeddingModel"/> (a same-dimension model swap -
+    /// silent, and undetectable by length alone). <see cref="CosineSimilarity"/> keeps its throw: it is a
+    /// genuine programming error for anything to reach it with mismatched lengths, and softening it to a
+    /// silent zero would conceal the next such bug rather than surface it.
+    /// </para>
+    /// </remarks>
     /// <param name="queryEmbedding">The task embedding to find neighbors for.</param>
     public IReadOnlyList<(MemoryEntry Entry, double Similarity)> FindNearest(float[] queryEmbedding)
     {
         ArgumentNullException.ThrowIfNull(queryEmbedding);
 
         var options = _optionsMonitor.CurrentValue;
+        var modelIdentity = _embeddingClient.ModelIdentity;
 
         List<MemoryEntry> snapshot;
         lock (_syncLock)
@@ -203,7 +243,25 @@ public sealed class EmbeddingMemory : IDisposable
             snapshot = [.. _entries];
         }
 
-        return snapshot
+        var comparable = snapshot
+            .Where(entry =>
+                entry.TaskEmbedding.Length == queryEmbedding.Length &&
+                entry.MatchesEmbeddingModel(modelIdentity))
+            .ToList();
+
+        // One aggregate line per retrieval, never one per entry: after a model change every entry in the
+        // working set is skipped at once, and logging each would recreate the very flood this filter
+        // exists to stop.
+        if (comparable.Count != snapshot.Count)
+        {
+            _logger.LogDebug(
+                "Skipped {SkippedCount} of {TotalCount} embedding memory entries not comparable to the current embedding model {ModelIdentity}.",
+                snapshot.Count - comparable.Count,
+                snapshot.Count,
+                modelIdentity);
+        }
+
+        return comparable
             .Select(entry => (Entry: entry, Similarity: CosineSimilarity(queryEmbedding, entry.TaskEmbedding)))
             .Where(candidate => candidate.Similarity >= options.EmbeddingSimilarityThreshold)
             .OrderByDescending(candidate => candidate.Similarity)

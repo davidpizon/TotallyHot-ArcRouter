@@ -18,6 +18,7 @@ public sealed class EmbeddingLogRegTrainingService : IEmbeddingLogRegTrainingSer
 {
     private readonly OodBootstrapSampleSource _bootstrapSource;
     private readonly IMemoryEntryStore _memoryEntryStore;
+    private readonly Embeddings.IEmbeddingClient _embeddingClient;
     private readonly LogRegVoter _voter;
     private readonly RoutingOptions _routingOptions;
     private readonly EmbeddingOptions _embeddingOptions;
@@ -30,6 +31,11 @@ public sealed class EmbeddingLogRegTrainingService : IEmbeddingLogRegTrainingSer
     /// </summary>
     /// <param name="bootstrapSource">Supplies OOD bootstrap training samples.</param>
     /// <param name="memoryEntryStore">Supplies live <c>memory_entries</c> training samples.</param>
+    /// <param name="embeddingClient">
+    /// Supplies <see cref="Embeddings.IEmbeddingClient.ModelIdentity"/> - used both to reject live entries
+    /// produced by a different embedding model and to stamp the resulting artifact with the identity it
+    /// was fitted against. Only the identity property is read; no inference runs here.
+    /// </param>
     /// <param name="voter">The <c>logreg</c> voter to signal after a successful artifact swap.</param>
     /// <param name="routingOptions">The blend weight and degenerate-set thresholds.</param>
     /// <param name="embeddingOptions">Supplies the embedding dimension every sample must match.</param>
@@ -38,6 +44,7 @@ public sealed class EmbeddingLogRegTrainingService : IEmbeddingLogRegTrainingSer
     public EmbeddingLogRegTrainingService(
         OodBootstrapSampleSource bootstrapSource,
         IMemoryEntryStore memoryEntryStore,
+        Embeddings.IEmbeddingClient embeddingClient,
         LogRegVoter voter,
         IOptions<RoutingOptions> routingOptions,
         IOptions<EmbeddingOptions> embeddingOptions,
@@ -46,6 +53,7 @@ public sealed class EmbeddingLogRegTrainingService : IEmbeddingLogRegTrainingSer
     {
         ArgumentNullException.ThrowIfNull(bootstrapSource);
         ArgumentNullException.ThrowIfNull(memoryEntryStore);
+        ArgumentNullException.ThrowIfNull(embeddingClient);
         ArgumentNullException.ThrowIfNull(voter);
         ArgumentNullException.ThrowIfNull(routingOptions);
         ArgumentNullException.ThrowIfNull(embeddingOptions);
@@ -54,6 +62,7 @@ public sealed class EmbeddingLogRegTrainingService : IEmbeddingLogRegTrainingSer
 
         _bootstrapSource = bootstrapSource;
         _memoryEntryStore = memoryEntryStore;
+        _embeddingClient = embeddingClient;
         _voter = voter;
         _routingOptions = routingOptions.Value;
         _embeddingOptions = embeddingOptions.Value;
@@ -105,8 +114,10 @@ public sealed class EmbeddingLogRegTrainingService : IEmbeddingLogRegTrainingSer
             _logger.LogInformation(ex, "logreg retrain proceeding without an OOD bootstrap.");
         }
 
+        var modelIdentity = _embeddingClient.ModelIdentity;
         var liveEntries = await _memoryEntryStore.LoadAllAsync(cancellationToken).ConfigureAwait(false);
         var memoryEntryCount = 0;
+        var skippedForModelMismatch = 0;
         foreach (var entry in liveEntries)
         {
             if (entry.TaskEmbedding.Length != dimension)
@@ -121,12 +132,32 @@ public sealed class EmbeddingLogRegTrainingService : IEmbeddingLogRegTrainingSer
                 continue;
             }
 
+            if (!entry.MatchesEmbeddingModel(modelIdentity))
+            {
+                // The silent half of the same problem the length check above catches loudly: two different
+                // embedding models can share a dimensionality, and their vectors are then mutually
+                // meaningless while every length guard passes. Training across the boundary would fit one
+                // set of weights to two unrelated coordinate spaces. Counted and reported once after the
+                // loop rather than logged per entry - after a model swap this rejects the entire corpus at
+                // once, and a per-entry line would be thousands of them.
+                skippedForModelMismatch++;
+                continue;
+            }
+
             samples.Add(new LogRegTrainingSample(
                 entry.TaskEmbedding,
                 ModelNameCanonicalizer.Canonicalize(entry.ChosenModel),
                 entry.Score,
                 _routingOptions.LogRegLiveSampleWeight));
             memoryEntryCount++;
+        }
+
+        if (skippedForModelMismatch > 0)
+        {
+            _logger.LogWarning(
+                "Skipped {SkippedCount} memory entry/entries produced by a different embedding model than the current {ModelIdentity}; they are retained in the store but cannot be trained on.",
+                skippedForModelMismatch,
+                modelIdentity);
         }
 
         var modelsRepresented = samples.Select(s => s.ModelKey).Distinct(StringComparer.Ordinal).Count();
@@ -147,7 +178,7 @@ public sealed class EmbeddingLogRegTrainingService : IEmbeddingLogRegTrainingSer
             $"models={modelsRepresented}, trained {DateTimeOffset.UtcNow:O}";
 
         var artifact = EmbeddingLogRegTrainer.Train(
-            samples, dimension, trainedFrom, bootstrapTaskCount, memoryEntryCount);
+            samples, dimension, trainedFrom, bootstrapTaskCount, memoryEntryCount, modelIdentity);
         EmbeddingLogRegModelArtifactSerializer.Validate(artifact);
 
         await WriteArtifactAtomicallyAsync(artifact, cancellationToken).ConfigureAwait(false);

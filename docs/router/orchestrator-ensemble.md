@@ -1,6 +1,9 @@
 # The Orchestrator Ensemble (PLAN.md Phase L)
 
-> **Status: shipped — 4 of 4 voters; `llm_router` is a documented substitute, not the paper's voter.**
+> **Status: shipped — 5 of 5 voters; `llm_router` is a documented substitute, not the paper's voter.**
+> Four voters shipped with PLAN.md Phase L; `cluster_best` was added later by
+> [`self-organizing-classification-plan.md`](self-organizing-classification-plan.md) Phase T3 and is
+> this project's own addition to the ensemble, not part of the paper's design.
 > This doc is the owning narrative for PLAN.md's Phase L, moved here when the roadmap was pruned back
 > to unfinished work per its own charter ("completed phases are removed rather than archived; the
 > narrative for anything already shipped lives in the design doc that owns it"). Putting the ensemble
@@ -9,13 +12,14 @@
 > here was subsequently rebuilt around task embeddings by
 > [`live-feedback-learning-plan.md`](live-feedback-learning-plan.md) Phases 3–4.
 
-Four voters, weighted vote, argmax — research-doc §3.3 and A.1
-([`../research/technical-reference.md`](../research/technical-reference.md)). Shipped as a
+Weighted vote, argmax — research-doc §3.3 and A.1
+([`../research/technical-reference.md`](../research/technical-reference.md)), whose design has four
+voters; this router runs those four plus `cluster_best`, its own addition. Shipped as a
 self-contained, DI-registered component: `OrchestratorRoutingPolicy` implements `IRoutingPolicy` and is
 registered in `AddTotallyHotArcRouter`. Phase M later made it the default general-path policy inside
 `CompositeRoutingPolicy`, gated by `RoutingOptions.EnableOrchestratorPolicy`.
 
-## The four voters
+## The five voters
 
 - **`dim_best`** (`Router/Orchestrator/DimBestVoter.cs`) — looks up `DimensionModelScoreMatrix`'s
   probing-split prior (Phase K2's `BenchmarkDatabase`) for each candidate, preferring the live
@@ -59,6 +63,18 @@ registered in `AddTotallyHotArcRouter`. Phase M later made it the default genera
   present" path this phase originally required, still exercised, just no longer the *only* path this
   voter takes.
 
+- **`cluster_best`** (`Router/Orchestrator/ClusterBestVoter.cs`) — **not one of the paper's four.** Added
+  by [`self-organizing-classification-plan.md`](self-organizing-classification-plan.md) Phase T3. Assigns
+  the task embedding to its nearest centroid in the learned `cluster_model.json` taxonomy
+  (spherical k-means over `memory_entries`, k swept 6–24), then votes for the candidate with the best
+  observed score in that (cluster, model) ledger cell. Abstains when no cluster artifact has been trained,
+  when the embedding's dimension or embedding model disagrees with the artifact's, when the nearest
+  centroid is below `ClusterAssignmentThreshold` (0.5), or when the winning cell holds fewer than
+  `ClusterBestMinObservations` (3) observations. Gated twice: by `EnableClusterBestVoter` (default `true`)
+  **and** by the `AdaptiveRoutingEnabled` master switch (default **off**), so a fresh install never scores
+  it until an operator opts in. Default weight `ClusterBestVoterWeight` = 0.5 — no published reference
+  value exists, so it is set to the same order of magnitude as `logreg`'s until an operator tunes it.
+
 ## Weights, logging, and the worked-example exit test
 
 Voter weights and per-voter enablement are configuration (`RoutingOptions.DimBestVoterWeight` /
@@ -70,8 +86,9 @@ static-template Serilog logging alongside it.
 
 `OrchestratorRoutingPolicyTests.DecideAsync_ResearchDocWorkedExample_ResolvesToKimiK25AtWeightedScore1_47`
 reproduces research-doc §3.3's worked example — voters picking MiniMax-M2.7 / GLM-5 / Kimi-K2.5 /
-Kimi-K2.5 resolve to Kimi-K2.5 at weighted score 1.47 — with fakes standing in for all four voters. The
-default voter weights (`dim_best` = 0.9, `memory_kNN` = 0.57, `logreg` = 0.43, `llm_router` = 0.64) are
+Kimi-K2.5 resolve to Kimi-K2.5 at weighted score 1.47 — with fakes standing in for the four Phase L voters. The
+default voter weights (`dim_best` = 0.9, `memory_kNN` = 0.57, `logreg` = 0.43, `llm_router` = 0.64,
+`cluster_best` = 0.5) are
 a documented implementation choice sized to reproduce this exact example (0.9 + 0.57 = 1.47), not a
 value the research doc publishes independently — see `RoutingOptions.DimBestVoterWeight`'s XML doc.
 "Ensemble beats every single voter" is **not yet measured** — that half of the original exit criterion
@@ -86,9 +103,20 @@ panel's **"Local Voter Model"** section. It reports the voter model's file sync 
 active model by base URL (`ILlmRouterModelOverrideStore`), and runs a sync with streamed per-file
 progress (`LlmRouterModelSyncService`), mapped by `ProxyServer` onto the same loopback TLS endpoint as
 `TelemetryService` and `BenchmarkDataAdminService`. GUI side: `Components/BenchmarkData.razor` +
-`Services/LlmRouterModelStore.cs`. This is distinct from the **not-yet-built** `logreg` admin surface
-([`live-feedback-learning-plan.md`](live-feedback-learning-plan.md) Phase 5) and from Phase M3's
-read-only `RoutingModeAdminService`, which reports all four voters' enablement and weights.
+`Services/LlmRouterModelStore.cs`. This is distinct from the `logreg` admin surface
+([`live-feedback-learning-plan.md`](live-feedback-learning-plan.md) Phase 5), which **has since shipped**
+as `LogRegModelAdminGrpcService` — an earlier revision of this paragraph called it "not-yet-built" and was
+stale — and from the `cluster_best` equivalent (`ClusterModelAdminGrpcService`, Phase T5).
+
+Phase M3's read-only `RoutingModeAdminGrpcService` reports all five voters' enablement and weights, in
+`dim_best` / `memory_kNN` / `logreg` / `llm_router` / `cluster_best` order. It reported only the original
+four for a while — `GetRoutingMode` appended four hardcoded string literals and was not updated when
+Phase T3 added the fifth — so the Governance → Routing Mode pane could not display `cluster_best` at all.
+Fixed per [`doc-code-reconciliation-plan.md`](doc-code-reconciliation-plan.md) §1.1: every name now comes
+from `VoterNames`, which exists precisely to stop this class of drift, so a future voter is a visible
+omission there rather than a silent one. `cluster_best` is reported un-gated on `AdaptiveRoutingEnabled`,
+because the pane reports *configuration* — what would apply if the Orchestrator were live — not current
+activity.
 
 ## Settled deferral
 

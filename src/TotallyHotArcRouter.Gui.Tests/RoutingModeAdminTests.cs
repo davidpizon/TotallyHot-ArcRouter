@@ -30,6 +30,11 @@ public sealed class RoutingModeAdminTests
             new VoterMode("memory_kNN", true, 0.57),
             new VoterMode("logreg", true, 0.43),
             new VoterMode("llm_router", false, 0.64),
+            // The fifth voter, added by self-organizing-classification-plan.md Phase T3. Present in this
+            // fixture because the component under test renders whatever the service sends, and the
+            // service sends five - a four-voter fixture under a test named "every voter" is the same
+            // drift that let RoutingModeAdminGrpcService omit this voter in the first place.
+            new VoterMode("cluster_best", true, 0.5),
         ]);
 
     [Fact]
@@ -44,6 +49,7 @@ public sealed class RoutingModeAdminTests
         cut.Markup.Should().Contain("memory_kNN");
         cut.Markup.Should().Contain("logreg");
         cut.Markup.Should().Contain("llm_router");
+        cut.Markup.Should().Contain("cluster_best");
         cut.Markup.Should().Contain("weight 0.90");
         cut.Markup.Should().Contain("disabled");
     }

@@ -139,7 +139,7 @@ public class EmbeddingMemoryTests
             MaxNeighborCount = 10,
             EmbeddingMemoryCapacity = 20_000,
         });
-        var memory = new EmbeddingMemory(store, monitor, NullLogger<EmbeddingMemory>.Instance);
+        var memory = new EmbeddingMemory(store, monitor, new StubEmbeddingClient(), NullLogger<EmbeddingMemory>.Instance);
         await memory.InitializeAsync(TestContext.Current.CancellationToken);
 
         await memory.AddEntryAsync(UnitVector(1, 0, 0), "model-oldest", 0.5, 0.01, null, TestContext.Current.CancellationToken);
@@ -167,7 +167,8 @@ public class EmbeddingMemoryTests
         IMemoryEntryStore store,
         double similarityThreshold,
         int maxNeighborCount,
-        int capacity = 20_000) =>
+        int capacity = 20_000,
+        string? modelIdentity = null) =>
         new(
             store,
             new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions
@@ -176,6 +177,7 @@ public class EmbeddingMemoryTests
                 MaxNeighborCount = maxNeighborCount,
                 EmbeddingMemoryCapacity = capacity,
             }),
+            new StubEmbeddingClient(modelIdentity),
             NullLogger<EmbeddingMemory>.Instance);
 
     private static float[] UnitVector(float x, float y, float z)

@@ -9,8 +9,9 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// </summary>
 /// <param name="EmbeddingDimension">
 /// The embedding dimension this artifact was trained at. Changing <c>EmbeddingOptions.EmbeddingDimension</c>
-/// or the embedding model URL invalidates a trained artifact; a consumer refuses to score a
-/// differently-sized embedding and abstains rather than silently misindexing centroids.
+/// invalidates a trained artifact; a consumer refuses to score a differently-sized embedding and abstains
+/// rather than silently misindexing centroids. A change of embedding <em>model</em> at the same dimension
+/// is caught by <see cref="EmbeddingModel"/> instead - this field cannot see it.
 /// </param>
 /// <param name="Centroids">The unit-normalized cluster centroids, one per cluster, each of length <see cref="EmbeddingDimension"/>.</param>
 /// <param name="ChosenK">The number of clusters <see cref="SphericalKMeansTrainer"/>'s sweep selected.</param>
@@ -35,6 +36,15 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// </param>
 /// <param name="BootstrapTaskCount">The number of OOD bootstrap tasks (Phase T2d) that contributed to this artifact, or 0 if none.</param>
 /// <param name="MemoryEntryCount">The number of live <c>memory_entries</c> rows that contributed to this artifact, or 0 if none.</param>
+/// <param name="EmbeddingModel">
+/// The identity of the embedding model whose vectors this artifact was fitted against
+/// (<see cref="Router.Embeddings.IEmbeddingClient.ModelIdentity"/>), or <see langword="null"/> for an
+/// artifact trained before this provenance existed. <see cref="EmbeddingDimension"/> alone cannot make
+/// the invalidation guarantee this type's own documentation claims: two different embedding models
+/// frequently share a dimensionality, and swapping between them leaves every length check passing while
+/// the weights below refer to a coordinate space that no longer exists. A consumer compares this against
+/// the live client and abstains on a mismatch, exactly as it does for a dimension mismatch.
+/// </param>
 public sealed record ClusterModelArtifact(
     int EmbeddingDimension,
     IReadOnlyList<float[]> Centroids,
@@ -45,7 +55,8 @@ public sealed record ClusterModelArtifact(
     IReadOnlyList<IReadOnlyList<string>> ClusterTopTerms,
     string TrainedFrom,
     int BootstrapTaskCount,
-    int MemoryEntryCount)
+    int MemoryEntryCount,
+    string? EmbeddingModel = null)
 {
     /// <summary>
     /// Returns a human-readable name for cluster <paramref name="clusterIndex"/>, preferring its top TF-IDF

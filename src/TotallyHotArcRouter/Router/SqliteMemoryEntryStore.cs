@@ -28,7 +28,7 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT id, embedding, chosen_model, score, cost, verifier_trace, created_at_utc, is_exploratory, propensity, dimension, is_judge_scored
+            SELECT id, embedding, chosen_model, score, cost, verifier_trace, created_at_utc, is_exploratory, propensity, dimension, is_judge_scored, embedding_model
             FROM memory_entries
             ORDER BY id ASC;
             """;
@@ -52,8 +52,8 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO memory_entries (embedding, chosen_model, score, cost, verifier_trace, created_at_utc, is_exploratory, propensity, dimension, is_judge_scored)
-            VALUES ($embedding, $chosenModel, $score, $cost, $verifierTrace, $createdAtUtc, $isExploratory, $propensity, $dimension, $isJudgeScored);
+            INSERT INTO memory_entries (embedding, chosen_model, score, cost, verifier_trace, created_at_utc, is_exploratory, propensity, dimension, is_judge_scored, embedding_model)
+            VALUES ($embedding, $chosenModel, $score, $cost, $verifierTrace, $createdAtUtc, $isExploratory, $propensity, $dimension, $isJudgeScored, $embeddingModel);
             SELECT last_insert_rowid();
             """;
         command.Parameters.AddWithValue("$embedding", ToBytes(entry.TaskEmbedding));
@@ -66,6 +66,7 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         command.Parameters.AddWithValue("$propensity", entry.Propensity);
         command.Parameters.AddWithValue("$dimension", (object?)entry.Dimension ?? DBNull.Value);
         command.Parameters.AddWithValue("$isJudgeScored", entry.IsJudgeScored ? 1 : 0);
+        command.Parameters.AddWithValue("$embeddingModel", (object?)entry.EmbeddingModel ?? DBNull.Value);
 
         var id = (long)command.ExecuteScalar()!;
         return Task.FromResult(entry with { Id = id });
@@ -112,8 +113,9 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         var propensity = reader.GetDouble(8);
         var dimension = reader.IsDBNull(9) ? null : reader.GetString(9);
         var isJudgeScored = reader.GetInt64(10) != 0;
+        var embeddingModel = reader.IsDBNull(11) ? null : reader.GetString(11);
 
-        return new MemoryEntry(id, embedding, chosenModel, score, cost, verifierTrace, createdAtUtc, isExploratory, propensity, dimension, isJudgeScored);
+        return new MemoryEntry(id, embedding, chosenModel, score, cost, verifierTrace, createdAtUtc, isExploratory, propensity, dimension, isJudgeScored, embeddingModel);
     }
 
     /// <summary>Encodes an embedding vector as a raw little-endian <c>float32</c> byte array for storage in the <c>embedding</c> BLOB column.</summary>

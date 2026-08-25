@@ -2,8 +2,18 @@
 
 A prioritized, multi-phase remediation plan for the TotallyHot Arc Router threat surface.
 
-**Status:** Proposed — no code has been changed. Every item below is an action item, not a
-completed change.
+**Status:** Proposed, with a stale blanket claim now qualified. This plan was written as a pure
+action list, and its original wording — "no code has been changed" — is **no longer true as a blanket
+statement**: [`mcp-endpoint-plan.md`](mcp-endpoint-plan.md) subsequently shipped and overlaps this
+plan's management-authentication surface. Concretely, `Proxy/Management/ManagementAccessToken.cs` now
+backs an `X-Admin-Token` header that `ProviderAdminEndpoints` and `UsageAdminEndpoints` require on every
+`/admin/*` request, and the MCP endpoint enforces the same token through `McpBearerAuthMiddleware` over
+TLS — which is the subject matter of **T-02** and **T-04** below.
+
+**The per-finding statuses in this document have not been re-audited against that work.** Nothing here
+should be read as either confirmed-open or confirmed-fixed until someone walks each finding against the
+current tree; that is a security review, not a documentation pass, and is deliberately not attempted
+here. Treat each item as *unverified* rather than *proposed*.
 
 **Method.** Every finding was derived from the current `main` working tree via CodeGraph symbol
 exploration plus targeted reads. Each carries a `file:line` citation so it can be re-verified

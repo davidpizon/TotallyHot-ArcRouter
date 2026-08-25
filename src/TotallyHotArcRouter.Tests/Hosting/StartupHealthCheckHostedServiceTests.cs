@@ -230,7 +230,7 @@ public class StartupHealthCheckHostedServiceTests
     {
         var database = CreateRouterMemoryDatabase(temp);
         var store = new SqliteMemoryEntryStore(database);
-        return new EmbeddingMemory(store, new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions()), NullLogger<EmbeddingMemory>.Instance);
+        return new EmbeddingMemory(store, new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions()), new StubEmbeddingClient(), NullLogger<EmbeddingMemory>.Instance);
     }
 
     private static BenchmarkDatabase CreateBenchmarkDatabase(TempDatabase temp)

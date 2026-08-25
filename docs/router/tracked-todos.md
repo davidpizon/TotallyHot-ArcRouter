@@ -17,83 +17,19 @@ and this is the nearer of the two repos' doc folders to where the work is being 
 
 ---
 
-## #1 Make `convertToolsToOpenAI` degrade instead of throwing on `ToolMode.Required` with multiple tools
+## #1 — removed (obsolete)
 
-**Repo:** `spark-vscode-extension` (a separate repository — file paths below are relative to *its*
-root, not this one) · **Status:** Open
+**Was:** "Make `convertToolsToOpenAI` degrade instead of throwing on `ToolMode.Required` with multiple
+tools." **Removed** because it targeted a TypeScript codebase that no longer exists: every file it named
+(`src/utils.ts`, `src/openai/openaiApi.ts`, `src/anthropic/anthropicApi.ts`, `src/gemini/geminiApi.ts`,
+`src/openai/openaiResponsesApi.ts`, `src/logger.ts`) predates this repository's C# migration and is gone.
+The item was unactionable rather than merely stale. Tool-choice handling in the C# router lives in
+[`tool-call-normalization.md`](tool-call-normalization.md); raise a fresh item there if a real gap exists.
 
-### Problem
+The numbering below is left unchanged so [`../../src/PLAN.md`](../../src/PLAN.md)'s references to #3,
+#4, and #5 stay valid.
 
-`convertToolsToOpenAI` in `src/utils.ts:74-81` throws when VS Code passes `toolMode ===
-LanguageModelChatToolMode.Required` together with more than one tool:
-
-```ts
-let tool_choice: "auto" | { type: "function"; function: { name: string } } = "auto";
-if (options?.toolMode === vscode.LanguageModelChatToolMode.Required) {
-    if (tools.length !== 1) {
-        console.error("[OAI Compatible Model Provider] ToolMode.Required but multiple tools:", tools.length);
-        throw new Error("LanguageModelChatToolMode.Required is not supported with more than one tool");
-    }
-    tool_choice = { type: "function", function: { name: tools[0].name } };
-}
-```
-
-The throw propagates out of `buildRequestBody` and aborts the whole chat request before a single
-byte is sent upstream. The user sees a failed request, not a degraded one.
-
-### Why this matters
-
-The restriction is an artifact of an older, narrower reading of the OpenAI spec. Modern
-OpenAI-compatible endpoints support `tool_choice: "required"` — "call *some* tool, you pick which" —
-which is exactly the semantics `LanguageModelChatToolMode.Required` asks for with N tools. There is
-no need to fail.
-
-Blast radius is wide because this is on the shared path: `convertToolsToOpenAI` is called by all four
-backends —
-- `src/openai/openaiApi.ts:229`
-- `src/ollama/ollamaApi.ts:138`
-- `src/anthropic/anthropicApi.ts:264`
-- `src/gemini/geminiApi.ts:706` (via `openaiToolChoiceToGeminiToolConfig`)
-- `src/openai/openaiResponsesApi.ts:268` (via `convertToolsToOpenAIResponses`, `src/utils.ts:103`)
-
-So one Copilot request with `Required` + 2 tools hard-fails on every provider the extension supports.
-
-### Proposed fix
-
-1. Widen the `tool_choice` union in both `convertToolsToOpenAI` (`src/utils.ts:49-51`) and
-   `convertToolsToOpenAIResponses` (`src/utils.ts:99-101`) to include the literal `"required"`.
-2. Replace the throw: emit `tool_choice: { type: "function", function: { name } }` when exactly one
-   tool is present (preserves today's behavior), and `tool_choice: "required"` when more than one is.
-3. Map the new value per provider:
-   - **OpenAI / Ollama** — passes through unchanged; `"required"` is native.
-   - **OpenAI Responses** — `convertToolsToOpenAIResponses` (`src/utils.ts:122-127`) currently
-     handles only `"auto"` and the function object. Add a `"required"` branch.
-   - **Anthropic** — `src/anthropic/anthropicApi.ts:282-287` maps `"auto"` → `{ type: "auto" }` and
-     the function object → `{ type: "tool", name }`. Add `"required"` → `{ type: "any" }`, which is
-     Anthropic's exact equivalent.
-   - **Gemini** — `openaiToolChoiceToGeminiToolConfig` should map `"required"` →
-     `functionCallingConfig.mode: "ANY"` with no `allowedFunctionNames` restriction.
-4. Drop the `console.error` — the codebase logs through `src/logger.ts`, not `console`.
-
-### Tests
-
-No existing coverage for this branch. Add cases to `src/test/utils.test.ts`:
-- `Required` + 1 tool → `{ type: "function", function: { name } }` (regression guard on current
-  behavior)
-- `Required` + 3 tools → `"required"`, and **does not throw** (this is the bug)
-- `Required` + 0 tools → still returns `{}` early at `src/utils.ts:54`
-- Per-provider mapping assertions for the Anthropic `any` and Gemini `ANY` translations
-
-### Notes
-
-Found while diagnosing a separate issue (a model emitting tool-call JSON as prose instead of a native
-`tool_calls` delta — the same investigation that produced [`tool-call-normalization.md`](tool-call-normalization.md)
-below). Unrelated root cause — this one is latent and has probably never fired, since Copilot rarely
-requests `Required` mode with multiple tools. Worth fixing before it does.
-
----
-
-## #2 Write `tool-call-normalization.md` design doc
+## #2 Write `tool-call-normalization.md` design doc — **complete**
 
 **Repo:** ArcRouter · **Status:** ✅ Done
 
