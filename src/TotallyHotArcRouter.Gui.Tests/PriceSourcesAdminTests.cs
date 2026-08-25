@@ -153,6 +153,29 @@ public sealed class PriceSourcesAdminTests
     }
 
     [Fact]
+    public void Clicking_the_toggle_flips_the_source_even_after_the_presss_bubbled_pointerdown()
+    {
+        // A real browser click on the toggle fires pointerdown first, and that bubbles up to the card's
+        // own @onpointerdown handler before the click event completes - Pressing_a_card_hands_the_drag_to_js
+        // and A_plain_click_never_lifts_a_card cover that handler directly. Reproduced here with two
+        // sources (below two, OnPointerDown's own guard skips it, masking the bug) because that bubble
+        // used to make DisplayOrder latch onto a working-order snapshot taken before the toggle applied,
+        // so the button never reflected the flip until the component was torn down and recreated - which
+        // is why a plain bUnit .Click() alone (no pointerdown) never caught it.
+        var client = new FakeClient(
+            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10),
+            new PriceSourceStatus("openrouter", Enabled: true, PriorityScore: -10, PriceCount: 5));
+        using var ctx = NewContext(client);
+
+        var cut = ctx.Render<PriceSourcesAdmin>();
+        Card(cut, 0).PointerDown(new PointerEventArgs { Button = 0 });
+        cut.FindAll("button").First(b => b.TextContent.Contains("ENABLED", StringComparison.Ordinal)).Click();
+
+        client.LastSetEnabled.Should().Be(("litellm", false));
+        cut.Markup.Should().Contain("DISABLED");
+    }
+
+    [Fact]
     public void Clicking_pull_now_runs_a_cycle_and_reports_outcomes()
     {
         var client = new FakeClient(

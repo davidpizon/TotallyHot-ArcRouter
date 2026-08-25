@@ -315,7 +315,6 @@
         }
 
         _dragName = source.Name;
-        _order = Store.Sources.ToList();
         _dragActive = false;
         _selfRef ??= DotNetObjectReference.Create(this);
 
@@ -332,6 +331,17 @@
     /// Called from JS once the press has travelled far enough to count as a drag, which is when the card
     /// is detached. Renders the lift; the card is already following the cursor by this point.
     /// </summary>
+    /// <remarks>
+    /// The working order is snapshotted here rather than in <see cref="OnPointerDown"/>, even though a
+    /// press always fires <see cref="OnPointerDown"/> first. A plain click on the enable/disable toggle
+    /// also fires <c>pointerdown</c> - it bubbles up from the button before the click completes - but
+    /// never crosses the drag threshold, so JS's <c>_onUp</c> tears itself down without ever calling
+    /// <see cref="EndDrag"/> or <see cref="CancelDrag"/>. Snapshotting eagerly in
+    /// <see cref="OnPointerDown"/> left <c>_order</c> permanently set after every such click, which made
+    /// <see cref="DisplayOrder"/> keep rendering that stale pre-toggle snapshot instead of the store's
+    /// freshly toggled state until the component was torn down and recreated. Snapshotting only once a
+    /// real drag is confirmed means a plain click never sets <c>_order</c> at all.
+    /// </remarks>
     [JSInvokable]
     public async Task DragStarted()
     {
@@ -340,6 +350,7 @@
             return;
         }
 
+        _order = Store.Sources.ToList();
         _dragActive = true;
         await InvokeAsync(StateHasChanged);
     }
