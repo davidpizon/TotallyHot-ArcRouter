@@ -79,24 +79,33 @@ The assembly contains no `System.Diagnostics.Process`, no `/dev/kvm` probe, and 
 
 ```mermaid
 flowchart TD
-    A[ProxyMiddleware<br/>completed response] --> B[QualityIngress<br/>sample + extract fenced code]
-    B --> C[QualityWorkQueue<br/>bounded, non-blocking]
-    C --> D[QualityGradingService<br/>N workers]
-    D --> E[QualityGrader]
-    E --> F[StructuralParser<br/>syntax verdict]
-    E --> G[CompositeStaticAnalyzer<br/>diagnostics · placeholder · truncation · complexity]
-    F --> H[QualityScorer<br/>static score]
-    G --> H
-    H --> I{IJudgeAvailability<br/>WillJudge?}
-    I -->|no| K[Write once]
-    I -->|yes| J[QualityScoreAggregator<br/>hold by correlation id]
-    J -.->|judge grade arrives| L[Blend · rescore]
-    J -.->|timeout · evict · abstain| K
-    L --> K
-    K --> M[IQualityScoreObserver fan-out]
-    M --> N[RouterMemory]
-    M --> O[EmbeddingMemory]
-    M --> P[Transcripts · Telemetry]
+    subgraph live["Live path — the only path that writes router memory"]
+        A[ProxyMiddleware<br/>completed response] --> B[QualityIngress<br/>sample + extract fenced code]
+        B --> C[QualityWorkQueue<br/>bounded, non-blocking]
+        C --> D[QualityGradingService<br/>N workers]
+        D --> E[QualityGrader]
+        E --> F[StructuralParser<br/>syntax verdict]
+        E --> G[CompositeStaticAnalyzer<br/>diagnostics · placeholder · truncation · complexity]
+        F --> H[QualityScorer<br/>static score]
+        G --> H
+        H --> I{IJudgeAvailability<br/>WillJudge?}
+        I -->|no| K[Write once]
+        I -->|yes| J[QualityScoreAggregator<br/>hold by correlation id]
+        J -.->|judge grade arrives| L[Blend · rescore]
+        J -.->|timeout · evict · abstain| K
+        L --> K
+        K --> M[IQualityScoreObserver fan-out]
+        M --> N[RouterMemory]
+        M --> O[EmbeddingMemory]
+        M --> P[Transcripts · Telemetry]
+    end
+
+    subgraph rescan["Rescan path — writes the transcript row only (§3.3)"]
+        R[(request_transcripts<br/>saved prompt + response)] --> RS[QualityRescanService<br/>bounded periodic sweep]
+        RS --> RE[QualityGrader<br/>same grader, saved input]
+        RE --> RW[score + scorer_version]
+        RW --> R
+    end
 ```
 
 ### 3.1 Structural parsing
@@ -149,6 +158,39 @@ at 0.5 so it can never dominate a score.
 `DiagnosticSeverityAnalyzer` parses only — no `CSharpCompilation`, no reference resolution — so it never
 reports "type or namespace not found" for a snippet whose imports simply were not pasted along with it, a
 complaint that would say more about the extraction than the model.
+
+### 3.3 The second source: grading saved rows
+
+`QualityIngress` is triggered by a completed live response. `QualityRescanService` grades the *saved*
+row instead — sweeping `request_transcripts` for rows whose `scorer_version` is missing or stale,
+re-extracting from the stored response text, grading, and stamping the score and version back.
+
+Three things the live trigger structurally cannot do, and this can:
+
+- **Backfill.** A response dropped because `QueueCapacity` was full is never graded — and the queue fills
+  under load, which is exactly when the evidence matters most.
+- **Re-run.** Changing a weight or adding a grader otherwise only affects traffic from that moment on.
+  Bumping `Quality:ScorerVersion` re-scores the corpus already captured, so two scorers can be compared
+  on the same rows instead of on different weeks of traffic.
+- **Throttle.** The live queue drops rather than defers. A bounded periodic sweep can batch and run
+  off-peak, which is what makes an LLM grader affordable at all.
+
+**It deliberately does not write to router memory.** `IQualityScoreObserver`'s contract is that
+`QualityScoreAggregator` calls it exactly once per request, and `RouterMemory` accumulates a running sum
+and count — so a rescan that also observed would add a second observation for every row the live path
+had already scored, inflating the sample size the voters trust in a way that is invisible in the
+resulting average. That is precisely the miscount §5's join exists to prevent, and re-introducing it
+through a second writer would undo the guarantee. What the rescan produces is a re-measurable scored
+*corpus*; which of those scores may reach live memory is a separate decision, and belongs with the rework
+that generalizes the join from one judge to N.
+
+A row that yields no code block is still stamped, with a null score. Leaving it unstamped would return it
+at the head of every subsequent sweep — and because the sweep is bounded and ordered oldest-first, a run
+of prose-only rows would consume every batch forever and no gradable row would ever be reached.
+
+Gated on `TranscriptOptions.EnableQualityRescan` **and** `TranscriptOptions.Enabled`: with capture off
+there is no saved task data to grade. Shape follows `EmbeddingBackfillService`, the established pattern
+for a bounded periodic sweep over saved transcript rows.
 
 ---
 
@@ -266,7 +308,26 @@ about to influence routing, so it must exist before the score does.
   "LiveMemoryPrefix": "live:",
   "JudgeJoinTimeoutMs": 60000,
   "JudgeJoinCapacity": 2000,
+  "ScorerVersion": "2.0",
   "DimensionWeights": { /* see §4 */ }
+}
+```
+
+`ScorerVersion` identifies the current scoring configuration and is stamped onto each rescanned
+transcript row. **Bump it whenever a change would produce a different score for the same response** — a
+new grader, a changed weight, a reworded judge prompt. Leaving it unchanged after a scoring change
+freezes the corpus at the old scorer's verdicts; bumping it needlessly re-grades every row.
+
+The rescan's own settings live on the `Transcript` section, not here, because they govern a sweep over
+the transcript store. That section is absent from `appsettings.json` entirely — every value below is
+a code default, and an operator opting in writes the section themselves:
+
+```jsonc
+"Transcript": {
+  "Enabled": true,
+  "EnableQualityRescan": true,
+  "QualityRescanIntervalMinutes": 5,
+  "QualityRescanBatchSize": 100
 }
 ```
 
@@ -292,6 +353,7 @@ learned rather than migrating it.
 | `QualityScoreAggregator` | The join; exactly-once write. |
 | `QualityJoinSweepService` | Periodic timeout sweep. |
 | `IQualityScoreObserver` | Seam into the host's memory adapters. |
+| `QualityRescanService` | The saved-data source (§3.3). Lives in the host beside the transcript store, not in this assembly - it needs `ITranscriptStore`, which this library does not reference. Writes scores to transcript rows only, never to router memory. |
 
 The `IJudgeAvailability` and `IQualityScoreObserver` seams exist so `TotallyHot.ArcRouter.Quality` never
 references the core router or the judge subsystem. The host supplies `JudgeAvailability` and

@@ -33,6 +33,7 @@ harness (`regret-evaluation-harness-plan.md` N1–N3) have all shipped. Narrativ
 | Routing ROI — regret vs `dim_best`, one-minute full drain, hard pause under load | [`../docs/router/routing-roi-regret-plan.md`](../docs/router/routing-roi-regret-plan.md), [`../docs/router/self-organizing-classification-plan.md`](../docs/router/self-organizing-classification-plan.md) (Phase T4 status block) |
 | Phases T1–T6 — transcript capture, self-organizing clustering, `cluster_best` voter, baseline comparison, Cluster Model admin pane, System Settings adaptive-routing toggle | [`../docs/router/self-organizing-classification-plan.md`](../docs/router/self-organizing-classification-plan.md) |
 | Phase N (N1–N3) — regret metrics core (`RegretReplayResult`), the no-leakage streaming replay engine (`RegretReplayEngine`), and the Always-*m* / DimensionBest / LinUCB / LinTS baselines | [`../docs/router/regret-evaluation-harness-plan.md`](../docs/router/regret-evaluation-harness-plan.md) (N1–N3 status notes) |
+| Phase Q0 — quality rescan over saved task data (`QualityRescanService`, `scorer_version` column, `Quality:ScorerVersion`, prompt carried onto `QualityRequest`), off by default | [`../docs/router/quality-verifier-architecture.md`](../docs/router/quality-verifier-architecture.md) §3.3, [`../docs/research/code-quality-metrics-assessment.md`](../docs/research/code-quality-metrics-assessment.md) |
 | Phase G1 — shadow judge observer (`PendingResponseTextCache`, `JudgeShadowScoreObserver`/`GEvalJudgeClient`/`JudgeModelSelector`/drain worker, `judge_shadow_scores` side table, `is_judge_scored` provenance columns), off by default, judging on a free Providers-screen model | [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md) |
 
 **What is still missing**, and which remaining workstream owns it:
@@ -137,7 +138,18 @@ flowchart LR
    the harness itself. Phase G1 (shipped; see the shipped-work table above) already accumulates shadow
    judge data passively in the background while this harness is built, so G2's gate has volume by the
    time it's ready.
-2. **Phases G2 → G3 — judge calibration, then judge-as-verifier.**
+2. **Phases Q1–Q5 — empirical quality metrics.** Q0 shipped (see the table above). What remains:
+   **Q1** generalizes the scorer from two graders to N (`DimensionWeightOptions` keyed grader map,
+   per-grader contributions on `QualityResult`, a K-way join, per-grader `DegradedReason`) with the exit
+   criterion that a single configured judge produces a byte-identical `UnifiedScore`; **Q2** adds the free
+   `IStaticAnalyzer`s (prompt/response relevance, smell density) and makes the judge prompt-aware; **Q3**
+   registers the LLM grader portfolio — CodeJudge (correctness), ICE-Score `usefulness`, RACE
+   readability/maintainability — each behind its own capability probe that abstains rather than fabricates;
+   **Q4** measures per-dimension, per-grader reliability plus verbosity and self-preference skew before any
+   re-weighting; **Q5** replaces `DimBestVoter`'s argmax-over-raw-mean with a sample-size-aware estimator,
+   accepted only if `RegretReplayEngine` shows `CumReg` improving. Rationale and per-source verdicts:
+   [`../docs/research/code-quality-metrics-assessment.md`](../docs/research/code-quality-metrics-assessment.md).
+3. **Phases G2 → G3 — judge calibration, then judge-as-verifier.**
    [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md). G2's
    agreement/calibration analysis runs once G1 has accumulated shadow data; G3 (the judge as scorer of
    record for non-executable dimensions only, with `is_judge_scored` provenance) is gated on G2's
@@ -195,6 +207,13 @@ solve itself, but N never required them to complete.
 
 ## Settled deferrals (do not re-open without new evidence)
 
+- **The quality rescan does not write to router memory** — it grades saved transcript rows and stamps
+  the score onto the row only. `IQualityScoreObserver`'s contract is that `QualityScoreAggregator` calls it
+  exactly once per request, and `RouterMemory` accumulates a running sum and count, so a second writer
+  would double-count every row the live path had already scored — invisibly, since the average still looks
+  plausible. Whether rescan scores may reach live memory is deliberately deferred to Phase Q1, which
+  reworks that join from one judge to N. Rationale:
+  [`../docs/router/quality-verifier-architecture.md`](../docs/router/quality-verifier-architecture.md) §3.3.
 - **Multimodal price tiers** — deferred; no upstream feed publishes a `resolution_tier` concept.
   Rationale: [`../docs/router/model-price-catalog.md`](../docs/router/model-price-catalog.md).
 - **Routing ROI / Tool Steps / Context Buffer GUI metrics** — deliberately mock-backed; each needs a

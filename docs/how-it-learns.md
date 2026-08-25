@@ -124,6 +124,26 @@ Two independent graders run — neither of which executes the code. See
 [**Two graders, one grade**](#two-graders-one-grade) for how their two opinions become a single number.
 When that grade arrives, the receipt is found by correlation id and the blank gets filled in.
 
+**Grading can also run later, from the filed receipts themselves.** The live trigger has three limits it
+cannot escape: a response dropped because the grading queue was full is never graded *at all* — and the
+queue fills under load, exactly when the evidence is most valuable; changing how grading works only
+affects traffic from that moment on, so comparing two ways of grading means waiting weeks; and the queue
+drops work rather than deferring it, so there is no way to grade more cheaply by grading later.
+
+So a background sweep re-reads the saved receipts — which kept the prompt *and* the response — regrades
+them, and writes the result back onto the row. Rows the live path never got to are picked up. Change the
+grading rules and bump `Quality:ScorerVersion`, and the whole filing cabinet is re-marked under the new
+rules, so the old and new way of grading can be compared on the *same* answers rather than on different
+months of traffic.
+
+One deliberate limit: **the sweep writes only to the receipt, never to the tally sheet.** Drawer A in
+Step 5 keeps a running sum and count, so re-grading an answer that was already counted would count it
+twice — the router would believe it had twice as much evidence as it does, and the inflation would be
+invisible in the resulting average. That is the same miscount
+[**Two graders, one grade**](#two-graders-one-grade) exists to prevent, and a second writer would undo
+it. The sweep produces a re-markable *corpus*; letting any of those marks reach the tally sheet is a
+separate decision.
+
 ## Step 5 — File the grade into two memory drawers
 
 One grade — already joined from both graders — fans out to several listeners at once.
@@ -376,6 +396,11 @@ A system that grades itself should be candid about what it doesn't yet measure.
   still the weakest link in the static axis.
 - **The judge grades what it grades.** Probability-weighted G-Eval is a real improvement over sampling one
   digit, but it is still one model opinion of another work, with whatever blind spots that implies.
+- **The graders still cannot see the question.** The prompt now travels with the request as far as the
+  grader (and the saved-receipt sweep above supplies it for history too), but nothing *reads* it yet: the
+  parser checks the code, and the judge is handed the answer alone. So a complete, well-formed, entirely
+  correct-looking snippet that answers a **different question** still scores as well as one that answers
+  this one. The plumbing is in place; the graders that use it are not built yet.
 - **The judge calibration against the static grader is not yet analysed.** Both scores are recorded side
   by side in `judge_shadow_scores` for exactly that purpose. The analysis has not been done.
 

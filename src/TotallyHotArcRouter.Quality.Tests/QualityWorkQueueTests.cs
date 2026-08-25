@@ -8,7 +8,7 @@ namespace TotallyHot.ArcRouter.Quality.Tests;
 public class QualityWorkQueueTests
 {
     private static QualityRequest Request() =>
-        new("code", CodeLanguage.Python, "code_generation", "gpt-5.4", "corr", "sess");
+        new("code", CodeLanguage.Python, "write code", "code_generation", "gpt-5.4", "corr", "sess");
 
     [Fact]
     public void TryEnqueue_WithinCapacity_Succeeds()

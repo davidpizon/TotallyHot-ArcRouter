@@ -163,6 +163,114 @@ public class SqliteTranscriptStoreTests : IDisposable
         Assert.True(File.Exists(_dbPath));
     }
 
+    [Fact]
+    public async Task LoadPendingQualityRescanAsync_ReturnsRowsThatWereNeverScanned()
+    {
+        // The load-bearing case for the query's `IS NOT` operator. SQL's three-valued logic evaluates
+        // `NULL <> 'v2'` to NULL rather than true, so a plain inequality would silently exclude every
+        // never-scanned row - which is the entire population the first sweep exists to grade.
+        var (database, store) = CreateEnabledStore();
+        await store.InsertAsync(MakeRecord("corr-never"), TestContext.Current.CancellationToken);
+
+        var pending = await store.LoadPendingQualityRescanAsync("v2", 10, TestContext.Current.CancellationToken);
+
+        Assert.Single(pending);
+        Assert.Null(ReadScorerVersion(database, "corr-never"));
+    }
+
+    [Fact]
+    public async Task LoadPendingQualityRescanAsync_ExcludesRowsAlreadyAtTheCurrentVersion()
+    {
+        var (_, store) = CreateEnabledStore();
+        var id = await store.InsertAsync(MakeRecord("corr-current"), TestContext.Current.CancellationToken);
+        await store.MarkQualityRescannedAsync(id!.Value, "v2", 0.7, TestContext.Current.CancellationToken);
+
+        var pending = await store.LoadPendingQualityRescanAsync("v2", 10, TestContext.Current.CancellationToken);
+
+        Assert.Empty(pending);
+    }
+
+    [Fact]
+    public async Task LoadPendingQualityRescanAsync_ReturnsRowsStampedByAnOlderScorer()
+    {
+        var (_, store) = CreateEnabledStore();
+        var id = await store.InsertAsync(MakeRecord("corr-stale"), TestContext.Current.CancellationToken);
+        await store.MarkQualityRescannedAsync(id!.Value, "v1", 0.7, TestContext.Current.CancellationToken);
+
+        var pending = await store.LoadPendingQualityRescanAsync("v2", 10, TestContext.Current.CancellationToken);
+
+        Assert.Equal([id.Value], pending);
+    }
+
+    [Fact]
+    public async Task LoadPendingQualityRescanAsync_ExcludesRowsCarryingNoResponseText()
+    {
+        // Nothing to grade, and returning them would let a run of text-less rows consume an entire
+        // bounded batch and starve the sweep of rows it could actually score.
+        var (_, store) = CreateEnabledStore();
+        await store.InsertAsync(
+            MakeRecord("corr-no-text") with { ResponseText = null },
+            TestContext.Current.CancellationToken);
+
+        var pending = await store.LoadPendingQualityRescanAsync("v2", 10, TestContext.Current.CancellationToken);
+
+        Assert.Empty(pending);
+    }
+
+    [Fact]
+    public async Task MarkQualityRescannedAsync_WritesBothTheScoreAndTheVersionStamp()
+    {
+        var (database, store) = CreateEnabledStore();
+        var id = await store.InsertAsync(MakeRecord("corr-mark"), TestContext.Current.CancellationToken);
+
+        await store.MarkQualityRescannedAsync(id!.Value, "v2", 0.61, TestContext.Current.CancellationToken);
+
+        Assert.Equal(0.61, ReadRow(database, "corr-mark").Score!.Value, 6);
+        Assert.Equal("v2", ReadScorerVersion(database, "corr-mark"));
+    }
+
+    [Fact]
+    public async Task MarkQualityRescannedAsync_NullScoreStillStampsSoTheRowLeavesThePendingSet()
+    {
+        // A row whose text carries no code block is ungradable, but must still be stamped - otherwise the
+        // oldest-first sweep returns it again on every tick, forever.
+        var (_, store) = CreateEnabledStore();
+        var id = await store.InsertAsync(MakeRecord("corr-ungradable"), TestContext.Current.CancellationToken);
+
+        await store.MarkQualityRescannedAsync(id!.Value, "v2", score: null, TestContext.Current.CancellationToken);
+
+        Assert.Empty(await store.LoadPendingQualityRescanAsync("v2", 10, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task LoadPendingQualityRescanAsync_CaptureDisabled_ReturnsEmptyAndWritesNothing()
+    {
+        var database = CreateDatabase();
+        var store = new SqliteTranscriptStore(database, Options.Create(new TranscriptOptions { Enabled = false }));
+
+        var pending = await store.LoadPendingQualityRescanAsync("v2", 10, TestContext.Current.CancellationToken);
+
+        Assert.Empty(pending);
+        Assert.False(File.Exists(_dbPath));
+    }
+
+    private (TranscriptDatabase Database, SqliteTranscriptStore Store) CreateEnabledStore()
+    {
+        var database = CreateDatabase();
+        database.EnsureCreated();
+        return (database, new SqliteTranscriptStore(database, Options.Create(new TranscriptOptions { Enabled = true })));
+    }
+
+    private static string? ReadScorerVersion(TranscriptDatabase database, string correlationId)
+    {
+        using var connection = database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT scorer_version FROM request_transcripts WHERE correlation_id = $correlationId;";
+        command.Parameters.AddWithValue("$correlationId", correlationId);
+        var value = command.ExecuteScalar();
+        return value is null or DBNull ? null : (string)value;
+    }
+
     private TranscriptDatabase CreateDatabase() =>
         new(Options.Create(new StorageOptions { TranscriptDatabasePath = _dbPath }));
 

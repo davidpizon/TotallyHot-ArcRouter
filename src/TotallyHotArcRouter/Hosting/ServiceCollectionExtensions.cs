@@ -528,6 +528,13 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddHostedService<TotallyHot.ArcRouter.Transcripts.EmbeddingBackfillService>();
             services.AddHostedService<TotallyHot.ArcRouter.Transcripts.TranscriptRetentionService>();
 
+            // The quality rescan: grades saved transcript rows rather than in-flight responses, so a
+            // response the live queue dropped under load still gets graded, and a scorer change can be
+            // measured against the corpus already captured instead of only against future traffic. Same
+            // unconditional registration as the two above - it no-ops while EnableQualityRescan is off.
+            // See docs/research/code-quality-metrics-assessment.md for why grading needs saved data.
+            services.AddHostedService<TotallyHot.ArcRouter.Transcripts.QualityRescanService>();
+
             // docs/router/geval-shadow-scoring-plan.md Phase G1: the shadow judge's drain worker and
             // retention purge. Both are registered unconditionally and keep running regardless, no-opping
             // per job / per tick while JudgeOptions.Enabled is false - that flag is toggleable at runtime,

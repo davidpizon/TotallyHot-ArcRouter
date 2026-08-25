@@ -146,6 +146,12 @@ public class EmbeddingBackfillServiceTests
 
         public Task<IReadOnlyDictionary<string, ModelTokenAverage>> LoadObservedTokenAveragesAsync(CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+
+        public Task<IReadOnlyList<long>> LoadPendingQualityRescanAsync(string scorerVersion, int limit, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task MarkQualityRescannedAsync(long transcriptId, string scorerVersion, double? score, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     private sealed class FakeEmbeddingClient : IEmbeddingClient

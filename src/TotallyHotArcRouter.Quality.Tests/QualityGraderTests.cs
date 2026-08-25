@@ -33,7 +33,7 @@ public class QualityGraderTests
     }
 
     private static QualityRequest Request(string code, CodeLanguage language, string dimension = "code_generation") =>
-        new(code, language, dimension, "model-a", "sess-1:1", "sess-1");
+        new(code, language, "the prompt", dimension, "model-a", "sess-1:1", "sess-1");
 
     [Fact]
     public async Task GradeAsync_RejectsNullRequest()

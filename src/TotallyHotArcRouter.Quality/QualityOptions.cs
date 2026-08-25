@@ -54,6 +54,19 @@ public sealed class QualityOptions
     /// </summary>
     public int JudgeJoinCapacity { get; set; } = 2_000;
 
+    /// <summary>
+    /// Identifies the current scoring configuration, stamped onto each rescanned transcript row so the
+    /// background rescan can tell rows it has already graded from rows graded by an older scorer.
+    /// </summary>
+    /// <remarks>
+    /// <b>Bump this whenever a change would produce a different score for the same response</b> - a new
+    /// grader, a changed weight, a reworded judge prompt. The rescan treats any row whose stamp differs
+    /// from this value as needing a fresh grade, so leaving it unchanged after a scoring change silently
+    /// freezes the corpus at the old scorer's verdicts, and bumping it needlessly re-grades every row (and,
+    /// once LLM graders are registered, pays for every one of them again).
+    /// </remarks>
+    public string ScorerVersion { get; set; } = "2.0";
+
     /// <summary>Per-dimension scoring weights, keyed by dimension name.</summary>
     public Dictionary<string, DimensionWeightOptions> DimensionWeights { get; set; } =
         new(StringComparer.OrdinalIgnoreCase);

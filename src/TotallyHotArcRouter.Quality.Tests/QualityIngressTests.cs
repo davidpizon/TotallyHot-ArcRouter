@@ -14,7 +14,7 @@ public class QualityIngressTests
         new("```python\nprint(1)\n```", "generate code", "gpt-5.4", "corr", "sess");
 
     private static QualityRequest Request() =>
-        new("print(1)", CodeLanguage.Python, "code_generation", "gpt-5.4", "corr", "sess");
+        new("print(1)", CodeLanguage.Python, "generate code", "code_generation", "gpt-5.4", "corr", "sess");
 
     private static QualityIngress CreateIngress(
         QualityOptions options,

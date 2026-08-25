@@ -39,7 +39,7 @@ public class QualityGradingServiceTests
     }
 
     private static QualityRequest Request() =>
-        new("print(1)", CodeLanguage.Python, "code_generation", "gpt-5.4", "corr", "sess");
+        new("print(1)", CodeLanguage.Python, "print one", "code_generation", "gpt-5.4", "corr", "sess");
 
     private static IQualityGrader StubGrader()
     {
