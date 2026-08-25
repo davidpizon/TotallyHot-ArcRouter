@@ -43,30 +43,6 @@ public sealed class RoutingOptions
     public double ExplorationRate { get; init; } = 0.05;
 
     /// <summary>
-    /// Dead configuration: bound from <c>appsettings.json</c> (default <c>"hierarchical"</c>) but read by
-    /// nothing except this property's own unit tests - no policy selection in the codebase branches on it.
-    /// <see cref="EnableOrchestratorPolicy"/> is the actual live-path switch
-    /// (docs/router/orchestrator-live-path-plan.md M1.3, which considered and rejected repurposing this
-    /// property for that role: its shipped value is operator-authored and has never had live meaning, so
-    /// attaching one now would change behavior based on configuration nobody was asked to review). Kept
-    /// rather than removed because dropping a bound config key is a schema break unrelated to routing;
-    /// removal is tracked as a separate cleanup.
-    /// </summary>
-    public string PolicyName { get; init; } = RouterConstants.DefaultPolicy;
-
-    /// <summary>
-    /// Dead configuration: bound from <c>appsettings.json</c> but read by nothing. Router memory moved from
-    /// a JSON file to the <c>dimension_scores</c> table in <see cref="EmbeddingMemoryDatabasePath"/>'s
-    /// database, so no code resolves this path any more. Kept rather than removed for the same reason as
-    /// <see cref="PolicyName"/> - dropping a bound config key is a schema break unrelated to routing, and an
-    /// operator whose <c>appsettings.json</c> still sets it should not fail validation on upgrade. Any
-    /// <c>router_memory.json</c> left on disk is an orphan; nothing reads it and its contents were
-    /// deliberately not migrated.
-    /// </summary>
-    [Required]
-    public string MemoryPath { get; init; } = "router_memory.json";
-
-    /// <summary>
     /// Gets the path to the SQLite database used for router memory persistence: both the
     /// task-embedding-keyed <c>memory_entries</c> working set (PLAN.md Phase J, research-doc §3.3) and the
     /// dimension-keyed <c>dimension_scores</c> aggregates behind <see cref="Router.RouterMemory"/>.
@@ -426,14 +402,6 @@ public sealed class RoutingOptions
                 nameof(RoutingOptions),
                 typeof(RoutingOptions),
                 ["ExplorationRate must be 0 when exploration is disabled."]);
-        }
-
-        if (string.IsNullOrWhiteSpace(MemoryPath))
-        {
-            throw new OptionsValidationException(
-                nameof(RoutingOptions),
-                typeof(RoutingOptions),
-                ["MemoryPath is required."]);
         }
 
         if (string.IsNullOrWhiteSpace(EmbeddingMemoryDatabasePath))

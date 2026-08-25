@@ -90,7 +90,7 @@ public sealed class ModelRoutingOptions
 /// <remarks>
 /// A <see langword="record"/> rather than a plain class specifically so <c>with</c> expressions work.
 /// <c>ManagementFacade</c>'s two write paths used to rebuild this type by listing its properties by hand,
-/// and both lists had fallen behind the type - silently resetting <see cref="EnableToolCallGuard"/> on
+/// and both lists had fallen behind the type - silently resetting a since-removed tool-call-guard flag on
 /// every provider edit and every Stop/Play toggle, and all four <c>Aws*</c> fields on an edit (see
 /// <c>docs/router/backlog.md</c> item 1). With <c>with</c>, those methods state only the fields they
 /// intend to <em>change</em>, so a newly added property carries across by construction rather than by
@@ -168,33 +168,6 @@ public sealed record ProviderOptions
     /// </para>
     /// </summary>
     public bool Enabled { get; init; } = true;
-
-    /// <summary>
-    /// Gets whether responses from this provider should be scanned for a model expressing a tool call as
-    /// literal text rather than as an OpenAI <c>tool_calls</c> delta - e.g. LM Studio serving a small GGUF
-    /// that emits <c>&lt;tool_call&gt;{"name": ..., "arguments": ...}&lt;/tool_call&gt;</c> as plain
-    /// assistant content (<c>docs/router/unified-api-translation.md</c> §4.5).
-    ///
-    /// <para>
-    /// <b>Obsolete.</b> Superseded by per-(provider, model) capability detection in
-    /// <c>docs/router/tool-call-normalization.md</c> Phase 4, and removed in Phase 6. This setting is
-    /// scoped to the wrong axis: a model's tool-call syntax comes from its chat template, not from the
-    /// server hosting it, so one LM Studio process serves both a model that needs rewriting and a natively
-    /// tool-calling model that must never be scanned. Arming provider-wide therefore both missed models
-    /// needing a different dialect and exposed capable ones to a false positive - a strong model emitting
-    /// a <c>&lt;tool_call&gt;</c> block as a prose *example* had it rewritten into a real invocation.
-    /// </para>
-    ///
-    /// <para>
-    /// Retained for one release as a forced-on override:
-    /// <c>TotallyHot.ArcRouter.Proxy.Translation.ToolCalling.ToolCallNormalizerFactory</c> arms a route that sets
-    /// it even when the request offers no tools and even when the model is classified as
-    /// <c>openai-native</c>, so an operator who set it because they saw a route misbehave keeps that fix
-    /// through the transition. Leaving it <see langword="false"/> - the default - is now the right choice
-    /// for every provider: normalization arms itself per request from the capability store.
-    /// </para>
-    /// </summary>
-    public bool EnableToolCallGuard { get; init; }
 
     /// <summary>
     /// Gets whether the endpoint-capability scan may additionally probe <c>POST {base}/v1/messages</c> with
@@ -282,7 +255,6 @@ public sealed record ProviderOptions
             .Append(']');
         builder.Append(", IsFree = ").Append(IsFree);
         builder.Append(", Enabled = ").Append(Enabled);
-        builder.Append(", EnableToolCallGuard = ").Append(EnableToolCallGuard);
         builder.Append(", ProbeAnthropicMessages = ").Append(ProbeAnthropicMessages);
         builder.Append(", AwsRegion = ").Append(AwsRegion);
         builder.Append(", AwsAccessKeyIdEnvVar = ").Append(AwsAccessKeyIdEnvVar);

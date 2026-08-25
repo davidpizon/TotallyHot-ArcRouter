@@ -6,12 +6,10 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// <summary>
 /// Decides, per request, whether tool calls need translating at all - and if so, whether the model's own
 /// syntax merely has to be *read* on the way back, or a syntax has to be *taught* on the way out
-/// (<c>docs/router/tool-call-normalization.md</c> §3.4 and Phase 5). This is where the phase's
-/// central correction lands: arming moves from the provider-wide
-/// <see cref="Models.ProviderOptions.EnableToolCallGuard"/> flag to a per-(provider, model) capability
-/// lookup, because a model's tool-call syntax comes from its chat template, not from the server hosting
-/// it - one LM Studio process serves both a Qwen that needs rewriting and a natively tool-calling model
-/// that must never be scanned.
+/// (<c>docs/router/tool-call-normalization.md</c> §3.4 and Phase 5). Arming is a per-(provider, model)
+/// capability lookup rather than a provider-wide flag, because a model's tool-call syntax comes from its
+/// chat template, not from the server hosting it - one LM Studio process serves both a Qwen that needs
+/// rewriting and a natively tool-calling model that must never be scanned.
 ///
 /// <para>
 /// Returning <see langword="null"/> is the common and desirable outcome: it restores true byte-for-byte
@@ -81,12 +79,6 @@ public sealed class ToolCallNormalizerFactory
     {
         ArgumentNullException.ThrowIfNull(route);
 
-        // Retained for one release as a forced-on override, and removed in Phase 6 in favor of the
-        // per-model dialect display. An operator who set it did so because a model on that provider was
-        // mangling tool calls, and honoring it here keeps that fix working through the transition even for
-        // a request this factory would otherwise decline to arm.
-        var forced = route.EnableToolCallGuard;
-
         var capability = _capabilityStore?.GetModelCapability(route.Provider, route.ModelName);
 
         // Constrained decoding is checked first, ahead of both emulation and rule 1, and the order is
@@ -98,7 +90,7 @@ public sealed class ToolCallNormalizerFactory
         // no re-offered tools still needs that history flattened.
         if (ShouldConstrain(route, capability, requestCarriesResponseFormat))
         {
-            if (!requestCarriesTools && !requestCarriesToolHistory && !forced)
+            if (!requestCarriesTools && !requestCarriesToolHistory)
             {
                 return null;
             }
@@ -141,7 +133,7 @@ public sealed class ToolCallNormalizerFactory
             known.EmulationPrompt is not null &&
             known.IsScannable)
         {
-            if (!requestCarriesTools && !requestCarriesToolHistory && !forced)
+            if (!requestCarriesTools && !requestCarriesToolHistory)
             {
                 return null;
             }
@@ -159,7 +151,7 @@ public sealed class ToolCallNormalizerFactory
             return new ToolCallEmulatingTranslator(emulatedPlan, known, _capabilityStore, _logger);
         }
 
-        if (!requestCarriesTools && !forced)
+        if (!requestCarriesTools)
         {
             // Rule 1. The shipping guard scanned every response on a guarded route regardless of whether
             // tools were ever offered, which is most of them.
@@ -191,14 +183,8 @@ public sealed class ToolCallNormalizerFactory
         {
             // Rule 2. openai-native: the model already emits real tool_calls deltas, so there is nothing
             // to rewrite and scanning anyway is exactly what turns a capable model's prose *example* of a
-            // tool call into a real invocation. The forced override still wins, since an operator who set
-            // the flag is asserting they have seen this route misbehave.
-            if (!forced)
-            {
-                return null;
-            }
-
-            candidates = ToolCallDialectRegistry.ScannableDialects;
+            // tool call into a real invocation.
+            return null;
         }
         else if (capability.Confidence >= DetectionConfidence.Observed)
         {

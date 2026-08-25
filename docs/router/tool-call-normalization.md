@@ -11,10 +11,9 @@
 > for that side of it, which is model-list bookkeeping rather than tool-call normalization proper. The
 > operator override shipped alongside Phase 8 (a per-model tool-dialect dropdown writing at
 > `DetectionConfidence.Operator` — see Phase 8's "Also shipped" note), so a wrong classification is
-> correctable from the GUI. Still missing from Phase 6 are the response/telemetry diagnostics, and
-> `EnableToolCallGuard` has not yet been removed — a self-contained follow-up now that its successor
-> exists. Native endpoints (Phase 7) remain proposed only. Phase 8 (constrained decoding) is
-> implemented.
+> correctable from the GUI. `EnableToolCallGuard` has since been removed (2026-08-25) now that its
+> successor is in place; still missing from Phase 6 are the response/telemetry diagnostics. Native
+> endpoints (Phase 7) remain proposed only. Phase 8 (constrained decoding) is implemented.
 
 **Goal:** VS Code respects a model's intent to invoke a tool regardless of which provider and model
 served it.
@@ -323,9 +322,9 @@ a capability-store lookup, and the echo-guard classes were deleted. All four per
 installed. `RouteCandidate.CarriesTools` is read off the `JsonObject` `RequestInterceptor` had already
 parsed, so rule 1 costs nothing.
 
-`ProviderOptions.EnableToolCallGuard` is retained for one release as a forced-on override — it arms a
-route even with no `tools` in the request and even for an `openai-native` model — and is marked
-obsolete in its doc comment. Phase 6 removes it.
+`ProviderOptions.EnableToolCallGuard` was retained for one release as a forced-on override — it armed a
+route even with no `tools` in the request and even for an `openai-native` model — before being removed
+(2026-08-25) now that arming is entirely per-(provider, model).
 
 Four decisions the plan above did not settle, each made during implementation:
 
@@ -512,9 +511,8 @@ the consolidated `refresh-from-endpoint` route.
 
 **Not shipped:** response headers and telemetry fields on `RoutingTelemetryEvent`. The operator
 override this section originally listed as the larger remaining piece has since shipped — with
-Phase 8, not here (see that phase's "Also shipped" note) — so the `EnableToolCallGuard` toggle's only
-remaining job is the one-release forced-on override, and deleting it is now a self-contained
-follow-up rather than a blocked one. Spark does not yet read any header into its debug log.
+Phase 8, not here (see that phase's "Also shipped" note). `EnableToolCallGuard` itself has since been
+deleted (2026-08-25). Spark does not yet read any header into its debug log.
 
 *Tests:* `ScanCapabilitiesTests` covers the capability/dialect fields surfacing through
 `ListProviders()`; `RefreshFromEndpointTests` covers the consolidated operation's model-list

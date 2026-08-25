@@ -103,21 +103,6 @@ public sealed class PriceCatalogOptions
             if (source is null)
             {
                 errors.Add($"Price source '{name}' has no configuration object.");
-                continue;
-            }
-
-            // The toggle moved to aggregator_sources.enabled. This key is bound purely so its presence can
-            // be rejected: the options binder ignores properties it doesn't recognize, so simply deleting
-            // it would leave an operator who had set `"Enabled": false` with a source that silently starts
-            // polling again on upgrade. That is the same "an operator who configures a source and gets
-            // something other than what they asked for has been misled" failure the unknown-name rule above
-            // exists to prevent, so it gets the same hard error rather than a log line nobody reads.
-            if (source.Enabled is not null)
-            {
-                errors.Add(
-                    $"Price source '{name}' sets 'Enabled', which has moved to the price catalog database " +
-                    "and is now managed from Governance → Price Sources. Remove this key; your existing " +
-                    "choice has been preserved in the database.");
             }
         }
 
@@ -164,14 +149,6 @@ public sealed record KnownPriceSource(string Name, int DefaultPriorityScore, boo
 /// </summary>
 public sealed class PriceSourceOptions
 {
-    /// <summary>
-    /// Gets the value of the retired <c>Enabled</c> key. Bound only so <see cref="PriceCatalogOptions.EnsureValid"/>
-    /// can reject its presence - the toggle now lives in <c>aggregator_sources.enabled</c>. Never read as a
-    /// toggle; see the validation in <see cref="PriceCatalogOptions.EnsureValid"/> for why an ignored key
-    /// would be worse than a hard error.
-    /// </summary>
-    public bool? Enabled { get; init; }
-
     /// <summary>
     /// Gets an optional endpoint override. When empty, the client uses its own built-in canonical URL.
     /// Present so an operator can point at a mirror or a commit-pinned copy without a code change.

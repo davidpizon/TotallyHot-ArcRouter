@@ -21,7 +21,6 @@ public class RoutingOptionsTests
         Assert.Equal(10, options.MaxNeighborCount);
         Assert.True(options.EnableExploration);
         Assert.Equal(0.05, options.ExplorationRate, 3);
-        Assert.Equal(RouterConstants.DefaultPolicy, options.PolicyName);
         Assert.Equal(1.0, options.Epsilon1, 3);
         Assert.Equal(-0.1, options.Epsilon2, 3);
         Assert.Equal(0.3, options.UtilityMinQualityScore, 3);

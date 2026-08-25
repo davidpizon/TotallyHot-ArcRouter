@@ -26,7 +26,6 @@ internal static class ModelRouteResolverTestFactory
         IReadOnlyList<ProviderHeader>? headers = null,
         bool isFree = false,
         string? awsRegion = null,
-        bool enableToolCallGuard = false,
         IEnvironmentVariableProvider? environment = null)
     {
         List<ProviderHeader> allHeaders = [];
@@ -51,8 +50,7 @@ internal static class ModelRouteResolverTestFactory
                     AuthHeaderName = authHeaderName,
                     Headers = allHeaders,
                     IsFree = isFree,
-                    AwsRegion = awsRegion,
-                    EnableToolCallGuard = enableToolCallGuard
+                    AwsRegion = awsRegion
                 }
             },
             ModelList =

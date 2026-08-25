@@ -5,9 +5,8 @@ using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
 
 /// <summary>
-/// Covers the arming decision itself (<c>docs/router/tool-call-normalization.md</c> §3.4) - the phase's
-/// central correction, moving from the provider-wide <c>EnableToolCallGuard</c> flag to a per-(provider,
-/// model) capability lookup.
+/// Covers the arming decision itself (<c>docs/router/tool-call-normalization.md</c> §3.4): a per-(provider,
+/// model) capability lookup rather than a provider-wide flag.
 ///
 /// <para>
 /// Returning <see langword="null"/> is the outcome most of these assert, and it is the valuable one: it
@@ -102,27 +101,6 @@ public class ToolCallNormalizerFactoryTests
     }
 
     [Fact]
-    public void TheLegacyGuardFlag_ArmsARequestThatOffersNoTools()
-    {
-        // Retained for one release as a forced-on override, removed in Phase 6.
-        var plan = PlanFor(new ToolCallNormalizerFactory()
-            .TryCreate(Route(enableToolCallGuard: true), requestCarriesTools: false));
-
-        Assert.Equal(ToolCallDialectRegistry.ScannableDialects, plan.Candidates);
-    }
-
-    [Fact]
-    public void TheLegacyGuardFlag_ArmsEvenAModelClassifiedAsNative()
-    {
-        // An operator who set the flag is asserting they have seen this route misbehave, which outranks a
-        // classification that says it should not.
-        var store = new FakeToolCallCapabilityStore().Seed(Capability("openai-native", DetectionConfidence.Observed));
-
-        Assert.NotNull(new ToolCallNormalizerFactory(store)
-            .TryCreate(Route(enableToolCallGuard: true), requestCarriesTools: true));
-    }
-
-    [Fact]
     public void WithNoCapabilityStore_AToolsCarryingRequestIsStillNormalized()
     {
         // Direct construction outside DI. Normalization still works; nothing is classified or persisted.
@@ -147,14 +125,13 @@ public class ToolCallNormalizerFactoryTests
     private static ModelToolCapability Capability(string dialect, DetectionConfidence confidence) =>
         new(Provider, Model, dialect, confidence);
 
-    private static ResolvedModelRoute Route(bool enableToolCallGuard = false) =>
+    private static ResolvedModelRoute Route() =>
         new(
             ModelName: Model,
             Provider: Provider,
             ProviderModelId: Model,
             UpstreamBaseUrl: new Uri("http://127.0.0.1:1234/v1"),
             AuthHeaderName: "Authorization",
-            ExtraHeaders: [],
-            EnableToolCallGuard: enableToolCallGuard);
+            ExtraHeaders: []);
 }
 

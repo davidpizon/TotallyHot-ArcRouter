@@ -10,8 +10,8 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Management;
 /// <summary>
 /// Guards <c>docs/router/backlog.md</c> item 1: <see cref="ManagementFacade"/>'s two provider write paths
 /// used to rebuild <see cref="ProviderOptions"/> from a hand-written property list, and both lists had
-/// fallen behind the type - silently clearing <see cref="ProviderOptions.EnableToolCallGuard"/> on every
-/// edit and every Stop/Play toggle, and all four <c>Aws*</c> fields on an edit. The loss was durable, since
+/// fallen behind the type - silently clearing a since-removed provider flag on every edit and every
+/// Stop/Play toggle, and all four <c>Aws*</c> fields on an edit. The loss was durable, since
 /// <see cref="IProviderConfigStore"/> persists the whole config on each mutation.
 ///
 /// <para>
@@ -43,7 +43,6 @@ public sealed class ProviderOptionsPreservationTests
         Headers = [new ProviderHeader { Name = "anthropic-version", Value = "2023-06-01" }],
         IsFree = true,
         Enabled = false,
-        EnableToolCallGuard = true,
         ProbeAnthropicMessages = true,
         AwsRegion = "us-east-1",
         AwsAccessKeyIdEnvVar = "AWS_ID",
@@ -181,23 +180,6 @@ public sealed class ProviderOptionsPreservationTests
         }
     }
 
-    // ----- The two specific fields the old hand-written lists dropped -----
-
-    [Fact]
-    public async Task UpsertProvider_PreservesEnableToolCallGuard()
-    {
-        // The regression that motivated this file: editing any provider through the GUI silently disarmed
-        // its tool-call guard.
-        var store = StoreWith(FullyPopulated());
-        var facade = CreateFacade(store);
-
-        await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
-            "https://changed.invalid", null),
-            TestContext.Current.CancellationToken);
-
-        Assert.True(store.Snapshot.Options.Providers["bedrock"].EnableToolCallGuard);
-    }
-
     [Fact]
     public async Task UpsertProvider_PreservesProviderType()
     {
@@ -277,19 +259,6 @@ public sealed class ProviderOptionsPreservationTests
         Assert.Equal("AWS_TOKEN", updated.AwsSessionTokenEnvVar);
     }
 
-    [Fact]
-    public async Task SetEnabled_PreservesEnableToolCallGuard()
-    {
-        // The Stop/Play toggle's own regression: WithEnabled copied every property by hand and had fallen
-        // one behind, so toggling a provider off and on again permanently disarmed its guard.
-        var store = StoreWith(FullyPopulated());
-        var facade = CreateFacade(store);
-
-        await facade.SetEnabledAsync("bedrock", new ProviderEnabledWriteRequest(Enabled: true), TestContext.Current.CancellationToken);
-
-        Assert.True(store.Snapshot.Options.Providers["bedrock"].EnableToolCallGuard);
-    }
-
     // ----- Adding a brand-new provider still gets the documented defaults -----
 
     [Fact]
@@ -311,7 +280,6 @@ public sealed class ProviderOptionsPreservationTests
         Assert.Equal("Authorization", created.AuthHeaderName);
         Assert.True(created.Enabled);
         Assert.False(created.IsFree);
-        Assert.False(created.EnableToolCallGuard);
         Assert.Empty(created.Headers);
     }
 

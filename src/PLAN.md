@@ -180,8 +180,6 @@ solve itself, but N never required them to complete.
   #4 zero-coverage classes (`TotallyHot.ArcRouter.Quality` now sits at 97.9%; the remaining gap is in
   `TotallyHotArcRouter` at 85.8%), #5 human review of
   tool-call-normalization Phase 5's three design decisions.
-- [`../docs/router/backlog.md`](../docs/router/backlog.md) — #2: deleting `EnableToolCallGuard` now
-  that its Phase 8 successor (the operator dialect override) shipped.
 - [`../docs/router/tool-call-normalization.md`](../docs/router/tool-call-normalization.md) — Phase 6
   remainder (response/telemetry diagnostics), Phase 7 (native endpoints, design only).
 - [`../docs/gui/backlog.md`](../docs/gui/backlog.md) — remaining live-telemetry gaps (Routing ROI /

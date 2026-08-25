@@ -550,7 +550,6 @@ public class ToolCallNormalizingTranslatorTests
     {
         // The original repro, now armed by the request's own "tools" field rather than by a provider flag.
         var body = await RunThroughMiddlewareAsync(
-            enableToolCallGuard: false,
             requestBody:
                 """{"model":"qwen2.5.1-coder-7b-instruct","messages":[{"role":"user","content":"time?"}],"stream":true,"tools":[{"type":"function","function":{"name":"get_time","parameters":{"type":"object","properties":{}}}}]}""");
 
@@ -570,26 +569,11 @@ public class ToolCallNormalizingTranslatorTests
         // Performance rule 1, and the false-positive guard: no tool was offered, so a <tool_call> block in
         // the reply is the model *explaining* the syntax - routine work for a coding assistant.
         var body = await RunThroughMiddlewareAsync(
-            enableToolCallGuard: false,
             requestBody:
                 """{"model":"qwen2.5.1-coder-7b-instruct","messages":[{"role":"user","content":"explain qwen tool syntax"}],"stream":true}""");
 
         Assert.Contains("<tool_call>", body, StringComparison.Ordinal);
         Assert.DoesNotContain("\"tool_calls\"", body, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task ProxyMiddleware_LegacyGuardFlag_StillArms_WhenTheRequestOffersNoTools()
-    {
-        // EnableToolCallGuard is retained for one release as a forced-on override (removed in Phase 6). An
-        // operator who set it did so because a model was mangling tool calls, and that fix keeps working.
-        var body = await RunThroughMiddlewareAsync(
-            enableToolCallGuard: true,
-            requestBody:
-                """{"model":"qwen2.5.1-coder-7b-instruct","messages":[{"role":"user","content":"time?"}],"stream":true}""");
-
-        Assert.DoesNotContain("<tool_call>", body, StringComparison.Ordinal);
-        Assert.Contains("\"tool_calls\"", body, StringComparison.Ordinal);
     }
 
     // ----- An empty tool_calls array is not a native call -----
@@ -660,14 +644,13 @@ public class ToolCallNormalizingTranslatorTests
         new(UnionPlan(), store, logger ?? Mock.Of<ILogger>());
 
     /// <summary>Drives one streamed request through the real middleware against a stub upstream that echoes a Hermes-framed tool call.</summary>
-    private static async Task<string> RunThroughMiddlewareAsync(bool enableToolCallGuard, string requestBody)
+    private static async Task<string> RunThroughMiddlewareAsync(string requestBody)
     {
         var resolver = ModelRouteResolverTestFactory.Create(
             modelName: "qwen2.5.1-coder-7b-instruct",
             providerModelId: "qwen2.5.1-coder-7b-instruct",
             baseUrl: "http://127.0.0.1:1234/v1",
-            providerName: "lmstudio",
-            enableToolCallGuard: enableToolCallGuard);
+            providerName: "lmstudio");
 
         const string echoedSse =
             "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"<tool_call>{\\\"name\\\": \\\"get_time\\\", \\\"arguments\\\": {}}</tool_call>\"},\"finish_reason\":null}]}\n\n" +

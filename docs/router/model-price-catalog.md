@@ -283,10 +283,13 @@ nor served.**
 > changing it required restarting the proxy. That is untenable for a control the operator is expected to
 > reach for: the likely reasons to disable a source (a licensing concern, distrust of its numbers) are
 > exactly the reasons you would not want to wait for a restart. `PriceSourceToggleStore` now owns the flag,
-> `PriceSourceRegistry.EnabledClients` filters against it per cycle, and the config key is **gone** — a
-> leftover `Enabled` key is a hard startup error, not an ignored one, because the options binder silently
-> drops properties it doesn't recognize and an operator upgrading with `"Enabled": false` would otherwise
-> find their source quietly polling again.
+> and `PriceSourceRegistry.EnabledClients` filters against it per cycle.
+>
+> **Amended 2026-08-25 — the migration guard was removed.** For a time, a present `Enabled` key was a
+> hard startup error rather than a silently-ignored one, since the options binder drops unrecognized
+> properties and an operator upgrading with `"Enabled": false` would otherwise have found their source
+> quietly polling again. With no installs still carrying that key, the guard (and `PriceSourceOptions.Enabled`
+> itself) was removed; the key is simply unrecognized configuration now.
 
 **Why this doesn't contradict "the source set lives in the table, not config."** That earlier rule
 replaced a single scalar `PriceCatalogUrl`, and it still holds for the source *set*: config cannot
@@ -626,10 +629,7 @@ was deleted, per this doc's banner.) Bound with the options pattern, per AGENTS.
 
 That is the whole of it in a default install. **`Enabled` is not a configuration key** — the toggle lives
 in `aggregator_sources.enabled` and is managed from Governance → Price Sources
-([D6](#d6-each-source-is-independently-enableddisabled-and-the-database-owns-the-toggle)). A leftover
-`Sources:<name>:Enabled` is a **hard startup error** telling the operator where the toggle went, rather
-than a key that binds to nothing: the options binder ignores properties it doesn't recognize, so deleting
-it outright would have silently re-enabled a source that someone had deliberately switched off.
+([D6](#d6-each-source-is-independently-enableddisabled-and-the-database-owns-the-toggle)).
 
 The optional `Sources` dictionary carries **only** a per-source endpoint override, for pointing a client at
 a mirror or a commit-pinned copy without a code change:
@@ -685,11 +685,6 @@ public sealed class PriceSourceOptions
 {
     /// <summary>Optional endpoint override; null means "use the client's built-in canonical URL".</summary>
     public string? Url { get; init; }
-
-    /// <summary>
-    /// The retired toggle. Bound only so EnsureValid can reject its presence - never read as a toggle.
-    /// </summary>
-    public bool? Enabled { get; init; }
 }
 ```
 
@@ -702,10 +697,6 @@ pattern — fail at startup, not on the first poll):
   source that is, in fact, not polling at all — the failure mode this validation exists to prevent.
   `openrouter` no longer exercises this path: it is exactly as recognized as `litellm` now that
   `OpenRouterPriceSourceClient` exists.
-- A present `Enabled` key is a **hard error**, naming Governance → Price Sources as the toggle's new home.
-  The options binder ignores unknown properties, so deleting the key outright would have silently
-  re-enabled a source an operator had switched off — the same "misled by their own configuration" failure
-  the rule above exists to prevent, which is why it gets the same treatment rather than a log line.
 - `PollIntervalHours` outside 4–12 is a **hard error**.
 - Every source disabled is **valid**, logged at Warning (see [D6](#d6-each-source-is-independently-enableddisabled-and-the-database-owns-the-toggle)).
   The check reads the database, not config, and now requires *both* `litellm` and `openrouter` to be off -

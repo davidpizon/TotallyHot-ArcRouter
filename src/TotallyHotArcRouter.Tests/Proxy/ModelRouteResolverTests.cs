@@ -164,33 +164,6 @@ public class ModelRouteResolverTests
         Assert.False(route!.IsFree);
     }
 
-    // ProxyMiddleware reads EnableToolCallGuard off the resolved route to decide whether to apply the
-    // tool-call echo guard translator (docs/router/unified-api-translation.md §4.5), so the flag has to
-    // survive the same provider -> route hop as IsFree does above.
-    [Fact]
-    public void TryResolve_ProviderWithToolCallGuardEnabled_PropagatesOntoTheRoute()
-    {
-        var resolver = ModelRouteResolverTestFactory.Create(
-            modelName: "qwen2.5.1-coder-7b-instruct",
-            providerModelId: "qwen2.5.1-coder-7b-instruct",
-            baseUrl: "http://127.0.0.1:1234/v1",
-            providerName: "lmstudio",
-            enableToolCallGuard: true);
-
-        Assert.True(resolver.TryResolve("qwen2.5.1-coder-7b-instruct", out var route));
-        Assert.True(route!.EnableToolCallGuard);
-    }
-
-    // Default must be off - existing providers must be unaffected by this new flag.
-    [Fact]
-    public void TryResolve_ProviderWithoutToolCallGuard_ResolvesAsDisabled()
-    {
-        var resolver = ModelRouteResolverTestFactory.Create("gpt-5.4", "gpt-5.4", "https://api.openai.com");
-
-        Assert.True(resolver.TryResolve("gpt-5.4", out var route));
-        Assert.False(route!.EnableToolCallGuard);
-    }
-
     [Fact]
     public void TryResolve_IsCaseInsensitiveOnModelName()
     {
