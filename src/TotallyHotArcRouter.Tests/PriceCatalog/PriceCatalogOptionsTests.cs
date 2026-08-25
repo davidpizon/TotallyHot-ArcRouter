@@ -84,27 +84,6 @@ public class PriceCatalogOptionsTests
         Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
     }
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public void EnsureValid_Throws_WhenRetiredEnabledKeyPresent(bool enabled)
-    {
-        // The toggle moved to aggregator_sources.enabled. The options binder ignores properties it doesn't
-        // know, so had this key simply been deleted, an operator upgrading with "Enabled": false would have
-        // found their source silently polling again. Rejecting it loudly is the whole point - and it must
-        // reject `true` as well, or half of them would be misled in the other direction.
-        var options = new PriceCatalogOptions
-        {
-            Sources = new Dictionary<string, PriceSourceOptions>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["litellm"] = new PriceSourceOptions { Enabled = enabled },
-            },
-        };
-
-        var ex = Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
-        Assert.Contains("Governance", ex.Message, StringComparison.Ordinal);
-    }
-
     [Fact]
     public void GetSourceUrl_ReturnsNull_WhenNoOverrideConfigured()
     {

@@ -56,7 +56,7 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// </param>
 /// <param name="CorrelationId">
 /// A stable id for this routed request (currently <c>{SessionId}:{TurnNumber}</c>). Links this event to a
-/// later off-path sandbox signal (see <c>SandboxSignalEvent</c>), or <see langword="null"/> when not set.
+/// later off-path quality signal (see <c>QualitySignalEvent</c>), or <see langword="null"/> when not set.
 /// </param>
 /// <param name="RouterTokens">
 /// Tokens the <b>router itself</b> consumed deciding where to send this request - today the embedding

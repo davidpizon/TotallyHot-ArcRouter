@@ -24,7 +24,7 @@ namespace TotallyHot.ArcRouter.Judge;
 /// <c>/v1/v1/chat/completions</c>, a mistake LM Studio answers with HTTP 200 and an error body) and
 /// <see cref="ResolvedModelRoute.ExtraHeaders"/> for credentials, already resolved through the
 /// literal → env-var → secret-store precedence. This deliberately does <em>not</em> loop back through our
-/// own proxy: a judge call re-entering <c>ProxyMiddleware</c> would be sandbox-scored and would enqueue a
+/// own proxy: a judge call re-entering <c>ProxyMiddleware</c> would itself be graded and would enqueue a
 /// further judging job.
 /// </para>
 /// <b>Scoped down from the plan for G1</b> (documented deviation, per AGENTS.md's deviation-recording

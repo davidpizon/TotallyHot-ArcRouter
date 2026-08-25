@@ -5,7 +5,7 @@ namespace TotallyHot.ArcRouter.Judge;
 /// sheds the job (incrementing <see cref="DroppedCount"/>) when the queue is full, so the routing hot path
 /// is never back-pressured by a slow judge backbone (docs/router/geval-shadow-scoring-plan.md's ground
 /// rule: "the routing hot path never blocks on judging"). Mirrors
-/// <see cref="Sandbox.Execution.ISandboxQueue"/> exactly.
+/// <see cref="Quality.Grading.IQualityQueue"/> exactly.
 /// </summary>
 public interface IJudgeShadowScoreQueue
 {

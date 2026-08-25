@@ -37,7 +37,6 @@ public sealed class ProviderOptionsRedactionTests
         Headers = [new ProviderHeader { Name = "anthropic-version", Value = Secret }],
         IsFree = true,
         Enabled = false,
-        EnableToolCallGuard = true,
         AwsRegion = "us-east-1",
         AwsAccessKeyIdEnvVar = "AWS_ACCESS_KEY_ID",
         AwsSecretAccessKeyEnvVar = "AWS_SECRET_ACCESS_KEY",

@@ -7,7 +7,7 @@ using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Orchestrator;
-using TotallyHot.ArcRouter.Sandbox;
+using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Transcripts;
@@ -105,7 +105,7 @@ public sealed class TaxonomyComparisonService : BackgroundService
     /// <param name="transcriptOptions">Gates the whole loop on transcript capture being enabled.</param>
     /// <param name="routingOptions">Supplies the cluster assignment threshold and the reward weights the regret estimate uses.</param>
     /// <param name="storageOptions">Supplies the cluster model artifact's path.</param>
-    /// <param name="sandboxOptions">Supplies the live-memory key prefix.</param>
+    /// <param name="qualityOptions">Supplies the live-memory key prefix.</param>
     /// <param name="inFlightGauge">
     /// The proxy's in-flight request gauge, or <see langword="null"/> to never pause - the hard-pause
     /// guarantee (see the class remarks) only exists when the gauge does. Defaults to
@@ -122,12 +122,12 @@ public sealed class TaxonomyComparisonService : BackgroundService
         IOptions<TranscriptOptions> transcriptOptions,
         IOptions<RoutingOptions> routingOptions,
         IOptions<StorageOptions> storageOptions,
-        IOptions<SandboxOptions> sandboxOptions,
+        IOptions<QualityOptions> qualityOptions,
         IModelPriceLookup? priceLookup = null,
         InFlightRequestGauge? inFlightGauge = null)
         : this(
             logger, transcriptStore, comparisonStore, memoryEntryStore, routerMemory, benchmarkDatabase,
-            routeResolver, transcriptOptions, routingOptions, storageOptions, sandboxOptions, priceLookup,
+            routeResolver, transcriptOptions, routingOptions, storageOptions, qualityOptions, priceLookup,
             inFlightGauge, DefaultComparisonBatchSize)
     {
     }
@@ -149,7 +149,7 @@ public sealed class TaxonomyComparisonService : BackgroundService
     /// <param name="transcriptOptions">Gates the whole loop on transcript capture being enabled.</param>
     /// <param name="routingOptions">Supplies the cluster assignment threshold and reward weights.</param>
     /// <param name="storageOptions">Supplies the cluster model artifact's path.</param>
-    /// <param name="sandboxOptions">Supplies the live-memory key prefix.</param>
+    /// <param name="qualityOptions">Supplies the live-memory key prefix.</param>
     /// <param name="priceLookup">Prices the counterfactual, or <see langword="null"/> when no catalog is configured.</param>
     /// <param name="inFlightGauge">The proxy's in-flight request gauge, or <see langword="null"/> to never pause.</param>
     /// <param name="comparisonBatchSize">The per-fetch batch size the drain loop uses. Must be positive.</param>
@@ -164,7 +164,7 @@ public sealed class TaxonomyComparisonService : BackgroundService
         IOptions<TranscriptOptions> transcriptOptions,
         IOptions<RoutingOptions> routingOptions,
         IOptions<StorageOptions> storageOptions,
-        IOptions<SandboxOptions> sandboxOptions,
+        IOptions<QualityOptions> qualityOptions,
         IModelPriceLookup? priceLookup,
         InFlightRequestGauge? inFlightGauge,
         int comparisonBatchSize)
@@ -180,7 +180,7 @@ public sealed class TaxonomyComparisonService : BackgroundService
         ArgumentNullException.ThrowIfNull(transcriptOptions);
         ArgumentNullException.ThrowIfNull(routingOptions);
         ArgumentNullException.ThrowIfNull(storageOptions);
-        ArgumentNullException.ThrowIfNull(sandboxOptions);
+        ArgumentNullException.ThrowIfNull(qualityOptions);
 
         _logger = logger;
         _transcriptStore = transcriptStore;
@@ -192,7 +192,7 @@ public sealed class TaxonomyComparisonService : BackgroundService
         _priceLookup = priceLookup;
         _transcriptOptions = transcriptOptions.Value;
         _routingOptions = routingOptions.Value;
-        _liveMemoryPrefix = sandboxOptions.Value.LiveMemoryPrefix;
+        _liveMemoryPrefix = qualityOptions.Value.LiveMemoryPrefix;
         _clusterModelPath = storageOptions.Value.ResolveClusterModelPath();
         _inFlightGauge = inFlightGauge;
         _comparisonBatchSize = comparisonBatchSize;

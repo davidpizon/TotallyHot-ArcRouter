@@ -15,7 +15,6 @@ public class RouterConstantsTests
     {
         Assert.Equal("kimi-k2.5", RouterConstants.DefaultModel);
         Assert.Equal("fallback", RouterConstants.FallbackReason);
-        Assert.Equal("hierarchical", RouterConstants.DefaultPolicy);
     }
 
     /// <summary>

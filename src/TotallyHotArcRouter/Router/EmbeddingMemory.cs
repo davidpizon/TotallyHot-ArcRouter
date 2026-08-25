@@ -126,7 +126,7 @@ public sealed class EmbeddingMemory : IDisposable
     /// </param>
     /// <param name="isJudgeScored">
     /// Whether <paramref name="score"/> was produced by the G-Eval judge rather than
-    /// <see cref="Sandbox.Scoring.VerifierScorer"/> (docs/router/geval-shadow-scoring-plan.md
+    /// <see cref="Quality.Scoring.QualityScorer"/> (docs/router/geval-shadow-scoring-plan.md
     /// §Provenance). Defaults to <see langword="false"/> - through Phase G1/G2 no caller ever passes
     /// <see langword="true"/>; the parameter exists so Phase G3 needs no further signature change. Placed
     /// last so every existing positional call site keeps compiling unchanged.

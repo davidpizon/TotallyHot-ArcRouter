@@ -71,7 +71,7 @@ Letting the database compute the sum makes the fold atomic regardless of interle
 `SqliteRouterMemoryStoreTests.RecordScoreAsync_ConcurrentObservationsOfTheSamePair_LoseNothing` is the guard.
 
 **The store creates its own schema on first use.** It does not assume startup already ran
-`RouterMemoryDatabase.EnsureCreated()`, because scores arrive from the sandbox verification path for the
+`RouterMemoryDatabase.EnsureCreated()`, because scores arrive from the quality verification path for the
 life of the process and `StartupHealthCheckHostedService` runs its `EnsureCreated` call best-effort inside a
 catch that only logs. Without self-creation, a startup failure would turn every subsequent score write into
 a "no such table" throw instead of a degraded-but-working router.

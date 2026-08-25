@@ -96,7 +96,7 @@ unauthenticated gRPC telemetry stream), so only spend/budget aggregates are expo
 
 ## Out of scope
 
-- Runtime mutation of `RoutingOptions`, `RouterMemory`, or `SandboxOptions` - these remain appsettings-only.
+- Runtime mutation of `RoutingOptions`, `RouterMemory`, or `QualityOptions` - these remain appsettings-only.
 - Migrating the GUI's telemetry/price-source-admin traffic off gRPC onto MCP, or retiring REST `/admin/*`
   in favor of MCP - a larger future consolidation, not part of this change.
 - Hardening the telemetry gRPC stream's own (still absent) authentication - a separate, pre-existing gap

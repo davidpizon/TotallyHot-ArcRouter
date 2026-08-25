@@ -32,7 +32,7 @@ Rather than have MCP call the REST API over HTTP (a self-directed network hop th
 
 ### Decisions locked with the user
 - **Transport/hosting:** in-process Streamable-HTTP MCP server on a new dedicated loopback **TLS port 5003**, mirroring the 5002 gRPC pattern.
-- **Scope (read + mutate):** providers/models/budgets; price sources & catalog; telemetry & spend (read-only, **aggregates only** — never raw prompt/response text). No new routing/memory/sandbox plumbing.
+- **Scope (read + mutate):** providers/models/budgets; price sources & catalog; telemetry & spend (read-only, **aggregates only** — never raw prompt/response text). No new routing/memory/verifier plumbing.
 - **Shared core:** one `ManagementFacade` backs both MCP and the hardened REST `/admin/*`.
 - **REST auth default:** the per-user token is **required by default** on `/admin/*`; the **GUI is updated** to read the same token file and send it (in scope).
 - **Credential masking:** **write-only everywhere** — no surface returns literal API keys or literal header values; on save, a **blank value preserves the stored one** (mirrors `ApiKey` "literal" mode). One projection, no per-surface leniency.
@@ -99,7 +99,7 @@ Each test < 5s; warning-free build (`TreatWarningsAsErrors`); coverage ≥ 80% (
 7. Store learnings (shared-facade design, header-value write-only tightening, token file, port map, forwarding-untouched) in Qdrant + the Obsidian vault (`ArcRouter/architecture/`), and this project's memory.
 
 ## Out of scope
-- Runtime mutation of `RoutingOptions`, `RouterMemory`, `SandboxOptions` (remain appsettings-only).
+- Runtime mutation of `RoutingOptions`, `RouterMemory`, `QualityOptions` (remain appsettings-only).
 - Streaming raw telemetry/prompt content over MCP (aggregates only).
 - Migrating the GUI off REST entirely / consolidating telemetry+price-source gRPC onto MCP (a larger future effort; this work leaves those on gRPC).
 

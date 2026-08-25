@@ -117,9 +117,12 @@ override. Building the GUI surface now would be building it to delete it.
 > Governance → Providers, backed by
 > `PUT /admin/providers/{key}/models/{modelName}/tool-dialect`, writing at
 > `DetectionConfidence.Operator` so no automatic scan can overwrite it, and clearing the pin to resume
-> detection. `EnableToolCallGuard` itself is still honored as the one-release forced-on override and is
-> still absent from the GUI — deliberately, and now with the intended successor in place, so deleting the
-> flag is a self-contained follow-up rather than a blocked one.
+> detection.
+>
+> **Fully resolved (2026-08-25).** `EnableToolCallGuard` itself has now been deleted from
+> `ProviderOptions`/`ResolvedModelRoute` and `ToolCallNormalizerFactory` no longer has a forced-on
+> override path. Arming is entirely per-(provider, model) from the capability store, as
+> [`tool-call-normalization.md`](tool-call-normalization.md) always intended.
 
 ### ✅ 3. `ToolCallHistoryRenderer` reads OpenAI-shaped history with dialect-specific key names — Resolved
 

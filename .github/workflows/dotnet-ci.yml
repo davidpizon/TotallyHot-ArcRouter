@@ -29,7 +29,7 @@ jobs:
       # references via ProjectReference, so no separate list of production projects is needed.
       PROJECTS: >-
         src/TotallyHotArcRouter.Tests/TotallyHotArcRouter.Tests.csproj
-        src/TotallyHotArcRouter.Sandbox.Tests/TotallyHotArcRouter.Sandbox.Tests.csproj
+        src/TotallyHotArcRouter.Quality.Tests/TotallyHotArcRouter.Quality.Tests.csproj
         src/TotallyHotArcRouter.Gui.Admin.Tests/TotallyHotArcRouter.Gui.Admin.Tests.csproj
         src/TotallyHotArcRouter.Gui.Charts.Tests/TotallyHotArcRouter.Gui.Charts.Tests.csproj
         src/TotallyHotArcRouter.Gui.Console.Tests/TotallyHotArcRouter.Gui.Console.Tests.csproj
@@ -43,17 +43,11 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
-      # Ubuntu 24.04 restricts unprivileged user namespaces via AppArmor by default
-      # (kernel.apparmor_restrict_unprivileged_userns=1), which blocks `unshare --user
-      # --map-root-user` for non-root processes. TotallyHotArcRouter.Sandbox.Tests' LinuxJailLauncherTests
-      # exercises the real Tier-1 jail launch path (unshare(1)) to verify process-tree cleanup on
-      # cancellation, which needs this. The production LinuxJailLauncher already assumes its
-      # deployment host permits this - a Tier-1-capable sandbox executor host cannot function at all
-      # otherwise - so this loosens the CI runner to match that pre-existing assumption, not a new
-      # requirement introduced by CI. Scoped to this job only; GitHub-hosted runners are ephemeral
-      # and rebuilt for every job, so this setting has no persistence or blast-radius concern.
-      - name: Allow unprivileged user namespaces
-        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      # NOTE: an "Allow unprivileged user namespaces" step used to sit here, loosening
+      # kernel.apparmor_restrict_unprivileged_userns so a jail-launch test could call `unshare --user
+      # --map-root-user`. Both the test and the jail are gone: the verifier no longer executes
+      # model-generated code (docs/router/quality-verifier-architecture.md), so CI needs no elevated
+      # namespace capability and the runner is left at its default hardening.
 
       - name: Restore
         run: |

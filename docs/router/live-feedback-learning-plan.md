@@ -35,7 +35,7 @@ nulls. That is not, by itself, the same as fixing it for live traffic — see th
 
 | Voter | Needs | Live status today |
 |---|---|---|
-| `dim_best` | `RouterMemory` scores | **Working** — `RouterMemoryScoreObserver` writes `live:`-prefixed scores through the sandbox |
+| `dim_best` | `RouterMemory` scores | **Working** — `RouterMemoryScoreObserver` writes `live:`-prefixed scores through the quality verifier |
 | `memory_kNN` | `VotingContext.TaskEmbedding` | **Wired and reachable** — PLAN.md Phase M1 shipped `CompositeRoutingPolicy`'s `RoutingSignals` overload (`Router/CompositeRoutingPolicy.cs`), which forwards to `OrchestratorRoutingPolicy` for non-utility traffic by default (`RoutingOptions.EnableOrchestratorPolicy`). Casts a real vote whenever a task embedding is present; abstains only when one isn't (e.g. the embedding budget timed out) |
 | `logreg` | `VotingContext.TaskEmbedding` | **Wired and reachable, same as `memory_kNN`** — abstains until an artifact exists; Phase 4 (below) is what produces one |
 | `llm_router` | `VotingContext.TaskText` | **Wired and reachable, same as `memory_kNN`** — prompts a local ONNX GenAI instruct model (a documented substitute for the paper's unpublished fine-tuned checkpoint - see `LlmRouterVoter`'s remarks); abstains only when its model artifacts are missing or the task has no text |
@@ -87,7 +87,7 @@ flowchart LR
         A1[Request] --> B1[Classify dimension]
         B1 --> C1[dim_best votes]
         C1 --> D1[Model chosen]
-        D1 --> E1[Sandbox verifies]
+        D1 --> E1[Verifier grades]
         E1 --> F1[(RouterMemory<br/>live: scores)]
         F1 -.-> C1
         G1[memory_kNN]:::dead
@@ -103,7 +103,7 @@ flowchart LR
         B2 --> C2[Embed via ONNX BGE]
         C2 --> D2[All voters vote]
         D2 --> E2[Model chosen]
-        E2 --> F2[Sandbox verifies]
+        E2 --> F2[Verifier grades]
         F2 --> G2[(RouterMemory)]
         F2 --> H2[(memory_entries<br/>embedding + model + score)]
         G2 -.-> D2
@@ -215,20 +215,20 @@ inference behind a semaphore.
   embedding is skipped rather than awaited.
 
 **2c. Write `memory_entries` when the score arrives.** The embedding is computed at request time; the
-verifier score arrives later and asynchronously, carrying only `SandboxResult.RequestCorrelationId`.
+verifier score arrives later and asynchronously, carrying only `QualityResult.RequestCorrelationId`.
 Bridge them with a bounded, TTL'd `PendingTaskEmbeddingCache` (correlation id → embedding) that the
 interceptor populates and a new `EmbeddingMemoryScoreObserver` drains, calling
 `EmbeddingMemory.AddEntryAsync` with the embedding, chosen model, score, and cost.
 
-Chosen over carrying the vector through `SandboxResult` because that type lives in
-`TotallyHot.ArcRouter.Sandbox` and threading a routing concern through the sandbox's public surface
+Chosen over carrying the vector through `QualityResult` because that type lives in
+`TotallyHot.ArcRouter.Quality` and threading a routing concern through the verifier's public surface
 couples two projects that are currently independent. The cost is a cache with eviction semantics; the
-benefit is that the Sandbox project is untouched. Cache misses (score arrived after TTL, or embedding
+benefit is that the quality-verifier project is untouched. Cache misses (score arrived after TTL, or embedding
 was skipped) are logged and dropped — a missing memory entry is a lost learning opportunity, not an
 error.
 
 Also register the observer so **both** it and the existing `RouterMemoryScoreObserver` receive each
-result; today `IRouterScoreObserver` resolves to a single implementation.
+result; today `IQualityScoreObserver` resolves to a single implementation.
 
 **Exit:** with a fake embedding client, a routed request writes exactly one `memory_entries` row
 carrying the right model and score; `memory_kNN` returns a non-abstain vote on a second, similar

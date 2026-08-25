@@ -18,11 +18,6 @@ public static class RouterConstants
     public const string FallbackReason = "fallback";
 
     /// <summary>
-    /// Gets the default routing policy name.
-    /// </summary>
-    public const string DefaultPolicy = "hierarchical";
-
-    /// <summary>
     /// Gets the ordered set of supported candidate models.
     /// </summary>
     public static readonly IReadOnlyList<string> SupportedModels = new ReadOnlyCollection<string>(

@@ -2,7 +2,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Orchestrator;
-using TotallyHot.ArcRouter.Sandbox;
+using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Tests.CodeRouterBench;
 
 namespace TotallyHot.ArcRouter.Tests.Router.Orchestrator;
@@ -14,7 +14,7 @@ public class DimBestVoterTests
     public async Task VoteAsync_NoCorpusFile_NoLiveMemory_Abstains()
     {
         using var temp = new TempBenchmarkDatabase(); // never EnsureCreated - no file on disk
-        var voter = new DimBestVoter(temp.Database, new RouterMemory(), NullLogger<DimBestVoter>.Instance, Options.Create(new SandboxOptions()));
+        var voter = new DimBestVoter(temp.Database, new RouterMemory(), NullLogger<DimBestVoter>.Instance, Options.Create(new QualityOptions()));
         var context = new VotingContext(
             "live:code_generation",
             [new RoutingCandidate("model-a", "openai", IsFree: false)]);
@@ -31,7 +31,7 @@ public class DimBestVoterTests
         var memory = new RouterMemory();
         await memory.AddScoreAsync("live:code_generation", "model-a", 0.3);
         await memory.AddScoreAsync("live:code_generation", "model-b", 0.9);
-        var voter = new DimBestVoter(temp.Database, memory, NullLogger<DimBestVoter>.Instance, Options.Create(new SandboxOptions()));
+        var voter = new DimBestVoter(temp.Database, memory, NullLogger<DimBestVoter>.Instance, Options.Create(new QualityOptions()));
         var context = new VotingContext(
             "live:code_generation",
             [new RoutingCandidate("model-a", "openai", IsFree: false), new RoutingCandidate("model-b", "openai", IsFree: false)]);
@@ -51,7 +51,7 @@ public class DimBestVoterTests
         InsertResultRow(temp.Database, "task-1", "probing", "code_generation", "model-a", 0.2);
         InsertResultRow(temp.Database, "task-2", "probing", "code_generation", "model-b", 0.8);
 
-        var voter = new DimBestVoter(temp.Database, new RouterMemory(), NullLogger<DimBestVoter>.Instance, Options.Create(new SandboxOptions()));
+        var voter = new DimBestVoter(temp.Database, new RouterMemory(), NullLogger<DimBestVoter>.Instance, Options.Create(new QualityOptions()));
         var context = new VotingContext(
             "code_generation",
             [new RoutingCandidate("model-a", "openai", IsFree: false), new RoutingCandidate("model-b", "openai", IsFree: false)]);
@@ -76,7 +76,7 @@ public class DimBestVoterTests
         var memory = new RouterMemory();
         await memory.AddScoreAsync("code_generation", "model-b", 0.95);
 
-        var voter = new DimBestVoter(temp.Database, memory, NullLogger<DimBestVoter>.Instance, Options.Create(new SandboxOptions()));
+        var voter = new DimBestVoter(temp.Database, memory, NullLogger<DimBestVoter>.Instance, Options.Create(new QualityOptions()));
         var context = new VotingContext(
             "code_generation",
             [new RoutingCandidate("model-a", "openai", IsFree: false), new RoutingCandidate("model-b", "openai", IsFree: false)]);
@@ -100,7 +100,7 @@ public class DimBestVoterTests
         InsertResultRow(temp.Database, "task-1", "probing", "code_generation", "model-a", 0.2);
         InsertResultRow(temp.Database, "task-2", "probing", "code_generation", "model-b", 0.8);
 
-        var voter = new DimBestVoter(temp.Database, new RouterMemory(), NullLogger<DimBestVoter>.Instance, Options.Create(new SandboxOptions()));
+        var voter = new DimBestVoter(temp.Database, new RouterMemory(), NullLogger<DimBestVoter>.Instance, Options.Create(new QualityOptions()));
         var context = new VotingContext(
             "live:code_generation",
             [new RoutingCandidate("model-a", "openai", IsFree: false), new RoutingCandidate("model-b", "openai", IsFree: false)]);

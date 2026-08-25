@@ -26,8 +26,6 @@ public class ServiceCollectionExtensionsTests
         Assert.Contains(services, d => d.ServiceType == typeof(RouterMemory) && d.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(services, d => d.ServiceType == typeof(AgentAsARouter) && d.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(services, d => d.ServiceType == typeof(CheckSyntax) && d.Lifetime == ServiceLifetime.Transient);
-        Assert.Contains(services, d => d.ServiceType == typeof(RunVisibleTests) && d.Lifetime == ServiceLifetime.Transient);
-        Assert.Contains(services, d => d.ServiceType == typeof(EstimateQuality) && d.Lifetime == ServiceLifetime.Transient);
         Assert.Contains(services, d => d.ServiceType == typeof(IEnvironmentVariableProvider) && d.ImplementationType == typeof(EnvironmentVariableProvider) && d.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(services, d => d.ServiceType == typeof(IModelRouteResolver) && d.ImplementationType == typeof(ModelRouteResolver) && d.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(services, d => d.ServiceType == typeof(RequestInterceptor) && d.Lifetime == ServiceLifetime.Singleton);
@@ -57,8 +55,6 @@ public class ServiceCollectionExtensionsTests
 
         Assert.NotNull(provider.GetRequiredService<RouterMemory>());
         Assert.NotNull(provider.GetRequiredService<CheckSyntax>());
-        Assert.NotNull(provider.GetRequiredService<RunVisibleTests>());
-        Assert.NotNull(provider.GetRequiredService<EstimateQuality>());
         Assert.NotNull(provider.GetRequiredService<IModelRouteResolver>());
         Assert.NotNull(provider.GetRequiredService<RequestInterceptor>());
         Assert.NotNull(provider.GetRequiredService<ProxyMiddleware>());

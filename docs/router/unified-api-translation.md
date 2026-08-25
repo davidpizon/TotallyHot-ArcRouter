@@ -461,8 +461,8 @@ erroring — but faithful translation of them is future work.
 > is *"model quality, not one specific provider."* One LM Studio process serves many GGUFs with
 > different chat templates, so provider-scoped arming both missed models needing another dialect and
 > exposed capable models to false positives. Arming is now per (provider, model) and per request.
-> `ProviderOptions.EnableToolCallGuard` survives one release as a forced-on override and is removed in
-> Phase 6.
+> `ProviderOptions.EnableToolCallGuard` survived one release as a forced-on override and was removed
+> (2026-08-25).
 
 Not part of the original four-pillar scope above (that was closed 2026-07-23) — this is a small,
 separately-motivated addition prompted by a real production incident: VS Code Copilot
@@ -523,8 +523,8 @@ from the real LM Studio repro, content correctly preserved before/after a tag, m
 calls, the fail-open path (malformed JSON and the schema-echo shape) with a verified logged warning, an
 unterminated-tag-at-stream-end case, the non-streaming `TranslateResponse` equivalent, and one end-to-end
 test through the real `ProxyMiddleware` proving the opt-in flag actually selects this translator.
-`ModelRouteResolverTests` covers `EnableToolCallGuard` propagating from `ProviderOptions` onto
-`ResolvedModelRoute` (mirroring the existing `IsFree` propagation test).
+(`EnableToolCallGuard` and its `ModelRouteResolverTests` propagation coverage were later removed
+alongside the flag itself - see the amendment above.)
 
 ## 5. Open questions to resolve before each PR starts
 

@@ -12,12 +12,17 @@ This plan adds an LLM-as-judge scorer, built on the G-Eval recipe
 two deliberately separated stages:
 
 1. **Shadow mode (G1/G2)** — the judge scores requests *in parallel* with the existing
-   `VerifierScorer`, records its opinion in a side table, and influences nothing. This measures, on
+   `QualityScorer`, records its opinion in a side table, and influences nothing. This measures, on
    this operator's real traffic, how often the judge agrees with execution-grounded scores before it
    is trusted with anything.
 2. **Alternate verifier for non-executable dimensions (G3)** — gated on G2's results, the judge
    becomes the scorer of record *only* for dimensions the sandbox cannot execute, where today's
    score collapses to a syntax check.
+
+> **Status note.** Step 1 shipped. Step 2 was **superseded** — code execution was removed from the
+> project entirely, which made *every* dimension non-executable and turned the judge into a permanent
+> co-grader rather than a fallback. See [`quality-verifier-architecture.md`](quality-verifier-architecture.md),
+> and Phase G3 below for what shipped instead and what is still outstanding.
 
 Two cross-cutting requirements apply from the first phase:
 
@@ -28,11 +33,13 @@ Two cross-cutting requirements apply from the first phase:
 
 ## Why
 
-- **The Verifier is blind on non-executable content.** `VerifierScorer.Score`
-  (`src/TotallyHotArcRouter.Sandbox/Scoring/VerifierScorer.cs`) folds the execution weight into the
-  syntax weight when `result.Executed` is false, so a prose answer — an algorithm explanation, a
-  design review, any non-coding dimension — is scored on syntax validity alone. A brilliant answer
-  and a useless one receive the same `u_i`.
+- **The Verifier is blind on non-executable content.** `QualityScorer.Score`
+  (`src/TotallyHotArcRouter.Quality/Scoring/QualityScorer.cs`) folded the execution weight into the
+  syntax weight when `result.Executed` was false, so a prose answer — an algorithm explanation, a
+  design review, any non-coding dimension — was scored on syntax validity alone. A brilliant answer
+  and a useless one received the same `u_i`. *This argument has since become the argument for the judge
+  generally, not just for prose: with execution removed, the static grader is never more than parsing
+  plus heuristics on any dimension.*
 - **Naive LLM-as-judge is measurably noisy.** `src/PLAN.md`'s Settled deferrals (full evidence in
   `data/README.md`'s "Known data-fidelity limit" section) document per-cell
   divergences up to 0.32 in the judge-scored CodeRouterBench dimensions (`algorithm`,
@@ -56,7 +63,7 @@ Two cross-cutting requirements apply from the first phase:
   inference still costs compute and wall-clock; the queue is bounded and sheds load rather than
   backing up.
 - **Shadow mode influences nothing.** Until G3, the judge's score never touches
-  `SandboxResult.UnifiedScore`, never reaches `memory_entries.score`, and never feeds any voter.
+  `QualityResult.UnifiedScore`, never reaches `memory_entries.score`, and never feeds any voter.
 - **Judge scores are never a training reward without provenance.** Any layer that consumes
   `memory_entries` must be able to filter on `is_judge_scored`.
 - **Raw text does not outlive its purpose.** The router's memory must not become a transcript store
@@ -71,7 +78,7 @@ Two cross-cutting requirements apply from the first phase:
 flowchart TD
     subgraph HotPath["Hot path (unchanged)"]
         PM["ProxyMiddleware<br/>captures response body;<br/>ResponseTextExtractor already<br/>extracts reply text"]
-        SE["SandboxExecutor.ExecuteAsync<br/>VerifierScorer -> UnifiedScore"]
+        SE["QualityGrader.ExecuteAsync<br/>QualityScorer -> UnifiedScore"]
         CO["CompositeRouterScoreObserver<br/>(fans out, exception-tolerant)"]
         PM --> SE --> CO
     end
@@ -97,9 +104,9 @@ flowchart TD
     CO --> JSO
 ```
 
-The seam is `IRouterScoreObserver`: `CompositeRouterScoreObserver`
+The seam is `IQualityScoreObserver`: `CompositeRouterScoreObserver`
 (`src/TotallyHotArcRouter/Router/CompositeRouterScoreObserver.cs`) already fans a scored
-`SandboxResult` out to each registered observer and swallows individual failures, so a third,
+`QualityResult` out to each registered observer and swallows individual failures, so a third,
 best-effort observer is additive — no existing type changes shape.
 
 ## Raw-text preservation (hybrid)
@@ -126,7 +133,7 @@ on transcript writes, a few lines below it in the same method.
 
 **Bounded memory:** worst case is (in-flight unjudged responses × capped text size). The cache caps
 per-entry text at a configurable byte limit (default aligned with
-`SandboxOptions.MaxCapturedOutputBytes`'s philosophy) and total entries at a configurable capacity,
+`QualityOptions.MaxCapturedOutputBytes`'s philosophy) and total entries at a configurable capacity,
 so the ceiling is a few MB regardless of traffic.
 
 **Secondary path — transcript backfill (only when T1 is enabled).** When
@@ -148,7 +155,7 @@ A new boolean column, following the additive-migration convention `RouterMemoryD
   score backfill.
 
 Semantics: `1` means the `score` on this row was produced by the LLM judge rather than by
-`VerifierScorer`'s structural/execution signals. In G1/G2 no row ever has `is_judge_scored = 1`
+`QualityScorer`'s structural/execution signals. In G1/G2 no row ever has `is_judge_scored = 1`
 (shadow scores live only in the side table); the column lands early anyway so that every learning
 consumer (`MemoryKnnVoter`, `EmbeddingLogRegTrainer`, T2's clustering, T4's comparison) can be
 written/updated against the final schema once, and can weight, discount, or exclude judge-graded
@@ -177,7 +184,7 @@ late that they can't.
 > (`IJudgeClient` over the selected provider's OpenAI-compatible chat-completions endpoint,
 > probability-weighted 1-5 scoring from `logprobs`/`top_logprobs` with a single-sample fallback),
 > `JudgeShadowScoreObserver`
-> (`IRouterScoreObserver`, enqueues onto a bounded `JudgeShadowScoreQueue` and returns immediately - shed,
+> (`IQualityScoreObserver`, enqueues onto a bounded `JudgeShadowScoreQueue` and returns immediately - shed,
 > never block, on a full channel), `JudgeShadowScoreDrainService` (a `BackgroundService` draining the
 > channel continuously, `TryTake`s the cached response text, calls the judge, writes one
 > `judge_shadow_scores` row, always drains the cache slot), and `JudgeShadowScoreRetentionService` (5-minute
@@ -228,7 +235,7 @@ and prompt-version guards, mirroring the trained-artifact guards in
 > flagged `IsFree` (a *known* zero — judging runs on every scored request, so an accidentally-paid backbone
 > would bill continuously), provider and model both enabled, and **not** a Bedrock route, which is not
 > OpenAI-shaped and cannot be reached without the SigV4 SDK client. The judge deliberately does **not** loop
-> back through our own proxy: a judge call re-entering `ProxyMiddleware` would be sandbox-scored and would
+> back through our own proxy: a judge call re-entering `ProxyMiddleware` would itself be graded and would
 > enqueue a further judging job. With no eligible model the judge **abstains** — no row, no fabricated
 > score — matching `LogRegVoter`/`ClusterBestVoter`'s no-placeholder posture. The operator picks a specific
 > backbone, or leaves it automatic, from the System Settings window; an ineligible pick falls back to the
@@ -248,9 +255,9 @@ extracted; options for TTL, capacity, and per-entry byte cap under a new `JudgeO
 all off unless `JudgeShadowEnabled` is true (default **false** — enabling the judge is a deliberate
 choice, the same posture as T1's capture toggle).
 
-**1c. `JudgeShadowScoreObserver`.** An `IRouterScoreObserver` registered as a third element of the
+**1c. `JudgeShadowScoreObserver`.** An `IQualityScoreObserver` registered as a third element of the
 `CompositeRouterScoreObserver` list. `ObserveAsync` does two cheap things and returns: snapshot the
-fields it needs from the `SandboxResult` (correlation id, dimension, model, `UnifiedScore`), and
+fields it needs from the `QualityResult` (correlation id, dimension, model, `UnifiedScore`), and
 enqueue onto a bounded channel. When the channel is full, the job is dropped with a debug log —
 shed, never block. A hosted service drains the channel: `TryTake` the response text, run the G-Eval
 call against the configured backbone, write one row to the side table, discard the text.
@@ -261,6 +268,12 @@ migration): `id`, `correlation_id`, `created_at_utc`, `dimension`, `model`, `ver
 `executed` (0/1 — whether the verifier's score was execution-grounded or Tier-0-only, the single
 most important split for G2). Retention: same startup-plus-periodic purge pattern as T1e, bounded
 by `RetentionDays`/`MaxRows`.
+
+> **Schema revised.** `verifier_score` was renamed `static_score` and `executed` was dropped when code
+> execution was removed — a grade can no longer be execution-grounded, and a column that must read 0
+> forever preserves the shape of a fact while discarding its meaning. `RouterMemoryDatabase`
+> migrates existing databases in place (rename + drop column); historical rows are kept, since their
+> score column still means "the non-judge grade for this request".
 
 **1e. `is_judge_scored` columns.** As specified in §Provenance — landed here, always written 0.
 
@@ -275,13 +288,20 @@ affecting routing latency; all migrations are additive and re-runnable.
 Runs after G1 has accumulated shadow data on real traffic (minimum row count configurable; no fixed
 calendar time).
 
-- **Agreement analysis**, split by the `executed` flag and by dimension: rank correlation
-  (Spearman) and mean absolute difference between `judge_score` and `verifier_score` where both are
-  meaningful, plus score-distribution shape (is the judge collapsing to one value? G-Eval's known
+> **Revised.** This phase was designed around an `executed` flag that split execution-grounded rows from
+> Tier-0-only ones. Code execution has since been removed entirely (see
+> [`quality-verifier-architecture.md`](quality-verifier-architecture.md)), the column is dropped, and
+> `verifier_score` is now `static_score`. Every split below that keyed on `executed` is replaced by
+> `syntax_authoritative` — whether a real parser or a heuristic produced the static grade — which is the
+> nearest remaining proxy for "how much do we trust the non-judge number".
+
+- **Agreement analysis**, split by dimension and by whether the static grade was authoritative: rank
+  correlation (Spearman) and mean absolute difference between `judge_score` and `static_score` where both
+  are meaningful, plus score-distribution shape (is the judge collapsing to one value? G-Eval's known
   failure without probability weighting).
-- **Self-preference probe**: per-model mean judge score vs. per-model mean verifier score — a judge
-  that systematically inflates one model family relative to its execution-grounded scores exhibits
-  exactly the bias the paper warns about, quantified on local traffic.
+- **Self-preference probe**: per-model mean judge score vs. per-model mean static score — a judge that
+  systematically inflates one model family relative to its static grades exhibits exactly the bias the
+  paper warns about, quantified on local traffic.
 - **Surface**: a read-only admin/gRPC status view (following the trainer-status precedent in
   `self-organizing-classification-plan.md` T5), not a GUI build-out — numbers first.
 
@@ -293,18 +313,31 @@ meaningless correlation. `used_logprobs` deserves the same treatment: rows score
 single-sample fallback carry exactly the quantization noise probability weighting exists to remove, so
 they are not comparable with logprob-weighted rows.
 
-**Gate for G3 (all required):** (1) on *executed* rows, judge rank-correlates with the verifier at
-or above a configured floor — the judge must at least reproduce ground truth where ground truth
-exists; (2) judge score distribution is non-degenerate (variance floor); (3) measured
-self-preference skew is below a configured ceiling. Failing the gate loops back to prompt/backbone
-iteration in G1 — it does not soften the gate.
+**The G3 gate is moot as written.** Its first condition — "on *executed* rows, judge rank-correlates
+with the verifier at or above a configured floor" — was the whole point of the gate: prove the judge
+reproduces ground truth *where ground truth exists*, before letting it stand in where it does not. There
+are no execution-grounded rows any more, so that condition can never be evaluated. This is an honest loss,
+not a technicality: the judge was promoted (see below) without the calibration evidence this phase was
+designed to demand.
 
-## Phase G3 — Judge as alternate verifier for non-executable dimensions
+Conditions (2) non-degenerate score distribution and (3) self-preference skew below a ceiling remain
+measurable against `static_score` and are still worth running as a standing regression check.
 
-Gated on G2. Scope is deliberately narrow: **only dimensions/results where the sandbox produced no
-execution signal** (`result.Executed == false` and the dimension is configured judge-eligible).
-Executable dimensions keep `VerifierScorer` unconditionally — where ground truth is available, an
-opinion never replaces it.
+## Phase G3 — Judge as alternate verifier for non-executable dimensions — **SUPERSEDED**
+
+> **Superseded and overtaken.** G3 proposed letting the judge score *only* results the sandbox could not
+> execute, keeping execution authoritative everywhere else. Removing execution made every dimension
+> non-executable, so the narrow carve-out this phase describes became the whole surface — and the
+> implementation went further than G3 did: rather than the judge *replacing* the score on eligible rows,
+> both grades are now blended into one via `QualityScoreAggregator`, and the judge defaults to **on**
+> whenever a free backbone resolves.
+>
+> The design below is retained because its learning-layer requirements were the right ones and are still
+> outstanding — see the note at the end of this section.
+
+The original scope: **only dimensions/results where the sandbox produced no execution signal**
+(`result.Executed == false` and the dimension is configured judge-eligible). Executable dimensions keep
+`QualityScorer` unconditionally — where ground truth is available, an opinion never replaces it.
 
 - A judge-eligible, non-executed result's `u_i` becomes the G-Eval score (normalized to `[0,1]`),
   written through the existing observer path with `is_judge_scored = 1` on the `memory_entries` row
@@ -321,6 +354,21 @@ from the judge and whose `is_judge_scored` is 1; an executable request is provab
 judge path; every learning consumer honors the configured judge-row policy under test; disabling
 the judge cleanly reverts non-executable dimensions to today's Tier-0 behavior.
 
+### What actually shipped, and what is still owed
+
+Shipped: the judge contributes to `u_i` on every graded request, blended with the static score rather than
+replacing it, with exactly-once write semantics and graceful static-only degradation.
+
+**Still owed from this phase, and tracked as outstanding:**
+
+- **`is_judge_scored` provenance is not being set on blended rows.** The column exists and the plumbing
+  is there, but with every row now potentially judge-influenced, the flag needs a definition — "the judge
+  contributed at all" or "the judge contributed more than X of the weight" — before it means anything.
+- **The learning-layer policy was never implemented.** `MemoryKnnVoter` and the logreg/clustering trainers
+  still have no include/exclude/down-weight policy for judge-influenced rows. G3 was explicit that this
+  should land in the same phase as the promotion, precisely so the first such row was already handled
+  deliberately. It did not.
+
 ## Non-goals
 
 - Judge scores as a training reward for any model tuning — out of scope permanently, per the
@@ -328,7 +376,7 @@ the judge cleanly reverts non-executable dimensions to today's Tier-0 behavior.
 - Any paid or remote judging backend.
 - Persisting raw prompt/response text anywhere new — the only persistent text store remains T1's
   opt-in `transcripts.db`, owned by that plan.
-- Replacing `VerifierScorer` on executable dimensions, in any phase.
+- Replacing `QualityScorer` on executable dimensions, in any phase.
 
 ## Key references
 
@@ -338,8 +386,10 @@ the judge cleanly reverts non-executable dimensions to today's Tier-0 behavior.
   text source; `IsExploratory` provenance precedent), trainer/artifact conventions.
 - `docs/router/regret-evaluation-harness-plan.md` — the no-fabricated-evaluation-data ground rule
   and the no-paid-backend constraint.
-- `src/TotallyHotArcRouter.Sandbox/Scoring/VerifierScorer.cs` — the non-executed fold this plan's
-  G3 addresses.
+- `src/TotallyHotArcRouter.Quality/Scoring/QualityScorer.cs` — now the three-axis
+  syntax/analysis/judge blend; the non-executed fold this plan's G3 addressed is gone.
+- `src/TotallyHotArcRouter.Quality/Grading/QualityScoreAggregator.cs` — the join that makes the judge a
+  co-grader without double-counting.
 - `src/TotallyHotArcRouter/Router/CompositeRouterScoreObserver.cs` — the observer seam G1 plugs
   into.
 - `src/TotallyHotArcRouter/Telemetry/ResponseTextExtractor.cs` and

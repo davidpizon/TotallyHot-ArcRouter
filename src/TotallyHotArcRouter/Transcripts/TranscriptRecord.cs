@@ -8,7 +8,7 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// </summary>
 /// <param name="Id">The store-assigned identity. Zero for a record not yet persisted.</param>
 /// <param name="CorrelationId">
-/// The same correlation id <c>SandboxResult.RequestCorrelationId</c> carries, joining this row to its
+/// The same correlation id <c>QualityResult.RequestCorrelationId</c> carries, joining this row to its
 /// later-arriving score.
 /// </param>
 /// <param name="CreatedAtUtc">When this row was written, in UTC.</param>

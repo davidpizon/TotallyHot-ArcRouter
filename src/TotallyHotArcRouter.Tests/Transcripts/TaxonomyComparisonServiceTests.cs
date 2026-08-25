@@ -7,7 +7,7 @@ using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Orchestrator;
-using TotallyHot.ArcRouter.Sandbox;
+using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Transcripts;
 
@@ -483,7 +483,7 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
             transcriptOptions,
             Options.Create(new RoutingOptions { ClusterAssignmentThreshold = 0.5 }),
             storageOptions,
-            Options.Create(new SandboxOptions { LiveMemoryPrefix = Prefix }),
+            Options.Create(new QualityOptions { LiveMemoryPrefix = Prefix }),
             new StubPriceLookup(),
             inFlightGauge,
             batchSize);

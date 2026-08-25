@@ -1,5 +1,5 @@
 using TotallyHot.ArcRouter.CodeRouterBench;
-using TotallyHot.ArcRouter.Sandbox;
+using TotallyHot.ArcRouter.Quality;
 
 namespace TotallyHot.ArcRouter.Tests.CodeRouterBench;
 

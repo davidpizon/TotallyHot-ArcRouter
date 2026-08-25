@@ -23,10 +23,10 @@ public interface ITelemetryPublisher
     Task PublishLogLineAsync(LogLineEvent logLine, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Publishes an optional sandbox execution signal for the dashboard's live verification tile.
+    /// Publishes an optional quality signal for the dashboard's live verification tile.
     /// Existing implementers may ignore it.
     /// </summary>
-    Task PublishSandboxSignalAsync(SandboxSignalEvent signal, CancellationToken cancellationToken = default) =>
+    Task PublishQualitySignalAsync(QualitySignalEvent signal, CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
 }
 
@@ -95,7 +95,7 @@ public sealed class TelemetryPublisher : ITelemetryPublisher
     }
 
     /// <inheritdoc />
-    public Task PublishSandboxSignalAsync(SandboxSignalEvent signal, CancellationToken cancellationToken = default)
+    public Task PublishQualitySignalAsync(QualitySignalEvent signal, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -103,9 +103,9 @@ public sealed class TelemetryPublisher : ITelemetryPublisher
         }
         catch (Exception ex)
         {
-            // Same fault-isolation contract as PublishAsync: a sandbox-signal publish failure must
+            // Same fault-isolation contract as PublishAsync: a quality-signal publish failure must
             // never surface to (or block) RouterMemoryScoreObserver's observation path.
-            _logger?.LogDebug(ex, "Failed to publish sandbox signal; continuing without it.");
+            _logger?.LogDebug(ex, "Failed to publish quality signal; continuing without it.");
         }
 
         return Task.CompletedTask;

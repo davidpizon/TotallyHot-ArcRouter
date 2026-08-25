@@ -89,7 +89,7 @@ public sealed class DimensionModelScoreMatrix
     /// Gets the average score for <paramref name="dimension"/> x <paramref name="model"/>, or
     /// <see langword="null"/> when no row in the source data had that pair.
     /// </summary>
-    /// <param name="dimension">A <see cref="Sandbox.RouterDimension"/> key, matched verbatim.</param>
+    /// <param name="dimension">A <see cref="Quality.RouterDimension"/> key, matched verbatim.</param>
     /// <param name="model">
     /// Any spelling of a model id - a configured <c>ModelName</c> or the dataset's own - matched through
     /// <see cref="ModelNameCanonicalizer.Canonicalize"/>.

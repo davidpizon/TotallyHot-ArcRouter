@@ -21,12 +21,12 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// <para>
 /// <b>Dimension keys.</b> Every method takes the <see cref="RouterMemory"/> key <em>as the caller holds
 /// it</em> and queries live memory with exactly that spelling; only the probing-prior lookup strips
-/// <see cref="Sandbox.SandboxOptions.LiveMemoryPrefix"/> back off, because the prior was built from
+/// <see cref="Quality.QualityOptions.LiveMemoryPrefix"/> back off, because the prior was built from
 /// unprefixed CodeRouterBench rows. Prepending the prefix here instead would silently miss live scores
 /// recorded under an unprefixed key, so the two sources are each queried under their own convention
 /// rather than forced onto one. A caller holding a bare dimension - Phase T4's comparison job, reading
 /// <c>request_transcripts.dimension</c> - converts it with
-/// <see cref="Sandbox.RouterDimension.ToLiveKey"/> first, exactly as
+/// <see cref="Quality.RouterDimension.ToLiveKey"/> first, exactly as
 /// <see cref="RouterMemoryScoreObserver"/> does when writing.
 /// </para>
 /// </remarks>
@@ -45,7 +45,7 @@ public sealed class DimensionLedger
     /// this machine - in which case this ledger scores from live memory only, exactly as
     /// <see cref="DimBestVoter"/> already degrades.
     /// </param>
-    /// <param name="liveMemoryPrefix">The <see cref="Sandbox.SandboxOptions.LiveMemoryPrefix"/> applied to reach live-memory keys.</param>
+    /// <param name="liveMemoryPrefix">The <see cref="Quality.QualityOptions.LiveMemoryPrefix"/> applied to reach live-memory keys.</param>
     public DimensionLedger(RouterMemory routerMemory, DimensionModelScoreMatrix? priorMatrix, string liveMemoryPrefix)
     {
         ArgumentNullException.ThrowIfNull(routerMemory);

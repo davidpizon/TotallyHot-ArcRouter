@@ -1333,9 +1333,9 @@ public sealed class ManagementFacade
     {
         // A `with` over the existing provider (or a default one when adding), rather than a hand-listed
         // rebuild. Only the fields this request can actually change are named below; everything else -
-        // EnableToolCallGuard, the four Aws* fields, and anything added to ProviderOptions later - carries
-        // across by construction. The previous hand-written list had silently fallen behind the type and
-        // was resetting exactly those fields on every edit (docs/router/backlog.md item 1).
+        // the four Aws* fields, and anything added to ProviderOptions later - carries across by
+        // construction. The previous hand-written list had silently fallen behind the type and was
+        // resetting exactly those fields on every edit (docs/router/backlog.md item 1).
         //
         // `new ProviderOptions()`'s own defaults reproduce the old terminal fallbacks exactly: BaseUrl "",
         // AuthHeaderName "Authorization", IsFree false, Enabled true, Headers [].
@@ -1396,9 +1396,9 @@ public sealed class ManagementFacade
     /// </summary>
     /// <remarks>
     /// This used to copy every property by hand, to avoid <see cref="MergeProvider"/>'s field loss - and had
-    /// itself fallen a field behind, silently clearing <see cref="ProviderOptions.EnableToolCallGuard"/> on
-    /// every Stop/Play toggle. Now that <see cref="ProviderOptions"/> is a record, <c>with</c> carries
-    /// everything across by construction and the hazard is gone from both methods at once.
+    /// itself fallen a field behind, silently clearing a since-removed provider flag on every Stop/Play
+    /// toggle. Now that <see cref="ProviderOptions"/> is a record, <c>with</c> carries everything across by
+    /// construction and the hazard is gone from both methods at once.
     /// </remarks>
     private static ProviderOptions WithEnabled(ProviderOptions source, bool enabled) =>
         source with { Enabled = enabled };

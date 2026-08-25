@@ -1,4 +1,4 @@
-using TotallyHot.ArcRouter.Sandbox;
+using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Transcripts;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -16,7 +16,7 @@ public class TranscriptScoreObserverTests
     {
         var store = new FakeTranscriptStore();
         var observer = new TranscriptScoreObserver(store, NullLogger<TranscriptScoreObserver>.Instance);
-        var result = new SandboxResult { RequestCorrelationId = "corr-1", Model = "kimi-k2.5", UnifiedScore = 0.83 };
+        var result = new QualityResult { RequestCorrelationId = "corr-1", Model = "kimi-k2.5", UnifiedScore = 0.83 };
 
         await observer.ObserveAsync(result, TestContext.Current.CancellationToken);
 
@@ -30,7 +30,7 @@ public class TranscriptScoreObserverTests
     {
         var store = new FakeTranscriptStore();
         var observer = new TranscriptScoreObserver(store, NullLogger<TranscriptScoreObserver>.Instance);
-        var result = new SandboxResult { RequestCorrelationId = "corr-1", Model = "kimi-k2.5", UnifiedScore = 5.0 };
+        var result = new QualityResult { RequestCorrelationId = "corr-1", Model = "kimi-k2.5", UnifiedScore = 5.0 };
 
         await observer.ObserveAsync(result, TestContext.Current.CancellationToken);
 
@@ -42,7 +42,7 @@ public class TranscriptScoreObserverTests
     {
         var store = new FakeTranscriptStore();
         var observer = new TranscriptScoreObserver(store, NullLogger<TranscriptScoreObserver>.Instance);
-        var result = new SandboxResult { RequestCorrelationId = string.Empty, Model = "kimi-k2.5", UnifiedScore = 0.5 };
+        var result = new QualityResult { RequestCorrelationId = string.Empty, Model = "kimi-k2.5", UnifiedScore = 0.5 };
 
         await observer.ObserveAsync(result, TestContext.Current.CancellationToken);
 

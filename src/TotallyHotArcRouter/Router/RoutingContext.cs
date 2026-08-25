@@ -7,7 +7,7 @@ namespace TotallyHot.ArcRouter.Router;
 /// </summary>
 /// <param name="Dimension">
 /// The request's live <see cref="RouterMemory"/> dimension key (already composed through
-/// <see cref="TotallyHot.ArcRouter.Sandbox.RouterDimension.ToLiveKey"/>), so a policy can read/write
+/// <see cref="TotallyHot.ArcRouter.Quality.RouterDimension.ToLiveKey"/>), so a policy can read/write
 /// <see cref="RouterMemory"/> scores directly without reconstructing the key itself.
 /// </param>
 /// <param name="IsUtility">

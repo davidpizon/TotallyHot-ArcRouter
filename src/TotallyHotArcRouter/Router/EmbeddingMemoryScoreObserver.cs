@@ -1,19 +1,19 @@
 using TotallyHot.ArcRouter.Router.Embeddings;
-using TotallyHot.ArcRouter.Sandbox;
-using TotallyHot.ArcRouter.Sandbox.Execution;
+using TotallyHot.ArcRouter.Quality;
+using TotallyHot.ArcRouter.Quality.Grading;
 using Microsoft.Extensions.Logging;
 
 namespace TotallyHot.ArcRouter.Router;
 
 /// <summary>
-/// Adapts sandbox-derived scores into <see cref="EmbeddingMemory"/> (docs/router/live-feedback-learning-plan.md
+/// Adapts verifier-derived scores into <see cref="EmbeddingMemory"/> (docs/router/live-feedback-learning-plan.md
 /// Phase 2c) - the write side of the loop <see cref="Proxy.RequestInterceptor"/>'s Phase 2b embedding
 /// computation and <see cref="PendingTaskEmbeddingCache"/> exist to feed. A scored result whose
 /// correlation id has no pending embedding (never computed, already claimed, or expired) is a lost
 /// learning opportunity, not an error - logged and dropped, exactly like every other best-effort
 /// observation path in this codebase.
 /// </summary>
-public sealed class EmbeddingMemoryScoreObserver : IRouterScoreObserver
+public sealed class EmbeddingMemoryScoreObserver : IQualityScoreObserver
 {
     private readonly EmbeddingMemory _memory;
     private readonly PendingTaskEmbeddingCache _pendingCache;
@@ -48,7 +48,7 @@ public sealed class EmbeddingMemoryScoreObserver : IRouterScoreObserver
     }
 
     /// <inheritdoc />
-    public async Task ObserveAsync(SandboxResult result, CancellationToken cancellationToken = default)
+    public async Task ObserveAsync(QualityResult result, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(result);
 
@@ -66,7 +66,7 @@ public sealed class EmbeddingMemoryScoreObserver : IRouterScoreObserver
 
         if (string.IsNullOrEmpty(result.Model))
         {
-            _logger.LogDebug("Sandbox result has no model attribution; skipping embedding-memory observation.");
+            _logger.LogDebug("Quality result has no model attribution; skipping embedding-memory observation.");
             return;
         }
 

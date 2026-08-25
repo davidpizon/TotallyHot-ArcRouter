@@ -2,13 +2,14 @@ using System.Diagnostics;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Quality.Grading;
 
 namespace TotallyHot.ArcRouter.Judge;
 
 /// <summary>
 /// Background worker that continuously drains <see cref="IJudgeShadowScoreQueue"/>
 /// (docs/router/geval-shadow-scoring-plan.md §1c), mirroring
-/// <see cref="Sandbox.Execution.SandboxExecutionService"/>'s <c>await foreach</c> shape rather than
+/// <see cref="Quality.Grading.QualityGradingService"/>'s <c>await foreach</c> shape rather than
 /// <c>TranscriptRetentionService</c>'s polling-timer shape - this drains a queue continuously, it does not
 /// poll on an interval. For each dequeued job it <see cref="PendingResponseTextCache.TryTake"/>s the
 /// response text, calls the configured <see cref="IJudgeClient"/>, and writes one row to
@@ -24,6 +25,7 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
     private readonly PendingResponseTextCache _pendingResponseTextCache;
     private readonly IJudgeClient _judgeClient;
     private readonly IJudgeShadowScoreStore _store;
+    private readonly IQualityScoreAggregator _aggregator;
     private readonly IOptionsMonitor<JudgeOptions> _options;
     private readonly ILogger<JudgeShadowScoreDrainService> _logger;
 
@@ -33,6 +35,7 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
     /// <param name="judgeClient">The judge backbone client.</param>
     /// <param name="store">Where each scored job's row is persisted.</param>
     /// <param name="options">The judge options (live enabled gate, prompt version), read per job rather than captured.</param>
+    /// <param name="aggregator">The quality aggregator holding this job's static verdict open for the judge's grade.</param>
     /// <param name="logger">The logger.</param>
     public JudgeShadowScoreDrainService(
         IJudgeShadowScoreQueue queue,
@@ -40,6 +43,7 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
         IJudgeClient judgeClient,
         IJudgeShadowScoreStore store,
         IOptionsMonitor<JudgeOptions> options,
+        IQualityScoreAggregator aggregator,
         ILogger<JudgeShadowScoreDrainService> logger)
     {
         ArgumentNullException.ThrowIfNull(queue);
@@ -47,6 +51,7 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
         ArgumentNullException.ThrowIfNull(judgeClient);
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(aggregator);
         ArgumentNullException.ThrowIfNull(logger);
 
         _queue = queue;
@@ -54,6 +59,7 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
         _judgeClient = judgeClient;
         _store = store;
         _options = options;
+        _aggregator = aggregator;
         _logger = logger;
     }
 
@@ -91,6 +97,7 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
         if (!_options.CurrentValue.Enabled)
         {
             _pendingResponseTextCache.TryTake(job.CorrelationId, out _);
+            await _aggregator.AbandonJudgeAsync(job.CorrelationId, "judge-disabled", stoppingToken).ConfigureAwait(false);
             return;
         }
 
@@ -99,6 +106,7 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
             _logger.LogDebug(
                 "No pending response text for correlation {CorrelationId}; skipping shadow-judge scoring.",
                 job.CorrelationId);
+            await _aggregator.AbandonJudgeAsync(job.CorrelationId, "judge-text-evicted", stoppingToken).ConfigureAwait(false);
             return;
         }
 
@@ -116,6 +124,7 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
                 _logger.LogDebug(
                     "No eligible free judge model for correlation {CorrelationId}; recorded no shadow score.",
                     job.CorrelationId);
+                await _aggregator.AbandonJudgeAsync(job.CorrelationId, "judge-abstained", stoppingToken).ConfigureAwait(false);
                 return;
             }
 
@@ -126,23 +135,28 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
                     CreatedAtUtc: DateTimeOffset.UtcNow,
                     Dimension: job.Dimension,
                     Model: job.Model,
-                    VerifierScore: job.VerifierScore,
+                    StaticScore: job.StaticScore,
                     JudgeScore: result.Score,
                     JudgeModel: result.JudgeModel,
                     JudgePromptVersion: _options.CurrentValue.PromptVersion,
                     JudgeLatencyMs: stopwatch.ElapsedMilliseconds,
-                    UsedLogprobs: result.UsedLogprobs,
-                    Executed: job.Executed),
+                    UsedLogprobs: result.UsedLogprobs),
                 stoppingToken).ConfigureAwait(false);
+
+            // The shadow row is written first, then the join is completed. Order matters: the row is the
+            // audit trail for a score that is about to influence routing, so it must exist before the score
+            // does - never the other way round, which would leave a routed-on grade with no record of where
+            // it came from if the insert then failed.
+            await _aggregator.CompleteWithJudgeAsync(job.CorrelationId, result.Score, stoppingToken).ConfigureAwait(false);
 
             if (_logger.IsEnabled(LogLevel.Debug))
             {
                 _logger.LogDebug(
-                    "Recorded shadow judge score {JudgeScore:F3} for model {Model} (correlation {CorrelationId}); verifier score was {VerifierScore:F3}.",
+                    "Recorded shadow judge score {JudgeScore:F3} for model {Model} (correlation {CorrelationId}); static score was {StaticScore:F3}.",
                     result.Score,
                     job.Model,
                     job.CorrelationId,
-                    job.VerifierScore);
+                    job.StaticScore);
             }
         }
         catch (OperationCanceledException)

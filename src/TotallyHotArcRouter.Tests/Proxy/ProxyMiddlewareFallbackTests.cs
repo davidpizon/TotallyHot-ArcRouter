@@ -19,7 +19,7 @@ namespace TotallyHot.ArcRouter.Tests.Proxy;
 /// (which replaced the old static <c>ModelRouteEntry.Fallbacks</c>). A same-provider 401/403/405 does NOT
 /// retry (the backup would share the same broken credential/gateway); a true terminal client-fault status
 /// (400/422) or a client abort never retries either way. This is distinct from the paper's
-/// Verifier-driven <em>semantic</em> re-routing (the separate, already-built sandbox/RouterMemory
+/// Verifier-driven <em>semantic</em> re-routing (the separate, already-built verifier/RouterMemory
 /// loop); these tests exercise only the transport-outage cascade within a single request. See
 /// <c>CircuitBreakerTests</c> for the circuit-breaker state machine itself (trip thresholds, exponential
 /// cooldown, half-open probes) and its cross-request bypass behavior.

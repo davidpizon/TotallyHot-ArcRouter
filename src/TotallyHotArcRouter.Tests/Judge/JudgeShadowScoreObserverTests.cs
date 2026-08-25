@@ -1,6 +1,6 @@
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Tests.TestSupport;
-using TotallyHot.ArcRouter.Sandbox;
+using TotallyHot.ArcRouter.Quality;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -19,13 +19,12 @@ public class JudgeShadowScoreObserverTests
         var queue = new JudgeShadowScoreQueue(Options.Create(new JudgeOptions { QueueCapacity = 10 }));
         var observer = new JudgeShadowScoreObserver(queue, EnabledJudge(), NullLogger<JudgeShadowScoreObserver>.Instance);
 
-        var result = new SandboxResult
+        var result = new QualityResult
         {
             RequestCorrelationId = "corr-1",
             Dimension = "algorithm",
             Model = "claude-opus-4-6",
             UnifiedScore = 0.75,
-            Executed = true,
         };
 
         await observer.ObserveAsync(result, TestContext.Current.CancellationToken);
@@ -41,8 +40,7 @@ public class JudgeShadowScoreObserverTests
         Assert.Equal("corr-1", enqueued.CorrelationId);
         Assert.Equal("algorithm", enqueued.Dimension);
         Assert.Equal("claude-opus-4-6", enqueued.Model);
-        Assert.Equal(0.75, enqueued.VerifierScore);
-        Assert.True(enqueued.Executed);
+        Assert.Equal(0.75, enqueued.StaticScore);
     }
 
     [Fact]
@@ -51,7 +49,7 @@ public class JudgeShadowScoreObserverTests
         var queue = new JudgeShadowScoreQueue(Options.Create(new JudgeOptions { QueueCapacity = 10 }));
         var observer = new JudgeShadowScoreObserver(queue, EnabledJudge(), NullLogger<JudgeShadowScoreObserver>.Instance);
 
-        var result = new SandboxResult { RequestCorrelationId = string.Empty, Model = "claude-opus-4-6" };
+        var result = new QualityResult { RequestCorrelationId = string.Empty, Model = "claude-opus-4-6" };
 
         await observer.ObserveAsync(result, TestContext.Current.CancellationToken);
 
@@ -98,13 +96,12 @@ public class JudgeShadowScoreObserverTests
             .IsCompleted);
     }
 
-    private static SandboxResult MakeResult(string correlationId) => new()
+    private static QualityResult MakeResult(string correlationId) => new()
     {
         RequestCorrelationId = correlationId,
         Dimension = "algorithm",
         Model = "claude-opus-4-6",
         UnifiedScore = 0.5,
-        Executed = true,
     };
 
     /// <summary>An options monitor reporting the judge as switched on - the precondition for every test above bar the disabled one.</summary>

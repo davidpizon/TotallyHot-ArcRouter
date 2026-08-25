@@ -83,7 +83,6 @@ public sealed record AvailableModel(string ModelName, string Provider);
 /// <param name="AwsAccessKeyId">An explicit AWS access key id override for a Bedrock route, resolved from <see cref="ProviderOptions.AwsAccessKeyIdEnvVar"/>; <see langword="null"/> when not configured, meaning the Bedrock Runtime SDK client should use its own default AWS credential chain instead.</param>
 /// <param name="AwsSecretAccessKey">The AWS secret access key paired with <see cref="AwsAccessKeyId"/>; always non-null exactly when <see cref="AwsAccessKeyId"/> is.</param>
 /// <param name="AwsSessionToken">An optional AWS session token for temporary/STS credentials, paired with <see cref="AwsAccessKeyId"/>.</param>
-/// <param name="EnableToolCallGuard">Whether this route's provider has the tool-call echo guard enabled (<see cref="ProviderOptions.EnableToolCallGuard"/>).</param>
 public sealed record ResolvedModelRoute(
     string ModelName,
     string Provider,
@@ -96,8 +95,7 @@ public sealed record ResolvedModelRoute(
     string? AwsRegion = null,
     string? AwsAccessKeyId = null,
     string? AwsSecretAccessKey = null,
-    string? AwsSessionToken = null,
-    bool EnableToolCallGuard = false)
+    string? AwsSessionToken = null)
 {
     /// <summary>
     /// Overrides the compiler-generated member printer (the pattern the record feature recognizes: a
@@ -123,7 +121,6 @@ public sealed record ResolvedModelRoute(
         builder.Append(", AwsAccessKeyId = ").Append(AwsAccessKeyId);
         builder.Append(", AwsSecretAccessKey = ").Append(Redacted(AwsSecretAccessKey));
         builder.Append(", AwsSessionToken = ").Append(Redacted(AwsSessionToken));
-        builder.Append(", EnableToolCallGuard = ").Append(EnableToolCallGuard);
         return true;
     }
 
@@ -248,8 +245,7 @@ public sealed class ModelRouteResolver : IModelRouteResolver
             provider.AwsRegion,
             awsAccessKeyId,
             awsSecretAccessKey,
-            awsSessionToken,
-            provider.EnableToolCallGuard);
+            awsSessionToken);
 
         return true;
     }

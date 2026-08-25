@@ -54,8 +54,7 @@ shape, including how to compose a scheme prefix (e.g. `Bearer`).
 `src/TotallyHotArcRouter/appsettings.json` has two relevant sections:
 
 - **`Routing`** — router policy defaults (`DefaultModel`, `MaxCandidates`,
-  `MaxNeighborCount`, `EnableExploration`, `ExplorationRate`, `PolicyName`,
-  `MemoryPath`).
+  `MaxNeighborCount`, `EnableExploration`, `ExplorationRate`).
 - **`ModelRouting`** — the proxy's allowlist. Only models listed in
   `ModelList` are routable; anything else gets a `400` response.
 

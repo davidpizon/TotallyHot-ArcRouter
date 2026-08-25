@@ -56,7 +56,7 @@ for what it syncs and verifies):
 ## Project Layout
 
 ```text
-src/TotallyHotArcRouter*/             .NET router implementation, GUI, sandbox, tests
+src/TotallyHotArcRouter*/             .NET router implementation, GUI, quality verifier, tests
 docs/                           Design docs and handbook
 
 %LOCALAPPDATA%\TotallyHot.ArcRouter\coderouterbench.db   CodeRouterBench tables, synced on demand
@@ -84,7 +84,9 @@ Copyright © 2026 David Pizon.
 
 ## Citation
 
-The routing approach and the CodeRouterBench dataset this project evaluates
+This project builds on two pieces of published research.
+
+**The routing approach and the CodeRouterBench dataset** this project evaluates
 against are the work of Zhou et al. If you use them, cite their paper:
 
 ```bibtex
@@ -98,4 +100,35 @@ against are the work of Zhou et al. If you use them, cite their paper:
   url           = {https://arxiv.org/abs/2606.22902}
 }
 ```
+
+**The quality-scoring judge** is an implementation of G-Eval, by Liu et al. Arc
+Router grades every response with two independent graders, and one of them
+(`GEvalJudgeClient`) follows this recipe directly: a per-dimension criteria
+prompt, a 1–5 form-filling score, and — the part that matters most — a
+**probability-weighted** score taken over the output-token logprobs rather than
+the single digit the model happened to sample. If you use that grader, cite:
+
+```bibtex
+@inproceedings{geval2023liu,
+  title         = {G-Eval: NLG Evaluation Using GPT-4 with Better Human Alignment},
+  author        = {Yang Liu, Dan Iter, Yichong Xu, Shuohang Wang, Ruochen Xu, Chenguang Zhu},
+  booktitle     = {Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing (EMNLP)},
+  year          = {2023},
+  archivePrefix = {arXiv},
+  eprint        = {2303.16634},
+  url           = {https://arxiv.org/abs/2303.16634}
+}
+```
+
+The paper's own headline caveat applies here and is worth repeating: G-Eval
+**prefers LLM-generated text over human-written text**, even where human judges
+prefer the human text. Arc Router uses judge scores to *choose between models*,
+never as a training reward, which avoids the self-reinforcement failure the
+authors warn about — but the related risk of the judge systematically favouring
+one model family is real and is not yet measured. See
+[`docs/router/geval-shadow-scoring-plan.md`](docs/router/geval-shadow-scoring-plan.md)
+§G2 for the self-preference probe that is meant to quantify it.
+
+Agent-readable digests of both papers live in
+[`docs/research/`](docs/research/), alongside the original PDFs.
 

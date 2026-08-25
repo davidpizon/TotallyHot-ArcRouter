@@ -2,14 +2,15 @@
 
 > **Status: Partially implemented.** The config-driven approach described here is real —
 > `Program.cs` calls `UseSerilog((context, services, cfg) => cfg.ReadFrom.Configuration(...))`,
-> and `appsettings.json`'s `Serilog` section is genuinely read at startup. What's **not**
-> implemented: only a `Console` sink is configured (`"WriteTo": [{ "Name": "Console" }]`), and
-> only `Serilog`, `Serilog.Extensions.Hosting`, `Serilog.Settings.Configuration`, and
-> `Serilog.Sinks.Console` are referenced in `TotallyHotArcRouter.csproj` — the `File` and `EventLog`
-> sinks and packages below (and the version numbers listed) are the **proposed** target
-> configuration, not what's installed today. There's also a separate bootstrap logger in
-> `Program.cs` (`Log.Logger = new LoggerConfiguration()...WriteTo.Console()`, used only before the
-> host is built) that is hardcoded, not config-driven.
+> and `appsettings.json`'s `Serilog` section is genuinely read at startup. `Console` and `File`
+> sinks are both configured (`"WriteTo": [{ "Name": "Console" }, { "Name": "File", ... }]`), and
+> `Serilog`, `Serilog.Extensions.Hosting`, `Serilog.Settings.Configuration`, `Serilog.Sinks.Console`,
+> and `Serilog.Sinks.File` are all referenced in `TotallyHotArcRouter.csproj`. The `File` sink
+> writes to `C:\Temp\arcrouter-.log`, rolling daily with a 30-day retention window. What's **not**
+> implemented: the `EventLog` sink and package below — still the **proposed** target configuration,
+> not what's installed today. There's also a separate bootstrap logger in `Program.cs`
+> (`Log.Logger = new LoggerConfiguration()...WriteTo.Console()`, used only before the host is
+> built) that is hardcoded, not config-driven.
 >
 > One additional sink beyond the config-driven `Console` sink *is* wired up in code (not via
 > `appsettings.json`): `TelemetryLogEventSink` (renamed from `SignalRLogEventSink` when the telemetry
@@ -75,7 +76,7 @@ dotnet add package Serilog.Sinks.Console
 	  {
 		"Name": "File",
 		"Args": {
-		  "path": "./logs/acrouter-.log",
+		  "path": "C:\\Temp\\arcrouter-.log",
 		  "rollingInterval": "Day",
 		  "retainedFileCountLimit": 30,
 		  "outputTemplate": "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}"

@@ -2,7 +2,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.CodeRouterBench;
-using TotallyHot.ArcRouter.Sandbox;
+using TotallyHot.ArcRouter.Quality;
 
 namespace TotallyHot.ArcRouter.Router.Orchestrator;
 
@@ -50,8 +50,8 @@ public sealed class DimBestVoter : IRoutingVoter
     /// <param name="database">The CodeRouterBench corpus database backing the probing-set prior.</param>
     /// <param name="routerMemory">Live per-dimension score averages, preferred over the prior when present.</param>
     /// <param name="logger">The logger.</param>
-    /// <param name="sandboxOptions">
-    /// Carries the live-memory prefix (<see cref="SandboxOptions.LiveMemoryPrefix"/>) used to recover the
+    /// <param name="qualityOptions">
+    /// Carries the live-memory prefix (<see cref="QualityOptions.LiveMemoryPrefix"/>) used to recover the
     /// bare <see cref="RouterDimension"/> key from <see cref="VotingContext.Dimension"/> before querying
     /// the probing-set prior - see <see cref="VoteAsync"/>'s remarks.
     /// </param>
@@ -59,17 +59,17 @@ public sealed class DimBestVoter : IRoutingVoter
         BenchmarkDatabase database,
         RouterMemory routerMemory,
         ILogger<DimBestVoter> logger,
-        IOptions<SandboxOptions> sandboxOptions)
+        IOptions<QualityOptions> qualityOptions)
     {
         ArgumentNullException.ThrowIfNull(database);
         ArgumentNullException.ThrowIfNull(routerMemory);
         ArgumentNullException.ThrowIfNull(logger);
-        ArgumentNullException.ThrowIfNull(sandboxOptions);
+        ArgumentNullException.ThrowIfNull(qualityOptions);
 
         _database = database;
         _routerMemory = routerMemory;
         _logger = logger;
-        _liveMemoryPrefix = sandboxOptions.Value.LiveMemoryPrefix;
+        _liveMemoryPrefix = qualityOptions.Value.LiveMemoryPrefix;
     }
 
     /// <inheritdoc />

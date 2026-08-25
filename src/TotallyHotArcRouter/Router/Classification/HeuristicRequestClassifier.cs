@@ -1,15 +1,15 @@
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
-using TotallyHot.ArcRouter.Sandbox;
+using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Router.Classification;
 
 /// <summary>
 /// A keyword/shape heuristic <see cref="IRequestClassifier"/> - deliberately minimal to start (same
-/// philosophy as <see cref="TotallyHot.ArcRouter.Sandbox.Extraction.KeywordDimensionInferrer"/>, architecture doc §10).
+/// philosophy as <see cref="TotallyHot.ArcRouter.Quality.Extraction.KeywordDimensionInferrer"/>, architecture doc §10).
 /// Delegates dimension inference to the shared <see cref="IDimensionInferrer"/> so a request classified
-/// here and the same prompt's later sandbox-side dimension can never independently drift apart.
+/// here and the same prompt's later verifier-side dimension can never independently drift apart.
 /// </summary>
 public sealed class HeuristicRequestClassifier : IRequestClassifier
 {
@@ -50,13 +50,13 @@ public sealed class HeuristicRequestClassifier : IRequestClassifier
 
     /// <summary>Initializes a new instance of the <see cref="HeuristicRequestClassifier"/> class.</summary>
     /// <param name="dimensionInferrer">
-    /// The shared dimension inferrer - defaults to a fresh <see cref="TotallyHot.ArcRouter.Sandbox.Extraction.KeywordDimensionInferrer"/>
+    /// The shared dimension inferrer - defaults to a fresh <see cref="TotallyHot.ArcRouter.Quality.Extraction.KeywordDimensionInferrer"/>
     /// when omitted, the same default <see cref="TotallyHot.ArcRouter.Proxy.RequestInterceptor"/> uses, so the two stay
     /// classified identically without either side hand-picking an instance.
     /// </param>
     public HeuristicRequestClassifier(IDimensionInferrer? dimensionInferrer = null)
     {
-        _dimensionInferrer = dimensionInferrer ?? new TotallyHot.ArcRouter.Sandbox.Extraction.KeywordDimensionInferrer();
+        _dimensionInferrer = dimensionInferrer ?? new TotallyHot.ArcRouter.Quality.Extraction.KeywordDimensionInferrer();
     }
 
     /// <inheritdoc />
@@ -74,21 +74,21 @@ public sealed class HeuristicRequestClassifier : IRequestClassifier
     }
 
     /// <summary>Detects the language of the first recognized fenced code block in the prompt, if any.</summary>
-    private static SandboxLanguage InferLanguage(string prompt)
+    private static CodeLanguage InferLanguage(string prompt)
     {
         var match = FenceLanguageHint.Match(prompt);
-        return match.Success ? SandboxLanguages.FromHint(match.Groups[1].Value) : SandboxLanguage.Unknown;
+        return match.Success ? CodeLanguages.FromHint(match.Groups[1].Value) : CodeLanguage.Unknown;
     }
 
-    /// <summary>Maps a <see cref="SandboxLanguage"/> to the lowercase name used in <see cref="RequestClassification.Language"/>.</summary>
-    /// <param name="language">The detected sandbox language.</param>
+    /// <summary>Maps a <see cref="CodeLanguage"/> to the lowercase name used in <see cref="RequestClassification.Language"/>.</summary>
+    /// <param name="language">The detected snippet language.</param>
     /// <returns>The lowercase language name, or <c>"unknown"</c> when <paramref name="language"/> has no known mapping.</returns>
-    private static string LanguageName(SandboxLanguage language) => language switch
+    private static string LanguageName(CodeLanguage language) => language switch
     {
-        SandboxLanguage.CSharp => "csharp",
-        SandboxLanguage.Python => "python",
-        SandboxLanguage.JavaScript => "javascript",
-        SandboxLanguage.Shell => "shell",
+        CodeLanguage.CSharp => "csharp",
+        CodeLanguage.Python => "python",
+        CodeLanguage.JavaScript => "javascript",
+        CodeLanguage.Shell => "shell",
         _ => "unknown",
     };
 

@@ -1,6 +1,6 @@
 using TotallyHot.ArcRouter.Router;
-using TotallyHot.ArcRouter.Sandbox;
-using TotallyHot.ArcRouter.Sandbox.Execution;
+using TotallyHot.ArcRouter.Quality;
+using TotallyHot.ArcRouter.Quality.Grading;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace TotallyHot.ArcRouter.Tests.Router;
@@ -18,7 +18,7 @@ public class CompositeRouterScoreObserverTests
         var second = new RecordingObserver();
         var composite = new CompositeRouterScoreObserver([first, second], NullLogger<CompositeRouterScoreObserver>.Instance);
 
-        var result = new SandboxResult { Model = "m", RequestCorrelationId = "c" };
+        var result = new QualityResult { Model = "m", RequestCorrelationId = "c" };
 
         await composite.ObserveAsync(result, TestContext.Current.CancellationToken);
 
@@ -33,7 +33,7 @@ public class CompositeRouterScoreObserverTests
         var second = new RecordingObserver();
         var composite = new CompositeRouterScoreObserver([throwing, second], NullLogger<CompositeRouterScoreObserver>.Instance);
 
-        var result = new SandboxResult { Model = "m", RequestCorrelationId = "c" };
+        var result = new QualityResult { Model = "m", RequestCorrelationId = "c" };
 
         await composite.ObserveAsync(result, TestContext.Current.CancellationToken);
 
@@ -49,20 +49,20 @@ public class CompositeRouterScoreObserverTests
             () => composite.ObserveAsync(null!, TestContext.Current.CancellationToken));
     }
 
-    private sealed class RecordingObserver : IRouterScoreObserver
+    private sealed class RecordingObserver : IQualityScoreObserver
     {
-        public List<SandboxResult> Observed { get; } = [];
+        public List<QualityResult> Observed { get; } = [];
 
-        public Task ObserveAsync(SandboxResult result, CancellationToken cancellationToken = default)
+        public Task ObserveAsync(QualityResult result, CancellationToken cancellationToken = default)
         {
             Observed.Add(result);
             return Task.CompletedTask;
         }
     }
 
-    private sealed class ThrowingObserver : IRouterScoreObserver
+    private sealed class ThrowingObserver : IQualityScoreObserver
     {
-        public Task ObserveAsync(SandboxResult result, CancellationToken cancellationToken = default) =>
+        public Task ObserveAsync(QualityResult result, CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("boom");
     }
 }

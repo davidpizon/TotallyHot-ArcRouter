@@ -54,5 +54,5 @@ public class JudgeShadowScoreQueueTests
     }
 
     private static JudgeShadowScoringJob MakeJob(string correlationId) =>
-        new(correlationId, "algorithm", "model-a", VerifierScore: 0.5, Executed: true);
+        new(correlationId, "algorithm", "model-a", StaticScore: 0.5);
 }

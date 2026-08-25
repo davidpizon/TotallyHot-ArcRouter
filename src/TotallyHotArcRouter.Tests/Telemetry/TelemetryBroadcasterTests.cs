@@ -43,20 +43,18 @@ public class TelemetryBroadcasterTests
         RouterCostUsd: routerCostUsd,
         SubstitutionReason: RoutingSubstitutionReason.Failover);
 
-    private static SandboxSignalEvent SampleSignal(int? exitCode = 0) => new(
+    private static QualitySignalEvent SampleSignal(double? judgeScore = 0.8) => new(
         CorrelationId: "corr-1",
         SessionId: "sess-1",
         Dimension: "live:code_generation",
         Model: "gpt-5.4",
-        Language: "python",
-        Tier: "Tier1Jail",
+        Language: "CSharp",
         SyntaxValid: true,
-        Executed: true,
-        ExitCode: exitCode,
-        TimedOut: false,
+        SyntaxAuthoritative: true,
+        AnalysisScore: 0.9,
+        JudgeScore: judgeScore,
         UnifiedScore: 0.87,
-        WallClockMs: 42,
-        PeakMemoryBytes: 1024,
+        DegradedReason: null,
         TimestampUtc: new DateTimeOffset(2026, 7, 9, 15, 0, 0, TimeSpan.Zero));
 
     private static async Task<Contract.TelemetryEvent> ReadOneAsync(ChannelReader<Contract.TelemetryEvent> reader)
@@ -284,7 +282,7 @@ public class TelemetryBroadcasterTests
     {
         var broadcaster = new TelemetryBroadcaster();
 
-        // Explicit cast: Publish is now overloaded (RoutingTelemetryEvent / SandboxSignalEvent), so a
+        // Explicit cast: Publish is now overloaded (RoutingTelemetryEvent / QualitySignalEvent), so a
         // bare null! is ambiguous between them at compile time.
         Assert.Throws<ArgumentNullException>(() => broadcaster.Publish((RoutingTelemetryEvent)null!));
     }
@@ -298,55 +296,56 @@ public class TelemetryBroadcasterTests
     }
 
     [Fact]
-    public async Task Publish_WritesSandboxSignalEnvelopeWithAllFieldsMapped()
+    public async Task Publish_WritesQualitySignalEnvelopeWithAllFieldsMapped()
     {
         var broadcaster = new TelemetryBroadcaster();
         var channel = Channel.CreateUnbounded<Contract.TelemetryEvent>();
         broadcaster.Register(channel.Writer);
 
-        var signal = SampleSignal(exitCode: 1);
+        var signal = SampleSignal(judgeScore: 0.75);
         broadcaster.Publish(signal);
 
         var envelope = await ReadOneAsync(channel.Reader);
-        Assert.Equal(Contract.TelemetryEvent.EventOneofCase.SandboxSignal, envelope.EventCase);
+        Assert.Equal(Contract.TelemetryEvent.EventOneofCase.QualitySignal, envelope.EventCase);
 
-        var wire = envelope.SandboxSignal;
+        var wire = envelope.QualitySignal;
         Assert.Equal(signal.CorrelationId, wire.CorrelationId);
         Assert.Equal(signal.SessionId, wire.SessionId);
         Assert.Equal(signal.Dimension, wire.Dimension);
         Assert.Equal(signal.Model, wire.Model);
         Assert.Equal(signal.Language, wire.Language);
-        Assert.Equal(signal.Tier, wire.Tier);
         Assert.Equal(signal.SyntaxValid, wire.SyntaxValid);
-        Assert.Equal(signal.Executed, wire.Executed);
-        Assert.True(wire.HasExitCode);
-        Assert.Equal(signal.ExitCode, wire.ExitCode);
-        Assert.Equal(signal.TimedOut, wire.TimedOut);
+        Assert.Equal(signal.SyntaxAuthoritative, wire.SyntaxAuthoritative);
+        Assert.True(wire.HasAnalysisScore);
+        Assert.Equal(signal.AnalysisScore, wire.AnalysisScore);
+        Assert.True(wire.HasJudgeScore);
+        Assert.Equal(signal.JudgeScore, wire.JudgeScore);
         Assert.Equal(signal.UnifiedScore, wire.UnifiedScore);
-        Assert.Equal(signal.WallClockMs, wire.WallClockMs);
-        Assert.Equal(signal.PeakMemoryBytes, wire.PeakMemoryBytes);
         Assert.Equal(signal.TimestampUtc, wire.TimestampUtc.ToDateTimeOffset());
     }
 
+    // An unjudged score and a judge score of zero are different facts, and the wire has to keep them
+    // apart: leaving the field unset is what lets a reader tell "the judge did not contribute" from "the
+    // judge scored this nothing".
     [Fact]
-    public async Task Publish_SandboxSignalWithNullExitCode_NotSetOnWireMessage()
+    public async Task Publish_QualitySignalWithNoJudgeScore_LeavesFieldUnsetOnWireMessage()
     {
         var broadcaster = new TelemetryBroadcaster();
         var channel = Channel.CreateUnbounded<Contract.TelemetryEvent>();
         broadcaster.Register(channel.Writer);
 
-        broadcaster.Publish(SampleSignal(exitCode: null));
+        broadcaster.Publish(SampleSignal(judgeScore: null));
 
         var envelope = await ReadOneAsync(channel.Reader);
-        Assert.False(envelope.SandboxSignal.HasExitCode);
+        Assert.False(envelope.QualitySignal.HasJudgeScore);
     }
 
     [Fact]
-    public void Publish_NullSandboxSignal_Throws()
+    public void Publish_NullQualitySignal_Throws()
     {
         var broadcaster = new TelemetryBroadcaster();
 
-        Assert.Throws<ArgumentNullException>(() => broadcaster.Publish((SandboxSignalEvent)null!));
+        Assert.Throws<ArgumentNullException>(() => broadcaster.Publish((QualitySignalEvent)null!));
     }
 }
 

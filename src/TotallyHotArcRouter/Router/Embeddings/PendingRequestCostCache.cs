@@ -6,7 +6,7 @@ namespace TotallyHot.ArcRouter.Router.Embeddings;
 /// <summary>
 /// Bridges a request's estimated dollar cost - computed once the response completes, in
 /// <c>ProxyMiddleware</c> - to its later-arriving verifier score, which carries only
-/// <see cref="TotallyHot.ArcRouter.Sandbox.SandboxResult.RequestCorrelationId"/>
+/// <see cref="TotallyHot.ArcRouter.Quality.QualityResult.RequestCorrelationId"/>
 /// (docs/router/self-organizing-classification-plan.md Phase T1c). Mirrors
 /// <see cref="PendingTaskEmbeddingCache"/>'s shape exactly - same TTL/capacity/eviction semantics,
 /// same correlation-id-keyed set-once/take-once contract - because it exists to close the same gap for

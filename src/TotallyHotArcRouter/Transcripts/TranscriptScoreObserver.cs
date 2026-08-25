@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging;
-using TotallyHot.ArcRouter.Sandbox;
-using TotallyHot.ArcRouter.Sandbox.Execution;
+using TotallyHot.ArcRouter.Quality;
+using TotallyHot.ArcRouter.Quality.Grading;
 
 namespace TotallyHot.ArcRouter.Transcripts;
 
@@ -12,7 +12,7 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// the fan-out <see cref="Router.CompositeRouterScoreObserver"/>, but only when transcript capture is
 /// enabled - see <c>Hosting.ServiceCollectionExtensions</c>.
 /// </summary>
-public sealed class TranscriptScoreObserver : IRouterScoreObserver
+public sealed class TranscriptScoreObserver : IQualityScoreObserver
 {
     private readonly ITranscriptStore _store;
     private readonly ILogger<TranscriptScoreObserver> _logger;
@@ -30,13 +30,13 @@ public sealed class TranscriptScoreObserver : IRouterScoreObserver
     }
 
     /// <inheritdoc />
-    public async Task ObserveAsync(SandboxResult result, CancellationToken cancellationToken = default)
+    public async Task ObserveAsync(QualityResult result, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(result);
 
         if (string.IsNullOrEmpty(result.RequestCorrelationId))
         {
-            _logger.LogDebug("Sandbox result has no correlation id; skipping transcript score backfill.");
+            _logger.LogDebug("Quality result has no correlation id; skipping transcript score backfill.");
             return;
         }
 

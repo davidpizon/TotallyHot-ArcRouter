@@ -57,13 +57,12 @@ public sealed class RouterMemoryDatabase
             created_at_utc        TEXT    NOT NULL,
             dimension             TEXT    NOT NULL,
             model                 TEXT    NOT NULL,
-            verifier_score        REAL    NOT NULL,
+            static_score          REAL    NOT NULL,
             judge_score           REAL    NOT NULL,
             judge_model           TEXT    NOT NULL,
             judge_prompt_version  TEXT    NOT NULL,
             judge_latency_ms      INTEGER NOT NULL,
-            used_logprobs         INTEGER NOT NULL,
-            executed              INTEGER NOT NULL
+            used_logprobs         INTEGER NOT NULL
         );
 
         CREATE INDEX IF NOT EXISTS ix_judge_shadow_scores_correlation_id
@@ -134,6 +133,7 @@ public sealed class RouterMemoryDatabase
         MigrateDimensionColumn(connection);
         MigrateIsJudgeScoredColumn(connection);
         MigrateEmbeddingModelColumn(connection);
+        MigrateJudgeShadowScoreColumns(connection);
     }
 
     // CREATE TABLE IF NOT EXISTS silently does nothing when the table already exists, so it cannot add a
@@ -221,6 +221,40 @@ public sealed class RouterMemoryDatabase
             using var alterEmbeddingModel = connection.CreateCommand();
             alterEmbeddingModel.CommandText = "ALTER TABLE memory_entries ADD COLUMN embedding_model TEXT NULL;";
             alterEmbeddingModel.ExecuteNonQuery();
+        }
+    }
+
+    // The executing verifier that produced `verifier_score` and `executed` is gone: scores now come from
+    // static analysis blended with the judge, and there is no execution to have been grounded in. A
+    // database predating that change still has the old shape, and `executed INTEGER NOT NULL` has no
+    // default, so the current INSERT - which no longer supplies it - would fail on every write.
+    /// <summary>
+    /// Migrates `judge_shadow_scores` from the executing verifier's shape to the current one: renames
+    /// `verifier_score` to `static_score` and drops the `executed` column.
+    /// </summary>
+    /// <remarks>
+    /// Both statements are guarded on the column actually being present, so this is idempotent and a no-op
+    /// on a database created by the current DDL. The historical rows are kept rather than truncated: their
+    /// score column still means "the non-judge grade for this request", which is exactly what
+    /// `static_score` means now - only its provenance changed, and that provenance is recoverable from the
+    /// row's timestamp. Dropping `executed` does lose the execution-grounded flag from those old rows;
+    /// nothing can be grounded in execution any more, so retaining a column that must read false forever
+    /// would preserve the shape of the fact while discarding its meaning.
+    /// </remarks>
+    private static void MigrateJudgeShadowScoreColumns(SqliteConnection connection)
+    {
+        if (ColumnExists(connection, "judge_shadow_scores", "verifier_score"))
+        {
+            using var rename = connection.CreateCommand();
+            rename.CommandText = "ALTER TABLE judge_shadow_scores RENAME COLUMN verifier_score TO static_score;";
+            rename.ExecuteNonQuery();
+        }
+
+        if (ColumnExists(connection, "judge_shadow_scores", "executed"))
+        {
+            using var drop = connection.CreateCommand();
+            drop.CommandText = "ALTER TABLE judge_shadow_scores DROP COLUMN executed;";
+            drop.ExecuteNonQuery();
         }
     }
 

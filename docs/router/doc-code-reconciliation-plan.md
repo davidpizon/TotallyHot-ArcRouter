@@ -189,8 +189,8 @@ Zero warnings required — `TreatWarningsAsErrors` is repo-wide.
 ```
 
 Then the full suite across all seven assemblies (`dotnet test` reports zero tests under xUnit v3 — run
-each built `.exe` directly). Baseline to hold: **2,112 passing / 8 skipped** in
-`TotallyHotArcRouter.Tests`, plus 203 Sandbox, 105 Gui.Admin, 71 Gui.Charts, 30 Gui.Console, 142
+each built `.exe` directly). Baseline to hold: **2,108 passing / 6 skipped** in
+`TotallyHotArcRouter.Tests`, plus 165 Quality, 105 Gui.Admin, 71 Gui.Charts, 30 Gui.Console, 142
 Gui.Telemetry, 317 Gui.
 
 Manual check for the GUI path, since no automated test covers rendering: launch the app, open

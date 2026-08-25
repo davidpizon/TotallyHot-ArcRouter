@@ -79,13 +79,12 @@ public class SqliteJudgeShadowScoreStoreTests : IDisposable
         CreatedAtUtc: DateTimeOffset.UtcNow,
         Dimension: "algorithm",
         Model: "claude-opus-4-6",
-        VerifierScore: 0.6,
+        StaticScore: 0.6,
         JudgeScore: 0.7,
         JudgeModel: "local-judge-model",
         JudgePromptVersion: "g-eval-v1",
         JudgeLatencyMs: 42,
-        UsedLogprobs: true,
-        Executed: true);
+        UsedLogprobs: true);
 
     public void Dispose()
     {

@@ -3,7 +3,7 @@ using System.Text.Json;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Router;
-using TotallyHot.ArcRouter.Sandbox;
+using TotallyHot.ArcRouter.Quality;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -20,7 +20,7 @@ public class RequestInterceptorTests
     // InferLiveDimension's KeywordDimensionInferrer default (empty prompt) always resolves here -
     // matching the dimension RequestInterceptor's fallback ranking will read for these requests.
     private static readonly string DefaultLiveDimension =
-        RouterDimension.ToLiveKey(new SandboxOptions().LiveMemoryPrefix, RouterDimension.CodeGeneration);
+        RouterDimension.ToLiveKey(new QualityOptions().LiveMemoryPrefix, RouterDimension.CodeGeneration);
 
     [Fact]
     public async Task InterceptRequestAsync_IncrementsCount_AndLogsStructuredMessage()
@@ -163,13 +163,13 @@ public class RequestInterceptorTests
         var memory = new RouterMemory();
         var observer = new RouterMemoryScoreObserver(
             memory,
-            Options.Create(new SandboxOptions()),
+            Options.Create(new QualityOptions()),
             Mock.Of<ILogger<RouterMemoryScoreObserver>>());
         var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver, routerMemory: memory);
 
-        // Request N: the sandbox scores a bug-fixing response from kimi-k2.5 highly, off the hot path.
+        // Request N: the verifier scores a bug-fixing response from kimi-k2.5 highly, off the hot path.
         await observer.ObserveAsync(
-            new SandboxResult
+            new QualityResult
             {
                 Model = "kimi-k2.5",
                 Dimension = RouterDimension.BugFixing,

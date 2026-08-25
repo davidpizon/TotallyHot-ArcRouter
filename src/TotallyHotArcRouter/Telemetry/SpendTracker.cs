@@ -60,10 +60,7 @@ public sealed class SpendTracker : ISpendTracker
     private int _unpricedRequests;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="SpendTracker"/> class. Warns once, at construction,
-    /// when <paramref name="options"/> carries a <see cref="SpendTrackingOptions.LogPath"/> other than
-    /// the compiled-in default - the only signal available (without reading raw configuration) that an
-    /// operator has actually set it - since that setting no longer does anything (§5.13).
+    /// Initializes a new instance of the <see cref="SpendTracker"/> class.
     /// </summary>
     public SpendTracker(ILogger<SpendTracker> logger, IOptions<SpendTrackingOptions> options)
     {
@@ -72,15 +69,6 @@ public sealed class SpendTracker : ISpendTracker
 
         _logger = logger;
         _options = options.Value;
-
-        if (!string.Equals(_options.LogPath, SpendTrackingOptions.DefaultLogPath, StringComparison.Ordinal))
-        {
-            _logger.LogWarning(
-                "SpendTracking:LogPath is set to {LogPath} but is deprecated and no longer written - " +
-                "the durable usage ledger supersedes the JSON Lines spend log. This setting will be " +
-                "removed in a future release.",
-                _options.LogPath);
-        }
     }
 
     /// <inheritdoc />

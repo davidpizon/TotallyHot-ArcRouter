@@ -1,16 +1,14 @@
 using TotallyHot.ArcRouter.Telemetry;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Moq;
 
 namespace TotallyHot.ArcRouter.Tests.Telemetry;
 
 /// <summary>Covers <see cref="SpendTracker"/>: the basic token/cost tracking parity pillar.</summary>
 public class SpendTrackerTests
 {
-    private static SpendTracker CreateTracker(bool enabled = true, string? logPath = null) =>
-        new(NullLogger<SpendTracker>.Instance, Options.Create(new SpendTrackingOptions { Enabled = enabled, LogPath = logPath ?? SpendTrackingOptions.DefaultLogPath }));
+    private static SpendTracker CreateTracker(bool enabled = true) =>
+        new(NullLogger<SpendTracker>.Instance, Options.Create(new SpendTrackingOptions { Enabled = enabled }));
 
     [Fact]
     public void GetSummary_NoRecordsYet_ReturnsZeroedSummary()
@@ -98,30 +96,6 @@ public class SpendTrackerTests
     }
 
     [Fact]
-    public void Constructor_DefaultLogPath_DoesNotWarn()
-    {
-        var loggerMock = new Mock<ILogger<SpendTracker>>();
-
-        _ = CreateTrackerWithLogger(loggerMock.Object, SpendTrackingOptions.DefaultLogPath);
-
-        loggerMock.Verify(
-            l => l.Log(LogLevel.Warning, It.IsAny<EventId>(), It.IsAny<It.IsAnyType>(), It.IsAny<Exception?>(), It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.Never);
-    }
-
-    [Fact]
-    public void Constructor_CustomLogPath_WarnsOnceThatItIsDeprecated()
-    {
-        var loggerMock = new Mock<ILogger<SpendTracker>>();
-
-        _ = CreateTrackerWithLogger(loggerMock.Object, "custom-spend-log.jsonl");
-
-        loggerMock.Verify(
-            l => l.Log(LogLevel.Warning, It.IsAny<EventId>(), It.IsAny<It.IsAnyType>(), It.IsAny<Exception?>(), It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.Once);
-    }
-
-    [Fact]
     public async Task NullSpendTracker_RecordAsync_ReturnsDefaultSummary_AndTakesNoAction()
     {
         var tracker = NullSpendTracker.Instance;
@@ -131,7 +105,4 @@ public class SpendTrackerTests
         Assert.Equal(default(SpendSummary), summary);
         Assert.Equal(default(SpendSummary), tracker.GetSummary());
     }
-
-    private static SpendTracker CreateTrackerWithLogger(ILogger<SpendTracker> logger, string logPath) =>
-        new(logger, Options.Create(new SpendTrackingOptions { Enabled = true, LogPath = logPath }));
 }

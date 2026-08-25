@@ -5,11 +5,11 @@ namespace TotallyHot.ArcRouter.Router.Embeddings;
 
 /// <summary>
 /// Bridges a request's task embedding - computed on the request path - to its later-arriving verifier
-/// score, which carries only <see cref="TotallyHot.ArcRouter.Sandbox.SandboxResult.RequestCorrelationId"/>
+/// score, which carries only <see cref="TotallyHot.ArcRouter.Quality.QualityResult.RequestCorrelationId"/>
 /// (docs/router/live-feedback-learning-plan.md Phase 2c). A correlation id is set once and taken at most
 /// once; entries older than <see cref="RoutingOptions.PendingEmbeddingCacheTtlSeconds"/>, or beyond
 /// <see cref="RoutingOptions.PendingEmbeddingCacheCapacity"/> (oldest first), are evicted so a score that
-/// never arrives - the sandbox is disabled, the evaluation is dropped, the request is aborted - cannot
+/// never arrives - the verifier is disabled, the evaluation is dropped, the request is aborted - cannot
 /// hold its slot forever.
 /// </summary>
 public sealed class PendingTaskEmbeddingCache

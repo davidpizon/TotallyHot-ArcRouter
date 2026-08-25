@@ -181,7 +181,7 @@ the carve-out inside this plan's existing ground rules, should any phase or foll
 
 - **Never on the hot path.** Free re-execution is background work, subject to the same
   off-the-request-path rule as every other learning task; the client's response never waits on it.
-- **Dollar-free is not cost-free.** Compute, rate limits, and Verifier sandbox time are real; any
+- **Dollar-free is not cost-free.** Compute, rate limits, and Verifier grading time are real; any
   implementation is budget-bounded and configuration-gated, defaulting off like every other feature
   this plan adds.
 - **Provenance is mandatory.** A score obtained by shadow execution on a free model is labeled as such
@@ -244,7 +244,7 @@ flowchart LR
         A1[Request] --> B1[Classify: 9 fixed dimensions]
         B1 --> C1[dim_best / memory_kNN / logreg / llm_router vote]
         C1 --> D1[Model chosen]
-        D1 --> E1[Sandbox verifies]
+        D1 --> E1[Verifier grades]
         E1 --> F1[(memory_entries<br/>embedding only, cost = 0)]
         F1 -.-> C1
     end
@@ -257,7 +257,7 @@ flowchart LR
         A2 -.->|"opt-in, default off"| T1[(request_transcripts<br/>text + real cost + propensity)]
         B2 --> C2["5 voters: dim_best / memory_kNN /<br/>logreg / llm_router / cluster_best"]
         C2 --> D2[Model chosen]
-        D2 --> E2[Sandbox verifies]
+        D2 --> E2[Verifier grades]
         E2 --> F2[(memory_entries<br/>embedding + real cost + IsExploratory)]
         T1 -->|"backfill missed embeddings"| F2
         F2 -.-> C2
@@ -338,8 +338,8 @@ computes the prompt text (`RequestTextExtractor.ExtractNewestUserMessage`) and t
 the request body. Response text and token usage are captured at the same point
 `RoutingTelemetryEvent` is already emitted. The score, cost, and exploratory flag arrive later and
 asynchronously, exactly the timing `EmbeddingMemoryScoreObserver` already handles via
-`PendingTaskEmbeddingCache` — a transcript-aware `IRouterScoreObserver`, registered alongside the two
-existing observers, backfills them by `SandboxResult.RequestCorrelationId`.
+`PendingTaskEmbeddingCache` — a transcript-aware `IQualityScoreObserver`, registered alongside the two
+existing observers, backfills them by `QualityResult.RequestCorrelationId`.
 
 **1c. Provenance repairs (unblocks Phase N's live arm).** Three gaps
 `regret-evaluation-harness-plan.md` names as blocking for any future live-regret estimate, all closed
@@ -778,7 +778,7 @@ clamping, and a full persistence round-trip.
 ## Existing code this plan builds on
 
 - Classification: `Router/Classification/HeuristicRequestClassifier.cs`, `IRequestClassifier.cs`,
-  `RequestClassification.cs`; `Sandbox/RouterDimension.cs`, `IDimensionInferrer.cs` — the frozen
+  `RequestClassification.cs`; `Quality/RouterDimension.cs`, `IDimensionInferrer.cs` — the frozen
   baseline T4 measures against.
 - Live memory: `Router/EmbeddingMemory.cs`, `Router/SqliteMemoryEntryStore.cs` (the `memory_entries`
   schema T1/T2 extend), `Router/IMemoryEntryStore.cs`, `Router/EmbeddingMemoryScoreObserver.cs` (the

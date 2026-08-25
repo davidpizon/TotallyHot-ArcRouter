@@ -225,7 +225,13 @@ where:
 
 **Verification tool tiers:**
 1. **AST parsing** — structural validity check
-2. **Sandbox execution** — run code in isolated environment
+2. **Sandbox execution** — run code in isolated environment *(not implemented — see the deviation note below)*
+
+> **Implementation deviation.** This document describes the *paper*. Arc Router deliberately does **not**
+> implement sandboxed execution: model-generated code is never run, and the paper's execution-based signal
+> is replaced by in-process static analysis blended with the G-Eval judge. Every reference to sandboxing,
+> Docker, or execution-based scoring below is a description of the source research, not of this codebase.
+> See [`../router/quality-verifier-architecture.md`](../router/quality-verifier-architecture.md).
 3. **Prompt-embedded tests** — extract and run in-prompt test cases
 4. **Rule-based signals** — heuristic checks
 5. **LLM-as-Judge / proxy metrics** — for non-executable dimensions

@@ -52,11 +52,47 @@ harness (`regret-evaluation-harness-plan.md` N1–N3) have all shipped. Narrativ
   are recovered by backfill, the learned cluster taxonomy is trained, voted on (`cluster_best`), and
   measured against the frozen nine-dimension baseline, and the System Settings window exposes the
   adaptive-routing toggle and sample size operators use to turn it on.
-- ~~**The Verifier is blind on non-executable dimensions.**~~ **G1 shipped.** The shadow judge
-  (`TotallyHot.ArcRouter.Judge`) now scores every request in parallel with `VerifierScorer` into
-  `judge_shadow_scores`, off by default, influencing nothing. Non-executable dimensions are still
-  syntax-only scored on the routing hot path until **G3**, gated on **G2**'s calibration analysis over
-  the shadow data G1 is now accumulating.
+- ~~**The Verifier is blind on non-executable dimensions.**~~ **Overtaken by the quality-verifier
+  change.** G1 shipped the shadow judge; then code execution was removed from the project entirely, which
+  made *every* dimension non-executable and promoted the judge from bystander to co-grader. See the entry
+  below.
+
+- **Code execution removed; the Verifier is now static analysis + the G-Eval judge.** The tiered
+  sandboxed executor — Linux jail with cgroups v2 and seccomp (Tier 1), Firecracker microVM (Tier 2) —
+  was deleted outright, along with its host-capability probe, warm pools, and output redaction. Running
+  model-generated code is a risk this project declines to carry under any isolation. What replaced it,
+  in `TotallyHotArcRouter.Quality` (renamed from `.Sandbox`):
+  - **Static analysis, deepened.** Roslyn for C# and Acornima for JS/TS give authoritative syntax
+    verdicts; Python and shell keep a heuristic that is now *explicitly marked* non-authoritative and
+    weighted at half. Four composable `IStaticAnalyzer`s add diagnostics, placeholder/stub detection,
+    truncation detection, and a complexity band.
+  - **The judge promoted.** It now contributes to `u_i` on every graded request rather than writing only
+    to `judge_shadow_scores`, and defaults **on** when a free backbone resolves.
+  - **One write per request.** `QualityScoreAggregator` joins the two grades by correlation id and
+    guarantees exactly one observation reaches `RouterMemory` — enforced by winning a removal race, not a
+    flag. Two independent writes would inflate the sample count the voters trust, invisibly.
+  - **No execution surface at all.** No subprocess touches model code (no `node --check`, no
+    `py_compile`), the assembly has no `Process` reference, and the DI graph is identical on every OS.
+
+  **Documented deviations and honest costs**, per AGENTS.md's deviation rule:
+  - *The G2 calibration gate is now unevaluable.* Its first condition — judge rank-correlates with the
+    verifier on execution-grounded rows — required ground truth that no longer exists. The judge was
+    promoted without the evidence G2 was designed to demand.
+  - *The strongest signal is gone.* "It compiled and ran cleanly" outperformed anything static analysis
+    can prove. The judge partially compensates; it does not replace it.
+  - *Python and shell lost their authoritative check.* A Tier-1 subprocess used to be their real syntax
+    verdict; no managed Python parser exists to replace it. IronPython was rejected — it is a full
+    interpreter, and referencing it would make "we cannot execute model code" a claim about discipline
+    rather than a fact about the assembly.
+  - *`is_judge_scored` provenance and the learning-layer policy for judge-influenced rows are still
+    outstanding* — G3 required both in the same phase as the promotion, and they did not land. Tracked in
+    `geval-shadow-scoring-plan.md` §G3.
+  - *Security findings T-11, T-12, and T-18 are closed as no longer applicable*, and the CI step that
+    loosened `kernel.apparmor_restrict_unprivileged_userns` for a jail-launch test was removed.
+  - *The uncommitted resource-efficiency scoring axis was discarded*; both its inputs (wall-clock, peak
+    memory) were execution-derived.
+
+  Full design: [`docs/router/quality-verifier-architecture.md`](../docs/router/quality-verifier-architecture.md).
 - **A live corpus cannot be re-keyed after an embedding-model change.** `memory_entries` stores the
   embedding vector but never the prompt text (a deliberate choice — `live-feedback-learning-plan.md`'s
   "Deliberately out of scope" rejects turning router memory into a transcript store), so vectors produced
@@ -141,10 +177,9 @@ solve itself, but N never required them to complete.
 ## Other open work (tracked elsewhere; referenced here so it is not lost)
 
 - [`../docs/router/tracked-todos.md`](../docs/router/tracked-todos.md) — #3 DeepSeek dialect research,
-  #4 zero-coverage classes (the `TotallyHot.ArcRouter.Sandbox` margin is 80.1%), #5 human review of
+  #4 zero-coverage classes (`TotallyHot.ArcRouter.Quality` now sits at 97.9%; the remaining gap is in
+  `TotallyHotArcRouter` at 85.8%), #5 human review of
   tool-call-normalization Phase 5's three design decisions.
-- [`../docs/router/backlog.md`](../docs/router/backlog.md) — #2: deleting `EnableToolCallGuard` now
-  that its Phase 8 successor (the operator dialect override) shipped.
 - [`../docs/router/tool-call-normalization.md`](../docs/router/tool-call-normalization.md) — Phase 6
   remainder (response/telemetry diagnostics), Phase 7 (native endpoints, design only).
 - [`../docs/gui/backlog.md`](../docs/gui/backlog.md) — remaining live-telemetry gaps (Routing ROI /
@@ -213,7 +248,7 @@ Applies at the end of every phase, per [`../AGENTS.md`](../AGENTS.md):
 2. Every new public/protected type and member carries accurate XML documentation; docs on code changed
    by a phase are re-read for staleness, which the compiler cannot check.
 3. All unit tests pass; both non-GUI assemblies hold ≥ 80% line coverage per-assembly, as
-   `.github/workflows/dotnet-ci.yml` measures it. `TotallyHot.ArcRouter.Sandbox` sits at ~80.1%, so
+   `.github/workflows/dotnet-ci.yml` measures it. `TotallyHot.ArcRouter.Quality` sits at ~97.9%, so
    phases touching it must add coverage, not just avoid removing it.
 4. No unusually heavy test exceeds 5 seconds. The embedding model load and Phase N's replay harness
    are the live risks here — both belong behind fixtures or environment gates.

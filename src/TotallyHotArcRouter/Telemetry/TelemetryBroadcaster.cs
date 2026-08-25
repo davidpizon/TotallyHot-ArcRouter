@@ -12,7 +12,7 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// SignalR's <c>IHubContext.Clients.All</c> broadcast primitive - see
 /// docs/router/grpc-migration.md. Each active <c>StreamEvents</c> call registers its own
 /// <see cref="ChannelWriter{T}"/> here for that call's lifetime; <see cref="Publish(RoutingTelemetryEvent)"/>,
-/// <see cref="PublishLogLine"/>, and <see cref="Publish(SandboxSignalEvent)"/> map the domain event to
+/// <see cref="PublishLogLine"/>, and <see cref="Publish(QualitySignalEvent)"/> map the domain event to
 /// the wire <see cref="Contract.TelemetryEvent"/> envelope and write it to every registered writer.
 /// </summary>
 /// <remarks>
@@ -69,13 +69,13 @@ public sealed class TelemetryBroadcaster
     }
 
     /// <summary>
-    /// Publishes a sandbox execution signal to every registered writer, for the dashboard's live
+    /// Publishes a quality signal to every registered writer, for the dashboard's live
     /// verification tile. Same fault-isolation contract as <see cref="Publish(RoutingTelemetryEvent)"/>.
     /// </summary>
-    public void Publish(SandboxSignalEvent signal)
+    public void Publish(QualitySignalEvent signal)
     {
         ArgumentNullException.ThrowIfNull(signal);
-        WriteToAll(new Contract.TelemetryEvent { SandboxSignal = ToWire(signal) });
+        WriteToAll(new Contract.TelemetryEvent { QualitySignal = ToWire(signal) });
     }
 
     /// <summary>
@@ -189,30 +189,38 @@ public sealed class TelemetryBroadcaster
     };
 
     /// <summary>
-    /// Converts a <see cref="SandboxSignalEvent"/> into its gRPC wire representation.
+    /// Converts a <see cref="QualitySignalEvent"/> into its gRPC wire representation.
     /// </summary>
-    private static Contract.SandboxSignalEvent ToWire(SandboxSignalEvent e)
+    private static Contract.QualitySignalEvent ToWire(QualitySignalEvent e)
     {
-        var wire = new Contract.SandboxSignalEvent
+        var wire = new Contract.QualitySignalEvent
         {
             CorrelationId = e.CorrelationId,
             SessionId = e.SessionId,
             Dimension = e.Dimension,
             Model = e.Model,
             Language = e.Language,
-            Tier = e.Tier,
             SyntaxValid = e.SyntaxValid,
-            Executed = e.Executed,
-            TimedOut = e.TimedOut,
+            SyntaxAuthoritative = e.SyntaxAuthoritative,
             UnifiedScore = e.UnifiedScore,
-            WallClockMs = e.WallClockMs,
-            PeakMemoryBytes = e.PeakMemoryBytes,
             TimestampUtc = Timestamp.FromDateTimeOffset(e.TimestampUtc),
         };
 
-        if (e.ExitCode is int exitCode)
+        // The three optional fields are left unset rather than defaulted, so a reader can tell "the
+        // analyzers all abstained" and "the judge did not contribute" apart from a genuine score of zero.
+        if (e.AnalysisScore is double analysisScore)
         {
-            wire.ExitCode = exitCode;
+            wire.AnalysisScore = analysisScore;
+        }
+
+        if (e.JudgeScore is double judgeScore)
+        {
+            wire.JudgeScore = judgeScore;
+        }
+
+        if (e.DegradedReason is { } degradedReason)
+        {
+            wire.DegradedReason = degradedReason;
         }
 
         return wire;

@@ -34,7 +34,7 @@ namespace TotallyHot.ArcRouter.Router;
 /// </param>
 /// <param name="IsJudgeScored">
 /// Whether <paramref name="Score"/> was produced by the G-Eval judge rather than
-/// <see cref="Sandbox.Scoring.VerifierScorer"/>'s structural/execution signals
+/// <see cref="Quality.Scoring.QualityScorer"/>'s structural/execution signals
 /// (docs/router/geval-shadow-scoring-plan.md §Provenance). Always <see langword="false"/> through Phase G1
 /// and G2 - shadow scores live only in <c>judge_shadow_scores</c>, never here - landed early so every
 /// learning consumer (<see cref="Orchestrator.MemoryKnnVoter"/>, the logreg/clustering trainers) can be
