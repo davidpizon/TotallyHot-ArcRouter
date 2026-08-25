@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
@@ -65,6 +66,21 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     // /v1/models behavior) since it has no request body to resolve a single upstream provider from, and no
     // single upstream to forward it to anyway when ModelList spans multiple providers.
     private const string ModelsListPath = "/v1/models";
+
+    // Ollama's native model discovery path. A client that adds this proxy as an "Ollama" provider (e.g.
+    // Visual Studio's AI model picker) probes this GET endpoint - with no body - to list models, exactly
+    // like ModelsListPath above but in Ollama's own response shape rather than OpenAI's. Answered the same
+    // way: locally from configuration, never forwarded, since there is no body to resolve a single upstream
+    // from and no single upstream anyway when ModelList spans multiple providers.
+    private const string OllamaTagsPath = "/api/tags";
+
+    // Ollama's native per-model detail path. A client that discovers models via OllamaTagsPath above (e.g.
+    // Visual Studio's AI model picker) follows up with one POST here per model to fetch its details before
+    // use. Answered locally from configuration, exactly like OllamaTagsPath: without this, the request falls
+    // through to the normal per-model routing path, which resolves its {"model": "..."} body to a real
+    // upstream candidate and forwards it there verbatim - a malformed chat/completion request that the
+    // upstream (correctly) rejects, surfacing as a confusing 400 with no indication /api/show was involved.
+    private const string OllamaShowPath = "/api/show";
 
     // Cap on how much of the response body telemetry captures for usage parsing (see CopyAndCaptureAsync).
     // Real chat/completion responses are almost always well under this; a response that exceeds it just
@@ -338,6 +354,18 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         if (IsModelsListRequest(context.Request))
         {
             await WriteModelsListResponseAsync(context);
+            return;
+        }
+
+        if (IsOllamaTagsRequest(context.Request))
+        {
+            await WriteOllamaTagsResponseAsync(context);
+            return;
+        }
+
+        if (IsOllamaShowRequest(context.Request))
+        {
+            await WriteOllamaShowResponseAsync(context);
             return;
         }
 
@@ -2171,6 +2199,171 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     private sealed record ModelsListResponse(
         [property: JsonPropertyName("object")] string Object,
         [property: JsonPropertyName("data")] IReadOnlyList<ModelListEntry> Data);
+
+    /// <summary>
+    /// Determines whether a request targets Ollama's native model discovery endpoint
+    /// (<c>GET /api/tags</c>), matched case-insensitively and with an optional trailing slash tolerated,
+    /// mirroring <see cref="IsModelsListRequest"/>.
+    /// </summary>
+    private static bool IsOllamaTagsRequest(HttpRequest request) =>
+        HttpMethods.IsGet(request.Method) &&
+        string.Equals(request.Path.Value?.TrimEnd('/'), OllamaTagsPath, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Writes the configured model list as an Ollama-native <c>/api/tags</c> response, so a client that
+    /// added this proxy as an "Ollama" provider (e.g. Visual Studio's AI model picker) can discover the
+    /// configured models the same way <see cref="WriteModelsListResponseAsync"/> answers the OpenAI-shaped
+    /// discovery endpoint.
+    /// </summary>
+    private async Task WriteOllamaTagsResponseAsync(HttpContext context)
+    {
+        var entries = _interceptor.ListAvailableModels()
+            .Select(model => new OllamaTagEntry(
+                model.ModelName,
+                model.ModelName,
+                DateTimeOffset.UtcNow.ToString("O"),
+                0,
+                string.Empty,
+                new OllamaTagDetails("gguf", string.Empty, string.Empty)))
+            .ToList();
+
+        // Debug, not Information: this fires on every poll from an Ollama-shaped client's model picker
+        // (potentially frequent), and its outcome is fully captured by the response itself - this exists so
+        // a trace can distinguish "answered locally from /api/tags" from the per-model routing path's own
+        // logging, without adding noise at the default log level.
+        _logger.LogDebug("Answered {Path} locally with {Count} configured model(s).", OllamaTagsPath, entries.Count);
+
+        context.Response.StatusCode = StatusCodes.Status200OK;
+        context.Response.ContentType = "application/json";
+
+        await context.Response.WriteAsync(
+            JsonSerializer.Serialize(new OllamaTagsResponse(entries)),
+            context.RequestAborted);
+    }
+
+    /// <summary>
+    /// The <c>details</c> object of one <see cref="OllamaTagEntry"/>, shaped to match Ollama's
+    /// <c>/api/tags</c> schema. Only the fields Ollama always populates are set; format-specific fields the
+    /// router has no equivalent for are left as ordinary defaults rather than fabricated.
+    /// </summary>
+    private sealed record OllamaTagDetails(
+        [property: JsonPropertyName("format")] string Format,
+        [property: JsonPropertyName("family")] string Family,
+        [property: JsonPropertyName("parameter_size")] string ParameterSize);
+
+    /// <summary>
+    /// A single entry in the <c>/api/tags</c> response, shaped to match Ollama's native model list schema.
+    /// </summary>
+    private sealed record OllamaTagEntry(
+        [property: JsonPropertyName("name")] string Name,
+        [property: JsonPropertyName("model")] string Model,
+        [property: JsonPropertyName("modified_at")] string ModifiedAt,
+        [property: JsonPropertyName("size")] long Size,
+        [property: JsonPropertyName("digest")] string Digest,
+        [property: JsonPropertyName("details")] OllamaTagDetails Details);
+
+    /// <summary>
+    /// The top-level <c>/api/tags</c> response envelope, shaped to match Ollama's native model list schema.
+    /// </summary>
+    private sealed record OllamaTagsResponse(
+        [property: JsonPropertyName("models")] IReadOnlyList<OllamaTagEntry> Models);
+
+    /// <summary>
+    /// Determines whether a request targets Ollama's native per-model detail endpoint (<c>POST /api/show</c>),
+    /// matched case-insensitively and with an optional trailing slash tolerated, mirroring
+    /// <see cref="IsOllamaTagsRequest"/>.
+    /// </summary>
+    private static bool IsOllamaShowRequest(HttpRequest request) =>
+        HttpMethods.IsPost(request.Method) &&
+        string.Equals(request.Path.Value?.TrimEnd('/'), OllamaShowPath, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Answers Ollama's native <c>POST /api/show</c> from local configuration instead of forwarding it
+    /// upstream - see <see cref="OllamaShowPath"/>'s remarks for why forwarding it produces a confusing 400.
+    /// Reads the requested model name out of the body's <c>{"model": "..."}</c> field the same way
+    /// <see cref="RequestInterceptor.ResolveModelRouteAsync"/> does, and answers 404 for a model this proxy
+    /// does not have configured - matching real Ollama's own behavior for an unknown model, which
+    /// <see cref="Translation.ToolCalling.ModelDialectResolver.TryReadOllamaTemplateAsync"/> already relies
+    /// on when probing a genuine Ollama endpoint.
+    /// </summary>
+    private async Task WriteOllamaShowResponseAsync(HttpContext context)
+    {
+        string body;
+        using (var reader = new StreamReader(context.Request.Body, Encoding.UTF8, leaveOpen: true))
+        {
+            body = await reader.ReadToEndAsync(context.RequestAborted);
+        }
+
+        string? modelName = null;
+        try
+        {
+            if (JsonNode.Parse(body) is JsonObject jsonObject &&
+                jsonObject["model"] is JsonValue modelValue &&
+                modelValue.TryGetValue<string>(out var value))
+            {
+                modelName = value;
+            }
+        }
+        catch (JsonException)
+        {
+            // Falls through to the "model not found" response below, matching real Ollama's own behavior
+            // for a request it cannot make sense of.
+        }
+
+        var model = modelName is null
+            ? null
+            : _interceptor.ListAvailableModels()
+                .FirstOrDefault(m => string.Equals(m.ModelName, modelName, StringComparison.OrdinalIgnoreCase));
+
+        if (model is null)
+        {
+            // Information, not Debug: unlike the tags poll above, this is the direct diagnostic signal for
+            // exactly the failure mode this endpoint exists to prevent - a client naming a model this proxy
+            // doesn't know, which without this local answer would instead fall through to the per-model
+            // routing path and surface as a confusing 400 from whatever upstream that name happened to
+            // resolve to (see OllamaShowPath's remarks).
+            _logger.LogInformation(
+                "Answered {Path} locally: unknown model '{ModelName}' requested; returning 404.",
+                OllamaShowPath,
+                SanitizeForLog(modelName));
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(
+                JsonSerializer.Serialize(new OllamaErrorResponse($"model '{modelName}' not found")),
+                context.RequestAborted);
+            return;
+        }
+
+        _logger.LogDebug("Answered {Path} locally for model {Model}.", OllamaShowPath, SanitizeForLog(model.ModelName));
+
+        context.Response.StatusCode = StatusCodes.Status200OK;
+        context.Response.ContentType = "application/json";
+
+        await context.Response.WriteAsync(
+            JsonSerializer.Serialize(new OllamaShowResponse(
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                new OllamaTagDetails("gguf", string.Empty, string.Empty))),
+            context.RequestAborted);
+    }
+
+    /// <summary>
+    /// The <c>POST /api/show</c> response envelope, shaped to match Ollama's native per-model detail schema.
+    /// Only the fields every Ollama install always populates are set; format-specific fields the router has
+    /// no equivalent for (the model's literal chat template among them - see
+    /// <see cref="Translation.ToolCalling.ModelDialectResolver"/> for where that is actually sourced from,
+    /// when it is available at all) are left as ordinary defaults rather than fabricated.
+    /// </summary>
+    private sealed record OllamaShowResponse(
+        [property: JsonPropertyName("modelfile")] string Modelfile,
+        [property: JsonPropertyName("parameters")] string Parameters,
+        [property: JsonPropertyName("template")] string Template,
+        [property: JsonPropertyName("details")] OllamaTagDetails Details);
+
+    /// <summary>An Ollama-shaped <c>{"error": "..."}</c> envelope, used for a <c>POST /api/show</c> naming an unknown model.</summary>
+    private sealed record OllamaErrorResponse(
+        [property: JsonPropertyName("error")] string Error);
 
     /// <summary>Writes a 400 response in an OpenAI-shaped error envelope for a request whose model could not be resolved.</summary>
     private static async Task WriteModelNotFoundResponseAsync(HttpContext context, string errorMessage)

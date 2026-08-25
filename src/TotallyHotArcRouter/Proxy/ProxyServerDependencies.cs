@@ -216,10 +216,14 @@ public sealed record LogRegModelAdminDependencies(
 /// <param name="Store">Persists the settings overrides layered on top of <see cref="Models.RoutingOptions"/>.</param>
 /// <param name="ReloadToken">Triggered after a successful save so <paramref name="OptionsMonitor"/> recomputes immediately.</param>
 /// <param name="OptionsMonitor">Reports the currently effective values once precedence has been applied.</param>
+/// <param name="JudgeOptionsMonitor">Reports the shadow judge's currently effective settings, the same way <paramref name="OptionsMonitor"/> does for routing.</param>
+/// <param name="JudgeModelSelector">Supplies the eligible judge-backbone list, both to populate the dropdown and to validate a save against it.</param>
 public sealed record RouterSettingsAdminDependencies(
     RouterSettingsStore Store,
     RouterSettingsReloadToken ReloadToken,
-    IOptionsMonitor<Models.RoutingOptions> OptionsMonitor)
+    IOptionsMonitor<Models.RoutingOptions> OptionsMonitor,
+    IOptionsMonitor<Judge.JudgeOptions> JudgeOptionsMonitor,
+    Judge.JudgeModelSelector JudgeModelSelector)
 {
     /// <summary>
     /// The working set trimmed synchronously when a save lowers the capacity, so the response reflects the

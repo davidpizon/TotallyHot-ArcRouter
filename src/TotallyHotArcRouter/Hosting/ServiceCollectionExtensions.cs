@@ -642,7 +642,9 @@ namespace TotallyHot.ArcRouter.Hosting
                         RouterSettingsAdmin = new RouterSettingsAdminDependencies(
                             sp.GetRequiredService<Router.RouterSettingsStore>(),
                             sp.GetRequiredService<Router.RouterSettingsReloadToken>(),
-                            sp.GetRequiredService<IOptionsMonitor<RoutingOptions>>())
+                            sp.GetRequiredService<IOptionsMonitor<RoutingOptions>>(),
+                            sp.GetRequiredService<IOptionsMonitor<TotallyHot.ArcRouter.Judge.JudgeOptions>>(),
+                            sp.GetRequiredService<TotallyHot.ArcRouter.Judge.JudgeModelSelector>())
                         {
                             EmbeddingMemory = sp.GetRequiredService<EmbeddingMemory>(),
                         },

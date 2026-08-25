@@ -255,6 +255,8 @@ namespace TotallyHot.ArcRouter.Proxy
                             services.AddSingleton(routerSettingsAdmin.Store);
                             services.AddSingleton(routerSettingsAdmin.ReloadToken);
                             services.AddSingleton(routerSettingsAdmin.OptionsMonitor);
+                            services.AddSingleton(routerSettingsAdmin.JudgeOptionsMonitor);
+                            services.AddSingleton(routerSettingsAdmin.JudgeModelSelector);
 
                             if (routerSettingsAdmin.EmbeddingMemory is not null)
                             {
