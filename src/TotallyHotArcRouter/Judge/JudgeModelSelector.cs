@@ -118,25 +118,44 @@ public sealed class JudgeModelSelector
     /// Yields every configured model that can currently serve as the judge backbone, in configuration
     /// order. See this type's remarks for why each condition is required.
     /// </summary>
-    private IEnumerable<ResolvedModelRoute> EnumerateEligible()
+    /// <summary>Enumerates the eligible backbones using this instance's resolver and logger.</summary>
+    private IEnumerable<ResolvedModelRoute> EnumerateEligible() => EnumerateEligible(_routeResolver, _logger);
+
+    /// <summary>
+    /// The single definition of "eligible judge backbone": a free, enabled, OpenAI-chat-completions-shaped
+    /// model, in configuration order.
+    /// </summary>
+    /// <param name="routeResolver">Supplies the configured models and their resolved provider routes.</param>
+    /// <param name="logger">Receives a debug line for each free model skipped for being the wrong shape.</param>
+    /// <returns>The eligible routes; empty when no free provider is configured or enabled.</returns>
+    /// <remarks>
+    /// Static, and taking its resolver as a parameter, so <see cref="JudgeSettingsConfigureOptions"/> can
+    /// apply the same predicate when computing <see cref="JudgeOptions.Enabled"/>'s default. It cannot hold
+    /// a <see cref="JudgeModelSelector"/> to ask: the selector reads <c>IOptionsMonitor&lt;JudgeOptions&gt;</c>,
+    /// and an <c>IConfigureOptions&lt;JudgeOptions&gt;</c> that depended on it would close a DI cycle
+    /// through the options factory. Sharing the predicate here rather than copying it is what keeps the
+    /// backbones the settings screen offers, the ones the judge accepts, and the ones the auto-detect
+    /// counts from drifting apart.
+    /// </remarks>
+    internal static IEnumerable<ResolvedModelRoute> EnumerateEligible(IModelRouteResolver routeResolver, ILogger logger)
     {
-        foreach (var candidate in _routeResolver.ListModels())
+        foreach (var candidate in routeResolver.ListModels())
         {
-            if (!_routeResolver.TryResolve(candidate.ModelName, out var route))
+            if (!routeResolver.TryResolve(candidate.ModelName, out var route))
             {
                 continue;
             }
 
             if (!route.IsFree ||
-                !_routeResolver.IsProviderEnabled(route.Provider) ||
-                !_routeResolver.IsModelEnabled(candidate.ModelName))
+                !routeResolver.IsProviderEnabled(route.Provider) ||
+                !routeResolver.IsModelEnabled(candidate.ModelName))
             {
                 continue;
             }
 
             if (route.AwsRegion is not null)
             {
-                _logger.LogDebug(
+                logger.LogDebug(
                     "Skipping free model {ModelName} as a judge backbone: Bedrock routes are not OpenAI chat-completions shaped.",
                     candidate.ModelName);
                 continue;

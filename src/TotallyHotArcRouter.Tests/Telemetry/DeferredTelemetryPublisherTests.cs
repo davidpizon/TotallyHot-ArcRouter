@@ -61,7 +61,7 @@ public class DeferredTelemetryPublisherTests
     }
 
     [Fact]
-    public async Task PublishSandboxSignalAsync_ForwardsToResolvedInstance()
+    public async Task PublishQualitySignalAsync_ForwardsToResolvedInstance()
     {
         var innerMock = new Mock<ITelemetryPublisher>();
         var services = new ServiceCollection();
@@ -69,12 +69,12 @@ public class DeferredTelemetryPublisherTests
         var provider = services.BuildServiceProvider();
 
         var deferred = new DeferredTelemetryPublisher(provider);
-        var signal = new SandboxSignalEvent(
-            "corr-1", "sess-1", "live:code_generation", "gpt-5.4", "python", "Tier1Jail",
-            true, true, 0, false, 0.87, 42, 1024, DateTimeOffset.UtcNow);
-        await deferred.PublishSandboxSignalAsync(signal, TestContext.Current.CancellationToken);
+        var signal = new QualitySignalEvent(
+            "corr-1", "sess-1", "live:code_generation", "gpt-5.4", "CSharp",
+            true, true, 0.9, 0.8, 0.87, null, DateTimeOffset.UtcNow);
+        await deferred.PublishQualitySignalAsync(signal, TestContext.Current.CancellationToken);
 
-        innerMock.Verify(p => p.PublishSandboxSignalAsync(signal, It.IsAny<CancellationToken>()), Times.Once);
+        innerMock.Verify(p => p.PublishQualitySignalAsync(signal, It.IsAny<CancellationToken>()), Times.Once);
     }
 }
 

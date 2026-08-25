@@ -1,7 +1,7 @@
 using System.Text;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Router;
-using TotallyHot.ArcRouter.Sandbox;
+using TotallyHot.ArcRouter.Quality;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -16,7 +16,7 @@ namespace TotallyHot.ArcRouter.Tests.Proxy;
 public class RequestInterceptorRoutingPolicyTests
 {
     private static readonly string DefaultLiveDimension =
-        RouterDimension.ToLiveKey(new SandboxOptions().LiveMemoryPrefix, RouterDimension.CodeGeneration);
+        RouterDimension.ToLiveKey(new QualityOptions().LiveMemoryPrefix, RouterDimension.CodeGeneration);
 
     [Fact]
     public async Task ResolveModelRouteAsync_UnresolvedModel_WithRoutingPolicy_UsesPolicySelection()

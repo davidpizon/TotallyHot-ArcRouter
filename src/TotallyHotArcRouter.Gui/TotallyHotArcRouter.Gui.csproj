@@ -14,7 +14,7 @@
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisLevel>latest</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
-    <!-- Matches TotallyHotArcRouter.csproj/.Sandbox.csproj: CS1591 (missing XML doc on a public member)
+    <!-- Matches TotallyHotArcRouter.csproj/.Quality.csproj: CS1591 (missing XML doc on a public member)
          becomes a build error via TreatWarningsAsErrors, so undocumented public API can't creep back
          in. Razor-compiler-generated partial classes (BuildRenderTree etc.) are emitted with their own
          `#pragma warning disable 1591`, so this doesn't fight componentgen. -->

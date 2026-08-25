@@ -35,7 +35,7 @@ public sealed class SqliteRouterMemoryStore : IRouterMemoryStore
     /// </summary>
     /// <remarks>
     /// This store does not assume startup already created the schema, unlike
-    /// <see cref="SqliteMemoryEntryStore"/>. Two reasons. Scores arrive from the sandbox verification path
+    /// <see cref="SqliteMemoryEntryStore"/>. Two reasons. Scores arrive from the quality verification path
     /// for the life of the process, and <c>StartupHealthCheckHostedService</c> runs its
     /// <see cref="RouterMemoryDatabase.EnsureCreated"/> call best-effort inside a catch that only logs - so
     /// a startup failure there would otherwise turn every subsequent score write into a "no such table"

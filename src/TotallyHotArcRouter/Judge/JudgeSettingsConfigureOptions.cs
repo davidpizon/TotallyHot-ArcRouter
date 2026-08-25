@@ -1,5 +1,7 @@
 using System.Reflection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Router;
 
 namespace TotallyHot.ArcRouter.Judge;
@@ -14,10 +16,26 @@ namespace TotallyHot.ArcRouter.Judge;
 /// default</b> rather than that type's three-level one.
 /// </summary>
 /// <remarks>
+/// <para>
+/// <b>The coded default for <see cref="JudgeOptions.Enabled"/> is computed, not constant.</b> With no
+/// stored row, the judge turns itself on when an eligible free backbone exists and stays off when none
+/// does, applying <see cref="JudgeModelSelector.EnumerateEligible(IModelRouteResolver, ILogger)"/> - the
+/// shared predicate - rather than holding a <see cref="JudgeModelSelector"/>, which would close a DI cycle
+/// back through the options factory this type is part of. That auto-detect lives here rather than on
+/// <see cref="JudgeOptions"/> because it is a <em>default</em>, not a gate: an operator who has explicitly
+/// switched the judge off in System Settings must stay switched off however many free models appear later,
+/// and the stored-override-wins precedence below is what guarantees that. The reason for defaulting on at
+/// all is that the judge stopped being an optional analysis aid when it became one of the two graders
+/// feeding router memory - leaving it off by default would ship a verifier running at half strength for
+/// anyone who never found the toggle.
+/// </para>
+/// <para>
 /// Uses the same reflection-over-<c>init</c>-properties technique
 /// (<see cref="PropertyInfo.SetValue(object?, object?)"/> is not bound by the compile-time-only <c>init</c>
-/// guard) and the same "a missing row means no override" rule: an absent key leaves the coded default
-/// untouched rather than re-asserting it.
+/// guard) and the same "a missing row means no override" rule for
+/// <see cref="JudgeOptions.ModelName"/>: an absent key leaves the coded default untouched rather than
+/// re-asserting it.
+/// </para>
 /// </remarks>
 public sealed class JudgeSettingsConfigureOptions : IConfigureOptions<JudgeOptions>
 {
@@ -28,13 +46,25 @@ public sealed class JudgeSettingsConfigureOptions : IConfigureOptions<JudgeOptio
         typeof(JudgeOptions).GetProperty(nameof(JudgeOptions.ModelName))!;
 
     private readonly RouterSettingsStore _store;
+    private readonly IModelRouteResolver _routeResolver;
+    private readonly ILogger<JudgeSettingsConfigureOptions> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="JudgeSettingsConfigureOptions"/> class.</summary>
     /// <param name="store">The settings store to read overrides from.</param>
-    public JudgeSettingsConfigureOptions(RouterSettingsStore store)
+    /// <param name="routeResolver">Supplies the configured models, used to decide whether any eligible free backbone exists.</param>
+    /// <param name="logger">The logger.</param>
+    public JudgeSettingsConfigureOptions(
+        RouterSettingsStore store,
+        IModelRouteResolver routeResolver,
+        ILogger<JudgeSettingsConfigureOptions> logger)
     {
         ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(routeResolver);
+        ArgumentNullException.ThrowIfNull(logger);
+
         _store = store;
+        _routeResolver = routeResolver;
+        _logger = logger;
     }
 
     /// <inheritdoc />
@@ -45,6 +75,14 @@ public sealed class JudgeSettingsConfigureOptions : IConfigureOptions<JudgeOptio
         if (_store.TryGetBool(RouterSettingsStore.JudgeEnabledKey, out var enabled))
         {
             EnabledProperty.SetValue(options, enabled);
+        }
+        else
+        {
+            // No stored row: fall back to "on if a free backbone exists". Any eligible model will do here -
+            // which one the judge ultimately picks is JudgeModelSelector.Resolve()'s business, and asking
+            // it would need JudgeOptions.ModelName, which is the value being configured.
+            var hasBackbone = JudgeModelSelector.EnumerateEligible(_routeResolver, _logger).Any();
+            EnabledProperty.SetValue(options, hasBackbone);
         }
 
         if (_store.TryGetString(RouterSettingsStore.JudgeModelNameKey, out var modelName))

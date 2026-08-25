@@ -106,32 +106,30 @@ public class TelemetryPublisherTests
         await publisher.PublishLogLineAsync(new LogLineEvent(DateTimeOffset.UtcNow, "ERROR", "boom"), TestContext.Current.CancellationToken);
     }
 
-    private static SandboxSignalEvent SampleSignal() => new(
+    private static QualitySignalEvent SampleSignal() => new(
         CorrelationId: "corr-1",
         SessionId: "sess-1",
         Dimension: "live:code_generation",
         Model: "gpt-5.4",
-        Language: "python",
-        Tier: "Tier1Jail",
+        Language: "CSharp",
         SyntaxValid: true,
-        Executed: true,
-        ExitCode: 0,
-        TimedOut: false,
+        SyntaxAuthoritative: true,
+        AnalysisScore: 0.9,
+        JudgeScore: 0.8,
         UnifiedScore: 0.87,
-        WallClockMs: 42,
-        PeakMemoryBytes: 1024,
+        DegradedReason: null,
         TimestampUtc: DateTimeOffset.UtcNow);
 
     [Fact]
-    public async Task PublishSandboxSignalAsync_NoRegisteredWriters_CompletesWithoutThrowing()
+    public async Task PublishQualitySignalAsync_NoRegisteredWriters_CompletesWithoutThrowing()
     {
         var publisher = new TelemetryPublisher(new TelemetryBroadcaster());
 
-        await publisher.PublishSandboxSignalAsync(SampleSignal(), TestContext.Current.CancellationToken);
+        await publisher.PublishQualitySignalAsync(SampleSignal(), TestContext.Current.CancellationToken);
     }
 
     [Fact]
-    public async Task PublishSandboxSignalAsync_RegisteredWriter_ForwardsSandboxSignalEnvelope()
+    public async Task PublishQualitySignalAsync_RegisteredWriter_ForwardsQualitySignalEnvelope()
     {
         var broadcaster = new TelemetryBroadcaster();
         var channel = Channel.CreateUnbounded<Contract.TelemetryEvent>();
@@ -139,17 +137,17 @@ public class TelemetryPublisherTests
         var publisher = new TelemetryPublisher(broadcaster);
 
         var signal = SampleSignal();
-        await publisher.PublishSandboxSignalAsync(signal, TestContext.Current.CancellationToken);
+        await publisher.PublishQualitySignalAsync(signal, TestContext.Current.CancellationToken);
 
         Assert.True(channel.Reader.TryRead(out var envelope));
-        Assert.Equal(Contract.TelemetryEvent.EventOneofCase.SandboxSignal, envelope!.EventCase);
-        Assert.Equal(signal.CorrelationId, envelope.SandboxSignal.CorrelationId);
-        Assert.Equal(signal.Model, envelope.SandboxSignal.Model);
-        Assert.Equal(signal.UnifiedScore, envelope.SandboxSignal.UnifiedScore);
+        Assert.Equal(Contract.TelemetryEvent.EventOneofCase.QualitySignal, envelope!.EventCase);
+        Assert.Equal(signal.CorrelationId, envelope.QualitySignal.CorrelationId);
+        Assert.Equal(signal.Model, envelope.QualitySignal.Model);
+        Assert.Equal(signal.UnifiedScore, envelope.QualitySignal.UnifiedScore);
     }
 
     [Fact]
-    public async Task PublishSandboxSignalAsync_BroadcastFails_DoesNotThrow()
+    public async Task PublishQualitySignalAsync_BroadcastFails_DoesNotThrow()
     {
         var broadcaster = new TelemetryBroadcaster();
         var writerMock = new Mock<ChannelWriter<Contract.TelemetryEvent>>();
@@ -157,7 +155,7 @@ public class TelemetryPublisherTests
         broadcaster.Register(writerMock.Object);
         var publisher = new TelemetryPublisher(broadcaster);
 
-        await publisher.PublishSandboxSignalAsync(SampleSignal(), TestContext.Current.CancellationToken);
+        await publisher.PublishQualitySignalAsync(SampleSignal(), TestContext.Current.CancellationToken);
     }
 }
 

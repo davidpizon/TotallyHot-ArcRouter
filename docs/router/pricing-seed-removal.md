@@ -121,7 +121,7 @@ dotnet build src/TotallyHotArcRouter/TotallyHotArcRouter.csproj   # removes a pu
 dotnet test  src/TotallyHotArcRouter.Tests/TotallyHotArcRouter.Tests.csproj
 dotnet test  src/TotallyHotArcRouter.Gui.Admin.Tests/TotallyHotArcRouter.Gui.Admin.Tests.csproj
 dotnet test  src/TotallyHotArcRouter.Gui.Tests/TotallyHotArcRouter.Gui.Tests.csproj
-dotnet test  src/TotallyHotArcRouter.Sandbox.Tests/TotallyHotArcRouter.Sandbox.Tests.csproj
+dotnet test  src/TotallyHotArcRouter.Quality.Tests/TotallyHotArcRouter.Quality.Tests.csproj
 dotnet test  src/TotallyHotArcRouter.Gui.Telemetry.Tests/TotallyHotArcRouter.Gui.Telemetry.Tests.csproj
 ```
 

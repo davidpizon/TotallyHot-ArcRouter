@@ -19,8 +19,8 @@ import "google/protobuf/timestamp.proto";
 // intentionally not part of this contract: both would need TotallyHot.ArcRouter.Telemetry's proposed
 // IUsageLedger (docs/router/agent-cost-tracking.md), which has no implementation yet. Beyond the two
 // event types TotallyHot.ArcRouter.Telemetry.TelemetryHub already sent, this service also carries
-// SandboxSignalEvent - the sandboxed executor's live verification signal (architecture doc §15) - which
-// TelemetryHub never had, since the sandbox executor postdates it.
+// QualitySignalEvent - the quality verifier's live signal - which TelemetryHub never had, since the
+// verifier postdates it.
 service TelemetryService {
   // Streams every routing telemetry event and log line to a connected client for the lifetime of the
   // call - the gRPC equivalent of today's push-only SignalR hub connection.
@@ -607,7 +607,7 @@ message TelemetryEvent {
   oneof event {
     RoutingTelemetryEvent routing_telemetry = 1;
     LogLineEvent log_line = 2;
-    SandboxSignalEvent sandbox_signal = 3;
+    QualitySignalEvent quality_signal = 3;
   }
 }
 
@@ -667,23 +667,30 @@ message LogLineEvent {
   string message = 3;
 }
 
-// Field names map 1:1 onto TotallyHot.ArcRouter.Telemetry.SandboxSignalEvent's C# properties, same convention
-// as RoutingTelemetryEvent above. Powers the dashboard's live sandbox-verification tile (architecture
-// doc §15) - a heuristic quality proxy for live traffic, not a paper-grade metric.
-message SandboxSignalEvent {
+// Field names map 1:1 onto TotallyHot.ArcRouter.Telemetry.QualitySignalEvent's C# properties, same convention
+// as RoutingTelemetryEvent above. Powers the dashboard's live quality-verification tile - a heuristic
+// quality proxy for live traffic, not a paper-grade metric.
+//
+// Fields 6, 8, 9, 10, 12, and 13 are reserved, not reused: they carried the isolation tier, executed
+// flag, exit code, timed-out flag, wall-clock duration, and peak memory of a verifier that ran the
+// model's code. That verifier is gone and nothing replaces those readings, so their numbers are retired
+// rather than recycled - a stored v1 envelope decoded by a current reader must not find a new meaning
+// sitting on an old field.
+message QualitySignalEvent {
+  reserved 6, 8, 9, 10, 12, 13;
+  reserved "tier", "executed", "exit_code", "timed_out", "wall_clock_ms", "peak_memory_bytes";
+
   string correlation_id = 1;
   string session_id = 2;
   string dimension = 3;
   string model = 4;
   string language = 5;
-  string tier = 6;
   bool syntax_valid = 7;
-  bool executed = 8;
-  optional int32 exit_code = 9;
-  bool timed_out = 10;
   double unified_score = 11;
-  int64 wall_clock_ms = 12;
-  int64 peak_memory_bytes = 13;
   google.protobuf.Timestamp timestamp_utc = 14;
+  bool syntax_authoritative = 15;
+  optional double analysis_score = 16;
+  optional double judge_score = 17;
+  optional string degraded_reason = 18;
 }
 

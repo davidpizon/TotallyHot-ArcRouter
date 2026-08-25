@@ -2,8 +2,8 @@ using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Embeddings;
-using TotallyHot.ArcRouter.Sandbox;
-using TotallyHot.ArcRouter.Sandbox.Execution;
+using TotallyHot.ArcRouter.Quality;
+using TotallyHot.ArcRouter.Quality.Grading;
 using TotallyHot.ArcRouter.Tests.TestSupport;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -12,7 +12,7 @@ namespace TotallyHot.ArcRouter.Tests.Judge;
 
 /// <summary>
 /// Covers docs/router/geval-shadow-scoring-plan.md Phase G1's exit criteria directly: shadow scoring must
-/// never influence <see cref="EmbeddingMemory"/>/<see cref="SandboxResult.UnifiedScore"/>, and with the
+/// never influence <see cref="EmbeddingMemory"/>/<see cref="QualityResult.UnifiedScore"/>, and with the
 /// judge disabled, nothing shadow-related fires at all.
 /// </summary>
 public class JudgeShadowScoringExitCriteriaTests
@@ -20,13 +20,12 @@ public class JudgeShadowScoringExitCriteriaTests
     [Fact]
     public async Task CompositeObserver_WithAndWithoutJudgeObserver_WritesByteIdenticalMemoryEntry()
     {
-        var result = new SandboxResult
+        var result = new QualityResult
         {
             RequestCorrelationId = "corr-1",
             Dimension = "algorithm",
             Model = "claude-opus-4-6",
             UnifiedScore = 0.6789,
-            Executed = true,
         };
 
         var withoutJudge = await RunCompositeAndCaptureMemoryEntryAsync(result, includeJudgeObserver: false);
@@ -71,13 +70,12 @@ public class JudgeShadowScoringExitCriteriaTests
             [embeddingObserver, judgeObserver],
             NullLogger<CompositeRouterScoreObserver>.Instance);
 
-        var result = new SandboxResult
+        var result = new QualityResult
         {
             RequestCorrelationId = "corr-1",
             Dimension = "algorithm",
             Model = "claude-opus-4-6",
             UnifiedScore = 0.5,
-            Executed = true,
         };
 
         cache.Set("corr-1", "response text that should never be touched");
@@ -89,7 +87,7 @@ public class JudgeShadowScoringExitCriteriaTests
         Assert.Equal(0, queue.DroppedCount);
     }
 
-    private static async Task<MemoryEntry> RunCompositeAndCaptureMemoryEntryAsync(SandboxResult result, bool includeJudgeObserver)
+    private static async Task<MemoryEntry> RunCompositeAndCaptureMemoryEntryAsync(QualityResult result, bool includeJudgeObserver)
     {
         var store = new FakeMemoryEntryStore();
         var memory = CreateMemory(store);
@@ -104,7 +102,7 @@ public class JudgeShadowScoringExitCriteriaTests
             new PendingRequestProvenanceCache(Options.Create(new RoutingOptions())),
             NullLogger<EmbeddingMemoryScoreObserver>.Instance);
 
-        var observers = new List<IRouterScoreObserver> { embeddingObserver };
+        var observers = new List<IQualityScoreObserver> { embeddingObserver };
         if (includeJudgeObserver)
         {
             var queue = new JudgeShadowScoreQueue(Options.Create(new JudgeOptions { QueueCapacity = 10 }));

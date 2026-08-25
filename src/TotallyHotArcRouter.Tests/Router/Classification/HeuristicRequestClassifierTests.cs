@@ -1,6 +1,6 @@
 using System.Text.Json.Nodes;
 using TotallyHot.ArcRouter.Router.Classification;
-using TotallyHot.ArcRouter.Sandbox;
+using TotallyHot.ArcRouter.Quality;
 
 namespace TotallyHot.ArcRouter.Tests.Router.Classification;
 

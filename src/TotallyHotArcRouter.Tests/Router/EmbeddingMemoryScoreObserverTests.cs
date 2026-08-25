@@ -1,7 +1,7 @@
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Embeddings;
-using TotallyHot.ArcRouter.Sandbox;
+using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Tests.TestSupport;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -27,7 +27,7 @@ public class EmbeddingMemoryScoreObserverTests
 
         var observer = new EmbeddingMemoryScoreObserver(memory, pendingCache, CreatePendingCostCache(), CreatePendingProvenanceCache(), NullLogger<EmbeddingMemoryScoreObserver>.Instance);
 
-        var result = new SandboxResult
+        var result = new QualityResult
         {
             RequestCorrelationId = "corr-1",
             Model = "claude-opus-4-6",
@@ -51,7 +51,7 @@ public class EmbeddingMemoryScoreObserverTests
         var pendingCache = CreatePendingCache();
         var observer = new EmbeddingMemoryScoreObserver(memory, pendingCache, CreatePendingCostCache(), CreatePendingProvenanceCache(), NullLogger<EmbeddingMemoryScoreObserver>.Instance);
 
-        var result = new SandboxResult
+        var result = new QualityResult
         {
             RequestCorrelationId = "never-set",
             Model = "claude-opus-4-6",
@@ -73,7 +73,7 @@ public class EmbeddingMemoryScoreObserverTests
         var pendingCache = CreatePendingCache();
         var observer = new EmbeddingMemoryScoreObserver(memory, pendingCache, CreatePendingCostCache(), CreatePendingProvenanceCache(), NullLogger<EmbeddingMemoryScoreObserver>.Instance);
 
-        var result = new SandboxResult { RequestCorrelationId = string.Empty, Model = "claude-opus-4-6", UnifiedScore = 0.5 };
+        var result = new QualityResult { RequestCorrelationId = string.Empty, Model = "claude-opus-4-6", UnifiedScore = 0.5 };
 
         await observer.ObserveAsync(result, TestContext.Current.CancellationToken);
 
@@ -91,7 +91,7 @@ public class EmbeddingMemoryScoreObserverTests
         pendingCache.Set("corr-1", [1f]);
         var observer = new EmbeddingMemoryScoreObserver(memory, pendingCache, CreatePendingCostCache(), CreatePendingProvenanceCache(), NullLogger<EmbeddingMemoryScoreObserver>.Instance);
 
-        var result = new SandboxResult { RequestCorrelationId = "corr-1", Model = string.Empty, UnifiedScore = 0.5 };
+        var result = new QualityResult { RequestCorrelationId = "corr-1", Model = string.Empty, UnifiedScore = 0.5 };
 
         await observer.ObserveAsync(result, TestContext.Current.CancellationToken);
 
@@ -109,7 +109,7 @@ public class EmbeddingMemoryScoreObserverTests
         pendingCache.Set("corr-1", [1f]);
         var observer = new EmbeddingMemoryScoreObserver(memory, pendingCache, CreatePendingCostCache(), CreatePendingProvenanceCache(), NullLogger<EmbeddingMemoryScoreObserver>.Instance);
 
-        var result = new SandboxResult { RequestCorrelationId = "corr-1", Model = "m", UnifiedScore = 5.0 };
+        var result = new QualityResult { RequestCorrelationId = "corr-1", Model = "m", UnifiedScore = 5.0 };
 
         await observer.ObserveAsync(result, TestContext.Current.CancellationToken);
 
@@ -132,7 +132,7 @@ public class EmbeddingMemoryScoreObserverTests
 
         var observer = new EmbeddingMemoryScoreObserver(memory, pendingCache, pendingCostCache, pendingProvenanceCache, NullLogger<EmbeddingMemoryScoreObserver>.Instance);
 
-        var result = new SandboxResult
+        var result = new QualityResult
         {
             RequestCorrelationId = "corr-1",
             Model = "claude-opus-4-6",
@@ -159,7 +159,7 @@ public class EmbeddingMemoryScoreObserverTests
 
         var observer = new EmbeddingMemoryScoreObserver(memory, pendingCache, CreatePendingCostCache(), CreatePendingProvenanceCache(), NullLogger<EmbeddingMemoryScoreObserver>.Instance);
 
-        var result = new SandboxResult
+        var result = new QualityResult
         {
             RequestCorrelationId = "corr-1",
             Model = "claude-opus-4-6",

@@ -75,7 +75,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\TotallyHotArcRouter.Sandbox\TotallyHotArcRouter.Sandbox.csproj" />
+    <ProjectReference Include="..\TotallyHotArcRouter.Quality\TotallyHotArcRouter.Quality.csproj" />
   </ItemGroup>
 
 </Project>

@@ -9,9 +9,9 @@ namespace TotallyHot.ArcRouter.CodeRouterBench;
 /// </summary>
 /// <param name="TaskId">The benchmark task identifier.</param>
 /// <param name="Dimension">
-/// The coding dimension key (research-doc §4.4), matching <see cref="Sandbox.RouterDimension"/>'s
+/// The coding dimension key (research-doc §4.4), matching <see cref="Quality.RouterDimension"/>'s
 /// vocabulary except for <c>"algorithm"</c>, which the released CSVs use where the router's own
-/// vocabulary says <see cref="Sandbox.RouterDimension.AlgorithmDesign"/> - see
+/// vocabulary says <see cref="Quality.RouterDimension.AlgorithmDesign"/> - see
 /// <see cref="CodeRouterBenchCsvReader.NormalizeDimension"/>.
 /// </param>
 /// <param name="Model">

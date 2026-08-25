@@ -1,23 +1,23 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using TotallyHot.ArcRouter.Sandbox;
-using TotallyHot.ArcRouter.Sandbox.Execution;
+using TotallyHot.ArcRouter.Quality;
+using TotallyHot.ArcRouter.Quality.Grading;
 
 namespace TotallyHot.ArcRouter.Judge;
 
 /// <summary>
-/// The shadow judge's <see cref="IRouterScoreObserver"/> (docs/router/geval-shadow-scoring-plan.md §1c).
+/// The shadow judge's <see cref="IQualityScoreObserver"/> (docs/router/geval-shadow-scoring-plan.md §1c).
 /// Registered unconditionally as a third element of <see cref="Router.CompositeRouterScoreObserver"/>'s
 /// fan-out and gated per call on <see cref="JudgeOptions.Enabled"/> instead, so the System Settings
 /// window's judge toggle takes effect immediately rather than at the next restart - the same live-gate
 /// posture <c>ProxyMiddleware</c> takes for <c>EnableAdaptiveRouting</c>.
 /// <see cref="ObserveAsync"/> does two cheap things and returns immediately - it never calls the judge
-/// backbone inline: snapshot the fields needed from <see cref="SandboxResult"/> into a
+/// backbone inline: snapshot the fields needed from <see cref="QualityResult"/> into a
 /// <see cref="JudgeShadowScoringJob"/>, then enqueue it onto a bounded channel
 /// (<see cref="IJudgeShadowScoreQueue"/>). A full channel sheds the job with a debug log rather than
 /// blocking the caller - the routing hot path must never wait on judging.
 /// </summary>
-public sealed class JudgeShadowScoreObserver : IRouterScoreObserver
+public sealed class JudgeShadowScoreObserver : IQualityScoreObserver
 {
     private readonly IJudgeShadowScoreQueue _queue;
     private readonly IOptionsMonitor<JudgeOptions> _options;
@@ -42,7 +42,7 @@ public sealed class JudgeShadowScoreObserver : IRouterScoreObserver
     }
 
     /// <inheritdoc />
-    public Task ObserveAsync(SandboxResult result, CancellationToken cancellationToken = default)
+    public Task ObserveAsync(QualityResult result, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(result);
 
@@ -53,7 +53,7 @@ public sealed class JudgeShadowScoreObserver : IRouterScoreObserver
 
         if (string.IsNullOrEmpty(result.RequestCorrelationId))
         {
-            _logger.LogDebug("Sandbox result has no correlation id; skipping shadow-judge observation.");
+            _logger.LogDebug("Quality result has no correlation id; skipping shadow-judge observation.");
             return Task.CompletedTask;
         }
 
@@ -61,8 +61,7 @@ public sealed class JudgeShadowScoreObserver : IRouterScoreObserver
             result.RequestCorrelationId,
             result.Dimension,
             result.Model,
-            result.UnifiedScore,
-            result.Executed);
+            result.UnifiedScore);
 
         if (!_queue.TryEnqueue(job))
         {

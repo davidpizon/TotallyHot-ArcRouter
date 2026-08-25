@@ -60,7 +60,7 @@ release no longer publishes; the published tables are consumed as-is.
 ## Repository Layout
 
 ```text
-src/TotallyHotArcRouter*/              .NET router implementation, GUI, sandbox, tests
+src/TotallyHotArcRouter*/              .NET router implementation, GUI, quality verifier, tests
 
 %LOCALAPPDATA%\TotallyHot.ArcRouter\coderouterbench.db   CodeRouterBench task x model tables, synced on demand
 ```

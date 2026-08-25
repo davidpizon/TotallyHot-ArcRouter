@@ -31,23 +31,22 @@ public sealed class SqliteJudgeShadowScoreStore : IJudgeShadowScoreStore
         using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO judge_shadow_scores (
-                correlation_id, created_at_utc, dimension, model, verifier_score, judge_score,
-                judge_model, judge_prompt_version, judge_latency_ms, used_logprobs, executed)
+                correlation_id, created_at_utc, dimension, model, static_score, judge_score,
+                judge_model, judge_prompt_version, judge_latency_ms, used_logprobs)
             VALUES (
-                $correlationId, $createdAtUtc, $dimension, $model, $verifierScore, $judgeScore,
-                $judgeModel, $judgePromptVersion, $judgeLatencyMs, $usedLogprobs, $executed);
+                $correlationId, $createdAtUtc, $dimension, $model, $staticScore, $judgeScore,
+                $judgeModel, $judgePromptVersion, $judgeLatencyMs, $usedLogprobs);
             """;
         command.Parameters.AddWithValue("$correlationId", record.CorrelationId);
         command.Parameters.AddWithValue("$createdAtUtc", record.CreatedAtUtc.ToString("O"));
         command.Parameters.AddWithValue("$dimension", record.Dimension);
         command.Parameters.AddWithValue("$model", record.Model);
-        command.Parameters.AddWithValue("$verifierScore", record.VerifierScore);
+        command.Parameters.AddWithValue("$staticScore", record.StaticScore);
         command.Parameters.AddWithValue("$judgeScore", record.JudgeScore);
         command.Parameters.AddWithValue("$judgeModel", record.JudgeModel);
         command.Parameters.AddWithValue("$judgePromptVersion", record.JudgePromptVersion);
         command.Parameters.AddWithValue("$judgeLatencyMs", record.JudgeLatencyMs);
         command.Parameters.AddWithValue("$usedLogprobs", record.UsedLogprobs ? 1 : 0);
-        command.Parameters.AddWithValue("$executed", record.Executed ? 1 : 0);
 
         command.ExecuteNonQuery();
         return Task.CompletedTask;

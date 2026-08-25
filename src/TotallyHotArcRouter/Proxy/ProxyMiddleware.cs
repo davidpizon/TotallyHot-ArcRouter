@@ -13,7 +13,7 @@ using TotallyHot.ArcRouter.Proxy.Translation;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Router.Classification;
 using TotallyHot.ArcRouter.Router.Embeddings;
-using TotallyHot.ArcRouter.Sandbox.Ingress;
+using TotallyHot.ArcRouter.Quality.Ingress;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Transcripts;
 using Microsoft.AspNetCore.Http;
@@ -82,7 +82,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     private readonly IUsageExtractor _usageExtractor;
     private readonly IResponseTextExtractor _responseTextExtractor;
     private readonly ITelemetryPublisher _telemetryPublisher;
-    private readonly ISandboxIngress? _sandboxIngress;
+    private readonly IQualityIngress? _qualityIngress;
     private readonly ISpendTracker _spendTracker;
     private readonly IModelPriceLookup? _priceLookup;
     private readonly IReadOnlyDictionary<string, IPayloadTranslator> _translators;
@@ -150,7 +150,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// <param name="usageExtractor">Optional usage extractor; defaults to <see cref="UsageExtractor"/>.</param>
     /// <param name="responseTextExtractor">Optional response-text extractor; defaults to <see cref="ResponseTextExtractor"/>.</param>
     /// <param name="telemetryPublisher">Optional telemetry publisher; defaults to a fresh <see cref="TelemetryPublisher"/> backed by a private, unshared <see cref="TelemetryBroadcaster"/> (a safe no-op, since nothing is ever registered to receive from it).</param>
-    /// <param name="sandboxIngress">Optional sandbox ingress façade; when supplied, completed responses are enqueued for off-path execution-grounded scoring. Best-effort and non-blocking; defaults to <see langword="null"/> (disabled).</param>
+    /// <param name="qualityIngress">Optional quality-verifier ingress façade; when supplied, completed responses are enqueued for off-path grading. Best-effort and non-blocking; defaults to <see langword="null"/> (disabled).</param>
     /// <param name="spendTracker">Optional running-spend tracker; defaults to <see cref="NullSpendTracker"/> (a safe no-op) so existing callers/tests that don't need it are unaffected.</param>
     /// <param name="priceLookup">Optional catalog price lookup (docs/router/model-price-catalog.md); when supplied, a paid route's per-request cost is estimated from the auto-refreshed price catalog. Defaults to <see langword="null"/> (disabled), leaving paid-model cost unknown as before.</param>
     /// <param name="translators">Optional per-provider payload translators (docs/router/unified-api-translation.md), keyed by provider name. A provider present here has its request/response/stream translated to and from OpenAI's shape (Gemini and Bedrock providers always; Anthropic when <see cref="IPayloadTranslator.ShouldTranslate"/> allows it for the request); a provider absent here, or whose translator vetoes this request, is forwarded byte-for-byte, exactly as before. Defaults to an empty map (all providers pass through unchanged).</param>
@@ -235,7 +235,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         IUsageExtractor? usageExtractor = null,
         IResponseTextExtractor? responseTextExtractor = null,
         ITelemetryPublisher? telemetryPublisher = null,
-        ISandboxIngress? sandboxIngress = null,
+        IQualityIngress? qualityIngress = null,
         ISpendTracker? spendTracker = null,
         IModelPriceLookup? priceLookup = null,
         IReadOnlyDictionary<string, IPayloadTranslator>? translators = null,
@@ -268,7 +268,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         _usageExtractor = usageExtractor ?? new UsageExtractor();
         _responseTextExtractor = responseTextExtractor ?? new ResponseTextExtractor();
         _telemetryPublisher = telemetryPublisher ?? new TelemetryPublisher(new TelemetryBroadcaster());
-        _sandboxIngress = sandboxIngress;
+        _qualityIngress = qualityIngress;
         _spendTracker = spendTracker ?? NullSpendTracker.Instance;
         _priceLookup = priceLookup;
         _translators = translators ?? NoTranslators;
@@ -1652,7 +1652,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             EmitUsageMetrics(route.Provider, requestedModel, promptTokens, completionTokens, cacheCreationTokens, cacheReadTokens, estimatedCostUsd);
         }
 
-        // Extracted once and reused below for the sandbox-ingress prompt - both read the same newest-user-
+        // Extracted once and reused below for the quality-ingress prompt - both read the same newest-user-
         // message text off the same already-parsed requestBody, so a second walk of its messages array
         // would just repeat the first.
         var newestUserMessage = RequestTextExtractor.ExtractNewestUserMessage(requestBody);
@@ -1661,12 +1661,12 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             ? TextTruncator.Truncate(responseText)
             : null;
 
-        // A stable id shared by this telemetry event and any off-path sandbox signal derived from the same
+        // A stable id shared by this telemetry event and any off-path quality signal derived from the same
         // response, so a dashboard can join the two.
         var correlationId = FormattableString.Invariant($"{sessionId}:{turnNumber}");
 
         // docs/router/live-feedback-learning-plan.md Phase 2c: this is the earliest point the correlation
-        // id a later-arriving SandboxResult carries is actually known - RequestInterceptor.ResolveModelRouteAsync
+        // id a later-arriving QualityResult carries is actually known - RequestInterceptor.ResolveModelRouteAsync
         // computed taskEmbedding well before session/turn resolution ran, so it could not key this itself.
         // Recorded here, immediately once both halves exist, rather than passed to RequestInterceptor.
         if (taskEmbedding is not null)
@@ -1770,12 +1770,12 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
         await _telemetryPublisher.PublishAsync(telemetryEvent, cancellationToken);
 
-        // Off-path, best-effort: hand the completed response to the sandbox for execution-grounded
+        // Off-path, best-effort: hand the completed response to the quality verifier for static and
         // scoring. The ingress samples, extracts, and enqueues without blocking; it never throws. Reuses
         // the already-extracted (untruncated) response text so no second copy of the body is made.
-        if (_sandboxIngress is not null && !string.IsNullOrEmpty(responseText))
+        if (_qualityIngress is not null && !string.IsNullOrEmpty(responseText))
         {
-            _sandboxIngress.TryIngest(new SandboxIngestContext(
+            _qualityIngress.TryIngest(new QualityIngestContext(
                 ResponseText: responseText,
                 Prompt: newestUserMessage ?? string.Empty,
                 Model: requestedModel,

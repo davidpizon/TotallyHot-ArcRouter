@@ -5,8 +5,8 @@ using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Classification;
 using TotallyHot.ArcRouter.Router.Embeddings;
-using TotallyHot.ArcRouter.Sandbox;
-using TotallyHot.ArcRouter.Sandbox.Extraction;
+using TotallyHot.ArcRouter.Quality;
+using TotallyHot.ArcRouter.Quality.Extraction;
 using TotallyHot.ArcRouter.Telemetry;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
@@ -78,15 +78,15 @@ namespace TotallyHot.ArcRouter.Proxy
         /// </param>
         /// <param name="dimensionInferrer">
         /// Infers the live dimension of the request in flight from its newest user message. Defaults to a
-        /// fresh <see cref="KeywordDimensionInferrer"/> when omitted - the same heuristic the sandbox's
+        /// fresh <see cref="KeywordDimensionInferrer"/> when omitted - the same heuristic the verifier's
         /// post-response path uses, so a request and its own later-observed score are classified
         /// identically. Also the default <paramref name="requestClassifier"/>'s dimension source when
         /// that parameter itself is omitted.
         /// </param>
-        /// <param name="sandboxOptions">
-        /// Optional source of <see cref="SandboxOptions.LiveMemoryPrefix"/>, which must match what
+        /// <param name="qualityOptions">
+        /// Optional source of <see cref="QualityOptions.LiveMemoryPrefix"/>, which must match what
         /// <see cref="Router.RouterMemoryScoreObserver"/> writes under for <paramref name="routerMemory"/>
-        /// lookups to ever hit. Defaults to <see cref="SandboxOptions"/>'s own default prefix when omitted.
+        /// lookups to ever hit. Defaults to <see cref="QualityOptions"/>'s own default prefix when omitted.
         /// </param>
         /// <param name="requestClassifier">
         /// PLAN.md Phase H's Context-leg classifier, run ahead of routing on every request. Defaults to a
@@ -120,7 +120,7 @@ namespace TotallyHot.ArcRouter.Proxy
             RouterMemory? routerMemory = null,
             ICircuitBreaker? circuitBreaker = null,
             IDimensionInferrer? dimensionInferrer = null,
-            IOptions<SandboxOptions>? sandboxOptions = null,
+            IOptions<QualityOptions>? qualityOptions = null,
             IRequestClassifier? requestClassifier = null,
             IRoutingPolicy? routingPolicy = null,
             IEmbeddingClient? embeddingClient = null,
@@ -133,7 +133,7 @@ namespace TotallyHot.ArcRouter.Proxy
             _routerMemory = routerMemory;
             _circuitBreaker = circuitBreaker ?? new CircuitBreaker();
             _dimensionInferrer = dimensionInferrer ?? new KeywordDimensionInferrer();
-            _liveMemoryPrefix = sandboxOptions?.Value.LiveMemoryPrefix ?? new SandboxOptions().LiveMemoryPrefix;
+            _liveMemoryPrefix = qualityOptions?.Value.LiveMemoryPrefix ?? new QualityOptions().LiveMemoryPrefix;
             _requestClassifier = requestClassifier ?? new HeuristicRequestClassifier(_dimensionInferrer);
             _routingPolicy = routingPolicy;
             _embeddingClient = embeddingClient;
@@ -250,7 +250,7 @@ namespace TotallyHot.ArcRouter.Proxy
             }
 
             // PLAN.md Phase G: the dimension this request's own routing decision reads is the same one a
-            // later-arriving sandbox score for this same prompt will be written under (RouterMemoryScoreObserver),
+            // later-arriving quality score for this same prompt will be written under (RouterMemoryScoreObserver),
             // so a verifier score written on request N can actually change the model selected on request N+1.
             // PLAN.md Phase H/I: the classification is computed once here and reused both for the dimension
             // key and for IsUtility, so the dimension key and the tier IRoutingPolicy sees can never

@@ -43,7 +43,7 @@ public sealed class DeferredTelemetryPublisher : ITelemetryPublisher
         Resolved.PublishLogLineAsync(logLine, cancellationToken);
 
     /// <inheritdoc />
-    public Task PublishSandboxSignalAsync(SandboxSignalEvent signal, CancellationToken cancellationToken = default) =>
-        Resolved.PublishSandboxSignalAsync(signal, cancellationToken);
+    public Task PublishQualitySignalAsync(QualitySignalEvent signal, CancellationToken cancellationToken = default) =>
+        Resolved.PublishQualitySignalAsync(signal, cancellationToken);
 }
 

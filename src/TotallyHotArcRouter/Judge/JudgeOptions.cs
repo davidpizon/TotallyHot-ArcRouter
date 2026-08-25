@@ -17,13 +17,15 @@ namespace TotallyHot.ArcRouter.Judge;
 public sealed class JudgeOptions
 {
     /// <summary>
-    /// Gets whether the shadow judge is enabled. Defaults to <see langword="false"/> - enabling the judge
-    /// is a deliberate operator choice, the same posture as
-    /// <see cref="Transcripts.TranscriptOptions.Enabled"/>. While this is <see langword="false"/> no
-    /// response text is cached, no job is enqueued, no HTTP call is made, and no row is written to
-    /// <c>judge_shadow_scores</c>. Overridden by the <c>router_settings</c> row
+    /// Gets whether the judge is enabled. The literal initializer here is <see langword="false"/>, but the
+    /// effective default is computed by <see cref="JudgeSettingsConfigureOptions"/>: absent a stored
+    /// setting, the judge turns on when an eligible free backbone can be resolved and stays off when it
+    /// cannot. While this is <see langword="false"/> no response text is cached, no job is enqueued, no
+    /// HTTP call is made, and no row is written to <c>judge_shadow_scores</c> - the quality verifier then
+    /// scores from static analysis alone. Overridden by the <c>router_settings</c> row
     /// <see cref="Router.RouterSettingsStore.JudgeEnabledKey"/>, so the System Settings window can toggle
-    /// it live; every consumer reads it through <c>IOptionsMonitor</c> rather than capturing it once.
+    /// it live and an explicit operator choice always beats the auto-detect; every consumer reads it
+    /// through <c>IOptionsMonitor</c> rather than capturing it once.
     /// </summary>
     public bool Enabled { get; init; }
 
@@ -64,7 +66,7 @@ public sealed class JudgeOptions
 
     /// <summary>
     /// Gets the maximum size, in UTF-16 characters, of a single response text cached for judging. Longer
-    /// text is truncated before it is cached, mirroring <c>SandboxOptions.MaxCapturedOutputBytes</c>'s
+    /// text is truncated before it is cached, mirroring <c>QualityOptions.MaxCapturedOutputBytes</c>'s
     /// philosophy of bounding worst-case memory regardless of traffic. Defaults to 65,536 characters.
     /// </summary>
     [Range(256, 10_000_000)]

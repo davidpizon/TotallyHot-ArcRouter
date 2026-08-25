@@ -9,8 +9,8 @@ using TotallyHot.ArcRouter.Proxy.Translation;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Classification;
-using TotallyHot.ArcRouter.Sandbox.DependencyInjection;
-using TotallyHot.ArcRouter.Sandbox.Execution;
+using TotallyHot.ArcRouter.Quality.DependencyInjection;
+using TotallyHot.ArcRouter.Quality.Grading;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tools;
 using Microsoft.Extensions.Configuration;
@@ -160,10 +160,12 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddSingleton<Router.Orchestrator.OodClusterBootstrapSampleSource>();
             services.AddSingleton<Router.Orchestrator.IClusterTrainingService, Router.Orchestrator.ClusterTrainingService>();
 
-            // Tools
+            // Tools. RunVisibleTests (which shelled out to `dotnet test` in a caller-supplied directory) and
+            // EstimateQuality (a placeholder length-and-comment heuristic) were removed along with the
+            // executing verifier: the first was a live path to running code we do not run, and the second
+            // was a competing quality API that the real static analyzers in TotallyHot.ArcRouter.Quality
+            // supersede outright.
             services.AddTransient<CheckSyntax>();
-            services.AddTransient<RunVisibleTests>();
-            services.AddTransient<EstimateQuality>();
 
             // Proxy
             services.AddOptions<ModelRoutingOptions>()
@@ -268,11 +270,11 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddSingleton<TelemetryPublisher>();
             services.AddSingleton<ITelemetryPublisher>(sp => sp.GetRequiredService<TelemetryPublisher>());
 
-            // Sandboxed executor (off-path, best-effort). IRouterScoreObserver resolves to a single
+            // Quality verifier (off-path, best-effort). IQualityScoreObserver resolves to a single
             // implementation, so a CompositeRouterScoreObserver fans each scored result out to both
             // RouterMemoryScoreObserver (live dim_best scores) and EmbeddingMemoryScoreObserver
             // (docs/router/live-feedback-learning-plan.md Phase 2c: memory_entries writes). Registered
-            // before AddSandbox so it wins over the library's Null default (which uses TryAdd).
+            // before AddQuality so it wins over the library's Null default (which uses TryAdd).
             services.AddSingleton<Router.Embeddings.PendingTaskEmbeddingCache>();
             services.AddSingleton<Router.Embeddings.PendingRequestCostCache>();
             services.AddSingleton<Router.Embeddings.PendingRequestProvenanceCache>();
@@ -324,9 +326,14 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddSingleton<TotallyHot.ArcRouter.Judge.IJudgeShadowScoreStore, TotallyHot.ArcRouter.Judge.SqliteJudgeShadowScoreStore>();
             services.AddSingleton<TotallyHot.ArcRouter.Judge.JudgeShadowScoreObserver>();
 
-            services.AddSingleton<IRouterScoreObserver>(sp =>
+            // Promotes the judge from a shadow observer to a real contributor: this is what tells the
+            // quality aggregator to hold a static verdict open for a judge grade instead of writing it
+            // immediately. Registered before AddQuality so it wins that method's TryAddSingleton default.
+            services.AddSingleton<TotallyHot.ArcRouter.Quality.Grading.IJudgeAvailability, TotallyHot.ArcRouter.Judge.JudgeAvailability>();
+
+            services.AddSingleton<IQualityScoreObserver>(sp =>
             {
-                var observers = new List<IRouterScoreObserver>
+                var observers = new List<IQualityScoreObserver>
                 {
                     sp.GetRequiredService<RouterMemoryScoreObserver>(),
                     sp.GetRequiredService<Router.EmbeddingMemoryScoreObserver>(),
@@ -352,7 +359,7 @@ namespace TotallyHot.ArcRouter.Hosting
 
                 return new Router.CompositeRouterScoreObserver(observers, sp.GetRequiredService<ILogger<Router.CompositeRouterScoreObserver>>());
             });
-            services.AddSandbox();
+            services.AddQuality();
 
             // In-flight request gauge (docs/router/routing-roi-regret-plan.md): a singleton so
             // ProxyMiddleware (incrementing per served request) and TaxonomyComparisonService

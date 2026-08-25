@@ -207,16 +207,16 @@ public sealed class RoutingOptions
     /// Gets the maximum number of entries <see cref="Router.Embeddings.PendingTaskEmbeddingCache"/> holds
     /// before evicting the oldest (FIFO) - docs/router/live-feedback-learning-plan.md Phase 2c. Bridges a
     /// request's task embedding (computed on the request path) to its later-arriving verifier score
-    /// (correlated only by <see cref="TotallyHot.ArcRouter.Sandbox.SandboxResult.RequestCorrelationId"/>);
-    /// bounded so an operator who disables the sandbox (scores never arrive) cannot grow this unboundedly.
+    /// (correlated only by <see cref="TotallyHot.ArcRouter.Quality.QualityResult.RequestCorrelationId"/>);
+    /// bounded so an operator who disables the verifier (scores never arrive) cannot grow this unboundedly.
     /// </summary>
     [Range(1, 1_000_000)]
     public int PendingEmbeddingCacheCapacity { get; init; } = 2_000;
 
     /// <summary>
     /// Gets how long, in seconds, <see cref="Router.Embeddings.PendingTaskEmbeddingCache"/> retains an
-    /// entry before it expires unclaimed - a score that never arrives (sandbox disabled, evaluation
-    /// dropped, request aborted) must not hold its slot forever. Default comfortably exceeds a sandboxed
+    /// entry before it expires unclaimed - a score that never arrives (verifier disabled, grading
+    /// dropped, request aborted) must not hold its slot forever. Default comfortably exceeds a graded
     /// evaluation's expected turnaround.
     /// </summary>
     [Range(1, 86_400)]

@@ -19,7 +19,11 @@ here. Treat each item as *unverified* rather than *proposed*.
 exploration plus targeted reads. Each carries a `file:line` citation so it can be re-verified
 independently. Findings are stated against the code as it exists, not against the design docs'
 description of it — where the two disagree, that disagreement is itself recorded as a finding
-(see [T-12](#t-12--seccomp-allowlist-is-defined-but-never-installed)).
+(see [T-12](#t-12--seccomp-allowlist-is-defined-but-never-installed), since closed).
+
+> **Note (post-audit change).** The sandboxed executor that T-11, T-12, and T-18 concern has since been
+> removed from the codebase; those three findings are closed as no longer applicable. The trust boundary
+> below reflects the current design, in which model-authored code is parsed but never executed.
 
 ---
 
@@ -63,9 +67,9 @@ flowchart TB
         MEM["RouterMemory / EmbeddingMemory<br/>steers future routing"]
     end
 
-    subgraph EXEC["Sandbox verifier — executes model-authored code"]
-        JAIL["Tier 1: unshare + cgroups v2<br/>inherits router environment"]
-        VM["Tier 2: Firecracker microVM"]
+    subgraph QUAL["Quality verifier — parses model-authored code, never runs it"]
+        PARSE["StructuralParser + static analyzers<br/>in-process, no subprocess"]
+        JUDGE["G-Eval judge<br/>outbound call to a free model"]
     end
 
     subgraph SECRETS["Secrets at rest — %LOCALAPPDATA%"]
@@ -84,8 +88,8 @@ flowchart TB
     MCP --> FWD
     FWD -->|"T-01 SSRF + credential egress"| UPSTREAM
     UPSTREAM -->|"T-13 forged tool_calls"| NORM
-    UPSTREAM --> EXEC
-    JAIL -->|"T-11 reads provider keys from env"| SECRETS
+    UPSTREAM --> QUAL
+    QUAL --> MEM
     V1 -->|"T-14 memory poisoning"| MEM
     ROUTER --> SECRETS
 ```
@@ -111,13 +115,13 @@ a later change does not undo them by accident.
   inherited ACL ([`SecureFile.cs:24-46`](../../src/TotallyHotArcRouter/Proxy/Management/SecureFile.cs)).
 - **Sandbox capability probe fails closed.** Non-Linux or no cgroups v2 degrades to Tier 0 static
   analysis; it never falls back to unjailed execution
-  ([`SandboxCapabilityProbe.cs:19-28`](../../src/TotallyHotArcRouter.Sandbox/Capability/SandboxCapabilityProbe.cs)).
+  ([`SandboxCapabilityProbe.cs:19-28`](../../src/TotallyHotArcRouter.Quality/Capability/SandboxCapabilityProbe.cs)).
 - **Client auth header is stripped before forwarding**, and stripped on configuration intent
   rather than on whether the credential happened to resolve — so a provider with an unset
   credential env var fails closed
   ([`ProxyMiddleware.cs:478-495`](../../src/TotallyHotArcRouter/Proxy/ProxyMiddleware.cs)).
 - **Tier-1 network air-gap.** An empty network namespace with no veth, so there is no route out
-  of a jailed run ([`JailCommandBuilder.cs:22-32`](../../src/TotallyHotArcRouter.Sandbox/Tier1/JailCommandBuilder.cs)).
+  of a jailed run ([`JailCommandBuilder.cs:22-32`](../../src/TotallyHotArcRouter.Quality/Tier1/JailCommandBuilder.cs)).
 
 ### 1.4 Severity scale
 
@@ -134,13 +138,20 @@ a later change does not undo them by accident.
 
 Ordered by remediation priority (`Today` severity first, `Exposed` as tiebreak).
 
+> **T-11, T-12, and T-18 are closed as no longer applicable.** All three were findings about the
+> sandboxed executor that ran model-generated code. That executor was removed outright — see
+> [`quality-verifier-architecture.md`](quality-verifier-architecture.md) — and nothing replaces it, so
+> the environment it inherited, the syscall filter it never installed, and the working directory it wrote
+> to no longer exist. They are retained below rather than deleted: the analysis is still the reason the
+> capability is gone, and a future proposal to reintroduce execution should have to read them first.
+
 | ID | Finding | Today | Exposed | CWE | Phase |
 |---|---|---|---|---|---|
 | [T-01](#t-01--provider-baseurl-is-unvalidated-ssrf--credential-exfiltration) | Provider `BaseUrl` unvalidated → SSRF + credential exfiltration | **Critical** | Critical | CWE-918, CWE-522 | 1 |
-| [T-11](#t-11--sandboxed-code-inherits-the-routers-full-environment) | Sandboxed model code inherits router environment (all API keys) | **Critical** | Critical | CWE-526, CWE-497 | 1 |
+| [T-11](#t-11--sandboxed-code-inherits-the-routers-full-environment) | ~~Sandboxed model code inherits router environment~~ — **CLOSED, not applicable** | ~~Critical~~ | — | CWE-526, CWE-497 | — |
 | [T-02](#t-02--v1-has-no-authentication-and-no-csrf-defense) | `/v1/*` unauthenticated + CSRF-reachable from any web page | **High** | Critical | CWE-352, CWE-306 | 1 |
 | [T-03](#t-03--host-header-is-unvalidated-dns-rebinding) | `AllowedHosts: "*"` → DNS rebinding reads responses | **High** | High | CWE-350 | 1 |
-| [T-12](#t-12--seccomp-allowlist-is-defined-but-never-installed) | `SeccompAllowlist` defined but never installed | **High** | High | CWE-693, CWE-1059 | 2 |
+| [T-12](#t-12--seccomp-allowlist-is-defined-but-never-installed) | ~~`SeccompAllowlist` defined but never installed~~ — **CLOSED, not applicable** | ~~High~~ | — | CWE-693, CWE-1059 | — |
 | [T-04](#t-04--management-auth-fails-open-on-a-blankmissing-token) | Management auth fails **open** on blank/missing token | **High** | Critical | CWE-636, CWE-1188 | 2 |
 | [T-13](#t-13--upstream-text-is-promoted-into-executable-tool_calls) | Upstream text promoted into structured `tool_calls` | **High** | High | CWE-74, CWE-807 | 3 |
 | [T-05](#t-05--client-headers-are-forwarded-upstream-on-a-denylist) | Client headers forwarded upstream on a denylist | **Medium** | High | CWE-644 | 2 |
@@ -152,7 +163,7 @@ Ordered by remediation priority (`Today` severity first, `Exposed` as tiebreak).
 | [T-08](#t-08--management-token-has-no-rotation-and-no-provenance-check) | Management token has no rotation, no provenance check | **Medium** | High | CWE-798, CWE-613 | 4 |
 | [T-17](#t-17--client-supplied-tool-schemas-are-injected-into-the-system-prompt) | Client tool schemas injected verbatim into system prompt | **Medium** | Medium | CWE-74 | 3 |
 | [T-09](#t-09--protectedsecretstore-is-windows-only) | `ProtectedSecretStore` is Windows-only | **Medium** | Medium | CWE-311 | 4 |
-| [T-18](#t-18--jail-working-directory-and-interpreter-path-are-not-hardened) | Jail workdir permissions + PATH-resolved interpreters | **Medium** | Medium | CWE-732, CWE-426 | 2 |
+| [T-18](#t-18--jail-working-directory-and-interpreter-path-are-not-hardened) | ~~Jail workdir permissions + PATH-resolved interpreters~~ — **CLOSED, not applicable** | ~~Medium~~ | — | CWE-732, CWE-426 | — |
 | [T-10](#t-10--pfx-private-key-and-password-generation-are-inconsistent-with-the-projects-own-standard) | `.pfx` private key unrestricted; GUID-derived password | **Low** | Medium | CWE-732, CWE-330 | 4 |
 | [T-19](#t-19--unbounded-per-request-response-buffering) | Unbounded per-request response buffering (4 MB × N) | **Low** | Medium | CWE-770 | 4 |
 
@@ -239,10 +250,15 @@ credential-invalidation case.
 
 **Today: Critical · Exposed: Critical · CWE-526, CWE-497**
 
+> **CLOSED — no longer applicable.** The jailed interpreter this describes no longer exists: model code
+> is never executed, so there is no child process to inherit the router's environment. The remediation
+> below (an explicit environment allowlist) was never implemented and is not needed. Retained for the
+> record — if execution is ever reintroduced, this is the first thing that must be solved.
+
 **Evidence.** The jailed interpreter is launched with no environment scrubbing:
 
 ```csharp
-// src/TotallyHotArcRouter.Sandbox/Tier1/LinuxJailLauncher.cs:115-134
+// src/TotallyHotArcRouter.Quality/Tier1/LinuxJailLauncher.cs:115-134
 startInfo.FileName = "unshare";
 // ... flags, "--", interpreter, script ...
 startInfo.UseShellExecute = false;
@@ -260,7 +276,7 @@ of them with `import os; print(os.environ)`.
 
 The Tier-1 network air-gap prevents direct egress, which is what keeps this from being trivially
 exploitable — but it does not contain the disclosure. Captured stdout flows into
-`ExecutionOutcome.Stdout` → `SandboxResult` → telemetry broadcast and Serilog sinks, and
+`ExecutionOutcome.Stdout` → `QualityResult` → telemetry broadcast and Serilog sinks, and
 `OutputRedactor` is explicitly documented as best-effort. Per [T-16](#t-16--output-redactor-misses-common-key-formats),
 it does not match the Anthropic or Google key formats at all. Any Tier-2 configuration that
 provisions network access, or any future runtime that relaxes `--net`, converts this directly into
@@ -279,7 +295,7 @@ exfiltration.
    assigning only the allowlisted keys is not sufficient.
 2. Apply the same scrubbing to the Firecracker Tier-2 launch path
    (`FirecrackerMicroVmLauncher`, `FirecrackerArgumentBuilder`) so the two tiers cannot diverge.
-3. Add a defense-in-depth assertion in `SandboxExecutionService`: if the resolved child
+3. Add a defense-in-depth assertion in `QualityGradingService`: if the resolved child
    environment contains any key matching the configured providers' `ValueEnvVar` names, fail the
    run rather than execute it. This makes a future regression loud instead of silent.
 
@@ -411,17 +427,21 @@ Controls that exist on paper, are believed to be active, and are not.
 
 **Today: High · Exposed: High · CWE-693, CWE-1059**
 
-**Evidence.** [`SeccompAllowlist.cs`](../../src/TotallyHotArcRouter.Sandbox/Tier1/SeccompAllowlist.cs)
+> **CLOSED — no longer applicable.** `SeccompAllowlist.cs` and the entire `Tier1/` directory were deleted
+> along with the executing verifier. There is no syscall filter to install because there is no untrusted
+> process to filter. Retained for the record.
+
+**Evidence.** [`SeccompAllowlist.cs`](../../src/TotallyHotArcRouter.Quality/Tier1/SeccompAllowlist.cs)
 defines a syscall allowlist. A repo-wide search for its usages finds **no call site that installs
 it** — no `libseccomp` P/Invoke, no `prctl(PR_SET_SECCOMP)`, no `bwrap --seccomp`. The only other
 `seccomp` references are the *detection* constant and the types that carry the result:
 
 ```csharp
-// src/TotallyHotArcRouter.Sandbox/Tier1/LinuxJailLauncher.cs:20
+// src/TotallyHotArcRouter.Quality/Tier1/LinuxJailLauncher.cs:20
 private const int SeccompKillExitCode = 128 + 31;
 ```
 
-`ConfigureStartInfo` ([`LinuxJailLauncher.cs:115-134`](../../src/TotallyHotArcRouter.Sandbox/Tier1/LinuxJailLauncher.cs))
+`ConfigureStartInfo` ([`LinuxJailLauncher.cs:115-134`](../../src/TotallyHotArcRouter.Quality/Tier1/LinuxJailLauncher.cs))
 launches `unshare <flags> -- <interpreter> <script>` and nothing else.
 
 **Impact.** Tier 1 is namespaces + cgroups only. Three consequences:
@@ -430,14 +450,14 @@ launches `unshare <flags> -- <interpreter> <script>` and nothing else.
    reachable from an unprivileged user namespace — the exact surface that historically carries
    local privilege-escalation CVEs, and the reason the allowlist was written.
 2. `ExecutionOutcome.SeccompDenied` can never be `true` from a real filter, so
-   `SandboxOptions.EscalateOnSeccompDenial` (default `true`,
-   [`SandboxOptions.cs:41-42`](../../src/TotallyHotArcRouter.Sandbox/SandboxOptions.cs)) is dead
-   configuration, and `SandboxExecutor`'s escalation branch
-   ([`SandboxExecutor.cs:79-86`](../../src/TotallyHotArcRouter.Sandbox/Execution/SandboxExecutor.cs))
+   `QualityOptions.EscalateOnSeccompDenial` (default `true`,
+   [`QualityOptions.cs:41-42`](../../src/TotallyHotArcRouter.Quality/QualityOptions.cs)) is dead
+   configuration, and `QualityGrader`'s escalation branch
+   ([`QualityGrader.cs:79-86`](../../src/TotallyHotArcRouter.Quality/Execution/QualityGrader.cs))
    is unreachable.
 3. The type-level documentation is **wrong** in a security-relevant way:
    `SandboxTier.Tier1Jail` is documented as "namespaces, cgroups v2, seccomp, tmpfs"
-   ([`SandboxTier.cs:15`](../../src/TotallyHotArcRouter.Sandbox/SandboxTier.cs)). Under the
+   ([`SandboxTier.cs:15`](../../src/TotallyHotArcRouter.Quality/SandboxTier.cs)). Under the
    project's own rule that stale docs are treated as missing docs, this is a defect in its own
    right — a reader auditing the sandbox is told a control is present that is not.
 
@@ -460,7 +480,7 @@ launches `unshare <flags> -- <interpreter> <script>` and nothing else.
   `159`, and `ExecutionOutcome.SeccompDenied` is `true`. `SandboxCapabilityProbe.DegradedReason`
   reports `seccomp-unavailable` on a host without the mechanism.
 - If removing: no symbol named `Seccomp*` remains, and `SandboxTier`'s summary no longer claims it.
-- Either way, `docs/router/sandboxed-executor-architecture.md` matches the implemented behavior.
+- Either way, the architecture doc matches the implemented behavior. (Moot: both the control and the doc are gone.)
 
 **Tests.** New `SeccompEnforcementTests` (Linux-gated); update
 `SandboxCapabilityProbeTests` for the new degradation reason.
@@ -606,7 +626,7 @@ correct and should be preserved by any fix here.
 **Evidence.**
 
 ```csharp
-// src/TotallyHotArcRouter.Sandbox/Redaction/OutputRedactor.cs:23
+// src/TotallyHotArcRouter.Quality/Redaction/OutputRedactor.cs:23
 new Regex("sk-[A-Za-z0-9]{16,}", RegexOptions.CultureInvariant, MatchTimeout),
 ```
 
@@ -616,7 +636,8 @@ does not redact Anthropic keys at all.** Google AI Studio keys (`AIza…`), Azur
 (32 hex chars, no distinguishing prefix), and Moonshot/Zhipu/MiniMax formats are likewise
 uncovered.
 
-**Impact.** This is the last line of defense for [T-11](#t-11--sandboxed-code-inherits-the-routers-full-environment)
+**Impact.** This was the last line of defense for
+[T-11](#t-11--sandboxed-code-inherits-the-routers-full-environment) (since closed)
 and for prompt content echoed through captured output into telemetry and Serilog sinks. Its
 failure is what turns that finding from "contained disclosure" into "logged disclosure".
 
@@ -689,16 +710,20 @@ which trusts any certificate presenting `CN=localhost` rather than pinning a thu
 
 **Today: Medium · Exposed: Medium · CWE-732, CWE-426**
 
+> **CLOSED — no longer applicable.** `NativeJailPool`, the per-lease `/dev/shm` directories, and the
+> PATH-resolved interpreter launch were all deleted with the executing verifier. Nothing writes model code
+> to disk and nothing resolves an interpreter to run it with. Retained for the record.
+
 **Evidence.**
 
 - Per-lease directories are created with default permissions:
-  `Directory.CreateDirectory(directory)` ([`NativeJailPool.cs:44`](../../src/TotallyHotArcRouter.Sandbox/Tier1/NativeJailPool.cs)),
+  `Directory.CreateDirectory(directory)` ([`NativeJailPool.cs:44`](../../src/TotallyHotArcRouter.Quality/Tier1/NativeJailPool.cs)),
   under `/dev/shm` on Linux — a world-writable, sticky tmpfs.
 - The snippet is written there before launch:
   `await File.WriteAllTextAsync(scriptPath, request.Code, …)`
-  ([`Tier1JailRuntime.cs:59-60`](../../src/TotallyHotArcRouter.Sandbox/Tier1/Tier1JailRuntime.cs)).
+  ([`Tier1JailRuntime.cs:59-60`](../../src/TotallyHotArcRouter.Quality/Tier1/Tier1JailRuntime.cs)).
 - Both `unshare` and the interpreter are resolved via `PATH`, not absolute paths
-  ([`LinuxJailLauncher.cs:119, 126`](../../src/TotallyHotArcRouter.Sandbox/Tier1/LinuxJailLauncher.cs)).
+  ([`LinuxJailLauncher.cs:119, 126`](../../src/TotallyHotArcRouter.Quality/Tier1/LinuxJailLauncher.cs)).
 
 **Impact.** Two distinct issues. First, default-permission directories under `/dev/shm` let any
 local account read the snippet and any artifacts it writes, and create a TOCTOU window between the
@@ -715,7 +740,7 @@ router's full environment, entirely bypassing the sandbox.
    resolved binary is not writable by non-root, and cache the result. Surface an unresolvable
    interpreter through `SandboxCapabilityProbe.DegradedReason` so the host degrades to Tier 0
    rather than failing per-run.
-3. Set the child's `PATH` to a fixed system value as part of the [T-11](#t-11--sandboxed-code-inherits-the-routers-full-environment)
+3. ~~Set the child's `PATH` to a fixed system value as part of the~~ [T-11](#t-11--sandboxed-code-inherits-the-routers-full-environment)
    environment allowlist — the two fixes share a code path and should land together.
 
 **Acceptance criteria.**
@@ -838,7 +863,7 @@ which are the least resistant to instruction-injection in the first place.
 namespace by `RouterMemoryScoreObserver`, and read back by
 `RequestInterceptor.ResolveAgenticRouteAsync` to rank candidates
 ([`RequestInterceptor.cs:229-236, 260-308`](../../src/TotallyHotArcRouter/Proxy/RequestInterceptor.cs)).
-`SandboxOptions.SamplingRate` defaults to `1.0`, so every eligible response is scored.
+`QualityOptions.SamplingRate` defaults to `1.0`, so every eligible response is scored.
 
 **Impact.** Because `/v1/*` is unauthenticated ([T-02](#t-02--v1-has-no-authentication-and-no-csrf-defense))
 and CSRF-reachable, an attacker can submit crafted prompts that classify into a chosen dimension
@@ -1144,8 +1169,9 @@ Applies at the end of every phase, per the repository's standing rules in `AGENT
 - [`signalr-hub-security.md`](signalr-hub-security.md) — the original management-token design that
   `TelemetryAuthInterceptor` translates to gRPC.
 - [`mcp-endpoint.md`](mcp-endpoint.md) — the MCP surface T-01 and T-08 concern.
-- [`sandboxed-executor-architecture.md`](sandboxed-executor-architecture.md) — the tier model
-  T-11, T-12, and T-18 concern; needs correction for T-12 either way.
+- [`quality-verifier-architecture.md`](quality-verifier-architecture.md) — what replaced the tier model
+  T-11, T-12, and T-18 concerned. The executing verifier those findings describe no longer exists;
+  `sandboxed-executor-architecture.md` was deleted with it.
 - [`tool-call-normalization.md`](tool-call-normalization.md) — the promotion pipeline T-13 and
   T-17 concern.
 - [`agent-cost-tracking.md`](agent-cost-tracking.md) — the budget model T-15 extends.

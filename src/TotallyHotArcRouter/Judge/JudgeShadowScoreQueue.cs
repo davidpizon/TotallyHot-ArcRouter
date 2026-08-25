@@ -7,8 +7,8 @@ namespace TotallyHot.ArcRouter.Judge;
 /// A bounded <see cref="Channel{T}"/>-backed <see cref="IJudgeShadowScoreQueue"/>. <see cref="TryEnqueue"/>
 /// uses a non-blocking <see cref="ChannelWriter{T}.TryWrite"/>; when the channel is full the write fails
 /// and the job is counted as dropped rather than queued unboundedly. Mirrors
-/// <see cref="Sandbox.Execution.SandboxWorkQueue"/> exactly, sized by
-/// <see cref="JudgeOptions.QueueCapacity"/> instead of <c>SandboxOptions.QueueCapacity</c>.
+/// <see cref="Quality.Grading.QualityWorkQueue"/> exactly, sized by
+/// <see cref="JudgeOptions.QueueCapacity"/> instead of <c>QualityOptions.QueueCapacity</c>.
 /// </summary>
 public sealed class JudgeShadowScoreQueue : IJudgeShadowScoreQueue
 {

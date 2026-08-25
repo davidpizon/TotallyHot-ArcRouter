@@ -1,26 +1,26 @@
-using TotallyHot.ArcRouter.Sandbox;
-using TotallyHot.ArcRouter.Sandbox.Execution;
+using TotallyHot.ArcRouter.Quality;
+using TotallyHot.ArcRouter.Quality.Grading;
 using Microsoft.Extensions.Logging;
 
 namespace TotallyHot.ArcRouter.Router;
 
 /// <summary>
-/// Fans a single scored <see cref="SandboxResult"/> out to every registered observer -
+/// Fans a single scored <see cref="QualityResult"/> out to every registered observer -
 /// <see cref="RouterMemoryScoreObserver"/> and <see cref="EmbeddingMemoryScoreObserver"/>
-/// (docs/router/live-feedback-learning-plan.md Phase 2c) - since <see cref="IRouterScoreObserver"/>
+/// (docs/router/live-feedback-learning-plan.md Phase 2c) - since <see cref="IQualityScoreObserver"/>
 /// otherwise resolves to a single implementation. One observer throwing does not stop the others: each is
 /// invoked independently and a failure is logged, matching every other off-path observation in this
 /// codebase's "never let a learning-path failure look like a routing failure" convention.
 /// </summary>
-public sealed class CompositeRouterScoreObserver : IRouterScoreObserver
+public sealed class CompositeRouterScoreObserver : IQualityScoreObserver
 {
-    private readonly IReadOnlyList<IRouterScoreObserver> _observers;
+    private readonly IReadOnlyList<IQualityScoreObserver> _observers;
     private readonly ILogger<CompositeRouterScoreObserver> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="CompositeRouterScoreObserver"/> class.</summary>
     /// <param name="observers">The observers to fan out to, in invocation order.</param>
     /// <param name="logger">The logger.</param>
-    public CompositeRouterScoreObserver(IReadOnlyList<IRouterScoreObserver> observers, ILogger<CompositeRouterScoreObserver> logger)
+    public CompositeRouterScoreObserver(IReadOnlyList<IQualityScoreObserver> observers, ILogger<CompositeRouterScoreObserver> logger)
     {
         ArgumentNullException.ThrowIfNull(observers);
         ArgumentNullException.ThrowIfNull(logger);
@@ -30,7 +30,7 @@ public sealed class CompositeRouterScoreObserver : IRouterScoreObserver
     }
 
     /// <inheritdoc />
-    public async Task ObserveAsync(SandboxResult result, CancellationToken cancellationToken = default)
+    public async Task ObserveAsync(QualityResult result, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(result);
 
@@ -44,7 +44,7 @@ public sealed class CompositeRouterScoreObserver : IRouterScoreObserver
             {
                 _logger.LogWarning(
                     ex,
-                    "Router score observer {ObserverType} threw while observing a sandbox result; continuing with the remaining observers.",
+                    "Router score observer {ObserverType} threw while observing a quality result; continuing with the remaining observers.",
                     observer.GetType().Name);
             }
         }

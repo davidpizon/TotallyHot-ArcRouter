@@ -1,4 +1,6 @@
 using TotallyHot.ArcRouter.Judge;
+using TotallyHot.ArcRouter.Quality;
+using TotallyHot.ArcRouter.Quality.Grading;
 using TotallyHot.ArcRouter.Tests.TestSupport;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -111,7 +113,8 @@ public class JudgeShadowScoreDrainServiceTests
         PendingResponseTextCache cache,
         IJudgeClient judgeClient,
         IJudgeShadowScoreStore store,
-        StaticOptionsMonitor<JudgeOptions>? options = null)
+        StaticOptionsMonitor<JudgeOptions>? options = null,
+        IQualityScoreAggregator? aggregator = null)
     {
         var queue = new JudgeShadowScoreQueue(Options.Create(new JudgeOptions { QueueCapacity = 10 }));
         return new JudgeShadowScoreDrainService(
@@ -120,11 +123,12 @@ public class JudgeShadowScoreDrainServiceTests
             judgeClient,
             store,
             options ?? new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions { Enabled = true, PromptVersion = "g-eval-v1" }),
+            aggregator ?? new RecordingAggregator(),
             NullLogger<JudgeShadowScoreDrainService>.Instance);
     }
 
     private static JudgeShadowScoringJob MakeJob(string correlationId) =>
-        new(correlationId, "algorithm", "claude-opus-4-6", VerifierScore: 0.6, Executed: true);
+        new(correlationId, "algorithm", "claude-opus-4-6", StaticScore: 0.6);
 
     private sealed class FakeJudgeClient : IJudgeClient
     {
@@ -163,5 +167,34 @@ public class JudgeShadowScoreDrainServiceTests
         public Task<int> DeleteOldestAsync(int count, CancellationToken cancellationToken = default) => Task.FromResult(0);
 
         public Task<int> DeleteBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken = default) => Task.FromResult(0);
+    }
+
+    /// <summary>
+    /// Records what the drain worker did to the quality join, so the tests can assert the judge's grade
+    /// actually reaches the aggregator - and that each failure path releases the held verdict instead of
+    /// leaving it to time out.
+    /// </summary>
+    private sealed class RecordingAggregator : IQualityScoreAggregator
+    {
+        public List<(string CorrelationId, double Score)> Completed { get; } = [];
+
+        public List<(string CorrelationId, string Reason)> Abandoned { get; } = [];
+
+        public Task SubmitAsync(QualityResult result, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task<bool> CompleteWithJudgeAsync(string correlationId, double judgeScore, CancellationToken cancellationToken = default)
+        {
+            Completed.Add((correlationId, judgeScore));
+            return Task.FromResult(true);
+        }
+
+        public Task<bool> AbandonJudgeAsync(string correlationId, string reason, CancellationToken cancellationToken = default)
+        {
+            Abandoned.Add((correlationId, reason));
+            return Task.FromResult(true);
+        }
+
+        public Task<int> SweepExpiredAsync(CancellationToken cancellationToken = default) => Task.FromResult(0);
     }
 }

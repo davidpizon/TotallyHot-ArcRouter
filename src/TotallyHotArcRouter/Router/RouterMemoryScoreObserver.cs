@@ -1,5 +1,5 @@
-using TotallyHot.ArcRouter.Sandbox;
-using TotallyHot.ArcRouter.Sandbox.Execution;
+using TotallyHot.ArcRouter.Quality;
+using TotallyHot.ArcRouter.Quality.Grading;
 using TotallyHot.ArcRouter.Telemetry;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -7,17 +7,17 @@ using Microsoft.Extensions.Options;
 namespace TotallyHot.ArcRouter.Router;
 
 /// <summary>
-/// Adapts sandbox-derived scores into <see cref="RouterMemory"/>. Live heuristic scores are written under
+/// Adapts verifier-derived scores into <see cref="RouterMemory"/>. Live heuristic scores are written under
 /// a configurable dimension prefix (default <c>live:</c>) so they occupy a separate namespace from the
-/// checked-in benchmark matrices the offline evaluation relies on (architecture doc §15).
+/// checked-in benchmark matrices the offline evaluation relies on.
 /// </summary>
-public sealed class RouterMemoryScoreObserver : IRouterScoreObserver
+public sealed class RouterMemoryScoreObserver : IQualityScoreObserver
 {
     /// <summary>The router memory this observer writes live scores into.</summary>
     private readonly RouterMemory _memory;
 
-    /// <summary>The sandbox options, carrying the live-memory dimension prefix.</summary>
-    private readonly SandboxOptions _options;
+    /// <summary>The quality options, carrying the live-memory dimension prefix.</summary>
+    private readonly QualityOptions _options;
 
     /// <summary>The logger.</summary>
     private readonly ILogger<RouterMemoryScoreObserver> _logger;
@@ -27,12 +27,12 @@ public sealed class RouterMemoryScoreObserver : IRouterScoreObserver
 
     /// <summary>Initializes a new instance of the <see cref="RouterMemoryScoreObserver"/> class.</summary>
     /// <param name="memory">The router memory to observe into.</param>
-    /// <param name="options">The sandbox options carrying the live-memory prefix.</param>
+    /// <param name="options">The quality options carrying the live-memory prefix.</param>
     /// <param name="logger">The logger.</param>
-    /// <param name="telemetryPublisher">Optional publisher for the dashboard's live execution-signal tile.</param>
+    /// <param name="telemetryPublisher">Optional publisher for the dashboard's live quality-signal tile.</param>
     public RouterMemoryScoreObserver(
         RouterMemory memory,
-        IOptions<SandboxOptions> options,
+        IOptions<QualityOptions> options,
         ILogger<RouterMemoryScoreObserver> logger,
         ITelemetryPublisher? telemetryPublisher = null)
     {
@@ -47,13 +47,13 @@ public sealed class RouterMemoryScoreObserver : IRouterScoreObserver
     }
 
     /// <inheritdoc />
-    public async Task ObserveAsync(SandboxResult result, CancellationToken cancellationToken = default)
+    public async Task ObserveAsync(QualityResult result, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(result);
 
         if (string.IsNullOrEmpty(result.Model))
         {
-            _logger.LogDebug("Sandbox result has no model attribution; skipping observation.");
+            _logger.LogDebug("Quality result has no model attribution; skipping observation.");
             return;
         }
 
@@ -65,10 +65,9 @@ public sealed class RouterMemoryScoreObserver : IRouterScoreObserver
         if (_logger.IsEnabled(LogLevel.Information))
         {
             _logger.LogInformation(
-                "Sandbox observed {Language} dim {Dimension} tier {Tier} model {Model} -> u={Score:F3} (correlation {CorrelationId}).",
+                "Quality observed {Language} dim {Dimension} model {Model} -> u={Score:F3} (correlation {CorrelationId}).",
                 result.Language,
                 dimension,
-                result.Tier,
                 result.Model,
                 score,
                 result.RequestCorrelationId);
@@ -76,23 +75,21 @@ public sealed class RouterMemoryScoreObserver : IRouterScoreObserver
 
         if (_telemetryPublisher is not null && !string.IsNullOrEmpty(result.RequestCorrelationId))
         {
-            var signal = new SandboxSignalEvent(
+            var signal = new QualitySignalEvent(
                 CorrelationId: result.RequestCorrelationId,
                 SessionId: result.SessionId,
                 Dimension: dimension,
                 Model: result.Model,
                 Language: result.Language,
-                Tier: result.Tier,
                 SyntaxValid: result.SyntaxValid,
-                Executed: result.Executed,
-                ExitCode: result.ExitCode,
-                TimedOut: result.TimedOut,
+                SyntaxAuthoritative: result.SyntaxAuthoritative,
+                AnalysisScore: result.AnalysisScore,
+                JudgeScore: result.JudgeScore,
                 UnifiedScore: score,
-                WallClockMs: result.WallClockMs,
-                PeakMemoryBytes: result.PeakMemoryBytes,
+                DegradedReason: result.DegradedReason,
                 TimestampUtc: DateTimeOffset.UtcNow);
 
-            await _telemetryPublisher.PublishSandboxSignalAsync(signal, cancellationToken).ConfigureAwait(false);
+            await _telemetryPublisher.PublishQualitySignalAsync(signal, cancellationToken).ConfigureAwait(false);
         }
     }
 }
