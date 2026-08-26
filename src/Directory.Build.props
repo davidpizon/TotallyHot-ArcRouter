@@ -9,4 +9,19 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
 
+  <!--
+    Single source of truth for the combined Router/GUI release version and the GitHub repo the
+    auto-updater checks (docs: the auto-update plan). Both TotallyHotArcRouter and
+    TotallyHotArcRouter.Gui compile these into an AssemblyMetadataAttribute (see each csproj's
+    ItemGroup below) instead of hardcoding or duplicating them in appsettings.json, so the two
+    apps can never disagree about which repo/version they're comparing against. Bump Version here
+    for every combined release; the GitHub Release tag is "v<Version>".
+  -->
+  <PropertyGroup>
+    <Version>1.0.0</Version>
+    <InformationalVersion>$(Version)</InformationalVersion>
+    <UpdateGitHubOwner>davidpizon</UpdateGitHubOwner>
+    <UpdateGitHubRepo>TotallyHot-ArcRouter</UpdateGitHubRepo>
+  </PropertyGroup>
+
 </Project>
