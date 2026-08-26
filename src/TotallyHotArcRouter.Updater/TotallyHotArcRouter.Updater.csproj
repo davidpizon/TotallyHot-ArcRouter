@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Plain net10.0 console app, deliberately with NO ProjectReference to TotallyHotArcRouter: it must
+         be able to run even while that app's own files are being replaced or are momentarily corrupted
+         mid-swap (docs/router/auto-update-plan.md Phase 2), so it cannot depend on anything living in the
+         directory it is about to overwrite. -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>TotallyHot.ArcRouter.Updater</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>preview</LangVersion>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- Matches every other project's convention (AGENTS.md): CS1591 (missing XML doc on a public
+         member) becomes a build error via the repo-wide TreatWarningsAsErrors, so undocumented public
+         API can't creep back in here either, even though nothing outside this project references it. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Exposes ArgumentParser.ExtractOption to the unit-test project, mirroring TotallyHotArcRouter.csproj's identical InternalsVisibleTo. -->
+    <InternalsVisibleTo Include="TotallyHotArcRouter.Updater.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Own, minimal file-sink logger (see Program.cs's remarks) - never Serilog.Sinks.EventLog/Console
+         dependencies the main Router carries, and never a dependency on the Router's own logging pipeline,
+         which may be down while this runs. -->
+    <PackageReference Include="Serilog" Version="4.4.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+    <!-- Bridges Serilog to the standard Microsoft.Extensions.Logging.ILogger&lt;T&gt; abstraction, so this
+         project's classes use the same ILogger&lt;T&gt;/LogInformation/structured-template convention as
+         every other project in the repo instead of Serilog's own ILogger API. -->
+    <PackageReference Include="Serilog.Extensions.Logging" Version="9.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
+    <!-- System.ServiceProcess.ServiceController's API surface compiles on any TFM; it throws
+         PlatformNotSupportedException at runtime on a non-Windows OS, which is acceptable here - this
+         updater exists only to service the Windows Service Windows Service hosting shipped in Phase 1. -->
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.0" />
+  </ItemGroup>
+
+</Project>

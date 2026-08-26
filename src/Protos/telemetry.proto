@@ -694,3 +694,64 @@ message QualitySignalEvent {
   optional string degraded_reason = 18;
 }
 
+// The GUI's System Settings window's "Software Update" section (docs/router/auto-update-plan.md
+// Phase 2): reads the Router's last-known self-update check outcome, forces an immediate re-check, and
+// triggers an apply. Same shape as the other admin services (unary reads/mutations), sharing the :5002
+// TLS loopback endpoint. Unlike the optional feature groups (LlmRouterModelAdmin, ClusterModelAdmin,
+// etc.), this service is mapped unconditionally, the same way RoutingModeAdminService is - update status
+// is core operational state, not an optional add-on.
+//
+// ApplyUpdate deliberately does not stream progress: it downloads and checksum-verifies the release
+// asset, and if that succeeds, launches TotallyHotArcRouter.Updater.exe as a detached process and
+// returns immediately with a "handoff succeeded" status. It cannot observe what happens after that,
+// because the updater's next act is to stop the very Windows Service this RPC is running inside of.
+service UpdateAdminService {
+  // Returns the last-known check outcome from IUpdateStateStore - never null after the background
+  // poller's first tick, and "no check has run yet" (every field at its proto3 zero value, unavailable
+  // reason UNSPECIFIED, checked_at_utc unset) beforehand.
+  rpc GetUpdateStatus (GetUpdateStatusRequest) returns (UpdateStatusResponse);
+
+  // Forces an immediate IReleaseCheckClient.CheckAsync call, records the outcome into IUpdateStateStore,
+  // and returns the fresh status - the GUI's "Check Now" button.
+  rpc CheckForUpdatesNow (CheckForUpdatesNowRequest) returns (UpdateStatusResponse);
+
+  // Downloads and checksum-verifies the currently-known-available update's release asset and, only if
+  // that succeeds, launches the detached updater process. Rejected with FAILED_PRECONDITION when no
+  // verified update is currently known available (i.e. the caller must GetUpdateStatus/CheckForUpdatesNow
+  // first) - the GUI's "Apply Update" button, gated behind its own confirmation dialog since this
+  // restarts the Router service.
+  rpc ApplyUpdate (ApplyUpdateRequest) returns (ApplyUpdateResponse);
+}
+
+message GetUpdateStatusRequest {}
+
+message CheckForUpdatesNowRequest {}
+
+message ApplyUpdateRequest {}
+
+// Mirrors TotallyHot.ArcRouter.Update.ReleaseCheckUnavailableReason.
+enum UpdateUnavailableReason {
+  UPDATE_UNAVAILABLE_REASON_UNSPECIFIED = 0;
+  UPDATE_UNAVAILABLE_REASON_NONE = 1;
+  UPDATE_UNAVAILABLE_REASON_NO_RELEASES_PUBLISHED = 2;
+  UPDATE_UNAVAILABLE_REASON_MALFORMED_TAG = 3;
+  UPDATE_UNAVAILABLE_REASON_ASSET_OR_CHECKSUM_MISSING = 4;
+  UPDATE_UNAVAILABLE_REASON_NETWORK_OR_API_FAILURE = 5;
+}
+
+message UpdateStatusResponse {
+  string current_version = 1;
+  // Empty when the latest version could not be determined (see unavailable_reason).
+  string latest_version = 2;
+  bool update_available = 3;
+  // Unset ("no check has run yet") only before the background poller's first tick.
+  google.protobuf.Timestamp checked_at_utc = 4;
+  UpdateUnavailableReason unavailable_reason = 5;
+  optional string unavailable_detail = 6;
+}
+
+message ApplyUpdateResponse {
+  bool succeeded = 1;
+  string message = 2;
+}
+

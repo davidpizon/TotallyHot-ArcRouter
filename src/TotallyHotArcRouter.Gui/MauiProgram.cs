@@ -71,6 +71,10 @@ public static class MauiProgram
         // Backs the System Settings window's Adaptive Routing row (Phase T6). A singleton for the same
         // reason, sharing the TLS gRPC port (5002) with the stores above. See Services/RouterSettingsAdminStore.cs.
         builder.Services.AddSingleton<RouterSettingsAdminStore>();
+        // Backs the System Settings window's Software Update section (docs/router/auto-update-plan.md
+        // Phase 2). A singleton for the same reason, sharing the TLS gRPC port (5002) with the stores
+        // above. See Services/UpdateStore.cs.
+        builder.Services.AddSingleton<UpdateStore>();
         // Backs the Model Distribution / Cost Analytics history / header ticker's real data (Phase 4,
         // §5.15). A singleton so its range-keyed cache survives tab switches; talks to the proxy's
         // /admin/usage API (port 5001), same as ProviderAdminStore. See Services/UsageStore.cs.

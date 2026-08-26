@@ -95,6 +95,11 @@ namespace TotallyHot.ArcRouter.Proxy
             var logRegModelAdmin = dependencies?.LogRegModelAdmin;
             var routerSettingsAdmin = dependencies?.RouterSettingsAdmin;
 
+            // Update (docs/router/auto-update-plan.md Phase 2) is mapped unconditionally, like
+            // RoutingModeAdminGrpcService above - so unlike every optional group, this one always has
+            // something to register, falling back to harmless no-ops when the caller didn't supply a group.
+            var updateAdmin = dependencies?.UpdateAdmin;
+
             // Own (and later dispose) the management client only when the caller didn't supply one. Note this
             // runs whether or not the management API is enabled, exactly as before the parameter moved into
             // ManagementApiDependencies - the client is this server's to dispose either way.
@@ -263,6 +268,12 @@ namespace TotallyHot.ArcRouter.Proxy
                                 services.AddSingleton(routerSettingsAdmin.EmbeddingMemory);
                             }
                         }
+
+                        // The Governance UI's "Software Update" section API (Phase 2). Always registered -
+                        // see the updateAdmin local's remarks above.
+                        services.AddSingleton(updateAdmin?.StateStore ?? new Update.UpdateStateStore());
+                        services.AddSingleton(updateAdmin?.ReleaseCheckClient ?? new Update.NullReleaseCheckClient());
+                        services.AddSingleton(updateAdmin?.Applier ?? new Update.NullUpdateApplier());
                     });
 
                     webBuilder.Configure(app =>
@@ -325,6 +336,10 @@ namespace TotallyHot.ArcRouter.Proxy
                             {
                                 endpoints.MapGrpcService<Router.RouterSettingsAdminGrpcService>();
                             }
+
+                            // The Governance UI's "Software Update" section API (Phase 2). Always mapped -
+                            // see the updateAdmin local's remarks above.
+                            endpoints.MapGrpcService<Update.UpdateAdminGrpcService>();
 
                             // The Governance UI's provider/credential/model management API. Only mapped
                             // when a writable store is supplied; shares this plain-HTTP loopback port with

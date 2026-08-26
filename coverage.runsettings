@@ -18,6 +18,8 @@
     <Functions>
       <Exclude>
         <Function>^TotallyHot\.ArcRouter\.Telemetry\.Contract\..*</Function>
+        <Function>^TotallyHot\.ArcRouter\.Updater\.Program\..*</Function>
+        <Function>^TotallyHot\.ArcRouter\.Updater\.WindowsServiceController\..*</Function>
       </Exclude>
     </Functions>
   </CodeCoverage>
