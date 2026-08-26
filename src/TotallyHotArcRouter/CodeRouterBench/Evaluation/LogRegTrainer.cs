@@ -1,8 +1,7 @@
 using System.Text.Json;
 using TotallyHot.ArcRouter.Models;
-using TotallyHot.ArcRouter.Router.Orchestrator;
 
-namespace TotallyHot.ArcRouter.CodeRouterBench;
+namespace TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 
 /// <summary>
 /// Phase N's static <c>logreg</c> comparison baseline (research-doc Table 4): reads the CodeRouterBench
@@ -73,7 +72,7 @@ public static class LogRegTrainer
                 $"The CodeRouterBench corpus database was not found at '{database.DatabasePath}' - is the corpus synced?");
         }
 
-        var examples = LoadTrainingExamples(database);
+        var examples = LoadOodTrainingExamples(database);
         if (examples.Count == 0)
         {
             throw new InvalidOperationException(
@@ -82,7 +81,7 @@ public static class LogRegTrainer
         }
 
         var (vocabulary, idf) = BuildVocabulary(examples, vocabularySize);
-        var vocabularyIndex = BuildIndex(vocabulary);
+        var vocabularyIndex = BuildVocabularyIndex(vocabulary);
         var features = examples
             .Select(example => ComputeTfIdf(example.Text, vocabularyIndex, idf))
             .ToList();
@@ -103,18 +102,16 @@ public static class LogRegTrainer
             TrainedFrom: $"split='ood', tasks={examples.Count}, vocabulary={vocabulary.Count}, classes={classes.Count}, trained {DateTimeOffset.UtcNow:O}");
     }
 
-    /// <summary>One (task text, winning model) training pair derived from the OOD split.</summary>
-    /// <param name="Text">The task's prompt text, extracted from its raw JSON.</param>
-    /// <param name="Label">The canonicalized model id that resolved the task most cheaply.</param>
-    private sealed record TrainingExample(string Text, string Label);
-
     /// <summary>
-    /// Builds the (task text, label) training set by joining each OOD task's extracted prompt with the
-    /// cheapest model that resolved it, per <see cref="Train"/>'s labeling rule.
+    /// Builds the (task id, text, label) training set by joining each OOD task's extracted prompt with the
+    /// cheapest model that resolved it, per <see cref="Train"/>'s labeling rule. Internal (not private) so
+    /// <see cref="KnnRetrievalIndexBuilder"/> shares this exact loading and labeling logic rather than
+    /// duplicating it - both baselines train from the same 176-task OOD split under the same "cheapest
+    /// resolver wins" label rule.
     /// </summary>
     /// <param name="database">The synced CodeRouterBench corpus to read the OOD split from.</param>
     /// <returns>Every task with both extractable prompt text and at least one resolving model.</returns>
-    private static List<TrainingExample> LoadTrainingExamples(BenchmarkDatabase database)
+    internal static IReadOnlyList<OodTrainingExample> LoadOodTrainingExamples(BenchmarkDatabase database)
     {
         using var connection = database.OpenConnection();
 
@@ -161,12 +158,12 @@ public static class LogRegTrainer
             }
         }
 
-        var examples = new List<TrainingExample>();
+        var examples = new List<OodTrainingExample>();
         foreach (var (taskId, text) in taskText)
         {
             if (bestResolverPerTask.TryGetValue(taskId, out var best))
             {
-                examples.Add(new TrainingExample(text, best.Model));
+                examples.Add(new OodTrainingExample(taskId, text, best.Model));
             }
         }
 
@@ -209,7 +206,7 @@ public static class LogRegTrainer
     /// <param name="vocabularySize">The maximum number of terms to keep.</param>
     /// <returns>The selected vocabulary terms and their parallel IDF values.</returns>
     private static (IReadOnlyList<string> Vocabulary, IReadOnlyList<double> Idf) BuildVocabulary(
-        List<TrainingExample> examples,
+        IReadOnlyList<OodTrainingExample> examples,
         int vocabularySize)
     {
         var documentFrequency = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -236,10 +233,15 @@ public static class LogRegTrainer
         return (vocabulary, idf);
     }
 
-    /// <summary>Builds a term-to-position lookup for a vocabulary, so feature vectors can be assembled by index rather than by repeated linear search.</summary>
+    /// <summary>
+    /// Builds a term-to-position lookup for a vocabulary, so feature vectors can be assembled by index
+    /// rather than by repeated linear search. Internal (not private) so <see cref="LogRegBaseline"/> can
+    /// build the same lookup once at construction from a deserialized artifact's vocabulary, rather than
+    /// duplicating this indexing logic for inference.
+    /// </summary>
     /// <param name="vocabulary">The vocabulary terms, in their fixed feature order.</param>
     /// <returns>A dictionary mapping each term to its index in <paramref name="vocabulary"/>.</returns>
-    private static Dictionary<string, int> BuildIndex(IReadOnlyList<string> vocabulary)
+    internal static Dictionary<string, int> BuildVocabularyIndex(IReadOnlyList<string> vocabulary)
     {
         var index = new Dictionary<string, int>(vocabulary.Count, StringComparer.Ordinal);
         for (var i = 0; i < vocabulary.Count; i++)
@@ -259,7 +261,13 @@ public static class LogRegTrainer
     /// <param name="vocabularyIndex">The vocabulary's term-to-index lookup.</param>
     /// <param name="idf">The vocabulary's parallel inverse-document-frequency values.</param>
     /// <returns>The document's nonzero (feature index, TF-IDF value) pairs.</returns>
-    private static (int Index, double Value)[] ComputeTfIdf(
+    /// <remarks>
+    /// Internal (not private) so <see cref="LogRegBaseline"/> reuses this exact featurization at inference
+    /// time - training and inference must compute TF-IDF identically for a fixed vocabulary's weights to
+    /// mean the same thing at both ends, the same reason <see cref="LogRegTextTokenizer"/> is shared rather
+    /// than reimplemented.
+    /// </remarks>
+    internal static (int Index, double Value)[] ComputeTfIdf(
         string text,
         IReadOnlyDictionary<string, int> vocabularyIndex,
         IReadOnlyList<double> idf)

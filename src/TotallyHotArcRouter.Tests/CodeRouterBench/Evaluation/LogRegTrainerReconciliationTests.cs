@@ -1,18 +1,19 @@
 using TotallyHot.ArcRouter.CodeRouterBench;
+using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 using TotallyHot.ArcRouter.PriceCatalog;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 
-namespace TotallyHot.ArcRouter.Tests.CodeRouterBench;
+namespace TotallyHot.ArcRouter.Tests.CodeRouterBench.Evaluation;
 
 /// <summary>
 /// The documented, reproducible <c>logreg</c> Phase N comparison-baseline training recipe: run
 /// <see cref="LogRegTrainer.Train"/> against the real, synced OOD split - the only split CodeRouterBench
 /// publishes task text for (see <see cref="LogRegTrainer"/>'s remarks) - and, to inspect the result,
-/// serialize it through <see cref="TotallyHot.ArcRouter.Router.Orchestrator.LogRegModelArtifactSerializer.Serialize"/>.
+/// serialize it through <see cref="LogRegModelArtifactSerializer.Serialize"/>.
 /// Skips itself via <see cref="Assert.SkipUnless"/> when <c>benchmark_ood_results</c> has no <c>resolved = 1</c>
 /// rows - sync the corpus first (Governance -> Benchmark Data, the <c>sync_benchmark_data</c> MCP tool, or
-/// <c>--sync-benchmark-data</c>) - the same self-skip pattern <see cref="CodeRouterBenchTable10ReconciliationTests"/>
+/// <c>--sync-benchmark-data</c>) - the same self-skip pattern <see cref="TotallyHot.ArcRouter.Tests.CodeRouterBench.CodeRouterBenchTable10ReconciliationTests"/>
 /// uses, since "data not synced" is an expected, non-broken state in CI and on most contributors' machines.
 /// </summary>
 [Trait("Category", "Integration")]
@@ -60,7 +61,7 @@ public class LogRegTrainerReconciliationTests
         var database = OpenRealDatabase();
         Assert.SkipUnless(AtLeastOneOodResultIsResolved(database), SkipReason);
 
-        var artifact = TotallyHot.ArcRouter.CodeRouterBench.LogRegTrainer.Train(database);
+        var artifact = LogRegTrainer.Train(database);
 
         Assert.False(artifact.IsPlaceholder);
         Assert.NotEmpty(artifact.Vocabulary);
@@ -70,7 +71,7 @@ public class LogRegTrainerReconciliationTests
             Assert.Equal(artifact.Vocabulary.Count + 1, weights.Length);
         }
 
-        var artifactJson = TotallyHot.ArcRouter.Router.Orchestrator.LogRegModelArtifactSerializer.Serialize(artifact);
+        var artifactJson = LogRegModelArtifactSerializer.Serialize(artifact);
         Assert.False(string.IsNullOrWhiteSpace(artifactJson));
     }
 }

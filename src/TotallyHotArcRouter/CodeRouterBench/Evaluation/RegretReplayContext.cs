@@ -11,4 +11,14 @@ namespace TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 /// (<see cref="RegretTaskOutcome.Cells"/>'s keys) — the only ids a baseline may legally return from
 /// <see cref="IRegretBaselineRouter.Route"/>.
 /// </param>
-public sealed record RegretReplayContext(string TaskId, string Dimension, IReadOnlyList<string> CandidateModelIds);
+/// <param name="TaskText">
+/// The task's prompt text, forwarded from <see cref="RegretTaskOutcome.TaskText"/> — never derived from
+/// <see cref="RegretTaskOutcome.Cells"/>, so exposing it here carries no outcome-row leakage.
+/// <see langword="null"/> on every split that publishes no task text (everything but OOD), which the
+/// text-limited baselines (<see cref="LogRegBaseline"/>) read as "route nothing on this task."
+/// </param>
+public sealed record RegretReplayContext(
+    string TaskId,
+    string Dimension,
+    IReadOnlyList<string> CandidateModelIds,
+    string? TaskText = null);

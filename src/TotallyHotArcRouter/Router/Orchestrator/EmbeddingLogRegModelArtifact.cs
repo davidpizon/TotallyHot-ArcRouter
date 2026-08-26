@@ -4,7 +4,7 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// A trained embedding-backed <c>logreg</c> voter model (docs/router/live-feedback-learning-plan.md
 /// Phase 3): one one-vs-rest logistic-regression weight vector per candidate model class, scored as a
 /// dense dot product against the task embedding rather than the sparse TF-IDF walk
-/// <see cref="LogRegModelArtifact"/> used. Trained per-installation from the operator's own synced corpus
+/// <see cref="CodeRouterBench.Evaluation.LogRegModelArtifact"/> used. Trained per-installation from the operator's own synced corpus
 /// and live traffic (docs/router/live-feedback-learning-plan.md Phase 4) and never checked in - the
 /// TF-IDF placeholder this replaces has been deleted outright rather than kept checked in, since an
 /// absent embedding-backed artifact is already a normal, honest state (<see cref="LogRegVoter"/> simply
@@ -19,7 +19,7 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// </param>
 /// <param name="ClassWeights">
 /// One weight vector per candidate model class, keyed by <see cref="Models.ModelNameCanonicalizer.Canonicalize"/>
-/// of the model id - the same keying convention <see cref="LogRegModelArtifact"/> used. Each vector has
+/// of the model id - the same keying convention <see cref="CodeRouterBench.Evaluation.LogRegModelArtifact"/> used. Each vector has
 /// length <see cref="EmbeddingDimension"/> + 1: index 0 is the class's bias term, indices
 /// <c>1..EmbeddingDimension</c> align with the embedding's own components.
 /// </param>

@@ -1,14 +1,14 @@
-namespace TotallyHot.ArcRouter.Router.Orchestrator;
+namespace TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 
 /// <summary>
 /// Phase N's static <c>logreg</c> comparison baseline (research-doc Table 4), produced by
-/// <see cref="CodeRouterBench.LogRegTrainer"/>: a fixed TF-IDF vocabulary plus one one-vs-rest
-/// logistic-regression weight vector per candidate model class, keyed through
-/// <see cref="Models.ModelNameCanonicalizer.Canonicalize"/> so the class keys match
-/// <see cref="CodeRouterBench.DimensionModelScoreMatrix"/>'s convention for the same reason - the
+/// <see cref="LogRegTrainer"/>: a fixed TF-IDF vocabulary plus one one-vs-rest logistic-regression weight
+/// vector per candidate model class, keyed through <see cref="Models.ModelNameCanonicalizer.Canonicalize"/>
+/// so the class keys match <see cref="DimensionModelScoreMatrix"/>'s convention for the same reason - the
 /// CodeRouterBench dataset's model spellings differ from the router's configured <c>ModelName</c>
 /// vocabulary. This TF-IDF-over-text design no longer backs the live <c>logreg</c> voter - see
-/// <see cref="LogRegVoter"/>'s remarks for why it was replaced by <see cref="EmbeddingLogRegModelArtifact"/>.
+/// <see cref="Router.Orchestrator.LogRegVoter"/>'s remarks for why it was replaced by
+/// <see cref="Router.Orchestrator.EmbeddingLogRegModelArtifact"/>.
 /// </summary>
 /// <param name="Vocabulary">
 /// The fixed vocabulary, in the index order every weight vector and <paramref name="InverseDocumentFrequency"/>

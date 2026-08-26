@@ -4,7 +4,7 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// Trains an <see cref="EmbeddingLogRegModelArtifact"/> from <see cref="LogRegTrainingSample"/> rows
 /// (docs/router/live-feedback-learning-plan.md Phase 4): one per-model linear regression head - "given
 /// this embedding, what score do I expect from model m?" - fit by plain, dependency-free batch gradient
-/// descent, mirroring <see cref="CodeRouterBench.LogRegTrainer"/>'s "training and inference both in
+/// descent, mirroring <see cref="CodeRouterBench.Evaluation.LogRegTrainer"/>'s "training and inference both in
 /// .NET" convention (PLAN.md Phase L).
 /// </summary>
 /// <remarks>

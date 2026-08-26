@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using TotallyHot.ArcRouter.CodeRouterBench;
+using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router.Embeddings;
 
@@ -14,7 +15,7 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// </summary>
 /// <remarks>
 /// <b>Regression target.</b> <c>benchmark_ood_results</c> carries no <c>score</c> column, only
-/// <c>resolved</c> - the same constraint <see cref="CodeRouterBench.LogRegTrainer"/> works around.
+/// <c>resolved</c> - the same constraint <see cref="CodeRouterBench.Evaluation.LogRegTrainer"/> works around.
 /// Unlike that trainer's one-winner-per-task classification labeling, this source emits one sample per
 /// <c>(task, model)</c> row with target <c>1.0</c> when <c>resolved = 1</c> and <c>0.0</c> otherwise -
 /// every row contributes a regression example for its own model's head, matching

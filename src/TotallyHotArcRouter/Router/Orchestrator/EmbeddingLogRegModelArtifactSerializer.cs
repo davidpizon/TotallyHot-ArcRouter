@@ -7,7 +7,7 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// JSON (de)serialization for <see cref="EmbeddingLogRegModelArtifact"/>. A separate DTO is used because
 /// <see cref="EmbeddingLogRegModelArtifact"/>'s <see cref="IReadOnlyDictionary{TKey,TValue}"/> member
 /// doesn't round-trip through <c>System.Text.Json</c>'s default record support without one - mirrors
-/// <see cref="LogRegModelArtifactSerializer"/>'s shape for the TF-IDF artifact.
+/// <see cref="CodeRouterBench.Evaluation.LogRegModelArtifactSerializer"/>'s shape for the TF-IDF artifact.
 /// </summary>
 public static class EmbeddingLogRegModelArtifactSerializer
 {

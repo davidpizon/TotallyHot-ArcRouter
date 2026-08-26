@@ -70,7 +70,7 @@ Status shown is each doc's own, verified against the code during the reconciliat
 | Doc | What it owns | Status |
 |---|---|---|
 | [`router/coderouterbench-sqlite-migration-plan.md`](router/coderouterbench-sqlite-migration-plan.md) | Benchmark corpus sync into SQLite, checksums, row counts | Shipped (all six phases) |
-| [`router/regret-evaluation-harness-plan.md`](router/regret-evaluation-harness-plan.md) | PLAN.md Phase N: `CumReg`/`AvgPerf`/`TotTok`/`$Total`/`Perf/$`, replay engine, comparison baselines | N1–N3 shipped; N4–N6 remain |
+| [`router/regret-evaluation-harness-plan.md`](router/regret-evaluation-harness-plan.md) | PLAN.md Phase N: `CumReg`/`AvgPerf`/`TotTok`/`$Total`/`Perf/$`, replay engine, comparison baselines, Orchestrator arm | N1–N5 shipped (N5's own exit criterion measured, not met — see its status note); N6 remains |
 | [`router/geval-shadow-scoring-plan.md`](router/geval-shadow-scoring-plan.md) | G-Eval shadow judge, then judge-as-verifier for non-executable dimensions | G1 shipped; G2–G3 proposed |
 | [`router/quality-verifier-architecture.md`](router/quality-verifier-architecture.md) | The Verifier: static analysis + G-Eval judge scoring (no code execution) | Implemented |
 
