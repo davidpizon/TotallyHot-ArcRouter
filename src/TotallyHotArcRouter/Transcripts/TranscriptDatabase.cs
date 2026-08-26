@@ -36,7 +36,8 @@ public sealed class TranscriptDatabase
             input_tokens       INTEGER NULL,
             output_tokens      INTEGER NULL,
             memory_entry_id    INTEGER NULL,
-            dim_best_model     TEXT    NULL
+            dim_best_model     TEXT    NULL,
+            scorer_version     TEXT    NULL
         );
 
         CREATE INDEX IF NOT EXISTS ix_request_transcripts_correlation_id
@@ -129,6 +130,46 @@ public sealed class TranscriptDatabase
 
         MigrateDimBestModelColumn(connection);
         MigrateTaxonomyComparisonRegretColumns(connection);
+        MigrateScorerVersionColumn(connection);
+    }
+
+    /// <summary>
+    /// Adds the <c>scorer_version</c> column to <c>request_transcripts</c> if it is missing, plus the index
+    /// <see cref="SqliteTranscriptStore"/>'s rescan sweep selects on, so a database created by a
+    /// pre-rescan build picks both up on startup instead of failing every sweep with "no such column".
+    /// </summary>
+    /// <param name="connection">An open connection to the transcript database.</param>
+    /// <remarks>
+    /// Same additive <c>PRAGMA</c>-check convention as <see cref="MigrateDimBestModelColumn"/>. The index
+    /// is created here rather than in <see cref="SchemaSql"/> because on an existing database the schema
+    /// statement runs <em>before</em> this migration, so indexing the column there would reference one that
+    /// does not exist yet.
+    /// <para>
+    /// The column is nullable with no backfill, and null carries a specific meaning the rescan depends on:
+    /// "this row has never been graded by a versioned scorer." Backfilling it to the current version would
+    /// mark rows as already-scanned that were graded by an older scorer, or never graded at all, silently
+    /// excluding exactly the rows the sweep exists to pick up.
+    /// </para>
+    /// </remarks>
+    private static void MigrateScorerVersionColumn(SqliteConnection connection)
+    {
+        using (var pragma = connection.CreateCommand())
+        {
+            pragma.CommandText = "SELECT COUNT(*) FROM pragma_table_info('request_transcripts') WHERE name = 'scorer_version';";
+            if (Convert.ToInt64(pragma.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) == 0)
+            {
+                using var alter = connection.CreateCommand();
+                alter.CommandText = "ALTER TABLE request_transcripts ADD COLUMN scorer_version TEXT NULL;";
+                alter.ExecuteNonQuery();
+            }
+        }
+
+        using var index = connection.CreateCommand();
+        index.CommandText = """
+            CREATE INDEX IF NOT EXISTS ix_request_transcripts_scorer_version
+                ON request_transcripts (scorer_version);
+            """;
+        index.ExecuteNonQuery();
     }
 
     /// <summary>

@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace TotallyHot.ArcRouter.Router.Orchestrator;
+namespace TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 
 /// <summary>
 /// JSON (de)serialization for <see cref="LogRegModelArtifact"/>. A separate DTO is used because
@@ -58,10 +58,10 @@ public static class LogRegModelArtifactSerializer
     /// Validates <paramref name="artifact"/>'s structural invariants - vocabulary non-empty and
     /// duplicate-free, <c>InverseDocumentFrequency</c> matching the vocabulary length with only finite
     /// values, and every class weight vector matching <c>Vocabulary.Count + 1</c> (bias + one per term)
-    /// with only finite values. Shared by <see cref="Deserialize"/> and <see cref="LogRegVoter"/>'s
-    /// model-artifact constructor, since the latter can receive an artifact built directly rather than
-    /// through <see cref="Deserialize"/> - either path must reject a malformed artifact before it can
-    /// throw <see cref="IndexOutOfRangeException"/> later during scoring.
+    /// with only finite values. Shared by <see cref="Deserialize"/> and <see cref="LogRegBaseline"/>'s
+    /// constructor, since the latter can receive an artifact built directly by <see cref="LogRegTrainer"/>
+    /// rather than through <see cref="Deserialize"/> - either path must reject a malformed artifact before
+    /// it can throw <see cref="IndexOutOfRangeException"/> later during scoring.
     /// </summary>
     /// <param name="artifact">The artifact to validate.</param>
     /// <exception cref="FormatException">The artifact violates one of the invariants above.</exception>

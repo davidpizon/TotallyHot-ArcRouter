@@ -8,6 +8,11 @@ namespace TotallyHot.ArcRouter.Quality.Extraction;
 /// Extracts the first runnable fenced code block from an assistant response, preferring blocks whose
 /// language is recognized, and tags it with an inferred dimension. Applies size and count caps.
 /// </summary>
+/// <remarks>
+/// The prompt is carried through onto <see cref="QualityRequest.Prompt"/> rather than only being consumed
+/// by <see cref="IDimensionInferrer"/>: a grader that cannot see the request cannot tell a correct answer
+/// from a well-formed answer to a different question. See <see cref="QualityRequest"/>'s remarks.
+/// </remarks>
 public sealed class CodeBlockSignalExtractor : ISignalExtractor
 {
     private readonly IDimensionInferrer _dimensionInferrer;
@@ -80,6 +85,7 @@ public sealed class CodeBlockSignalExtractor : ISignalExtractor
         return new QualityRequest(
             Code: code,
             Language: language,
+            Prompt: context.Prompt ?? string.Empty,
             Dimension: dimension,
             Model: context.Model,
             CorrelationId: context.CorrelationId,

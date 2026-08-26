@@ -131,6 +131,77 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
     }
 
     /// <inheritdoc />
+    public Task<IReadOnlyList<long>> LoadPendingQualityRescanAsync(
+        string scorerVersion,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(scorerVersion);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (!_options.Enabled)
+        {
+            return Task.FromResult<IReadOnlyList<long>>(Array.Empty<long>());
+        }
+
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        // "IS NOT $scorerVersion" rather than "<> $scorerVersion": SQL's three-valued logic makes
+        // `NULL <> 'x'` evaluate to NULL, not true, so a plain inequality would silently exclude every
+        // never-scanned row - exactly the rows this sweep exists to find.
+        command.CommandText = """
+            SELECT id FROM request_transcripts
+            WHERE response_text IS NOT NULL
+              AND scorer_version IS NOT $scorerVersion
+            ORDER BY id ASC
+            LIMIT $limit;
+            """;
+        command.Parameters.AddWithValue("$scorerVersion", scorerVersion);
+        command.Parameters.AddWithValue("$limit", limit);
+
+        var ids = new List<long>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            ids.Add(reader.GetInt64(0));
+        }
+
+        return Task.FromResult<IReadOnlyList<long>>(ids);
+    }
+
+    /// <inheritdoc />
+    public Task MarkQualityRescannedAsync(
+        long transcriptId,
+        string scorerVersion,
+        double? score,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(transcriptId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(scorerVersion);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (!_options.Enabled)
+        {
+            return Task.CompletedTask;
+        }
+
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE request_transcripts
+            SET score = $score, scorer_version = $scorerVersion
+            WHERE id = $id;
+            """;
+        command.Parameters.AddWithValue("$score", (object?)score ?? DBNull.Value);
+        command.Parameters.AddWithValue("$scorerVersion", scorerVersion);
+        command.Parameters.AddWithValue("$id", transcriptId);
+        command.ExecuteNonQuery();
+
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
     public Task<TranscriptRecord?> GetTranscriptAsync(long id, CancellationToken cancellationToken = default)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(id);

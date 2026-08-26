@@ -239,5 +239,11 @@ public class ClusterTrainingServiceTests
         public Task<IReadOnlyDictionary<string, TotallyHot.ArcRouter.Transcripts.ModelTokenAverage>> LoadObservedTokenAveragesAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyDictionary<string, TotallyHot.ArcRouter.Transcripts.ModelTokenAverage>>(
                 new Dictionary<string, TotallyHot.ArcRouter.Transcripts.ModelTokenAverage>());
+
+        public Task<IReadOnlyList<long>> LoadPendingQualityRescanAsync(string scorerVersion, int limit, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<long>>([]);
+
+        public Task MarkQualityRescannedAsync(long transcriptId, string scorerVersion, double? score, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
     }
 }

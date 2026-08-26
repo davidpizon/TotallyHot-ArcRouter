@@ -1,8 +1,8 @@
 using System.Reflection;
 using TotallyHot.ArcRouter.CodeRouterBench;
-using TotallyHot.ArcRouter.Router.Orchestrator;
+using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 
-namespace TotallyHot.ArcRouter.Tests.CodeRouterBench;
+namespace TotallyHot.ArcRouter.Tests.CodeRouterBench.Evaluation;
 
 /// <summary>
 /// Covers <see cref="LogRegTrainer.Train"/> end-to-end against a small, synthetic

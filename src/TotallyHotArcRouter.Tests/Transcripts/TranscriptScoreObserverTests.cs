@@ -87,5 +87,11 @@ public class TranscriptScoreObserverTests
 
         public Task<IReadOnlyDictionary<string, ModelTokenAverage>> LoadObservedTokenAveragesAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyDictionary<string, ModelTokenAverage>>(new Dictionary<string, ModelTokenAverage>());
+
+        public Task<IReadOnlyList<long>> LoadPendingQualityRescanAsync(string scorerVersion, int limit, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<long>>([]);
+
+        public Task MarkQualityRescannedAsync(long transcriptId, string scorerVersion, double? score, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
     }
 }

@@ -30,6 +30,30 @@ public sealed class TranscriptOptions
     public bool EnableEmbeddingBackfill { get; init; }
 
     /// <summary>
+    /// Gets whether the background quality rescan is enabled. Defaults to <see langword="false"/>. When
+    /// enabled, <see cref="QualityRescanService"/> grades saved transcript rows that the live path never
+    /// graded, and re-scores rows whose <c>scorer_version</c> is stale so the corpus can be re-measured
+    /// under a changed scorer. Independent of <see cref="Enabled"/>, and gated by it so the rescan never
+    /// runs when transcripts are disabled - with capture off there is no saved task data to grade.
+    /// </summary>
+    public bool EnableQualityRescan { get; init; }
+
+    /// <summary>
+    /// Gets how often <see cref="QualityRescanService"/> sweeps for rows needing a grade, in minutes.
+    /// Defaults to 5, matching <see cref="EmbeddingBackfillService"/>'s interval.
+    /// </summary>
+    [Range(1, 1_440)]
+    public int QualityRescanIntervalMinutes { get; init; } = 5;
+
+    /// <summary>
+    /// Gets how many rows <see cref="QualityRescanService"/> grades per sweep. Defaults to 100, matching
+    /// <see cref="EmbeddingBackfillService"/>'s batch size. Bounded because each row may cost a judge call
+    /// once the LLM grader portfolio lands, so a sweep's upper cost has to stay predictable.
+    /// </summary>
+    [Range(1, 10_000)]
+    public int QualityRescanBatchSize { get; init; } = 100;
+
+    /// <summary>
     /// Gets the maximum age in days for rows in <c>request_transcripts</c> before they become eligible
     /// for deletion by the retention purge (docs/router/self-organizing-classification-plan.md Phase T1e).
     /// Rows older than this are deleted by <see cref="TranscriptRetentionService"/>; defaults to 30 days.

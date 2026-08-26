@@ -1,11 +1,11 @@
-using TotallyHot.ArcRouter.Router.Orchestrator;
+using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 
-namespace TotallyHot.ArcRouter.Tests.Router.Orchestrator;
+namespace TotallyHot.ArcRouter.Tests.CodeRouterBench.Evaluation;
 
 /// <summary>
 /// Covers <see cref="LogRegModelArtifactSerializer.Deserialize"/>'s structural validation - length
 /// agreement between the vocabulary, IDF vector, and class weight vectors, and rejection of malformed or
-/// non-finite values that would otherwise silently propagate NaN into <see cref="LogRegVoter"/> scoring.
+/// non-finite values that would otherwise silently propagate NaN into <see cref="LogRegBaseline"/> scoring.
 /// </summary>
 public class LogRegModelArtifactSerializerTests
 {

@@ -56,6 +56,51 @@ public interface ITranscriptStore
     Task LinkMemoryEntryAsync(long transcriptId, long memoryEntryId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Loads up to <paramref name="limit"/> transcript ids whose saved response text has not yet been
+    /// graded by the scorer identified by <paramref name="scorerVersion"/>, oldest first, for
+    /// <see cref="QualityRescanService"/>. Returns an empty list when transcript capture is disabled or
+    /// every row is current.
+    /// </summary>
+    /// <param name="scorerVersion">The current <c>Quality:ScorerVersion</c>; rows already stamped with it are excluded.</param>
+    /// <param name="limit">The maximum number of row ids to return.</param>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    /// <returns>Transcript row ids needing a grade, up to <paramref name="limit"/> in size.</returns>
+    /// <remarks>
+    /// Rows with no <c>response_text</c> are excluded rather than returned and skipped: there is nothing to
+    /// grade, and returning them would let a run of text-less rows consume an entire batch and starve the
+    /// sweep. A row whose text is present but yields no code block is still stamped by
+    /// <see cref="MarkQualityRescannedAsync"/> with a null score, so it leaves the pending set instead of
+    /// being retried every sweep forever.
+    /// </remarks>
+    Task<IReadOnlyList<long>> LoadPendingQualityRescanAsync(
+        string scorerVersion,
+        int limit,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records the outcome of one rescan: writes <paramref name="score"/> and stamps
+    /// <paramref name="scorerVersion"/> onto the row, so the sweep does not pick it up again until the
+    /// scorer changes. A no-op when transcript capture is disabled or no row matches.
+    /// </summary>
+    /// <param name="transcriptId">The transcript row id.</param>
+    /// <param name="scorerVersion">The scorer version to stamp.</param>
+    /// <param name="score">The freshly graded score, or <see langword="null"/> when the row yielded nothing gradable.</param>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    /// <remarks>
+    /// The score is **overwritten**, not merged - a rescan under a changed scorer is meant to replace the
+    /// old scorer's verdict, which is what makes the corpus re-measurable. Note that any
+    /// <c>taxonomy_comparisons</c> row already computed from the previous score is not recomputed, so a
+    /// rescan can leave a comparison keyed to a score that has since moved; the comparison is a historical
+    /// record of what was decided at the time, and rewriting it would fabricate a decision that was never
+    /// made.
+    /// </remarks>
+    Task MarkQualityRescannedAsync(
+        long transcriptId,
+        string scorerVersion,
+        double? score,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Returns the total number of rows in <c>request_transcripts</c>, used by retention to enforce
     /// the <see cref="TranscriptOptions.MaxRows"/> bound. Returns 0 if transcript capture is disabled.
     /// </summary>

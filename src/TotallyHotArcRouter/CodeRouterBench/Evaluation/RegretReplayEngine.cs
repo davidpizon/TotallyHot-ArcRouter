@@ -27,10 +27,10 @@ public static class RegretReplayEngine
 
         foreach (var task in tasks)
         {
-            // The router sees only dimension + candidate ids - never task.Cells - enforcing "no leakage"
-            // at the call boundary rather than trusting each IRegretBaselineRouter implementation to
-            // police itself.
-            var context = new RegretReplayContext(task.TaskId, task.Dimension, [.. task.Cells.Keys]);
+            // The router sees only dimension + candidate ids + (when published) task text - never
+            // task.Cells - enforcing "no leakage" at the call boundary rather than trusting each
+            // IRegretBaselineRouter implementation to police itself.
+            var context = new RegretReplayContext(task.TaskId, task.Dimension, [.. task.Cells.Keys], task.TaskText);
             var selectedModelId = router.Route(context);
 
             // Online baselines (LinUCB/LinTS) get fed back exactly the reward of the arm they picked -

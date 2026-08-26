@@ -556,6 +556,12 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
 
         public Task<IReadOnlyDictionary<string, ModelTokenAverage>> LoadObservedTokenAveragesAsync(CancellationToken cancellationToken = default) =>
             inner.LoadObservedTokenAveragesAsync(cancellationToken);
+
+        public Task<IReadOnlyList<long>> LoadPendingQualityRescanAsync(string scorerVersion, int limit, CancellationToken cancellationToken = default) =>
+            inner.LoadPendingQualityRescanAsync(scorerVersion, limit, cancellationToken);
+
+        public Task MarkQualityRescannedAsync(long transcriptId, string scorerVersion, double? score, CancellationToken cancellationToken = default) =>
+            inner.MarkQualityRescannedAsync(transcriptId, scorerVersion, score, cancellationToken);
     }
 
     /// <summary>An in-memory <see cref="IMemoryEntryStore"/>, avoiding a second SQLite file per test.</summary>

@@ -16,12 +16,13 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// <para>
 /// <b>Replaces the TF-IDF-over-text design.</b> PLAN.md Phase L's original <c>logreg</c> scored a sparse
 /// TF-IDF vector over the task's prompt text against a checked-in placeholder artifact
-/// (<see cref="LogRegModelArtifact"/>) - abandoned because CodeRouterBench publishes no task text for the
-/// ID splits it was meant to train from (docs/router/live-feedback-learning-plan.md's "What we are
-/// actually able to train on"). The embedding is always available once Phase 2 computes one, so this
-/// voter scores that instead; <see cref="LogRegModelArtifact"/>/<see cref="LogRegTextTokenizer"/>/
-/// <see cref="CodeRouterBench.LogRegTrainer"/> remain in the tree only as Phase N's static comparison
-/// baseline (Phase 6 relocates them out of this namespace).
+/// (<see cref="CodeRouterBench.Evaluation.LogRegModelArtifact"/>) - abandoned because CodeRouterBench
+/// publishes no task text for the ID splits it was meant to train from
+/// (docs/router/live-feedback-learning-plan.md's "What we are actually able to train on"). The embedding
+/// is always available once Phase 2 computes one, so this voter scores that instead;
+/// <see cref="CodeRouterBench.Evaluation.LogRegModelArtifact"/>/<see cref="CodeRouterBench.Evaluation.LogRegTextTokenizer"/>/
+/// <see cref="CodeRouterBench.Evaluation.LogRegTrainer"/> now live in <see cref="CodeRouterBench.Evaluation"/>
+/// as Phase N's static comparison baseline, relocated out of this namespace per Phase 6.
 /// </para>
 /// <para>
 /// <b>No placeholder, ever.</b> The model artifact is per-installation, trained from the operator's own

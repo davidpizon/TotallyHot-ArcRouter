@@ -15,4 +15,15 @@ namespace TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 /// docs/router/regret-evaluation-harness-plan.md's candidate-derivation decision, this set — not a
 /// fixed global roster — is the candidate pool a baseline may choose from for this task.
 /// </param>
-public sealed record RegretTaskOutcome(string TaskId, string Dimension, IReadOnlyDictionary<string, RegretOutcomeCell> Cells);
+/// <param name="TaskText">
+/// The task's prompt text, when the source split publishes one — only the OOD split does (N4's
+/// text-availability constraint, the same one <see cref="LogRegTrainer"/> works around). <see langword="null"/>
+/// for every ID-test/probing task, which is what lets the text-limited baselines (<see cref="LogRegBaseline"/>,
+/// <see cref="KnnRetrievalBaseline"/>) report "not computable" on those splits rather than silently
+/// substituting something else.
+/// </param>
+public sealed record RegretTaskOutcome(
+    string TaskId,
+    string Dimension,
+    IReadOnlyDictionary<string, RegretOutcomeCell> Cells,
+    string? TaskText = null);

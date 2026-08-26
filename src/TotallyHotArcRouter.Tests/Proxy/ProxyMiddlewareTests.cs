@@ -670,6 +670,122 @@ public class ProxyMiddlewareTests
         Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
     }
 
+    // Verifies that GET /api/tags is answered locally from the configured ModelList, in Ollama's native
+    // tag list shape, and never reaches the upstream HTTP handler - the same local-discovery treatment
+    // /v1/models gets, so a client that adds this proxy as an "Ollama" provider (e.g. Visual Studio) can
+    // discover the configured models instead of getting a 400 from the normal per-model routing path.
+    [Fact]
+    public async Task InvokeAsync_GetOllamaTags_ReturnsConfiguredModels_AsOllamaShapedList_WithoutCallingUpstream()
+    {
+        var resolver = ModelRouteResolverTestFactory.CreateWithModelList(
+            ("gpt-5.4", "openai", "gpt-5.4-2026-01"),
+            ("claude-opus-4.6", "anthropic", "claude-opus-4-6"));
+        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var handler = new DelegatingHandlerStub(_ => throw new InvalidOperationException("Upstream should never be called for /api/tags."));
+        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+
+        var context = new DefaultHttpContext();
+        context.Request.Method = HttpMethods.Get;
+        context.Request.Scheme = "http";
+        context.Request.Host = new HostString("127.0.0.1:5001");
+        context.Request.Path = "/api/tags";
+        context.Response.Body = new MemoryStream();
+
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal("application/json", context.Response.ContentType);
+
+        context.Response.Body.Position = 0;
+        using var reader = new StreamReader(context.Response.Body, Encoding.UTF8);
+        using var document = JsonDocument.Parse(await reader.ReadToEndAsync(TestContext.Current.CancellationToken));
+
+        var models = document.RootElement.GetProperty("models").EnumerateArray().ToList();
+        Assert.Equal(2, models.Count);
+
+        Assert.Equal("gpt-5.4", models[0].GetProperty("name").GetString());
+        Assert.Equal("gpt-5.4", models[0].GetProperty("model").GetString());
+
+        Assert.Equal("claude-opus-4.6", models[1].GetProperty("name").GetString());
+        Assert.Equal("claude-opus-4.6", models[1].GetProperty("model").GetString());
+    }
+
+    // Verifies that a trailing slash on the path is tolerated, mirroring /v1/models' tolerance.
+    [Fact]
+    public async Task InvokeAsync_GetOllamaTags_TrailingSlashIsTolerated()
+    {
+        var resolver = ModelRouteResolverTestFactory.CreateWithModelList(("gpt-5.4", "openai", "gpt-5.4"));
+        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var handler = new DelegatingHandlerStub(_ => throw new InvalidOperationException("Upstream should never be called for /api/tags."));
+        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+
+        var context = new DefaultHttpContext();
+        context.Request.Method = HttpMethods.Get;
+        context.Request.Path = "/api/tags/";
+        context.Response.Body = new MemoryStream();
+
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+    }
+
+    // Verifies that POST /api/show is answered locally for a configured model - the follow-up request an
+    // Ollama-shaped client (e.g. Visual Studio's AI model picker) makes per model after GET /api/tags - and
+    // never reaches the upstream HTTP handler. Without this, the request falls through to the normal
+    // per-model routing path and gets forwarded upstream as a malformed chat/completion request.
+    [Fact]
+    public async Task InvokeAsync_PostOllamaShow_KnownModel_ReturnsOllamaShapedDetails_WithoutCallingUpstream()
+    {
+        var resolver = ModelRouteResolverTestFactory.CreateWithModelList(("gpt-5.4", "openai", "gpt-5.4-2026-01"));
+        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var handler = new DelegatingHandlerStub(_ => throw new InvalidOperationException("Upstream should never be called for /api/show."));
+        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+
+        var context = new DefaultHttpContext();
+        context.Request.Method = HttpMethods.Post;
+        context.Request.Path = "/api/show";
+        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+        context.Request.Body = new MemoryStream(requestBody);
+        context.Request.ContentLength = requestBody.Length;
+        context.Response.Body = new MemoryStream();
+
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal("application/json", context.Response.ContentType);
+
+        context.Response.Body.Position = 0;
+        using var reader = new StreamReader(context.Response.Body, Encoding.UTF8);
+        using var document = JsonDocument.Parse(await reader.ReadToEndAsync(TestContext.Current.CancellationToken));
+
+        Assert.True(document.RootElement.TryGetProperty("template", out _));
+        Assert.True(document.RootElement.TryGetProperty("details", out _));
+    }
+
+    // Verifies that POST /api/show for a model this proxy does not have configured answers 404 with an
+    // Ollama-shaped error body, matching real Ollama's own behavior, instead of falling through to the
+    // normal per-model routing path.
+    [Fact]
+    public async Task InvokeAsync_PostOllamaShow_UnknownModel_Returns404_WithoutCallingUpstream()
+    {
+        var resolver = ModelRouteResolverTestFactory.CreateWithModelList(("gpt-5.4", "openai", "gpt-5.4-2026-01"));
+        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var handler = new DelegatingHandlerStub(_ => throw new InvalidOperationException("Upstream should never be called for /api/show."));
+        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+
+        var context = new DefaultHttpContext();
+        context.Request.Method = HttpMethods.Post;
+        context.Request.Path = "/api/show";
+        var requestBody = Encoding.UTF8.GetBytes("""{"model":"deepseek-coder-6.7b-instruct"}""");
+        context.Request.Body = new MemoryStream(requestBody);
+        context.Request.ContentLength = requestBody.Length;
+        context.Response.Body = new MemoryStream();
+
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        Assert.Equal(StatusCodes.Status404NotFound, context.Response.StatusCode);
+    }
+
     // Covers the telemetry integration added to ProxyMiddleware: session resolution from a request
     // header, turn tracking, provider-aware usage extraction from the (non-streaming) upstream
     // response body, and publishing the resulting event - all layered on top of forwarding behavior

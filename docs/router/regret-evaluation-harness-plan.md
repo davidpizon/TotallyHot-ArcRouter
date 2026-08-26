@@ -5,7 +5,10 @@ Orchestrator ("the ensemble beats every single voter," "loop-complete routing be
 an assertion into a measurement, replaying CodeRouterBench through the router's actual decision code and
 a family of comparison baselines under one reward.
 
-**Status:** in progress — N1, N2, and N3 shipped (see their status notes below); N4-N6 remain. **Ordering:**
+**Status:** in progress — N1-N5 shipped (see their status notes below); N6 remains. N5's own exit
+criterion (Orchestrator beats DimensionBest, and reproduces the paper's regret ordering) was measured and
+**not met** as this harness is currently scoped — see N5's status note for the real numbers and why.
+**Ordering:**
 after `docs/router/live-feedback-learning-plan.md` Phases 1-4 (shipped) — see that plan's own note that
 measuring voters which structurally cannot fire would produce a benchmark of `dim_best` wearing an
 ensemble's name. Phases 5-6 of that plan remain open and do not block this one.
@@ -221,13 +224,23 @@ constructs, not routing policies the live proxy could register.
   `CodeRouterBench/DimensionModelScoreMatrix.cs`), argmax over candidates for the task's dimension. This
   is the *frozen* baseline — deliberately not `DimBestVoter`'s live-memory-preferring version, since Table
   4 specifies "frozen probing-set prior" for the static family.
-- **kNN Retrieval** — nearest-neighbor over a frozen probing-set embedding index (OOD only, per the
-  constraint above; the harness reports it absent on ID test rather than silently substituting something
-  else).
-- **LogReg** — reuses the existing `CodeRouterBench/LogRegTrainer.cs` TF-IDF artifact (already trained
-  from the OOD split, per `orchestrator-ensemble.md`'s `logreg` history and
-  `live-feedback-learning-plan.md` Phase 6's relocation note). OOD only, for
-  the same reason.
+- **kNN Retrieval** (`KnnRetrievalBaseline`, N4, shipped) — majority vote over the *k* nearest neighbors
+  (embedding cosine similarity, i.e. dot product since `EmbeddingResult.Vector` is already
+  unit-normalized) in a frozen `KnnRetrievalArtifact` index built by `KnnRetrievalIndexBuilder`. OOD only,
+  per the constraint above; on ID test it reports absent (`Route` returns `null` for every task) rather
+  than silently substituting something else. **Deviation from Table 4's literal "frozen probing-set
+  embedding index":** the probing split publishes no task text, the same constraint that forced LogReg
+  onto the 176-task OOD split — this baseline's index is therefore built *and* queried entirely within
+  OOD, leave-one-out (a query task's own entry is excluded from its neighbor search), an honest
+  reconstruction rather than an exact reproduction of Table 4. No live embedding calls happen during
+  replay: every OOD task's embedding is precomputed once by `KnnRetrievalIndexBuilder` (an offline step
+  that does call a real `IEmbeddingClient`), and `Route` only ever looks up a query's own precomputed
+  entry by task id — never embeds arbitrary text — preserving the harness's "no live API calls" property.
+- **LogReg** (`LogRegBaseline`, N4, shipped) — real TF-IDF inference (argmax over one-vs-rest class
+  scores) against the existing `LogRegTrainer`-trained artifact (already trained from the OOD split, per
+  `orchestrator-ensemble.md`'s `logreg` history and `live-feedback-learning-plan.md` Phase 6's relocation
+  note). OOD only, for the same reason; `Route` returns `null` whenever `RegretReplayContext.TaskText` is
+  unpublished (every ID-test/probing task).
 - **LinUCB / LinTS (categorical-context variant)** — `α = λ = 1` (LinUCB), `v = 0.5, λ = 1` (LinTS),
   one-hot context over dimension (× difficulty × language where the classifier exposes them), warm-started
   on the probing split with `seed = 42`, online per-arm posterior update using the same canonical reward
@@ -251,14 +264,48 @@ baseline's. Exploration (`RoutingOptions.EnableExploration`) is disabled for the
 evaluation measures the policy's exploitation quality; a separate, explicitly-labeled exploratory run can
 report the cost of exploration itself later, but is not part of this phase's exit criterion.
 
+**Shipped (N5) with a deliberately reduced voter set.** `OrchestratorArmFactory.Build` wires the real
+`OrchestratorRoutingPolicy` (`Router/Orchestrator/OrchestratorArmFactory.cs`) with only two of the live
+ensemble's five voters:
+
+- **`dim_best`** — a real `DimBestVoter` over the frozen probing-split prior, backed by a fresh, empty
+  `RouterMemory` so it never touches (or is influenced by) an operator's live memory database; it degrades
+  to the frozen prior on every task, exactly like `DimensionBestBaseline`.
+- **`logreg`** — a real, embedding-based `LogRegVoter`, trained fresh and in-memory (via the production
+  `EmbeddingLogRegTrainer`, never touching an operator's own `logreg_voter_model.json`) from the same OOD
+  outcome rows and precomputed embeddings N4 already loads for `KnnRetrievalBaseline` — no second embedding
+  pass, no live API call anywhere in the harness's replay path.
+
+**`memory_kNN`, `cluster_best`, and `llm_router` are deliberately excluded.** `memory_kNN` and
+`cluster_best` would otherwise need "memory"/cluster state manufactured from the same 176-task evaluation
+corpus being scored — a real judgment call, resolved by leaving them out rather than fabricating a live
+history that never happened. `cluster_best` doubly so: fitting a taxonomy to 176 tasks split across ~9
+dimensions would leave nearly every cluster below `RoutingOptions.ClusterBestMinObservations` and abstain
+everywhere anyway. `llm_router` requires a real local-model generation call, which the harness's "no live
+API calls" property forbids outright. This is a documented limitation of an isolated, offline harness with
+no live traffic behind it (this repository's own dev/build machine has no `agent_telemetry.db`,
+`transcripts.db`, or trained voter artifacts at all) — not a claim that the live 5-voter ensemble behaves
+identically.
+
+**Observed consequence, reported honestly per this plan's own standard.** With only `dim_best` (weight
+`0.9`) and `logreg` (weight `0.43`) wired, the Orchestrator arm's weighted argmax can never flip away from
+`dim_best`'s pick unless `dim_best` abstains — `0.43` cannot outweigh `0.9 × confidence` for any
+`dim_best`-confidence above `≈0.48`, which every task in this corpus clears. Empirically, on the real synced
+corpus, `orchestrator`'s `CumReg`/`AvgPerf`/`TotTok`/`$Total` are **bit-for-bit identical to `dim_best`'s**
+on both ID test and OOD (N5's reconciliation run, below) — `logreg` never overturns a single decision.
+This is a real, structural property of the two-voter reduction, not a measurement bug, and it is the reason
+N5's exit criterion (see below) is not met by this harness as scoped.
+
 ## Namespace and layout
 
 Lands in a new `TotallyHot.ArcRouter.CodeRouterBench.Evaluation` namespace under
 `src/TotallyHotArcRouter/CodeRouterBench/Evaluation/`, and — per Phase 6 of
 `live-feedback-learning-plan.md`, explicitly deferred to "land alongside Phase N itself" — `LogRegTrainer`,
-`LogRegTextTokenizer`, `LogRegModelArtifact`, and `LogRegModelArtifactSerializer` relocate into it at the
-same time, since they become this phase's LogReg-baseline implementation rather than router-voter
-infrastructure. `DimensionModelScoreMatrix` stays where it is (`CodeRouterBench/`) — it is still `dim_best`
+`LogRegTextTokenizer`, `LogRegModelArtifact`, and `LogRegModelArtifactSerializer` relocated into it at N4,
+since they became this phase's LogReg-baseline implementation rather than router-voter infrastructure
+(every prior in-namespace reference — `ClusterTermExtractor`'s shared tokenizer, `OodBootstrapSampleSource`/
+`OodClusterBootstrapSampleSource`'s prompt extraction, `LogRegVoter`'s doc comments — now points at the new
+namespace). `DimensionModelScoreMatrix` stays where it was (`CodeRouterBench/`) — it is still `dim_best`
 voter infrastructure too, not evaluation-only.
 
 ## Sub-phases
@@ -298,16 +345,74 @@ Landed incrementally; each is independently testable and mergeable.
   assert `AvgPerf` converges toward the strictly-better arm's score over 200 tasks;
   `LinThompsonSamplingBaselineTests.Replay_SameSeed_IsDeterministicAcrossRuns` and
   `WarmStart_SeededTwice_ProducesIdenticalPostWarmStartRoute` assert seed-42 reproducibility bit-for-bit.
-- **N4 — kNN Retrieval + LogReg baselines (OOD only).** Reuses/relocates `LogRegTrainer`. Exit: both report
-  "not computable — no task text" when pointed at `id_test`, and produce a real, non-placeholder score on
-  OOD from the synced corpus.
-- **N5 — Orchestrator arm + full comparison report.** Wires `OrchestratorRoutingPolicy` into the replay
-  loop, produces the ID-test and OOD comparison tables (all baselines + the Orchestrator, same columns as
-  research-doc Table 3), and evaluates PLAN.md's exit criterion: does the observed `CumReg` ordering match
-  the paper's (Orchestrator < DimensionBest < static classifiers < bandits < single models), and does the
-  Orchestrator beat DimensionBest? Publishes the numbers obtained either way — the plan's exit criterion is
-  explicit that failing to reproduce the ordering must be reported honestly, not hidden or re-tuned until
-  it passes.
+- **N4 — kNN Retrieval + LogReg baselines (OOD only). Shipped.** `LogRegTrainer`/`LogRegTextTokenizer`/
+  `LogRegModelArtifact`/`LogRegModelArtifactSerializer` relocated into
+  `TotallyHot.ArcRouter.CodeRouterBench.Evaluation` (see "Namespace and layout" above); `LogRegTrainer`
+  gained `LoadOodTrainingExamples`/`BuildVocabularyIndex`/`ComputeTfIdf` as internal (not private) members
+  so `LogRegBaseline` and `KnnRetrievalIndexBuilder` reuse its exact loading, labeling, and featurization
+  logic rather than duplicating it. `RegretTaskOutcome`/`RegretReplayContext` gained an optional
+  `TaskText` field (`null` on every split but OOD), threaded through by `RegretReplayEngine` alongside
+  dimension and candidate ids — carrying no additional leakage, since it is never derived from
+  `RegretTaskOutcome.Cells`. `OodRegretTaskOutcomeLoader` builds real `RegretTaskOutcome` rows (with text)
+  from the synced OOD split, resolving cost from the row's own `cost_usd` or, when absent, from
+  `benchmark_models` pricing over its token counts — the shared loader N5 reuses for its own OOD arm.
+  `LogRegBaseline` does real TF-IDF inference from `RegretReplayContext.TaskText`; `KnnRetrievalBaseline`
+  looks up a query task's own precomputed embedding by id in a `KnnRetrievalArtifact` frozen index (built
+  offline by `KnnRetrievalIndexBuilder`, the only call site that ever touches an `IEmbeddingClient`) and
+  majority-votes its *k* nearest (leave-one-out) neighbors' labels — see "Baselines" above for the kNN
+  deviation from Table 4's literal "probing-set" wording. Exit criterion met:
+  `N4BaselinesReconciliationTests.Replay_OnRealOodCorpus_ProducesNonPlaceholderScoresForBothBaselines`
+  (self-skipping like `LogRegTrainerReconciliationTests`) replays both baselines over the real synced OOD
+  corpus and asserts a nonzero scored-task count and a finite `CumReg` for each; the ID-test "not
+  computable" half needs no real corpus and is covered by
+  `LogRegBaselineTests.Route_TaskTextAbsent_ReturnsNull` and
+  `KnnRetrievalBaselineTests.Route_TaskIdNotInFrozenIndex_ReturnsNull`.
+- **N5 — Orchestrator arm + full comparison report. Shipped.** `OrchestratorArmFactory`/`OrchestratorArmBaseline`
+  wire the real `OrchestratorRoutingPolicy` into the replay loop (see "The Orchestrator arm" above for the
+  reduced two-voter wiring and why). `IdSplitRegretTaskOutcomeLoader` builds real `RegretTaskOutcome` rows
+  from `benchmark_id_results` for either the `probing` or `id_test` split (continuous `score` column, no
+  resolved-to-score conversion, `TaskText` always `null`), and `BenchmarkModelPricingLookup` factors the
+  cost-fallback logic N4's OOD loader already had so both loaders resolve cost identically.
+  `RegretComparisonReportBuilder.BuildReport` replays every Always-*m* (one per model observed in the
+  split), `DimensionBestBaseline`, both bandits (warm-started on `probing`), `LogRegBaseline`,
+  `KnnRetrievalBaseline`, and the Orchestrator arm over one split through the shared accumulator, and
+  `FormatMarkdownTable` renders research-doc Table 3's columns plus scored/skipped counts — the "which
+  baselines were text-limited" signal exit criterion #3 requires, shown as a `0`/full-skip row rather than
+  omitted. Exit criterion met (build + report produced):
+  `N5ComparisonReportReconciliationTests.Replay_OnRealCorpus_ProducesTheFullComparisonReport`
+  (self-skipping like `N4BaselinesReconciliationTests`) builds and prints both splits' reports against the
+  real synced corpus and asserts every row's `CumReg` is finite.
+
+  **The real acceptance criterion result, published per this doc's own "either way" mandate — not met.**
+  Running the reconciliation test against this repository's synced corpus on 2026-08-25 (dev/build machine,
+  no live traffic; see "The Orchestrator arm" above) produced:
+
+  | Split | dim_best `CumReg` | orchestrator `CumReg` | Orchestrator beats dim_best? | Best-of-all-computable `CumReg` |
+  |---|---:|---:|---|---|
+  | ID test (2,919 tasks) | 244.3459 | 244.3459 (bit-identical) | **No — exact tie** | dim_best/orchestrator (tied lowest) |
+  | OOD (176 tasks) | 43.7286 | 43.7286 (bit-identical) | **No — exact tie** | `linucb` at 41.4336 (lower than dim_best/orchestrator) |
+
+  Neither half of PLAN.md's exit criterion holds under this harness as scoped: the Orchestrator arm does
+  not beat DimensionBest (it structurally cannot, with only `dim_best`+`logreg` wired at their production
+  weights — see "The Orchestrator arm"'s consequence note), and on OOD the paper's expected ordering
+  (Orchestrator < DimensionBest < static classifiers < **bandits** < single models) is contradicted outright
+  — `linucb`, a bandit, achieves *lower* regret than both DimensionBest and the Orchestrator arm, the
+  opposite of where the paper's ordering places bandits. `logreg`/`knn_retrieval` correctly report
+  "not computable" (zero scored, all skipped) on ID test; on OOD, `knn_retrieval` skips 37 of 176 tasks
+  (a nearest neighbor whose only viable neighbors' labels fell outside that task's candidate pool) and
+  `logreg` (the standalone TF-IDF baseline) always picks `qwen3-max`, the model its "cheapest resolver
+  wins" training label favored most often in-sample. Full tables (all 8 Always-*m* baselines, both bandits,
+  every column) are reproduced by re-running the reconciliation test above; this changelog entry is the
+  "publish the numbers obtained either way" artifact, not a summary that omits the unfavorable half.
+
+  **Read this honestly, not as "the ensemble doesn't work."** This result is a property of the *harness's*
+  necessarily reduced two-voter reconstruction (an isolated, one-shot offline run has no live traffic to
+  honestly back `memory_kNN`/`cluster_best`, and no local LLM to back `llm_router`), not a measurement of
+  the live, full five-voter, sample-size-aware production ensemble. It is exactly the kind of finding
+  PLAN.md's exit criterion exists to surface rather than hide: the current offline reconstruction cannot
+  yet demonstrate the ensemble's claimed advantage, and closing that gap (a live-traffic arm, or a richer
+  offline bootstrap for the other three voters) is now a load-bearing fact about what remains, not an
+  assumption.
 - **N6 — CLI/GUI surface for re-running the harness on demand.** Follows the `--sync-benchmark-data` /
   Governance-pane pattern once N1-N5 are proven; not required for the exit criterion itself.
 
