@@ -98,6 +98,10 @@ public static class Program
         var (forcedModelName, remainingArgs) = ExtractModelArg(args);
 
         return Host.CreateDefaultBuilder(remainingArgs)
+            // No-op outside the Windows Service Control Manager, so `dotnet run`/console debugging
+            // and every other CreateHostBuilder test are unaffected - see the auto-update plan's
+            // Phase 1 for the Install-RouterService.ps1 script that registers this service name.
+            .UseWindowsService(options => options.ServiceName = "TotallyHotArcRouter")
             .UseSerilog((context, services, loggerConfiguration) => loggerConfiguration
                 .ReadFrom.Configuration(context.Configuration)
                 .ReadFrom.Services(services)

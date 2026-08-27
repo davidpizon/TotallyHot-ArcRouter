@@ -13,6 +13,7 @@ using TotallyHot.ArcRouter.Quality.DependencyInjection;
 using TotallyHot.ArcRouter.Quality.Grading;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tools;
+using TotallyHot.ArcRouter.Update;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -521,6 +522,29 @@ namespace TotallyHot.ArcRouter.Hosting
                     configuration.GetSection(McpOptions.SectionName).Bind(options));
             services.AddHostedService<McpHostedService>();
 
+            // docs/router/auto-update-plan.md Phase 2 (packaging superseded by
+            // docs/router/packaging-and-distribution.md): the Router's self-update *detection* pipeline
+            // only - it never downloads, verifies, or applies an update itself. GitHubReleaseCheckClient
+            // is registered as a typed HttpClient (rather than the IHttpClientFactory-named-client
+            // pattern OnnxEmbeddingClient uses) since it has exactly one HTTP concern and no reason to
+            // create more than one named client per use. Applying is entirely the GUI's responsibility
+            // (TotallyHot.ArcRouter.Gui.Telemetry.MsiUpdateApplier), reached from an explicit operator
+            // click; this service only records that it is about to happen, via
+            // UpdateAdminGrpcService.NotifyApplyStarting.
+            services.AddOptions<UpdateOptions>()
+                .Configure<IConfiguration>((options, configuration) =>
+                    configuration.GetSection(UpdateOptions.SectionName).Bind(options))
+                .ValidateDataAnnotations()
+                .Validate(options =>
+                {
+                    options.EnsureValid();
+                    return true;
+                })
+                .ValidateOnStart();
+            services.AddHttpClient<IReleaseCheckClient, GitHubReleaseCheckClient>();
+            services.AddSingleton<IUpdateStateStore, UpdateStateStore>();
+            services.AddHostedService<UpdateCheckHostedService>();
+
             // docs/router/self-organizing-classification-plan.md Phase T1d-T1e: background services for
             // embedding backfill and transcript retention. Both are registered unconditionally but are no-ops
             // when their respective feature flags are off (Enabled for retention, EnableEmbeddingBackfill for
@@ -648,6 +672,12 @@ namespace TotallyHot.ArcRouter.Hosting
                         {
                             EmbeddingMemory = sp.GetRequiredService<EmbeddingMemory>(),
                         },
+
+                        // Backs the Governance UI's System Settings window's "Software Update" section gRPC
+                        // API (docs/router/auto-update-plan.md Phase 2).
+                        UpdateAdmin = new UpdateAdminDependencies(
+                            sp.GetRequiredService<IUpdateStateStore>(),
+                            sp.GetRequiredService<IReleaseCheckClient>()),
                     });
             });
 

@@ -19,15 +19,41 @@
     <DockerfileContext>.</DockerfileContext>
   </PropertyGroup>
 
+  <!-- Self-contained win-x64 publish for the Windows Service deployment (auto-update plan Phase 1/6),
+       gated behind the "Service" publish profile so ordinary `dotnet build`/CI unit-test restores
+       aren't forced into a win-x64-only graph. -->
+  <PropertyGroup Condition="'$(PublishProfile)' == 'Service'">
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+  </PropertyGroup>
+
   <ItemGroup>
     <!-- Exposes internal helpers (e.g. ProviderCredentialResolver) to the unit-test project. -->
     <InternalsVisibleTo Include="TotallyHotArcRouter.Tests" />
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Compiles Directory.Build.props' UpdateGitHubOwner/UpdateGitHubRepo (auto-update plan) into
+         assembly metadata so UpdateOptions' default (before any appsettings.json override) comes
+         from this single repo-wide source rather than a second hand-maintained value - matches
+         TotallyHotArcRouter.Gui.csproj's identical copy of this ItemGroup. -->
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>UpdateGitHubOwner</_Parameter1>
+      <_Parameter2>$(UpdateGitHubOwner)</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>UpdateGitHubRepo</_Parameter1>
+      <_Parameter2>$(UpdateGitHubRepo)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Grpc.AspNetCore already transitively brings in Grpc.Tools (it's a meta-package for exactly
          this: server + client + codegen), but it's referenced explicitly here too so the codegen
          dependency isn't implicit - matches TotallyHotArcRouter.Gui.csproj's explicit Grpc.Tools reference. -->
+    <!-- Backs Program.cs's UseWindowsService() call (auto-update plan Phase 1) so the host can run
+         under the Windows Service Control Manager; a no-op when launched any other way. -->
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.0" />
     <PackageReference Include="AWSSDK.BedrockRuntime" Version="4.0.101.3" />
     <PackageReference Include="Grpc.AspNetCore" Version="2.83.0" />
     <PackageReference Include="Grpc.Tools" Version="2.83.0">

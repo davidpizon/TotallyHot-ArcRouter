@@ -22,6 +22,9 @@ namespace TotallyHot.ArcRouter.Tests
             var host = Program.CreateHostBuilder(args).Build();
 
             // Assert
+            // UseWindowsService() (auto-update plan Phase 1) is a no-op outside the Windows Service
+            // Control Manager, so this same build already exercises it - a separate test would only
+            // re-assert the identical outcome.
             Assert.NotNull(host);
         }
 

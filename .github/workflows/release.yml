@@ -1,0 +1,107 @@
+name: Release
+
+# Tag-triggered: pushing a "v<Directory.Build.props' Version>" tag (e.g. v1.2.3, matching this repo's
+# existing "bump Version, tag v<Version>" convention - see Directory.Build.props' comment) builds the
+# signed... well, unsigned-for-now (see the signing step below) MSI installer and publishes it plus
+# checksums.txt as GitHub Release assets, in the shape GitHubReleaseCheckClient expects:
+# https://github.com/<owner>/<repo>/releases/latest with exactly one *.msi asset and one checksums.txt
+# asset containing a `<sha256 hex>  <filename>` line for it (docs/router/packaging-and-distribution.md).
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build MSI and publish release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      # TotallyHotArcRouter.Gui.csproj is the only project needing this - see dotnet-ci.yml's identical
+      # step and its own comment.
+      - name: Install MAUI workload
+        run: dotnet workload install maui-windows
+
+      # Directory.Build.props' <Version> is this repo's single source of truth for the release version
+      # (see its own comment); the tag is expected to be "v<Version>" exactly. Fail fast here rather than
+      # publishing a release asset whose embedded ProductVersion silently disagrees with the tag that
+      # triggered it - GitHubReleaseCheckClient parses the tag as the version it compares against, so a
+      # mismatch would mean the MSI installs a version other than the one the tag (and therefore the
+      # Router's update check) claims.
+      - name: Verify tag matches Directory.Build.props Version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if (-not $tag.StartsWith("v")) {
+            Write-Error "Tag '$tag' does not start with 'v'."
+            exit 1
+          }
+          $tagVersion = $tag.Substring(1)
+
+          [xml]$props = Get-Content "src/Directory.Build.props"
+          $propsVersion = ($props.Project.PropertyGroup.Version | Where-Object { $_ }) | Select-Object -First 1
+
+          if ($tagVersion -ne $propsVersion) {
+            Write-Error "Tag version '$tagVersion' does not match Directory.Build.props Version '$propsVersion'. Bump Version and re-tag."
+            exit 1
+          }
+
+          Write-Host "Tag version '$tagVersion' matches Directory.Build.props."
+          echo "RELEASE_VERSION=$tagVersion" >> $env:GITHUB_ENV
+
+      - name: Restore
+        run: |
+          dotnet restore src/TotallyHotArcRouter/TotallyHotArcRouter.csproj
+          dotnet restore src/TotallyHotArcRouter.Gui/TotallyHotArcRouter.Gui.csproj
+
+      # Publishes both apps with their `Service` publish profile (RuntimeIdentifier=win-x64,
+      # SelfContained=true) - the exact layout the installer project's RouterPublishDir/GuiPublishDir
+      # default to, and what TotallyHotArcRouter.Installer.wixproj packages via <Files Include="...">
+      # harvesting (Package.wxs).
+      - name: Publish Router
+        run: dotnet publish src/TotallyHotArcRouter/TotallyHotArcRouter.csproj -c Release -p:PublishProfile=Service
+
+      - name: Publish GUI
+        run: dotnet publish src/TotallyHotArcRouter.Gui/TotallyHotArcRouter.Gui.csproj -c Release -p:PublishProfile=Service
+
+      - name: Build MSI
+        run: dotnet build src/TotallyHotArcRouter.Installer/TotallyHotArcRouter.Installer.wixproj -c Release
+
+      # TODO(signing): the MSI produced here is UNSIGNED - no code-signing certificate exists yet for this
+      # project (docs/router/packaging-and-distribution.md tracks this as an open prerequisite). Once one
+      # exists, add a `signtool sign /fd SHA256 /a /tr <timestamp-url> /td SHA256 <msi>` step here, before
+      # the checksum is computed below, so the published checksum covers the signed artifact. Without
+      # signing, Windows SmartScreen will warn on install and MsiUpdateApplier's future Authenticode
+      # verification (its own TODO) has nothing to check yet.
+      - name: Rename MSI and compute checksums.txt
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release-assets | Out-Null
+          $msiSource = Get-ChildItem -Path "src/TotallyHotArcRouter.Installer/bin/x64/Release" -Filter "*.msi" -Recurse | Select-Object -First 1
+          $msiName = "TotallyHotArcRouter-$env:RELEASE_VERSION.msi"
+          Copy-Item $msiSource.FullName "release-assets/$msiName"
+
+          $hash = (Get-FileHash "release-assets/$msiName" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $msiName" | Out-File -FilePath "release-assets/checksums.txt" -Encoding ascii -NoNewline
+          Add-Content -Path "release-assets/checksums.txt" -Value "" -NoNewline
+
+          Get-ChildItem release-assets
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            release-assets/*.msi
+            release-assets/checksums.txt
+          generate_release_notes: true

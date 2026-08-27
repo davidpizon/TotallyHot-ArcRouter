@@ -22,7 +22,13 @@
 
     <ApplicationTitle>TotallyHotArcRouter</ApplicationTitle>
     <ApplicationId>com.TotallyHotArcRouter.gui</ApplicationId>
-    <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+    <!-- Derived from Directory.Build.props' shared <Version> (auto-update plan Phase 0) rather than
+         hardcoded, so the GUI's displayed/compared version can never drift from the Router's.
+         ApplicationDisplayVersion must stay a 3-part semver (matching Version exactly) - the
+         Resizetizer's GeneratePackageAppxManifest task appends ApplicationVersion itself as the
+         4th component when building the appx manifest version, so pre-padding it here produces
+         a 4-part value the task then rejects. -->
+    <ApplicationDisplayVersion>$(Version)</ApplicationDisplayVersion>
     <ApplicationVersion>1</ApplicationVersion>
 
     <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
@@ -44,6 +50,21 @@
 
   <ItemGroup>
     <MauiIcon Include="Resources\AppIcon\appicon.svg" Color="#0f172a" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Compiles Directory.Build.props' UpdateGitHubOwner/UpdateGitHubRepo (auto-update plan) into
+         assembly metadata so the GUI can resolve which release to check/install even when there's
+         no reachable Router to ask (first-run/unreachable-fallback path) - matches
+         TotallyHotArcRouter.csproj's identical copy of this ItemGroup. -->
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>UpdateGitHubOwner</_Parameter1>
+      <_Parameter2>$(UpdateGitHubOwner)</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>UpdateGitHubRepo</_Parameter1>
+      <_Parameter2>$(UpdateGitHubRepo)</_Parameter2>
+    </AssemblyAttribute>
   </ItemGroup>
 
   <ItemGroup>

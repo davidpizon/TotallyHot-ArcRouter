@@ -694,3 +694,74 @@ message QualitySignalEvent {
   optional string degraded_reason = 18;
 }
 
+// The GUI's System Settings window's "Software Update" section (docs/router/auto-update-plan.md
+// Phase 2, superseded 2026-08-26 by the MSI packaging decision - see
+// docs/router/packaging-and-distribution.md): reads the Router's last-known self-update check outcome,
+// forces an immediate re-check, and receives the GUI's audit notification that an apply is starting.
+// Same shape as the other admin services (unary reads/mutations), sharing the :5002 TLS loopback
+// endpoint. Unlike the optional feature groups (LlmRouterModelAdmin, ClusterModelAdmin, etc.), this
+// service is mapped unconditionally, the same way RoutingModeAdminService is - update status is core
+// operational state, not an optional add-on.
+//
+// The Router no longer applies updates itself (that design - a detached TotallyHotArcRouter.Updater.exe
+// helper - was superseded by shipping one signed MSI, per the packaging decision). The GUI is the one
+// that downloads the MSI, verifies its checksum, and launches an elevated `msiexec` - all with
+// information it already has from GetUpdateStatus/CheckForUpdatesNow's asset_download_url/asset_sha256.
+// NotifyApplyStarting exists purely so the Router's own audit log records the apply before the Windows
+// Installer transaction stops this very service.
+service UpdateAdminService {
+  // Returns the last-known check outcome from IUpdateStateStore - never null after the background
+  // poller's first tick, and "no check has run yet" (every field at its proto3 zero value, unavailable
+  // reason UNSPECIFIED, checked_at_utc unset) beforehand.
+  rpc GetUpdateStatus (GetUpdateStatusRequest) returns (UpdateStatusResponse);
+
+  // Forces an immediate IReleaseCheckClient.CheckAsync call, records the outcome into IUpdateStateStore,
+  // and returns the fresh status - the GUI's "Check Now" button.
+  rpc CheckForUpdatesNow (CheckForUpdatesNowRequest) returns (UpdateStatusResponse);
+
+  // Audit-only: logs that the GUI is about to download/launch the installer for the named version,
+  // before the MSI transaction stops the Router's Windows Service. Always acknowledges - this RPC
+  // authorizes nothing and blocks nothing; the GUI decides whether to apply from its own cached
+  // GetUpdateStatus/CheckForUpdatesNow result and proceeds even if this call fails to reach the Router.
+  rpc NotifyApplyStarting (NotifyApplyStartingRequest) returns (NotifyApplyStartingResponse);
+}
+
+message GetUpdateStatusRequest {}
+
+message CheckForUpdatesNowRequest {}
+
+message NotifyApplyStartingRequest {
+  // The version the GUI is about to install, for the audit log line.
+  string version = 1;
+}
+
+message NotifyApplyStartingResponse {
+  bool acknowledged = 1;
+}
+
+// Mirrors TotallyHot.ArcRouter.Update.ReleaseCheckUnavailableReason.
+enum UpdateUnavailableReason {
+  UPDATE_UNAVAILABLE_REASON_UNSPECIFIED = 0;
+  UPDATE_UNAVAILABLE_REASON_NONE = 1;
+  UPDATE_UNAVAILABLE_REASON_NO_RELEASES_PUBLISHED = 2;
+  UPDATE_UNAVAILABLE_REASON_MALFORMED_TAG = 3;
+  UPDATE_UNAVAILABLE_REASON_ASSET_OR_CHECKSUM_MISSING = 4;
+  UPDATE_UNAVAILABLE_REASON_NETWORK_OR_API_FAILURE = 5;
+}
+
+message UpdateStatusResponse {
+  string current_version = 1;
+  // Empty when the latest version could not be determined (see unavailable_reason).
+  string latest_version = 2;
+  bool update_available = 3;
+  // Unset ("no check has run yet") only before the background poller's first tick.
+  google.protobuf.Timestamp checked_at_utc = 4;
+  UpdateUnavailableReason unavailable_reason = 5;
+  optional string unavailable_detail = 6;
+  // The installer MSI's direct download URL, set only when update_available is true. The GUI downloads
+  // this itself - the Router never does.
+  optional string asset_download_url = 7;
+  // The MSI's published SHA256 (lowercase hex), set only when update_available is true.
+  optional string asset_sha256 = 8;
+}
+

@@ -3,9 +3,11 @@
    picker (docs/router/geval-shadow-scoring-plan.md), plus destructive actions gated behind a typed
    confirmation word. *@
 @using TotallyHot.ArcRouter.Gui.Telemetry
+@implements IDisposable
 @inject LiveDataStore LiveDataStore
 @inject IGuiSettingsStore SettingsStore
 @inject RouterSettingsAdminStore RouterSettingsStore
+@inject TotallyHot.ArcRouter.Gui.Services.UpdateStore UpdateStore
 <div class="overlay-backdrop fixed inset-0 z-50 flex items-center justify-center"
      @onclick="OnClose">
     <div class="overlay-panel w-full max-w-md rounded-lg border border-slate-700"
@@ -107,6 +109,73 @@
                 }
             </div>
 
+            @* Software Update (docs/router/auto-update-plan.md Phase 2). Router self-update only - this
+               GUI does not update itself, it only displays the Router's update status and triggers its
+               apply. *@
+            <div class="space-y-2">
+                <label class="text-xs text-slate-400 font-medium uppercase tracking-widest">
+                    Software Update
+                </label>
+                @if (UpdateStore.Status is { } status)
+                {
+                    <p class="text-xs text-slate-400">
+                        Running <span class="font-mono text-slate-200">@status.CurrentVersion</span>
+                        @if (status.UpdateAvailable)
+                        {
+                            <span class="text-amber-400"> — update available: <span class="font-mono">@status.LatestVersion</span></span>
+                        }
+                        else if (!string.IsNullOrEmpty(status.LatestVersion))
+                        {
+                            <span> — up to date</span>
+                        }
+                    </p>
+                    @if (status.UnavailableReason != UpdateUnavailableReasonInfo.None)
+                    {
+                        <p class="text-xs text-slate-600">Last check: @status.UnavailableDetail</p>
+                    }
+                }
+                else if (UpdateStore.IsLoaded && !UpdateStore.IsReachable)
+                {
+                    <p class="text-xs text-amber-400">Could not reach the router. Is the proxy running?</p>
+                }
+                <div class="flex gap-2">
+                    <button @onclick="CheckForUpdatesNow" disabled="@UpdateStore.IsBusy" class="flex-1 btn btn-ghost">
+                        @(UpdateStore.IsBusy ? "Checking…" : "Check Now")
+                    </button>
+                    @if (UpdateStore.Status?.UpdateAvailable == true)
+                    {
+                        <button @onclick="StartApplyConfirmation" disabled="@UpdateStore.IsBusy" class="flex-1 btn btn-ghost-warning">
+                            Apply Update
+                        </button>
+                    }
+                </div>
+                @if (_confirmingApply)
+                {
+                    <div class="space-y-2 ds-destructive-box-warning">
+                        <p class="text-xs text-slate-400 leading-5">
+                            This will download and install the update, which requires administrator approval
+                            and will restart the application. Continue?
+                        </p>
+                        <div class="flex gap-2">
+                            <button @onclick="@(() => _confirmingApply = false)" class="flex-1 btn btn-ghost">
+                                Cancel
+                            </button>
+                            <button @onclick="ApplyUpdateConfirmed" disabled="@UpdateStore.IsBusy" class="flex-1 btn btn-critical">
+                                Confirm Apply
+                            </button>
+                        </div>
+                    </div>
+                }
+                @if (UpdateStore.LastApplyOutcome is { } applyOutcome)
+                {
+                    <p class="text-xs @(applyOutcome.Succeeded ? "text-emerald-400" : "text-red-400")">@applyOutcome.Message</p>
+                }
+                @if (_updateErrorMessage is not null)
+                {
+                    <p class="text-xs text-red-400">@_updateErrorMessage</p>
+                }
+            </div>
+
             @* Unified save *@
             <button @onclick="SaveAll" disabled="@_saving" class="btn btn-ghost w-full">
                 @(_saving ? "Saving…" : "Save")
@@ -198,6 +267,8 @@
     private bool _saving;
     private string? _routerSettingsMessage;
     private bool _routerSettingsSaveFailed;
+    private bool _confirmingApply;
+    private string? _updateErrorMessage;
 
     /// <summary>The exact word the operator must type to confirm the active destructive action.</summary>
     private string Required => _activeAction == "reset" ? "RESET" : "PURGE";
@@ -214,6 +285,9 @@
     protected override async Task OnInitializedAsync()
     {
         _telemetryAddress = SettingsStore.Load().TelemetryServerAddress;
+
+        UpdateStore.Changed += OnUpdateStoreChanged;
+        await UpdateStore.LoadAsync();
 
         await RouterSettingsStore.LoadAsync();
         if (RouterSettingsStore.Settings is { } settings)
@@ -417,4 +491,48 @@
             await _confirmInput.FocusAsync();
         }
     }
+
+    /// <summary>Re-renders when <see cref="UpdateStore"/> publishes a state change (a load, check, or apply completing).</summary>
+    private void OnUpdateStoreChanged() => InvokeAsync(StateHasChanged);
+
+    /// <summary>Forces an immediate update check via the "Check Now" button.</summary>
+    private async Task CheckForUpdatesNow()
+    {
+        _updateErrorMessage = null;
+        try
+        {
+            await UpdateStore.CheckNowAsync();
+        }
+        catch (UpdateAdminException)
+        {
+            // UpdateStore already recorded IsReachable/LastError; the panel reads those via
+            // UpdateStore.Status remaining unchanged on failure, so nothing further to do here.
+        }
+    }
+
+    /// <summary>Opens the "this restarts the Router service" confirmation ahead of applying.</summary>
+    private void StartApplyConfirmation()
+    {
+        _confirmingApply = true;
+        _updateErrorMessage = null;
+    }
+
+    /// <summary>Applies the update once the operator has confirmed the install/restart.</summary>
+    private async Task ApplyUpdateConfirmed()
+    {
+        _confirmingApply = false;
+        try
+        {
+            await UpdateStore.ApplyAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            // No update was known available - e.g. a background CheckNowAsync/LoadAsync raced this
+            // confirmation and cleared the status between the button appearing and the click landing.
+            _updateErrorMessage = ex.Message;
+        }
+    }
+
+    /// <inheritdoc />
+    public void Dispose() => UpdateStore.Changed -= OnUpdateStoreChanged;
 }

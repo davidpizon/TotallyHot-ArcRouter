@@ -9,6 +9,7 @@ using TotallyHot.ArcRouter.Router.Orchestrator;
 using TotallyHot.ArcRouter.Router.TextGeneration;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Transcripts;
+using TotallyHot.ArcRouter.Update;
 
 namespace TotallyHot.ArcRouter.Proxy;
 
@@ -75,6 +76,17 @@ public sealed record ProxyServerDependencies
 
     /// <summary>The Governance UI's System Settings window API (Phase T6). <see langword="null"/> leaves it unmapped.</summary>
     public RouterSettingsAdminDependencies? RouterSettingsAdmin { get; init; }
+
+    /// <summary>
+    /// The Governance UI's System Settings window's "Software Update" section API
+    /// (docs/router/auto-update-plan.md Phase 2, packaging superseded by
+    /// docs/router/packaging-and-distribution.md). Unlike every group above, <c>UpdateAdminGrpcService</c>
+    /// is mapped <em>unconditionally</em>, the same way <see cref="RoutingOptions"/> backs the
+    /// always-mapped <c>RoutingModeAdminGrpcService</c> - update status is core operational state, not an
+    /// optional add-on. When omitted, a private, harmless no-op state store/release-check client back the
+    /// service instead of the real ones.
+    /// </summary>
+    public UpdateAdminDependencies? UpdateAdmin { get; init; }
 }
 
 /// <summary>
@@ -234,3 +246,18 @@ public sealed record RouterSettingsAdminDependencies(
     /// </summary>
     public EmbeddingMemory? EmbeddingMemory { get; init; }
 }
+
+/// <summary>
+/// Backs <see cref="Update.UpdateAdminGrpcService"/>, the Governance UI's System Settings window's
+/// "Software Update" section (docs/router/auto-update-plan.md Phase 2). Both are required - the service
+/// needs its own state store and release-check client - and (unlike every other group in this file) is
+/// mapped even when this whole group is <see langword="null"/>: see
+/// <see cref="ProxyServerDependencies.UpdateAdmin"/>'s remarks for why. There is no applier here anymore:
+/// the Router only detects updates, it never downloads or applies one - that moved to the GUI (see
+/// docs/router/packaging-and-distribution.md).
+/// </summary>
+/// <param name="StateStore">The last-known check outcome the panel reads.</param>
+/// <param name="ReleaseCheckClient">Runs the immediate re-check the panel's "Check Now" button triggers.</param>
+public sealed record UpdateAdminDependencies(
+    IUpdateStateStore StateStore,
+    IReleaseCheckClient ReleaseCheckClient);
