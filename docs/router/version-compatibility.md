@@ -1,128 +1,130 @@
-# Version Compatibility: Router, GUI, and Updater
+# Version Compatibility: Router and GUI
 
-> **Status.** The versioning model below is **decided and in force**. Phase 0's single-source `<Version>`
-> and Phase 2's Router self-update implement it for the Router and the Updater. **GUI self-update is
-> decided here but not yet built** — see [`auto-update-plan.md`](auto-update-plan.md) for its phase status.
-> This document is the authority on *how the three components relate by version*; the plan doc owns the
-> *phase-by-phase delivery*.
+> **Status.** This document was rewritten 2026-08-26 for the MSI packaging decision
+> ([`packaging-and-distribution.md`](packaging-and-distribution.md)), which replaced the three-executable
+> Router↔Updater↔GUI closed loop described in the prior revision of this document (still readable in git
+> history) with a single Windows Installer transaction. There is no Updater component anymore, so there is
+> no closed loop, no ordering invariant between a Router-launched helper and its payload, and no
+> Router→Updater compatibility surface to reason about. What remains genuinely unchanged from the prior
+> revision: `<Version>` in `Directory.Build.props` as the single source of truth (§1), and the GUI↔Router
+> gRPC contract as a compatibility surface (§4).
 
-TotallyHot Arc Router ships as three separate executables that update each other in a closed loop. This
-document records why they are versioned in lockstep, which component may replace which, and what actually
-breaks when versions do skew.
+TotallyHot ArcRouter ships as two executables — the Router (a Windows Service) and the GUI (a MAUI tray
+app) — packaged and versioned together. This document records how they relate by version and what happens
+when they skew.
 
-## 1. The decision: lockstep, one release, three artifacts
+## 1. The decision: lockstep, one release, one artifact
 
-**All three components carry the same version number, cut from the same release, and are installed
-together in a single apply operation.** There is no independent per-component versioning and no
-compatibility matrix to maintain.
+**Both components carry the same version number, cut from the same release, and are installed together by
+one MSI in one Windows Installer transaction.** There is no independent per-component versioning.
 
 The version is stamped exactly once, in [`src/Directory.Build.props`](../../src/Directory.Build.props)'s
-`<Version>`. Every component derives from it — the Router and Updater directly, the GUI via
-`ApplicationDisplayVersion` (padded to the 4-part form Windows package versions require). The GitHub
-Release tag is `v<Version>`, and that one release publishes all three zips plus a single `checksums.txt`.
+`<Version>`. The Router compiles it directly into `AssemblyInformationalVersionAttribute`; the GUI does the
+same and additionally derives `ApplicationDisplayVersion` (padded to the 4-part form Windows package
+versions require); the installer project derives the MSI's `ProductVersion` from the same property via
+MSBuild passthrough (`src/TotallyHotArcRouter.Installer/TotallyHotArcRouter.Installer.wixproj`) — never a
+second, hand-typed version. The GitHub Release tag is `v<Version>`, and that one release publishes exactly
+one `.msi` asset plus a single `checksums.txt`.
 
 **Why not independent versions.** Independent semver per component would buy the ability to ship a fix to
-one component without touching the others — real value when components are consumed separately. These are
-not: nobody installs the Updater without the Router, and the GUI is useless without a Router to talk to.
-The cost is a compatibility matrix that must be reasoned about and tested on every release. Lockstep pays
-nothing for a guarantee that would otherwise need enforcing, so lockstep it is.
+one without touching the other — real value when components are consumed separately. They are not: the GUI
+is useless without a Router to talk to, and both are installed by the same MSI. Lockstep pays nothing for a
+guarantee that would otherwise need enforcing.
 
-**What this buys.** "Which Updater works with which Router?" is not a question anyone has to answer. The
-three binaries in a given install either all came from release *N*, or the install is broken in a way the
-GUI surfaces (§5).
+## 2. How the swap actually happens now
 
-## 2. Who may replace whom
-
-The binding physical constraint on Windows: **a running process cannot overwrite its own image or loaded
-DLLs.** Every component therefore needs some *other* process to replace it, and the assignments fall out
-of which processes are running when.
+The physical constraint that shaped the old three-executable design is still real: **a running process
+cannot overwrite its own image or loaded DLLs.** What changed is *who* does the overwriting. Windows
+Installer's own transaction — not a hand-rolled helper process — is the "someone else" that replaces both
+the Router and the GUI:
 
 ```mermaid
 flowchart LR
-    Router["Router<br/>(Windows Service, always on)"]
-    Gui["GUI<br/>(tray app, user-launched)"]
-    Updater["Updater<br/>(transient, runs only during a swap)"]
+    Gui["GUI<br/>(interactive, elevates via UAC)"]
+    Msiexec["msiexec<br/>(elevated, launched by the GUI)"]
+    Router["Router<br/>(Windows Service)"]
+    GuiFiles["...\Gui\ files"]
+    RouterFiles["...\Router\ files"]
 
-    Router -- "replaces (Updater is not running)" --> Updater
-    Updater -- "replaces (after service stop)" --> Router
-    Updater -- "replaces (after GUI exits)" --> Gui
+    Gui -- "download + verify MSI, launch elevated, then exit" --> Msiexec
+    Msiexec -- "ServiceControl: stop" --> Router
+    Msiexec -- "replace" --> RouterFiles
+    Msiexec -- "replace (GUI has already exited)" --> GuiFiles
+    Msiexec -- "ServiceControl: start" --> Router
 ```
 
-- **The Updater replaces the Router.** The Router cannot overwrite itself, and because it runs under the
-  Service Control Manager, it cannot even restart itself — a clean self-stop is not a failure, so SCM
-  recovery actions never fire. Something outside the process must sequence stop → swap → start → verify.
-- **The Updater replaces the GUI.** Same self-overwrite constraint. The GUI is an *unpackaged* MAUI app
-  (`<WindowsPackageType>None</WindowsPackageType>`), so a plain directory swap works. Were it MSIX-packaged
-  this would be impossible without going through the MSIX install pipeline instead.
-- **The Router replaces the Updater.** The Updater is transient — it is not running at the moment the
-  Router is deciding to update, so the Router can overwrite its directory freely. This is the exact mirror
-  of why the Updater can replace the Router.
+The GUI downloads the release's MSI, verifies it against the published SHA256
+(`TotallyHot.ArcRouter.Gui.Telemetry.MsiUpdateApplier`), launches
+`msiexec /i <path> /qn REBOOT=ReallySuppress /l*v <logpath>` elevated (`UseShellExecute = true`,
+`Verb = "runas"` — the single UAC prompt an operator sees), and **exits immediately** so it is not holding
+its own files locked when the MSI tries to replace `...\Gui\`. The Router does not participate in its own
+replacement beyond that — Windows Installer's `ServiceControl` element stops the
+`TotallyHotArcRouter` service before the file swap and restarts it after, the same stop/swap/restart
+sequence the deleted `Updater.exe` used to perform by hand, now a property of the MSI transaction instead
+of application code.
 
-The loop is closed: the Updater is the only component that can never replace itself under any
-circumstance, and the Router covers it.
+**Why GUI-elevated rather than Router-launched.** The original intent explored during this design was
+having the always-on Router (running as `LocalSystem` under the Windows Service) launch `msiexec` detached,
+so applying an update needed no interactive session at all. That could not be empirically verified in this
+project's development environment — testing it requires an admin/UAC-capable interactive Windows session to
+install a real service and observe whether a `msiexec` process launched detached by that service survives
+the service being stopped mid-transaction by the very same MSI, and no such session was available (`sc.exe
+create` returned `OpenSCManager FAILED 5: Access is denied` in every session that attempted it; a
+containerized Windows target was also considered and ruled out — the available container backend on the
+development machine is a Linux/WSL2 backend, which cannot host a real Windows Service either). Rather than
+ship an unverified detached-launch-from-a-service design, the repo owner decided on GUI-elevated: one
+ordinary UAC prompt, the same pattern virtually every other Windows desktop installer uses, and simpler to
+reason about than a service launching a process that outlives the service's own shutdown.
 
-## 3. The ordering invariant
+## 3. Atomicity and skew
 
-**The Updater is refreshed before it is used, so it is never older than the payload it installs.**
+**Apply is always operator-initiated from the GUI**, behind a confirmation dialog. The Router's background
+poller (`UpdateCheckHostedService`) only *detects* an available update and records it — it never applies
+unattended.
 
-An apply runs in this order:
+Because the entire swap is now one Windows Installer transaction, atomicity is Windows Installer's problem,
+not this codebase's: **a failed MSI transaction rolls back automatically** — there is no partial-apply state
+where the Router is on version *N+1* and the GUI is still on version *N*, or vice versa, the way a failed
+step mid-`Updater.exe`-run could previously leave one component ahead of the other. `MajorUpgrade`'s
+scheduling (`src/TotallyHotArcRouter.Installer/Package.wxs`) means a successful install always leaves both
+components at the same version, and a failed one leaves both at whatever version was there before the
+transaction began.
 
-1. The Router downloads and SHA256-verifies every zip in the release.
-2. The Router backs up and swaps `Updater\`, then confirms the new `TotallyHotArcRouter.Updater.exe` is
-   present. Any failure here restores the backup and aborts **without touching the Router or GUI**.
-3. The Router launches the now-current Updater, which swaps the Router and the GUI.
+Version skew between Router and GUI can now only happen from an *operator* action outside the MSI's control
+— e.g. downgrading one component's files by hand, which nothing about this design prevents or needs to
+prevent, since it is not a path the shipped tooling offers.
 
-This is what makes the Router→Updater CLI contract safe to change. Adding a **required**
-`--expected-sha256` argument would ordinarily be a breaking change to that surface; it is safe here
-because a Router of version *N* only ever invokes an Updater of version *N*, refreshed moments earlier in
-the same operation. Any future required argument is safe for the same reason — but only as long as step 2
-stays ahead of step 3.
-
-## 4. Atomicity and skew
-
-**Apply is always operator-initiated from the GUI.** The background poller in the Router detects and
-notifies; it never applies unattended. This is a deliberate policy (see the plan doc), and it has a useful
-consequence for versioning: *the GUI is by construction running at the moment an apply begins*, so a single
-apply can update both the Router and the GUI in one Updater run — waiting on both processes to exit,
-swapping both directories, then restarting the service and relaunching the GUI.
-
-Version skew between Router and GUI is therefore **transient by design** — it exists only inside the
-seconds an apply is in flight. Steady state is an exact match across all three components.
-
-A skew that *persists* means an apply failed partway. The rollback policy is all-or-nothing: if either the
-Router or the GUI swap fails, both roll back to their backups. The one asymmetry the design accepts is
-recorded in the plan doc's settled-deferrals section — a successful Updater refresh followed by a failed
-Router swap leaves an old Router beside a new Updater, which is harmless because the Updater's CLI contract
-is the only surface between them and it is never older.
-
-## 5. Compatibility surfaces — what actually breaks on skew
-
-Skew should not occur, but "should not" is not "cannot", so each seam has a defined degradation:
+## 4. Compatibility surfaces — what actually breaks on skew
 
 | Seam | Contract | Behavior under skew |
 |---|---|---|
 | GUI ↔ Router | the gRPC contract in [`src/Protos/telemetry.proto`](../../src/Protos/telemetry.proto) | proto3's additive field rules mean a mismatched pair degrades — unknown fields are ignored, absent fields read as defaults — rather than failing to connect. A GUI older than its Router simply does not render the newest panes. |
-| Router → Updater | the `Updater.exe` command-line argument contract | Structurally cannot skew, per §3's invariant. A malformed or missing argument is a hard parse error with a clear message, never a silent partial run. |
-| Router → GitHub | the release asset + `checksums.txt` naming convention | A release missing any expected asset or checksum line is reported as `AssetOrChecksumMissing` and the update is **not offered**. An update that cannot be applied is never reported as available. |
+| Router → GitHub | the release asset + `checksums.txt` naming convention | A release missing the `.msi` asset or its checksum line is reported as `AssetOrChecksumMissing` and the update is **not offered**. An update that cannot be applied is never reported as available. |
+| GUI → installer | the MSI's `ServiceControl`/`ServiceInstall` naming (`TotallyHotArcRouter`) | Must exactly match `Program.cs`'s `UseWindowsService(options => options.ServiceName = "TotallyHotArcRouter")`. A mismatch here would mean the installer registers or controls a service that does not exist, which `dotnet build`-time XML review and the "verify for real" step of any installer change are the only guards — there is no runtime skew-detection possible for this seam, since it is fixed at build time on both sides. |
 
 **The GUI surfaces detected skew.** The GUI knows its own compiled version and reads the Router's from
 `GetUpdateStatus`, so a mismatch is directly observable and should be shown to the operator rather than
-left to manifest as confusing behavior. That check is cheap and falls out of data the GUI already has.
+left to manifest as confusing behavior.
 
-## 6. Consequences for contributors
+## 5. Consequences for contributors
 
 - **Bump `<Version>` in `Directory.Build.props` and nowhere else.** A component with its own hardcoded
-  version is a bug — Phase 0 exists specifically to make that unrepresentable.
-- **A release publishes all three zips or it publishes nothing usable.** Partial releases are rejected by
-  the release check, not partially applied.
-- **Changing the Updater's CLI contract is allowed** — §3's invariant covers it — but the change must land
-  in the same release as the Router change that depends on it.
+  version is a bug — this is the single source of truth for the Router, the GUI, and the installer's
+  `ProductVersion` alike.
+- **A release publishes one `.msi` and one `checksums.txt` or it publishes nothing usable.** A partial
+  release is rejected by the release check, not partially applied.
 - **Changing the gRPC contract follows proto3 additive rules.** Never renumber or repurpose a field; skew
   is supposed to degrade, and renumbering turns degradation into corruption.
+- **Changing the Windows Service name requires updating three places in lockstep**: `Program.cs`'s
+  `UseWindowsService` call, `Package.wxs`'s `ServiceInstall`/`ServiceControl` `Name` attributes, and
+  `scripts/service/Install-RouterService.ps1`'s `$ServiceName` (dev-only path, but should still agree).
 
 ## Related
 
-- [`auto-update-plan.md`](auto-update-plan.md) — the phased delivery of the update mechanism itself.
+- [`packaging-and-distribution.md`](packaging-and-distribution.md) — the MSI decision itself, the MSIX
+  evaluation that preceded it, and the WiX v7 licensing note.
+- [`auto-update-plan.md`](auto-update-plan.md) — the original Router-self-update design; its Phase 2 apply
+  mechanism is superseded by this document and by packaging-and-distribution.md.
 - [`grpc-migration.md`](grpc-migration.md) — the GUI ↔ Router contract this document treats as a
   compatibility surface.
-- [`../../AGENTS.md`](../../AGENTS.md) — the repository-wide rules every phase validates against.
+- [`../../AGENTS.md`](../../AGENTS.md) — the repository-wide rules every change validates against.

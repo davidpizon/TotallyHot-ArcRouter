@@ -7,7 +7,6 @@
     <Project Path="TotallyHotArcRouter.Gui.Telemetry.Tests/TotallyHotArcRouter.Gui.Telemetry.Tests.csproj" />
     <Project Path="TotallyHotArcRouter.Quality.Tests/TotallyHotArcRouter.Quality.Tests.csproj" />
     <Project Path="TotallyHotArcRouter.Tests/TotallyHotArcRouter.Tests.csproj" Id="6bc19e70-13cf-4f60-91c9-7282407a6ff6" />
-    <Project Path="TotallyHotArcRouter.Updater.Tests/TotallyHotArcRouter.Updater.Tests.csproj" />
   </Folder>
   <Project Path="TotallyHotArcRouter.Gui.Admin/TotallyHotArcRouter.Gui.Admin.csproj" />
   <Project Path="TotallyHotArcRouter.Gui.Charts/TotallyHotArcRouter.Gui.Charts.csproj" />
@@ -15,7 +14,6 @@
   <Project Path="TotallyHotArcRouter.Gui.Telemetry/TotallyHotArcRouter.Gui.Telemetry.csproj" />
   <Project Path="TotallyHotArcRouter.Gui/TotallyHotArcRouter.Gui.csproj" />
   <Project Path="TotallyHotArcRouter.Quality/TotallyHotArcRouter.Quality.csproj" />
-  <Project Path="TotallyHotArcRouter.Updater/TotallyHotArcRouter.Updater.csproj" />
   <Project Path="TotallyHotArcRouter/TotallyHotArcRouter.csproj" />
 </Solution>
 

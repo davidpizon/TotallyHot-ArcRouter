@@ -38,14 +38,6 @@ public sealed class UpdateOptions
     public string GitHubApiBaseUrl { get; init; } = "https://api.github.com";
 
     /// <summary>
-    /// Gets the Windows Service name <c>Updater.exe</c> stops and restarts around the file swap, matching
-    /// <c>Program.cs</c>'s <c>UseWindowsService(options => options.ServiceName = "TotallyHotArcRouter")</c>
-    /// call and <c>Install-RouterService.ps1</c>.
-    /// </summary>
-    [Required]
-    public string ServiceName { get; init; } = "TotallyHotArcRouter";
-
-    /// <summary>
     /// Performs domain-level validation that is not fully expressible through data annotations.
     /// </summary>
     /// <exception cref="OptionsValidationException">Thrown when the configuration is inconsistent.</exception>

@@ -25,6 +25,8 @@ public class UpdateAdminClientTests
                 UpdateAvailable = true,
                 CheckedAtUtc = Timestamp.FromDateTimeOffset(checkedAt),
                 UnavailableReason = Contract.UpdateUnavailableReason.None,
+                AssetDownloadUrl = "https://example.test/a.msi",
+                AssetSha256 = "abc123",
             },
         };
         using var client = new UpdateAdminClient(stub);
@@ -36,6 +38,8 @@ public class UpdateAdminClientTests
         status.UpdateAvailable.Should().BeTrue();
         status.CheckedAtUtc.Should().Be(checkedAt);
         status.UnavailableReason.Should().Be(UpdateUnavailableReasonInfo.None);
+        status.AssetDownloadUrl.Should().Be("https://example.test/a.msi");
+        status.AssetSha256.Should().Be("abc123");
     }
 
     [Fact]
@@ -47,6 +51,18 @@ public class UpdateAdminClientTests
         var status = await client.GetStatusAsync(TestContext.Current.CancellationToken);
 
         status.CheckedAtUtc.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetStatusAsync_NoAssetFieldsSet_MapsToNull()
+    {
+        var stub = new StubClient { StatusResponse = new Contract.UpdateStatusResponse() };
+        using var client = new UpdateAdminClient(stub);
+
+        var status = await client.GetStatusAsync(TestContext.Current.CancellationToken);
+
+        status.AssetDownloadUrl.Should().BeNull();
+        status.AssetSha256.Should().BeNull();
     }
 
     [Theory]
@@ -88,18 +104,17 @@ public class UpdateAdminClientTests
     }
 
     [Fact]
-    public async Task ApplyAsync_ReturnsMappedOutcome()
+    public async Task NotifyApplyStartingAsync_ReturnsMappedOutcome()
     {
         var stub = new StubClient
         {
-            ApplyResponse = new Contract.ApplyUpdateResponse { Succeeded = true, Message = "handed off" },
+            NotifyResponse = new Contract.NotifyApplyStartingResponse { Acknowledged = true },
         };
         using var client = new UpdateAdminClient(stub);
 
-        var outcome = await client.ApplyAsync(TestContext.Current.CancellationToken);
+        var outcome = await client.NotifyApplyStartingAsync("2.0.0", TestContext.Current.CancellationToken);
 
-        outcome.Succeeded.Should().BeTrue();
-        outcome.Message.Should().Be("handed off");
+        outcome.Acknowledged.Should().BeTrue();
     }
 
     [Fact]
@@ -115,12 +130,12 @@ public class UpdateAdminClientTests
     }
 
     [Fact]
-    public async Task ApplyAsync_Rejected_ThrowsUnflaggedException()
+    public async Task NotifyApplyStartingAsync_Rejected_ThrowsUnflaggedException()
     {
         var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.FailedPrecondition, "no update")) };
         using var client = new UpdateAdminClient(stub);
 
-        var act = async () => await client.ApplyAsync(TestContext.Current.CancellationToken);
+        var act = async () => await client.NotifyApplyStartingAsync("2.0.0", TestContext.Current.CancellationToken);
 
         var ex = await act.Should().ThrowAsync<UpdateAdminException>();
         ex.Which.IsUnavailable.Should().BeFalse();
@@ -149,7 +164,7 @@ public class UpdateAdminClientTests
     {
         public Contract.UpdateStatusResponse StatusResponse { get; init; } = new();
         public Contract.UpdateStatusResponse CheckNowResponse { get; init; } = new();
-        public Contract.ApplyUpdateResponse ApplyResponse { get; init; } = new();
+        public Contract.NotifyApplyStartingResponse NotifyResponse { get; init; } = new();
         public RpcException? Failure { get; init; }
 
         public override AsyncUnaryCall<Contract.UpdateStatusResponse> GetUpdateStatusAsync(
@@ -160,9 +175,9 @@ public class UpdateAdminClientTests
             Contract.CheckForUpdatesNowRequest request, CallOptions options) =>
             Call(CheckNowResponse);
 
-        public override AsyncUnaryCall<Contract.ApplyUpdateResponse> ApplyUpdateAsync(
-            Contract.ApplyUpdateRequest request, CallOptions options) =>
-            Call(ApplyResponse);
+        public override AsyncUnaryCall<Contract.NotifyApplyStartingResponse> NotifyApplyStartingAsync(
+            Contract.NotifyApplyStartingRequest request, CallOptions options) =>
+            Call(NotifyResponse);
 
         private AsyncUnaryCall<T> Call<T>(T response) =>
             new(

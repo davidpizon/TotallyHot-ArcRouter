@@ -8,7 +8,7 @@ namespace TotallyHot.ArcRouter.Tests.Update;
 
 /// <summary>
 /// Covers <see cref="UpdateAdminGrpcService"/>'s three RPCs against fakes - no real Windows service, no
-/// real <c>Updater.exe</c> process ever spawned.
+/// real installer process ever spawned (that all lives in the GUI now).
 /// </summary>
 public sealed class UpdateAdminGrpcServiceTests
 {
@@ -17,18 +17,6 @@ public sealed class UpdateAdminGrpcServiceTests
         public ReleaseCheckResult Result { get; set; } = ReleaseCheckResult.Resolved("1.0.0", "1.0.0", false, null, null);
 
         public Task<ReleaseCheckResult> CheckAsync(CancellationToken cancellationToken = default) => Task.FromResult(Result);
-    }
-
-    private sealed class FakeUpdateApplier : IUpdateApplier
-    {
-        public ApplyUpdateResult Result { get; set; } = ApplyUpdateResult.Handoff("ok");
-        public ReleaseCheckResult? LastApplied { get; private set; }
-
-        public Task<ApplyUpdateResult> ApplyAsync(ReleaseCheckResult update, CancellationToken cancellationToken = default)
-        {
-            LastApplied = update;
-            return Task.FromResult(Result);
-        }
     }
 
     private static ServerCallContext CreateContext() =>
@@ -48,7 +36,7 @@ public sealed class UpdateAdminGrpcServiceTests
     [Fact]
     public async Task GetUpdateStatus_BeforeAnyCheck_ReportsUnspecifiedWithNoTimestamp()
     {
-        var service = new UpdateAdminGrpcService(new UpdateStateStore(), new FakeReleaseCheckClient(), new FakeUpdateApplier(), NullLogger<UpdateAdminGrpcService>.Instance);
+        var service = new UpdateAdminGrpcService(new UpdateStateStore(), new FakeReleaseCheckClient(), NullLogger<UpdateAdminGrpcService>.Instance);
 
         var response = await service.GetUpdateStatus(new Contract.GetUpdateStatusRequest(), CreateContext());
 
@@ -61,14 +49,29 @@ public sealed class UpdateAdminGrpcServiceTests
     public async Task GetUpdateStatus_AfterStateRecorded_ReturnsSnapshot()
     {
         var stateStore = new UpdateStateStore();
-        stateStore.Record(ReleaseCheckResult.Resolved("1.0.0", "2.0.0", true, "https://example.test/a.zip", "abc"));
-        var service = new UpdateAdminGrpcService(stateStore, new FakeReleaseCheckClient(), new FakeUpdateApplier(), NullLogger<UpdateAdminGrpcService>.Instance);
+        stateStore.Record(ReleaseCheckResult.Resolved("1.0.0", "2.0.0", true, "https://example.test/a.msi", "abc"));
+        var service = new UpdateAdminGrpcService(stateStore, new FakeReleaseCheckClient(), NullLogger<UpdateAdminGrpcService>.Instance);
 
         var response = await service.GetUpdateStatus(new Contract.GetUpdateStatusRequest(), CreateContext());
 
         Assert.True(response.UpdateAvailable);
         Assert.Equal("2.0.0", response.LatestVersion);
         Assert.NotNull(response.CheckedAtUtc);
+        Assert.Equal("https://example.test/a.msi", response.AssetDownloadUrl);
+        Assert.Equal("abc", response.AssetSha256);
+    }
+
+    [Fact]
+    public async Task GetUpdateStatus_NoUpdateAvailable_LeavesAssetFieldsUnset()
+    {
+        var stateStore = new UpdateStateStore();
+        stateStore.Record(ReleaseCheckResult.Resolved("1.0.0", "1.0.0", false, null, null));
+        var service = new UpdateAdminGrpcService(stateStore, new FakeReleaseCheckClient(), NullLogger<UpdateAdminGrpcService>.Instance);
+
+        var response = await service.GetUpdateStatus(new Contract.GetUpdateStatusRequest(), CreateContext());
+
+        Assert.False(response.HasAssetDownloadUrl);
+        Assert.False(response.HasAssetSha256);
     }
 
     [Fact]
@@ -76,10 +79,10 @@ public sealed class UpdateAdminGrpcServiceTests
     {
         var releaseClient = new FakeReleaseCheckClient
         {
-            Result = ReleaseCheckResult.Resolved("1.0.0", "3.0.0", true, "https://example.test/a.zip", "abc"),
+            Result = ReleaseCheckResult.Resolved("1.0.0", "3.0.0", true, "https://example.test/a.msi", "abc"),
         };
         var stateStore = new UpdateStateStore();
-        var service = new UpdateAdminGrpcService(stateStore, releaseClient, new FakeUpdateApplier(), NullLogger<UpdateAdminGrpcService>.Instance);
+        var service = new UpdateAdminGrpcService(stateStore, releaseClient, NullLogger<UpdateAdminGrpcService>.Instance);
 
         var response = await service.CheckForUpdatesNow(new Contract.CheckForUpdatesNowRequest(), CreateContext());
 
@@ -89,44 +92,15 @@ public sealed class UpdateAdminGrpcServiceTests
     }
 
     [Fact]
-    public async Task ApplyUpdate_NoUpdateKnownAvailable_ThrowsFailedPrecondition()
+    public async Task NotifyApplyStarting_AlwaysAcknowledges()
     {
-        var service = new UpdateAdminGrpcService(new UpdateStateStore(), new FakeReleaseCheckClient(), new FakeUpdateApplier(), NullLogger<UpdateAdminGrpcService>.Instance);
+        var service = new UpdateAdminGrpcService(new UpdateStateStore(), new FakeReleaseCheckClient(), NullLogger<UpdateAdminGrpcService>.Instance);
 
-        var ex = await Assert.ThrowsAsync<RpcException>(() =>
-            service.ApplyUpdate(new Contract.ApplyUpdateRequest(), CreateContext()));
+        var response = await service.NotifyApplyStarting(
+            new Contract.NotifyApplyStartingRequest { Version = "2.0.0" },
+            CreateContext());
 
-        Assert.Equal(StatusCode.FailedPrecondition, ex.StatusCode);
-    }
-
-    [Fact]
-    public async Task ApplyUpdate_UpdateKnownAvailable_CallsApplierAndReturnsOutcome()
-    {
-        var stateStore = new UpdateStateStore();
-        var available = ReleaseCheckResult.Resolved("1.0.0", "2.0.0", true, "https://example.test/a.zip", "abc");
-        stateStore.Record(available);
-        var applier = new FakeUpdateApplier { Result = ApplyUpdateResult.Handoff("handed off") };
-        var service = new UpdateAdminGrpcService(stateStore, new FakeReleaseCheckClient(), applier, NullLogger<UpdateAdminGrpcService>.Instance);
-
-        var response = await service.ApplyUpdate(new Contract.ApplyUpdateRequest(), CreateContext());
-
-        Assert.True(response.Succeeded);
-        Assert.Equal("handed off", response.Message);
-        Assert.Same(available, applier.LastApplied);
-    }
-
-    [Fact]
-    public async Task ApplyUpdate_DownloadOrChecksumFailure_ReturnsFailureWithoutThrowing()
-    {
-        var stateStore = new UpdateStateStore();
-        stateStore.Record(ReleaseCheckResult.Resolved("1.0.0", "2.0.0", true, "https://example.test/a.zip", "abc"));
-        var applier = new FakeUpdateApplier { Result = ApplyUpdateResult.Failure("checksum mismatch") };
-        var service = new UpdateAdminGrpcService(stateStore, new FakeReleaseCheckClient(), applier, NullLogger<UpdateAdminGrpcService>.Instance);
-
-        var response = await service.ApplyUpdate(new Contract.ApplyUpdateRequest(), CreateContext());
-
-        Assert.False(response.Succeeded);
-        Assert.Equal("checksum mismatch", response.Message);
+        Assert.True(response.Acknowledged);
     }
 
     [Fact]
@@ -134,12 +108,10 @@ public sealed class UpdateAdminGrpcServiceTests
     {
         var stateStore = new UpdateStateStore();
         var releaseClient = new FakeReleaseCheckClient();
-        var applier = new FakeUpdateApplier();
         var logger = NullLogger<UpdateAdminGrpcService>.Instance;
 
-        Assert.Throws<ArgumentNullException>(() => new UpdateAdminGrpcService(null!, releaseClient, applier, logger));
-        Assert.Throws<ArgumentNullException>(() => new UpdateAdminGrpcService(stateStore, null!, applier, logger));
-        Assert.Throws<ArgumentNullException>(() => new UpdateAdminGrpcService(stateStore, releaseClient, null!, logger));
-        Assert.Throws<ArgumentNullException>(() => new UpdateAdminGrpcService(stateStore, releaseClient, applier, null!));
+        Assert.Throws<ArgumentNullException>(() => new UpdateAdminGrpcService(null!, releaseClient, logger));
+        Assert.Throws<ArgumentNullException>(() => new UpdateAdminGrpcService(stateStore, null!, logger));
+        Assert.Throws<ArgumentNullException>(() => new UpdateAdminGrpcService(stateStore, releaseClient, null!));
     }
 }

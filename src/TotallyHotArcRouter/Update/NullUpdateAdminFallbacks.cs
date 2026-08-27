@@ -16,14 +16,3 @@ public sealed class NullReleaseCheckClient : IReleaseCheckClient
             ReleaseCheckUnavailableReason.NetworkOrApiFailure,
             "Update checking was not configured for this server instance."));
 }
-
-/// <summary>
-/// Fallback <see cref="IUpdateApplier"/>, mirroring <see cref="NullReleaseCheckClient"/>'s reason for
-/// existing. Always reports failure without touching anything, since there is nothing real to apply.
-/// </summary>
-public sealed class NullUpdateApplier : IUpdateApplier
-{
-    /// <inheritdoc />
-    public Task<ApplyUpdateResult> ApplyAsync(ReleaseCheckResult update, CancellationToken cancellationToken = default) =>
-        Task.FromResult(ApplyUpdateResult.Failure("Update applying was not configured for this server instance."));
-}

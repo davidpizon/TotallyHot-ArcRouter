@@ -522,13 +522,15 @@ namespace TotallyHot.ArcRouter.Hosting
                     configuration.GetSection(McpOptions.SectionName).Bind(options));
             services.AddHostedService<McpHostedService>();
 
-            // docs/router/auto-update-plan.md Phase 2: the Router's self-update check/apply pipeline.
-            // GitHubReleaseCheckClient and UpdateApplier are registered as typed HttpClients (rather than
-            // the IHttpClientFactory-named-client pattern OnnxEmbeddingClient uses) since each has exactly
-            // one HTTP concern and no reason to create more than one named client per use.
-            // UpdateCheckHostedService only ever *detects* an available update (see its own remarks); an
-            // apply is reached exclusively through UpdateAdminGrpcService.ApplyUpdate, behind an explicit
-            // operator click in the GUI.
+            // docs/router/auto-update-plan.md Phase 2 (packaging superseded by
+            // docs/router/packaging-and-distribution.md): the Router's self-update *detection* pipeline
+            // only - it never downloads, verifies, or applies an update itself. GitHubReleaseCheckClient
+            // is registered as a typed HttpClient (rather than the IHttpClientFactory-named-client
+            // pattern OnnxEmbeddingClient uses) since it has exactly one HTTP concern and no reason to
+            // create more than one named client per use. Applying is entirely the GUI's responsibility
+            // (TotallyHot.ArcRouter.Gui.Telemetry.MsiUpdateApplier), reached from an explicit operator
+            // click; this service only records that it is about to happen, via
+            // UpdateAdminGrpcService.NotifyApplyStarting.
             services.AddOptions<UpdateOptions>()
                 .Configure<IConfiguration>((options, configuration) =>
                     configuration.GetSection(UpdateOptions.SectionName).Bind(options))
@@ -540,7 +542,6 @@ namespace TotallyHot.ArcRouter.Hosting
                 })
                 .ValidateOnStart();
             services.AddHttpClient<IReleaseCheckClient, GitHubReleaseCheckClient>();
-            services.AddHttpClient<IUpdateApplier, UpdateApplier>();
             services.AddSingleton<IUpdateStateStore, UpdateStateStore>();
             services.AddHostedService<UpdateCheckHostedService>();
 
@@ -676,8 +677,7 @@ namespace TotallyHot.ArcRouter.Hosting
                         // API (docs/router/auto-update-plan.md Phase 2).
                         UpdateAdmin = new UpdateAdminDependencies(
                             sp.GetRequiredService<IUpdateStateStore>(),
-                            sp.GetRequiredService<IReleaseCheckClient>(),
-                            sp.GetRequiredService<IUpdateApplier>()),
+                            sp.GetRequiredService<IReleaseCheckClient>()),
                     });
             });
 

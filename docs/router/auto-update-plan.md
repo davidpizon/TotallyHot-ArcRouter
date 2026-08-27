@@ -1,9 +1,28 @@
 # Auto-Update Plan
 
-Status: **Phases 0-2 shipped.** Phase 0 (versioning source of truth) and Phase 1 (Windows Service
-hosting) shipped on an earlier commit (`8d46a7e`) with no design doc of their own — this doc closes that
-gap retroactively, in addition to specifying and shipping Phase 2 (the Router's self-update pipeline).
-GUI self-update and CI release-publishing automation are unscheduled; see "Deferred/future phases" below.
+> **Status: Phase 2's mechanism — a separate `Updater.exe` helper process — is superseded (2026-08-26) by
+> the MSI packaging decision.** See [`packaging-and-distribution.md`](packaging-and-distribution.md) for
+> the current design: one signed MSI installer (built from `src/TotallyHotArcRouter.Installer/`) replaces
+> both the Router and the GUI in a single Windows Installer transaction, using `ServiceControl` to
+> stop/restart the Router's Windows Service — the same stop/swap/restart behavior this document's Phase 2
+> had `Updater.exe` hand-roll. `TotallyHotArcRouter.Updater` (the project) and everything below describing
+> it — the `IUpdateApplier`/`UpdateApplier` Router-side apply pipeline, the Router zip + Updater zip +
+> `checksums.txt` asset convention, `ApplyUpdate`'s "Router downloads, verifies, and hands off" RPC
+> semantics — has been **deleted**, not merely deprecated. What still applies unchanged: Phase 0
+> (versioning source of truth) and Phase 1 (Windows Service hosting) below, and Phase 2's *detection* half
+> (`GitHubReleaseCheckClient`/`UpdateCheckHostedService`/`IUpdateStateStore`, now checking for a single
+> `.msi` asset instead of two zips) — only the *apply* half moved, from a Router-launched detached helper
+> to the GUI downloading/verifying/launching the MSI elevated. This document is kept for its still-accurate
+> parts and as a historical record of the design that was tried first; do not implement anything below
+> that packaging-and-distribution.md's Status banner says was deleted.
+
+Status: **Phases 0-2 shipped, Phase 2's apply mechanism since superseded (see banner above).** Phase 0
+(versioning source of truth) and Phase 1 (Windows Service hosting) shipped on an earlier commit (`8d46a7e`)
+with no design doc of their own — this doc closes that gap retroactively, in addition to specifying and
+shipping Phase 2 (the Router's self-update pipeline) as originally built. GUI self-update and CI
+release-publishing automation, both called out as deferred below, are no longer deferred — the MSI
+packaging switch delivered both (the GUI downloads/verifies/launches the installer, which replaces its own
+files too, and `.github/workflows/release.yml` publishes the MSI on tag push).
 
 ## Why
 

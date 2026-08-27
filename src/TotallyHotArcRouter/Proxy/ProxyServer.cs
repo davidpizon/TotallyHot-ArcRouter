@@ -273,7 +273,6 @@ namespace TotallyHot.ArcRouter.Proxy
                         // see the updateAdmin local's remarks above.
                         services.AddSingleton(updateAdmin?.StateStore ?? new Update.UpdateStateStore());
                         services.AddSingleton(updateAdmin?.ReleaseCheckClient ?? new Update.NullReleaseCheckClient());
-                        services.AddSingleton(updateAdmin?.Applier ?? new Update.NullUpdateApplier());
                     });
 
                     webBuilder.Configure(app =>

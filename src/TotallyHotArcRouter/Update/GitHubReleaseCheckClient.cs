@@ -8,40 +8,27 @@ namespace TotallyHot.ArcRouter.Update;
 
 /// <summary>
 /// Checks <c>GET {GitHubApiBaseUrl}/repos/{owner}/{repo}/releases/latest</c> for a Router release newer
-/// than the one currently running (docs/router/auto-update-plan.md Phase 2). Owner/repo default to
-/// <c>Directory.Build.props</c>' <c>UpdateGitHubOwner</c>/<c>UpdateGitHubRepo</c>, compiled into this
-/// assembly's <see cref="AssemblyMetadataAttribute"/>s (see <c>TotallyHotArcRouter.csproj</c>'s
-/// <c>ItemGroup</c>) so they can never drift from the single source of truth; overridable via
-/// <see cref="UpdateOptions"/> for testability.
+/// than the one currently running (docs/router/auto-update-plan.md Phase 2, packaging superseded by
+/// docs/router/packaging-and-distribution.md). Owner/repo default to <c>Directory.Build.props</c>'
+/// <c>UpdateGitHubOwner</c>/<c>UpdateGitHubRepo</c>, compiled into this assembly's
+/// <see cref="AssemblyMetadataAttribute"/>s (see <c>TotallyHotArcRouter.csproj</c>'s <c>ItemGroup</c>) so
+/// they can never drift from the single source of truth; overridable via <see cref="UpdateOptions"/> for
+/// testability.
 /// </summary>
 /// <remarks>
-/// <para>
-/// <b>Checksum-publishing convention.</b> A release must publish three assets for this client to
-/// consider it installable: one <b>Updater</b> zip, one <b>Router</b> zip, and one asset named exactly
-/// <see cref="ChecksumsAssetName"/> (<c>checksums.txt</c>) containing one <c>&lt;sha256 hex&gt;
-/// &lt;two spaces&gt; &lt;filename&gt;</c> line per released asset (the conventional <c>sha256sum</c>
-/// output format) - a single checksums file covering both zips, not one per asset. A release missing any
-/// of the three, or missing a checksum line for either zip, is reported as
-/// <see cref="ReleaseCheckUnavailableReason.AssetOrChecksumMissing"/> - see
-/// docs/router/auto-update-plan.md's Phase 2 section for why this convention was chosen over a per-asset
-/// <c>.sha256</c> sidecar file, and for what CI automation is not yet in place to publish these files
-/// on tag push.
-/// </para>
-/// <para>
-/// <b>Asset classification is most-specific-first</b> (see <see cref="ClassifyAsset"/>), and that ordering
-/// is load-bearing rather than stylistic: the product name <c>TotallyHotArcRouter</c> contains
-/// <c>"router"</c>, so an Updater asset named <c>TotallyHotArcRouter-Updater-win-x64.zip</c> matches a
-/// naive <c>"router"</c> test as well. Testing for <c>"updater"</c> first is what keeps the two apart;
-/// reversing it would silently misclassify one zip as the other depending on release-asset enumeration
-/// order.
-/// </para>
+/// <b>Checksum-publishing convention.</b> A release must publish exactly two assets for this client to
+/// consider it installable: one <c>.msi</c> installer asset, and one asset named exactly
+/// <see cref="ChecksumsAssetName"/> (<c>checksums.txt</c>) containing a
+/// <c>&lt;sha256 hex&gt; &lt;two spaces&gt; &lt;filename&gt;</c> line for it (the conventional
+/// <c>sha256sum</c> output format). A release missing either, or missing the MSI's checksum line, is
+/// reported as <see cref="ReleaseCheckUnavailableReason.AssetOrChecksumMissing"/>.
 /// </remarks>
 public sealed class GitHubReleaseCheckClient : IReleaseCheckClient
 {
-    /// <summary>The asset GitHub Releases must publish alongside the Router zip: one <c>sha256sum</c>-format line per asset.</summary>
+    /// <summary>The asset GitHub Releases must publish alongside the MSI: one <c>sha256sum</c>-format line for it.</summary>
     public const string ChecksumsAssetName = "checksums.txt";
 
-    private const string UserAgent = "TotallyHotArcRouter-Updater";
+    private const string UserAgent = "TotallyHotArcRouter-Router";
 
     private readonly HttpClient _httpClient;
     private readonly UpdateOptions _options;
@@ -175,10 +162,8 @@ public sealed class GitHubReleaseCheckClient : IReleaseCheckClient
                 "Release has no assets array.");
         }
 
-        string? routerAssetUrl = null;
-        string? routerAssetName = null;
-        string? updaterAssetUrl = null;
-        string? updaterAssetName = null;
+        string? msiAssetUrl = null;
+        string? msiAssetName = null;
         string? checksumsUrl = null;
 
         foreach (var asset in assetsElement.EnumerateArray())
@@ -204,27 +189,19 @@ public sealed class GitHubReleaseCheckClient : IReleaseCheckClient
                 continue;
             }
 
-            switch (ClassifyAsset(name))
+            if (name.EndsWith(".msi", StringComparison.OrdinalIgnoreCase))
             {
-                case ReleaseAssetKind.Updater:
-                    updaterAssetUrl = downloadUrl;
-                    updaterAssetName = name;
-                    break;
-                case ReleaseAssetKind.Router:
-                    routerAssetUrl = downloadUrl;
-                    routerAssetName = name;
-                    break;
-                default:
-                    break;
+                msiAssetUrl = downloadUrl;
+                msiAssetName = name;
             }
         }
 
-        if (routerAssetUrl is null || updaterAssetUrl is null || checksumsUrl is null)
+        if (msiAssetUrl is null || checksumsUrl is null)
         {
             return ReleaseCheckResult.Unavailable(
                 _currentVersion,
                 ReleaseCheckUnavailableReason.AssetOrChecksumMissing,
-                $"Release '{tag}' does not publish a Router zip asset, an Updater zip asset, and '{ChecksumsAssetName}'.");
+                $"Release '{tag}' does not publish an installer .msi asset and '{ChecksumsAssetName}'.");
         }
 
         if (!isNewer)
@@ -232,24 +209,14 @@ public sealed class GitHubReleaseCheckClient : IReleaseCheckClient
             return ReleaseCheckResult.Resolved(_currentVersion, versionText, isUpdateAvailable: false, assetDownloadUrl: null, assetSha256: null);
         }
 
-        return await ResolveWithChecksumsAsync(
-                versionText,
-                routerAssetUrl,
-                routerAssetName!,
-                updaterAssetUrl,
-                updaterAssetName!,
-                checksumsUrl,
-                cancellationToken)
-            .ConfigureAwait(false);
+        return await ResolveWithChecksumAsync(versionText, msiAssetUrl, msiAssetName!, checksumsUrl, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Downloads <c>checksums.txt</c> once and looks up both zips' published SHA256s, completing the result only when every piece an apply needs is known.</summary>
-    private async Task<ReleaseCheckResult> ResolveWithChecksumsAsync(
+    /// <summary>Downloads <c>checksums.txt</c> once and looks up the MSI's published SHA256, completing the result only when both pieces an apply needs are known.</summary>
+    private async Task<ReleaseCheckResult> ResolveWithChecksumAsync(
         string versionText,
         string assetUrl,
         string assetName,
-        string updaterAssetUrl,
-        string updaterAssetName,
         string checksumsUrl,
         CancellationToken cancellationToken)
     {
@@ -265,14 +232,12 @@ public sealed class GitHubReleaseCheckClient : IReleaseCheckClient
         }
 
         var sha256 = ParseChecksum(checksumsText, assetName);
-        var updaterSha256 = ParseChecksum(checksumsText, updaterAssetName);
-        if (sha256 is null || updaterSha256 is null)
+        if (sha256 is null)
         {
-            var missing = sha256 is null ? assetName : updaterAssetName;
             return ReleaseCheckResult.Unavailable(
                 _currentVersion,
                 ReleaseCheckUnavailableReason.AssetOrChecksumMissing,
-                $"'{ChecksumsAssetName}' does not list a checksum for '{missing}'.");
+                $"'{ChecksumsAssetName}' does not list a checksum for '{assetName}'.");
         }
 
         return ReleaseCheckResult.Resolved(
@@ -280,9 +245,7 @@ public sealed class GitHubReleaseCheckClient : IReleaseCheckClient
             versionText,
             isUpdateAvailable: true,
             assetDownloadUrl: assetUrl,
-            assetSha256: sha256,
-            updaterAssetDownloadUrl: updaterAssetUrl,
-            updaterAssetSha256: updaterSha256);
+            assetSha256: sha256);
     }
 
     /// <summary>Parses <c>&lt;sha256&gt;  &lt;filename&gt;</c> lines (the <c>sha256sum</c> output format) looking for <paramref name="assetName"/>.</summary>
@@ -311,47 +274,6 @@ public sealed class GitHubReleaseCheckClient : IReleaseCheckClient
         }
 
         return null;
-    }
-
-    /// <summary>Which of the release's two installable zips an asset name denotes, if either.</summary>
-    /// <remarks>
-    /// Public rather than internal so <see cref="ClassifyAsset"/> is directly theory-testable
-    /// (<c>GitHubReleaseCheckClientTests.ClassifyAsset_RealisticNames_ResolveToTheExpectedKind</c>) without
-    /// <c>InternalsVisibleTo</c> hitting CS0051 on the public xUnit theory method's parameter type.
-    /// </remarks>
-    public enum ReleaseAssetKind
-    {
-        /// <summary>Not one of the two installable zips (e.g. <c>checksums.txt</c>, or a GUI/source archive).</summary>
-        Other = 0,
-
-        /// <summary>The Router zip that replaces <c>...\Router\</c>.</summary>
-        Router,
-
-        /// <summary>The Updater zip that replaces <c>...\Updater\</c>.</summary>
-        Updater,
-    }
-
-    /// <summary>
-    /// Classifies a release asset name, testing the more specific <c>"updater"</c> substring <b>before</b>
-    /// the broader <c>"router"</c> one. The order is required for correctness, not tidiness: the product
-    /// name <c>TotallyHotArcRouter</c> embeds <c>"router"</c>, so <c>TotallyHotArcRouter-Updater-win-x64.zip</c>
-    /// satisfies a plain <c>"router"</c> test too and would otherwise be picked up as the Router zip.
-    /// </summary>
-    internal static ReleaseAssetKind ClassifyAsset(string name)
-    {
-        if (!name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
-        {
-            return ReleaseAssetKind.Other;
-        }
-
-        if (name.Contains("updater", StringComparison.OrdinalIgnoreCase))
-        {
-            return ReleaseAssetKind.Updater;
-        }
-
-        return name.Contains("router", StringComparison.OrdinalIgnoreCase)
-            ? ReleaseAssetKind.Router
-            : ReleaseAssetKind.Other;
     }
 
     /// <summary>Reads one named value out of this assembly's compiled-in <see cref="AssemblyMetadataAttribute"/>s.</summary>

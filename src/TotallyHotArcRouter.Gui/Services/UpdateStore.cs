@@ -5,15 +5,19 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 
 /// <summary>
 /// Singleton view-model backing the System Settings window's "Software Update" section. Wraps
-/// <see cref="UpdateAdminClient"/> (the tested, platform-agnostic logic in
-/// TotallyHot.ArcRouter.Gui.Telemetry) with the same "singleton + Changed event + best-effort,
-/// reachability-tolerant" shape as <see cref="LlmRouterModelStore"/>, so the UI survives tab switches and
-/// degrades gracefully when the proxy isn't running. Registered in <c>MauiProgram</c>.
+/// <see cref="UpdateAdminClient"/> (status/check/audit-notify) and <see cref="MsiUpdateApplier"/>
+/// (download/verify/launch) - both the tested, platform-agnostic logic in TotallyHot.ArcRouter.Gui.Telemetry
+/// - with the same "singleton + Changed event + best-effort, reachability-tolerant" shape as
+/// <see cref="LlmRouterModelStore"/>, so the UI survives tab switches and degrades gracefully when the
+/// proxy isn't running. Registered in <c>MauiProgram</c>.
 /// </summary>
 public sealed class UpdateStore : IDisposable
 {
     private readonly IUpdateAdminClient _client;
+    private readonly IMsiUpdateApplier _applier;
     private readonly IDisposable? _ownedClient;
+    private readonly HttpClient? _ownedHttpClient;
+    private readonly Action _exitApplication;
     private readonly ILogger<UpdateStore>? _logger;
 
     /// <summary>Initializes a new instance of the <see cref="UpdateStore"/> class.</summary>
@@ -27,17 +31,37 @@ public sealed class UpdateStore : IDisposable
         var client = new UpdateAdminClient(serverAddress);
         _client = client;
         _ownedClient = client;
+
+        var httpClient = new HttpClient();
+        _ownedHttpClient = httpClient;
+        _applier = new MsiUpdateApplier(httpClient, Microsoft.Extensions.Logging.Abstractions.NullLogger<MsiUpdateApplier>.Instance);
+
+        _exitApplication = () => Environment.Exit(0);
     }
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="UpdateStore"/> class over a caller-supplied client.
-    /// The seam tests use to drive the store without a live proxy; the caller owns the client's lifetime.
+    /// Initializes a new instance of the <see cref="UpdateStore"/> class over caller-supplied
+    /// dependencies. The seam tests use to drive the store without a live proxy, a real download, or a
+    /// real process exit; the caller owns the client's lifetime.
     /// </summary>
-    public UpdateStore(IUpdateAdminClient client, ILogger<UpdateStore>? logger = null)
+    /// <param name="client">Reads status and sends the apply-starting audit notification.</param>
+    /// <param name="applier">Downloads, verifies, and launches the installer.</param>
+    /// <param name="exitApplication">
+    /// Invoked immediately after a successful apply launch - production wires this to actually terminate
+    /// the process (<see cref="Environment.Exit(int)"/>), since this process cannot hold its own files
+    /// locked while the MSI replaces <c>...\Gui\</c>. Defaults to a no-op so a test can assert it was
+    /// called without ending the test process.
+    /// </param>
+    /// <param name="logger">Optional logger.</param>
+    public UpdateStore(IUpdateAdminClient client, IMsiUpdateApplier applier, Action? exitApplication = null, ILogger<UpdateStore>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(client);
+        ArgumentNullException.ThrowIfNull(applier);
         _client = client;
+        _applier = applier;
         _ownedClient = null;
+        _ownedHttpClient = null;
+        _exitApplication = exitApplication ?? (() => { });
         _logger = logger;
     }
 
@@ -57,7 +81,7 @@ public sealed class UpdateStore : IDisposable
     public bool IsBusy { get; private set; }
 
     /// <summary>The outcome of the most recent apply attempt, or <see langword="null"/> before one has run.</summary>
-    public ApplyUpdateInfo? LastApplyOutcome { get; private set; }
+    public MsiApplyResult? LastApplyOutcome { get; private set; }
 
     /// <summary>Raised after any of the above change.</summary>
     public event Action? Changed;
@@ -72,31 +96,55 @@ public sealed class UpdateStore : IDisposable
 
     /// <summary>
     /// Applies the currently-known-available update - the "Apply Update" button, which the panel is
-    /// expected to gate behind its own confirmation dialog before calling this (applying restarts the
-    /// Router service). Rethrows so the panel can render the rejection inline, matching
-    /// <see cref="LlmRouterModelStore.SetBaseUrlAsync"/>'s split.
+    /// expected to gate behind its own confirmation dialog before calling this (applying downloads and
+    /// installs an MSI, which requires administrator approval and restarts the application). Notifies the
+    /// Router first (best-effort audit log, never blocking), then downloads/verifies/launches the
+    /// installer via <see cref="IMsiUpdateApplier"/>. On a successful launch, invokes the exit callback
+    /// supplied at construction so this process releases its own files before the MSI tries to replace
+    /// them.
     /// </summary>
-    /// <exception cref="UpdateAdminException">The apply was rejected, failed, or the router is unreachable.</exception>
+    /// <exception cref="InvalidOperationException">No update is currently known available (call <see cref="LoadAsync"/>/<see cref="CheckNowAsync"/> first).</exception>
     public async Task ApplyAsync(CancellationToken cancellationToken = default)
     {
+        if (Status is not { UpdateAvailable: true, AssetDownloadUrl: { } assetDownloadUrl, AssetSha256: { } assetSha256 } status)
+        {
+            throw new InvalidOperationException("No verified update is currently known available. Call LoadAsync/CheckNowAsync first.");
+        }
+
         IsBusy = true;
         Changed?.Invoke();
 
         try
         {
-            LastApplyOutcome = await _client.ApplyAsync(cancellationToken).ConfigureAwait(false);
-            IsReachable = true;
-            LastError = null;
-        }
-        catch (UpdateAdminException ex)
-        {
-            RecordFailure(ex);
-            throw;
+            await TryNotifyRouterAsync(status.LatestVersion, cancellationToken).ConfigureAwait(false);
+
+            LastApplyOutcome = await _applier.ApplyAsync(assetDownloadUrl, assetSha256, status.LatestVersion, cancellationToken).ConfigureAwait(false);
+            if (LastApplyOutcome.Succeeded)
+            {
+                _exitApplication();
+            }
         }
         finally
         {
             IsBusy = false;
             Changed?.Invoke();
+        }
+    }
+
+    /// <summary>
+    /// Best-effort audit notification to the Router - a failure here (e.g. the router is unreachable, or
+    /// already mid-shutdown) never blocks the apply, since the GUI already has everything it needs from
+    /// its own cached status.
+    /// </summary>
+    private async Task TryNotifyRouterAsync(string latestVersion, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _client.NotifyApplyStartingAsync(latestVersion, cancellationToken).ConfigureAwait(false);
+        }
+        catch (UpdateAdminException ex)
+        {
+            _logger?.LogWarning(ex, "Could not notify the router that an apply is starting; proceeding anyway.");
         }
     }
 
@@ -133,5 +181,9 @@ public sealed class UpdateStore : IDisposable
     }
 
     /// <inheritdoc />
-    public void Dispose() => _ownedClient?.Dispose();
+    public void Dispose()
+    {
+        _ownedClient?.Dispose();
+        _ownedHttpClient?.Dispose();
+    }
 }

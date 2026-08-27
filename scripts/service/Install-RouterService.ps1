@@ -1,13 +1,15 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    Registers the TotallyHotArcRouter Windows Service from a self-contained win-x64 publish.
+    DEV-ONLY: Registers the TotallyHotArcRouter Windows Service from a self-contained win-x64 publish.
 
 .DESCRIPTION
-    Manual/documented install path for the Router backend. Matches the registration the
-    auto-update Updater helper performs itself in C# (ServiceInstaller.cs) when the GUI drives a
-    first-run install - see docs/... auto-update plan. The service name here ("TotallyHotArcRouter")
-    must match Program.cs's UseWindowsService(options => options.ServiceName = "TotallyHotArcRouter").
+    NOT the real install path anymore. The signed MSI built from src/TotallyHotArcRouter.Installer/
+    (docs/router/packaging-and-distribution.md) registers the service via WiX ServiceInstall/ServiceControl
+    and is what end users and CI-produced releases use. This script is kept only for a developer who wants
+    to run/debug the Router as a real Windows Service on a dev machine without building the MSI. The
+    service name here ("TotallyHotArcRouter") must match Program.cs's
+    UseWindowsService(options => options.ServiceName = "TotallyHotArcRouter") and the MSI's ServiceInstall.
 
 .PARAMETER PublishDir
     Directory containing the published TotallyHotArcRouter.exe (default: this script's

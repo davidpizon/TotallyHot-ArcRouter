@@ -50,18 +50,25 @@ public enum UpdateUnavailableReasonInfo
 /// <param name="CheckedAtUtc">When this status was computed, or <see langword="null"/> before the first check has ever run.</param>
 /// <param name="UnavailableReason">Why the check could not resolve, or <see cref="UpdateUnavailableReasonInfo.None"/> on a definite outcome.</param>
 /// <param name="UnavailableDetail">A human-readable elaboration of <paramref name="UnavailableReason"/>.</param>
+/// <param name="AssetDownloadUrl">
+/// The installer MSI's direct download URL, set only when <paramref name="UpdateAvailable"/> is
+/// <see langword="true"/>. The GUI downloads this itself via <see cref="IMsiUpdateApplier"/> - the
+/// Router never does.
+/// </param>
+/// <param name="AssetSha256">The MSI's published SHA256 (lowercase hex), set only when <paramref name="UpdateAvailable"/> is <see langword="true"/>.</param>
 public sealed record UpdateStatusInfo(
     string CurrentVersion,
     string LatestVersion,
     bool UpdateAvailable,
     DateTimeOffset? CheckedAtUtc,
     UpdateUnavailableReasonInfo UnavailableReason,
-    string? UnavailableDetail);
+    string? UnavailableDetail,
+    string? AssetDownloadUrl = null,
+    string? AssetSha256 = null);
 
-/// <summary>The outcome of an apply request.</summary>
-/// <param name="Succeeded">Whether the download, checksum verification, and updater handoff all succeeded.</param>
-/// <param name="Message">A human-readable outcome.</param>
-public sealed record ApplyUpdateInfo(bool Succeeded, string Message);
+/// <summary>The outcome of a "notify the Router an apply is starting" audit call.</summary>
+/// <param name="Acknowledged">Whether the Router recorded the notification. Never gates the apply itself - the GUI proceeds regardless.</param>
+public sealed record NotifyApplyStartingInfo(bool Acknowledged);
 
 /// <summary>
 /// The Router self-update operations the Governance UI's System Settings window's "Software Update"
@@ -79,19 +86,21 @@ public interface IUpdateAdminClient
     Task<UpdateStatusInfo> CheckNowAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Downloads, verifies, and hands off the currently-known-available update. Fails with
-    /// <see cref="UpdateAdminException"/> (not <see cref="UpdateAdminException.IsUnavailable"/>) when no
-    /// verified update is currently known - call <see cref="CheckNowAsync"/> first.
+    /// Tells the Router it is about to apply an update to <paramref name="version"/>, purely for the
+    /// audit log - the Router does not download, verify, or gate anything here. The caller (
+    /// <see cref="IMsiUpdateApplier"/>, driven from <c>UpdateStore</c>) already has everything it needs
+    /// from a prior <see cref="GetStatusAsync"/>/<see cref="CheckNowAsync"/> result and proceeds with the
+    /// apply even if this call fails to reach the Router.
     /// </summary>
-    /// <exception cref="UpdateAdminException">The call was rejected, failed, or the router is unreachable.</exception>
-    Task<ApplyUpdateInfo> ApplyAsync(CancellationToken cancellationToken = default);
+    /// <exception cref="UpdateAdminException">The call failed or the router is unreachable.</exception>
+    Task<NotifyApplyStartingInfo> NotifyApplyStartingAsync(string version, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
 /// Client for the proxy's <c>UpdateAdminService</c> - the Governance UI's System Settings window's
-/// "Software Update" section (docs/router/auto-update-plan.md Phase 2). Lives in this plain
-/// <c>net10.0</c> library rather than the Windows-only MAUI project so CI can unit-test it, exactly like
-/// <see cref="LlmRouterModelAdminClient"/>.
+/// "Software Update" section (docs/router/auto-update-plan.md Phase 2, packaging superseded by
+/// docs/router/packaging-and-distribution.md). Lives in this plain <c>net10.0</c> library rather than the
+/// Windows-only MAUI project so CI can unit-test it, exactly like <see cref="LlmRouterModelAdminClient"/>.
 /// </summary>
 public sealed class UpdateAdminClient : IUpdateAdminClient, IDisposable
 {
@@ -154,18 +163,20 @@ public sealed class UpdateAdminClient : IUpdateAdminClient, IDisposable
     }
 
     /// <inheritdoc />
-    public async Task<ApplyUpdateInfo> ApplyAsync(CancellationToken cancellationToken = default)
+    public async Task<NotifyApplyStartingInfo> NotifyApplyStartingAsync(string version, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(version);
+
         try
         {
             var response = await _client
-                .ApplyUpdateAsync(new Contract.ApplyUpdateRequest(), cancellationToken: cancellationToken)
+                .NotifyApplyStartingAsync(new Contract.NotifyApplyStartingRequest { Version = version }, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
-            return new ApplyUpdateInfo(response.Succeeded, response.Message);
+            return new NotifyApplyStartingInfo(response.Acknowledged);
         }
         catch (RpcException ex)
         {
-            throw Wrap(ex, "Could not apply the update");
+            throw Wrap(ex, "Could not notify the router that an apply is starting");
         }
     }
 
@@ -176,7 +187,9 @@ public sealed class UpdateAdminClient : IUpdateAdminClient, IDisposable
         response.UpdateAvailable,
         response.CheckedAtUtc?.ToDateTimeOffset(),
         MapReason(response.UnavailableReason),
-        response.HasUnavailableDetail ? response.UnavailableDetail : null);
+        response.HasUnavailableDetail ? response.UnavailableDetail : null,
+        response.HasAssetDownloadUrl ? response.AssetDownloadUrl : null,
+        response.HasAssetSha256 ? response.AssetSha256 : null);
 
     /// <summary>Maps the wire reason enum onto the client's enum.</summary>
     private static UpdateUnavailableReasonInfo MapReason(Contract.UpdateUnavailableReason reason) => reason switch

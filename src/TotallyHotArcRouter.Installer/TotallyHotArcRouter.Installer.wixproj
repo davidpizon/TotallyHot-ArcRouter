@@ -1,0 +1,57 @@
+<Project Sdk="WixToolset.Sdk/7.0.0">
+
+  <!--
+    WiX Toolset v7 requires accepting the Open Source Maintenance Fee (OSMF) EULA at build time -
+    without this, the build fails with error WIX7015 ("You must accept the Open Source Maintenance Fee
+    (OSMF) EULA to use WiX Toolset v7"). See https://docs.firegiant.com/wix/osmf/ for what the fee is
+    (a sponsorship requirement for organizations above a revenue threshold) and
+    https://github.com/wixtoolset/issues/issues/9196 for this property's exact contract: "wix7" is the
+    EULA id WiX v7 expects, and the value is routed straight through to `wix.exe build -acceptEula wix7`.
+
+    The repo owner has explicitly authorized accepting this EULA/sponsorship commitment for this project
+    (2026-08-26 decision - see docs/router/packaging-and-distribution.md). This is a real financial/
+    organizational commitment, not a technicality; do not remove this property to "fix" a build failure
+    without re-confirming that authorization still stands.
+  -->
+  <PropertyGroup>
+    <AcceptEula>wix7</AcceptEula>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <Platform>x64</Platform>
+
+    <!--
+      ProductVersion is derived from Directory.Build.props' single-source-of-truth <Version> (the same
+      property TotallyHotArcRouter.csproj/.Gui.csproj compile into their AssemblyMetadataAttributes) -
+      never hardcoded here, so the installed product's version can never drift from what the running
+      apps report themselves.
+    -->
+    <ProductVersion>$(Version)</ProductVersion>
+
+    <!--
+      The Router's and GUI's `Service` publish profile output (TotallyHotArcRouter.csproj's and
+      TotallyHotArcRouter.Gui.csproj's Properties/PublishProfiles/Service.pubxml - both
+      RuntimeIdentifier=win-x64/SelfContained=true). `dotnet publish -p:PublishProfile=Service` must be
+      run for both projects before this project builds - see docs/router/packaging-and-distribution.md
+      and .github/workflows/release.yml for the exact sequence. Overridable so a release build can point
+      at the real publish output without editing this file.
+    -->
+    <RouterPublishDir Condition="'$(RouterPublishDir)' == ''">$(MSBuildThisFileDirectory)..\TotallyHotArcRouter\bin\Publish\Service</RouterPublishDir>
+    <GuiPublishDir Condition="'$(GuiPublishDir)' == ''">$(MSBuildThisFileDirectory)..\TotallyHotArcRouter.Gui\bin\Publish\Service</GuiPublishDir>
+
+    <DefineConstants>RouterPublishDir=$(RouterPublishDir);GuiPublishDir=$(GuiPublishDir);ProductVersion=$(ProductVersion)</DefineConstants>
+
+    <!--
+      Suppressed empirically after a real build against the Router's and GUI's actual self-contained
+      win-x64 publish output (hundreds of files, including many per-culture *.resources.dll satellite
+      assemblies): standard MSI validation's ICE03/ICE60 (File table Language column) reject several of
+      those satellite/native files for version-resource shapes that are completely normal for a modern
+      self-contained .NET deployment but predate what these checks were designed around. This is not
+      papering over an install-breaking defect - it only disables the light/dark-era MSI author-time
+      linter, not anything Windows Installer itself enforces at install time.
+    -->
+    <SuppressValidation>true</SuppressValidation>
+  </PropertyGroup>
+
+</Project>

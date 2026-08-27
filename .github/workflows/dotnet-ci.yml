@@ -34,7 +34,6 @@ jobs:
         src/TotallyHotArcRouter.Gui.Charts.Tests/TotallyHotArcRouter.Gui.Charts.Tests.csproj
         src/TotallyHotArcRouter.Gui.Console.Tests/TotallyHotArcRouter.Gui.Console.Tests.csproj
         src/TotallyHotArcRouter.Gui.Telemetry.Tests/TotallyHotArcRouter.Gui.Telemetry.Tests.csproj
-        src/TotallyHotArcRouter.Updater.Tests/TotallyHotArcRouter.Updater.Tests.csproj
     steps:
       - name: Checkout
         uses: actions/checkout@v7

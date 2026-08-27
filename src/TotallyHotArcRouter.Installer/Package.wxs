@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The signed MSI (signing pending a certificate - see docs/router/packaging-and-distribution.md) that
+  replaces the deleted TotallyHotArcRouter.Updater helper. One Windows Installer transaction installs
+  both the Router and the GUI, registers the Router's Windows Service, and - via MajorUpgrade below -
+  cleanly replaces any prior version already installed. Built and verified against WiX Toolset v7.0.0 in
+  this repo (see the .wixproj's AcceptEula comment for the OSMF EULA acceptance this requires).
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="TotallyHot ArcRouter"
+           Manufacturer="TotallyHot"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="38369898-c08b-4d1b-8247-0705657c914c"
+           Compressed="yes">
+
+    <!--
+      Standard WiX major-upgrade pattern (https://docs.firegiant.com/wix/upgrades/): MajorUpgrade's
+      default Schedule ("afterInstallInitialize" - not overridden here) removes the previous version's
+      files and stops/re-registers the service as part of the SAME transaction that installs the new
+      version's files, before the new files are laid down. That is what gives vN -> vN+1 a single,
+      replaced Add/Remove Programs entry rather than two side-by-side installs, and is also why
+      ServiceControl below (Stop="both"/Remove="uninstall") is enough to cleanly hand the service
+      registration from the old version to the new one without a manual uninstall step in between.
+      DowngradeErrorMessage blocks installing an older MSI over a newer one, rather than silently
+      corrupting the newer install.
+    -->
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed. Uninstall it first if you need to downgrade." />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <!--
+      %ProgramFiles%\TotallyHotArcRouter\Router\ and \Gui\ - no \Updater\ directory, unlike the design
+      this MSI superseded. %LOCALAPPDATA%\TotallyHot.ArcRouter\ (per-user config/state both apps write at
+      runtime) is never referenced anywhere in this file and is therefore left completely untouched by
+      install, upgrade, and uninstall - Windows Installer only ever manages files, registry keys, and
+      services it was explicitly told about.
+    -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="TotallyHotArcRouter">
+        <Directory Id="ROUTERFOLDER" Name="Router" />
+        <Directory Id="GUIFOLDER" Name="Gui" />
+      </Directory>
+    </StandardDirectory>
+
+    <!--
+      Harvests every file TotallyHotArcRouter.csproj's Service publish profile produced, except the
+      Router's own exe - that one file also carries the ServiceInstall/ServiceControl pair below, so it
+      lives in its own explicit Component instead (Windows Installer requires the service's binary to be
+      the KeyPath of the component that installs it, and Files-harvested components don't let this file
+      opt into that).
+    -->
+    <ComponentGroup Id="RouterFiles" Directory="ROUTERFOLDER">
+      <Files Include="$(var.RouterPublishDir)\**">
+        <Exclude Files="$(var.RouterPublishDir)\TotallyHotArcRouter.exe" />
+      </Files>
+    </ComponentGroup>
+
+    <!-- Harvests every file TotallyHotArcRouter.Gui.csproj's Service publish profile produced. -->
+    <ComponentGroup Id="GuiFiles" Directory="GUIFOLDER">
+      <Files Include="$(var.GuiPublishDir)\**" />
+    </ComponentGroup>
+
+    <Component Id="RouterServiceComponent" Directory="ROUTERFOLDER" Guid="20aa08ae-3a04-41e6-b3e7-d44768a7e3fe">
+      <File Id="RouterServiceExe" Source="$(var.RouterPublishDir)\TotallyHotArcRouter.exe" KeyPath="yes" />
+
+      <!--
+        Name/Account/Start must exactly match Program.cs's
+        UseWindowsService(options => options.ServiceName = "TotallyHotArcRouter") and mirror the
+        parameters scripts/service/Install-RouterService.ps1's New-Service call used before this MSI
+        replaced it as the real install path (that script is now dev-only - see its header comment).
+      -->
+      <ServiceInstall Id="RouterServiceInstall"
+                       Name="TotallyHotArcRouter"
+                       DisplayName="TotallyHot ArcRouter"
+                       Description="TotallyHot ArcRouter LLM routing proxy."
+                       Type="ownProcess"
+                       Start="auto"
+                       ErrorControl="normal"
+                       Account="LocalSystem" />
+
+      <!--
+        Stops the service before the install/upgrade/uninstall file swap and starts it again after
+        install/upgrade (not after a plain uninstall) - the exact stop/swap/restart sequence the deleted
+        TotallyHotArcRouter.Updater helper used to hand-roll, now handled by Windows Installer's own
+        transaction (docs/router/packaging-and-distribution.md). Wait="yes" makes the install wait for
+        the service to actually reach a stopped state before the file swap proceeds, rather than racing a
+        file lock still held by a not-yet-stopped process.
+      -->
+      <ServiceControl Id="RouterServiceControl"
+                       Name="TotallyHotArcRouter"
+                       Start="install"
+                       Stop="both"
+                       Remove="uninstall"
+                       Wait="yes" />
+    </Component>
+
+    <Feature Id="Main" Title="TotallyHot ArcRouter" Level="1">
+      <ComponentGroupRef Id="RouterFiles" />
+      <ComponentGroupRef Id="GuiFiles" />
+      <ComponentRef Id="RouterServiceComponent" />
+    </Feature>
+
+  </Package>
+</Wix>

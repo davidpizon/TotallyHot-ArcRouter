@@ -153,7 +153,8 @@
                 {
                     <div class="space-y-2 ds-destructive-box-warning">
                         <p class="text-xs text-slate-400 leading-5">
-                            Applying restarts the Router service. Continue?
+                            This will download and install the update, which requires administrator approval
+                            and will restart the application. Continue?
                         </p>
                         <div class="flex gap-2">
                             <button @onclick="@(() => _confirmingApply = false)" class="flex-1 btn btn-ghost">
@@ -516,7 +517,7 @@
         _updateErrorMessage = null;
     }
 
-    /// <summary>Applies the update once the operator has confirmed the restart.</summary>
+    /// <summary>Applies the update once the operator has confirmed the install/restart.</summary>
     private async Task ApplyUpdateConfirmed()
     {
         _confirmingApply = false;
@@ -524,11 +525,11 @@
         {
             await UpdateStore.ApplyAsync();
         }
-        catch (UpdateAdminException ex)
+        catch (InvalidOperationException ex)
         {
-            _updateErrorMessage = UpdateStore.IsReachable
-                ? ex.Message
-                : "Could not reach the router. Is the proxy running?";
+            // No update was known available - e.g. a background CheckNowAsync/LoadAsync raced this
+            // confirmation and cleared the status between the button appearing and the click landing.
+            _updateErrorMessage = ex.Message;
         }
     }
 

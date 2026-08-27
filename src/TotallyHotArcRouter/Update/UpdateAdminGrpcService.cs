@@ -7,38 +7,40 @@ namespace TotallyHot.ArcRouter.Update;
 
 /// <summary>
 /// gRPC service backing the Governance UI's System Settings window's "Software Update" section
-/// (docs/router/auto-update-plan.md Phase 2): reports the Router's last-known self-update check outcome,
-/// forces an immediate re-check, and applies a verified update. Mapped by
-/// <see cref="TotallyHot.ArcRouter.Proxy.ProxyServer"/> unconditionally onto the same loopback TLS
-/// endpoint as <c>TelemetryService</c> and the other admin services - update status is core operational
-/// state, the same way <c>RoutingModeAdminService</c> is always mapped.
+/// (docs/router/auto-update-plan.md Phase 2, packaging superseded by
+/// docs/router/packaging-and-distribution.md): reports the Router's last-known self-update check
+/// outcome, forces an immediate re-check, and receives the GUI's audit notification that it is about to
+/// apply an update. Mapped by <see cref="TotallyHot.ArcRouter.Proxy.ProxyServer"/> unconditionally onto
+/// the same loopback TLS endpoint as <c>TelemetryService</c> and the other admin services - update
+/// status is core operational state, the same way <c>RoutingModeAdminService</c> is always mapped.
 /// </summary>
+/// <remarks>
+/// The Router does not download, verify, or launch anything for an update - that logic moved to the GUI
+/// (<c>TotallyHot.ArcRouter.Gui.Telemetry.MsiUpdateApplier</c>), which downloads and checksum-verifies
+/// the release's MSI and launches an elevated <c>msiexec</c>. This service only detects updates and
+/// records that an apply is about to happen, for the audit log.
+/// </remarks>
 public sealed class UpdateAdminGrpcService : Contract.UpdateAdminService.UpdateAdminServiceBase
 {
     private readonly IUpdateStateStore _stateStore;
     private readonly IReleaseCheckClient _releaseCheckClient;
-    private readonly IUpdateApplier _applier;
     private readonly ILogger<UpdateAdminGrpcService> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="UpdateAdminGrpcService"/> class.</summary>
     /// <param name="stateStore">The last-known check outcome <see cref="GetUpdateStatus"/> reads.</param>
     /// <param name="releaseCheckClient">Runs the immediate re-check <see cref="CheckForUpdatesNow"/> performs.</param>
-    /// <param name="applier">Downloads, verifies, and hands off to the updater for <see cref="ApplyUpdate"/>.</param>
     /// <param name="logger">The logger.</param>
     public UpdateAdminGrpcService(
         IUpdateStateStore stateStore,
         IReleaseCheckClient releaseCheckClient,
-        IUpdateApplier applier,
         ILogger<UpdateAdminGrpcService> logger)
     {
         ArgumentNullException.ThrowIfNull(stateStore);
         ArgumentNullException.ThrowIfNull(releaseCheckClient);
-        ArgumentNullException.ThrowIfNull(applier);
         ArgumentNullException.ThrowIfNull(logger);
 
         _stateStore = stateStore;
         _releaseCheckClient = releaseCheckClient;
-        _applier = applier;
         _logger = logger;
     }
 
@@ -65,31 +67,15 @@ public sealed class UpdateAdminGrpcService : Contract.UpdateAdminService.UpdateA
     }
 
     /// <inheritdoc />
-    public override async Task<Contract.ApplyUpdateResponse> ApplyUpdate(
-        Contract.ApplyUpdateRequest request,
+    public override Task<Contract.NotifyApplyStartingResponse> NotifyApplyStarting(
+        Contract.NotifyApplyStartingRequest request,
         ServerCallContext context)
     {
-        var current = _stateStore.Current.Result;
-        if (current is null || !current.IsUpdateAvailable)
-        {
-            throw new RpcException(new Status(
-                StatusCode.FailedPrecondition,
-                "No verified update is currently known available. Call CheckForUpdatesNow first."));
-        }
-
-        var outcome = await _applier.ApplyAsync(current, context.CancellationToken).ConfigureAwait(false);
-
         _logger.LogInformation(
-            "Update apply requested for version {LatestVersion}: Succeeded={Succeeded} Message={Message}",
-            current.LatestVersion,
-            outcome.Succeeded,
-            outcome.Message);
+            "GUI reports it is about to apply update to version {Version}; this service will restart shortly.",
+            request.Version);
 
-        return new Contract.ApplyUpdateResponse
-        {
-            Succeeded = outcome.Succeeded,
-            Message = outcome.Message,
-        };
+        return Task.FromResult(new Contract.NotifyApplyStartingResponse { Acknowledged = true });
     }
 
     /// <summary>Converts an <see cref="UpdateStateSnapshot"/> into the wire response.</summary>
@@ -115,6 +101,19 @@ public sealed class UpdateAdminGrpcService : Contract.UpdateAdminService.UpdateA
         if (snapshot.Result?.UnavailableDetail is { } detail)
         {
             response.UnavailableDetail = detail;
+        }
+
+        if (snapshot.Result?.IsUpdateAvailable == true)
+        {
+            if (snapshot.Result.AssetDownloadUrl is { } assetDownloadUrl)
+            {
+                response.AssetDownloadUrl = assetDownloadUrl;
+            }
+
+            if (snapshot.Result.AssetSha256 is { } assetSha256)
+            {
+                response.AssetSha256 = assetSha256;
+            }
         }
 
         return response;

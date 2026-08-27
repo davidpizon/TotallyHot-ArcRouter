@@ -27,34 +27,27 @@ public sealed class GitHubReleaseCheckClientTests
     private static HttpResponseMessage PlainText(string body) =>
         new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "text/plain") };
 
-    /// <summary>The realistic Router asset name a release publishes.</summary>
-    private const string RouterAssetName = "TotallyHotArcRouter-Router-win-x64.zip";
-
-    /// <summary>
-    /// The realistic Updater asset name a release publishes. Deliberately the real product name, which
-    /// embeds "router" inside "TotallyHotArcRouter" - the exact collision that made a naive
-    /// Contains("router") classification misfile this asset as the Router zip.
-    /// </summary>
-    private const string UpdaterAssetName = "TotallyHotArcRouter-Updater-win-x64.zip";
+    /// <summary>The realistic MSI installer asset name a release publishes.</summary>
+    private const string MsiAssetName = "TotallyHotArcRouter-1.2.3.msi";
 
     private static string Asset(string name) =>
         $$"""{"name": "{{name}}", "browser_download_url": "https://example.test/{{name}}"}""";
 
     private static string ReleasePayload(
         string tag,
-        string assetName = RouterAssetName,
+        string assetName = MsiAssetName,
         bool includeChecksums = true,
-        bool includeUpdaterAsset = true)
+        bool includeMsiAsset = true)
     {
-        var assets = Asset(assetName);
-        if (includeUpdaterAsset)
+        var assets = string.Empty;
+        if (includeMsiAsset)
         {
-            assets += "," + Asset(UpdaterAssetName);
+            assets = Asset(assetName);
         }
 
         if (includeChecksums)
         {
-            assets += "," + Asset("checksums.txt");
+            assets = assets.Length == 0 ? Asset("checksums.txt") : assets + "," + Asset("checksums.txt");
         }
 
         return $$"""
@@ -62,9 +55,9 @@ public sealed class GitHubReleaseCheckClientTests
             """;
     }
 
-    /// <summary>A well-formed <c>checksums.txt</c> body listing both zips, in the <c>sha256sum</c> output format.</summary>
-    private static string ChecksumsBody(string routerSha = "abc123def456", string updaterSha = "feed0000cafe") =>
-        $"{routerSha}  {RouterAssetName}\n{updaterSha}  {UpdaterAssetName}\n";
+    /// <summary>A well-formed <c>checksums.txt</c> body listing the MSI, in the <c>sha256sum</c> output format.</summary>
+    private static string ChecksumsBody(string msiSha = "abc123def456") =>
+        $"{msiSha}  {MsiAssetName}\n";
 
     [Fact]
     public async Task CheckAsync_LatestEqualsCurrent_NoUpdateAvailable()
@@ -101,36 +94,15 @@ public sealed class GitHubReleaseCheckClientTests
         Assert.True(result.IsUpdateAvailable);
         Assert.Equal("2.5.0", result.LatestVersion);
         Assert.Equal("abc123def456", result.AssetSha256);
-        Assert.Equal($"https://example.test/{RouterAssetName}", result.AssetDownloadUrl);
+        Assert.Equal($"https://example.test/{MsiAssetName}", result.AssetDownloadUrl);
     }
 
     [Fact]
-    public async Task CheckAsync_RealisticRouterAndUpdaterAssetNames_ClassifiesEachToTheCorrectSlot()
+    public async Task CheckAsync_NonMsiNonChecksumAssetsAreIgnored()
     {
-        // Regression guard: "TotallyHotArcRouter-Updater-win-x64.zip" also contains "router", so a
-        // Contains("router")-first classification would file it as the Router zip (or, depending on
-        // enumeration order, let it overwrite the real one) and hand the Router swap a copy of the Updater.
-        var client = CreateClient(request =>
-            request.RequestUri!.AbsolutePath.EndsWith("checksums.txt", StringComparison.Ordinal)
-                ? PlainText(ChecksumsBody())
-                : Json(ReleasePayload("v2.5.0")));
-
-        var result = await client.CheckAsync(TestContext.Current.CancellationToken);
-
-        Assert.True(result.IsUpdateAvailable);
-        Assert.Equal($"https://example.test/{RouterAssetName}", result.AssetDownloadUrl);
-        Assert.Equal("abc123def456", result.AssetSha256);
-        Assert.Equal($"https://example.test/{UpdaterAssetName}", result.UpdaterAssetDownloadUrl);
-        Assert.Equal("feed0000cafe", result.UpdaterAssetSha256);
-    }
-
-    [Fact]
-    public async Task CheckAsync_UpdaterAssetListedFirst_StillClassifiesEachToTheCorrectSlot()
-    {
-        // Same pair, reversed enumeration order - the classification must not depend on which asset the
-        // release happens to list first.
+        // A release's Source code (zip)/other assets must not be mistaken for the installer.
         var payload = $$"""
-            {"tag_name": "v2.5.0", "assets": [{{Asset(UpdaterAssetName)}},{{Asset(RouterAssetName)}},{{Asset("checksums.txt")}}]}
+            {"tag_name": "v2.5.0", "assets": [{{Asset("Source code (zip)")}},{{Asset(MsiAssetName)}},{{Asset("checksums.txt")}}]}
             """;
         var client = CreateClient(request =>
             request.RequestUri!.AbsolutePath.EndsWith("checksums.txt", StringComparison.Ordinal)
@@ -140,45 +112,18 @@ public sealed class GitHubReleaseCheckClientTests
         var result = await client.CheckAsync(TestContext.Current.CancellationToken);
 
         Assert.True(result.IsUpdateAvailable);
-        Assert.Equal($"https://example.test/{RouterAssetName}", result.AssetDownloadUrl);
-        Assert.Equal($"https://example.test/{UpdaterAssetName}", result.UpdaterAssetDownloadUrl);
+        Assert.Equal($"https://example.test/{MsiAssetName}", result.AssetDownloadUrl);
     }
 
-    [Theory]
-    [InlineData(RouterAssetName, GitHubReleaseCheckClient.ReleaseAssetKind.Router)]
-    [InlineData(UpdaterAssetName, GitHubReleaseCheckClient.ReleaseAssetKind.Updater)]
-    [InlineData("checksums.txt", GitHubReleaseCheckClient.ReleaseAssetKind.Other)]
-    [InlineData("TotallyHotArcRouter-Router-win-x64.zip.sig", GitHubReleaseCheckClient.ReleaseAssetKind.Other)]
-    [InlineData("Source code (zip)", GitHubReleaseCheckClient.ReleaseAssetKind.Other)]
-    public void ClassifyAsset_RealisticNames_ResolveToTheExpectedKind(string name, GitHubReleaseCheckClient.ReleaseAssetKind expected) =>
-        Assert.Equal(expected, GitHubReleaseCheckClient.ClassifyAsset(name));
-
     [Fact]
-    public async Task CheckAsync_NewerButNoUpdaterAsset_ReportsAssetOrChecksumMissing()
+    public async Task CheckAsync_NewerButNoMsiAsset_ReportsAssetOrChecksumMissing()
     {
-        // Strict by design: an apply always refreshes the Updater first, so a release without one cannot
-        // be applied - and an update that cannot be applied is never reported as available.
-        var client = CreateClient(_ => Json(ReleasePayload("v9.0.0", includeUpdaterAsset: false)));
+        var client = CreateClient(_ => Json(ReleasePayload("v9.0.0", includeMsiAsset: false)));
 
         var result = await client.CheckAsync(TestContext.Current.CancellationToken);
 
         Assert.False(result.IsUpdateAvailable);
         Assert.Equal(ReleaseCheckUnavailableReason.AssetOrChecksumMissing, result.UnavailableReason);
-    }
-
-    [Fact]
-    public async Task CheckAsync_ChecksumsFileMissingTheUpdaterEntry_ReportsAssetOrChecksumMissing()
-    {
-        var client = CreateClient(request =>
-            request.RequestUri!.AbsolutePath.EndsWith("checksums.txt", StringComparison.Ordinal)
-                ? PlainText($"abc123def456  {RouterAssetName}\n")
-                : Json(ReleasePayload("v9.0.0")));
-
-        var result = await client.CheckAsync(TestContext.Current.CancellationToken);
-
-        Assert.False(result.IsUpdateAvailable);
-        Assert.Equal(ReleaseCheckUnavailableReason.AssetOrChecksumMissing, result.UnavailableReason);
-        Assert.Contains(UpdaterAssetName, result.UnavailableDetail!, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -204,7 +149,7 @@ public sealed class GitHubReleaseCheckClientTests
     }
 
     [Fact]
-    public async Task CheckAsync_NewerButNoZipAsset_ReportsAssetOrChecksumMissing()
+    public async Task CheckAsync_NewerButNoAssets_ReportsAssetOrChecksumMissing()
     {
         var client = CreateClient(_ => Json("""{"tag_name": "v9.0.0", "assets": []}"""));
 
@@ -226,17 +171,18 @@ public sealed class GitHubReleaseCheckClientTests
     }
 
     [Fact]
-    public async Task CheckAsync_ChecksumsFileMissingTheAssetsEntry_ReportsAssetOrChecksumMissing()
+    public async Task CheckAsync_ChecksumsFileMissingTheMsiEntry_ReportsAssetOrChecksumMissing()
     {
         var client = CreateClient(request =>
             request.RequestUri!.AbsolutePath.EndsWith("checksums.txt", StringComparison.Ordinal)
-                ? PlainText($"deadbeef  some-other-file.zip\nfeed0000cafe  {UpdaterAssetName}\n")
+                ? PlainText("deadbeef  some-other-file.msi\n")
                 : Json(ReleasePayload("v9.0.0")));
 
         var result = await client.CheckAsync(TestContext.Current.CancellationToken);
 
         Assert.False(result.IsUpdateAvailable);
         Assert.Equal(ReleaseCheckUnavailableReason.AssetOrChecksumMissing, result.UnavailableReason);
+        Assert.Contains(MsiAssetName, result.UnavailableDetail!, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -262,10 +208,10 @@ public sealed class GitHubReleaseCheckClientTests
     }
 
     [Theory]
-    [InlineData("abc123  file.zip", "file.zip", "abc123")]
-    [InlineData("ABC123  file.zip", "file.zip", "abc123")]
-    [InlineData("abc123 *file.zip", "file.zip", "abc123")]
-    [InlineData("abc123  other.zip", "file.zip", null)]
+    [InlineData("abc123  file.msi", "file.msi", "abc123")]
+    [InlineData("ABC123  file.msi", "file.msi", "abc123")]
+    [InlineData("abc123 *file.msi", "file.msi", "abc123")]
+    [InlineData("abc123  other.msi", "file.msi", null)]
     public void ParseChecksum_VariousFormats_ResolvesExpected(string checksumsText, string assetName, string? expected)
     {
         var result = GitHubReleaseCheckClient.ParseChecksum(checksumsText, assetName);

@@ -12,9 +12,10 @@ namespace TotallyHot.ArcRouter.Update;
 /// shape.
 /// </summary>
 /// <remarks>
-/// This service only <em>detects</em> an available update - it never applies one. Applying always goes
-/// through <see cref="UpdateAdminGrpcService.ApplyUpdate"/>, reached only by an explicit operator click
-/// in the GUI, per the auto-update plan's settled apply-policy decision.
+/// This service only <em>detects</em> an available update - it never applies one. Applying is entirely
+/// the GUI's responsibility (downloading and launching the signed MSI installer); this service's role
+/// ends at <see cref="UpdateAdminGrpcService.NotifyApplyStarting"/> recording that it is about to happen,
+/// per docs/router/packaging-and-distribution.md.
 /// </remarks>
 public sealed class UpdateCheckHostedService : BackgroundService
 {
