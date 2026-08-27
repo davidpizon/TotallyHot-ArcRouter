@@ -24,9 +24,11 @@
     <ApplicationId>com.TotallyHotArcRouter.gui</ApplicationId>
     <!-- Derived from Directory.Build.props' shared <Version> (auto-update plan Phase 0) rather than
          hardcoded, so the GUI's displayed/compared version can never drift from the Router's.
-         ApplicationDisplayVersion requires a 4-part Windows package version, stricter than the
-         semver Version property, so pad it out here rather than widening Version itself. -->
-    <ApplicationDisplayVersion>$(Version).0</ApplicationDisplayVersion>
+         ApplicationDisplayVersion must stay a 3-part semver (matching Version exactly) - the
+         Resizetizer's GeneratePackageAppxManifest task appends ApplicationVersion itself as the
+         4th component when building the appx manifest version, so pre-padding it here produces
+         a 4-part value the task then rejects. -->
+    <ApplicationDisplayVersion>$(Version)</ApplicationDisplayVersion>
     <ApplicationVersion>1</ApplicationVersion>
 
     <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
