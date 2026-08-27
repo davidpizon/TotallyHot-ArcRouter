@@ -1,5 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
+using TotallyHot.ArcRouter.Gui.Services;
+using TotallyHot.ArcRouter.Gui.Telemetry;
 using Microsoft.UI.Dispatching;
 
 namespace TotallyHot.ArcRouter.Gui.Platforms.Windows;
@@ -8,7 +10,9 @@ namespace TotallyHot.ArcRouter.Gui.Platforms.Windows;
 /// Makes the MAUI main window tray-resident on Windows. MAUI has no built-in system tray support, so
 /// this is implemented directly against Win32: a Shell_NotifyIcon tray icon whose callback messages are
 /// received by subclassing the main window's WndProc. The same subclass intercepts minimize and close so
-/// both hide the window to the tray instead; only the tray menu's Exit actually quits.
+/// both hide the window to the tray instead; only the tray menu's Exit actually quits. The tray menu also
+/// carries the "Enable Routing"/"Disable Routing" kill switch, backed by <see cref="RoutingGateStore"/>;
+/// while the router is unreachable, a right-click shows a native balloon reporting that instead of the menu.
 /// </summary>
 /// <remarks>
 /// Excluded from code coverage: every method here operates on a live native HWND via P/Invoke
@@ -32,11 +36,14 @@ internal static class TrayWindowManager
     private const int SW_RESTORE = 9;
 
     private const uint NIM_ADD = 0x0000;
+    private const uint NIM_MODIFY = 0x0001;
     private const uint NIM_DELETE = 0x0002;
     private const uint NIM_SETVERSION = 0x0004;
     private const uint NIF_MESSAGE = 0x0001;
     private const uint NIF_ICON = 0x0002;
     private const uint NIF_TIP = 0x0004;
+    private const uint NIF_INFO = 0x0010;
+    private const uint NIIF_WARNING = 0x0002;
     private const uint NOTIFYICON_VERSION_4 = 4;
     private const int IDI_APPLICATION = 32512;
 
@@ -52,6 +59,7 @@ internal static class TrayWindowManager
 
     private const uint CMD_SHOW_DASHBOARD = 1;
     private const uint CMD_EXIT = 2;
+    private const uint CMD_TOGGLE_ROUTING = 3;
 
     /// <summary>
     /// Signature matching a native Win32 window procedure, used to invoke the previously-installed
@@ -66,6 +74,16 @@ internal static class TrayWindowManager
     private static WndProc? _wndProcDelegate;
     private static bool _isExiting;
 
+    // Resolved once from the MAUI service provider in Attach - TrayWindowManager is a static P/Invoke
+    // wrapper with no DI of its own, so this is the one seam it needs into the app's singletons. Null only
+    // if resolution somehow fails (e.g. Application.Current not yet set), in which case the tray menu always
+    // shows the routing toggle rather than the unreachable balloon - a safe degrade, not a crash.
+    private static RoutingGateStore? _routingGateStore;
+
+    // Captured so the background poll thread that raises RoutingGateStore.BecameUnreachable can marshal the
+    // balloon notification back onto the UI thread, the same way the low-priority re-hide in Attach does.
+    private static DispatcherQueue? _dispatcherQueue;
+
     /// <summary>
     /// Called once from the MAUI Windows lifecycle when the native window is created: installs the
     /// WndProc subclass, adds the tray icon, centers the window, and hides it so the app starts in the
@@ -78,18 +96,45 @@ internal static class TrayWindowManager
         _wndProcDelegate = WindowProc;
         _originalWndProc = SetWindowLongPtrW(_hwnd, GWLP_WNDPROC, Marshal.GetFunctionPointerForDelegate(_wndProcDelegate));
 
+        // Hidden as early as possible, before the tray icon even exists, to narrow the window in which
+        // MAUI's own post-creation activation (below) could show a visible frame before this takes effect.
+        ShowWindowNative(_hwnd, SW_HIDE);
+
         AddTrayIcon();
 
-        // MAUI activates (shows) the window right after this lifecycle callback, which would undo an
-        // immediate hide - so also queue a low-priority hide to run after that activation. A brief flash
-        // on first launch is possible; the Photino version had the same characteristic.
-        ShowWindowNative(_hwnd, SW_HIDE);
+        _dispatcherQueue = nativeWindow.DispatcherQueue;
+        _routingGateStore = ResolveRoutingGateStore();
+        if (_routingGateStore is not null)
+        {
+            _routingGateStore.BecameUnreachable += OnRoutingGateBecameUnreachable;
+        }
+
+        // MAUI activates (shows) the window right after this lifecycle callback, which would undo the
+        // immediate hide above - so also queue a low-priority hide to run after that activation. A brief
+        // flash on first launch is still possible; the Photino version had the same characteristic.
         nativeWindow.DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
         {
             CenterOnWorkArea();
             ShowWindowNative(_hwnd, SW_HIDE);
         });
     }
+
+    /// <summary>
+    /// Resolves the tray's one collaborator from the MAUI service provider. <see cref="TrayWindowManager"/>
+    /// has no DI of its own (it is a static Win32 wrapper attached via a MAUI lifecycle callback, not a
+    /// constructed instance), so this is the seam it uses instead - the same pattern would extend to any
+    /// future tray feature that needs an app singleton.
+    /// </summary>
+    private static RoutingGateStore? ResolveRoutingGateStore() =>
+        Application.Current?.Handler?.MauiContext?.Services?.GetService(typeof(RoutingGateStore)) as RoutingGateStore;
+
+    /// <summary>
+    /// Proactively shows the "service is stopped" balloon the moment <see cref="RoutingGateStore"/> detects
+    /// the router went from reachable to unreachable, marshaled onto the UI thread since the store's poll
+    /// loop runs on a background thread.
+    /// </summary>
+    private static void OnRoutingGateBecameUnreachable() =>
+        _dispatcherQueue?.TryEnqueue(ShowServiceStoppedBalloon);
 
     /// <summary>
     /// The subclassed window procedure installed over the main window: intercepts tray-icon callbacks,
@@ -140,10 +185,19 @@ internal static class TrayWindowManager
 
     /// <summary>
     /// Builds and displays the tray icon's right-click context menu at the cursor position, then acts on
-    /// whichever command the user picks.
+    /// whichever command the user picks. When the router is unreachable (<see cref="RoutingGateStore.IsReachable"/>
+    /// is <see langword="false"/>), no menu is shown at all - the "Enable Routing"/"Disable Routing" toggle
+    /// would have nothing to act on, and "Show Dashboard"/"Exit" stay meaningful on their own but are hidden
+    /// too rather than presenting a partially-broken menu; a balloon reporting the outage takes its place.
     /// </summary>
     private static void ShowTrayMenu()
     {
+        if (_routingGateStore?.IsReachable == false)
+        {
+            ShowServiceStoppedBalloon();
+            return;
+        }
+
         // Required by TrackPopupMenuEx: without foreground status the menu won't dismiss when the user
         // clicks elsewhere (see the Shell_NotifyIcon docs).
         SetForegroundWindow(_hwnd);
@@ -152,6 +206,13 @@ internal static class TrayWindowManager
         try
         {
             AppendMenuW(menu, MF_STRING, (UIntPtr)CMD_SHOW_DASHBOARD, "Show Dashboard");
+            AppendMenuW(menu, MF_SEPARATOR, UIntPtr.Zero, null);
+
+            // A single flipping item rather than two always-present entries: its label and action reflect
+            // whatever RoutingGateStore last polled, so there is never a state where the menu offers an
+            // action that would be a no-op.
+            var routingLabel = _routingGateStore?.IsEnabled == false ? "Enable Routing" : "Disable Routing";
+            AppendMenuW(menu, MF_STRING, (UIntPtr)CMD_TOGGLE_ROUTING, routingLabel);
             AppendMenuW(menu, MF_SEPARATOR, UIntPtr.Zero, null);
             AppendMenuW(menu, MF_STRING, (UIntPtr)CMD_EXIT, "Exit");
 
@@ -163,6 +224,9 @@ internal static class TrayWindowManager
                 case CMD_SHOW_DASHBOARD:
                     ShowDashboard();
                     break;
+                case CMD_TOGGLE_ROUTING:
+                    ToggleRouting();
+                    break;
                 case CMD_EXIT:
                     ExitApplication();
                     break;
@@ -172,6 +236,64 @@ internal static class TrayWindowManager
         {
             DestroyMenu(menu);
         }
+    }
+
+    /// <summary>
+    /// Flips routing to the opposite of <see cref="RoutingGateStore.IsEnabled"/>'s last-polled value,
+    /// fire-and-forget - the tray menu command handler (<see cref="WindowProc"/>) has no async signature to
+    /// await one on.
+    /// </summary>
+    private static void ToggleRouting()
+    {
+        if (_routingGateStore is null)
+        {
+            return;
+        }
+
+        _ = ToggleRoutingAsync(enable: !_routingGateStore.IsEnabled);
+    }
+
+    /// <summary>
+    /// Calls <see cref="RoutingGateStore.EnableAsync"/>/<see cref="RoutingGateStore.DisableAsync"/> and lets
+    /// the result land in the store's own polled state - there is nothing further to show here on success or
+    /// failure: a failure means the router went away between the right-click's reachability check and this
+    /// call, and the very next right-click will see <see cref="RoutingGateStore.IsReachable"/> false and
+    /// offer the balloon instead of the menu.
+    /// </summary>
+    private static async Task ToggleRoutingAsync(bool enable)
+    {
+        try
+        {
+            if (enable)
+            {
+                await _routingGateStore!.EnableAsync();
+            }
+            else
+            {
+                await _routingGateStore!.DisableAsync();
+            }
+        }
+        catch (RoutingGateAdminException)
+        {
+        }
+    }
+
+    /// <summary>
+    /// Shows a native balloon notification anchored to the tray icon: both when the user right-clicks while
+    /// the router is unreachable (replacing the menu, see <see cref="ShowTrayMenu"/>) and proactively the
+    /// moment connectivity is first lost (see <see cref="OnRoutingGateBecameUnreachable"/>). Reuses the same
+    /// Shell_NotifyIcon plumbing the tray icon itself is built on (NIF_INFO), so it is visible regardless of
+    /// whether the dashboard window is open - unlike the in-app <c>ToastService</c>, which only renders
+    /// inside the BlazorWebView the window hides almost all the time.
+    /// </summary>
+    private static void ShowServiceStoppedBalloon()
+    {
+        var data = NewIconData();
+        data.uFlags = NIF_INFO;
+        data.szInfoTitle = "TotallyHot Arc Router";
+        data.szInfo = "The Windows service is stopped.";
+        data.dwInfoFlags = NIIF_WARNING;
+        Shell_NotifyIconW(NIM_MODIFY, ref data);
     }
 
     /// <summary>

@@ -100,6 +100,12 @@ namespace TotallyHot.ArcRouter.Proxy
             // something to register, falling back to harmless no-ops when the caller didn't supply a group.
             var updateAdmin = dependencies?.UpdateAdmin;
 
+            // The GUI system tray's routing kill switch (Governance-adjacent, but tray-controlled rather
+            // than a Governance panel) is mapped unconditionally, the same way UpdateAdminGrpcService above
+            // is - so this always has something to register, falling back to a private, unpersisted gate
+            // (not the instance ProxyMiddleware checks) when the caller didn't supply the real one.
+            var routingGateAdmin = dependencies?.RoutingGateAdmin;
+
             // Own (and later dispose) the management client only when the caller didn't supply one. Note this
             // runs whether or not the management API is enabled, exactly as before the parameter moved into
             // ManagementApiDependencies - the client is this server's to dispose either way.
@@ -273,6 +279,10 @@ namespace TotallyHot.ArcRouter.Proxy
                         // see the updateAdmin local's remarks above.
                         services.AddSingleton(updateAdmin?.StateStore ?? new Update.UpdateStateStore());
                         services.AddSingleton(updateAdmin?.ReleaseCheckClient ?? new Update.NullReleaseCheckClient());
+
+                        // The GUI system tray's routing kill switch API. Always registered - see the
+                        // routingGateAdmin local's remarks above.
+                        services.AddSingleton(routingGateAdmin?.Gate ?? new Router.RoutingGateStore());
                     });
 
                     webBuilder.Configure(app =>
@@ -339,6 +349,11 @@ namespace TotallyHot.ArcRouter.Proxy
                             // The Governance UI's "Software Update" section API (Phase 2). Always mapped -
                             // see the updateAdmin local's remarks above.
                             endpoints.MapGrpcService<Update.UpdateAdminGrpcService>();
+
+                            // The GUI system tray's routing kill switch API. Shares the TLS gRPC port with
+                            // the telemetry stream and the other admin services. Always mapped - see the
+                            // routingGateAdmin local's remarks above.
+                            endpoints.MapGrpcService<Router.RoutingGateAdminGrpcService>();
 
                             // The Governance UI's provider/credential/model management API. Only mapped
                             // when a writable store is supplied; shares this plain-HTTP loopback port with

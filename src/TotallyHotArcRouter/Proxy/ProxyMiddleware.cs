@@ -116,6 +116,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     private readonly InFlightRequestGauge? _inFlightGauge;
     private readonly IOptionsMonitor<Models.RoutingOptions>? _routingOptionsMonitor;
     private readonly IOptionsMonitor<Judge.JudgeOptions>? _judgeOptionsMonitor;
+    private readonly Router.IRoutingGate? _routingGate;
 
     // The rate the router's own tokens are charged at (see RoutingOptions.SelfHostedRouterPricePerMillionTokens).
     // Read once at construction rather than per request: it is a static amortization figure, not a catalog
@@ -241,6 +242,13 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// says so, not at the next restart. Defaults to <see langword="null"/>, treated as the judge being
     /// disabled, matching <see cref="Judge.JudgeOptions.Enabled"/>'s own off-by-default coded value.
     /// </param>
+    /// <param name="routingGate">
+    /// Optional runtime kill switch, toggled from the GUI system tray via
+    /// <see cref="Router.RoutingGateAdminGrpcService"/>. When <see cref="Router.IRoutingGate.IsEnabled"/> is
+    /// <see langword="false"/>, every LLM-forwarding request is rejected with 503 before routing is
+    /// attempted; <see langword="null"/> (the default) means routing is always accepted, matching the
+    /// enabled-by-default coded value <see cref="Router.RoutingGateStore"/> itself falls back to.
+    /// </param>
     public ProxyMiddleware(
         ILogger<ProxyMiddleware> logger,
         RequestInterceptor interceptor,
@@ -269,7 +277,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         ITranscriptStore? transcriptStore = null,
         InFlightRequestGauge? inFlightGauge = null,
         IOptionsMonitor<Models.RoutingOptions>? routingOptionsMonitor = null,
-        IOptionsMonitor<Judge.JudgeOptions>? judgeOptionsMonitor = null)
+        IOptionsMonitor<Judge.JudgeOptions>? judgeOptionsMonitor = null,
+        Router.IRoutingGate? routingGate = null)
     {
         _logger = logger;
         _interceptor = interceptor;
@@ -301,6 +310,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         _inFlightGauge = inFlightGauge;
         _routingOptionsMonitor = routingOptionsMonitor;
         _judgeOptionsMonitor = judgeOptionsMonitor;
+        _routingGate = routingGate;
         _selfHostedRouterPricePerMillionTokens =
             routingOptions?.Value.SelfHostedRouterPricePerMillionTokens ?? new Models.RoutingOptions().SelfHostedRouterPricePerMillionTokens;
 
@@ -366,6 +376,18 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         if (IsOllamaShowRequest(context.Request))
         {
             await WriteOllamaShowResponseAsync(context);
+            return;
+        }
+
+        // The GUI system tray's "Disable Routing" kill switch: checked after the read-only /v1/models and
+        // Ollama listing endpoints above (which stay available so clients can still discover models while
+        // routing is paused) but before any actual routing/forwarding work begins. Every other
+        // admin/management surface (REST /admin/*, the gRPC admin services, and this same kill switch's own
+        // toggle RPC) lives on separate endpoints mapped ahead of this terminal middleware, so disabling
+        // routing never blocks administrative tasks.
+        if (_routingGate?.IsEnabled == false)
+        {
+            await WriteRoutingDisabledResponseAsync(context);
             return;
         }
 
@@ -2379,6 +2401,30 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 type = "invalid_request_error",
                 param = "model",
                 code = "400"
+            }
+        };
+
+        await context.Response.WriteAsync(JsonSerializer.Serialize(payload), context.RequestAborted);
+    }
+
+    /// <summary>
+    /// Writes a 503 response in an OpenAI-shaped error envelope when the GUI system tray's kill switch
+    /// (<see cref="Router.IRoutingGate"/>) has routing disabled. Matches
+    /// <see cref="WriteModelNotFoundResponseAsync"/>'s envelope shape but as 503 (Service Unavailable): the
+    /// request itself may be perfectly valid, it was refused solely because an operator paused routing.
+    /// </summary>
+    private static async Task WriteRoutingDisabledResponseAsync(HttpContext context)
+    {
+        context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+        context.Response.ContentType = "application/json";
+
+        var payload = new
+        {
+            error = new
+            {
+                message = "Routing is currently disabled.",
+                type = "routing_disabled",
+                code = "503"
             }
         };
 

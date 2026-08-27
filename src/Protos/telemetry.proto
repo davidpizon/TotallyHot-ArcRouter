@@ -393,6 +393,33 @@ message RoutingModeResponse {
   repeated VoterMode voters = 4;
 }
 
+// The GUI system tray's "Enable Routing"/"Disable Routing" toggle: reads and mutates whether the proxy
+// currently accepts LLM-forwarding requests, independent of whether the process itself is running -
+// disabling routing keeps every admin/management surface (this endpoint, /admin/*, /v1/models) fully
+// usable, it only stops new LLM traffic from being forwarded. A separate service from the read-only
+// RoutingModeAdminService above for the same reason RouterSettingsAdminService is separate from it (see
+// that service's remarks) - this is a mutating kill switch, not ensemble/voter configuration. Always
+// mapped, like RoutingModeAdminService and UpdateAdminService: whether the proxy accepts requests is core
+// operational state, not an optional add-on. Same shape as the other admin services, sharing the :5002 TLS
+// loopback endpoint.
+service RoutingGateAdminService {
+  // Returns whether the proxy currently accepts LLM-forwarding requests.
+  rpc GetRoutingGate (GetRoutingGateRequest) returns (RoutingGateResponse);
+
+  // Enables or disables routing, persisting the choice so it survives a service restart.
+  rpc SetRoutingGate (SetRoutingGateRequest) returns (RoutingGateResponse);
+}
+
+message GetRoutingGateRequest {}
+
+message SetRoutingGateRequest {
+  bool enabled = 1;
+}
+
+message RoutingGateResponse {
+  bool enabled = 1;
+}
+
 // The Governance UI's System Settings window's "Adaptive Routing" and "Shadow Judge" rows
 // (docs/router/self-organizing-classification-plan.md Phase T6, docs/router/geval-shadow-scoring-plan.md):
 // reads and mutates the router_settings-backed overrides layered on top of RoutingOptions
