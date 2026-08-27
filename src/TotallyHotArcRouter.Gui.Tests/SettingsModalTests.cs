@@ -27,9 +27,36 @@ public sealed class SettingsModalTests
         ctx.Services.AddSingleton(liveDataStore);
         ctx.Services.AddSingleton(settingsStore);
         ctx.Services.AddSingleton(routerSettingsStore);
+        ctx.Services.AddSingleton(new UpdateStore(new FakeUpdateAdminClient(), new FakeMsiUpdateApplier()));
         ctx.Services.AddSingleton(_ => new TempFileCleanup(settingsPath));
         ctx.Services.GetRequiredService<TempFileCleanup>();
         return ctx;
+    }
+
+    /// <summary>A minimal <see cref="IUpdateAdminClient"/> double so <see cref="SettingsModal"/>'s Software Update section has something to load without a live proxy.</summary>
+    private sealed class FakeUpdateAdminClient : IUpdateAdminClient
+    {
+        public UpdateStatusInfo Status { get; set; } = new(
+            CurrentVersion: "1.0.0",
+            LatestVersion: "1.0.0",
+            UpdateAvailable: false,
+            CheckedAtUtc: null,
+            UnavailableReason: UpdateUnavailableReasonInfo.None,
+            UnavailableDetail: null);
+
+        public Task<UpdateStatusInfo> GetStatusAsync(CancellationToken cancellationToken = default) => Task.FromResult(Status);
+
+        public Task<UpdateStatusInfo> CheckNowAsync(CancellationToken cancellationToken = default) => Task.FromResult(Status);
+
+        public Task<NotifyApplyStartingInfo> NotifyApplyStartingAsync(string version, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new NotifyApplyStartingInfo(true));
+    }
+
+    /// <summary>A minimal <see cref="IMsiUpdateApplier"/> double; none of these tests trigger an apply.</summary>
+    private sealed class FakeMsiUpdateApplier : IMsiUpdateApplier
+    {
+        public Task<MsiApplyResult> ApplyAsync(string assetDownloadUrl, string assetSha256, string latestVersion, CancellationToken cancellationToken = default) =>
+            Task.FromResult(MsiApplyResult.Failure("not used in tests"));
     }
 
     /// <summary>A controllable <see cref="IRouterSettingsAdminClient"/> double, mirroring the router-side default (adaptive routing off, capacity 20000).</summary>
@@ -282,12 +309,31 @@ public sealed class SettingsModalTests
         {
             Settings = new RouterSettingsInfo(false, 20_000, JudgeEnabled: true, JudgeModelName: "gone-away", EligibleJudgeModels: ["free-a"]),
         };
+        using var ctx = NewContext(out _, out _, out _, client);
+
+        var cut = ctx.Render<SettingsModal>();
+
+        cut.Find("#judge-model").GetAttribute("value").Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Selecting a model persists it immediately (no footer Save button for this section), which also
+    /// carries the corrected Automatic fallback through to the server since the RPC writes every field
+    /// together.
+    /// </summary>
+    [Fact]
+    public void Selecting_a_judge_model_saves_immediately_and_carries_the_automatic_fallback_along()
+    {
+        var client = new FakeRouterSettingsAdminClient
+        {
+            Settings = new RouterSettingsInfo(false, 20_000, JudgeEnabled: true, JudgeModelName: "gone-away", EligibleJudgeModels: ["free-a"]),
+        };
         using var ctx = NewContext(out _, out _, out var routerSettingsStore, client);
 
         var cut = ctx.Render<SettingsModal>();
-        cut.FindAll("button").First(b => b.TextContent.Trim() == "Save").Click();
+        cut.Find("#judge-model").Change("free-a");
 
-        routerSettingsStore.Settings!.JudgeModelName.Should().BeEmpty();
+        routerSettingsStore.Settings!.JudgeModelName.Should().Be("free-a");
     }
 
     [Fact]
@@ -306,7 +352,7 @@ public sealed class SettingsModalTests
     }
 
     [Fact]
-    public void The_save_button_persists_the_judge_toggle_and_model()
+    public void Toggling_the_judge_and_changing_its_model_each_save_immediately()
     {
         var client = new FakeRouterSettingsAdminClient
         {
@@ -316,10 +362,11 @@ public sealed class SettingsModalTests
 
         var cut = ctx.Render<SettingsModal>();
         cut.Find("button[aria-label='Toggle shadow judge']").Click();
-        cut.Find("#judge-model").Change("free-b");
-        cut.FindAll("button").First(b => b.TextContent.Trim() == "Save").Click();
 
         routerSettingsStore.Settings!.JudgeEnabled.Should().BeTrue();
+
+        cut.Find("#judge-model").Change("free-b");
+
         routerSettingsStore.Settings.JudgeModelName.Should().Be("free-b");
     }
 
@@ -351,21 +398,60 @@ public sealed class SettingsModalTests
     }
 
     [Fact]
-    public void The_unified_save_button_persists_both_the_telemetry_address_and_the_router_settings()
+    public void The_telemetry_address_and_the_router_settings_save_independently()
     {
         using var ctx = NewContext(out _, out var settingsStore, out var routerSettingsStore);
 
         var cut = ctx.Render<SettingsModal>();
-        cut.Find("#telemetry-address").Input("https://example.test:7777");
+
+        // Adaptive Routing and Sample Size have no footer Save button - each saves the instant it changes.
         cut.Find("button[aria-label='Toggle adaptive routing']").Click();
-        cut.Find("#sample-size").Input("15000");
+        cut.Find("#sample-size").Change("15000");
+
+        routerSettingsStore.Settings!.AdaptiveRoutingEnabled.Should().BeTrue();
+        routerSettingsStore.Settings.EmbeddingMemoryCapacity.Should().Be(15_000);
+        cut.Markup.Should().Contain("Saved");
+
+        // The telemetry address is local-only and keeps its own explicit Save button.
+        cut.Find("#telemetry-address").Input("https://example.test:7777");
         cut.FindAll("button").First(b => b.TextContent.Trim() == "Save").Click();
 
         settingsStore.Load().TelemetryServerAddress.Should().Be("https://example.test:7777");
         cut.Markup.Should().Contain("Restart the app");
-        routerSettingsStore.Settings!.AdaptiveRoutingEnabled.Should().BeTrue();
-        routerSettingsStore.Settings.EmbeddingMemoryCapacity.Should().Be(15_000);
-        cut.Markup.Should().Contain("Applied");
+    }
+
+    [Fact]
+    public void The_telemetry_address_save_and_undo_buttons_stay_disabled_until_there_is_a_pending_change()
+    {
+        using var ctx = NewContext(out _, out var settingsStore, out _);
+        settingsStore.Save(new GuiSettings("https://example.test:9999"));
+
+        var cut = ctx.Render<SettingsModal>();
+        var save = cut.FindAll("button").First(b => b.TextContent.Trim() == "Save");
+        var undo = cut.FindAll("button").First(b => b.TextContent.Trim() == "Undo");
+        save.HasAttribute("disabled").Should().BeTrue();
+        undo.HasAttribute("disabled").Should().BeTrue();
+
+        cut.Find("#telemetry-address").Input("https://example.test:7777");
+
+        save = cut.FindAll("button").First(b => b.TextContent.Trim() == "Save");
+        undo = cut.FindAll("button").First(b => b.TextContent.Trim() == "Undo");
+        save.HasAttribute("disabled").Should().BeFalse();
+        undo.HasAttribute("disabled").Should().BeFalse();
+    }
+
+    [Fact]
+    public void Clicking_undo_restores_the_last_persisted_telemetry_address_without_saving()
+    {
+        using var ctx = NewContext(out _, out var settingsStore, out _);
+        settingsStore.Save(new GuiSettings("https://example.test:9999"));
+
+        var cut = ctx.Render<SettingsModal>();
+        cut.Find("#telemetry-address").Input("https://example.test:7777");
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Undo").Click();
+
+        cut.Find("#telemetry-address").GetAttribute("value").Should().Be("https://example.test:9999");
+        settingsStore.Load().TelemetryServerAddress.Should().Be("https://example.test:9999");
     }
 
     [Fact]
@@ -380,21 +466,36 @@ public sealed class SettingsModalTests
     }
 
     [Fact]
-    public void Editing_a_field_after_a_save_clears_the_stale_outcome_message()
+    public void Typing_in_the_sample_size_field_clears_the_stale_outcome_message_before_the_blur_commits()
     {
         using var ctx = NewContext(out _, out _, out _);
 
         var cut = ctx.Render<SettingsModal>();
-        cut.FindAll("button").First(b => b.TextContent.Trim() == "Save").Click();
-        cut.Markup.Should().Contain("Applied");
-
         cut.Find("button[aria-label='Toggle adaptive routing']").Click();
+        cut.Markup.Should().Contain("Saved");
 
-        cut.Markup.Should().NotContain("Applied");
+        cut.Find("#sample-size").Input("15000");
+
+        cut.Markup.Should().NotContain("Saved");
     }
 
     [Fact]
-    public void A_save_while_the_router_is_unreachable_reports_it_without_blocking_the_telemetry_save()
+    public void Toggling_adaptive_routing_while_the_router_is_unreachable_reports_it()
+    {
+        var client = new FakeRouterSettingsAdminClient
+        {
+            Failure = new RouterSettingsAdminException("Could not save the router settings: the router is not reachable.", isUnavailable: true),
+        };
+        using var ctx = NewContext(out _, out _, out _, client);
+
+        var cut = ctx.Render<SettingsModal>();
+        cut.Find("button[aria-label='Toggle adaptive routing']").Click();
+
+        cut.Markup.Should().Contain("Could not reach the router. Is the proxy running?");
+    }
+
+    [Fact]
+    public void A_rejected_router_settings_save_does_not_block_the_telemetry_address_save()
     {
         var client = new FakeRouterSettingsAdminClient
         {
@@ -403,6 +504,7 @@ public sealed class SettingsModalTests
         using var ctx = NewContext(out _, out var settingsStore, out _, client);
 
         var cut = ctx.Render<SettingsModal>();
+        cut.Find("button[aria-label='Toggle adaptive routing']").Click();
         cut.Find("#telemetry-address").Input("https://example.test:7777");
         cut.FindAll("button").First(b => b.TextContent.Trim() == "Save").Click();
 

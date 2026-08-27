@@ -79,6 +79,12 @@ public static class MauiProgram
         // §5.15). A singleton so its range-keyed cache survives tab switches; talks to the proxy's
         // /admin/usage API (port 5001), same as ProviderAdminStore. See Services/UsageStore.cs.
         builder.Services.AddSingleton<UsageStore>();
+        // Backs the tray icon's "Enable Routing"/"Disable Routing" toggle and its service-down detection
+        // (right-click while the router is unreachable shows a toast instead of the menu). A singleton,
+        // like every store above, but unlike them it polls continuously in the background rather than
+        // loading once per component - see Services/RoutingGateStore.cs. TrayWindowManager resolves this
+        // from the MAUI service provider when the window is attached, since it has no DI of its own.
+        builder.Services.AddSingleton<RoutingGateStore>();
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();
 #endif

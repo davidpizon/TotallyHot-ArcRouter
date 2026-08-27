@@ -87,6 +87,16 @@ public sealed record ProxyServerDependencies
     /// service instead of the real ones.
     /// </summary>
     public UpdateAdminDependencies? UpdateAdmin { get; init; }
+
+    /// <summary>
+    /// The GUI system tray's "Enable Routing"/"Disable Routing" toggle API. Unlike every optional group
+    /// above, <c>RoutingGateAdminGrpcService</c> is mapped <em>unconditionally</em>, the same way
+    /// <see cref="UpdateAdmin"/> backs the always-mapped <c>UpdateAdminGrpcService</c> - whether the proxy
+    /// accepts routing requests is core operational state, not an optional add-on. When omitted, a private,
+    /// unshared <see cref="Router.RoutingGateStore"/> (defaulting to enabled, and not the instance
+    /// <see cref="ProxyMiddleware"/> checks) backs the service instead of the real one.
+    /// </summary>
+    public RoutingGateAdminDependencies? RoutingGateAdmin { get; init; }
 }
 
 /// <summary>
@@ -261,3 +271,14 @@ public sealed record RouterSettingsAdminDependencies(
 public sealed record UpdateAdminDependencies(
     IUpdateStateStore StateStore,
     IReleaseCheckClient ReleaseCheckClient);
+
+/// <summary>
+/// Backs <see cref="Router.RoutingGateAdminGrpcService"/>, the GUI system tray's routing kill switch.
+/// Required - the service needs the same <see cref="Router.IRoutingGate"/> instance
+/// <see cref="ProxyMiddleware"/> checks, so toggling it from the tray takes effect on the very next
+/// request - and (unlike every other group in this file except <see cref="ProxyServerDependencies.UpdateAdmin"/>)
+/// is mapped even when this whole group is <see langword="null"/>: see
+/// <see cref="ProxyServerDependencies.RoutingGateAdmin"/>'s remarks.
+/// </summary>
+/// <param name="Gate">The routing kill switch this service reads and mutates.</param>
+public sealed record RoutingGateAdminDependencies(Router.IRoutingGate Gate);

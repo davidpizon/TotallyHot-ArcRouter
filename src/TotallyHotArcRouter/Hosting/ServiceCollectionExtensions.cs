@@ -367,6 +367,11 @@ namespace TotallyHot.ArcRouter.Hosting
             // (hard-pausing its comparison drain while the count is non-zero) observe one number.
             services.AddSingleton<InFlightRequestGauge>();
 
+            // The GUI system tray's "Enable Routing"/"Disable Routing" kill switch: one singleton shared by
+            // ProxyMiddleware (which checks it on every request) and RoutingGateAdminGrpcService (which the
+            // tray calls to read/toggle it), so a toggle takes effect on the very next request.
+            services.AddSingleton<IRoutingGate, RoutingGateStore>();
+
             services.AddSingleton<ProxyMiddleware>();
 
             // Model price catalog (docs/router/model-price-catalog.md). Shares agent_telemetry.db with the
@@ -678,6 +683,10 @@ namespace TotallyHot.ArcRouter.Hosting
                         UpdateAdmin = new UpdateAdminDependencies(
                             sp.GetRequiredService<IUpdateStateStore>(),
                             sp.GetRequiredService<IReleaseCheckClient>()),
+
+                        // Backs the GUI system tray's "Enable Routing"/"Disable Routing" gRPC API. The same
+                        // singleton ProxyMiddleware checks, so a toggle from the tray takes effect immediately.
+                        RoutingGateAdmin = new RoutingGateAdminDependencies(sp.GetRequiredService<IRoutingGate>()),
                     });
             });
 

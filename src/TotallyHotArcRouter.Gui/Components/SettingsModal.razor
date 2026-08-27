@@ -23,29 +23,43 @@
         </div>
 
         <div class="overlay-content p-5 space-y-4">
-            @* Connection settings *@
+            @* Connection settings. Unlike the router settings below, this is local-only (no round trip to
+               the router) and needs an app restart to take effect, so it keeps its own explicit Save/Undo
+               pair rather than saving on every keystroke. Both buttons stay disabled until the field holds
+               an actual pending change. *@
             <div class="space-y-2">
                 <label for="telemetry-address" class="text-xs text-slate-400 font-medium uppercase tracking-widest">
                     Telemetry Server Address
                 </label>
-                <input id="telemetry-address"
-                       type="text"
-                       value="@_telemetryAddress"
-                       @oninput="OnTelemetryAddressInput"
-                       class="w-full px-3 py-2 text-sm font-mono ds-input" />
+                <div class="flex items-center gap-2">
+                    <input id="telemetry-address"
+                           type="text"
+                           value="@_telemetryAddress"
+                           @oninput="OnTelemetryAddressInput"
+                           class="flex-1 min-w-0 px-3 py-2 text-sm font-mono ds-input" />
+                    <button @onclick="UndoTelemetryAddress" disabled="@(!HasTelemetryAddressChanged)" class="btn btn-ghost">
+                        Undo
+                    </button>
+                    <button @onclick="SaveTelemetryAddress" disabled="@(!CanSaveTelemetryAddress)" class="btn btn-ghost">
+                        Save
+                    </button>
+                </div>
                 @if (_telemetryAddressSaved)
                 {
                     <p class="text-xs text-emerald-400">Saved. Restart the app to connect to the new address.</p>
                 }
             </div>
 
-            @* Adaptive routing (docs/router/self-organizing-classification-plan.md Phase T6) *@
+            @* Adaptive routing (docs/router/self-organizing-classification-plan.md Phase T6). Every control
+               here saves the instant it changes - there is no footer Save button for this section - so a
+               toggle flipped and then abandoned (modal closed, tab switched) is never silently lost. *@
             <div class="space-y-2">
                 <label class="text-xs text-slate-400 font-medium uppercase tracking-widest">
                     Adaptive Routing
                 </label>
                 <div class="flex items-center gap-3">
                     <button @onclick="ToggleAdaptiveRouting"
+                            disabled="@_routerSettingsSaving"
                             aria-label="Toggle adaptive routing"
                             class="shrink-0 flex items-center gap-1.5 rounded px-2 py-1 text-xs font-semibold border transition-colors @(_adaptiveRoutingEnabled ? "toggle-enabled" : "toggle-disabled")">
                         <span class="w-1.5 h-1.5 rounded-full @(_adaptiveRoutingEnabled ? "toggle-dot-enabled" : "toggle-dot-disabled")"></span>
@@ -57,6 +71,7 @@
                            max="@MaxEmbeddingMemoryCapacity"
                            step="1"
                            value="@_sampleSizeText"
+                           disabled="@_routerSettingsSaving"
                            @oninput="OnSampleSizeInput"
                            @onchange="OnSampleSizeChange"
                            class="w-28 px-3 py-2 text-sm font-mono ds-input" />
@@ -80,6 +95,7 @@
                 </label>
                 <div class="flex items-center gap-3">
                     <button @onclick="ToggleJudgeEnabled"
+                            disabled="@_routerSettingsSaving"
                             aria-label="Toggle shadow judge"
                             class="shrink-0 flex items-center gap-1.5 rounded px-2 py-1 text-xs font-semibold border transition-colors @(_judgeEnabled ? "toggle-enabled" : "toggle-disabled")">
                         <span class="w-1.5 h-1.5 rounded-full @(_judgeEnabled ? "toggle-dot-enabled" : "toggle-dot-disabled")"></span>
@@ -88,7 +104,7 @@
                     <select id="judge-model"
                             value="@_judgeModelName"
                             @onchange="OnJudgeModelChange"
-                            disabled="@(_eligibleJudgeModels.Count == 0)"
+                            disabled="@(_eligibleJudgeModels.Count == 0 || _routerSettingsSaving)"
                             class="flex-1 min-w-0 px-3 py-2 text-sm font-mono ds-input">
                         <option value="">Automatic</option>
                         @foreach (var model in _eligibleJudgeModels)
@@ -103,7 +119,11 @@
                         No free model is configured. Mark a provider as free in Providers to give the judge a backbone.
                     </p>
                 }
-                @if (_routerSettingsMessage is not null)
+                @if (_routerSettingsSaving)
+                {
+                    <p class="text-xs text-slate-500">Saving…</p>
+                }
+                else if (_routerSettingsMessage is not null)
                 {
                     <p class="text-xs @(_routerSettingsSaveFailed ? "text-red-400" : "text-emerald-400")">@_routerSettingsMessage</p>
                 }
@@ -175,11 +195,6 @@
                     <p class="text-xs text-red-400">@_updateErrorMessage</p>
                 }
             </div>
-
-            @* Unified save *@
-            <button @onclick="SaveAll" disabled="@_saving" class="btn btn-ghost w-full">
-                @(_saving ? "Saving…" : "Save")
-            </button>
 
             @* Destructive zone label *@
             <div class="flex items-center gap-2 text-xs text-amber-400 font-medium uppercase tracking-widest">
@@ -257,6 +272,7 @@
     private ElementReference _confirmInput;
     private bool _focusPending;
     private string _telemetryAddress = string.Empty;
+    private string _persistedTelemetryAddress = string.Empty;
     private bool _telemetryAddressSaved;
     private bool _adaptiveRoutingEnabled;
     private int _embeddingMemoryCapacity = RecommendedEmbeddingMemoryCapacity;
@@ -264,7 +280,7 @@
     private bool _judgeEnabled;
     private string _judgeModelName = string.Empty;
     private IReadOnlyList<string> _eligibleJudgeModels = [];
-    private bool _saving;
+    private bool _routerSettingsSaving;
     private string? _routerSettingsMessage;
     private bool _routerSettingsSaveFailed;
     private bool _confirmingApply;
@@ -276,6 +292,12 @@
     /// <summary>Whether the typed confirmation text exactly matches <see cref="Required"/>.</summary>
     private bool IsConfirmed => _confirmText == Required;
 
+    /// <summary>Whether the telemetry address field differs from the last-persisted value.</summary>
+    private bool HasTelemetryAddressChanged => _telemetryAddress != _persistedTelemetryAddress;
+
+    /// <summary>Whether the telemetry address field holds a real, savable pending change.</summary>
+    private bool CanSaveTelemetryAddress => HasTelemetryAddressChanged && !string.IsNullOrWhiteSpace(_telemetryAddress.Trim());
+
     // Read off the live (possibly out-of-bounds or unparsable) text rather than the clamped
     // _embeddingMemoryCapacity, which only updates on blur/save - otherwise the warning would lag a full
     // keystroke behind what the operator actually typed.
@@ -284,7 +306,9 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _telemetryAddress = SettingsStore.Load().TelemetryServerAddress;
+        var loadedAddress = SettingsStore.Load().TelemetryServerAddress;
+        _telemetryAddress = loadedAddress;
+        _persistedTelemetryAddress = loadedAddress;
 
         UpdateStore.Changed += OnUpdateStoreChanged;
         await UpdateStore.LoadAsync();
@@ -292,19 +316,28 @@
         await RouterSettingsStore.LoadAsync();
         if (RouterSettingsStore.Settings is { } settings)
         {
-            _adaptiveRoutingEnabled = settings.AdaptiveRoutingEnabled;
-            _embeddingMemoryCapacity = settings.EmbeddingMemoryCapacity;
-            _sampleSizeText = settings.EmbeddingMemoryCapacity.ToString();
-            _judgeEnabled = settings.JudgeEnabled;
-            _eligibleJudgeModels = settings.EligibleJudgeModels;
-
-            // A stored pick that is no longer eligible is shown as Automatic rather than as a phantom
-            // option: that is what the selector will actually do at call time, and re-offering the dead
-            // name would let the operator "save" a choice the server would now reject.
-            _judgeModelName = _eligibleJudgeModels.Contains(settings.JudgeModelName, StringComparer.OrdinalIgnoreCase)
-                ? settings.JudgeModelName
-                : string.Empty;
+            ApplyRouterSettings(settings);
         }
+    }
+
+    // Shared by the initial load and every instant save's post-mutation refresh (success re-syncs to the
+    // server's canonical values; failure rolls back to the last-known-good ones), so both paths treat
+    // RouterSettingsAdminStore.Settings as the single source of truth the same way.
+    /// <summary>Copies <paramref name="settings"/> into the form fields.</summary>
+    private void ApplyRouterSettings(RouterSettingsInfo settings)
+    {
+        _adaptiveRoutingEnabled = settings.AdaptiveRoutingEnabled;
+        _embeddingMemoryCapacity = settings.EmbeddingMemoryCapacity;
+        _sampleSizeText = settings.EmbeddingMemoryCapacity.ToString();
+        _judgeEnabled = settings.JudgeEnabled;
+        _eligibleJudgeModels = settings.EligibleJudgeModels;
+
+        // A stored pick that is no longer eligible is shown as Automatic rather than as a phantom
+        // option: that is what the selector will actually do at call time, and re-offering the dead
+        // name would let the operator "save" a choice the server would now reject.
+        _judgeModelName = _eligibleJudgeModels.Contains(settings.JudgeModelName, StringComparer.OrdinalIgnoreCase)
+            ? settings.JudgeModelName
+            : string.Empty;
     }
 
     /// <summary>Updates the address field and clears any stale "Saved" confirmation from a previous save.</summary>
@@ -314,25 +347,47 @@
         _telemetryAddressSaved = false;
     }
 
-    /// <summary>Flips the adaptive-routing toggle and clears any stale save outcome from a previous attempt.</summary>
-    private void ToggleAdaptiveRouting()
+    /// <summary>Persists the telemetry address once the operator explicitly confirms it via the Save button.</summary>
+    private void SaveTelemetryAddress()
+    {
+        var trimmed = _telemetryAddress.Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            return;
+        }
+
+        _telemetryAddress = trimmed;
+        _persistedTelemetryAddress = trimmed;
+        SettingsStore.Save(SettingsStore.Load() with { TelemetryServerAddress = trimmed });
+        _telemetryAddressSaved = true;
+    }
+
+    /// <summary>Discards the in-progress edit, restoring the field to the last-persisted address.</summary>
+    private void UndoTelemetryAddress()
+    {
+        _telemetryAddress = _persistedTelemetryAddress;
+        _telemetryAddressSaved = false;
+    }
+
+    /// <summary>Flips the adaptive-routing toggle and saves it immediately.</summary>
+    private Task ToggleAdaptiveRouting()
     {
         _adaptiveRoutingEnabled = !_adaptiveRoutingEnabled;
-        ClearRouterSettingsMessage();
+        return SaveRouterSettingsNow();
     }
 
-    /// <summary>Flips the shadow-judge toggle and clears any stale save outcome from a previous attempt.</summary>
-    private void ToggleJudgeEnabled()
+    /// <summary>Flips the shadow-judge toggle and saves it immediately.</summary>
+    private Task ToggleJudgeEnabled()
     {
         _judgeEnabled = !_judgeEnabled;
-        ClearRouterSettingsMessage();
+        return SaveRouterSettingsNow();
     }
 
-    /// <summary>Tracks the judge-model selection; an empty value is the explicit "Automatic" choice.</summary>
-    private void OnJudgeModelChange(ChangeEventArgs e)
+    /// <summary>Tracks the judge-model selection (an empty value is the explicit "Automatic" choice) and saves it immediately.</summary>
+    private Task OnJudgeModelChange(ChangeEventArgs e)
     {
         _judgeModelName = (string?)e.Value ?? string.Empty;
-        ClearRouterSettingsMessage();
+        return SaveRouterSettingsNow();
     }
 
     // Only tracks the raw text here - deliberately does NOT parse into _embeddingMemoryCapacity on every
@@ -346,11 +401,12 @@
         ClearRouterSettingsMessage();
     }
 
-    /// <summary>Parses and clamps the Sample Size once the operator leaves the field.</summary>
-    private void OnSampleSizeChange(ChangeEventArgs e)
+    /// <summary>Parses and clamps the Sample Size once the operator leaves the field, then saves it immediately.</summary>
+    private Task OnSampleSizeChange(ChangeEventArgs e)
     {
         _sampleSizeText = (string?)e.Value ?? string.Empty;
         ClampSampleSize();
+        return SaveRouterSettingsNow();
     }
 
     /// <summary>
@@ -378,47 +434,18 @@
         _routerSettingsSaveFailed = false;
     }
 
-    // Runs both persistence paths from the one footer button. Outcomes are reported per-concern rather than
-    // blended: the telemetry address keeps its own "Saved" note, and the router settings report "Applied" or
-    // the router-unreachable/rejection state independently, mirroring PriceSourcesAdmin's own gRPC error
-    // rendering (docs/router/self-organizing-classification-plan.md Phase T6).
-    /// <summary>Persists the telemetry address (if changed) and the adaptive-routing settings in one action.</summary>
-    private async Task SaveAll()
-    {
-        _saving = true;
-        try
-        {
-            SaveTelemetryAddress();
-            await SaveRouterSettings();
-        }
-        finally
-        {
-            _saving = false;
-        }
-    }
-
-    /// <summary>Trims and persists the typed telemetry address, then shows the "Saved" confirmation.</summary>
-    private void SaveTelemetryAddress()
-    {
-        var trimmed = _telemetryAddress.Trim();
-        if (string.IsNullOrWhiteSpace(trimmed))
-        {
-            return;
-        }
-
-        _telemetryAddress = trimmed;
-        SettingsStore.Save(SettingsStore.Load() with { TelemetryServerAddress = trimmed });
-        _telemetryAddressSaved = true;
-    }
-
+    // Called from every Adaptive Routing / Shadow Judge control's own change handler - there is no footer
+    // Save button for this section, so each edit must reach the router on its own. The underlying RPC
+    // (UpdateRouterSettingsAsync) always writes all four fields together; that is fine here because every
+    // caller already holds the form's full current state, not just the field that just changed.
+    //
     // Reads the outcome off RouterSettingsAdminStore's own IsReachable/LastError rather than recomputing a
     // message from the caught exception - the store already resolved unreachable-vs-rejected via
     // IRouterSettingsAdminClient's isUnavailable flag, so recomputing it here would just duplicate that logic.
-    /// <summary>Clamps the Sample Size, then persists the adaptive-routing and shadow-judge settings through <see cref="RouterSettingsAdminStore"/>.</summary>
-    private async Task SaveRouterSettings()
+    /// <summary>Persists the adaptive-routing and shadow-judge settings through <see cref="RouterSettingsAdminStore"/> immediately.</summary>
+    private async Task SaveRouterSettingsNow()
     {
-        ClampSampleSize();
-
+        _routerSettingsSaving = true;
         try
         {
             await RouterSettingsStore.UpdateAsync(
@@ -426,14 +453,15 @@
                 _embeddingMemoryCapacity,
                 _judgeEnabled,
                 _judgeModelName);
-            _routerSettingsMessage = "Applied";
+            _routerSettingsMessage = "Saved";
             _routerSettingsSaveFailed = false;
 
-            // The eligible list is recomputed server-side on every response, so a provider toggled in another
-            // window since this modal opened is reflected here without a reopen.
+            // The server is now the single source of truth for what actually took effect (it recomputes the
+            // eligible judge-model list too), so resync the whole form to its response rather than only the
+            // list, the way the pre-instant-save footer button used to.
             if (RouterSettingsStore.Settings is { } saved)
             {
-                _eligibleJudgeModels = saved.EligibleJudgeModels;
+                ApplyRouterSettings(saved);
             }
         }
         catch (RouterSettingsAdminException)
@@ -442,6 +470,17 @@
                 ? RouterSettingsStore.LastError
                 : "Could not reach the router. Is the proxy running?";
             _routerSettingsSaveFailed = true;
+
+            // The edit never took effect, so roll the form back to whatever last actually saved - otherwise
+            // the toggle would keep showing a state the router never received.
+            if (RouterSettingsStore.Settings is { } lastGood)
+            {
+                ApplyRouterSettings(lastGood);
+            }
+        }
+        finally
+        {
+            _routerSettingsSaving = false;
         }
     }
 

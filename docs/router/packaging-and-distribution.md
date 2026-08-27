@@ -154,6 +154,46 @@ can control the Windows Service" idea that was floated during the Router-launche
 caller anymore** and was deliberately not built — it existed only to let a not-yet-elevated Router-side
 apply request service control without full admin rights, and there is no Router-side apply left to need it.
 
+## 7. Publishing a release: cut, then promote
+
+Publishing is deliberately **two stages**, so that "this build is a release candidate" and "this build is
+*the* release" are separate, revocable decisions rather than a single irreversible `git push --tags`.
+
+```mermaid
+flowchart LR
+    A["Bump Version in<br/>Directory.Build.props"] --> B["Push tag v&lt;Version&gt;"]
+    B --> C["release.yml<br/>builds MSI + checksums.txt<br/>publishes as <b>prerelease</b>"]
+    C --> D{"RC verified<br/>by hand?"}
+    D -- "no" --> E["Delete the release,<br/>fix, re-tag"]
+    D -- "yes" --> F["Run promote.yml<br/>(gh release edit --latest)"]
+    F --> G["/releases/latest resolves to it<br/>Routers offer it on next poll"]
+```
+
+**Stage one — cut the RC.** Pushing a `v<Version>` tag runs
+[`release.yml`](../../.github/workflows/release.yml), which builds the MSI and `checksums.txt` and
+publishes them as a **prerelease**. `GitHubReleaseCheckClient` polls
+`/repos/{owner}/{repo}/releases/latest`, and that endpoint excludes prereleases by definition — so a build
+at this stage is invisible to every installed Router, and no code in the update pipeline needed changing to
+make that true. Testers install the RC by downloading its MSI from the release page by hand.
+
+**Stage two — nominate it.** [`promote.yml`](../../.github/workflows/promote.yml) is a
+`workflow_dispatch` taking the tag; it re-checks that the release still satisfies the asset contract §2's
+`GitHubReleaseCheckClient` depends on (exactly one `*.msi`, one `checksums.txt`, and a
+`<sha256>  <that msi's name>` line inside it), then runs `gh release edit <tag> --prerelease=false
+--latest`. Nothing is rebuilt: the MSI an operator installs is the byte-identical artifact that was tested
+as the RC, and its already-published checksum still covers it.
+
+**Why the version does not change between the stages.** Both stages are the same `Version` — there is no
+`-rc.1` suffix anywhere. `GitHubReleaseCheckClient` compares versions with `System.Version`, which cannot
+parse a prerelease suffix at all (`Version.TryParse("1.2.3-rc.1")` returns false, which the client reports
+as `MalformedTag`), and keeping the version identical also means a tester already running the RC sees no
+spurious "update available" the moment that same build becomes latest.
+
+**Not built (yet): an opt-in prerelease channel.** There is no way for a Router to auto-update *along* the
+RC track — RCs are installed manually. Adding one would be an `UpdateOptions` flag switching `CheckAsync`
+to `GET /repos/{owner}/{repo}/releases` and taking the first entry; it is deliberately not built until
+there are testers who want it.
+
 ## Related
 
 - [`version-compatibility.md`](version-compatibility.md) — how the Router and GUI relate by version now
