@@ -3,9 +3,16 @@ name: Release
 # Tag-triggered: pushing a "v<Directory.Build.props' Version>" tag (e.g. v1.2.3, matching this repo's
 # existing "bump Version, tag v<Version>" convention - see Directory.Build.props' comment) builds the
 # signed... well, unsigned-for-now (see the signing step below) MSI installer and publishes it plus
-# checksums.txt as GitHub Release assets, in the shape GitHubReleaseCheckClient expects:
-# https://github.com/<owner>/<repo>/releases/latest with exactly one *.msi asset and one checksums.txt
-# asset containing a `<sha256 hex>  <filename>` line for it (docs/router/packaging-and-distribution.md).
+# checksums.txt as GitHub Release assets, in the shape GitHubReleaseCheckClient expects: exactly one
+# *.msi asset and one checksums.txt asset containing a `<sha256 hex>  <filename>` line for it
+# (docs/router/packaging-and-distribution.md).
+#
+# This workflow is stage one of two: it always publishes the release as a PRERELEASE - a release
+# candidate - never as `latest`. GitHub's /repos/{owner}/{repo}/releases/latest endpoint, which
+# GitHubReleaseCheckClient polls, excludes prereleases by definition, so a build published here is
+# invisible to every installed Router until it is deliberately nominated. Stage two is promote.yml,
+# which flips the same release to `latest` WITHOUT rebuilding - so the MSI operators install is the
+# byte-identical artifact that was tested as the RC, and its published checksum still covers it.
 on:
   push:
     tags:
@@ -105,3 +112,8 @@ jobs:
             release-assets/*.msi
             release-assets/checksums.txt
           generate_release_notes: true
+          # See the two-stage note in this file's header: an RC, not `latest`, until promote.yml says so.
+          # make_latest is quoted because it is a tri-state string input ('true'/'false'/'legacy'), not a
+          # boolean - quoting keeps that explicit rather than relying on YAML's bool-to-string coercion.
+          prerelease: true
+          make_latest: "false"

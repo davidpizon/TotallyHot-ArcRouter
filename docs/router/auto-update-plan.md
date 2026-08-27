@@ -22,7 +22,8 @@ with no design doc of their own — this doc closes that gap retroactively, in a
 shipping Phase 2 (the Router's self-update pipeline) as originally built. GUI self-update and CI
 release-publishing automation, both called out as deferred below, are no longer deferred — the MSI
 packaging switch delivered both (the GUI downloads/verifies/launches the installer, which replaces its own
-files too, and `.github/workflows/release.yml` publishes the MSI on tag push).
+files too, and `.github/workflows/release.yml` publishes the MSI on tag push, as a prerelease that
+`.github/workflows/promote.yml` later nominates to `latest` — see packaging-and-distribution.md §7).
 
 ## Why
 

@@ -1,0 +1,83 @@
+name: Promote release
+
+# Stage two of the two-stage release flow (stage one is release.yml, which always publishes a tagged
+# build as a prerelease - a release candidate). This workflow nominates one of those release candidates
+# as THE release by flipping it to `latest`.
+#
+# Deliberately a promotion, not a rebuild: the MSI and checksums.txt already attached to the release are
+# left untouched, so the artifact operators install is byte-identical to the one that was tested as the
+# RC and the published SHA256 still covers it. It also means the version never changes between the two
+# stages - Directory.Build.props' Version is "1.2.3" for both, so a tester running the RC sees no
+# spurious "update available" once the same build becomes latest (GitHubReleaseCheckClient compares
+# versions with System.Version, which cannot parse an "-rc.N" suffix at all - hence no such suffix).
+#
+# The moment this runs, /repos/{owner}/{repo}/releases/latest starts returning this release, and every
+# installed Router picks it up on its next UpdateCheckHostedService poll.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to promote, e.g. v1.2.3 (must already exist as a prerelease)"
+        required: true
+        type: string
+
+# Editing a release is a release write, which lives under contents.
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    name: Promote ${{ inputs.tag }} to latest
+    runs-on: ubuntu-latest
+    steps:
+      # Guard against promoting a release the Router would then reject: GitHubReleaseCheckClient requires
+      # exactly one *.msi asset plus one asset named exactly checksums.txt, and reports anything else as
+      # AssetOrChecksumMissing - which surfaces to the operator as a silently unavailable update rather
+      # than a loud failure. Catching it here, before the release goes latest, keeps that failure mode out
+      # of the field entirely.
+      - name: Verify release assets match the update-check contract
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          names=$(gh release view "$TAG" --json assets --jq '.assets[].name')
+          echo "Assets on $TAG:"
+          echo "$names" | sed 's/^/  /'
+
+          msi_count=$(echo "$names" | grep -c '\.msi$' || true)
+          if [ "$msi_count" -ne 1 ]; then
+            echo "::error::$TAG has $msi_count .msi assets; GitHubReleaseCheckClient expects exactly one."
+            exit 1
+          fi
+
+          if ! echo "$names" | grep -qx 'checksums.txt'; then
+            echo "::error::$TAG has no checksums.txt asset; GitHubReleaseCheckClient cannot verify the MSI."
+            exit 1
+          fi
+
+          # The checksum line must name the MSI actually attached to this release, in sha256sum's
+          # "<hex><two spaces><filename>" format - a checksums.txt left over from a different build
+          # would pass the presence check above and still fail verification on the operator's machine.
+          msi_name=$(echo "$names" | grep '\.msi$')
+          checksums=$(gh release download "$TAG" --pattern checksums.txt --output - )
+          if ! echo "$checksums" | grep -qE "^[0-9a-f]{64}  ${msi_name//./\.}$"; then
+            echo "::error::checksums.txt has no '<sha256>  $msi_name' line."
+            echo "checksums.txt contents:"
+            echo "$checksums" | sed 's/^/  /'
+            exit 1
+          fi
+
+          echo "$TAG carries $msi_name and a matching checksums.txt line."
+
+      - name: Promote to latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" --prerelease=false --draft=false --latest
+          echo "Promoted $TAG. /releases/latest now resolves to it; Routers will offer it on their next poll."

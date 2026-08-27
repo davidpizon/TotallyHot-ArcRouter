@@ -9,6 +9,38 @@
 TotallyHot Arc Router routes coding tasks to different backend models under a
 performance-cost tradeoff.
 
+## Install
+
+Windows 10 version 1809 (build 17763) or later, x64. Download the `.msi` from the
+[latest release](https://github.com/davidpizon/TotallyHot-ArcRouter/releases/latest)
+and run it. Nothing else is required - both the router and the GUI ship as
+self-contained builds, so no .NET runtime needs to be installed first.
+
+The installer is per-machine and needs administrator rights. It lays out
+`%ProgramFiles%\TotallyHotArcRouter\Router\` and `\Gui\`, then registers and
+starts `TotallyHotArcRouter`, a `LocalSystem` Windows Service set to start
+automatically - so the router is running before you open the GUI, and keeps
+running after you close it.
+
+**Windows will warn you on first run.** The MSI is not code-signed yet, so
+SmartScreen shows "Windows protected your PC" and names an unknown publisher;
+choose *More info* → *Run anyway*. Every release publishes a `checksums.txt`
+asset next to the MSI if you would rather verify the download before trusting
+it - the hash on the left should match:
+
+```powershell
+Get-FileHash .\TotallyHotArcRouter-1.0.0.msi -Algorithm SHA256
+```
+
+Releases marked **Pre-release** on that page are release candidates. They are
+built by the same pipeline and are safe to install, but they are deliberately
+invisible to the built-in update check, which only ever offers a promoted
+release (see
+[`docs/router/packaging-and-distribution.md`](docs/router/packaging-and-distribution.md)
+§7). Once installed, the router checks for new releases every six hours and the
+GUI offers to apply what it finds; updates are never applied without an explicit
+click, since applying one restarts the service.
+
 ## Routing
 
 Point an OpenAI/Anthropic-compatible client at the proxy and send `"model": "auto"`
