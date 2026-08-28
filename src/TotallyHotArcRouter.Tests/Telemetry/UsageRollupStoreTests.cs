@@ -36,6 +36,16 @@ public class UsageRollupStoreTests
             OccurredAtUtc: occurredAtUtc ?? DateTimeOffset.UtcNow,
             RequestId: requestId ?? Guid.NewGuid().ToString("N"));
 
+    // Anchors a test's entries to midday rather than to the current time-of-day. Tests that record a
+    // second entry a few minutes after the first and then assert both landed in the *same* P1D bucket are
+    // otherwise clock-dependent: "now" plus those minutes crosses midnight during the last few minutes of
+    // a UTC day, splitting the entries across two day buckets. The query window (anchored to the first
+    // entry's date) then sees only the earlier bucket, and the accumulated totals come up short - a real
+    // failure that reproduces for only a few minutes out of every 24h. Midday leaves ~12h of headroom on
+    // either side, so the offsets these tests add can never reach a bucket boundary.
+    private static DateTimeOffset MiddayDaysAgo(int days) =>
+        new DateTimeOffset(DateTime.UtcNow.Date, TimeSpan.Zero).AddDays(-days).AddHours(12);
+
     [Fact]
     public async Task RollForward_AppliesLedgerEntry_QueryableAfterBucketCompletes()
     {
@@ -96,7 +106,7 @@ public class UsageRollupStoreTests
         var rollup = temp.CreateRollupStore();
         var ledger = temp.CreateUsageLedger(rollup);
 
-        var occurredAt = DateTimeOffset.UtcNow.AddDays(-2);
+        var occurredAt = MiddayDaysAgo(2);
         await ledger.RecordAsync(MakeEntry(occurredAtUtc: occurredAt, promptTokens: 100, completionTokens: 50, costUsd: 1.5m), Ct);
         await ledger.RecordAsync(MakeEntry(occurredAtUtc: occurredAt.AddMinutes(1), promptTokens: 10, completionTokens: 5, costUsd: 0.25m), Ct);
 
@@ -117,7 +127,7 @@ public class UsageRollupStoreTests
         // backfill - rolls them up.
         using var temp = new TempDatabase();
         var ledgerOnly = temp.CreateUsageLedger(rollupStore: null);
-        var occurredAt = DateTimeOffset.UtcNow.AddDays(-2);
+        var occurredAt = MiddayDaysAgo(2);
         await ledgerOnly.RecordAsync(MakeEntry(occurredAtUtc: occurredAt), Ct);
         await ledgerOnly.RecordAsync(MakeEntry(occurredAtUtc: occurredAt.AddMinutes(5)), Ct);
 
@@ -173,7 +183,7 @@ public class UsageRollupStoreTests
         var rollup = temp.CreateRollupStore();
         var ledger = temp.CreateUsageLedger(rollup);
 
-        var occurredAt = DateTimeOffset.UtcNow.AddDays(-2);
+        var occurredAt = MiddayDaysAgo(2);
         await ledger.RecordAsync(MakeEntry(provider: "openai", model: "gpt-4o", occurredAtUtc: occurredAt, costUsd: 1m), Ct);
         await ledger.RecordAsync(MakeEntry(provider: "openai", model: "gpt-4o-mini", occurredAtUtc: occurredAt.AddMinutes(1), costUsd: 0.5m), Ct);
 
