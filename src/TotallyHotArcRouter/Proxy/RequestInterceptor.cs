@@ -26,9 +26,28 @@ namespace TotallyHot.ArcRouter.Proxy
         /// itself instead of naming one - the same auto-select the generalized fallback performs for an
         /// unresolved name, but requested deliberately rather than as a recovery. Matched
         /// case-insensitively, and it wins over a configured model of the same name so the meaning of
-        /// <c>"model": "auto"</c> never depends on the operator's model list.
+        /// <c>"model": "auto"</c> never depends on the operator's model list. Unlike
+        /// <see cref="RouterModelName"/> this name is never advertised by
+        /// <see cref="ListAvailableModels"/>; it remains accepted for callers that already send it.
         /// </summary>
         internal const string AutoSelectModelName = "auto";
+
+        /// <summary>
+        /// The advertised alias for <see cref="AutoSelectModelName"/>, and the only one of the two that
+        /// <see cref="ListAvailableModels"/> surfaces as a selectable entry. It exists because editors
+        /// that attach to this proxy as a provider (Visual Studio's Ollama picker, VS Code/Copilot's
+        /// OpenAI-compatible provider) force the user to pick one name from the discovery response, and
+        /// so offer no other way to express "you choose". Spelled as an Ollama-safe slug - no spaces, no
+        /// tag separator - so it round-trips unmodified through both clients.
+        /// </summary>
+        internal const string RouterModelName = "totallyhot-arcrouter";
+
+        /// <summary>
+        /// The <c>owned_by</c> value reported for <see cref="RouterModelName"/> on the OpenAI-shaped
+        /// discovery endpoint. Deliberately not a real provider key: the entry is a request for a routing
+        /// decision rather than a route, so no configured provider owns it.
+        /// </summary>
+        private const string RouterModelProvider = "totallyhot";
 
         /// <summary>
         /// The neutral prior assigned to a candidate with no recorded <see cref="RouterMemory"/> score yet
@@ -196,25 +215,62 @@ namespace TotallyHot.ArcRouter.Proxy
 
         /// <summary>
         /// Lists the client-facing models this proxy is configured to route. Used to answer the
-        /// OpenAI-compatible model discovery endpoint (<c>GET /v1/models</c>). When single-model serving
+        /// OpenAI-compatible model discovery endpoint (<c>GET /v1/models</c>) and Ollama's native
+        /// equivalents (<c>GET /api/tags</c>, <c>POST /api/show</c>). When single-model serving
         /// is forced (see the constructor's <c>singleModelServingOptions</c> parameter), only that one
         /// model is listed, so a connecting tool sees exactly what it can actually get.
         /// </summary>
+        /// <remarks>
+        /// <see cref="RouterModelName"/> is prepended as a synthetic entry so a client whose picker only
+        /// offers names from this list can still ask the router to choose. It is synthesized here rather
+        /// than configured as a <c>ModelList</c> entry because it resolves to no provider and no upstream
+        /// model id - it is a request for a decision, not a route - and a real entry would additionally
+        /// have to be excluded from every ranking and governance surface.
+        /// It is omitted in the two cases where selecting it could not work: single-model serving forces
+        /// its one model and bypasses auto-select entirely, and with no configured models there is
+        /// nothing for auto-select to choose between.
+        /// </remarks>
         public IReadOnlyList<AvailableModel> ListAvailableModels()
         {
             var models = _modelRouteResolver.ListModels();
 
-            return _forcedModelName is null
-                ? models
-                : models.Where(m => string.Equals(m.ModelName, _forcedModelName, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (_forcedModelName is not null)
+            {
+                return models
+                    .Where(m => string.Equals(m.ModelName, _forcedModelName, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+            }
+
+            if (models.Count == 0)
+            {
+                return models;
+            }
+
+            var listed = new List<AvailableModel>(models.Count + 1)
+            {
+                new(RouterModelName, RouterModelProvider),
+            };
+            listed.AddRange(models);
+
+            return listed;
         }
+
+        /// <summary>
+        /// Reports whether <paramref name="modelName"/> is one of the reserved names that ask the router
+        /// to choose the model itself (<see cref="RouterModelName"/> or <see cref="AutoSelectModelName"/>),
+        /// matched case-insensitively to mirror <see cref="IModelRouteResolver"/>'s own lookup semantics.
+        /// </summary>
+        private static bool IsRouterChoiceModelName(string modelName) =>
+            string.Equals(modelName, RouterModelName, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(modelName, AutoSelectModelName, StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
         /// Reads the request body, resolves the requested model against the known-model allowlist, and
         /// rewrites <c>model</c> to the upstream provider's model id. The proxy only ever forwards to
         /// upstreams present in this allowlist, so a request can never be routed back to the proxy itself.
-        /// The reserved name <see cref="AutoSelectModelName"/> (any casing) skips the lookup and lets the
-        /// router auto-select the highest-ranked currently-eligible model instead.
+        /// The reserved names <see cref="RouterModelName"/> and <see cref="AutoSelectModelName"/> (any
+        /// casing) skip the lookup and let the router auto-select the highest-ranked currently-eligible
+        /// model instead.
         /// </summary>
         /// <param name="context">The HTTP context.</param>
         /// <param name="cancellationToken">A token to cancel the operation.</param>
@@ -302,13 +358,13 @@ namespace TotallyHot.ArcRouter.Proxy
                 modelName = _forcedModelName;
             }
 
-            // "model": "auto" (any casing) is an explicit request for the router to pick, so it skips the
-            // allowlist lookup entirely and runs the same ranked auto-select the unresolved-model fallback
-            // below uses. Checked before TryResolve so the reserved name can't be shadowed by a configured
-            // model literally named "auto". Single-model serving is unaffected: _forcedModelName has already
-            // overwritten modelName above, so a forced proxy still serves its one model.
-            var isAutoSelectRequest =
-                _forcedModelName is null && string.Equals(modelName, AutoSelectModelName, StringComparison.OrdinalIgnoreCase);
+            // Either reserved name (any casing) is an explicit request for the router to pick, so it skips
+            // the allowlist lookup entirely and runs the same ranked auto-select the unresolved-model
+            // fallback below uses. Checked before TryResolve so a reserved name can't be shadowed by a
+            // configured model that happens to share it. Single-model serving is unaffected:
+            // _forcedModelName has already overwritten modelName above, so a forced proxy still serves its
+            // one model.
+            var isAutoSelectRequest = _forcedModelName is null && IsRouterChoiceModelName(modelName);
 
             ResolvedModelRoute? route;
             var isExploratory = false;
@@ -324,7 +380,7 @@ namespace TotallyHot.ArcRouter.Proxy
                     // caller who asked for auto-select rather than one who named a model we didn't recognize.
                     _logger.LogWarning("[INTERCEPTOR] Rejected auto-select request: no eligible model is currently available.");
                     return ModelRouteResolutionResult.Failure(
-                        $"model '{AutoSelectModelName}' could not be auto-selected: no eligible model is currently available.");
+                        $"model '{modelName}' could not be auto-selected: no eligible model is currently available.");
                 }
 
                 _logger.LogInformation(
@@ -498,7 +554,8 @@ namespace TotallyHot.ArcRouter.Proxy
         /// <summary>
         /// Picks a real, allowlisted route to serve a request whose <c>model</c> didn't match any configured
         /// entry - the generalized fallback in <c>docs/router/utility-model-routing.md</c> - and also to serve
-        /// a request that explicitly asked for auto-select via <see cref="AutoSelectModelName"/>.
+        /// a request that explicitly asked for auto-select via <see cref="RouterModelName"/> or
+        /// <see cref="AutoSelectModelName"/>.
         /// </summary>
         /// <remarks>
         /// PLAN.md Phase I / <c>docs/router/utility-model-routing.md</c> §B4: when a routing policy is

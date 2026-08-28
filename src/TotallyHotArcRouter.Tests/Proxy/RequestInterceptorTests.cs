@@ -215,6 +215,55 @@ public class RequestInterceptorTests
         Assert.Equal("kimi-k2.5-upstream", document.RootElement.GetProperty("model").GetString());
     }
 
+    // The advertised alias must behave identically to "auto" - it is the name a picker actually sends back,
+    // so if it did not auto-select, selecting the router entry would do nothing. Matched case-insensitively
+    // because clients are free to normalize the casing of what they advertise back to us.
+    [Theory]
+    [InlineData("totallyhot-arcrouter")]
+    [InlineData("TotallyHot-ArcRouter")]
+    [InlineData("TOTALLYHOT-ARCROUTER")]
+    public async Task ResolveModelRouteAsync_RouterModel_AnyCasing_AutoSelectsHighestRankedModel(string requestedModel)
+    {
+        var resolver = ModelRouteResolverTestFactory.CreateWithModelList(
+            ("gpt-5.4", "openai", "gpt-5.4"),
+            ("kimi-k2.5", "moonshot", "kimi-k2.5-upstream"));
+        var memory = new RouterMemory();
+        await memory.AddScoreAsync(DefaultLiveDimension, "gpt-5.4", 0.2);
+        await memory.AddScoreAsync(DefaultLiveDimension, "kimi-k2.5", 0.9);
+        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver, routerMemory: memory);
+        var context = CreateContextWithBody($$"""{"model":"{{requestedModel}}"}""");
+
+        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("kimi-k2.5", result.Route!.ModelName);
+
+        // The forwarded body must carry the selected model's upstream id - the router name is never a real
+        // upstream model, so leaking it through would be rejected by whatever provider received it.
+        using var document = JsonDocument.Parse(result.RewrittenBody!);
+        Assert.Equal("kimi-k2.5-upstream", document.RootElement.GetProperty("model").GetString());
+    }
+
+    // Same allowlist-shadowing guarantee "auto" has: the advertised name is reserved, so an operator who
+    // configures a model under it cannot change what selecting the router entry means for every client.
+    [Fact]
+    public async Task ResolveModelRouteAsync_RouterModel_ConfiguredModelNamedTheSame_StillAutoSelects()
+    {
+        var resolver = ModelRouteResolverTestFactory.CreateWithModelList(
+            ("totallyhot-arcrouter", "openai", "some-literal-model"),
+            ("kimi-k2.5", "moonshot", "kimi-k2.5"));
+        var memory = new RouterMemory();
+        await memory.AddScoreAsync(DefaultLiveDimension, "totallyhot-arcrouter", 0.2);
+        await memory.AddScoreAsync(DefaultLiveDimension, "kimi-k2.5", 0.9);
+        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver, routerMemory: memory);
+        var context = CreateContextWithBody("""{"model":"totallyhot-arcrouter"}""");
+
+        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("kimi-k2.5", result.Route!.ModelName);
+    }
+
     // The reserved name wins over the allowlist: an operator who happens to configure a model called "auto"
     // must not silently change what "model": "auto" means for every connecting client.
     [Fact]
@@ -332,10 +381,11 @@ public class RequestInterceptorTests
         Assert.NotNull(result.ErrorMessage);
     }
 
-    // Verifies that ListAvailableModels delegates directly to the underlying resolver, so the interceptor
-    // stays a thin pass-through for the model-discovery data ProxyMiddleware needs to answer /v1/models.
+    // Verifies that ListAvailableModels reports every configured model, in the resolver's own order and
+    // otherwise unmodified, so the interceptor stays a thin pass-through for the model-discovery data
+    // ProxyMiddleware needs to answer /v1/models. The synthetic router entry is covered separately below.
     [Fact]
-    public void ListAvailableModels_DelegatesToModelRouteResolver()
+    public void ListAvailableModels_ReportsEveryConfiguredModelFromTheResolver()
     {
         var resolver = ModelRouteResolverTestFactory.CreateWithModelList(
             ("gpt-5.4", "openai", "gpt-5.4"),
@@ -344,7 +394,56 @@ public class RequestInterceptorTests
 
         var models = interceptor.ListAvailableModels();
 
-        Assert.Equal(resolver.ListModels(), models);
+        Assert.Equal(resolver.ListModels(), models.Where(m => m.ModelName != "totallyhot-arcrouter"));
+    }
+
+    // Editors that attach to this proxy as a provider force the user to pick one name from the discovery
+    // response, so "let the router choose" is only reachable if it is itself listed. It leads so it reads
+    // as the default in the picker.
+    [Fact]
+    public void ListAvailableModels_ModelsConfigured_ListsTheRouterEntryFirst()
+    {
+        var resolver = ModelRouteResolverTestFactory.CreateWithModelList(
+            ("gpt-5.4", "openai", "gpt-5.4"),
+            ("kimi-k2.5", "moonshot", "kimi-k2.5"));
+        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+
+        var models = interceptor.ListAvailableModels();
+
+        Assert.Equal("totallyhot-arcrouter", models[0].ModelName);
+        Assert.Equal(3, models.Count);
+    }
+
+    // With nothing configured to route to, selecting the router entry could only ever fail - so it must not
+    // be offered. Advertising it here would put an entry in the picker that errors on first use.
+    [Fact]
+    public void ListAvailableModels_NoModelsConfigured_OmitsTheRouterEntry()
+    {
+        var interceptor = new RequestInterceptor(
+            Mock.Of<ILogger<RequestInterceptor>>(),
+            ModelRouteResolverTestFactory.Empty());
+
+        var models = interceptor.ListAvailableModels();
+
+        Assert.Empty(models);
+    }
+
+    // Single-model serving bypasses auto-select entirely (--model always wins), so the router entry would
+    // be a lie: picking it would silently serve the forced model instead of choosing.
+    [Fact]
+    public void ListAvailableModels_SingleModelServingForced_OmitsTheRouterEntry()
+    {
+        var resolver = ModelRouteResolverTestFactory.CreateWithModelList(
+            ("gpt-5.4", "openai", "gpt-5.4"),
+            ("kimi-k2.5", "moonshot", "kimi-k2.5"));
+        var interceptor = new RequestInterceptor(
+            Mock.Of<ILogger<RequestInterceptor>>(),
+            resolver,
+            new SingleModelServingOptions { ForcedModelName = "gpt-5.4" });
+
+        var models = interceptor.ListAvailableModels();
+
+        Assert.DoesNotContain(models, m => m.ModelName == "totallyhot-arcrouter");
     }
 
     // Local Proxy CLI: an invalid --model CLI value must fail at startup

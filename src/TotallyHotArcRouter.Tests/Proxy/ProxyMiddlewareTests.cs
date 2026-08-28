@@ -565,15 +565,46 @@ public class ProxyMiddlewareTests
 
         Assert.Equal("list", document.RootElement.GetProperty("object").GetString());
         var data = document.RootElement.GetProperty("data").EnumerateArray().ToList();
-        Assert.Equal(2, data.Count);
+        Assert.Equal(3, data.Count);
 
-        Assert.Equal("gpt-5.4", data[0].GetProperty("id").GetString());
-        Assert.Equal("model", data[0].GetProperty("object").GetString());
-        Assert.Equal(0, data[0].GetProperty("created").GetInt64());
-        Assert.Equal("openai", data[0].GetProperty("owned_by").GetString());
+        // The synthetic "let the router choose" entry leads the list - see the dedicated test below.
+        Assert.Equal("totallyhot-arcrouter", data[0].GetProperty("id").GetString());
 
-        Assert.Equal("claude-opus-4.6", data[1].GetProperty("id").GetString());
-        Assert.Equal("anthropic", data[1].GetProperty("owned_by").GetString());
+        Assert.Equal("gpt-5.4", data[1].GetProperty("id").GetString());
+        Assert.Equal("model", data[1].GetProperty("object").GetString());
+        Assert.Equal(0, data[1].GetProperty("created").GetInt64());
+        Assert.Equal("openai", data[1].GetProperty("owned_by").GetString());
+
+        Assert.Equal("claude-opus-4.6", data[2].GetProperty("id").GetString());
+        Assert.Equal("anthropic", data[2].GetProperty("owned_by").GetString());
+    }
+
+    // VS Code / Copilot attaches to this proxy as an OpenAI-compatible provider and discovers models here
+    // rather than via Ollama's /api/tags, so the router entry has to be present in this shape too - it is
+    // the only way a user of that client can ask the router to choose. Reported under its own owned_by,
+    // since no configured provider owns it.
+    [Fact]
+    public async Task InvokeAsync_GetModelsList_ListsTheRouterEntryFirst()
+    {
+        var resolver = ModelRouteResolverTestFactory.CreateWithModelList(("gpt-5.4", "openai", "gpt-5.4-2026-01"));
+        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var handler = new DelegatingHandlerStub(_ => throw new InvalidOperationException("Upstream should never be called for /v1/models."));
+        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+
+        var context = new DefaultHttpContext();
+        context.Request.Method = HttpMethods.Get;
+        context.Request.Path = "/v1/models";
+        context.Response.Body = new MemoryStream();
+
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        context.Response.Body.Position = 0;
+        using var reader = new StreamReader(context.Response.Body, Encoding.UTF8);
+        using var document = JsonDocument.Parse(await reader.ReadToEndAsync(TestContext.Current.CancellationToken));
+
+        var data = document.RootElement.GetProperty("data").EnumerateArray().ToList();
+        Assert.Equal("totallyhot-arcrouter", data[0].GetProperty("id").GetString());
+        Assert.Equal("totallyhot", data[0].GetProperty("owned_by").GetString());
     }
 
     // Verifies that an empty ModelList still yields a valid, empty OpenAI-shaped response rather than an
@@ -701,13 +732,67 @@ public class ProxyMiddlewareTests
         using var document = JsonDocument.Parse(await reader.ReadToEndAsync(TestContext.Current.CancellationToken));
 
         var models = document.RootElement.GetProperty("models").EnumerateArray().ToList();
-        Assert.Equal(2, models.Count);
+        Assert.Equal(3, models.Count);
 
-        Assert.Equal("gpt-5.4", models[0].GetProperty("name").GetString());
-        Assert.Equal("gpt-5.4", models[0].GetProperty("model").GetString());
+        // The synthetic "let the router choose" entry leads the list - see the dedicated test below.
+        Assert.Equal("totallyhot-arcrouter", models[0].GetProperty("name").GetString());
 
-        Assert.Equal("claude-opus-4.6", models[1].GetProperty("name").GetString());
-        Assert.Equal("claude-opus-4.6", models[1].GetProperty("model").GetString());
+        Assert.Equal("gpt-5.4", models[1].GetProperty("name").GetString());
+        Assert.Equal("gpt-5.4", models[1].GetProperty("model").GetString());
+
+        Assert.Equal("claude-opus-4.6", models[2].GetProperty("name").GetString());
+        Assert.Equal("claude-opus-4.6", models[2].GetProperty("model").GetString());
+    }
+
+    // Visual Studio's Ollama model picker only lets the user choose a name this endpoint returned, so the
+    // router entry must appear here for "let the router choose" to be selectable at all. It leads the list
+    // so it reads as the default choice.
+    [Fact]
+    public async Task InvokeAsync_GetOllamaTags_ListsTheRouterEntryFirst()
+    {
+        var resolver = ModelRouteResolverTestFactory.CreateWithModelList(("gpt-5.4", "openai", "gpt-5.4-2026-01"));
+        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var handler = new DelegatingHandlerStub(_ => throw new InvalidOperationException("Upstream should never be called for /api/tags."));
+        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+
+        var context = new DefaultHttpContext();
+        context.Request.Method = HttpMethods.Get;
+        context.Request.Path = "/api/tags";
+        context.Response.Body = new MemoryStream();
+
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        context.Response.Body.Position = 0;
+        using var reader = new StreamReader(context.Response.Body, Encoding.UTF8);
+        using var document = JsonDocument.Parse(await reader.ReadToEndAsync(TestContext.Current.CancellationToken));
+
+        var models = document.RootElement.GetProperty("models").EnumerateArray().ToList();
+        Assert.Equal("totallyhot-arcrouter", models[0].GetProperty("name").GetString());
+        Assert.Equal("totallyhot-arcrouter", models[0].GetProperty("model").GetString());
+    }
+
+    // The step that would silently break the picker: Visual Studio POSTs /api/show for the model the user
+    // selected before using it, and this endpoint 404s any name absent from the discovery list. Listing the
+    // router entry in /api/tags without this would let it be selected and then immediately fail.
+    [Fact]
+    public async Task InvokeAsync_PostOllamaShow_RouterModel_Returns200()
+    {
+        var resolver = ModelRouteResolverTestFactory.CreateWithModelList(("gpt-5.4", "openai", "gpt-5.4-2026-01"));
+        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var handler = new DelegatingHandlerStub(_ => throw new InvalidOperationException("Upstream should never be called for /api/show."));
+        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+
+        var context = new DefaultHttpContext();
+        context.Request.Method = HttpMethods.Post;
+        context.Request.Path = "/api/show";
+        var requestBody = Encoding.UTF8.GetBytes("""{"model":"totallyhot-arcrouter"}""");
+        context.Request.Body = new MemoryStream(requestBody);
+        context.Request.ContentLength = requestBody.Length;
+        context.Response.Body = new MemoryStream();
+
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
     }
 
     // Verifies that a trailing slash on the path is tolerated, mirroring /v1/models' tolerance.
