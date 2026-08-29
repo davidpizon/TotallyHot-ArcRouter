@@ -9,7 +9,8 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 /// <summary>
 /// Tests for <see cref="SettingsModal"/>: the telemetry address field, the Adaptive Routing toggle and
 /// Sample Size input (docs/router/self-organizing-classification-plan.md Phase T6), the typed-confirmation
-/// gate on the destructive Reset/Purge actions and what they actually clear, and the close callbacks.
+/// gate on the destructive Reset/Purge actions and what they actually clear, the close callbacks, and
+/// the GUI/Router version footer.
 /// </summary>
 public sealed class SettingsModalTests
 {
@@ -17,7 +18,8 @@ public sealed class SettingsModalTests
         out LiveDataStore liveDataStore,
         out IGuiSettingsStore settingsStore,
         out RouterSettingsAdminStore routerSettingsStore,
-        FakeRouterSettingsAdminClient? routerSettingsClient = null)
+        FakeRouterSettingsAdminClient? routerSettingsClient = null,
+        FakeUpdateAdminClient? updateClient = null)
     {
         var ctx = new Bunit.BunitContext();
         liveDataStore = new LiveDataStore(serverAddress: "https://127.0.0.1:59996");
@@ -27,7 +29,7 @@ public sealed class SettingsModalTests
         ctx.Services.AddSingleton(liveDataStore);
         ctx.Services.AddSingleton(settingsStore);
         ctx.Services.AddSingleton(routerSettingsStore);
-        ctx.Services.AddSingleton(new UpdateStore(new FakeUpdateAdminClient(), new FakeMsiUpdateApplier()));
+        ctx.Services.AddSingleton(new UpdateStore(updateClient ?? new FakeUpdateAdminClient(), new FakeMsiUpdateApplier()));
         ctx.Services.AddSingleton(_ => new TempFileCleanup(settingsPath));
         ctx.Services.GetRequiredService<TempFileCleanup>();
         return ctx;
@@ -44,9 +46,14 @@ public sealed class SettingsModalTests
             UnavailableReason: UpdateUnavailableReasonInfo.None,
             UnavailableDetail: null);
 
-        public Task<UpdateStatusInfo> GetStatusAsync(CancellationToken cancellationToken = default) => Task.FromResult(Status);
+        /// <summary>When set, every call fails with it - how a test stands in for a Router that isn't running.</summary>
+        public UpdateAdminException? Failure { get; set; }
 
-        public Task<UpdateStatusInfo> CheckNowAsync(CancellationToken cancellationToken = default) => Task.FromResult(Status);
+        public Task<UpdateStatusInfo> GetStatusAsync(CancellationToken cancellationToken = default) =>
+            Failure is null ? Task.FromResult(Status) : Task.FromException<UpdateStatusInfo>(Failure);
+
+        public Task<UpdateStatusInfo> CheckNowAsync(CancellationToken cancellationToken = default) =>
+            Failure is null ? Task.FromResult(Status) : Task.FromException<UpdateStatusInfo>(Failure);
 
         public Task<NotifyApplyStartingInfo> NotifyApplyStartingAsync(string version, CancellationToken cancellationToken = default) =>
             Task.FromResult(new NotifyApplyStartingInfo(true));
@@ -94,6 +101,70 @@ public sealed class SettingsModalTests
                 Settings.EligibleJudgeModels);
             return Task.FromResult(Settings);
         }
+    }
+
+    [Fact]
+    public void Version_footer_shows_the_GUI_version_from_its_own_assembly()
+    {
+        using var ctx = NewContext(out _, out _, out _);
+
+        var cut = ctx.Render<SettingsModal>();
+
+        cut.Markup.Should().Contain($"GUI v{AppVersion.Current}");
+    }
+
+    [Fact]
+    public void Version_footer_shows_the_version_the_router_reported()
+    {
+        var updateClient = new FakeUpdateAdminClient();
+        updateClient.Status = updateClient.Status with { CurrentVersion = "1.0.2" };
+        using var ctx = NewContext(out _, out _, out _, updateClient: updateClient);
+
+        var cut = ctx.Render<SettingsModal>();
+
+        cut.Markup.Should().Contain("Router v1.0.2");
+        cut.Markup.Should().NotContain("Router unknown");
+    }
+
+    [Fact]
+    public void Version_footer_shows_Router_unknown_when_the_router_is_not_running()
+    {
+        var updateClient = new FakeUpdateAdminClient
+        {
+            Failure = new UpdateAdminException("router is down", isUnavailable: true),
+        };
+        using var ctx = NewContext(out _, out _, out _, updateClient: updateClient);
+
+        var cut = ctx.Render<SettingsModal>();
+
+        cut.Markup.Should().Contain("Router unknown");
+    }
+
+    [Fact]
+    public void Version_footer_shows_Router_unknown_when_the_router_reports_a_blank_version()
+    {
+        var updateClient = new FakeUpdateAdminClient();
+        updateClient.Status = updateClient.Status with { CurrentVersion = "" };
+        using var ctx = NewContext(out _, out _, out _, updateClient: updateClient);
+
+        var cut = ctx.Render<SettingsModal>();
+
+        cut.Markup.Should().Contain("Router unknown");
+    }
+
+    // The whole point of reading the Router half from the Router rather than assuming it matches the
+    // GUI's: an upgrade that left a stale Router behind has to be visible here.
+    [Fact]
+    public void Version_footer_shows_both_halves_independently_when_they_disagree()
+    {
+        var updateClient = new FakeUpdateAdminClient();
+        updateClient.Status = updateClient.Status with { CurrentVersion = "0.9.9" };
+        using var ctx = NewContext(out _, out _, out _, updateClient: updateClient);
+
+        var cut = ctx.Render<SettingsModal>();
+
+        cut.Markup.Should().Contain($"GUI v{AppVersion.Current}");
+        cut.Markup.Should().Contain("Router v0.9.9");
     }
 
     [Fact]
