@@ -77,6 +77,27 @@
     <!-- Charts: Apache ECharts (echarts.min.js, Apache-2.0) is vendored under
          wwwroot/lib/echarts and driven by wwwroot/js/echarts-interop.js, so charts work offline in the
          BlazorWebView with no NuGet chart dependency. See docs/gui/cost-analytics-visualization-spec.md. -->
+    <!-- Logging (AGENTS.md: Serilog exclusively, configured via appsettings.json). Versions match
+         TotallyHotArcRouter.csproj's so the two processes cannot end up on different Serilog behavior.
+         No Sinks.Console here, unlike the Router: this is a WinExe with no console attached. See
+         Services/GuiLogging.cs. -->
+    <PackageReference Include="Serilog" Version="4.4.0" />
+    <PackageReference Include="Serilog.Extensions.Logging" Version="10.0.0" />
+    <PackageReference Include="Serilog.Settings.Configuration" Version="10.0.1" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+    <!-- Direct, though .NET MAUI already pulls this in transitively: GuiLogging reads appsettings.json
+         through it, and a transitive dependency is not a contract this project should build on. -->
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Update (not Include): the SDK's default None glob already matches this file, so including it
+         again fails with NETSDK1022. Copied to the output - and therefore into the publish directory the
+         MSI harvests with <Files Include="$(var.GuiPublishDir)\**"> - so the installed GUI reads the same
+         Serilog configuration a development build does. -->
+    <None Update="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
   <ItemGroup>

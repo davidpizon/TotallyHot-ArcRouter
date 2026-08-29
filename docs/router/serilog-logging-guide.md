@@ -6,7 +6,7 @@
 > sinks are both configured (`"WriteTo": [{ "Name": "Console" }, { "Name": "File", ... }]`), and
 > `Serilog`, `Serilog.Extensions.Hosting`, `Serilog.Settings.Configuration`, `Serilog.Sinks.Console`,
 > and `Serilog.Sinks.File` are all referenced in `TotallyHotArcRouter.csproj`. The `File` sink
-> writes to `C:\Temp\arcrouter-.log`, rolling daily with a 30-day retention window. What's **not**
+> writes to `C:\Logs\ArcRouter\arcrouter-.log`, rolling daily with a 30-day retention window. What's **not**
 > implemented: the `EventLog` sink and package below — still the **proposed** target configuration,
 > not what's installed today. There's also a separate bootstrap logger in `Program.cs`
 > (`Log.Logger = new LoggerConfiguration()...WriteTo.Console()`, used only before the host is
@@ -18,6 +18,58 @@
 > `.WriteTo.Sink(...)` directly in `Program.cs`, forwards every log event to the GUI's Console tab
 > over the telemetry gRPC stream. See [`../gui/console-tab-plan.md`](../gui/console-tab-plan.md) and
 > [`telemetry.md`](telemetry.md)'s "Transport: gRPC" section.
+
+## Two processes, two logs
+
+The Router and the GUI are separate processes running as **different identities** — the Router as
+`LocalSystem` under the service control manager, the GUI as the interactive user — so they cannot share
+one log file without one of them being denied. Each has its own `appsettings.json` and its own `File`
+sink:
+
+| Process | Configuration | Log file |
+| --- | --- | --- |
+| Router (`TotallyHotArcRouter`) | `src/TotallyHotArcRouter/appsettings.json` | `C:\Logs\ArcRouter\arcrouter-.log` |
+| GUI (`TotallyHotArcRouter.Gui`) | `src/TotallyHotArcRouter.Gui/appsettings.json` | `%LOCALAPPDATA%\TotallyHotArcRouter\logs\arcrouter-gui-.log` |
+
+Both roll daily with a 30-day retention limit and share the same output template, so the two files line
+up when they are read side by side during an incident.
+
+### GUI logging
+
+The GUI had **no logging at all** until it was added; a WebView2 environment failure in the installed
+build opened a blank dashboard window with nothing written anywhere, because the only log that existed
+belonged to a different process. `Services/GuiLogging.cs` is what closes that, and it is deliberately
+defensive:
+
+- The log lives under `%LOCALAPPDATA%` — the same per-user root `GuiSettingsStore` and
+  `WebViewUserData` already use — because the interactive user cannot write to the Router's
+  `C:\Logs\ArcRouter`, and the installed GUI cannot write beside its own executable under
+  `%ProgramFiles%`.
+- `%LOCALAPPDATA%` in the configured path is expanded **in code** before Serilog reads it. An
+  unexpanded variable would otherwise become a literal `%LOCALAPPDATA%` directory relative to the
+  working directory, which for the GUI's registry Run-key auto-start is not even the install folder.
+- A missing or unreadable `appsettings.json` falls back to a built-in rolling file sink at that same
+  per-user path and records *why* it fell back. A bootstrap that quietly produces a logger with no
+  sinks would reproduce the exact undiagnosable symptom this exists to prevent.
+
+What the GUI logs at startup:
+
+| Event | Where |
+| --- | --- |
+| Version, PID, user, base directory, working directory, OS | `MauiProgram.CreateMauiApp` |
+| The resolved WebView2 user-data folder (or the failure to create it) | `MauiProgram.CreateMauiApp` → `WebViewUserData.Apply` |
+| BlazorWebView initializing / initialized, and the WebView2 runtime version | `MainPage` |
+| WebView2 browser-process failures | `MainPage`, via the platform control's `CoreProcessFailed` |
+| `Failed to create WebView2 environment` | .NET MAUI's own logger — reaches the file because `MauiProgram` routes `Microsoft.Extensions.Logging` into Serilog |
+| Tray window attached; exit chosen from the tray menu | `Platforms/Windows/TrayWindowManager` |
+| Unhandled exceptions (app domain, WinUI thread, unobserved tasks) | `MauiProgram` and `Platforms/Windows/App.xaml.cs` |
+
+**Diagnosing a blank dashboard:** look for `BlazorWebView initializing` in the GUI log. If no
+`BlazorWebView initialized` line follows it, WebView2 never came up — the reason is either MAUI's
+`Failed to create WebView2 environment` entry (runtime missing, or the user-data folder unwritable) or a
+`CoreProcessFailed` entry immediately after.
+
+---
 
 ## Overview
 
