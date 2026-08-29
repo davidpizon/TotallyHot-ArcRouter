@@ -11,7 +11,7 @@ reads it, and `.gitignore` keeps it from being committed again if a stray fetch 
 
 ## Syncing
 
-The corpus lives at `%LOCALAPPDATA%\TotallyHot.ArcRouter\coderouterbench.db` (configurable via
+The corpus lives at `%ProgramData%\TotallyHotArcRouter\coderouterbench.db` (configurable via
 `Storage:BenchmarkDatabasePath`), synced from
 [`huggingface.co/datasets/Lance1573/CodeRouterBench`](https://huggingface.co/datasets/Lance1573/CodeRouterBench)
 (`main` branch by default; pin a ref via `CodeRouterBench:DatasetRef`). Three ways to trigger a sync:

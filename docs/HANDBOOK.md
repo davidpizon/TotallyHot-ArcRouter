@@ -62,7 +62,7 @@ release no longer publishes; the published tables are consumed as-is.
 ```text
 src/TotallyHotArcRouter*/              .NET router implementation, GUI, quality verifier, tests
 
-%LOCALAPPDATA%\TotallyHot.ArcRouter\coderouterbench.db   CodeRouterBench task x model tables, synced on demand
+%ProgramData%\TotallyHotArcRouter\coderouterbench.db   CodeRouterBench task x model tables, synced on demand
 ```
 
 ## CodeRouterBench Data

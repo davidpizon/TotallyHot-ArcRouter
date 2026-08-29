@@ -250,7 +250,7 @@ Concretely, for a proxy that already runs an OpenAI-compatible HTTP surface on p
 | Local telemetry channel → `TotallyHot.ArcRouter.Gui` | ✅ | Loopback, same machine, same OS user — this is the user reading their own catalog, not redistribution. Must stay loopback-bound (see [`signalr-hub-security.md`](signalr-hub-security.md), whose concerns apply to the current gRPC transport). |
 | Governance model cards | ✅ | Same local channel; the display surface [`../gui/governance-model-cards.md`](../gui/governance-model-cards.md) specifies. |
 | `PriceSourceAdminService` (Governance → Price Sources) | ✅ | Same loopback gRPC channel, and it carries **no price values at all** — only feed metadata: source name, enabled flag, rank, row counts, error strings, and the poll schedule (interval + anchor) the panel's countdown renders. Permitted because it is operator control over the user's own ingestion, not price distribution. **Not a licence to add a price field**: "the transport happens to be local" is not the test — see the rule above. |
-| The SQLite file on disk | ✅ | Local storage, ACL'd to the running user (see [`agent-cost-tracking.md`](agent-cost-tracking.md) §4's shared `Storage:DatabasePath` and its `%LOCALAPPDATA%` convention). |
+| The SQLite file on disk | ✅ | Local storage under the machine-wide `%ProgramData%\TotallyHotArcRouter\`, readable by local `Users` (see [`agent-cost-tracking.md`](agent-cost-tracking.md) §4's shared `Storage:DatabasePath`). |
 
 This also means the catalog **must not** become a feature of the proxy's OpenAI-compatible surface even
 if a client would find it useful, and any future "expose pricing to the IDE" request has to be refused
