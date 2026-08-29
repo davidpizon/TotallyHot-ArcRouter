@@ -64,18 +64,25 @@ public sealed class LogRegRetrainHostedService : BackgroundService
         }
 
         using var timer = new PeriodicTimer(CheckInterval);
-        do
+        try
         {
-            try
+            do
             {
-                await CheckAndRetrainAsync(stoppingToken).ConfigureAwait(false);
+                try
+                {
+                    await CheckAndRetrainAsync(stoppingToken).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogError(ex, "Automatic logreg retrain check threw unexpectedly; continuing.");
+                }
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogError(ex, "Automatic logreg retrain check threw unexpectedly; continuing.");
-            }
+            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
         }
-        while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
+        catch (OperationCanceledException)
+        {
+            // Normal shutdown.
+        }
     }
 
     /// <summary>

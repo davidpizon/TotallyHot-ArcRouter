@@ -75,11 +75,18 @@ public sealed class UpdateCheckHostedService : BackgroundService
         }
 
         using var timer = new PeriodicTimer(_options.PollInterval);
-        do
+        try
         {
-            await RunOneCheckAsync(stoppingToken).ConfigureAwait(false);
+            do
+            {
+                await RunOneCheckAsync(stoppingToken).ConfigureAwait(false);
+            }
+            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
         }
-        while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
+        catch (OperationCanceledException)
+        {
+            // Normal shutdown.
+        }
     }
 
     /// <summary>

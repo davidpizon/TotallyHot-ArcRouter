@@ -44,18 +44,25 @@ public sealed class JudgeShadowScoreRetentionService : BackgroundService
         // the judge starts disabled would leave retention dead for the process's lifetime, so enabling the
         // judge from System Settings would accumulate rows with nothing ever purging them until a restart.
         using var timer = new PeriodicTimer(CheckInterval);
-        do
+        try
         {
-            try
+            do
             {
-                await CheckAndPurgeAsync(stoppingToken).ConfigureAwait(false);
+                try
+                {
+                    await CheckAndPurgeAsync(stoppingToken).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogError(ex, "Shadow judge retention check threw unexpectedly; continuing.");
+                }
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogError(ex, "Shadow judge retention check threw unexpectedly; continuing.");
-            }
+            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
         }
-        while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
+        catch (OperationCanceledException)
+        {
+            // Normal shutdown.
+        }
     }
 
     /// <summary>
