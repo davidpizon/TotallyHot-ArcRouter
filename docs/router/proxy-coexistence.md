@@ -53,20 +53,28 @@ flowchart TD
 
 **Database Storage Locations:**
 
-TotallyHotArcRouter data is stored in an agent-neutral directory structure. Note that the defaults are
-currently **split across two sibling folders** - files written directly by the service and GUI use the
-`TotallyHotArcRouter` folder, while the paths bound through `StorageOptions`/`EmbeddingOptions`
-(`Storage:DatabasePath`, `Storage:BenchmarkDatabasePath`, `Embedding:ModelCacheDirectory`) default to
-`TotallyHot.ArcRouter`. Both are listed below so operators can find every file:
+TotallyHotArcRouter data is stored in an agent-neutral directory structure, spread across three
+locations that differ in *scope*, not in naming. All five `StorageOptions` paths plus the routing gate
+and management token are machine-wide; per-user secrets and GUI settings stay per-user; the ONNX model
+caches are per-user for now.
 
-| OS | Service/GUI data (proxy snapshot, certs, management token, GUI settings) | `StorageOptions`/`EmbeddingOptions` defaults (`agent_telemetry.db`, `coderouterbench.db`, model cache) |
-|-----|---|---|
-| **Windows** | `%LOCALAPPDATA%\TotallyHotArcRouter\` | `%LOCALAPPDATA%\TotallyHot.ArcRouter\` |
-| **macOS** | `~/Library/Application Support/TotallyHotArcRouter/` | `~/Library/Application Support/TotallyHot.ArcRouter/` |
-| **Linux** | `~/.local/share/TotallyHotArcRouter/` | `~/.local/share/TotallyHot.ArcRouter/` |
+| OS | Machine-wide operational state (`agent_telemetry.db`, `coderouterbench.db`, `transcripts.db`, voter models, `routing-gate.json`, `management-token.txt`) | Per-user secrets/settings (`secrets.dat`, `telemetry-cert.pfx`, `gui-settings.json`) | Per-user model caches |
+|-----|---|---|---|
+| **Windows** | `%ProgramData%\TotallyHotArcRouter\` | `%LOCALAPPDATA%\TotallyHotArcRouter\` | `%LOCALAPPDATA%\TotallyHot.ArcRouter\models\` |
+| **macOS** | `/Users/Shared/TotallyHotArcRouter/` | `~/Library/Application Support/TotallyHotArcRouter/` | `~/Library/Application Support/TotallyHot.ArcRouter/models/` |
+| **Linux** | `~/.local/share/TotallyHotArcRouter/` | `~/.local/share/TotallyHotArcRouter/` | `~/.local/share/TotallyHot.ArcRouter/models/` |
 
-Every row above is `Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)` plus the
-folder name, so the paths follow whatever that API resolves to per platform rather than being hardcoded.
+The machine-wide column exists because the installed service runs as `LocalSystem` while the GUI runs as
+the interactive user — a per-user path resolves to a *different file per account*, which for the
+management token meant a permanent 401 and for the databases meant data the interactive user could
+neither read nor back up. See `StorageOptions`' remarks and `docs/router/packaging-and-distribution.md`
+§3.1. `LegacyStorageMigration` adopts a pre-move copy of any of the five storage files on first startup.
+
+The per-user columns are `Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)` plus
+the folder name, so the paths follow whatever that API resolves to per platform rather than being
+hardcoded. The machine-wide column is `SpecialFolder.CommonApplicationData` on Windows only: off Windows
+that resolves to `/usr/share`, which this project's container account cannot write, so the resolver falls
+back to the per-user root there (there is no LocalSystem/interactive split to bridge in a container).
 The macOS row is `~/Library/Application Support`, not the `~/.local/share` it would have been on .NET 7
 and earlier: [.NET 8 changed `LocalApplicationData` on macOS to `NSApplicationSupportDirectory`](https://learn.microsoft.com/dotnet/core/compatibility/core-libraries/8.0/getfolderpath-unix),
 and this project targets .NET 10. Linux is unchanged - still `XDG_DATA_HOME`, defaulting to

@@ -28,13 +28,24 @@ Configuration lives under the `Mcp` section in `appsettings.json`:
 
 Set `Enabled: false` to turn the endpoint off entirely.
 
-## Authentication: one shared per-user token
+## Authentication: one shared machine-wide token
 
 `TotallyHot.ArcRouter.Proxy.Management.ManagementAccessToken` generates (or loads) a single 32-byte random token
-on first use and persists it to `%LOCALAPPDATA%\TotallyHotArcRouter\management-token.txt`. On Windows the file's
-ACL is broken from inheritance and rewritten to grant only the current Windows user; on POSIX the mode is
-set to `600`. This is the **same token** that now gates the REST `/admin/*` API by default (see below) -
-one credential, two surfaces, both authenticated by it.
+on first use and persists it to `%ProgramData%\TotallyHotArcRouter\management-token.txt`. On Windows the file's
+ACL is broken from inheritance and rewritten to grant full control to `LocalSystem`, the local administrators
+group, and the writing account, plus **read-only** access to `Users`; on POSIX the mode is set to `644`. This
+is the **same token** that gates the REST `/admin/*` API by default (see below) - one credential, two
+surfaces, both authenticated by it.
+
+> **Why machine-wide rather than per-user.** The installed router runs as `LocalSystem`
+> (`TotallyHotArcRouter.Installer/Package.wxs`) while the GUI runs as the interactive user, so
+> `%LOCALAPPDATA%` resolves to a *different file for each of them*. Each side minted or read its own token,
+> every management call came back 401, and the tray reported the running Windows service as stopped. The
+> trust boundary is therefore "any interactive account on this machine" rather than "one user account" -
+> the minimum that makes the cross-account handoff work at all.
+>
+> Note the telemetry certificate deliberately does **not** follow this: only the router ever reads that
+> `.pfx`, and its password is sealed with user-scoped DPAPI, so moving it would break rather than fix it.
 
 - **MCP** presents it as `Authorization: Bearer <token>` (`McpBearerAuthMiddleware`, checked before
   `MapMcp()` - there is no unauthenticated route on this host).

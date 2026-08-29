@@ -602,6 +602,9 @@ namespace TotallyHot.ArcRouter.Hosting
                     sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ProxyHostedService>>(),
                     sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ProxyServer>>(),
                     sp.GetRequiredService<ProxyMiddleware>(),
+                    // Lets a port clash stop the host in an orderly way instead of throwing out of
+                    // StartAsync - see ProxyHostedService.StartAsync.
+                    sp.GetRequiredService<IHostApplicationLifetime>(),
                     dependencies: new ProxyServerDependencies
                     {
                         Telemetry = sp.GetRequiredService<TelemetryBroadcaster>(),

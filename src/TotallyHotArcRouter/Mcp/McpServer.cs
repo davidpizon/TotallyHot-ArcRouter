@@ -80,6 +80,10 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
         ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
 
         _host = Host.CreateDefaultBuilder()
+            // Same reasoning as ProxyServer's identical filter: this inner host is an implementation
+            // detail, it never gets Serilog, and its default console provider would otherwise report a
+            // bind failure with a full stack alongside McpHostedService's own one-line report of it.
+            .ConfigureLogging(logging => logging.AddFilter("Microsoft.Extensions.Hosting.Internal.Host", LogLevel.None))
             .ConfigureWebHostDefaults(webBuilder =>
             {
                 webBuilder.UseKestrel(options =>
