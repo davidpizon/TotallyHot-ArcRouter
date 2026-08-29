@@ -432,3 +432,8 @@ FodyWeavers.xsd
 # CodeRouterBench corpus - synced on demand into a local SQLite database, never committed.
 # See data/README.md and docs/router/coderouterbench-sqlite-migration-plan.md.
 data/coderouterbench/
+
+# Local installer build counter (scripts/build-installer.ps1). Holds the auto-bumped ProductVersion build
+# field for DEV builds only; releases are versioned by Directory.Build.props' <Version> and the matching
+# "v<Version>" tag, so this must never be committed.
+.build-number

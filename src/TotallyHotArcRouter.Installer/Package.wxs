@@ -30,10 +30,26 @@
 
     <!--
       %ProgramFiles%\TotallyHotArcRouter\Router\ and \Gui\ - no \Updater\ directory, unlike the design
-      this MSI superseded. %LOCALAPPDATA%\TotallyHot.ArcRouter\ (per-user config/state both apps write at
-      runtime) is never referenced anywhere in this file and is therefore left completely untouched by
-      install, upgrade, and uninstall - Windows Installer only ever manages files, registry keys, and
-      services it was explicitly told about.
+      this MSI superseded.
+
+      Two runtime data locations exist and NEITHER is referenced anywhere in this file, so both are left
+      completely untouched by install, upgrade, and uninstall - Windows Installer only ever manages files,
+      registry keys, and services it was explicitly told about:
+
+        %ProgramData%\TotallyHotArcRouter\   - machine-wide operational state: agent_telemetry.db (usage
+            ledger, provider spend, price catalog), coderouterbench.db, transcripts.db, the two trained
+            voter models, routing-gate.json, and management-token.txt. Machine-wide because the service
+            runs as LocalSystem while the GUI runs as the interactive user (see StorageOptions' remarks).
+        %LOCALAPPDATA%\TotallyHot.ArcRouter\ - the per-user ONNX model caches (~2.1 GB: bge-large-en-v1.5
+            plus the llm_router Qwen artifacts), still per-user pending a separate change.
+
+      Preserving the ProgramData tree on uninstall is a deliberate choice, not an oversight. It holds the
+      operator's own spend and usage history, which is not re-derivable from anywhere - an uninstall (which
+      a major upgrade performs internally, see MajorUpgrade above) that silently deleted it would destroy
+      months of billing-reconciliation data to reclaim a few tens of megabytes. A RemoveFolderEx here would
+      also have to run on upgrade, not just uninstall, which is precisely the wrong time to do it.
+      Operators who want a genuinely clean removal delete the two directories by hand; this is documented
+      in docs/router/packaging-and-distribution.md.
     -->
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="TotallyHotArcRouter">
@@ -41,6 +57,14 @@
         <Directory Id="GUIFOLDER" Name="Gui" />
       </Directory>
     </StandardDirectory>
+
+    <!--
+      The all-users Start Menu (this is a per-machine install, so ProgramMenuFolder resolves to the
+      common Start Menu, not one user's). The shortcut is placed directly here rather than in a product
+      subfolder: a single-app product does not earn a folder of its own in the modern Start Menu app
+      list, and a subfolder would additionally need a RemoveFolder to uninstall cleanly.
+    -->
+    <StandardDirectory Id="ProgramMenuFolder" />
 
     <!--
       Harvests every file TotallyHotArcRouter.csproj's Service publish profile produced, except the
@@ -55,10 +79,69 @@
       </Files>
     </ComponentGroup>
 
-    <!-- Harvests every file TotallyHotArcRouter.Gui.csproj's Service publish profile produced. -->
+    <!--
+      Harvests every file TotallyHotArcRouter.Gui.csproj's Service publish profile produced, except the
+      GUI's own exe - that one file carries the Start Menu Shortcut below, so it lives in its own explicit
+      Component instead. Same reason the Router's exe is excluded from RouterFiles above: a <Files>-
+      harvested file cannot be individually customized, and a non-advertised Shortcut must be nested
+      inside the <File> element it points at.
+    -->
     <ComponentGroup Id="GuiFiles" Directory="GUIFOLDER">
-      <Files Include="$(var.GuiPublishDir)\**" />
+      <Files Include="$(var.GuiPublishDir)\**">
+        <Exclude Files="$(var.GuiPublishDir)\TotallyHotArcRouter.Gui.exe" />
+      </Files>
     </ComponentGroup>
+
+    <!--
+      The GUI's exe plus the Start Menu shortcut that launches it. Without a shortcut the only entry
+      points to a tray-resident app were the logon Run key below and browsing to ProgramFiles by hand -
+      so a user who chose "Exit" from the tray menu had no supported way to bring it back until the next
+      logon.
+
+      Advertise="no" (the default, stated explicitly here because it is load-bearing): an advertised
+      shortcut would route every launch through Windows Installer's repair/resiliency path, which for a
+      1,000-file self-contained deployment means a visible MSI progress dialog on an ordinary app launch.
+      A plain shortcut points straight at the exe.
+    -->
+    <Component Id="GuiExeComponent" Directory="GUIFOLDER" Guid="75e13998-dc1c-4025-bf1d-17888d68222a">
+      <File Id="GuiExe" Source="$(var.GuiPublishDir)\TotallyHotArcRouter.Gui.exe" KeyPath="yes">
+        <Shortcut Id="GuiStartMenuShortcut"
+                  Directory="ProgramMenuFolder"
+                  Name="TotallyHot ArcRouter"
+                  Description="TotallyHot ArcRouter dashboard and routing controls."
+                  WorkingDirectory="GUIFOLDER"
+                  Advertise="no" />
+      </File>
+    </Component>
+
+    <!--
+      Starts the GUI at logon, so it is running (tray-resident - see docs/gui/dashboard.md) without the
+      user having to launch it. This complements the Start Menu shortcut above rather than duplicating it:
+      the shortcut is the manual entry point, this is what makes the GUI present after a reboot. Before
+      either existed the MSI copied TotallyHotArcRouter.Gui.exe into %ProgramFiles%\TotallyHotArcRouter\Gui      and left it there - the Router's service auto-started via ServiceControl below, but nothing ever
+      launched or surfaced the GUI, so a fresh install produced no visible GUI at all.
+
+      HKLM (not HKCU) deliberately: this is a per-machine install into ProgramFiles64Folder, and an MSI
+      component writing HKCU only ever writes it for the account that ran the installer - typically the
+      elevating admin, not the person who then logs in. The HKLM Run key starts the GUI for every user
+      who logs on, matching the machine-wide service the same package installs.
+
+      The value is quoted because [GUIFOLDER] expands to a path containing spaces; an unquoted Run value
+      would be parsed as the executable "C:\Program" with arguments. RegistryValue is the component's
+      KeyPath so the component has an identity independent of the harvested GuiFiles above, and MSI
+      removes the Run entry on uninstall along with it.
+
+      Note this takes effect at the NEXT logon - installing does not itself start the GUI in the current
+      session.
+    -->
+    <Component Id="GuiAutoStartComponent" Directory="GUIFOLDER" Guid="d3b7b870-6fb1-41e2-9d92-b414100536eb">
+      <RegistryValue Root="HKLM"
+                     Key="Software\Microsoft\Windows\CurrentVersion\Run"
+                     Name="TotallyHotArcRouter.Gui"
+                     Value="&quot;[GUIFOLDER]TotallyHotArcRouter.Gui.exe&quot;"
+                     Type="string"
+                     KeyPath="yes" />
+    </Component>
 
     <Component Id="RouterServiceComponent" Directory="ROUTERFOLDER" Guid="20aa08ae-3a04-41e6-b3e7-d44768a7e3fe">
       <File Id="RouterServiceExe" Source="$(var.RouterPublishDir)\TotallyHotArcRouter.exe" KeyPath="yes" />
@@ -97,6 +180,8 @@
     <Feature Id="Main" Title="TotallyHot ArcRouter" Level="1">
       <ComponentGroupRef Id="RouterFiles" />
       <ComponentGroupRef Id="GuiFiles" />
+      <ComponentRef Id="GuiExeComponent" />
+      <ComponentRef Id="GuiAutoStartComponent" />
       <ComponentRef Id="RouterServiceComponent" />
     </Feature>
 

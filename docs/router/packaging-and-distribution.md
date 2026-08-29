@@ -56,12 +56,57 @@ otherwise.
   `Uninstall-RouterService.ps1` are kept only as a clearly-marked dev-only path for a developer who wants a
   real Windows Service on a dev machine without building the MSI.
 - **One MSI installs both the Router and the GUI**, to `%ProgramFiles%\TotallyHotArcRouter\Router\` and
-  `\Gui\` respectively — no `\Updater\` directory. `%LOCALAPPDATA%\TotallyHot.ArcRouter\` (per-user
-  config/state either app writes at runtime) is never referenced by the installer and is therefore
-  untouched by install, upgrade, or uninstall.
+  `\Gui\` respectively — no `\Updater\` directory. Neither runtime data location is referenced by the
+  installer, so both are untouched by install, upgrade, and uninstall:
+  `%ProgramData%\TotallyHotArcRouter\` (machine-wide operational state — see §3.1) and
+  `%LOCALAPPDATA%\TotallyHot.ArcRouter\` (the per-user ONNX model caches, still per-user).
+
+### 3.1 Runtime data is preserved on uninstall, deliberately
+
+`%ProgramData%\TotallyHotArcRouter\` holds `agent_telemetry.db` (usage ledger, provider spend, price
+catalog), `coderouterbench.db`, `transcripts.db`, the two trained voter model artifacts,
+`routing-gate.json`, and `management-token.txt`. The MSI never removes it, and that is a decision rather
+than an omission: the usage ledger and provider-spend history are the operator's own billing-reconciliation
+record and are not re-derivable from anywhere. A `RemoveFolderEx` would additionally have to run during a
+**major upgrade**, since `MajorUpgrade` performs an internal uninstall of the previous version — so
+"clean up on uninstall" would in practice mean "wipe the spend history on every update".
+
+Operators who want a genuinely clean removal delete both directories by hand after uninstalling.
+
+**Migrating a developer's data into the installed service.** Before this location was machine-wide these
+files lived under `%LOCALAPPDATA%`, and `LegacyStorageMigration` adopts a pre-move copy automatically on
+the first startup that finds the destination missing. It can only adopt what the running account can see,
+though: the installed service runs as `LocalSystem`, which cannot read an interactive user's
+`%LOCALAPPDATA%`. So a developer's own database — the one produced by running the router directly —
+has to be moved across by hand, with the service stopped:
+
+```powershell
+Stop-Service TotallyHotArcRouter
+robocopy "$env:LOCALAPPDATA\TotallyHot.ArcRouter" "$env:ProgramData\TotallyHotArcRouter" /MOVE agent_telemetry.db coderouterbench.db transcripts.db logreg_voter_model.json cluster_model.json
+Start-Service TotallyHotArcRouter
+```
+
+Only files whose destination does not already exist should be moved — the two databases record the same
+traffic from different runs, and merging them would double-count spend.
 - **`ServiceInstall`/`ServiceControl`** register the `TotallyHotArcRouter` Windows Service (`LocalSystem`,
   auto-start, matching `Program.cs`'s `UseWindowsService` call exactly) and stop it before / start it after
   the file swap on install, upgrade, and uninstall.
+- **The GUI starts at logon** via an `HKLM\Software\Microsoft\Windows\CurrentVersion\Run` value
+  (`GuiAutoStartComponent`). Without it a fresh install left `TotallyHotArcRouter.Gui.exe` on disk with
+  nothing to invoke it — it is a tray-resident app, so there was no visible GUI at all after installing.
+  `HKLM` rather than `HKCU` because this is a per-machine install: an MSI component writing `HKCU` writes
+  it only for the elevating account that ran the installer, not for the user who subsequently logs in.
+  This takes effect at the **next** logon; installing does not start the GUI in the current session (there
+  is deliberately no launch-on-install custom action — doing that correctly from a per-machine package
+  means a deferred-impersonated action to reach the interactive user's session rather than `LocalSystem`'s
+  session 0).
+- **A Start Menu shortcut** (`GuiExeComponent`) points at the GUI exe, so a user who picks "Exit" from the
+  tray menu can relaunch without waiting for the next logon or browsing to ProgramFiles. It is
+  **non-advertised** (`Advertise="no"`): an advertised shortcut routes every launch through Windows
+  Installer's resiliency check, which on a ~1,000-file self-contained deployment surfaces an MSI progress
+  dialog during an ordinary app launch. Giving the exe a shortcut means excluding it from the `GuiFiles`
+  `<Files>` harvest and installing it via its own explicit `Component` — the same carve-out, for the same
+  reason, that `RouterFiles` already makes for `TotallyHotArcRouter.exe`.
 - **A real major upgrade** (`MajorUpgrade`, WiX's documented pattern — see
   [`src/TotallyHotArcRouter.Installer/Package.wxs`](../../src/TotallyHotArcRouter.Installer/Package.wxs)):
   installing v*N*+1 over v*N* cleanly replaces it — one Add/Remove Programs entry, not two side-by-side
