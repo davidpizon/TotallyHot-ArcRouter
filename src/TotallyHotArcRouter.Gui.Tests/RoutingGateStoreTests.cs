@@ -7,7 +7,7 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 /// <summary>
 /// Tests for <see cref="RoutingGateStore"/>: the background poll loop keeping <see cref="RoutingGateStore.IsReachable"/>/
 /// <see cref="RoutingGateStore.IsEnabled"/> fresh for the tray context menu, the one-time
-/// <see cref="RoutingGateStore.BecameUnreachable"/> notification on a down-transition, and
+/// <see cref="RoutingGateStore.BecameUnusable"/> notification on a down-transition, and
 /// <see cref="RoutingGateStore.EnableAsync"/>/<see cref="RoutingGateStore.DisableAsync"/> applying immediately
 /// rather than waiting for the next poll tick.
 /// </summary>
@@ -28,22 +28,89 @@ public sealed class RoutingGateStoreTests
     }
 
     [Fact]
-    public async Task PollLoop_FailedPoll_SetsUnreachable_AndRaisesBecameUnreachableExactlyOnce()
+    public async Task PollLoop_UnavailableFailure_SetsUnreachable_AndRaisesBecameUnusableExactlyOnce()
     {
         var client = new FakeRoutingGateAdminClient();
         await using var store = new RoutingGateStore(client, pollInterval: FastPoll);
         await WaitUntilAsync(() => store.IsReachable, WaitTimeout);
 
-        var becameUnreachableCount = 0;
-        store.BecameUnreachable += () => Interlocked.Increment(ref becameUnreachableCount);
+        var becameUnusableCount = 0;
+        store.BecameUnusable += () => Interlocked.Increment(ref becameUnusableCount);
         client.GetFailure = new RoutingGateAdminException("router is gone", isUnavailable: true);
 
         await WaitUntilAsync(() => !store.IsReachable, WaitTimeout);
-        // Give several more poll ticks a chance to run, to prove BecameUnreachable doesn't fire again
+        // Give several more poll ticks a chance to run, to prove BecameUnusable doesn't fire again
         // while the router stays down.
         await Task.Delay(FastPoll * 10, TestContext.Current.CancellationToken);
 
-        becameUnreachableCount.Should().Be(1);
+        becameUnusableCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task PollLoop_UnavailableFailure_ReportsUnreachable()
+    {
+        var client = new FakeRoutingGateAdminClient
+        {
+            GetFailure = new RoutingGateAdminException("router is gone", isUnavailable: true),
+        };
+        await using var store = new RoutingGateStore(client, pollInterval: FastPoll);
+
+        await WaitUntilAsync(() => store.ConnectionState == RouterConnectionState.Unreachable, WaitTimeout);
+
+        store.IsReachable.Should().BeFalse();
+        store.IsUsable.Should().BeFalse();
+    }
+
+    // The regression this whole distinction exists for: the router answered and refused the call (a
+    // mismatched management token in the field), which the store used to record as "unreachable" - so the
+    // tray told the user their perfectly healthy Windows service was stopped.
+    [Fact]
+    public async Task PollLoop_RejectedFailure_ReportsRejectedAndStaysReachable()
+    {
+        var client = new FakeRoutingGateAdminClient
+        {
+            GetFailure = new RoutingGateAdminException("Could not update the routing gate: bad token"),
+        };
+        await using var store = new RoutingGateStore(client, pollInterval: FastPoll);
+
+        await WaitUntilAsync(() => store.ConnectionState == RouterConnectionState.Rejected, WaitTimeout);
+
+        store.IsReachable.Should().BeTrue("a router that answers with an error is still reachable");
+        store.IsUsable.Should().BeFalse("the routing toggle still has nothing it can act on");
+        store.LastFailureMessage.Should().Be("Could not update the routing gate: bad token");
+    }
+
+    [Fact]
+    public async Task PollLoop_RecoveringAfterAFailure_ClearsTheFailureMessage()
+    {
+        var client = new FakeRoutingGateAdminClient
+        {
+            GetFailure = new RoutingGateAdminException("bad token"),
+        };
+        await using var store = new RoutingGateStore(client, pollInterval: FastPoll);
+        await WaitUntilAsync(() => store.ConnectionState == RouterConnectionState.Rejected, WaitTimeout);
+
+        client.GetFailure = null;
+
+        await WaitUntilAsync(() => store.IsUsable, WaitTimeout);
+        store.LastFailureMessage.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task PollLoop_RejectedFailure_RaisesBecameUnusableExactlyOnce()
+    {
+        var client = new FakeRoutingGateAdminClient();
+        await using var store = new RoutingGateStore(client, pollInterval: FastPoll);
+        await WaitUntilAsync(() => store.IsUsable, WaitTimeout);
+
+        var becameUnusableCount = 0;
+        store.BecameUnusable += () => Interlocked.Increment(ref becameUnusableCount);
+        client.GetFailure = new RoutingGateAdminException("bad token");
+
+        await WaitUntilAsync(() => store.ConnectionState == RouterConnectionState.Rejected, WaitTimeout);
+        await Task.Delay(FastPoll * 10, TestContext.Current.CancellationToken);
+
+        becameUnusableCount.Should().Be(1);
     }
 
     [Fact]

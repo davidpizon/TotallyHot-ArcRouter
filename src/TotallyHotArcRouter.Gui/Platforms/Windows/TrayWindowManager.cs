@@ -1,5 +1,7 @@
+using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
+using System.ServiceProcess;
 using TotallyHot.ArcRouter.Gui.Services;
 using TotallyHot.ArcRouter.Gui.Telemetry;
 using Microsoft.UI.Dispatching;
@@ -12,7 +14,8 @@ namespace TotallyHot.ArcRouter.Gui.Platforms.Windows;
 /// received by subclassing the main window's WndProc. The same subclass intercepts minimize and close so
 /// both hide the window to the tray instead; only the tray menu's Exit actually quits. The tray menu also
 /// carries the "Enable Routing"/"Disable Routing" kill switch, backed by <see cref="RoutingGateStore"/>;
-/// while the router is unreachable, a right-click shows a native balloon reporting that instead of the menu.
+/// while the router isn't usable that one item is greyed out and a greyed status line names the reason,
+/// but the menu itself always opens - see <see cref="ShowTrayMenu"/>.
 /// </summary>
 /// <remarks>
 /// Excluded from code coverage: every method here operates on a live native HWND via P/Invoke
@@ -46,8 +49,13 @@ internal static class TrayWindowManager
     private const uint NIIF_WARNING = 0x0002;
     private const uint NOTIFYICON_VERSION_4 = 4;
     private const int IDI_APPLICATION = 32512;
+    private const uint IMAGE_ICON = 1;
+    private const uint LR_LOADFROMFILE = 0x0010;
+    private const int SM_CXSMICON = 49;
+    private const int SM_CYSMICON = 50;
 
     private const uint MF_STRING = 0x0000;
+    private const uint MF_GRAYED = 0x0001;
     private const uint MF_SEPARATOR = 0x0800;
     private const uint TPM_RIGHTBUTTON = 0x0002;
     private const uint TPM_NONOTIFY = 0x0080;
@@ -60,6 +68,10 @@ internal static class TrayWindowManager
     private const uint CMD_SHOW_DASHBOARD = 1;
     private const uint CMD_EXIT = 2;
     private const uint CMD_TOGGLE_ROUTING = 3;
+
+    // Must match ServiceInstall/@Name in TotallyHotArcRouter.Installer/Package.wxs - that is the name the
+    // service control manager knows the router by, and the only handle this app has on its real state.
+    private const string RouterServiceName = "TotallyHotArcRouter";
 
     /// <summary>
     /// Signature matching a native Win32 window procedure, used to invoke the previously-installed
@@ -74,13 +86,18 @@ internal static class TrayWindowManager
     private static WndProc? _wndProcDelegate;
     private static bool _isExiting;
 
+    // The tray icon's HICON when it came from appicon.ico via LoadImageW, which the caller owns and must
+    // release; IntPtr.Zero when AddTrayIcon fell back to the shared IDI_APPLICATION stock icon, which is
+    // owned by the system and must NOT be destroyed. RemoveTrayIcon keys its DestroyIcon call off this.
+    private static IntPtr _trayIconHandle;
+
     // Resolved once from the MAUI service provider in Attach - TrayWindowManager is a static P/Invoke
     // wrapper with no DI of its own, so this is the one seam it needs into the app's singletons. Null only
-    // if resolution somehow fails (e.g. Application.Current not yet set), in which case the tray menu always
-    // shows the routing toggle rather than the unreachable balloon - a safe degrade, not a crash.
+    // if resolution somehow fails (e.g. Application.Current not yet set), in which case the tray menu shows
+    // the routing toggle enabled rather than greyed - a safe degrade, not a crash.
     private static RoutingGateStore? _routingGateStore;
 
-    // Captured so the background poll thread that raises RoutingGateStore.BecameUnreachable can marshal the
+    // Captured so the background poll thread that raises RoutingGateStore.BecameUnusable can marshal the
     // balloon notification back onto the UI thread, the same way the low-priority re-hide in Attach does.
     private static DispatcherQueue? _dispatcherQueue;
 
@@ -106,7 +123,7 @@ internal static class TrayWindowManager
         _routingGateStore = ResolveRoutingGateStore();
         if (_routingGateStore is not null)
         {
-            _routingGateStore.BecameUnreachable += OnRoutingGateBecameUnreachable;
+            _routingGateStore.BecameUnusable += OnRoutingGateBecameUnusable;
         }
 
         // MAUI activates (shows) the window right after this lifecycle callback, which would undo the
@@ -129,12 +146,12 @@ internal static class TrayWindowManager
         Application.Current?.Handler?.MauiContext?.Services?.GetService(typeof(RoutingGateStore)) as RoutingGateStore;
 
     /// <summary>
-    /// Proactively shows the "service is stopped" balloon the moment <see cref="RoutingGateStore"/> detects
-    /// the router went from reachable to unreachable, marshaled onto the UI thread since the store's poll
-    /// loop runs on a background thread.
+    /// Proactively shows the router-status balloon the moment <see cref="RoutingGateStore"/> detects the
+    /// router stopped being usable, marshaled onto the UI thread since the store's poll loop runs on a
+    /// background thread.
     /// </summary>
-    private static void OnRoutingGateBecameUnreachable() =>
-        _dispatcherQueue?.TryEnqueue(ShowServiceStoppedBalloon);
+    private static void OnRoutingGateBecameUnusable() =>
+        _dispatcherQueue?.TryEnqueue(ShowRouterUnavailableBalloon);
 
     /// <summary>
     /// The subclassed window procedure installed over the main window: intercepts tray-icon callbacks,
@@ -185,34 +202,46 @@ internal static class TrayWindowManager
 
     /// <summary>
     /// Builds and displays the tray icon's right-click context menu at the cursor position, then acts on
-    /// whichever command the user picks. When the router is unreachable (<see cref="RoutingGateStore.IsReachable"/>
-    /// is <see langword="false"/>), no menu is shown at all - the "Enable Routing"/"Disable Routing" toggle
-    /// would have nothing to act on, and "Show Dashboard"/"Exit" stay meaningful on their own but are hidden
-    /// too rather than presenting a partially-broken menu; a balloon reporting the outage takes its place.
+    /// whichever command the user picks. The menu always opens, including when the router isn't usable
+    /// (<see cref="RoutingGateStore.IsUsable"/> is <see langword="false"/>): only the routing toggle depends
+    /// on a reachable router, so that one item is replaced by a greyed "Routing Unavailable" and a greyed
+    /// status line naming the reason, while "Show Dashboard" and "Exit" stay live. This used to suppress the
+    /// menu entirely and show a balloon in its place, which left a user whose service was stopped with no way
+    /// to reach Exit from the tray at all - exactly when quitting is the thing they most likely want.
+    /// Gated on <see cref="RoutingGateStore.IsUsable"/> rather than <see cref="RoutingGateStore.IsReachable"/>:
+    /// a router that answers but rejects the call can't drive the toggle either, so the toggle is equally
+    /// dead - only the status line's wording differs.
     /// </summary>
     private static void ShowTrayMenu()
     {
-        if (_routingGateStore?.IsReachable == false)
-        {
-            ShowServiceStoppedBalloon();
-            return;
-        }
-
         // Required by TrackPopupMenuEx: without foreground status the menu won't dismiss when the user
         // clicks elsewhere (see the Shell_NotifyIcon docs).
         SetForegroundWindow(_hwnd);
 
+        var routerUsable = _routingGateStore?.IsUsable != false;
         var menu = CreatePopupMenu();
         try
         {
+            if (!routerUsable)
+            {
+                // A greyed, uncommandable caption rather than a real item - TrackPopupMenuEx never returns
+                // MF_GRAYED entries, so it needs no CMD_ id and can share CMD_SHOW_DASHBOARD's harmlessly.
+                // This carries the short form of what the balloon says at length; see BuildRouterStatusLabel.
+                AppendMenuW(menu, MF_STRING | MF_GRAYED, (UIntPtr)CMD_SHOW_DASHBOARD, BuildRouterStatusLabel());
+                AppendMenuW(menu, MF_SEPARATOR, UIntPtr.Zero, null);
+            }
+
             AppendMenuW(menu, MF_STRING, (UIntPtr)CMD_SHOW_DASHBOARD, "Show Dashboard");
             AppendMenuW(menu, MF_SEPARATOR, UIntPtr.Zero, null);
 
             // A single flipping item rather than two always-present entries: its label and action reflect
             // whatever RoutingGateStore last polled, so there is never a state where the menu offers an
-            // action that would be a no-op.
-            var routingLabel = _routingGateStore?.IsEnabled == false ? "Enable Routing" : "Disable Routing";
-            AppendMenuW(menu, MF_STRING, (UIntPtr)CMD_TOGGLE_ROUTING, routingLabel);
+            // action that would be a no-op. With no reachable router to command, neither label would be
+            // truthful, so the item states that plainly instead of guessing a direction.
+            var routingLabel = routerUsable
+                ? (_routingGateStore?.IsEnabled == false ? "Enable Routing" : "Disable Routing")
+                : "Routing Unavailable";
+            AppendMenuW(menu, routerUsable ? MF_STRING : MF_STRING | MF_GRAYED, (UIntPtr)CMD_TOGGLE_ROUTING, routingLabel);
             AppendMenuW(menu, MF_SEPARATOR, UIntPtr.Zero, null);
             AppendMenuW(menu, MF_STRING, (UIntPtr)CMD_EXIT, "Exit");
 
@@ -257,8 +286,8 @@ internal static class TrayWindowManager
     /// Calls <see cref="RoutingGateStore.EnableAsync"/>/<see cref="RoutingGateStore.DisableAsync"/> and lets
     /// the result land in the store's own polled state - there is nothing further to show here on success or
     /// failure: a failure means the router went away between the right-click's reachability check and this
-    /// call, and the very next right-click will see <see cref="RoutingGateStore.IsReachable"/> false and
-    /// offer the balloon instead of the menu.
+    /// call, and the very next right-click will see <see cref="RoutingGateStore.IsUsable"/> false and grey
+    /// this item out with the reason beside it.
     /// </summary>
     private static async Task ToggleRoutingAsync(bool enable)
     {
@@ -279,21 +308,104 @@ internal static class TrayWindowManager
     }
 
     /// <summary>
-    /// Shows a native balloon notification anchored to the tray icon: both when the user right-clicks while
-    /// the router is unreachable (replacing the menu, see <see cref="ShowTrayMenu"/>) and proactively the
-    /// moment connectivity is first lost (see <see cref="OnRoutingGateBecameUnreachable"/>). Reuses the same
+    /// Shows a native balloon notification anchored to the tray icon, proactively, the moment the router
+    /// stops being usable (see <see cref="OnRoutingGateBecameUnusable"/>). Right-clicking the tray icon
+    /// deliberately does not raise this - it opens the menu, which carries the same information in its
+    /// greyed status line (see <see cref="BuildRouterStatusLabel"/>). Reuses the same
     /// Shell_NotifyIcon plumbing the tray icon itself is built on (NIF_INFO), so it is visible regardless of
     /// whether the dashboard window is open - unlike the in-app <c>ToastService</c>, which only renders
     /// inside the BlazorWebView the window hides almost all the time.
     /// </summary>
-    private static void ShowServiceStoppedBalloon()
+    /// <remarks>
+    /// The message is derived from two independent facts - the poll's <see cref="RouterConnectionState"/> and
+    /// the service control manager's actual verdict - rather than asserting one from the other. This used to
+    /// unconditionally claim "The Windows service is stopped." off nothing more than a failed poll, which was
+    /// simply false whenever the service was running and the poll failed for some other reason (most often a
+    /// management token the service didn't recognize), and sent users hunting for a problem in services.msc
+    /// that was never there.
+    /// </remarks>
+    private static void ShowRouterUnavailableBalloon()
     {
+        var serviceState = TryGetServiceStatus();
+        var connectionState = _routingGateStore?.ConnectionState ?? RouterConnectionState.Unreachable;
+
+        var message = (serviceState, connectionState) switch
+        {
+            // The one case the old message was actually right about.
+            (ServiceControllerStatus.Stopped, _) => "The Windows service is stopped.",
+            (ServiceControllerStatus.StartPending, _) => "The Windows service is still starting.",
+            (ServiceControllerStatus.StopPending, _) => "The Windows service is shutting down.",
+            (ServiceControllerStatus.Paused, _) => "The Windows service is paused.",
+
+            // Running, but this GUI can't use it - name the real problem instead of blaming the service.
+            (ServiceControllerStatus.Running, RouterConnectionState.Rejected) =>
+                "The Windows service is running but rejected this app's request. Its management token may not match; restarting the service regenerates it.",
+            (ServiceControllerStatus.Running, RouterConnectionState.Unreachable) =>
+                "The Windows service is running but is not accepting connections on its management port yet.",
+            (ServiceControllerStatus.Running, _) => "The router is temporarily unavailable.",
+
+            // Service state unknown (not installed, or we lack the rights to query it) - report only what
+            // the poll actually established, with no claim about the service either way.
+            (null, RouterConnectionState.Rejected) =>
+                "The router rejected this app's request. Its management token may not match.",
+            _ => "The router is not responding.",
+        };
+
         var data = NewIconData();
         data.uFlags = NIF_INFO;
         data.szInfoTitle = "TotallyHot Arc Router";
-        data.szInfo = "The Windows service is stopped.";
+        data.szInfo = message;
         data.dwInfoFlags = NIIF_WARNING;
         Shell_NotifyIconW(NIM_MODIFY, ref data);
+    }
+
+    /// <summary>
+    /// The short, menu-width form of <see cref="ShowRouterUnavailableBalloon"/>'s message, shown as the tray
+    /// menu's greyed status caption while the router isn't usable. Derived from the same two independent
+    /// facts for the same reason - the service control manager's verdict and the poll's
+    /// <see cref="RouterConnectionState"/> - so the menu never claims the service is stopped on the strength
+    /// of a failed poll alone. Kept separate from the balloon's text rather than shared: a balloon has room
+    /// for a sentence of remediation, a menu item has room for a few words.
+    /// </summary>
+    private static string BuildRouterStatusLabel() => (TryGetServiceStatus(), _routingGateStore?.ConnectionState ?? RouterConnectionState.Unreachable) switch
+    {
+        (ServiceControllerStatus.Stopped, _) => "Router service: stopped",
+        (ServiceControllerStatus.StartPending, _) => "Router service: starting",
+        (ServiceControllerStatus.StopPending, _) => "Router service: stopping",
+        (ServiceControllerStatus.Paused, _) => "Router service: paused",
+        (ServiceControllerStatus.Running, RouterConnectionState.Rejected) => "Router: request rejected",
+        (ServiceControllerStatus.Running, _) => "Router: not responding yet",
+        (null, RouterConnectionState.Rejected) => "Router: request rejected",
+        _ => "Router: not responding",
+    };
+
+    /// <summary>
+    /// Reads the installed router service's current status, or <see langword="null"/> when it can't be
+    /// determined - the service isn't installed (a developer running the router from the command line), or
+    /// this process lacks the rights to query it. Null is deliberately distinct from
+    /// <see cref="ServiceControllerStatus.Stopped"/>: "I couldn't check" must never render as "it is
+    /// stopped", which is the entire class of bug this method exists to end.
+    /// </summary>
+    private static ServiceControllerStatus? TryGetServiceStatus()
+    {
+        try
+        {
+            using var controller = new ServiceController(RouterServiceName);
+            return controller.Status;
+        }
+        catch (InvalidOperationException)
+        {
+            // Thrown (wrapping a Win32Exception) when the service does not exist or can't be opened.
+            return null;
+        }
+        catch (Win32Exception)
+        {
+            return null;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -320,7 +432,7 @@ internal static class TrayWindowManager
         var data = NewIconData();
         data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
         data.uCallbackMessage = WM_TRAYICON;
-        data.hIcon = LoadIconW(IntPtr.Zero, (IntPtr)IDI_APPLICATION);
+        data.hIcon = LoadAppIcon();
         data.szTip = "TotallyHot Arc Router";
         Shell_NotifyIconW(NIM_ADD, ref data);
 
@@ -337,6 +449,53 @@ internal static class TrayWindowManager
     {
         var data = NewIconData();
         Shell_NotifyIconW(NIM_DELETE, ref data);
+
+        // Only ours to destroy - see _trayIconHandle. Released after NIM_DELETE so the shell is no longer
+        // referencing the icon when the handle goes away.
+        if (_trayIconHandle != IntPtr.Zero)
+        {
+            DestroyIcon(_trayIconHandle);
+            _trayIconHandle = IntPtr.Zero;
+        }
+    }
+
+    /// <summary>
+    /// Loads the application's own icon for the tray, falling back to the Windows stock application icon
+    /// if it cannot be loaded. The icon is <c>appicon.ico</c> beside the executable - the file Resizetizer
+    /// generates from <c>Resources/AppIcon/appicon.svg</c> (the csproj's <c>MauiIcon</c> item) and copies
+    /// to the output directory, so the tray, the taskbar, and the executable all show one icon from one
+    /// source rather than the tray showing a generic placeholder.
+    /// </summary>
+    /// <remarks>
+    /// Loaded at the system's small-icon metrics rather than <c>LR_DEFAULTSIZE</c> so the result matches
+    /// what the notification area asks for at the current DPI. Resizetizer currently emits a single 64x64
+    /// frame, so this is a downscale rather than a frame selection; it becomes a frame selection for free
+    /// if the icon ever gains 16x16/32x32 frames, which is the reason to request the real size here rather
+    /// than hardcode 16. A missing or unreadable file is a cosmetic problem, not a reason to fail startup,
+    /// so the stock icon is used instead - that is also the pre-existing behavior this replaced.
+    /// </remarks>
+    private static IntPtr LoadAppIcon()
+    {
+        var iconPath = Path.Combine(AppContext.BaseDirectory, "appicon.ico");
+        if (File.Exists(iconPath))
+        {
+            var handle = LoadImageW(
+                IntPtr.Zero,
+                iconPath,
+                IMAGE_ICON,
+                GetSystemMetrics(SM_CXSMICON),
+                GetSystemMetrics(SM_CYSMICON),
+                LR_LOADFROMFILE);
+
+            if (handle != IntPtr.Zero)
+            {
+                _trayIconHandle = handle;
+                return handle;
+            }
+        }
+
+        _trayIconHandle = IntPtr.Zero;
+        return LoadIconW(IntPtr.Zero, (IntPtr)IDI_APPLICATION);
     }
 
     /// <summary>
@@ -451,10 +610,37 @@ internal static class TrayWindowManager
 
     /// <summary>
     /// P/Invoke binding for the Win32 LoadIconW API, used to load the stock application icon shown in the
-    /// tray.
+    /// tray when the application's own icon file cannot be loaded.
     /// </summary>
     [DllImport("user32.dll")]
     private static extern IntPtr LoadIconW(IntPtr hInstance, IntPtr lpIconName);
+
+    /// <summary>
+    /// P/Invoke binding for the Win32 LoadImageW API, used to load the application's own icon from
+    /// <c>appicon.ico</c> at the system's small-icon size for the tray.
+    /// </summary>
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr LoadImageW(
+        IntPtr hInst,
+        string name,
+        uint type,
+        int cx,
+        int cy,
+        uint fuLoad);
+
+    /// <summary>
+    /// P/Invoke binding for the Win32 DestroyIcon API, used to release the icon handle
+    /// <see cref="LoadAppIcon"/> loaded once the tray icon has been removed.
+    /// </summary>
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool DestroyIcon(IntPtr hIcon);
+
+    /// <summary>
+    /// P/Invoke binding for the Win32 GetSystemMetrics API, used to ask for the notification area's
+    /// small-icon dimensions so the correct frame is taken from the multi-resolution icon file.
+    /// </summary>
+    [DllImport("user32.dll")]
+    private static extern int GetSystemMetrics(int nIndex);
 
     /// <summary>
     /// P/Invoke binding for the Win32 ShowWindow API, used to hide, show, and restore the main window.
