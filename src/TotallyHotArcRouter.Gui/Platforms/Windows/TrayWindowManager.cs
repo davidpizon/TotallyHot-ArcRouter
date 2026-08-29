@@ -5,6 +5,7 @@ using System.ServiceProcess;
 using TotallyHot.ArcRouter.Gui.Services;
 using TotallyHot.ArcRouter.Gui.Telemetry;
 using Microsoft.UI.Dispatching;
+using Serilog;
 
 namespace TotallyHot.ArcRouter.Gui.Platforms.Windows;
 
@@ -134,6 +135,13 @@ internal static class TrayWindowManager
             CenterOnWorkArea();
             ShowWindowNative(_hwnd, SW_HIDE);
         });
+
+        // The app launches straight to the tray with no visible window, so this line is how anyone
+        // confirms after the fact that the GUI actually started rather than failing before it got here.
+        Log.Information(
+            "Tray window attached. Window handle {WindowHandle}, routing gate store resolved: {RoutingGateResolved}.",
+            _hwnd,
+            _routingGateStore is not null);
     }
 
     /// <summary>
@@ -415,6 +423,10 @@ internal static class TrayWindowManager
     /// </summary>
     private static void ExitApplication()
     {
+        // Logged before the quit, not after: nothing below this line is guaranteed to run to completion,
+        // and a recorded deliberate exit is what distinguishes "the user quit" from "the GUI vanished".
+        Log.Information("Exiting: the tray menu's Exit was chosen.");
+
         _isExiting = true;
         RemoveTrayIcon();
 

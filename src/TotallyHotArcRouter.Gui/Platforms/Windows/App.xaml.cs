@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using Serilog;
 
 namespace TotallyHot.ArcRouter.Gui.WinUI;
 
@@ -14,13 +15,34 @@ namespace TotallyHot.ArcRouter.Gui.WinUI;
 [ExcludeFromCodeCoverage]
 public partial class App : MauiWinUIApplication
 {
-    /// <summary>Initializes the XAML-generated component.</summary>
+    /// <summary>
+    /// Initializes the XAML-generated component and subscribes the WinUI unhandled-exception hook. That
+    /// hook is separate from the app-domain one <see cref="MauiProgram.CreateMauiApp"/> installs and
+    /// catches a different population: an exception escaping a XAML or UI-thread callback is handled by
+    /// WinUI itself, so it never reaches the app domain and - before this - ended the GUI with nothing
+    /// written anywhere.
+    /// </summary>
     public App()
     {
         InitializeComponent();
+
+        UnhandledException += OnUnhandledException;
     }
 
     /// <inheritdoc />
     protected override MauiApp CreateMauiApp() => MauiProgram.CreateMauiApp();
+
+    /// <summary>
+    /// Logs an exception WinUI caught on the UI thread and flushes immediately, since the process is
+    /// about to end. <c>e.Handled</c> is deliberately left <see langword="false"/>: this hook exists to
+    /// make the crash visible, not to swallow it and leave the app running in an unknown state.
+    /// </summary>
+    /// <param name="sender">The WinUI application raising the event; unused.</param>
+    /// <param name="e">Carries the exception and its message.</param>
+    private static void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
+    {
+        Log.Fatal(e.Exception, "Unhandled exception on the WinUI thread: {ExceptionMessage}", e.Message);
+        Log.CloseAndFlush();
+    }
 }
 

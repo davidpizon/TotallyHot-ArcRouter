@@ -1,8 +1,10 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Reflection;
 using TotallyHot.ArcRouter.Gui.Platforms.Windows;
 using TotallyHot.ArcRouter.Gui.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Maui.LifecycleEvents;
+using Serilog;
 
 namespace TotallyHot.ArcRouter.Gui;
 
@@ -19,14 +21,34 @@ namespace TotallyHot.ArcRouter.Gui;
 public static class MauiProgram
 {
     /// <summary>
-    /// Builds the MAUI app: registers the BlazorWebView and hooks the Windows lifecycle so the main
-    /// window becomes a tray-resident window at creation time. Charts use vendored Apache ECharts via
-    /// JS interop (see wwwroot/js/echarts-interop.js), so there's no chart service to register.
+    /// Builds the MAUI app: starts Serilog, redirects WebView2's user-data folder somewhere writable,
+    /// registers the BlazorWebView, and hooks the Windows lifecycle so the main window becomes a
+    /// tray-resident window at creation time. Charts use vendored Apache ECharts via JS interop (see
+    /// wwwroot/js/echarts-interop.js), so there's no chart service to register.
     /// </summary>
     public static MauiApp CreateMauiApp()
     {
+        // Logging first, before anything else here can fail. The installed build's blank-dashboard bug
+        // left no trace anywhere precisely because the GUI had no sink at all - the Router's log holds
+        // only the service's own entries - so every statement below this one is now diagnosable.
+        Log.Logger = GuiLogging.CreateDefaultLogger();
+        HookProcessWideFailureHandlers();
+        LogStartupEnvironment();
+
+        // Must run before the first BlazorWebView is created: the WebView2 loader reads
+        // WEBVIEW2_USER_DATA_FOLDER once, when that view creates its environment, and the default
+        // location is unwritable in the installed layout - see WebViewUserData for the whole story.
+        ApplyWebViewUserDataFolder();
+
         var builder = MauiApp.CreateBuilder();
         builder.UseMauiApp<App>();
+
+        // Routes everything logged through Microsoft.Extensions.Logging into the same Serilog file:
+        // the GUI's own ILogger<T>-injected services, and - the reason this matters most - .NET MAUI's
+        // WebView2 host, whose "Failed to create WebView2 environment" error is what a blank dashboard
+        // window actually looks like from the inside. dispose: false because Log.CloseAndFlush on
+        // process exit already owns the logger's lifetime.
+        builder.Logging.AddSerilog(Log.Logger, dispose: false);
 
         builder.Services.AddMauiBlazorWebView();
         // Local, per-user GUI settings (currently just the telemetry server address) - see
@@ -93,7 +115,90 @@ public static class MauiProgram
             events.AddWindows(windows =>
                 windows.OnWindowCreated(TrayWindowManager.Attach)));
 
-        return builder.Build();
+        var app = builder.Build();
+        Log.Information("MAUI app built; handing control to the Windows lifecycle.");
+        return app;
+    }
+
+    /// <summary>
+    /// Records what the process is and where it is running from. Every field here has been the answer to
+    /// a "which build is this and why does it behave differently than mine" question: the installed build
+    /// runs from %ProgramFiles% and auto-starts from a registry Run key, so neither its version nor its
+    /// working directory can be assumed from how a developer launches it.
+    /// </summary>
+    private static void LogStartupEnvironment() =>
+        Log.Information(
+            "GUI starting. Version {Version}, process {ProcessId}, user {UserName}, base directory {BaseDirectory}, working directory {WorkingDirectory}, OS {OperatingSystem}.",
+            typeof(MauiProgram).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown",
+            Environment.ProcessId,
+            Environment.UserName,
+            AppContext.BaseDirectory,
+            Environment.CurrentDirectory,
+            Environment.OSVersion.VersionString);
+
+    /// <summary>
+    /// Points WebView2 at a writable per-user folder and logs where that landed. The failure is caught
+    /// rather than thrown: a GUI that cannot create the folder still starts (and still shows its tray
+    /// icon, from which the user can quit), whereas an exception here would kill the process during
+    /// <c>CreateMauiApp</c> with no window and - before this method existed - no explanation.
+    /// </summary>
+    private static void ApplyWebViewUserDataFolder()
+    {
+        try
+        {
+            Log.Information("WebView2 user-data folder resolved to {UserDataFolder}.", WebViewUserData.Apply());
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            Log.Error(
+                ex,
+                "Could not prepare the WebView2 user-data folder; WebView2 will fall back to its default location beside the executable and the dashboard may render blank.");
+        }
+    }
+
+    /// <summary>
+    /// Subscribes the process-wide failure and shutdown hooks. These are what turn "the GUI just
+    /// disappeared" into a log entry: a MAUI app that dies outside the UI thread's exception handler
+    /// (see <see cref="WinUI.App"/> for that one) otherwise leaves nothing behind at all.
+    /// </summary>
+    private static void HookProcessWideFailureHandlers()
+    {
+        AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
+        AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
+        TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+    }
+
+    /// <summary>Logs a fatal unhandled exception and flushes, since the runtime is about to end the process.</summary>
+    /// <param name="sender">The app domain raising the event; unused.</param>
+    /// <param name="e">Carries the exception and whether the runtime is terminating.</param>
+    private static void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
+    {
+        Log.Fatal(
+            e.ExceptionObject as Exception,
+            "Unhandled exception reached the app domain. Runtime terminating: {IsTerminating}.",
+            e.IsTerminating);
+        Log.CloseAndFlush();
+    }
+
+    /// <summary>
+    /// Logs a faulted task nobody awaited and marks it observed, so a background failure in one of the
+    /// polling stores is recorded instead of being escalated into a process kill by the finalizer thread.
+    /// </summary>
+    /// <param name="sender">The task scheduler raising the event; unused.</param>
+    /// <param name="e">Carries the unobserved exception.</param>
+    private static void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
+    {
+        Log.Error(e.Exception, "A background task faulted with nobody awaiting it.");
+        e.SetObserved();
+    }
+
+    /// <summary>Flushes buffered log events at process exit, so the last thing that happened is on disk.</summary>
+    /// <param name="sender">The app domain raising the event; unused.</param>
+    /// <param name="e">Empty event arguments; unused.</param>
+    private static void OnProcessExit(object? sender, EventArgs e)
+    {
+        Log.Information("GUI process exiting.");
+        Log.CloseAndFlush();
     }
 }
 
