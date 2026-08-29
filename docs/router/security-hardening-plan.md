@@ -950,10 +950,18 @@ Lower-urgency items that reduce standing exposure and make the system auditable.
 **Today: Medium · Exposed: Medium · CWE-311, CWE-532**
 
 **Evidence.** `Storage:DatabasePath` resolves to
-`%LOCALAPPDATA%\TotallyHotArcRouter\agent_telemetry.db`. `RequestTextExtractor`,
+`%ProgramData%\TotallyHotArcRouter\agent_telemetry.db`. `RequestTextExtractor`,
 `ResponseTextExtractor`, and `TextTruncator` capture prompt and completion text into the usage
 ledger and telemetry stream. The database is created with default permissions — it does not go
 through `SecureFile`, and there is no at-rest encryption.
+
+Moving this file to `%ProgramData%` (so the interactive user can read and back it up at all — the
+`LocalSystem` service previously wrote it into an administrators-only system profile) **widened** this
+finding rather than narrowing it. The inherited `%ProgramData%` ACL grants `BUILTIN\Users` read, so
+`agent_telemetry.db` and `transcripts.db` — the two files that carry prompt and response text — are now
+readable by every local account, not just by administrators. That is an accepted tradeoff for a
+single-user, personal-scale tool and is the reason prompt-text capture is opt-in and retention-bounded;
+it would not be acceptable on a shared machine.
 
 **Impact.** Prompt content is the most sensitive data the router handles: it routinely contains
 source code, internal identifiers, and — for a coding-workload router specifically — credentials
@@ -1120,7 +1128,11 @@ stay under the configured ceiling and every response still forwards intact.
 
 ### Phase 4 exit criteria
 
-- Every file under `%LOCALAPPDATA%\TotallyHotArcRouter\` is user-restricted on both platforms.
+- Every file under `%LOCALAPPDATA%\TotallyHotArcRouter\` is user-restricted on both platforms. This no
+  longer covers the operational databases or the management token, which are machine-wide under
+  `%ProgramData%\TotallyHotArcRouter\` so the `LocalSystem` service and the interactive-user GUI can both
+  reach them; the token is hardened per-file by `SecureFile.WriteMachineShared`, the databases inherit
+  `%ProgramData%`'s `Users`-read ACL (see T-07).
 - Token rotation exists and is documented.
 - Prompt-text capture is opt-in and retention-bounded.
 - Build clean, tests green, coverage ≥ 80%.

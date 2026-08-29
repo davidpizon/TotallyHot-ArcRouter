@@ -164,10 +164,13 @@ than hidden in the dialog: the flag's state should be visible without opening an
 
 The `/admin/*` endpoints inherit the proxy's loopback-only posture, and are additionally gated by a
 shared token on every request — **always on, not configurable off**. `ManagementAccessToken.GetOrCreate`
-generates a cryptographically random per-user token on first run and persists it to
-`%LOCALAPPDATA%\TotallyHot.ArcRouter\management-token.txt` with an access-restricted ACL (Windows) /
-file mode 600 (POSIX), so only the current OS user can read it; the GUI reads the same file to attach
-it as `X-Admin-Token` on every call, verified server-side in constant time (`ManagementAccessToken.Verify`).
+generates a cryptographically random token on first run and persists it to
+`%ProgramData%\TotallyHotArcRouter\management-token.txt` with an access-restricted ACL (Windows: system,
+administrators, and the writing account get full control, `Users` read-only) / file mode 644 (POSIX); the
+GUI reads the same file to attach it as `X-Admin-Token` on every call, verified server-side in constant
+time (`ManagementAccessToken.Verify`). The location is machine-wide rather than per-user because the
+installed router runs as `LocalSystem` while the GUI runs as the interactive user — under `%LOCALAPPDATA%`
+the two processes read different files and every call came back 401.
 There is no `Management:Token` configuration key — the token is never entered or stored in
 `appsettings.json`.
 
