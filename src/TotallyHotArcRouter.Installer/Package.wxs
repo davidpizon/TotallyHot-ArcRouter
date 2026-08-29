@@ -7,7 +7,7 @@
   this repo (see the .wixproj's AcceptEula comment for the OSMF EULA acceptance this requires).
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <Package Name="TotallyHot ArcRouter"
+  <Package Name="TotallyHot Arc Router"
            Manufacturer="TotallyHot"
            Version="$(var.ProductVersion)"
            UpgradeCode="38369898-c08b-4d1b-8247-0705657c914c"
@@ -107,8 +107,8 @@
       <File Id="GuiExe" Source="$(var.GuiPublishDir)\TotallyHotArcRouter.Gui.exe" KeyPath="yes">
         <Shortcut Id="GuiStartMenuShortcut"
                   Directory="ProgramMenuFolder"
-                  Name="TotallyHot ArcRouter"
-                  Description="TotallyHot ArcRouter dashboard and routing controls."
+                  Name="TotallyHot Arc Router"
+                  Description="TotallyHot Arc Router dashboard and routing controls."
                   WorkingDirectory="GUIFOLDER"
                   Advertise="no" />
       </File>
@@ -151,11 +151,23 @@
         UseWindowsService(options => options.ServiceName = "TotallyHotArcRouter") and mirror the
         parameters scripts/service/Install-RouterService.ps1's New-Service call used before this MSI
         replaced it as the real install path (that script is now dev-only - see its header comment).
+
+        Name and DisplayName deliberately diverge. Name is the service's identity to the SCM and is
+        therefore frozen: Program.cs's UseWindowsService, ServiceControl below, the dev scripts, and
+        TrayWindowManager's RouterServiceName constant (which is how the tray reads the router's real
+        run state) all address the service by it, so versioning Name would silently break all of them
+        and strand the previous version's registration behind. DisplayName is only the label
+        services.msc and Task Manager show, so it can carry $(var.ProductVersion) - itself derived from
+        Directory.Build.props' single-source-of-truth <Version> via the .wixproj - and makes "which
+        build is actually running as a service" answerable without opening the GUI. It refreshes on
+        upgrade because MajorUpgrade's RemoveExistingProducts runs the old package's uninstall (which
+        deletes the service, per ServiceControl's Remove="uninstall") before this ServiceInstall
+        re-registers it.
       -->
       <ServiceInstall Id="RouterServiceInstall"
                        Name="TotallyHotArcRouter"
-                       DisplayName="TotallyHot ArcRouter"
-                       Description="TotallyHot ArcRouter LLM routing proxy."
+                       DisplayName="TotallyHot Arc Router v$(var.ProductVersion)"
+                       Description="TotallyHot Arc Router LLM routing proxy."
                        Type="ownProcess"
                        Start="auto"
                        ErrorControl="normal"
