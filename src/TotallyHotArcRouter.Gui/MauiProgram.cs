@@ -19,12 +19,18 @@ namespace TotallyHot.ArcRouter.Gui;
 public static class MauiProgram
 {
     /// <summary>
-    /// Builds the MAUI app: registers the BlazorWebView and hooks the Windows lifecycle so the main
-    /// window becomes a tray-resident window at creation time. Charts use vendored Apache ECharts via
-    /// JS interop (see wwwroot/js/echarts-interop.js), so there's no chart service to register.
+    /// Builds the MAUI app: redirects WebView2's user-data folder somewhere writable, registers the
+    /// BlazorWebView, and hooks the Windows lifecycle so the main window becomes a tray-resident window
+    /// at creation time. Charts use vendored Apache ECharts via JS interop (see
+    /// wwwroot/js/echarts-interop.js), so there's no chart service to register.
     /// </summary>
     public static MauiApp CreateMauiApp()
     {
+        // First statement on purpose: the WebView2 loader reads WEBVIEW2_USER_DATA_FOLDER once, when the
+        // first BlazorWebView creates its environment, and its default location is unwritable in the
+        // installed layout - see WebViewUserData for the whole story.
+        WebViewUserData.Apply();
+
         var builder = MauiApp.CreateBuilder();
         builder.UseMauiApp<App>();
 

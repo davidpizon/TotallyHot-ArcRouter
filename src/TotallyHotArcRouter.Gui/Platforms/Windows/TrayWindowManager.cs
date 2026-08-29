@@ -34,6 +34,7 @@ internal static class TrayWindowManager
     private const int WM_CONTEXTMENU = 0x007B;
 
     private const int GWLP_WNDPROC = -4;
+    private const int DWMWA_CLOAK = 13;
     private const int SW_HIDE = 0;
     private const int SW_SHOW = 5;
     private const int SW_RESTORE = 9;
@@ -102,19 +103,25 @@ internal static class TrayWindowManager
     private static DispatcherQueue? _dispatcherQueue;
 
     /// <summary>
-    /// Called once from the MAUI Windows lifecycle when the native window is created: installs the
-    /// WndProc subclass, adds the tray icon, centers the window, and hides it so the app starts in the
-    /// tray only.
+    /// Called once from the MAUI Windows lifecycle when the native window is created: cloaks the window
+    /// so startup never paints it, installs the WndProc subclass, adds the tray icon, centers the window,
+    /// and hides it so the app starts in the tray only.
     /// </summary>
     public static void Attach(Microsoft.UI.Xaml.Window nativeWindow)
     {
         _hwnd = WinRT.Interop.WindowNative.GetWindowHandle(nativeWindow);
 
+        // Cloaked before anything else, because hiding alone cannot win this race: MAUI activates (shows)
+        // the window immediately after this callback returns, which undoes the SW_HIDE below and used to
+        // flash a frame of the dashboard on screen until the low-priority re-hide at the end of this
+        // method caught up. A cloaked window is still created, laid out, and composed - so WinUI and the
+        // BlazorWebView initialize exactly as they would visibly - but it is never painted to the screen,
+        // the taskbar, or Alt+Tab. See SetCloaked.
+        SetCloaked(true);
+
         _wndProcDelegate = WindowProc;
         _originalWndProc = SetWindowLongPtrW(_hwnd, GWLP_WNDPROC, Marshal.GetFunctionPointerForDelegate(_wndProcDelegate));
 
-        // Hidden as early as possible, before the tray icon even exists, to narrow the window in which
-        // MAUI's own post-creation activation (below) could show a visible frame before this takes effect.
         ShowWindowNative(_hwnd, SW_HIDE);
 
         AddTrayIcon();
@@ -127,13 +134,35 @@ internal static class TrayWindowManager
         }
 
         // MAUI activates (shows) the window right after this lifecycle callback, which would undo the
-        // immediate hide above - so also queue a low-priority hide to run after that activation. A brief
-        // flash on first launch is still possible; the Photino version had the same characteristic.
+        // immediate hide above - so also queue a low-priority hide to run after that activation. The
+        // window is invisible throughout thanks to the cloak, so this settles the real show state before
+        // anyone can see it.
         nativeWindow.DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
         {
             CenterOnWorkArea();
             ShowWindowNative(_hwnd, SW_HIDE);
+
+            // Uncloaked only now, once the window is genuinely hidden - uncloaking while it is still
+            // shown would reveal the very frame this avoids. Order here is load-bearing.
+            SetCloaked(false);
         });
+    }
+
+    /// <summary>
+    /// Cloaks or uncloaks the main window through DWM. A cloaked window keeps its full window and
+    /// composition lifetime - it is created, sized, and rendered by the compositor, so XAML lays out and
+    /// the BlazorWebView initializes normally - while being invisible on screen and absent from the
+    /// taskbar and Alt+Tab. That combination is what lets startup let MAUI activate the window without
+    /// the user seeing it, which neither <c>SW_HIDE</c> (activation undoes it) nor an off-screen move
+    /// (still visible on another monitor, still in the taskbar) achieves.
+    /// </summary>
+    /// <param name="cloaked"><see langword="true"/> to cloak the window; <see langword="false"/> to reveal it.</param>
+    private static void SetCloaked(bool cloaked)
+    {
+        // A failed HRESULT here only means the window stays visible - the pre-existing flash - so it is
+        // deliberately not escalated into a startup failure.
+        var value = cloaked ? 1 : 0;
+        _ = DwmSetWindowAttribute(_hwnd, DWMWA_CLOAK, in value, sizeof(int));
     }
 
     /// <summary>
@@ -195,6 +224,10 @@ internal static class TrayWindowManager
     /// </summary>
     private static void ShowDashboard()
     {
+        // Idempotent, and the safety net for the one case Attach cannot cover: if its low-priority
+        // uncloak never ran, the window would show without ever painting. Cheap enough to just repeat.
+        SetCloaked(false);
+
         ShowWindowNative(_hwnd, SW_RESTORE);
         ShowWindowNative(_hwnd, SW_SHOW);
         SetForegroundWindow(_hwnd);
@@ -654,6 +687,13 @@ internal static class TrayWindowManager
     /// </summary>
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    /// <summary>
+    /// P/Invoke binding for the DWM DwmSetWindowAttribute API, used by <see cref="SetCloaked"/> to hide
+    /// the main window from the compositor's output during startup.
+    /// </summary>
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, in int pvAttribute, int cbAttribute);
 
     /// <summary>
     /// P/Invoke binding for the Win32 CreatePopupMenu API, used to create the tray icon's context menu.
