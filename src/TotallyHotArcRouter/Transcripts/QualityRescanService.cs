@@ -101,24 +101,26 @@ public sealed class QualityRescanService : BackgroundService
             _qualityOptions.ScorerVersion);
 
         using var timer = new PeriodicTimer(interval);
-        do
+        try
         {
-            try
+            do
             {
-                await SweepAsync(stoppingToken).ConfigureAwait(false);
+                try
+                {
+                    await SweepAsync(stoppingToken).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // One bad sweep must not end the loop - the next tick retries whatever it did not stamp.
+                    _logger.LogWarning(ex, "Quality rescan sweep failed; the next sweep will retry.");
+                }
             }
-            catch (OperationCanceledException)
-            {
-                // Normal shutdown.
-                break;
-            }
-            catch (Exception ex)
-            {
-                // One bad sweep must not end the loop - the next tick retries whatever it did not stamp.
-                _logger.LogWarning(ex, "Quality rescan sweep failed; the next sweep will retry.");
-            }
+            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
         }
-        while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
+        catch (OperationCanceledException)
+        {
+            // Normal shutdown.
+        }
     }
 
     /// <summary>

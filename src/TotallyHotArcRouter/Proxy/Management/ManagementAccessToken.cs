@@ -11,14 +11,22 @@ namespace TotallyHot.ArcRouter.Proxy.Management;
 /// one on every launch.
 /// </summary>
 /// <remarks>
-/// Persisted under <c>%LOCALAPPDATA%\TotallyHotArcRouter\management-token.txt</c>, the same per-user directory
-/// the telemetry certificate uses. Unlike the certificate, this file is access-restricted on write - a
-/// bearer token is the whole credential (there is no separate password protecting it the way the
-/// certificate's <c>.pfx</c> has), so an ACL that keeps other local accounts from reading it is the only
-/// thing standing between "loopback-only" and "any account on the machine". On Windows this sets an
-/// explicit, non-inherited ACL granting only the current user; on POSIX it sets file mode 600. Both
-/// processes trusting this token (the router and the GUI) run as the same OS user on the same machine,
-/// which is why per-user-account access is an adequate boundary here rather than a hardened one.
+/// Persisted machine-wide under <c>%ProgramData%\TotallyHotArcRouter\management-token.txt</c>, alongside
+/// <see cref="TotallyHot.ArcRouter.Router.RoutingGateStore"/>'s state file and for exactly the same reason:
+/// the installed service runs as <c>LocalSystem</c> while the GUI runs as the interactive user, so the
+/// per-user <c>%LOCALAPPDATA%</c> this used to live in resolved to a <em>different file per account</em>.
+/// Each side minted or read its own token, every management call came back 401, and the GUI's tray reported
+/// the (perfectly healthy) service as stopped. Note this is not the same choice as the telemetry
+/// certificate's, which correctly stays per-user: only the router ever reads that <c>.pfx</c>, and its
+/// password is sealed with user-scoped DPAPI, so moving it would break rather than fix it.
+/// <para>
+/// This file is access-restricted on write - a bearer token is the whole credential (there is no separate
+/// password protecting it the way the certificate's <c>.pfx</c> has), so its ACL is the only thing standing
+/// between "loopback-only" and "anything on the machine". <see cref="SecureFile.WriteMachineShared"/> grants
+/// full control to <c>LocalSystem</c>/administrators and read-only access to <c>Users</c>. The boundary is
+/// therefore "any interactive account on this machine" rather than "one user account" - the minimum that
+/// makes the cross-account handoff work at all.
+/// </para>
 /// </remarks>
 public static class ManagementAccessToken
 {
@@ -88,11 +96,13 @@ public static class ManagementAccessToken
         "TotallyHot.ArcRouter.ManagementAccessToken." + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(tokenPath)))[..32];
 
     /// <summary>
-    /// Gets the default token file path (<c>%LOCALAPPDATA%\TotallyHotArcRouter\management-token.txt</c>), the
-    /// same per-user directory <see cref="TotallyHot.ArcRouter.Telemetry.TelemetryTlsCertificate"/> uses.
+    /// Gets the default token file path (<c>%ProgramData%\TotallyHotArcRouter\management-token.txt</c>), the
+    /// same machine-wide directory <see cref="TotallyHot.ArcRouter.Router.RoutingGateStore"/> persists to.
+    /// Machine-wide rather than per-user because the router and the GUI do not run as the same OS account in
+    /// the installed configuration - see this type's remarks.
     /// </summary>
     public static string DefaultPath() =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TotallyHotArcRouter", TokenFileName);
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "TotallyHotArcRouter", TokenFileName);
 
     /// <summary>
     /// Compares <paramref name="presented"/> against <paramref name="expected"/> in constant time (so a
@@ -124,10 +134,13 @@ public static class ManagementAccessToken
             .TrimEnd('=');
 
     /// <summary>
-    /// Restricts <paramref name="path"/> to the current user and writes <paramref name="token"/> to it,
-    /// via the shared <see cref="SecureFile.WriteRestricted(string, byte[])"/> sequence.
+    /// Restricts <paramref name="path"/> to this machine's system/administrator accounts (write) and
+    /// <c>Users</c> (read), then writes <paramref name="token"/> to it, via the shared
+    /// <see cref="SecureFile.WriteMachineShared(string, byte[])"/> sequence. Deliberately not the per-user
+    /// <see cref="SecureFile.WriteRestricted(string, byte[])"/>: the GUI reads this file from a different OS
+    /// account than the service that writes it - see this type's remarks.
     /// </summary>
     private static void WriteRestricted(string path, string token) =>
-        SecureFile.WriteRestricted(path, Encoding.UTF8.GetBytes(token));
+        SecureFile.WriteMachineShared(path, Encoding.UTF8.GetBytes(token));
 }
 

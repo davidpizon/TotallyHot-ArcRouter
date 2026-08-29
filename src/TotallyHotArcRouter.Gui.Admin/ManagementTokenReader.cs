@@ -14,7 +14,7 @@ public static class ManagementTokenReader
 
     /// <summary>
     /// Reads the token from <paramref name="path"/> (or, when <see langword="null"/>, the default
-    /// <c>%LOCALAPPDATA%\TotallyHotArcRouter\management-token.txt</c>), or <see langword="null"/> when the file
+    /// <c>%ProgramData%\TotallyHotArcRouter\management-token.txt</c>), or <see langword="null"/> when the file
     /// doesn't exist yet (e.g. the proxy has never started), is empty/whitespace, or can't be read. A
     /// caller that gets <see langword="null"/> here will see every <c>/admin/*</c> request come back 401
     /// until the proxy has run at least once to generate the file.
@@ -44,10 +44,15 @@ public static class ManagementTokenReader
         }
     }
 
-    /// <summary>Gets the default token file path: <c>%LOCALAPPDATA%\TotallyHotArcRouter\management-token.txt</c>.</summary>
+    /// <summary>
+    /// Gets the default token file path: <c>%ProgramData%\TotallyHotArcRouter\management-token.txt</c>.
+    /// Machine-wide, not per-user: the installed router runs as <c>LocalSystem</c> while this GUI runs as the
+    /// interactive user, so the per-user <c>%LOCALAPPDATA%</c> this used to read resolved to a different file
+    /// than the one the router wrote. Must stay in step with <c>ManagementAccessToken.DefaultPath</c>.
+    /// </summary>
     private static string DefaultPath() =>
         Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "TotallyHotArcRouter",
             TokenFileName);
 }

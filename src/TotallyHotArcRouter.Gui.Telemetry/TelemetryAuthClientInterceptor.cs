@@ -4,10 +4,10 @@ using Grpc.Core.Interceptors;
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
 
 /// <summary>
-/// Attaches the shared per-user management token to every call's <c>x-admin-token</c> metadata entry,
+/// Attaches the shared management token to every call's <c>x-admin-token</c> metadata entry,
 /// mirroring <c>TotallyHot.ArcRouter.Telemetry.TelemetryAuthInterceptor</c> server-side. Reads the token
 /// from the same file the proxy's <c>ManagementAccessToken</c> writes
-/// (<c>%LOCALAPPDATA%\TotallyHotArcRouter\management-token.txt</c>); the file path and read logic are
+/// (<c>%ProgramData%\TotallyHotArcRouter\management-token.txt</c>); the file path and read logic are
 /// duplicated here rather than referenced, the same "one fact, two copies because of the process
 /// boundary" tradeoff <see cref="TelemetryChannelFactory.ValidateLoopbackCertificate"/> and
 /// <c>TotallyHot.ArcRouter.Gui.Admin.ManagementTokenReader</c> already accept.
@@ -105,7 +105,7 @@ public sealed class TelemetryAuthClientInterceptor : Interceptor
 
     /// <summary>
     /// Reads the token from <paramref name="path"/> (or, when <see langword="null"/>, the default
-    /// <c>%LOCALAPPDATA%\TotallyHotArcRouter\management-token.txt</c>), or <see langword="null"/> when the
+    /// <c>%ProgramData%\TotallyHotArcRouter\management-token.txt</c>), or <see langword="null"/> when the
     /// file doesn't exist yet, is empty/whitespace, or can't be read.
     /// </summary>
     private static string? TryReadToken(string? path)
@@ -132,10 +132,15 @@ public sealed class TelemetryAuthClientInterceptor : Interceptor
         }
     }
 
-    /// <summary>Gets the default token file path: <c>%LOCALAPPDATA%\TotallyHotArcRouter\management-token.txt</c>.</summary>
+    /// <summary>
+    /// Gets the default token file path: <c>%ProgramData%\TotallyHotArcRouter\management-token.txt</c>.
+    /// Machine-wide, not per-user: the installed router runs as <c>LocalSystem</c> while this GUI runs as the
+    /// interactive user, so the per-user <c>%LOCALAPPDATA%</c> this used to read resolved to a different file
+    /// than the one the router wrote. Must stay in step with <c>ManagementAccessToken.DefaultPath</c>.
+    /// </summary>
     private static string DefaultTokenPath() =>
         Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "TotallyHotArcRouter",
             TokenFileName);
 }

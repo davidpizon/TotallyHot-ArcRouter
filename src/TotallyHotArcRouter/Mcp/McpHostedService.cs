@@ -2,6 +2,7 @@ using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Telemetry;
+using Microsoft.AspNetCore.Connections;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -120,9 +121,34 @@ public sealed class McpHostedService : IHostedService, IAsyncDisposable
             // real listening port.
             _logger.LogInformation("MCP endpoint listening on {Addresses}.", string.Join(", ", _server.Addresses));
         }
+        catch (IOException ex) when (ex.InnerException is AddressInUseException)
+        {
+            // A taken port is an operator condition, not a defect, so it gets the one actionable line
+            // Kestrel's own message already carries rather than the exception's several frames of stack -
+            // none of which say anything the operator can act on. ex.Message names the address, which is
+            // more precise than the configured port (McpOptions.Port may be 0, an ephemeral port).
+            _logger.LogWarning(
+                "The MCP endpoint could not start: {Reason} The router continues without it; set Mcp:Port to a free port, or Mcp:Enabled=false to stop trying.",
+                ex.Message);
+            await DisposeServerAsync().ConfigureAwait(false);
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to start the MCP endpoint; it will be unavailable.");
+            await DisposeServerAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Disposes a partially-constructed server and clears the field, so a start that got as far as
+    /// building the inner host but never bound a listener does not leave that host undisposed for the
+    /// life of the process - <see cref="DisposeAsync"/> only ever sees a server that started.
+    /// </summary>
+    private async Task DisposeServerAsync()
+    {
+        if (_server is not null)
+        {
+            await _server.DisposeAsync().ConfigureAwait(false);
             _server = null;
         }
     }

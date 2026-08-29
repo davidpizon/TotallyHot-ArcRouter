@@ -1,5 +1,7 @@
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Security.AccessControl;
+using System.Security.Principal;
 using TotallyHot.ArcRouter.Proxy.Management;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy.Management;
@@ -97,10 +99,16 @@ public sealed class ManagementAccessTokenTests
         Assert.Throws<ArgumentException>(() => ManagementAccessToken.Verify("abc", string.Empty));
     }
 
+    /// <summary>
+    /// The token is the one credential the <c>LocalSystem</c> service and the interactive-user GUI must
+    /// both read, so its ACL is deliberately machine-wide rather than current-user-only: system and
+    /// administrators write it, <c>Users</c> may only read it. A regression to a per-user ACL here is
+    /// exactly what made the two processes mint separate tokens and every management call return 401.
+    /// </summary>
     [Fact]
-    public void GetOrCreate_OnWindows_RestrictsFileToCurrentUser()
+    public void GetOrCreate_OnWindows_GrantsSystemWriteAndUsersReadOnly()
     {
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        if (!OperatingSystem.IsWindows())
         {
             return;
         }
@@ -109,19 +117,68 @@ public sealed class ManagementAccessTokenTests
         try
         {
             ManagementAccessToken.GetOrCreate(path);
-
-            var security = new FileInfo(path).GetAccessControl();
-            var rules = security.GetAccessRules(includeExplicit: true, includeInherited: true, typeof(System.Security.Principal.NTAccount));
-
-            // Inheritance from the parent directory must be broken - otherwise "restricted" is a lie and
-            // whatever ACL the parent (or its parent, up to the drive root) happens to carry still applies.
-            Assert.True(security.AreAccessRulesProtected);
-            Assert.NotEmpty(rules.Cast<System.Security.AccessControl.FileSystemAccessRule>());
+            AssertMachineSharedAcl(path);
         }
         finally
         {
             CleanUp(path);
         }
+    }
+
+    /// <summary>
+    /// The Windows-only half of <see cref="GetOrCreate_OnWindows_GrantsSystemWriteAndUsersReadOnly"/>, split
+    /// out so the platform annotation is on the method CA1416 actually analyzes - the analyzer doesn't treat
+    /// an early-return guard in the caller as narrowing the platform.
+    /// </summary>
+    /// <param name="path">The token file whose ACL to assert on.</param>
+    [SupportedOSPlatform("windows")]
+    private static void AssertMachineSharedAcl(string path)
+    {
+        var security = new FileInfo(path).GetAccessControl();
+        var rules = security
+            .GetAccessRules(includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier))
+            .Cast<FileSystemAccessRule>()
+            .ToList();
+
+        // Inheritance from the parent directory must be broken - otherwise "restricted" is a lie and
+        // whatever ACL the parent (or its parent, up to the drive root) happens to carry still applies.
+        Assert.True(security.AreAccessRulesProtected);
+
+        var system = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+        var users = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
+
+        Assert.Contains(rules, rule =>
+            rule.IdentityReference.Equals(system) &&
+            rule.AccessControlType == AccessControlType.Allow &&
+            rule.FileSystemRights.HasFlag(FileSystemRights.FullControl));
+
+        var usersRules = rules.Where(rule => rule.IdentityReference.Equals(users)).ToList();
+        Assert.NotEmpty(usersRules);
+
+        // Read, never write: the interactive user presents this credential but must not be able to
+        // replace the one the service trusts.
+        Assert.All(usersRules, rule =>
+        {
+            Assert.Equal(AccessControlType.Allow, rule.AccessControlType);
+            Assert.False(rule.FileSystemRights.HasFlag(FileSystemRights.Write));
+            Assert.False(rule.FileSystemRights.HasFlag(FileSystemRights.FullControl));
+        });
+    }
+
+    /// <summary>
+    /// The path itself is the contract between the two processes: <c>ManagementTokenReader</c> and
+    /// <c>TelemetryAuthClientInterceptor</c> hardcode their own copies of it across the assembly boundary,
+    /// so a change here that isn't mirrored there silently breaks authentication in the installed build.
+    /// </summary>
+    [Fact]
+    public void DefaultPath_IsMachineWideNotPerUser()
+    {
+        var expected = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "TotallyHotArcRouter",
+            "management-token.txt");
+
+        Assert.Equal(expected, ManagementAccessToken.DefaultPath());
     }
 
     private static string TempTokenPath() =>

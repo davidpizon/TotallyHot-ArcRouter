@@ -13,7 +13,7 @@ renders its empty state. The rest of the application works fully either way.
 |---|---|---|
 | Provider header literals (inference API keys) with `Locked = true` | Protected store, referenced from `model-routing.json` by `ProviderHeader.ValueSecretRef` | DPAPI-encrypted, ACL-restricted (`ProtectedSecretStore`) |
 | Telemetry certificate password | Protected store (`telemetry:cert-password`) | DPAPI-encrypted, ACL-restricted |
-| Management token | `%LOCALAPPDATA%\TotallyHotArcRouter\management-token.txt` | ACL-restricted via `ManagementAccessToken.WriteRestricted`; contents plaintext (deliberately left as-is - see §5) |
+| Management token | `%ProgramData%\TotallyHotArcRouter\management-token.txt` | ACL-restricted via `SecureFile.WriteMachineShared` (system/administrators/writer full control, `Users` read-only); contents plaintext (deliberately left as-is - see §5). Machine-wide rather than per-user because the `LocalSystem` service and the interactive-user GUI must both read it |
 | Admin API keys (OpenAI/Anthropic cost reconcilers) | Protected store (`reconciliation:{provider}:admin-key`), stored secret preferred, environment variable fallback | DPAPI-encrypted, ACL-restricted; optional - an account with neither configured simply has no reconciler/usage report for that provider |
 | AWS credentials | Environment variable only, by design | n/a - no change |
 
@@ -32,6 +32,28 @@ processes (router + GUI) editing at once cannot interleave and lose an entry.
 Implementation: [`ProtectedSecretStore.cs`](../../src/TotallyHotArcRouter/Proxy/Management/ProtectedSecretStore.cs),
 split into `ISecretReader` (the router's own resolution paths only) and `ISecretWriter` (what
 `ManagementFacade` is injected with).
+
+`secrets.dat` correctly stays **per-user** while the management token and the operational databases moved
+to the machine-wide `%ProgramData%\TotallyHotArcRouter\`. Only the router process ever opens it, and its
+DPAPI `CurrentUser` scope means the bytes are decryptable only by the account that wrote them — moving
+the file without changing that scope would break it rather than fix anything.
+
+### 2.1 What the machine-wide move exposes
+
+`%ProgramData%`'s inherited ACL grants `BUILTIN\Users` read. Nothing encrypted is affected — the token is
+hardened per-file by `SecureFile.WriteMachineShared`, and `secrets.dat` did not move — but two databases
+that were previously per-user are now readable by **every local account**:
+
+| File | Contents newly readable by local `Users` |
+|---|---|
+| `agent_telemetry.db` | Usage ledger, provider spend, price catalog. Token counts and cost, no credentials. |
+| `transcripts.db` | **Raw prompt and response text**, when `TranscriptOptions.Enabled` turns capture on. |
+
+`transcripts.db` is the one that matters. It is opt-in and retention-bounded precisely because of what it
+holds, and on a single-user machine — the deployment this tool targets — "readable by local Users" and
+"readable by me" are the same set. On a shared or multi-user machine they are not: leave transcripts off,
+or point `Storage:TranscriptDatabasePath` at a directory you have ACL'd yourself. See
+`docs/router/security-hardening-plan.md` T-07.
 
 ## 3. Naming convention
 

@@ -279,7 +279,7 @@ Carried forward from `live-feedback-learning-plan.md`, which apply with equal fo
   clustering, and retraining are all off the request path or budgeted with a timeout; a failure in any
   of them degrades to today's behavior and is logged, never a failed request.
 - **Artifacts are per-installation and never committed.** Derived from the operator's own traffic.
-  Nothing under `%LOCALAPPDATA%` enters the repository.
+  Nothing under the runtime data directory enters the repository.
 - **Partial feedback is labeled as such.** Any metric, log line, or UI element distinguishes
   observations from exploration versus exploitation.
 
@@ -295,7 +295,7 @@ New for this plan:
   the operator's recorded wording.
 - **Privacy-first transcripts.** Capture defaults **off** (`TranscriptOptions.Enabled = false`);
   retention is enforced (`RetentionDays`, `MaxRows`); the store lives in its own SQLite file under
-  `%LOCALAPPDATA%\TotallyHot.ArcRouter\`, resolved through `StorageOptions` the same way
+  `%ProgramData%\TotallyHotArcRouter\`, resolved through `StorageOptions` the same way
   `StorageOptions.ResolveLogRegModelPath` resolves the logreg artifact; never synced, never committed;
   disabling capture is documented to stop new writes (existing rows still age out under retention,
   not deleted immediately, to avoid a disable-toggle doubling as an unexpected bulk delete).
@@ -448,7 +448,7 @@ posture `logreg`'s bootstrap takes when nothing is synced.
 > dominate as it accumulates, so there is nothing for a cutover to do. The wording, not the behavior,
 > was wrong.
 
-**2e. Artifact.** `%LOCALAPPDATA%\TotallyHot.ArcRouter\cluster_model.json`: centroids, chosen k,
+**2e. Artifact.** `%ProgramData%\TotallyHotArcRouter\cluster_model.json`: centroids, chosen k,
 embedding dimension, trained-at timestamp, per-cluster sizes, a **per-cluster heuristic-dimension
 histogram** (each member entry's request carries a heuristic dimension label, recovered via the
 transcript link when T1 is enabled, or tagged going forward otherwise), and — when transcripts are

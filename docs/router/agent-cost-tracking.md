@@ -381,7 +381,7 @@ sources.
 ```json
 {
   "Storage": {
-    "DatabasePath": "%LOCALAPPDATA%\\TotallyHotArcRouter\\agent_telemetry.db"
+    "DatabasePath": "%PROGRAMDATA%\\TotallyHotArcRouter\\agent_telemetry.db"
   },
   "CostTracking": {
     "Reconciliation": {
@@ -408,10 +408,14 @@ makes it structurally impossible for them to open two different files and silent
 different services** — see [`model-price-catalog.md`](model-price-catalog.md)'s D4 for why they stay
 separate: reconciliation needs Admin API keys and the catalog needs no credentials at all.
 
-`Storage:DatabasePath` defaults to the same per-user `%LOCALAPPDATA%` convention already established in
-[`signalr-hub-security.md`](signalr-hub-security.md) for the certificate/token files, for the same
-reason: filesystem ACLs restrict the database (which will contain real cost/token data, and
-transitively whatever `provider_cost_reconciliation` reveals about actual spend) to the same OS user
+`Storage:DatabasePath` defaults to the machine-wide `%ProgramData%\TotallyHotArcRouter\` directory rather
+than the per-user `%LOCALAPPDATA%` convention [`signalr-hub-security.md`](signalr-hub-security.md)
+established for the certificate files: the installed service runs as `LocalSystem`, whose
+`%LOCALAPPDATA%` is an administrators-only system profile, so a per-user path put the cost data somewhere
+the operator could not read or back up. The tradeoff is that the inherited `%ProgramData%` ACL grants
+`Users` read, so the database (which will contain real cost/token data, and transitively whatever
+`provider_cost_reconciliation` reveals about actual spend) is readable by every local account rather than
+one OS user
 running the proxy, without inventing a new access-control mechanism.
 
 `AdminApiKeyEnvVar` follows the `ValueEnvVar` naming convention already used by a provider's `Headers`

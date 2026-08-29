@@ -208,18 +208,25 @@ public sealed class TaxonomyComparisonService : BackgroundService
         }
 
         using var timer = new PeriodicTimer(CheckInterval);
-        do
+        try
         {
-            try
+            do
             {
-                await RunCycleAsync(stoppingToken).ConfigureAwait(false);
+                try
+                {
+                    await RunCycleAsync(stoppingToken).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogError(ex, "[TAXONOMY-COMPARE] Comparison cycle threw unexpectedly; continuing.");
+                }
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogError(ex, "[TAXONOMY-COMPARE] Comparison cycle threw unexpectedly; continuing.");
-            }
+            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
         }
-        while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
+        catch (OperationCanceledException)
+        {
+            // Normal shutdown.
+        }
     }
 
     /// <summary>

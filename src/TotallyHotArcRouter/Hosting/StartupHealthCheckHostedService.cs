@@ -120,6 +120,11 @@ public sealed class StartupHealthCheckHostedService : IHostedService
     {
         _logger.LogInformation("Startup pricing health checks are running.");
 
+        // Check 0: adopt any pre-%ProgramData% per-user copy of the storage files before anything opens
+        // them. Must precede every EnsureCreated below - those create an empty file at the destination,
+        // and the migration deliberately refuses to overwrite a destination that already exists.
+        LegacyStorageMigration.Run(_storageOptions, _logger);
+
         // Check 1: ensure the SQLite database exists, creating it (and its directory) if absent. This also
         // applies additive column migrations and seeds a row for every source that has a client, so it must
         // precede the toggle store's first read below.

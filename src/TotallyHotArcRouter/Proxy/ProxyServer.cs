@@ -113,6 +113,12 @@ namespace TotallyHot.ArcRouter.Proxy
             var managementClient = managementApi?.HttpClient ?? _ownedManagementHttpClient!;
 
             _host = Host.CreateDefaultBuilder()
+                // This inner host is an implementation detail of ProxyServer: the outer application host
+                // owns the process's lifecycle logging. Without this filter a bind failure is reported
+                // twice - once here with a full stack through the default console provider (this host never
+                // gets Serilog), and again by the outer host as ProxyHostedService's start failure - so the
+                // inner copy is suppressed and ProxyHostedService is left to report the condition once.
+                .ConfigureLogging(logging => logging.AddFilter("Microsoft.Extensions.Hosting.Internal.Host", LogLevel.None))
                 .ConfigureWebHostDefaults(webBuilder =>
                 {
                     webBuilder.UseKestrel(options =>

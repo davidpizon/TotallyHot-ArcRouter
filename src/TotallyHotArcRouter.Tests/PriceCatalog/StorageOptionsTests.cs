@@ -11,8 +11,8 @@ public class StorageOptionsTests
     [Fact]
     public void ResolveDatabasePath_Default_IsRootedWithNoUnexpandedTokens()
     {
-        // The default uses %LOCALAPPDATA% and backslashes. On Linux (the Docker default) LOCALAPPDATA is
-        // unset and backslashes are literal, so a naive resolve would leave a "%LOCALAPPDATA%" filename in
+        // The default uses %PROGRAMDATA% and backslashes. On Linux (the Docker default) PROGRAMDATA is
+        // unset and backslashes are literal, so a naive resolve would leave a "%PROGRAMDATA%" filename in
         // an unrooted path. The fallback + separator normalization must produce a real absolute path.
         var resolved = new StorageOptions().ResolveDatabasePath();
 
@@ -22,6 +22,52 @@ public class StorageOptionsTests
         // path is expected and not checked here.)
         var doubledSeparator = new string(Path.DirectorySeparatorChar, 2);
         Assert.DoesNotContain(doubledSeparator, resolved);
+    }
+
+    [Fact]
+    public void AllFiveDefaults_ResolveIntoTheOneMachineSharedDirectory()
+    {
+        // The move to %ProgramData% also collapsed a folder-name split: DatabasePath was pinned under
+        // "TotallyHotArcRouter" by appsettings.json while the other four defaults used
+        // "TotallyHot.ArcRouter", so one install wrote two sibling directories. Assert they cannot drift
+        // apart again.
+        var options = new StorageOptions();
+        var expected = StorageOptions.ResolveMachineSharedDirectory();
+
+        string[] resolved =
+        [
+            options.ResolveDatabasePath(),
+            options.ResolveBenchmarkDatabasePath(),
+            options.ResolveTranscriptDatabasePath(),
+            options.ResolveLogRegModelPath(),
+            options.ResolveClusterModelPath(),
+        ];
+
+        Assert.All(resolved, path => Assert.Equal(expected, Path.GetDirectoryName(path)));
+    }
+
+    [Fact]
+    public void ResolveLegacyDirectories_CoverBothPreMoveSpellings()
+    {
+        var legacy = StorageOptions.ResolveLegacyDirectories();
+
+        Assert.Equal(2, legacy.Count);
+        Assert.Contains(legacy, path => Path.GetFileName(path) == "TotallyHot.ArcRouter");
+        Assert.Contains(legacy, path => Path.GetFileName(path) == "TotallyHotArcRouter");
+        Assert.All(legacy, path => Assert.True(Path.IsPathRooted(path)));
+    }
+
+    [Fact]
+    public void ResolveDatabasePath_LegacyLocalAppDataToken_IsStillExpanded()
+    {
+        // An operator upgrading from a build that predates the move may have %LOCALAPPDATA% pinned in
+        // their own appsettings.json. That must keep resolving rather than producing a literal
+        // "%LOCALAPPDATA%" directory.
+        var resolved = new StorageOptions { DatabasePath = @"%LOCALAPPDATA%\Pinned\prices.db" }.ResolveDatabasePath();
+
+        Assert.True(Path.IsPathRooted(resolved));
+        Assert.DoesNotContain('%', resolved);
+        Assert.EndsWith($"Pinned{Path.DirectorySeparatorChar}prices.db", resolved);
     }
 
     [Fact]

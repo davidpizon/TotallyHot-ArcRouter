@@ -38,7 +38,7 @@ for what it syncs and verifies):
 src/TotallyHotArcRouter*/             .NET router implementation, GUI, quality verifier, tests
 docs/                           Design docs and handbook
 
-%LOCALAPPDATA%\TotallyHot.ArcRouter\coderouterbench.db   CodeRouterBench tables, synced on demand
+%ProgramData%\TotallyHotArcRouter\coderouterbench.db   CodeRouterBench tables, synced on demand
 ```
 
 ## Design docs

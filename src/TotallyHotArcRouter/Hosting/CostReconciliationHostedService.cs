@@ -59,33 +59,40 @@ public sealed class CostReconciliationHostedService : BackgroundService
         // health check for its first cycle) - reconciliation has no equivalent startup gate, and an
         // operator who just configured an Admin API key expects the first reconciliation to happen soon,
         // not up to a full PollIntervalHours later.
-        do
+        try
         {
-            try
+            do
             {
-                await _reconciliationService.RunCycleAsync(stoppingToken).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                // A cycle should already swallow per-provider/per-day failures; this guards the
-                // unexpected so a single bad tick never tears down the loop.
-                _logger.LogError(ex, "Cost reconciliation cycle threw unexpectedly; continuing.");
-            }
-
-            if (_usageReportService is not null)
-            {
-                // A separate try/catch: a reconciliation failure above must not skip the usage-report
-                // refresh, and vice versa - the two are independent optional features sharing one timer.
                 try
                 {
-                    await _usageReportService.RunCycleAsync(stoppingToken).ConfigureAwait(false);
+                    await _reconciliationService.RunCycleAsync(stoppingToken).ConfigureAwait(false);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    _logger.LogError(ex, "Anthropic usage report refresh threw unexpectedly; continuing.");
+                    // A cycle should already swallow per-provider/per-day failures; this guards the
+                    // unexpected so a single bad tick never tears down the loop.
+                    _logger.LogError(ex, "Cost reconciliation cycle threw unexpectedly; continuing.");
+                }
+
+                if (_usageReportService is not null)
+                {
+                    // A separate try/catch: a reconciliation failure above must not skip the usage-report
+                    // refresh, and vice versa - the two are independent optional features sharing one timer.
+                    try
+                    {
+                        await _usageReportService.RunCycleAsync(stoppingToken).ConfigureAwait(false);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        _logger.LogError(ex, "Anthropic usage report refresh threw unexpectedly; continuing.");
+                    }
                 }
             }
+            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
         }
-        while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
+        catch (OperationCanceledException)
+        {
+            // Normal shutdown.
+        }
     }
 }

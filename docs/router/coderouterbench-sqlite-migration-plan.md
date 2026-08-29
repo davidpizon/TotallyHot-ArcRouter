@@ -225,7 +225,7 @@ Notes on the shape:
 - `CodeRouterBench/BenchmarkDatabase.cs` — connection string, `EnsureCreated()`, WAL +
   `synchronous=NORMAL`, modeled on `RouterMemoryDatabase`.
 - `StorageOptions.BenchmarkDatabasePath`, defaulting to
-  `%LOCALAPPDATA%\TotallyHot.ArcRouter\coderouterbench.db` and resolved through the existing
+  `%ProgramData%\TotallyHotArcRouter\coderouterbench.db` and resolved through the existing
   `ResolveDatabasePath` logic (environment-token expansion, separator normalization, Linux fallback).
 - All six data tables plus `benchmark_files` per the schema above.
 - `BenchmarkFileLedger` — read/write the per-file checksum rows.

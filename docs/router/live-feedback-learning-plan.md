@@ -125,7 +125,7 @@ flowchart LR
   retraining are all subject to timeouts or run off the request path. A failure in any of them degrades
   that request to today's behavior (voter abstains) and is logged — never a failed request.
 - **The trained model is per-installation and never committed.** It is derived from the operator's own
-  traffic and their own synced corpus. Nothing under `%LOCALAPPDATA%` enters the repository.
+  traffic and their own synced corpus. Nothing under the runtime data directory enters the repository.
 - **Partial feedback is labeled as such.** Any metric, log line, or UI element reporting model quality
   distinguishes observations from exploration versus exploitation, because the two have different
   selection bias.
@@ -253,7 +253,7 @@ its feature space from TF-IDF-over-text to the task embedding.
   `ModelNameCanonicalizer` on both training and lookup exactly as today, softmax over the restricted
   candidate scores for confidence. Abstains when the embedding is null, when no local artifact exists,
   or when no candidate has weights.
-- **Local artifact location.** `%LOCALAPPDATA%\TotallyHot.ArcRouter\logreg_voter_model.json`, resolved
+- **Local artifact location.** `%ProgramData%\TotallyHotArcRouter\logreg_voter_model.json`, resolved
   through `StorageOptions` with the same environment-token expansion `ResolveBenchmarkDatabasePath`
   uses. **Not** an embedded resource, not checked in. The voter loads it lazily and reloads it after a
   retrain.
