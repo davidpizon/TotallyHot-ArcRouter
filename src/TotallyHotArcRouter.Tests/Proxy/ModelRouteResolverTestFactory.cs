@@ -125,5 +125,40 @@ internal static class ModelRouteResolverTestFactory
 
         return new ModelRouteResolver(new InMemoryProviderConfigStore(options), Mock.Of<IEnvironmentVariableProvider>());
     }
+
+    /// <summary>
+    /// Builds a resolver from fully-specified model entries, for tests that need to control the governance
+    /// flags <see cref="CreateWithModelList"/> cannot express - <see cref="ModelRouteEntry.Enabled"/> and
+    /// <see cref="ModelRouteEntry.PresentUpstream"/>, the two inputs to
+    /// <see cref="IModelRouteResolver.IsModelEnabled"/>.
+    /// </summary>
+    /// <param name="disabledProviders">
+    /// Providers to mark <see cref="ProviderOptions.Enabled"/> = <see langword="false"/>, so a test can
+    /// exercise the provider gate independently of the per-model one.
+    /// </param>
+    /// <param name="models">The routes to configure, each carrying its own enablement flags.</param>
+    public static IModelRouteResolver CreateWithModelEntries(
+        IReadOnlyCollection<string>? disabledProviders,
+        params ModelRouteEntry[] models)
+    {
+        var disabled = new HashSet<string>(disabledProviders ?? [], StringComparer.OrdinalIgnoreCase);
+        var providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase);
+        foreach (var providerName in models.Select(m => m.Provider).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            providers[providerName] = new ProviderOptions
+            {
+                BaseUrl = "https://example.com",
+                Enabled = !disabled.Contains(providerName),
+            };
+        }
+
+        var options = new ModelRoutingOptions
+        {
+            Providers = providers,
+            ModelList = [.. models],
+        };
+
+        return new ModelRouteResolver(new InMemoryProviderConfigStore(options), Mock.Of<IEnvironmentVariableProvider>());
+    }
 }
 

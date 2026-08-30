@@ -240,12 +240,16 @@ public sealed record LogRegModelAdminDependencies(
 /// <param name="OptionsMonitor">Reports the currently effective values once precedence has been applied.</param>
 /// <param name="JudgeOptionsMonitor">Reports the shadow judge's currently effective settings, the same way <paramref name="OptionsMonitor"/> does for routing.</param>
 /// <param name="JudgeModelSelector">Supplies the eligible judge-backbone list, both to populate the dropdown and to validate a save against it.</param>
+/// <param name="TranscriptOptionsMonitor">Reports the Transcription Capture toggle's currently effective value, the same way <paramref name="OptionsMonitor"/> does for routing.</param>
+/// <param name="TranscriptStore">Backs the Transcription Capture row's "Clear" action.</param>
 public sealed record RouterSettingsAdminDependencies(
     RouterSettingsStore Store,
     RouterSettingsReloadToken ReloadToken,
     IOptionsMonitor<Models.RoutingOptions> OptionsMonitor,
     IOptionsMonitor<Judge.JudgeOptions> JudgeOptionsMonitor,
-    Judge.JudgeModelSelector JudgeModelSelector)
+    Judge.JudgeModelSelector JudgeModelSelector,
+    IOptionsMonitor<Transcripts.TranscriptOptions> TranscriptOptionsMonitor,
+    Transcripts.ITranscriptStore TranscriptStore)
 {
     /// <summary>
     /// The working set trimmed synchronously when a save lowers the capacity, so the response reflects the

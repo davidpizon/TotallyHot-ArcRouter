@@ -42,6 +42,9 @@ public sealed class RouterSettingsStore
     /// </summary>
     public const string JudgeModelNameKey = "JudgeModelName";
 
+    /// <summary>The <c>router_settings</c> key for <see cref="Transcripts.TranscriptOptions.Enabled"/>, stored as <c>"0"</c>/<c>"1"</c>.</summary>
+    public const string TranscriptCaptureEnabledKey = "TranscriptCaptureEnabled";
+
     private readonly RouterMemoryDatabase _database;
     private readonly ILogger<RouterSettingsStore> _logger;
 

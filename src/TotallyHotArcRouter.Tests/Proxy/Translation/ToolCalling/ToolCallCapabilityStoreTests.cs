@@ -495,5 +495,109 @@ public class ToolCallCapabilityStoreTests
             Assert.Equal(dialect.Name, resolved.Name);
         }
     }
-}
 
+    // ----- Context windows: the separation invariants from ADR-0002 -----
+
+    [Fact]
+    public void GetModelContextWindow_ReturnsNull_WhenNeverProbed()
+    {
+        using var temp = new TempDatabase();
+        var store = temp.CreateToolCallCapabilityStore();
+
+        Assert.Null(store.GetModelContextWindow("lmstudio", "qwen2.5.1-coder-7b-instruct"));
+    }
+
+    [Fact]
+    public void SetModelContextWindow_RoundTripsEveryField()
+    {
+        using var temp = new TempDatabase();
+        var store = temp.CreateToolCallCapabilityStore();
+        var detectedAt = new DateTimeOffset(2026, 7, 30, 12, 0, 0, TimeSpan.Zero);
+
+        store.SetModelContextWindow(new ModelContextWindow(
+            "lmstudio", "qwen-local", 32768, "qwen2", "LM Studio /api/v0/models.", detectedAt));
+
+        var stored = store.GetModelContextWindow("lmstudio", "qwen-local");
+
+        Assert.NotNull(stored);
+        Assert.Equal(32768, stored!.ContextLength);
+        Assert.Equal("qwen2", stored.Architecture);
+        Assert.Equal("LM Studio /api/v0/models.", stored.Evidence);
+        Assert.Equal(detectedAt, stored.DetectedAtUtc);
+    }
+
+    // Proves the COLLATE NOCASE key columns and ModelCapabilityKey's comparer carried over to the new
+    // table - a lookup that missed on casing would silently report every window as unknown.
+    [Fact]
+    public void GetModelContextWindow_IsCaseInsensitiveOnBothHalves()
+    {
+        using var temp = new TempDatabase();
+        var store = temp.CreateToolCallCapabilityStore();
+
+        store.SetModelContextWindow(new ModelContextWindow("LMStudio", "Qwen-Local", 8192));
+
+        Assert.NotNull(store.GetModelContextWindow("lmstudio", "qwen-local"));
+    }
+
+    // The first corruption path ADR-0002 exists to prevent: ToolCallObservationRecorder builds a fresh
+    // capability from the request path with no window to supply. Sharing a row would null the window on the
+    // first live tool call.
+    [Fact]
+    public void RecordingADialectObservation_DoesNotDisturbTheContextWindow()
+    {
+        using var temp = new TempDatabase();
+        var store = temp.CreateToolCallCapabilityStore();
+
+        store.SetModelContextWindow(new ModelContextWindow("lmstudio", "qwen-local", 32768, "qwen2"));
+        store.TryRecordModelCapability(new ModelToolCapability(
+            "lmstudio", "qwen-local", "hermes", DetectionConfidence.Observed, ObservationCount: 1));
+
+        Assert.Equal(32768, store.GetModelContextWindow("lmstudio", "qwen-local")?.ContextLength);
+    }
+
+    // The second: ClearModelCapability DELETEs the dialect row. An operator resetting a dialect override
+    // must not destroy an unrelated probed window as a side effect.
+    [Fact]
+    public void ClearModelCapability_LeavesTheContextWindowIntact()
+    {
+        using var temp = new TempDatabase();
+        var store = temp.CreateToolCallCapabilityStore();
+
+        store.SetModelContextWindow(new ModelContextWindow("lmstudio", "qwen-local", 32768, "qwen2"));
+        store.TryRecordModelCapability(new ModelToolCapability(
+            "lmstudio", "qwen-local", "hermes", DetectionConfidence.Template));
+
+        store.ClearModelCapability("lmstudio", "qwen-local");
+
+        Assert.Null(store.GetModelCapability("lmstudio", "qwen-local"));
+        Assert.Equal(32768, store.GetModelContextWindow("lmstudio", "qwen-local")?.ContextLength);
+    }
+
+    // No confidence ladder applies to a context length - a model reloaded under a different num_ctx
+    // genuinely has a different window, so a gate would freeze the first reading forever.
+    [Fact]
+    public void SetModelContextWindow_LastWriteWins_WithNoConfidenceGate()
+    {
+        using var temp = new TempDatabase();
+        var store = temp.CreateToolCallCapabilityStore();
+
+        store.SetModelContextWindow(new ModelContextWindow("lmstudio", "qwen-local", 32768, "qwen2"));
+        store.SetModelContextWindow(new ModelContextWindow("lmstudio", "qwen-local", 8192, "qwen2"));
+
+        Assert.Equal(8192, store.GetModelContextWindow("lmstudio", "qwen-local")?.ContextLength);
+    }
+
+    // Rejected at the caller boundary rather than coerced, mirroring TryRecordModelCapability's treatment
+    // of a negative observation count. A corrupt row on disk is skipped instead; see the repository.
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void SetModelContextWindow_NonPositiveLength_Throws(int contextLength)
+    {
+        using var temp = new TempDatabase();
+        var store = temp.CreateToolCallCapabilityStore();
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            store.SetModelContextWindow(new ModelContextWindow("lmstudio", "qwen-local", contextLength)));
+    }
+}

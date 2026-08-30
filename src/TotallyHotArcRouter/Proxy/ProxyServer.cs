@@ -118,7 +118,13 @@ namespace TotallyHot.ArcRouter.Proxy
                 // twice - once here with a full stack through the default console provider (this host never
                 // gets Serilog), and again by the outer host as ProxyHostedService's start failure - so the
                 // inner copy is suppressed and ProxyHostedService is left to report the condition once.
-                .ConfigureLogging(logging => logging.AddFilter("Microsoft.Extensions.Hosting.Internal.Host", LogLevel.None))
+                // The "Microsoft" filter mirrors the outer host's Serilog "Microsoft": "Warning" override
+                // (see src/TotallyHotArcRouter/appsettings.json) - this inner host never reads that Serilog
+                // config, so without it Microsoft.AspNetCore.Routing.EndpointMiddleware's per-request
+                // "Executed endpoint" Information logs would flood the default console provider.
+                .ConfigureLogging(logging => logging
+                    .AddFilter("Microsoft.Extensions.Hosting.Internal.Host", LogLevel.None)
+                    .AddFilter("Microsoft", LogLevel.Warning))
                 .ConfigureWebHostDefaults(webBuilder =>
                 {
                     webBuilder.UseKestrel(options =>
@@ -274,6 +280,8 @@ namespace TotallyHot.ArcRouter.Proxy
                             services.AddSingleton(routerSettingsAdmin.OptionsMonitor);
                             services.AddSingleton(routerSettingsAdmin.JudgeOptionsMonitor);
                             services.AddSingleton(routerSettingsAdmin.JudgeModelSelector);
+                            services.AddSingleton(routerSettingsAdmin.TranscriptOptionsMonitor);
+                            services.AddSingleton(routerSettingsAdmin.TranscriptStore);
 
                             if (routerSettingsAdmin.EmbeddingMemory is not null)
                             {

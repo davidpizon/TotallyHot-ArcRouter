@@ -32,11 +32,12 @@ public sealed class ManagementFacade
     // so a slow-but-alive local server should get the chance to finish.
     private static readonly TimeSpan ExplicitCapabilityScanBudget = TimeSpan.FromSeconds(15);
 
-    // Dialect resolution's own budget, applied across every model on a provider rather than per model, so a
-    // provider serving thirty models cannot turn one scan into thirty sequential timeouts. Deliberately
-    // under ExplicitCapabilityScanBudget: the endpoint flavors are what the operator actually asked for,
-    // and dialect detection is the free extra that rides along on the metadata those flavors expose.
-    private static readonly TimeSpan DialectResolutionBudget = TimeSpan.FromSeconds(10);
+    // Per-model metadata probing's own budget (dialect and context window, learned from the same two
+    // responses), applied across every model on a provider rather than per model, so a provider serving
+    // thirty models cannot turn one scan into thirty sequential timeouts. Deliberately under
+    // ExplicitCapabilityScanBudget: the endpoint flavors are what the operator actually asked for, and this
+    // detection is the free extra that rides along on the metadata those flavors expose.
+    private static readonly TimeSpan ModelProbeBudget = TimeSpan.FromSeconds(10);
 
     private readonly IProviderConfigStore _store;
     private readonly IEnvironmentVariableProvider _environment;
@@ -171,7 +172,7 @@ public sealed class ManagementFacade
         // native metadata APIs are reachable have just been refreshed. Best-effort and non-blocking on the
         // result: the operator asked which flavors the endpoint answers, and that question has been
         // answered above regardless of what detection manages to learn.
-        await TryResolveDialectsAsync(key, provider, capabilities, ModelsFor(key), cancellationToken).ConfigureAwait(false);
+        await TryResolveModelMetadataAsync(key, provider, capabilities, ModelsFor(key), cancellationToken).ConfigureAwait(false);
 
         return ManagementResult<ProviderEndpointCapabilities>.Ok(capabilities);
     }
@@ -324,7 +325,7 @@ public sealed class ManagementFacade
 
             // Same best-effort spirit, and inside the same try: a provider save must not start depending on
             // a metadata probe succeeding.
-            await TryResolveDialectsAsync(key, provider, capabilities, ModelsFor(key), cancellationToken)
+            await TryResolveModelMetadataAsync(key, provider, capabilities, ModelsFor(key), cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (Exception)
@@ -415,7 +416,7 @@ public sealed class ManagementFacade
         // flags - no scan is triggered here, since adding a model says nothing new about the provider.
         if (result.Success && _store.Snapshot.Options.Providers.TryGetValue(providerKey, out var provider))
         {
-            await TryResolveDialectsAsync(
+            await TryResolveModelMetadataAsync(
                 providerKey,
                 provider,
                 _capabilityStore?.GetProviderCapabilities(providerKey),
@@ -433,18 +434,24 @@ public sealed class ManagementFacade
             .ToList();
 
     /// <summary>
-    /// Runs tier 1-3 dialect detection over <paramref name="models"/> and records whatever it learns. Never
-    /// throws and never affects the caller's outcome.
+    /// Runs tier 1-3 metadata detection over <paramref name="models"/> and records whatever it learns -
+    /// each model's tool-call dialect and its context window. Never throws and never affects the caller's
+    /// outcome.
     /// </summary>
     /// <remarks>
     /// A model the resolver cannot classify is skipped rather than recorded as anything - the deliberate
     /// design from <c>tool-call-normalization.md</c> §3.2, since a missing row means "forward natively and
     /// classify from the first real response" while a wrong row arms the wrong scanner against every
-    /// response the model produces. Writes go through
+    /// response the model produces. Dialect writes go through
     /// <see cref="ToolCallCapabilityStore.TryRecordModelCapability"/>, whose confidence gate is what keeps
     /// a re-scan from overwriting something a live observation or an operator already established.
+    /// <para>
+    /// Context windows are recorded through <see cref="ToolCallCapabilityStore.SetModelContextWindow"/>,
+    /// which has no such gate - see that method for why a context length has no confidence ladder to rank.
+    /// The two are recorded independently: a probe routinely learns one without the other.
+    /// </para>
     /// </remarks>
-    private async Task TryResolveDialectsAsync(
+    private async Task TryResolveModelMetadataAsync(
         string providerKey,
         ProviderOptions provider,
         ProviderEndpointCapabilities? endpointCapabilities,
@@ -459,7 +466,7 @@ public sealed class ManagementFacade
         try
         {
             using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            budget.CancelAfter(DialectResolutionBudget);
+            budget.CancelAfter(ModelProbeBudget);
 
             foreach (var model in models)
             {
@@ -471,7 +478,7 @@ public sealed class ManagementFacade
                     break;
                 }
 
-                var capability = await _dialectResolver.ResolveAsync(
+                var probe = await _dialectResolver.ResolveAsync(
                     providerKey,
                     provider,
                     endpointCapabilities,
@@ -483,9 +490,17 @@ public sealed class ManagementFacade
                 // there is no record here worth degrading - so stop rather than persist a partial pass.
                 cancellationToken.ThrowIfCancellationRequested();
 
-                if (capability is not null)
+                if (probe.Capability is not null)
                 {
-                    _capabilityStore.TryRecordModelCapability(capability);
+                    _capabilityStore.TryRecordModelCapability(probe.Capability);
+                }
+
+                // Recorded independently of the dialect: the probe deliberately reports a window even on the
+                // paths that classify nothing, so gating this on Capability would discard exactly the
+                // readings tier 1 is best at producing.
+                if (probe.ContextWindow is not null)
+                {
+                    _capabilityStore.SetModelContextWindow(probe.ContextWindow);
                 }
             }
         }
@@ -950,7 +965,7 @@ public sealed class ManagementFacade
         {
             capabilities = await ScanAndPersistCapabilitiesAsync(
                 key, provider, ExplicitCapabilityScanBudget, cancellationToken).ConfigureAwait(false);
-            await TryResolveDialectsAsync(key, provider, capabilities, ModelsFor(key), cancellationToken).ConfigureAwait(false);
+            await TryResolveModelMetadataAsync(key, provider, capabilities, ModelsFor(key), cancellationToken).ConfigureAwait(false);
         }
 
         RecordRefreshOutcome(key, discovery, capabilities);

@@ -129,6 +129,17 @@ public interface ITranscriptStore
     Task<int> DeleteBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Deletes every row from <c>request_transcripts</c> - the System Settings window's Transcription
+    /// Capture "Clear" action. Unlike <see cref="DeleteOldestAsync"/> and <see cref="DeleteBeforeAsync"/>,
+    /// this runs regardless of <see cref="TranscriptOptions.Enabled"/>: an operator who has just switched
+    /// capture off still needs to be able to wipe what was already collected, and a database that was never
+    /// created has nothing to delete either way.
+    /// </summary>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    /// <returns>The number of rows deleted.</returns>
+    Task<int> DeleteAllAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Loads the prompt text of every transcript row linked to a <c>memory_entries</c> row, keyed by
     /// <c>memory_entry_id</c> - used by the cluster trainer's top-TF-IDF-term naming
     /// (docs/router/self-organizing-classification-plan.md Phase T2e), the one piece of cluster-model

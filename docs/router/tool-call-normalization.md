@@ -144,6 +144,29 @@ request; tier 4 confirms or corrects them. `observed` outranks `template` and `h
 `confidence: 'operator'` value records a manual override that no scan may overwrite — the escape
 hatch for a model whose detection misfires.
 
+**Context windows ride along on tiers 1 and 2.** Both probes already fetch documents that carry the
+model's context length — Ollama's `model_info` (`{arch}.context_length`, resolved by indirection through
+`general.architecture`) and LM Studio's `loaded_context_length` / `max_context_length` — so the resolver
+records it alongside the dialect at no extra cost. It is reported to Ollama-shaped clients through
+`POST /api/show`; see [`ollama-show-capabilities-plan.md`](ollama-show-capabilities-plan.md).
+
+Three things about that are deliberate and easy to misread as oversights:
+
+- **The window is stored in its own table** (`model_context_windows`), not as a column on
+  `model_tool_capabilities`, even though the two share a key and a probe. The request path rewrites
+  capability rows without a window to supply, and clearing a dialect override `DELETE`s one — either
+  would destroy a probed window if they shared a row. See
+  [ADR-0002](../adr/0002-store-probed-model-context-windows-in-their-own-table.md).
+- **The confidence ladder does not extend to it.** Window writes are unconditional, last-write-wins.
+  The tiers are peers rather than a ranking here, and a model reloaded under a different `num_ctx`
+  genuinely has a different window, so a `>=` gate would freeze the first reading forever. The
+  invariant that keeps this safe is in the probe: a scan that read nothing writes nothing, so a failed
+  re-probe never clears a known value.
+- **The window is recorded independently of the dialect.** Several tiers classify no dialect yet read a
+  perfectly good window — most notably a template that renders tools in an unregistered dialect, which
+  is the single most authoritative context reading available. `ResolveAsync` returns both in a
+  `ModelMetadataProbeResult` so no exit path discards one to report the other.
+
 ### 3.3 Endpoint flavor scan (provider-level)
 
 On provider add/edit, probe well-known paths reusing the **existing** `DiscoverModelsCoreAsync`

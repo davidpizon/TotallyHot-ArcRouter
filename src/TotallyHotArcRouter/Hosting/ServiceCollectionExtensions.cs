@@ -282,15 +282,24 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddSingleton<RouterMemoryScoreObserver>();
             services.AddSingleton<Router.EmbeddingMemoryScoreObserver>();
 
-            // docs/router/self-organizing-classification-plan.md Phase T1: the opt-in transcript store.
-            // TranscriptDatabase/SqliteTranscriptStore are registered unconditionally (SqliteTranscriptStore
-            // itself no-ops every method when TranscriptOptions.Enabled is false, so nothing queries a table
-            // that was never created), but TranscriptScoreObserver only joins the fan-out below when capture
-            // is enabled - registering a dead observer for the common (disabled) case would do nothing
-            // except add a per-score no-op call.
+            // docs/router/self-organizing-classification-plan.md Phase T1: the transcript store, on by
+            // default and operator-toggleable live from the System Settings window's Transcription Capture
+            // row. TranscriptDatabase/SqliteTranscriptStore are registered unconditionally
+            // (SqliteTranscriptStore itself no-ops every method when TranscriptOptions.Enabled is currently
+            // false, so nothing queries a table that was never created), and TranscriptScoreObserver joins
+            // the fan-out below unconditionally too, gating per call the same way - a construction-time
+            // check could never see a later toggle.
+            //
+            // The SQLite-backed override layer (TranscriptSettingsConfigureOptions) is registered as an
+            // IConfigureOptions<TranscriptOptions> step *after* the appsettings.json bind below - Options
+            // pattern configure delegates run in registration order, so this one runs second and wins,
+            // giving "stored override > appsettings.json > coded default" precedence, exactly like
+            // RouterSettingsConfigureOptions does for RoutingOptions above.
             services.AddOptions<TotallyHot.ArcRouter.Transcripts.TranscriptOptions>()
                 .Configure<IConfiguration>((options, configuration) =>
                     configuration.GetSection(TotallyHot.ArcRouter.Transcripts.TranscriptOptions.SectionName).Bind(options));
+            services.AddSingleton<IConfigureOptions<TotallyHot.ArcRouter.Transcripts.TranscriptOptions>, TotallyHot.ArcRouter.Transcripts.TranscriptSettingsConfigureOptions>();
+            services.AddSingleton<IOptionsChangeTokenSource<TotallyHot.ArcRouter.Transcripts.TranscriptOptions>>(sp => sp.GetRequiredService<Router.RouterSettingsReloadToken>());
             services.AddSingleton<TotallyHot.ArcRouter.Transcripts.TranscriptDatabase>();
             services.AddSingleton<TotallyHot.ArcRouter.Transcripts.ITranscriptStore, TotallyHot.ArcRouter.Transcripts.SqliteTranscriptStore>();
             services.AddSingleton<TotallyHot.ArcRouter.Transcripts.TranscriptScoreObserver>();
@@ -340,16 +349,15 @@ namespace TotallyHot.ArcRouter.Hosting
                     sp.GetRequiredService<Router.EmbeddingMemoryScoreObserver>(),
                 };
 
-                // docs/router/self-organizing-classification-plan.md Phase T6: transcript-score
-                // backfill additionally requires the adaptive-routing master switch, on top of its own
-                // TranscriptOptions.Enabled flag. A plain IOptions snapshot is sufficient here (not the
-                // monitor) - this factory runs once, at this singleton's construction, so a later toggle
-                // has nothing to re-run regardless.
-                if (sp.GetRequiredService<IOptions<TotallyHot.ArcRouter.Transcripts.TranscriptOptions>>().Value.Enabled
-                    && sp.GetRequiredService<IOptions<RoutingOptions>>().Value.EnableAdaptiveRouting)
-                {
-                    observers.Add(sp.GetRequiredService<TotallyHot.ArcRouter.Transcripts.TranscriptScoreObserver>());
-                }
+                // docs/router/self-organizing-classification-plan.md Phase T6: joins the fan-out
+                // unconditionally, like the judge observer below - TranscriptScoreObserver's own store call
+                // (SqliteTranscriptStore.UpdateOutcomeAsync) reads TranscriptOptions.Enabled live via
+                // IOptionsMonitor and no-ops when it is currently false, so a construction-time check here
+                // would only freeze the toggle in whatever state the process started in. The
+                // EnableAdaptiveRouting master switch still applies, but only at the insert site
+                // (ProxyMiddleware, gated live off IOptionsMonitor<RoutingOptions>) - a row that was never
+                // inserted has no correlation id for this backfill to match, so it naturally no-ops too.
+                observers.Add(sp.GetRequiredService<TotallyHot.ArcRouter.Transcripts.TranscriptScoreObserver>());
 
                 // docs/router/geval-shadow-scoring-plan.md Phase G1: unlike the transcript observer above,
                 // this one joins the fan-out unconditionally and checks JudgeOptions.Enabled itself on every
@@ -499,6 +507,12 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddSingleton<ToolCallCapabilityRepository>();
             services.AddSingleton<ToolCallCapabilityStore>();
             services.AddSingleton<IToolCallCapabilityStore>(sp => sp.GetRequiredService<ToolCallCapabilityStore>());
+
+            // The same singleton again under its second read interface, for the proxy's /api/show handler.
+            // Separate from IToolCallCapabilityStore because a context window is not a tool-call concern -
+            // see IModelContextWindowStore - but backed by the one store so both read the same snapshot and
+            // one Reload refreshes both.
+            services.AddSingleton<IModelContextWindowStore>(sp => sp.GetRequiredService<ToolCallCapabilityStore>());
             services.AddSingleton<PriceSourceRegistry>();
             services.AddSingleton<IPriceSourceRegistry>(sp => sp.GetRequiredService<PriceSourceRegistry>());
             services.AddSingleton<PriceCatalogIngestionService>();
@@ -676,7 +690,9 @@ namespace TotallyHot.ArcRouter.Hosting
                             sp.GetRequiredService<Router.RouterSettingsReloadToken>(),
                             sp.GetRequiredService<IOptionsMonitor<RoutingOptions>>(),
                             sp.GetRequiredService<IOptionsMonitor<TotallyHot.ArcRouter.Judge.JudgeOptions>>(),
-                            sp.GetRequiredService<TotallyHot.ArcRouter.Judge.JudgeModelSelector>())
+                            sp.GetRequiredService<TotallyHot.ArcRouter.Judge.JudgeModelSelector>(),
+                            sp.GetRequiredService<IOptionsMonitor<TotallyHot.ArcRouter.Transcripts.TranscriptOptions>>(),
+                            sp.GetRequiredService<TotallyHot.ArcRouter.Transcripts.ITranscriptStore>())
                         {
                             EmbeddingMemory = sp.GetRequiredService<EmbeddingMemory>(),
                         },

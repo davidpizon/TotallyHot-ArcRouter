@@ -8,6 +8,7 @@ using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Tests.Proxy;
 using TotallyHot.ArcRouter.Tests.TestSupport;
+using TotallyHot.ArcRouter.Transcripts;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Tests.Router;
@@ -184,6 +185,43 @@ public sealed class RouterSettingsAdminGrpcServiceTests
     }
 
     [Fact]
+    public async Task GetRouterSettings_ReportsTheTranscriptCaptureSetting()
+    {
+        var service = CreateService(
+            transcriptMonitor: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = false }));
+
+        var response = await service.GetRouterSettings(new Contract.GetRouterSettingsRequest(), CreateContext());
+
+        response.TranscriptCaptureEnabled.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task UpdateRouterSettings_PersistsTheTranscriptCaptureSetting()
+    {
+        var store = CreateStore();
+        var service = CreateService(store: store);
+
+        await service.UpdateRouterSettings(
+            new Contract.UpdateRouterSettingsRequest { EmbeddingMemoryCapacity = 20_000, TranscriptCaptureEnabled = true },
+            CreateContext());
+
+        store.TryGetBool(RouterSettingsStore.TranscriptCaptureEnabledKey, out var enabled).Should().BeTrue();
+        enabled.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ClearTranscripts_DelegatesToTheStoreAndReportsTheDeletedCount()
+    {
+        var transcriptStore = new FakeTranscriptStore(rowsToDelete: 7);
+        var service = CreateService(transcriptStore: transcriptStore);
+
+        var response = await service.ClearTranscripts(new Contract.ClearTranscriptsRequest(), CreateContext());
+
+        response.RowsDeleted.Should().Be(7);
+        transcriptStore.DeleteAllCallCount.Should().Be(1);
+    }
+
+    [Fact]
     public void Constructor_ThrowsOnNullStore()
     {
         var act = () => new RouterSettingsAdminGrpcService(
@@ -192,7 +230,9 @@ public sealed class RouterSettingsAdminGrpcServiceTests
             new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions()),
             CreateJudgeModelSelector(),
             new RouterSettingsReloadToken(),
-            NullLogger<RouterSettingsAdminGrpcService>.Instance);
+            NullLogger<RouterSettingsAdminGrpcService>.Instance,
+            new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions()),
+            new FakeTranscriptStore());
         act.Should().Throw<ArgumentNullException>();
     }
 
@@ -201,14 +241,66 @@ public sealed class RouterSettingsAdminGrpcServiceTests
         RouterSettingsReloadToken? reloadToken = null,
         StaticOptionsMonitor<RoutingOptions>? monitor = null,
         StaticOptionsMonitor<JudgeOptions>? judgeMonitor = null,
-        JudgeModelSelector? judgeModelSelector = null) =>
+        JudgeModelSelector? judgeModelSelector = null,
+        StaticOptionsMonitor<TranscriptOptions>? transcriptMonitor = null,
+        ITranscriptStore? transcriptStore = null) =>
         new(
             store ?? CreateStore(),
             monitor ?? new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions()),
             judgeMonitor ?? new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions()),
             judgeModelSelector ?? CreateJudgeModelSelector(),
             reloadToken ?? new RouterSettingsReloadToken(),
-            NullLogger<RouterSettingsAdminGrpcService>.Instance);
+            NullLogger<RouterSettingsAdminGrpcService>.Instance,
+            transcriptMonitor ?? new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions()),
+            transcriptStore ?? new FakeTranscriptStore());
+
+    /// <summary>A minimal <see cref="ITranscriptStore"/> test double covering only <see cref="ITranscriptStore.DeleteAllAsync"/>.</summary>
+    private sealed class FakeTranscriptStore(int rowsToDelete = 0) : ITranscriptStore
+    {
+        public int DeleteAllCallCount { get; private set; }
+
+        public Task<int> DeleteAllAsync(CancellationToken cancellationToken = default)
+        {
+            DeleteAllCallCount++;
+            return Task.FromResult(rowsToDelete);
+        }
+
+        public Task<long?> InsertAsync(TranscriptRecord record, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task UpdateOutcomeAsync(string correlationId, double? score, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<long>> LoadUnembeddedScoredAsync(int limit, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<TranscriptRecord?> GetTranscriptAsync(long id, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task LinkMemoryEntryAsync(long transcriptId, long memoryEntryId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<int> GetRowCountAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<int> DeleteOldestAsync(int count, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<int> DeleteBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyDictionary<long, string>> LoadPromptTextByMemoryEntryIdAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyDictionary<string, ModelTokenAverage>> LoadObservedTokenAveragesAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<long>> LoadPendingQualityRescanAsync(string scorerVersion, int limit, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task MarkQualityRescannedAsync(long transcriptId, string scorerVersion, double? score, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
 
     /// <summary>
     /// A selector over one free model, so the judge-model validation has something eligible to accept.

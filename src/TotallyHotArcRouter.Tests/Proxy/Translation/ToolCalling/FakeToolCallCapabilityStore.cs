@@ -12,10 +12,11 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
 /// not overwritten" must seed the pin and assert the *decision not to arm*, which is the part that lives in
 /// <see cref="ToolCallNormalizerFactory"/>.
 /// </remarks>
-internal sealed class FakeToolCallCapabilityStore : IToolCallCapabilityStore
+internal sealed class FakeToolCallCapabilityStore : IToolCallCapabilityStore, IModelContextWindowStore
 {
     private readonly Dictionary<ModelCapabilityKey, ModelToolCapability> _rows = new();
     private readonly Dictionary<string, ProviderEndpointCapabilities> _providers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<ModelCapabilityKey, ModelContextWindow> _contextWindows = new();
 
     /// <summary>Gets every capability written through <see cref="TryRecordModelCapability"/>, in order.</summary>
     public List<ModelToolCapability> Recorded { get; } = [];
@@ -43,6 +44,23 @@ internal sealed class FakeToolCallCapabilityStore : IToolCallCapabilityStore
             ScannedAtUtc: DateTimeOffset.UtcNow);
         return this;
     }
+
+    /// <summary>
+    /// Pre-populates a probed context window, as an endpoint scan would have. Mirrors the real store, where
+    /// a window is written by the scan path independently of any dialect row - so a test can seed one
+    /// without the other, which is exactly the case /api/show has to describe correctly.
+    /// </summary>
+    public FakeToolCallCapabilityStore SeedContextWindow(
+        string providerKey, string modelName, int contextLength, string? architecture = null)
+    {
+        _contextWindows[new ModelCapabilityKey(providerKey, modelName)] =
+            new ModelContextWindow(providerKey, modelName, contextLength, architecture, "seeded by test", DateTimeOffset.UtcNow);
+        return this;
+    }
+
+    /// <inheritdoc />
+    public ModelContextWindow? GetModelContextWindow(string providerKey, string modelName) =>
+        _contextWindows.TryGetValue(new ModelCapabilityKey(providerKey, modelName), out var window) ? window : null;
 
     /// <inheritdoc />
     public ModelToolCapability? GetModelCapability(string providerKey, string modelName) =>

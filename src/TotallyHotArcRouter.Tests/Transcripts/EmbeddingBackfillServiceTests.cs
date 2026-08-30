@@ -141,6 +141,9 @@ public class EmbeddingBackfillServiceTests
         public Task<int> DeleteBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
+        public Task<int> DeleteAllAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
         public Task<IReadOnlyDictionary<long, string>> LoadPromptTextByMemoryEntryIdAsync(CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 

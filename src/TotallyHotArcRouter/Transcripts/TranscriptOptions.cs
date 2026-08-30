@@ -12,13 +12,17 @@ public sealed class TranscriptOptions
     public const string SectionName = "Transcript";
 
     /// <summary>
-    /// Gets whether transcript capture is enabled. Defaults to <see langword="false"/> - the plan's
-    /// "Privacy-first transcripts" ground rule: capture defaults off, and no <c>transcripts.db</c> table
-    /// is ever created while this stays <see langword="false"/>. An operator opts in explicitly, aware
-    /// that enabling this persists raw prompt/response text, unlike every other learned-memory table in
-    /// this codebase.
+    /// Gets whether transcript capture is enabled. Defaults to <see langword="true"/>, matching the
+    /// System Settings window's Transcription Capture toggle defaulting to On - no <c>transcripts.db</c>
+    /// table is created until the first row is actually written, so a fresh install that never routes a
+    /// request still creates nothing. Overridable at runtime through the <c>router_settings</c> SQLite
+    /// table (<see cref="Router.RouterSettingsStore"/>) via <see cref="TranscriptSettingsConfigureOptions"/>,
+    /// which - when a stored value is present - beats whatever <c>appsettings.json</c> bound here, which in
+    /// turn beats this property's own coded default. A stored override takes effect immediately through
+    /// <see cref="Microsoft.Extensions.Options.IOptionsMonitor{TOptions}"/>, without a process restart - see
+    /// <see cref="Router.RouterSettingsAdminGrpcService"/>.
     /// </summary>
-    public bool Enabled { get; init; }
+    public bool Enabled { get; init; } = true;
 
     /// <summary>
     /// Gets whether the embedding backfill background service is enabled

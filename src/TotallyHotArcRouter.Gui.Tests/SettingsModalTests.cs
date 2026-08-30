@@ -66,7 +66,7 @@ public sealed class SettingsModalTests
             Task.FromResult(MsiApplyResult.Failure("not used in tests"));
     }
 
-    /// <summary>A controllable <see cref="IRouterSettingsAdminClient"/> double, mirroring the router-side default (adaptive routing off, capacity 20000).</summary>
+    /// <summary>A controllable <see cref="IRouterSettingsAdminClient"/> double, mirroring the router-side default (adaptive routing off, capacity 20000, transcript capture on).</summary>
     private sealed class FakeRouterSettingsAdminClient : IRouterSettingsAdminClient
     {
         public RouterSettingsInfo Settings { get; set; } = new(
@@ -74,9 +74,14 @@ public sealed class SettingsModalTests
             EmbeddingMemoryCapacity: 20_000,
             JudgeEnabled: false,
             JudgeModelName: "",
-            EligibleJudgeModels: ["free-judge"]);
+            EligibleJudgeModels: ["free-judge"],
+            TranscriptCaptureEnabled: true);
 
         public RouterSettingsAdminException? Failure { get; set; }
+
+        public int ClearTranscriptsCallCount { get; private set; }
+
+        public int ClearTranscriptsRowsDeleted { get; set; }
 
         public Task<RouterSettingsInfo> GetAsync(CancellationToken cancellationToken = default) =>
             Failure is null ? Task.FromResult(Settings) : Task.FromException<RouterSettingsInfo>(Failure);
@@ -86,6 +91,7 @@ public sealed class SettingsModalTests
             int embeddingMemoryCapacity,
             bool judgeEnabled,
             string judgeModelName,
+            bool transcriptCaptureEnabled,
             CancellationToken cancellationToken = default)
         {
             if (Failure is not null)
@@ -98,8 +104,17 @@ public sealed class SettingsModalTests
                 embeddingMemoryCapacity,
                 judgeEnabled,
                 judgeModelName,
-                Settings.EligibleJudgeModels);
+                Settings.EligibleJudgeModels,
+                transcriptCaptureEnabled);
             return Task.FromResult(Settings);
+        }
+
+        public Task<int> ClearTranscriptsAsync(CancellationToken cancellationToken = default)
+        {
+            ClearTranscriptsCallCount++;
+            return Failure is null
+                ? Task.FromResult(ClearTranscriptsRowsDeleted)
+                : Task.FromException<int>(Failure);
         }
     }
 
@@ -334,7 +349,7 @@ public sealed class SettingsModalTests
     [Fact]
     public void Loads_a_persisted_adaptive_routing_toggle_and_sample_size()
     {
-        var client = new FakeRouterSettingsAdminClient { Settings = new RouterSettingsInfo(true, 5_000, JudgeEnabled: false, JudgeModelName: "", EligibleJudgeModels: ["free-judge"]) };
+        var client = new FakeRouterSettingsAdminClient { Settings = new RouterSettingsInfo(true, 5_000, JudgeEnabled: false, JudgeModelName: "", EligibleJudgeModels: ["free-judge"], TranscriptCaptureEnabled: true) };
         using var ctx = NewContext(out _, out _, out _, client);
 
         var cut = ctx.Render<SettingsModal>();
@@ -355,11 +370,76 @@ public sealed class SettingsModalTests
     }
 
     [Fact]
+    public void Transcription_capture_toggle_defaults_to_on()
+    {
+        using var ctx = NewContext(out _, out _, out _);
+
+        var cut = ctx.Render<SettingsModal>();
+
+        cut.Find("button[aria-label='Toggle transcription capture']").TextContent.Trim().Should().Be("On");
+    }
+
+    [Fact]
+    public void Clicking_the_transcription_capture_toggle_flips_it_and_saves_immediately()
+    {
+        var client = new FakeRouterSettingsAdminClient();
+        using var ctx = NewContext(out _, out _, out var routerSettingsStore, client);
+        var cut = ctx.Render<SettingsModal>();
+
+        cut.Find("button[aria-label='Toggle transcription capture']").Click();
+
+        cut.Find("button[aria-label='Toggle transcription capture']").TextContent.Trim().Should().Be("Off");
+        routerSettingsStore.Settings!.TranscriptCaptureEnabled.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Clicking_clear_shows_a_confirmation_prompt_without_clearing_yet()
+    {
+        var client = new FakeRouterSettingsAdminClient();
+        using var ctx = NewContext(out _, out _, out _, client);
+        var cut = ctx.Render<SettingsModal>();
+
+        cut.Find("button:contains('Clear')").Click();
+
+        cut.Markup.Should().Contain("Are you sure you want to do this?");
+        client.ClearTranscriptsCallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public void Cancelling_the_clear_confirmation_clears_nothing()
+    {
+        var client = new FakeRouterSettingsAdminClient();
+        using var ctx = NewContext(out _, out _, out _, client);
+        var cut = ctx.Render<SettingsModal>();
+        cut.Find("button:contains('Clear')").Click();
+
+        cut.Find("button:contains('Cancel')").Click();
+
+        cut.Markup.Should().NotContain("Are you sure you want to do this?");
+        client.ClearTranscriptsCallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public void Confirming_the_clear_deletes_the_data_and_reports_the_row_count()
+    {
+        var client = new FakeRouterSettingsAdminClient { ClearTranscriptsRowsDeleted = 3 };
+        using var ctx = NewContext(out _, out _, out _, client);
+        var cut = ctx.Render<SettingsModal>();
+        cut.Find("button:contains('Clear')").Click();
+
+        cut.Find("button:contains('Confirm Clear')").Click();
+
+        client.ClearTranscriptsCallCount.Should().Be(1);
+        cut.Markup.Should().Contain("Cleared 3 rows.");
+        cut.Markup.Should().NotContain("Are you sure you want to do this?");
+    }
+
+    [Fact]
     public void The_judge_model_dropdown_offers_automatic_plus_every_eligible_free_model()
     {
         var client = new FakeRouterSettingsAdminClient
         {
-            Settings = new RouterSettingsInfo(false, 20_000, JudgeEnabled: true, JudgeModelName: "free-b", EligibleJudgeModels: ["free-a", "free-b"]),
+            Settings = new RouterSettingsInfo(false, 20_000, JudgeEnabled: true, JudgeModelName: "free-b", EligibleJudgeModels: ["free-a", "free-b"], TranscriptCaptureEnabled: true),
         };
         using var ctx = NewContext(out _, out _, out _, client);
 
@@ -378,7 +458,7 @@ public sealed class SettingsModalTests
     {
         var client = new FakeRouterSettingsAdminClient
         {
-            Settings = new RouterSettingsInfo(false, 20_000, JudgeEnabled: true, JudgeModelName: "gone-away", EligibleJudgeModels: ["free-a"]),
+            Settings = new RouterSettingsInfo(false, 20_000, JudgeEnabled: true, JudgeModelName: "gone-away", EligibleJudgeModels: ["free-a"], TranscriptCaptureEnabled: true),
         };
         using var ctx = NewContext(out _, out _, out _, client);
 
@@ -397,7 +477,7 @@ public sealed class SettingsModalTests
     {
         var client = new FakeRouterSettingsAdminClient
         {
-            Settings = new RouterSettingsInfo(false, 20_000, JudgeEnabled: true, JudgeModelName: "gone-away", EligibleJudgeModels: ["free-a"]),
+            Settings = new RouterSettingsInfo(false, 20_000, JudgeEnabled: true, JudgeModelName: "gone-away", EligibleJudgeModels: ["free-a"], TranscriptCaptureEnabled: true),
         };
         using var ctx = NewContext(out _, out _, out var routerSettingsStore, client);
 
@@ -412,7 +492,7 @@ public sealed class SettingsModalTests
     {
         var client = new FakeRouterSettingsAdminClient
         {
-            Settings = new RouterSettingsInfo(false, 20_000, JudgeEnabled: false, JudgeModelName: "", EligibleJudgeModels: []),
+            Settings = new RouterSettingsInfo(false, 20_000, JudgeEnabled: false, JudgeModelName: "", EligibleJudgeModels: [], TranscriptCaptureEnabled: true),
         };
         using var ctx = NewContext(out _, out _, out _, client);
 
@@ -427,7 +507,7 @@ public sealed class SettingsModalTests
     {
         var client = new FakeRouterSettingsAdminClient
         {
-            Settings = new RouterSettingsInfo(false, 20_000, JudgeEnabled: false, JudgeModelName: "", EligibleJudgeModels: ["free-a", "free-b"]),
+            Settings = new RouterSettingsInfo(false, 20_000, JudgeEnabled: false, JudgeModelName: "", EligibleJudgeModels: ["free-a", "free-b"], TranscriptCaptureEnabled: true),
         };
         using var ctx = NewContext(out _, out _, out var routerSettingsStore, client);
 

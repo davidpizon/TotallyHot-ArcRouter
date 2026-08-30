@@ -233,6 +233,9 @@ public class ClusterTrainingServiceTests
         public Task<int> DeleteBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken = default) =>
             Task.FromResult(0);
 
+        public Task<int> DeleteAllAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(0);
+
         public Task<IReadOnlyDictionary<long, string>> LoadPromptTextByMemoryEntryIdAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyDictionary<long, string>>(new Dictionary<long, string>());
 

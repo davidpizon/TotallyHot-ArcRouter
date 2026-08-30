@@ -78,6 +78,42 @@ public sealed class ModelDialectDetectionTests : IDisposable
         });
 
     /// <summary>
+    /// As <see cref="OllamaServing"/>, but the <c>/api/show</c> body also carries the <c>model_info</c>
+    /// block a real Ollama returns - the source of the context window recorded alongside the dialect.
+    /// </summary>
+    private static HttpMessageHandler OllamaServingWithModelInfo(
+        string? template, string architecture, long contextLength) =>
+        new DelegatingHandlerStub(request =>
+        {
+            var url = request.RequestUri!.ToString();
+            string? body = null;
+            if (url.EndsWith("/v1/models", StringComparison.Ordinal))
+            {
+                body = OpenAiBody;
+            }
+            else if (url.EndsWith("/api/tags", StringComparison.Ordinal))
+            {
+                body = OllamaTagsBody;
+            }
+            else if (url.EndsWith("/api/show", StringComparison.Ordinal))
+            {
+                body = JsonSerializer.Serialize(new Dictionary<string, object?>
+                {
+                    ["template"] = template,
+                    ["model_info"] = new Dictionary<string, object>
+                    {
+                        ["general.architecture"] = architecture,
+                        [$"{architecture}.context_length"] = contextLength,
+                    },
+                });
+            }
+
+            return Task.FromResult(body is null
+                ? new HttpResponseMessage(HttpStatusCode.NotFound)
+                : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) });
+        });
+
+    /// <summary>
     /// Builds a facade whose endpoint scanner and management client share <paramref name="handler"/>, so one
     /// stub serves both the flavor probes and the metadata probes that read the flags they record.
     /// </summary>
@@ -271,5 +307,62 @@ public sealed class ModelDialectDetectionTests : IDisposable
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             => _handler(request);
     }
-}
 
+    // ----- Context windows persisted by the same sweep -----
+
+    // The only test that proves the ManagementFacade funnel actually reaches the database: everything else
+    // either uses a fake store or exercises ModelDialectResolver in isolation. If step 6's wiring were
+    // dropped, this is what would catch it.
+    [Fact]
+    public async Task ScanCapabilities_PersistsTheContextWindow_AlongsideTheDialect()
+    {
+        var capabilities = CapabilityStore();
+        var facade = Facade(
+            StoreWith("qwen2.5-coder:7b"),
+            OllamaServingWithModelInfo(QwenTemplate, "qwen2", 32768),
+            capabilities);
+
+        var result = await facade.ScanCapabilitiesAsync("ollama", TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success);
+        Assert.Equal("hermes", capabilities.GetModelCapability("ollama", "qwen2.5-coder:7b")!.Dialect);
+
+        var window = capabilities.GetModelContextWindow("ollama", "qwen2.5-coder:7b");
+        Assert.NotNull(window);
+        Assert.Equal(32768, window!.ContextLength);
+        Assert.Equal("qwen2", window.Architecture);
+    }
+
+    // The independence guarantee, end to end: a template rendering tools in an unregistered dialect writes
+    // no capability row at all, but the window read from the same response must still be persisted. This is
+    // the exit that discarded the entire probe before this change.
+    [Fact]
+    public async Task ScanCapabilities_ThatLearnsNoDialect_StillPersistsTheContextWindow()
+    {
+        var capabilities = CapabilityStore();
+        var facade = Facade(
+            StoreWith("some-private-finetune"),
+            OllamaServingWithModelInfo(
+                "{{- if .Tools }}<|tool calls begin|>{{ .Tools }}<|tool calls end|>{{ end }}", "deepseek2", 65536),
+            capabilities);
+
+        await facade.ScanCapabilitiesAsync("ollama", TestContext.Current.CancellationToken);
+
+        Assert.Null(capabilities.GetModelCapability("ollama", "some-private-finetune"));
+        Assert.Equal(65536, capabilities.GetModelContextWindow("ollama", "some-private-finetune")?.ContextLength);
+    }
+
+    // A provider that reports no model_info must leave no row, so a later successful probe is the first
+    // thing to write one - the "a probe that read nothing writes nothing" invariant, through the facade.
+    [Fact]
+    public async Task ScanCapabilities_WritesNoContextWindow_WhenTheProviderReportsNone()
+    {
+        var capabilities = CapabilityStore();
+        var facade = Facade(StoreWith("qwen2.5-coder:7b"), OllamaServing(QwenTemplate), capabilities);
+
+        await facade.ScanCapabilitiesAsync("ollama", TestContext.Current.CancellationToken);
+
+        Assert.NotNull(capabilities.GetModelCapability("ollama", "qwen2.5-coder:7b"));
+        Assert.Null(capabilities.GetModelContextWindow("ollama", "qwen2.5-coder:7b"));
+    }
+}

@@ -112,6 +112,9 @@ public class TranscriptRetentionServiceTests
             return Task.FromResult(1000);
         }
 
+        public Task<int> DeleteAllAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
         public Task<IReadOnlyDictionary<long, string>> LoadPromptTextByMemoryEntryIdAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyDictionary<long, string>>(new Dictionary<long, string>());
 

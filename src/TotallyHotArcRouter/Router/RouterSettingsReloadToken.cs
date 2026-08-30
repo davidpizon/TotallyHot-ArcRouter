@@ -4,13 +4,15 @@ using Microsoft.Extensions.Primitives;
 namespace TotallyHot.ArcRouter.Router;
 
 /// <summary>
-/// The live-reload signal for the two settings types backed by <c>router_settings</c> -
-/// <see cref="Models.RoutingOptions"/> and <see cref="Judge.JudgeOptions"/>
+/// The live-reload signal for the three settings types backed by <c>router_settings</c> -
+/// <see cref="Models.RoutingOptions"/>, <see cref="Judge.JudgeOptions"/>, and
+/// <see cref="Transcripts.TranscriptOptions"/>
 /// (docs/router/self-organizing-classification-plan.md Phase T6): a swappable <see cref="IChangeToken"/>
 /// source that <see cref="RouterSettingsAdminGrpcService"/> triggers after a successful
 /// <c>router_settings</c> write, so each <c>IOptionsMonitor</c> recomputes <c>CurrentValue</c> - re-running
-/// every registered configure step, including <see cref="RouterSettingsConfigureOptions"/> and
-/// <see cref="Judge.JudgeSettingsConfigureOptions"/> - without a process restart.
+/// every registered configure step, including <see cref="RouterSettingsConfigureOptions"/>,
+/// <see cref="Judge.JudgeSettingsConfigureOptions"/>, and <see cref="Transcripts.TranscriptSettingsConfigureOptions"/>
+/// - without a process restart.
 /// </summary>
 /// <remarks>
 /// Registered as both a plain singleton (so <see cref="RouterSettingsAdminGrpcService"/> can call
@@ -21,18 +23,21 @@ namespace TotallyHot.ArcRouter.Router;
 /// with only a public, documented primitive.
 /// </remarks>
 public sealed class RouterSettingsReloadToken
-    : IOptionsChangeTokenSource<Models.RoutingOptions>, IOptionsChangeTokenSource<Judge.JudgeOptions>
+    : IOptionsChangeTokenSource<Models.RoutingOptions>,
+      IOptionsChangeTokenSource<Judge.JudgeOptions>,
+      IOptionsChangeTokenSource<Transcripts.TranscriptOptions>
 {
     private CancellationTokenSource _cts = new();
 
     /// <inheritdoc cref="IOptionsChangeTokenSource{TOptions}.Name" />
     /// <remarks>
     /// <see langword="null"/>: this source applies to the default (unnamed) instance only. One
-    /// implementation satisfies both interfaces - their members are identical in signature - so a single
-    /// <see cref="Trigger"/> reloads <see cref="Models.RoutingOptions"/> and <see cref="Judge.JudgeOptions"/>
-    /// together. That is exactly what the one Save button behind both wants: the settings share a table
-    /// (<see cref="RouterSettingsStore"/>) and are written in one transaction, so reloading them in
-    /// lockstep is simpler than, and indistinguishable from, two independent sources.
+    /// implementation satisfies all three interfaces - their members are identical in signature - so a
+    /// single <see cref="Trigger"/> reloads <see cref="Models.RoutingOptions"/>, <see cref="Judge.JudgeOptions"/>,
+    /// and <see cref="Transcripts.TranscriptOptions"/> together. That is exactly what the one Save button
+    /// behind all three wants: the settings share a table (<see cref="RouterSettingsStore"/>) and are
+    /// written in one transaction, so reloading them in lockstep is simpler than, and indistinguishable
+    /// from, three independent sources.
     /// </remarks>
     public string? Name => null;
 

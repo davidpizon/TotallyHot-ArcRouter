@@ -216,6 +216,100 @@ public sealed class ToolCallCapabilityRepository
         return command.ExecuteNonQuery() > 0;
     }
 
+    /// <summary>Reads every probed context-window row. Used to build the store's cache.</summary>
+    /// <remarks>
+    /// Rows whose stored length cannot be represented as a positive <see cref="int"/> are skipped rather
+    /// than clamped - the opposite of <see cref="ReadObservationCount"/>'s treatment of a corrupt count,
+    /// and deliberately so. A clamped count is still a plausible count, but a clamped context window would
+    /// be advertised to clients as a real limit and used to size prompts. "Unknown" is the honest reading
+    /// of an unusable value here, and absence is exactly how this feature represents unknown.
+    /// </remarks>
+    public IReadOnlyList<ModelContextWindow> GetModelContextWindows()
+    {
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT provider_key, model_name, context_length, architecture, evidence, detected_at_utc
+            FROM model_context_windows;
+            """;
+
+        var results = new List<ModelContextWindow>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            var length = ReadContextLength(reader.GetInt64(2));
+            if (length is null)
+            {
+                continue;
+            }
+
+            results.Add(new ModelContextWindow(
+                ProviderKey: reader.GetString(0),
+                ModelName: reader.GetString(1),
+                ContextLength: length.Value,
+                Architecture: reader.IsDBNull(3) ? null : reader.GetString(3),
+                Evidence: reader.IsDBNull(4) ? null : reader.GetString(4),
+                DetectedAtUtc: ParseTimestamp(reader.GetString(5))));
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Writes a model's probed context window, overwriting any existing row unconditionally.
+    /// </summary>
+    /// <remarks>
+    /// No confidence gate, unlike <see cref="TryUpsertModelCapability"/> - this mirrors
+    /// <see cref="UpsertProviderCapabilities"/> instead. A confidence ladder ranks *how* a classification
+    /// was learned so a filename guess cannot overwrite a template read; a context window has no such
+    /// ranking to build. Ollama's <c>model_info</c> and LM Studio's <c>max_context_length</c> are peers,
+    /// and nothing guesses a window from a model id. A gate would also be actively harmful: a model
+    /// reloaded under a different <c>num_ctx</c> genuinely has a different window, and a <c>&gt;=</c> gate
+    /// would freeze the first reading forever.
+    /// <para>
+    /// The invariant that keeps last-write-wins safe lives one layer up, in the probe: a scan that read
+    /// nothing returns no window and so never reaches this method, meaning a failed re-probe can never
+    /// clear a value that was previously known.
+    /// </para>
+    /// </remarks>
+    /// <param name="window">The window to persist.</param>
+    public void UpsertModelContextWindow(ModelContextWindow window)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO model_context_windows
+                (provider_key, model_name, context_length, architecture, evidence, detected_at_utc)
+            VALUES ($provider, $model, $length, $architecture, $evidence, $detected)
+            ON CONFLICT(provider_key, model_name) DO UPDATE SET
+                context_length  = excluded.context_length,
+                architecture    = excluded.architecture,
+                evidence        = excluded.evidence,
+                detected_at_utc = excluded.detected_at_utc;
+            """;
+        command.Parameters.AddWithValue("$provider", window.ProviderKey);
+        command.Parameters.AddWithValue("$model", window.ModelName);
+        command.Parameters.AddWithValue("$length", window.ContextLength);
+        command.Parameters.AddWithValue("$architecture", (object?)window.Architecture ?? DBNull.Value);
+        command.Parameters.AddWithValue("$evidence", (object?)window.Evidence ?? DBNull.Value);
+        command.Parameters.AddWithValue("$detected", FormatTimestamp(window.DetectedAtUtc));
+
+        command.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Reads a stored context length, or <see langword="null"/> when it is not a usable positive
+    /// <see cref="int"/>. See <see cref="GetModelContextWindows"/> for why this rejects rather than clamps.
+    /// </summary>
+    private static int? ReadContextLength(long stored) => stored switch
+    {
+        <= 0 => null,
+        > int.MaxValue => null,
+        _ => (int)stored,
+    };
+
     /// <summary>
     /// Clamps a stored observation count into the non-negative <see cref="int"/> range.
     /// </summary>

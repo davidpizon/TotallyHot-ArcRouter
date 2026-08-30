@@ -420,12 +420,13 @@ message RoutingGateResponse {
   bool enabled = 1;
 }
 
-// The Governance UI's System Settings window's "Adaptive Routing" and "Shadow Judge" rows
-// (docs/router/self-organizing-classification-plan.md Phase T6, docs/router/geval-shadow-scoring-plan.md):
-// reads and mutates the router_settings-backed overrides layered on top of RoutingOptions
-// (EnableAdaptiveRouting, EmbeddingMemoryCapacity) and JudgeOptions (Enabled, ModelName). The judge
-// settings share this service because they share the router_settings table and the window's single Save
-// button - one write, one reload token trigger, one response carrying the whole post-mutation state.
+// The Governance UI's System Settings window's "Adaptive Routing", "Shadow Judge", and "Transcription
+// Capture" rows (docs/router/self-organizing-classification-plan.md Phase T6,
+// docs/router/geval-shadow-scoring-plan.md): reads and mutates the router_settings-backed overrides
+// layered on top of RoutingOptions (EnableAdaptiveRouting, EmbeddingMemoryCapacity), JudgeOptions (Enabled,
+// ModelName), and TranscriptOptions (Enabled). These settings share this service because they share the
+// router_settings table and the window's single Save button - one write, one reload token trigger, one
+// response carrying the whole post-mutation state.
 // Deliberately a separate service from the read-only RoutingModeAdminService above
 // (§M3.2's settled "read-only reporting and settings mutation stay separate" convention) - this is the one
 // admin service on this endpoint that mutates RoutingOptions. Same shape as ClusterModelAdminService/
@@ -442,6 +443,12 @@ service RouterSettingsAdminService {
   // a structured INVALID_ARGUMENT error rather than silently clamping it; the response always re-reads the
   // post-mutation effective values, mirroring RetrainClusterModel's "true post-mutation state" convention.
   rpc UpdateRouterSettings (UpdateRouterSettingsRequest) returns (RouterSettingsResponse);
+
+  // Deletes every row from request_transcripts - the Transcription Capture row's "Clear" action. Runs
+  // regardless of the current Transcription Capture toggle state, so an operator who has just switched
+  // capture off can still flush what was already collected. Does not trigger the reload token or affect
+  // any other setting.
+  rpc ClearTranscripts (ClearTranscriptsRequest) returns (ClearTranscriptsResponse);
 }
 
 message GetRouterSettingsRequest {}
@@ -461,6 +468,11 @@ message UpdateRouterSettingsRequest {
   // is rejected with INVALID_ARGUMENT rather than silently falling back, so the window cannot save a
   // choice that would not actually be honored.
   string judge_model_name = 4;
+
+  // Whether the opt-in transcript store captures raw prompt/response text
+  // (docs/router/self-organizing-classification-plan.md Phase T1). Takes effect immediately - no restart -
+  // through the same router_settings reload token as the other three fields above.
+  bool transcript_capture_enabled = 5;
 }
 
 message RouterSettingsResponse {
@@ -477,6 +489,15 @@ message RouterSettingsResponse {
   // enabled, OpenAI-compatible - in configuration order. Populates the window's dropdown, and is empty when
   // no free provider is configured, which is the honest "the judge has nothing to call" state.
   repeated string eligible_judge_models = 5;
+
+  bool transcript_capture_enabled = 6;
+}
+
+message ClearTranscriptsRequest {}
+
+message ClearTranscriptsResponse {
+  // The number of request_transcripts rows actually deleted.
+  int32 rows_deleted = 1;
 }
 
 // The Governance UI's Cluster Model panel (docs/router/self-organizing-classification-plan.md Phase T5):

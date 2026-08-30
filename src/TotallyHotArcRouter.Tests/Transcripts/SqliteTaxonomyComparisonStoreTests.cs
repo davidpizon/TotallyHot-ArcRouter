@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.PriceCatalog;
+using TotallyHot.ArcRouter.Tests.TestSupport;
 using TotallyHot.ArcRouter.Transcripts;
 
 namespace TotallyHot.ArcRouter.Tests.Transcripts;
@@ -77,7 +78,7 @@ public sealed class SqliteTaxonomyComparisonStoreTests : IDisposable
     {
         var options = Options.Create(new TranscriptOptions { Enabled = true });
         var database = CreateDatabase();
-        var transcriptStore = new SqliteTranscriptStore(database, options);
+        var transcriptStore = new SqliteTranscriptStore(database, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
         var comparisonStore = new SqliteTaxonomyComparisonStore(database, options);
         var token = TestContext.Current.CancellationToken;
 

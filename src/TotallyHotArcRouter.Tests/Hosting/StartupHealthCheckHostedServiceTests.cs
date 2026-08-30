@@ -43,7 +43,7 @@ public class StartupHealthCheckHostedServiceTests
 
         var transcriptDb = CreateTranscriptDatabase(temp);
         var transcriptStore = new SqliteTranscriptStore(
-            transcriptDb, Options.Create(new TranscriptOptions()));
+            transcriptDb, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions()));
         var service = new StartupHealthCheckHostedService(
             NullLogger<StartupHealthCheckHostedService>.Instance,
             temp.Database,
@@ -89,7 +89,7 @@ public class StartupHealthCheckHostedServiceTests
 
         var transcriptDb = CreateTranscriptDatabase(temp);
         var transcriptStore = new SqliteTranscriptStore(
-            transcriptDb, Options.Create(new TranscriptOptions()));
+            transcriptDb, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions()));
         var service = new StartupHealthCheckHostedService(
             NullLogger<StartupHealthCheckHostedService>.Instance,
             temp.Database,
@@ -172,7 +172,7 @@ public class StartupHealthCheckHostedServiceTests
 
         var transcriptDb = CreateTranscriptDatabase(temp);
         var transcriptStore = new SqliteTranscriptStore(
-            transcriptDb, Options.Create(new TranscriptOptions()));
+            transcriptDb, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions()));
 
         return new StartupHealthCheckHostedService(
             NullLogger<StartupHealthCheckHostedService>.Instance,

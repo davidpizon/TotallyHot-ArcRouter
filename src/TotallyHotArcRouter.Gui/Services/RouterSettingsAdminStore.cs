@@ -4,7 +4,8 @@ using Microsoft.Extensions.Logging;
 namespace TotallyHot.ArcRouter.Gui.Services;
 
 /// <summary>
-/// Singleton view-model backing the System Settings window's Adaptive Routing and Shadow Judge rows. Wraps
+/// Singleton view-model backing the System Settings window's Adaptive Routing, Shadow Judge, and
+/// Transcription Capture rows. Wraps
 /// <see cref="RouterSettingsAdminClient"/> (the tested, platform-agnostic logic in
 /// TotallyHot.ArcRouter.Gui.Telemetry) with the same "singleton + Changed event + best-effort,
 /// reachability-tolerant" shape as <see cref="ClusterModelAdminStore"/>, so the UI survives modal
@@ -96,6 +97,7 @@ public sealed class RouterSettingsAdminStore : IDisposable
     /// <param name="embeddingMemoryCapacity">The embedding-memory capacity.</param>
     /// <param name="judgeEnabled">Whether the G-Eval shadow judge is enabled.</param>
     /// <param name="judgeModelName">The chosen judge backbone, or an empty string for automatic selection.</param>
+    /// <param name="transcriptCaptureEnabled">Whether the opt-in transcript store captures raw prompt/response text.</param>
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <exception cref="RouterSettingsAdminException">The save was rejected or the router is unreachable.</exception>
     public async Task UpdateAsync(
@@ -103,6 +105,7 @@ public sealed class RouterSettingsAdminStore : IDisposable
         int embeddingMemoryCapacity,
         bool judgeEnabled,
         string judgeModelName,
+        bool transcriptCaptureEnabled,
         CancellationToken cancellationToken = default)
     {
         IsSaving = true;
@@ -111,11 +114,42 @@ public sealed class RouterSettingsAdminStore : IDisposable
         try
         {
             Settings = await _client
-                .UpdateAsync(adaptiveRoutingEnabled, embeddingMemoryCapacity, judgeEnabled, judgeModelName, cancellationToken)
+                .UpdateAsync(adaptiveRoutingEnabled, embeddingMemoryCapacity, judgeEnabled, judgeModelName, transcriptCaptureEnabled, cancellationToken)
                 .ConfigureAwait(false);
             IsReachable = true;
             IsLoaded = true;
             LastError = null;
+        }
+        catch (RouterSettingsAdminException ex)
+        {
+            RecordFailure(ex);
+            throw;
+        }
+        finally
+        {
+            IsSaving = false;
+            Changed?.Invoke();
+        }
+    }
+
+    /// <summary>
+    /// Deletes every captured transcript row - the Transcription Capture row's "Clear" action. Does not
+    /// touch <see cref="Settings"/>; the toggle's own state is unaffected by clearing the data it captured.
+    /// </summary>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    /// <returns>The number of rows deleted.</returns>
+    /// <exception cref="RouterSettingsAdminException">The call failed or the router is unreachable.</exception>
+    public async Task<int> ClearTranscriptsAsync(CancellationToken cancellationToken = default)
+    {
+        IsSaving = true;
+        Changed?.Invoke();
+
+        try
+        {
+            var rowsDeleted = await _client.ClearTranscriptsAsync(cancellationToken).ConfigureAwait(false);
+            IsReachable = true;
+            LastError = null;
+            return rowsDeleted;
         }
         catch (RouterSettingsAdminException ex)
         {
