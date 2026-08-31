@@ -663,5 +663,42 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
     /// <summary>Generates a unique OpenAI-style completion id (<c>chatcmpl-&lt;guid&gt;</c>) for use when the upstream response omits one.</summary>
     internal static string GenerateCompletionId() =>
         "chatcmpl-" + Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Attempts to extract Anthropic's native error shape (<c>{"type":"error","error":{"type":...,"message":...}}</c>)
+    /// from a response body. <see cref="TranslateResponse"/> has no concept of this shape - it optimistically reads
+    /// <c>id</c>/<c>model</c>/<c>content</c>/<c>stop_reason</c>, all of which are absent on an error body, and would
+    /// null-coalesce them into a bogus empty completion (<c>model:""</c>, <c>content:""</c>, <c>finish_reason:"stop"</c>)
+    /// that silently discards the real error message. Callers must check this before running an error-status body
+    /// through <see cref="TranslateResponse"/>, mirroring <c>GeminiPayloadTranslator.TryExtractEmbeddedError</c>.
+    /// </summary>
+    /// <param name="body">The raw upstream response body.</param>
+    /// <param name="errorType">The Anthropic error type (e.g. <c>invalid_request_error</c>) when extraction succeeds; otherwise empty.</param>
+    /// <param name="message">The human-readable error message when extraction succeeds; otherwise empty.</param>
+    /// <returns><see langword="true"/> if <paramref name="body"/> parsed as an Anthropic error envelope with a non-empty message.</returns>
+    internal static bool TryExtractEmbeddedError(byte[] body, out string errorType, out string message)
+    {
+        errorType = string.Empty;
+        message = string.Empty;
+
+        JsonNode? parsed;
+        try
+        {
+            parsed = JsonNode.Parse(body);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        if (parsed is not JsonObject root || root["type"]?.GetValue<string>() != "error" || root["error"] is not JsonObject errorObject)
+        {
+            return false;
+        }
+
+        errorType = errorObject["type"]?.GetValue<string>() ?? string.Empty;
+        message = errorObject["message"]?.GetValue<string>() ?? string.Empty;
+        return message.Length > 0;
+    }
 }
 

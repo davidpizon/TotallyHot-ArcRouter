@@ -71,6 +71,10 @@ public static class MauiProgram
         // provider list survives tab switches; it talks to the proxy's /admin API (port 5001) via the
         // tested TotallyHot.ArcRouter.Gui.Admin client. See Services/ProviderAdminStore.cs.
         builder.Services.AddSingleton<ProviderAdminStore>();
+        // Backs the Sessions tab's persisted-history view (docs/router/sessions-tab-training-data-plan.md
+        // Phase 2). A singleton for the same reason, sharing the TLS gRPC port (5002) with LiveDataStore.
+        // See Services/PersistedSessionStore.cs.
+        builder.Services.AddSingleton<PersistedSessionStore>();
         // Backs the Governance tab's price-source panel. A singleton for the same reason, sharing the TLS
         // gRPC port (5002) with LiveDataStore. See Services/PriceSourceStore.cs.
         builder.Services.AddSingleton<PriceSourceStore>();

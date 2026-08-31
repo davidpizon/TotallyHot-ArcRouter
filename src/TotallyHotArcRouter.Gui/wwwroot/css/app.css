@@ -1432,6 +1432,48 @@ input[type="number"] {
 }
 
 /* ---------------------------------------------------------------------------
+   Sessions tab (formerly Live Stream): full-width card list before a session is opened via
+   double-click on a card, split view (session detail + chat reproduction) after.
+   --------------------------------------------------------------------------- */
+.ls-sessions-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ls-sessions-detail-pane {
+  min-width: 0;
+}
+
+.ls-sessions-back-btn {
+  align-self: flex-start;
+}
+
+/* Chat-style reproduction of a session's turns (SessionConversationPane.razor). Request bubbles
+   sit left, response bubbles sit right (mirroring the ROI/cost read direction the rest of the
+   dashboard uses), tinted with the turn's agent color so scanning the thread still shows which
+   agent produced which reply - the same tinted-row language TurnCard uses for the routing log. */
+.ls-chat-turn-separator {
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.ls-chat-bubble-user {
+  max-width: 85%;
+  background: var(--surface-elevated-a);
+  border-left: 3px solid var(--border-button);
+}
+
+.ls-chat-bubble-model {
+  max-width: 85%;
+  margin-left: auto;
+  background: var(--surface-card);
+  border: 1px solid var(--border-button);
+}
+
+/* ---------------------------------------------------------------------------
    Reduced motion. Note that .flash-* and .pulse-dot degrade to a STATIC equivalent
    rather than to nothing: they are status signals (budget breached / stream live),
    so silently blanking them would delete information, not just decoration.

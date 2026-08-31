@@ -429,7 +429,7 @@ public sealed class TaxonomyComparisonService : BackgroundService
         return new TaxonomyComparisonRecord(
             TranscriptId: transcript.Id,
             ComparedAtUtc: DateTimeOffset.UtcNow,
-            SessionId: SessionIdOf(transcript.CorrelationId),
+            SessionId: CorrelationIdParser.SessionIdOf(transcript.CorrelationId),
             ObservedScore: observedScore,
             DimensionPredictedScore: dimensionPredicted,
             ClusterPredictedScore: clusterPredicted,
@@ -595,18 +595,6 @@ public sealed class TaxonomyComparisonService : BackgroundService
 
         average = null!;
         return false;
-    }
-
-    /// <summary>
-    /// Recovers the session id from a correlation id, which <c>ProxyMiddleware</c> composes as
-    /// <c>"{sessionId}:{turnNumber}"</c>.
-    /// </summary>
-    /// <param name="correlationId">The transcript row's correlation id.</param>
-    /// <returns>The session portion, or the whole id when it carries no turn suffix.</returns>
-    private static string SessionIdOf(string correlationId)
-    {
-        var lastSeparator = correlationId.LastIndexOf(':');
-        return lastSeparator > 0 ? correlationId[..lastSeparator] : correlationId;
     }
 
     /// <summary>Names which taxonomy predicted this observation better, for the per-row log line.</summary>

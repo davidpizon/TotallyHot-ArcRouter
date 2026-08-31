@@ -232,7 +232,7 @@ markup silently opts out of it. See [`DESIGN.md`](DESIGN.md) §4.1.
 .overlay-panel    { animation: overlay-panel-enter    var(--dur-slow)    var(--ease-out-quart); }
 ```
 
-### Row Enter — *Coded and wired on `ConversationCard` (§10) — not confirmed in UI; still Proposed on `TurnCard`*
+### Row Enter — *Coded and wired on `ConversationCard` (§10) — not confirmed in UI; `TurnCard` never got this treatment before the component was orphaned by the Sessions-tab rebuild (`DESIGN.md` §1)*
 
 A new conversation or turn arriving from the live gRPC stream. Rows prepend (newest first), so the
 row moves *down* into place from `-4px`.
@@ -409,8 +409,9 @@ Three rules for using it:
   focusable controls stay in the tab order while invisible. `inert="@(!_open)"` — Blazor emits the
   attribute only when the value is true.
 - **Do not use it for long or repeated lists.** Staying mounted means rendering the collapsed
-  content for every instance. `TurnCard` deliberately keeps `@if` + Disclosure Expand for exactly
-  this reason — see §10.
+  content for every instance. `TurnCard` was built this way — keeping `@if` + Disclosure Expand for
+  exactly this reason — see §10; the component is now orphaned (unreferenced since the Sessions-tab
+  rebuild, `DESIGN.md` §1), but the reasoning still applies to any future repeated-list disclosure.
 
 ### Value Tick — *Proposed*
 
@@ -426,11 +427,13 @@ read the true value throughout.
 .value-tick { animation: value-tick 400ms var(--ease-out-quart); }
 ```
 
-### Disclosure Expand — *Coded and wired (§10) — not confirmed in UI*
+### Disclosure Expand — *CSS ships in `app.css`, but currently unused (§10)*
 
-`TurnCard` expanding to show the routing-decision log. Animate `opacity` and `transform` on the
-revealed content; do **not** animate `height` — the payload blocks are variable-height and
-height animation forces layout on every frame in a WebView.
+`TurnCard` expanded to show the routing-decision log this way — animating `opacity` and `transform`
+on the revealed content, never `height` (the payload blocks are variable-height, and height animation
+forces layout on every frame in a WebView). `TurnCard` is orphaned since the Sessions-tab rebuild
+(`DESIGN.md` §1), so nothing invokes this pattern today; the `.disclosure-enter` keyframe stays in
+`app.css` for whichever future disclosure UI needs the same "animate reveal, not height" rule.
 
 ```css
 @keyframes disclosure-enter {
@@ -472,9 +475,10 @@ reading direction.
 **Cap the index at 8.** A 200-row conversation list must not leave the last row arriving six seconds
 late. After the eighth item everything lands together.
 
-**The stat strip never staggers.** `TurnCard` / `ConversationCard` pack 8 stats into a two-line strip
-designed to be scanned as one unit (`DESIGN.md` §1). Staggering them would defeat the density the
-layout exists to provide.
+**The stat strip never staggers.** `ConversationSummary`'s pinned aggregate strip packs several stats
+into one line designed to be scanned as a unit (`DESIGN.md` §1). Staggering them would defeat the
+density the layout exists to provide. (`TurnCard`'s denser 8-stat strip demonstrated this most
+clearly, but the component is orphaned since the Sessions-tab rebuild — see `DESIGN.md` §1.)
 
 Blazor sets the per-item delay via an inline custom property on the loop index:
 
@@ -580,16 +584,16 @@ accessibility setting forcing `prefers-reduced-motion: reduce` (collapses all du
 | Panel Crossfade on tab switch | `Dashboard.razor` — `@key`-ed wrapper in `<main>` |
 | Overlay Rise | `SettingsModal`, `ProviderEditDialog` |
 | Row Enter + first-mount stagger | `ConversationCard` via `LiveStream._listHasRendered` |
-| Disclosure Expand + causal-order stagger | `TurnCard` routing-decision log |
+| Disclosure Expand + causal-order stagger | `TurnCard` routing-decision log — orphaned since the Sessions-tab rebuild (`DESIGN.md` §1); CSS ships, no live consumer |
 
 ### Not yet implemented
 
 | Item | Why it's deferred |
 |---|---|
 | **Value Tick** (§6) | Needs per-stat previous-value tracking to fire on. The CSS is intentionally *not* in `app.css` — unused rules rot, as `.tab-indicator` did. Add rule and wiring together. |
-| **Row Enter on `TurnCard`** | Turn lists re-render on selection change; entrance animation there needs the same first-mount gate `LiveStream` uses for conversations, or every conversation switch replays it. |
+| **Row Enter on `TurnCard`** | Moot — `TurnCard` is orphaned since the Sessions-tab rebuild (`DESIGN.md` §1) and never got this treatment before being replaced. If `SessionConversationPane`'s chat-bubble turn list ever gets entrance motion, the same first-mount gate `LiveStream` uses for conversations would apply. |
 | **Grid stagger on provider/model cards** (§7) | Straightforward; not yet applied. |
-| **Disclosure Collapse on `TurnCard`** (§6) | Deliberately *not* applied, and not a gap to close. Its expanded block carries the full routing-step list plus the request/response `<pre>` payload summaries, and the live stream renders many turn cards at once; staying mounted to gain a collapse animation would mean rendering every collapsed turn's payload for every card in the list. It keeps `@if` + Disclosure Expand — entrance animates, collapse is instant. Revisit only if the turn list is virtualized. |
+| **Disclosure Collapse on `TurnCard`** (§6) | Moot — `TurnCard` is orphaned since the Sessions-tab rebuild (`DESIGN.md` §1); its routing-decision log and request/response `<pre>` payloads no longer render anywhere. The original reasoning (staying mounted for a collapse animation would mean rendering every collapsed turn's payload across a long list) would still apply if a dense turn list returns. |
 
 ### Notes for future work
 

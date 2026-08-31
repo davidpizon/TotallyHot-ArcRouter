@@ -131,6 +131,92 @@ public sealed class TranscriptDatabase
         MigrateDimBestModelColumn(connection);
         MigrateTaxonomyComparisonRegretColumns(connection);
         MigrateScorerVersionColumn(connection);
+        MigrateSessionIdColumn(connection);
+    }
+
+    /// <summary>
+    /// Adds the <c>session_id</c> column to <c>request_transcripts</c> if it is missing, plus its index,
+    /// and backfills every existing row by parsing <c>correlation_id</c>
+    /// (<see cref="CorrelationIdParser.SessionIdOf"/>) - docs/router/sessions-tab-training-data-plan.md
+    /// Phase 1. Lets the GUI's Sessions tab group transcript rows into sessions without re-parsing
+    /// <c>correlation_id</c> on every read.
+    /// </summary>
+    /// <param name="connection">An open connection to the transcript database.</param>
+    /// <remarks>
+    /// Same additive <c>PRAGMA</c>-check convention as <see cref="MigrateDimBestModelColumn"/>. Unlike
+    /// that migration, this one backfills: <c>session_id</c> is derivable from <c>correlation_id</c> for
+    /// every row that has ever been written (<c>ProxyMiddleware</c> has composed correlation ids as
+    /// <c>"{sessionId}:{turnNumber}"</c> since before this table existed), so leaving existing rows at the
+    /// column's <c>NOT NULL DEFAULT ''</c> would make every pre-migration session invisible to session
+    /// grouping instead of just newly written ones. The backfill runs in C# rather than a single SQL
+    /// statement so it uses the exact same parser new writes do, rather than a second, SQL-only
+    /// reimplementation of the same rule that could drift from it.
+    /// </remarks>
+    private static void MigrateSessionIdColumn(SqliteConnection connection)
+    {
+        bool columnJustAdded;
+        using (var pragma = connection.CreateCommand())
+        {
+            pragma.CommandText = "SELECT COUNT(*) FROM pragma_table_info('request_transcripts') WHERE name = 'session_id';";
+            columnJustAdded = Convert.ToInt64(pragma.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) == 0;
+        }
+
+        if (columnJustAdded)
+        {
+            using var alter = connection.CreateCommand();
+            alter.CommandText = "ALTER TABLE request_transcripts ADD COLUMN session_id TEXT NOT NULL DEFAULT '';";
+            alter.ExecuteNonQuery();
+
+            BackfillSessionIdColumn(connection);
+        }
+
+        using var index = connection.CreateCommand();
+        index.CommandText = """
+            CREATE INDEX IF NOT EXISTS ix_request_transcripts_session_id
+                ON request_transcripts (session_id);
+            """;
+        index.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Fills in <c>session_id</c> for every row left at the column's default empty string by
+    /// <see cref="MigrateSessionIdColumn"/>'s <c>ALTER TABLE</c>, parsed from each row's own
+    /// <c>correlation_id</c> via <see cref="CorrelationIdParser.SessionIdOf"/>.
+    /// </summary>
+    /// <param name="connection">An open connection to the transcript database, mid-migration.</param>
+    private static void BackfillSessionIdColumn(SqliteConnection connection)
+    {
+        List<(long Id, string CorrelationId)> rows = [];
+        using (var select = connection.CreateCommand())
+        {
+            select.CommandText = "SELECT id, correlation_id FROM request_transcripts WHERE session_id = '';";
+            using var reader = select.ExecuteReader();
+            while (reader.Read())
+            {
+                rows.Add((reader.GetInt64(0), reader.GetString(1)));
+            }
+        }
+
+        if (rows.Count == 0)
+        {
+            return;
+        }
+
+        using var transaction = connection.BeginTransaction();
+        using var update = connection.CreateCommand();
+        update.Transaction = transaction;
+        update.CommandText = "UPDATE request_transcripts SET session_id = $sessionId WHERE id = $id;";
+        var sessionIdParam = update.Parameters.Add("$sessionId", SqliteType.Text);
+        var idParam = update.Parameters.Add("$id", SqliteType.Integer);
+
+        foreach (var (id, correlationId) in rows)
+        {
+            sessionIdParam.Value = CorrelationIdParser.SessionIdOf(correlationId);
+            idParam.Value = id;
+            update.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
     }
 
     /// <summary>

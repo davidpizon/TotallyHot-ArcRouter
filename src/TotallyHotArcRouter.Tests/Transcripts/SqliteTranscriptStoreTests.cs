@@ -275,6 +275,127 @@ public class SqliteTranscriptStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task InsertAsync_WritesSessionIdParsedFromCorrelationId()
+    {
+        var (database, store) = CreateEnabledStore();
+        await store.InsertAsync(MakeRecord("sess-A:2"), TestContext.Current.CancellationToken);
+
+        Assert.Equal("sess-A", ReadSessionId(database, "sess-A:2"));
+    }
+
+    [Fact]
+    public async Task InsertAsync_CorrelationIdWithNoTurnSuffix_SessionIdIsTheWholeCorrelationId()
+    {
+        var (database, store) = CreateEnabledStore();
+        await store.InsertAsync(MakeRecord("standalone-corr"), TestContext.Current.CancellationToken);
+
+        Assert.Equal("standalone-corr", ReadSessionId(database, "standalone-corr"));
+    }
+
+    [Fact]
+    public async Task ListSessionsAsync_CaptureDisabled_ReturnsEmpty()
+    {
+        var database = CreateDatabase();
+        var store = new SqliteTranscriptStore(database, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = false }));
+
+        var rows = await store.ListSessionsAsync(10, TestContext.Current.CancellationToken);
+
+        Assert.Empty(rows);
+    }
+
+    [Fact]
+    public async Task ListSessionsAsync_ReturnsRowsNewestFirstWithSessionIdAndTrainingLinkage()
+    {
+        var (_, store) = CreateEnabledStore();
+        await store.InsertAsync(MakeRecord("sess-B:1") with { MemoryEntryId = null }, TestContext.Current.CancellationToken);
+        var secondId = await store.InsertAsync(MakeRecord("sess-B:2") with { MemoryEntryId = 42 }, TestContext.Current.CancellationToken);
+
+        var rows = await store.ListSessionsAsync(10, TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, rows.Count);
+        // Newest first: the second insert (id == secondId) comes back before the first.
+        Assert.Equal(secondId, rows[0].Id);
+        Assert.Equal("sess-B", rows[0].SessionId);
+        Assert.Equal("sess-B:2", rows[0].CorrelationId);
+        Assert.Equal(42, rows[0].MemoryEntryId);
+        Assert.Null(rows[1].MemoryEntryId);
+    }
+
+    [Fact]
+    public async Task ListSessionsAsync_RespectsLimit()
+    {
+        var (_, store) = CreateEnabledStore();
+        await store.InsertAsync(MakeRecord("sess-C:1"), TestContext.Current.CancellationToken);
+        await store.InsertAsync(MakeRecord("sess-C:2"), TestContext.Current.CancellationToken);
+        await store.InsertAsync(MakeRecord("sess-C:3"), TestContext.Current.CancellationToken);
+
+        var rows = await store.ListSessionsAsync(2, TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, rows.Count);
+    }
+
+    [Fact]
+    public void EnsureCreated_ExistingDatabaseMissingSessionIdColumn_BackfillsFromCorrelationId()
+    {
+        var database = CreateDatabase();
+        Directory.CreateDirectory(_tempDirectory);
+
+        // Simulate a database created by a pre-Phase-1 build: request_transcripts exists but has no
+        // session_id column at all, and already carries rows with turn-suffixed correlation ids.
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_dbPath}"))
+        {
+            connection.Open();
+            using var create = connection.CreateCommand();
+            create.CommandText = """
+                CREATE TABLE request_transcripts (
+                    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                    correlation_id     TEXT    NOT NULL,
+                    created_at_utc     TEXT    NOT NULL,
+                    requested_model    TEXT    NOT NULL,
+                    routed_model       TEXT    NOT NULL,
+                    dimension          TEXT    NULL,
+                    difficulty         TEXT    NULL,
+                    language           TEXT    NULL,
+                    is_utility         INTEGER NOT NULL,
+                    prompt_text        TEXT    NULL,
+                    response_text      TEXT    NULL,
+                    score              REAL    NULL,
+                    cost               REAL    NULL,
+                    is_exploratory     INTEGER NOT NULL,
+                    propensity         REAL    NOT NULL,
+                    input_tokens       INTEGER NULL,
+                    output_tokens      INTEGER NULL,
+                    memory_entry_id    INTEGER NULL,
+                    dim_best_model     TEXT    NULL
+                );
+                """;
+            create.ExecuteNonQuery();
+
+            using var insert = connection.CreateCommand();
+            insert.CommandText = """
+                INSERT INTO request_transcripts (
+                    correlation_id, created_at_utc, requested_model, routed_model, is_utility,
+                    is_exploratory, propensity)
+                VALUES ('pre-migration-sess:3', '2026-01-01T00:00:00Z', 'gpt-5.4', 'kimi-k2.5', 0, 0, 0.1);
+                """;
+            insert.ExecuteNonQuery();
+        }
+
+        database.EnsureCreated();
+
+        Assert.Equal("pre-migration-sess", ReadSessionId(database, "pre-migration-sess:3"));
+    }
+
+    private static string ReadSessionId(TranscriptDatabase database, string correlationId)
+    {
+        using var connection = database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT session_id FROM request_transcripts WHERE correlation_id = $correlationId;";
+        command.Parameters.AddWithValue("$correlationId", correlationId);
+        return (string)command.ExecuteScalar()!;
+    }
+
+    [Fact]
     public async Task DeleteAllAsync_RemovesEveryRow()
     {
         var (_, store) = CreateEnabledStore();

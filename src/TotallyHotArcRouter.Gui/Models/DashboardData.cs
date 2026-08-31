@@ -99,6 +99,13 @@ public sealed record ConversationTurn(
 /// How many of <paramref name="Turns"/> had no cost at all, and so contributed nothing to
 /// <paramref name="TotalCost"/> - a non-zero value means the total is a floor, not a complete sum (§5.6).
 /// </param>
+/// <param name="IsUsedForTraining">
+/// Whether any turn's persisted transcript was folded into the live-learning corpus
+/// (docs/router/sessions-tab-training-data-plan.md Phase 2) - the Sessions tab's "used for live training"
+/// badge. Always <see langword="false"/> for a session sourced only from the live telemetry stream
+/// (<see cref="TotallyHot.ArcRouter.Gui.Services.LiveConversationMapper"/>), since the linkage this flag
+/// reports is only known once a transcript has been persisted and its embedding backfilled.
+/// </param>
 public sealed record Conversation(
     string Id,
     string Title,
@@ -109,7 +116,8 @@ public sealed record Conversation(
     int TotalCompletionTokens,
     bool HasFallbackTurns,
     IReadOnlyList<ConversationTurn> Turns,
-    int UnpricedTurns = 0);
+    int UnpricedTurns = 0,
+    bool IsUsedForTraining = false);
 
 /// <summary>
 /// Hard-coded mock data for the dashboard. The dashboard is not yet wired up to the live TotallyHot.ArcRouter

@@ -481,6 +481,17 @@ the voter abstains through the same clean "no usable data" path `LogRegVoter` an
 already used. `CosineSimilarity` keeps its throw: reaching it with mismatched lengths is a genuine
 programming error, and softening it to a silent zero would hide the next such bug.
 
+## GUI visibility into which sessions were used for training
+
+[`sessions-tab-training-data-plan.md`](sessions-tab-training-data-plan.md) (shipped) surfaces,
+in the GUI's Sessions tab, exactly which persisted `request_transcripts` rows were folded into
+`memory_entries` — the same linkage `EmbeddingBackfillService`/`SqliteTranscriptStore.LinkMemoryEntryAsync`
+already stamp via `request_transcripts.memory_entry_id`. This is a read-only visibility feature; it adds
+no new write path to `memory_entries` and doesn't change anything documented above. Noted here because,
+like the embedding-model-provenance section above, this plan owns `memory_entries`'s consumers, and a
+`memory_entry_id IS NOT NULL` row is the literal definition of "used for live training" that plan's GUI
+badge relies on.
+
 ## Deliberately out of scope
 
 - **Replacing epsilon-greedy with a contextual bandit.** LinUCB/LinTS are Phase N comparison baselines;

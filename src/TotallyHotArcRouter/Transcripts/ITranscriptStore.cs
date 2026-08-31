@@ -165,7 +165,64 @@ public interface ITranscriptStore
     /// "no estimate" instead of pricing an invented token count.
     /// </remarks>
     Task<IReadOnlyDictionary<string, ModelTokenAverage>> LoadObservedTokenAveragesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Loads up to <paramref name="limit"/> of the most recent transcript rows, newest first, for the
+    /// GUI Sessions tab (docs/router/sessions-tab-training-data-plan.md Phase 1). Each row carries the
+    /// <c>session_id</c> parsed from its correlation id at write time
+    /// (<see cref="CorrelationIdParser.SessionIdOf"/>), so a caller can group turns into sessions the same
+    /// way <c>ConversationAggregator</c> groups live telemetry, and its <c>memory_entry_id</c>, so the
+    /// caller can flag which sessions were actually folded into the live-learning corpus. Returns an empty
+    /// list when transcript capture is disabled.
+    /// </summary>
+    /// <param name="limit">The maximum number of rows to return. Must be positive.</param>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    /// <returns>Rows ordered by <c>id DESC</c> (most recent first), up to <paramref name="limit"/> in size.</returns>
+    /// <remarks>
+    /// Default-implemented to return an empty list, unlike every other member of this interface, so the
+    /// eight <see cref="ITranscriptStore"/> test fakes that predate this method (none of which exercise
+    /// session listing) don't all need a matching stub added. Only <see cref="SqliteTranscriptStore"/>
+    /// overrides it with a real implementation; a future test that specifically exercises session listing
+    /// should override it too rather than relying on this default.
+    /// </remarks>
+    Task<IReadOnlyList<SessionTranscript>> ListSessionsAsync(int limit, CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlyList<SessionTranscript>>(Array.Empty<SessionTranscript>());
 }
+
+/// <summary>
+/// One transcript row as read for the GUI Sessions tab
+/// (docs/router/sessions-tab-training-data-plan.md Phase 1) - a subset of <see cref="TranscriptRecord"/>'s
+/// columns, keyed additionally by the session id parsed out of <see cref="CorrelationId"/> so turns can be
+/// grouped into sessions without a second parse in every caller.
+/// </summary>
+/// <param name="Id">The store-assigned row id.</param>
+/// <param name="SessionId">The session portion of <paramref name="CorrelationId"/> - see <see cref="CorrelationIdParser.SessionIdOf"/>.</param>
+/// <param name="CorrelationId">The full per-request correlation id, <c>"{SessionId}:{turnNumber}"</c>.</param>
+/// <param name="CreatedAtUtc">When this row was written, in UTC.</param>
+/// <param name="RequestedModel">The client's literal requested model name.</param>
+/// <param name="RoutedModel">The model that actually served the request.</param>
+/// <param name="PromptText">The captured prompt text, or <see langword="null"/> when unavailable.</param>
+/// <param name="ResponseText">The captured response text, or <see langword="null"/> when unavailable.</param>
+/// <param name="Cost">The estimated dollar cost, or <see langword="null"/> when unknown.</param>
+/// <param name="InputTokens">The prompt token count, or <see langword="null"/> when unknown.</param>
+/// <param name="OutputTokens">The completion token count, or <see langword="null"/> when unknown.</param>
+/// <param name="MemoryEntryId">
+/// The linked <c>memory_entries</c> row id, or <see langword="null"/> if this transcript was never folded
+/// into the live-learning corpus - the literal "used for live training" signal the Sessions tab surfaces.
+/// </param>
+public sealed record SessionTranscript(
+    long Id,
+    string SessionId,
+    string CorrelationId,
+    DateTimeOffset CreatedAtUtc,
+    string RequestedModel,
+    string RoutedModel,
+    string? PromptText,
+    string? ResponseText,
+    decimal? Cost,
+    int? InputTokens,
+    int? OutputTokens,
+    long? MemoryEntryId);
 
 /// <summary>
 /// One model's observed mean token usage across captured transcripts - the per-model estimator behind

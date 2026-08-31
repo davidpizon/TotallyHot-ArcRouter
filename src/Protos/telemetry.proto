@@ -25,9 +25,49 @@ service TelemetryService {
   // Streams every routing telemetry event and log line to a connected client for the lifetime of the
   // call - the gRPC equivalent of today's push-only SignalR hub connection.
   rpc StreamEvents (StreamEventsRequest) returns (stream TelemetryEvent);
+
+  // Returns the most recent persisted request_transcripts rows for the GUI's Sessions tab
+  // (docs/router/sessions-tab-training-data-plan.md Phase 1), so a session survives a GUI restart instead
+  // of existing only in the live StreamEvents buffer. A unary RPC on this push-only service rather than a
+  // new admin service: the GUI already holds an open TelemetryServiceClient channel for StreamEvents, and
+  // this read needs no new channel, DI wiring, or :5002 admin-endpoint registration to reuse it.
+  rpc ListPersistedSessions (ListPersistedSessionsRequest) returns (ListPersistedSessionsResponse);
 }
 
 message StreamEventsRequest {}
+
+message ListPersistedSessionsRequest {
+  // The maximum number of transcript rows to return, most recent first. The caller groups rows into
+  // sessions by session_id itself - a session's turns are not necessarily contiguous within this cap when
+  // interleaved with other sessions' turns, so grouping happens after the fact rather than being assumed
+  // from row order.
+  int32 limit = 1;
+}
+
+// One request_transcripts row, per SessionTranscript (TotallyHot.ArcRouter.Transcripts).
+message PersistedTranscript {
+  string session_id = 1;
+  string correlation_id = 2;
+  google.protobuf.Timestamp created_at_utc = 3;
+  string requested_model = 4;
+  string routed_model = 5;
+  optional string prompt_text = 6;
+  optional string response_text = 7;
+  // decimal-as-string, same convention and rationale as RoutingTelemetryEvent.estimated_cost_usd above.
+  optional string cost_usd = 8;
+  optional int32 input_tokens = 9;
+  optional int32 output_tokens = 10;
+  // Set only when this transcript's embedding was folded into memory_entries - the literal "used for live
+  // training" signal the Sessions tab badges. Absent, not zero, when it was not.
+  optional int64 memory_entry_id = 11;
+}
+
+message ListPersistedSessionsResponse {
+  // TranscriptOptions.Enabled, read at call time. False means transcripts is empty because capture is off,
+  // not because no traffic has been persisted yet - the GUI needs to render these two states differently.
+  bool transcript_capture_enabled = 1;
+  repeated PersistedTranscript transcripts = 2;
+}
 
 // The Governance > Price Sources panel's management plane: read the price feeds' status, switch one on or
 // off (docs/router/model-price-catalog.md D6), and trigger an immediate pull.
