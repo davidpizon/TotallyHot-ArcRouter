@@ -1737,6 +1737,16 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             ? TextTruncator.Truncate(responseText)
             : null;
 
+        // The raw-body log above ([INTERCEPTOR] Intercepted agent response message) dumps the response
+        // exactly as it crossed the wire - for a streamed completion that's dozens of single-token SSE
+        // "delta" chunks on one log line, so the answer text itself is never a contiguous, searchable
+        // substring (e.g. "The application's name is Totally Hot Arc Router." appears only as separate
+        // " The", " application", "'s", " name", ... tokens). Logging the assembled text extracted above
+        // for telemetry gives the actual answer as one readable, searchable line.
+        _logger.LogDebug(
+            "[INTERCEPTOR] Assembled LLM response text: {ResponseText}",
+            responseSummary is null ? "(none found)" : TruncateForLog(SanitizeForLog(responseText)));
+
         // A stable id shared by this telemetry event and any off-path quality signal derived from the same
         // response, so a dashboard can join the two.
         var correlationId = FormattableString.Invariant($"{sessionId}:{turnNumber}");

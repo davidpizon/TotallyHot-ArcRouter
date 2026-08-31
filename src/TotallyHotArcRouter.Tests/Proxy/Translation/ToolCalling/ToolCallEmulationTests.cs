@@ -428,6 +428,107 @@ public class ToolCallEmulationTests
         Assert.Contains(messages, m => m.Contains("injection budget", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void AnEightThousandTokenWindow_ProducesTheSameBudgetAsTheFixedFallback()
+    {
+        // The scaling fraction was chosen so an 8k-context model - the case the original fixed 16 KiB
+        // constant was reasoned about - gets the identical budget it always did; the change is only in
+        // what happens above and below that point.
+        var (messages, logger) = CapturingLogger();
+
+        var rewritten = ToolCallEmulationRewriter.Rewrite(
+            Encoding.UTF8.GetBytes(OversizedToolsetRequestBody()),
+            ToolCallDialectRegistry.Emulated,
+            logger,
+            new ModelContextWindow("lmstudio", "tiny", ContextLength: 8192));
+
+        var content = Messages(JsonDocument.Parse(rewritten))[0].GetProperty("content").GetString()!;
+        Assert.DoesNotContain("tool_39", content, StringComparison.Ordinal);
+        Assert.Contains(messages, m => m.Contains(
+            $"{ToolCallInstructionInjector.MaxToolSchemaChars}-character injection budget", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ALargeProbedContextWindow_RaisesTheInjectionBudget_AboveTheFixedFallback()
+    {
+        // A model whose probed window is far larger than 8k was previously having tools dropped at the same
+        // fixed 16 KiB every small local model was capped at. Scaling to the window fixes that.
+        var (messages, logger) = CapturingLogger();
+
+        var rewritten = ToolCallEmulationRewriter.Rewrite(
+            Encoding.UTF8.GetBytes(OversizedToolsetRequestBody()),
+            ToolCallDialectRegistry.Emulated,
+            logger,
+            new ModelContextWindow("lmstudio", "tiny", ContextLength: 1_000_000));
+
+        var content = Messages(JsonDocument.Parse(rewritten))[0].GetProperty("content").GetString()!;
+        Assert.Contains("tool_0", content, StringComparison.Ordinal);
+
+        // Clamped at the sanity ceiling rather than scaling without bound from a million-token window.
+        Assert.Contains(messages, m => m.Contains("131072-character injection budget", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ATinyProbedContextWindow_LowersTheInjectionBudget_BelowTheFixedFallback()
+    {
+        // The other direction matters just as much: 16 KiB can be most or all of a genuinely small window,
+        // which would crowd out the conversation the tools exist to serve.
+        var (messages, logger) = CapturingLogger();
+
+        var rewritten = ToolCallEmulationRewriter.Rewrite(
+            Encoding.UTF8.GetBytes(OversizedToolsetRequestBody()),
+            ToolCallDialectRegistry.Emulated,
+            logger,
+            new ModelContextWindow("lmstudio", "tiny", ContextLength: 512));
+
+        var content = Messages(JsonDocument.Parse(rewritten))[0].GetProperty("content").GetString()!;
+        Assert.DoesNotContain("tool_1", content, StringComparison.Ordinal);
+
+        // Clamped at the floor rather than shrinking to a budget too small to describe even one tool.
+        Assert.Contains(messages, m => m.Contains("4096-character injection budget", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// 40 tools with 4 KiB descriptions each - about 165 KB serialized, comfortably over every budget these
+    /// tests probe (the 4 KiB floor, the 16 KiB fallback, and the 128 KiB ceiling alike), so each test's
+    /// warning and included/excluded tools reflect the budget actually applied rather than everything fitting.
+    /// </summary>
+    private static string OversizedToolsetRequestBody()
+    {
+        var padding = new string('x', 4096);
+        var tools = JsonSerializer.Serialize(Enumerable.Range(0, 40).Select(i => new
+        {
+            type = "function",
+            function = new { name = $"tool_{i}", description = padding },
+        }));
+
+        return $$"""{"model":"tiny","messages":[{"role":"user","content":"hi"}],"tools":{{tools}}}""";
+    }
+
+    [Fact]
+    public void TheFactory_WiresTheProbedContextWindow_IntoTheEmulatingTranslatorsBudget()
+    {
+        // End-to-end through the same construction path production DI uses: TryCreate must pass the store
+        // down so the translator actually looks the window up, not just that Rewrite honors one when handed
+        // it directly (covered above).
+        var store = Emulated().SeedContextWindow("lmstudio", "tiny", contextLength: 1_000_000);
+        var factory = new ToolCallNormalizerFactory(store, contextWindowStore: store);
+        var translator = (ToolCallEmulatingTranslator)factory.TryCreate(Route(), requestCarriesTools: true)!;
+
+        // tool_20 fits inside the ~128 KiB ceiling a million-token window scales to, but not inside the
+        // fixed 16 KiB fallback (~3 tools' worth of these 4 KiB descriptions) - so its presence proves the
+        // factory actually threaded the store through, not just that Rewrite honors a window when handed one
+        // directly (covered above).
+        var withWindow = Messages(JsonDocument.Parse(
+            translator.TranslateRequest(Encoding.UTF8.GetBytes(OversizedToolsetRequestBody()))))[0]
+            .GetProperty("content").GetString()!;
+        Assert.Contains("tool_20", withWindow, StringComparison.Ordinal);
+
+        var withoutWindow = Messages(Rewrite(OversizedToolsetRequestBody()))[0]
+            .GetProperty("content").GetString()!;
+        Assert.DoesNotContain("tool_20", withoutWindow, StringComparison.Ordinal);
+    }
+
     // ----- Selection, and the classification that must not eat itself -----
 
     [Fact]
