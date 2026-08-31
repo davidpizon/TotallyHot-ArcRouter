@@ -332,6 +332,102 @@ public class ProxyMiddlewareFallbackTests
     }
 
     [Fact]
+    public async Task InvokeAsync_PrimaryAnthropic400EmbeddedError_ForwardsRealMessage()
+    {
+        // Anthropic's native error shape ({"type":"error","error":{"type":...,"message":...}}) has none of
+        // the fields TranslateResponse expects (id/model/content/stop_reason), so running it through the
+        // translator would null-coalesce those into a bogus empty completion (model:"", content:"",
+        // finish_reason:"stop") that silently discards the real rejection reason - see
+        // AnthropicPayloadTranslator.TryExtractEmbeddedError's doc comment. Same provider on both sides so
+        // this can't fail over either way; the client must still see the actual Anthropic error message.
+        var backupCalled = false;
+        var resolver = ModelRouteResolverTestFactory.CreateWithModels(
+            ("primary", "anthropic", "claude-sonnet-4-6", $"https://{PrimaryHost}"),
+            ("backup", "anthropic", "claude-opus-4-7", $"https://{PrimaryHost}"));
+
+        var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["anthropic"] = new AnthropicPayloadTranslator(),
+        };
+
+        var handler = new RoutingHandlerStub(request =>
+        {
+            var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            if (body.Contains("claude-opus-4-7", StringComparison.Ordinal))
+            {
+                backupCalled = true;
+                return Ok("should-not-be-served");
+            }
+
+            return AnthropicEmbeddedErrorResponse();
+        });
+
+        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver);
+        var middleware = new ProxyMiddleware(
+            NullLogger<ProxyMiddleware>.Instance,
+            interceptor,
+            new HttpClient(handler),
+            translators: translators);
+
+        var context = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
+
+        Assert.Equal(400, context.Response.StatusCode);
+        Assert.False(backupCalled);
+
+        using var responseJson = JsonDocument.Parse(await ReadBodyAsync(context));
+        Assert.Equal(
+            "messages: at least one message is required",
+            responseJson.RootElement.GetProperty("error").GetProperty("message").GetString());
+    }
+
+    [Fact]
+    public async Task InvokeAsync_PrimaryAnthropic400WithoutEmbeddedError_ForwardsRawBodyUnchanged()
+    {
+        // An Anthropic 400 whose body has no recognizable {"type":"error","error":{...}} shape
+        // (TryExtractEmbeddedError returns false) - the raw upstream body must reach the client unchanged
+        // rather than being mangled into a bogus empty completion by TranslateResponse.
+        var backupCalled = false;
+        var resolver = ModelRouteResolverTestFactory.CreateWithModels(
+            ("primary", "anthropic", "claude-sonnet-4-6", $"https://{PrimaryHost}"),
+            ("backup", "anthropic", "claude-opus-4-7", $"https://{PrimaryHost}"));
+
+        var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["anthropic"] = new AnthropicPayloadTranslator(),
+        };
+
+        const string rawBody = """{"reason":"unrecognized_shape"}""";
+
+        var handler = new RoutingHandlerStub(request =>
+        {
+            var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            if (body.Contains("claude-opus-4-7", StringComparison.Ordinal))
+            {
+                backupCalled = true;
+                return Ok("should-not-be-served");
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.BadRequest)
+            {
+                Content = new StringContent(rawBody, Encoding.UTF8, "application/json"),
+            };
+        });
+
+        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver);
+        var middleware = new ProxyMiddleware(
+            NullLogger<ProxyMiddleware>.Instance,
+            interceptor,
+            new HttpClient(handler),
+            translators: translators);
+
+        var context = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
+
+        Assert.Equal(400, context.Response.StatusCode);
+        Assert.False(backupCalled);
+        Assert.Equal(rawBody, await ReadBodyAsync(context));
+    }
+
+    [Fact]
     public async Task InvokeAsync_Primary405_DifferentProviderBackup_FailsOver()
     {
         // A 405 on a path ArcRouter itself constructs (the client never chooses the method) is treated like
@@ -906,6 +1002,14 @@ public class ProxyMiddlewareFallbackTests
     {
         Content = new StringContent(
             """{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"UNAUTHENTICATED"}}""",
+            Encoding.UTF8,
+            "application/json"),
+    };
+
+    private static HttpResponseMessage AnthropicEmbeddedErrorResponse() => new(HttpStatusCode.BadRequest)
+    {
+        Content = new StringContent(
+            """{"type":"error","error":{"type":"invalid_request_error","message":"messages: at least one message is required"}}""",
             Encoding.UTF8,
             "application/json"),
     };

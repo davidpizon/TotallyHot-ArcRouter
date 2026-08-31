@@ -767,17 +767,30 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // the client; whatever this finds also replaces the translator's success-shaped
             // TranslateResponse/stream translation below, which would otherwise mangle or (for the SSE
             // shape) silently swallow the error text instead of surfacing it.
+            // Anthropic 400s carry the same problem as Gemini's embedded-error case below (minus the
+            // disguised-401 auth wrinkle): its native error shape (`{"type":"error","error":{...}}`) has none
+            // of the fields TranslateResponse expects, so running it through the translator would mangle it
+            // into a bogus empty completion instead of surfacing the real rejection reason - see
+            // AnthropicPayloadTranslator.TryExtractEmbeddedError's own doc comment.
             byte[]? preReadErrorBody = null;
-            string? geminiEmbeddedErrorMessage = null;
+            string? embeddedErrorMessage = null;
             var isGeminiAuthFailure = false;
             if (statusCode == StatusCodes.Status400BadRequest && translator is GeminiPayloadTranslator)
             {
                 preReadErrorBody = await responseMessage.Content.ReadAsByteArrayAsync(context.RequestAborted);
                 if (GeminiPayloadTranslator.TryExtractEmbeddedError(preReadErrorBody, out var embeddedStatus, out var embeddedMessage))
                 {
-                    geminiEmbeddedErrorMessage = embeddedMessage;
+                    embeddedErrorMessage = embeddedMessage;
                     isGeminiAuthFailure = string.Equals(embeddedStatus, "UNAUTHENTICATED", StringComparison.Ordinal) ||
                         embeddedMessage.Contains("API key not valid", StringComparison.OrdinalIgnoreCase);
+                }
+            }
+            else if (statusCode == StatusCodes.Status400BadRequest && translator is AnthropicPayloadTranslator)
+            {
+                preReadErrorBody = await responseMessage.Content.ReadAsByteArrayAsync(context.RequestAborted);
+                if (AnthropicPayloadTranslator.TryExtractEmbeddedError(preReadErrorBody, out _, out var embeddedMessage))
+                {
+                    embeddedErrorMessage = embeddedMessage;
                 }
             }
 
@@ -919,23 +932,23 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 byte[] capturedResponseBytes;
                 byte[]? nativeResponseBytes = null;
                 IncrementalUsageScanner? tailScanner = null;
-                if (preReadErrorBody is not null && geminiEmbeddedErrorMessage is not null)
+                if (preReadErrorBody is not null && embeddedErrorMessage is not null)
                 {
-                    // A Gemini 400 that reached here (either it wasn't the UNAUTHENTICATED case, or it was
-                    // but no differing-provider candidate remained to fail over to) whose body actually
-                    // contained an embedded error object (TryExtractEmbeddedError succeeded). The body was
-                    // already read above to make that determination; running it through TranslateResponse/the
-                    // stream translator now would mangle it into a bogus empty completion or (for the SSE
-                    // shape) silently swallow it - see TryExtractEmbeddedError's caller - so a clean
-                    // OpenAI-shaped error is written directly instead, preserving whatever message Gemini
-                    // actually sent.
+                    // A Gemini or Anthropic 400 that reached here (for Gemini: either it wasn't the
+                    // UNAUTHENTICATED case, or it was but no differing-provider candidate remained to fail
+                    // over to) whose body actually contained an embedded error object (TryExtractEmbeddedError
+                    // succeeded). The body was already read above to make that determination; running it
+                    // through TranslateResponse/the stream translator now would mangle it into a bogus empty
+                    // completion or (for the SSE shape) silently swallow it - see TryExtractEmbeddedError's
+                    // caller - so a clean OpenAI-shaped error is written directly instead, preserving whatever
+                    // message the provider actually sent.
                     context.Response.ContentType = "application/json";
                     context.Response.Headers.Remove("Content-Length");
                     var errorPayload = JsonSerializer.SerializeToUtf8Bytes(new
                     {
                         error = new
                         {
-                            message = geminiEmbeddedErrorMessage,
+                            message = embeddedErrorMessage,
                             type = "invalid_request_error",
                             param = (string?)null,
                             code = statusCode.ToString(),
@@ -946,7 +959,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 }
                 else if (preReadErrorBody is not null)
                 {
-                    // A Gemini 400 whose body didn't contain a recognizable embedded error object
+                    // A Gemini or Anthropic 400 whose body didn't contain a recognizable embedded error object
                     // (TryExtractEmbeddedError returned false) - per its contract, forward the raw body
                     // unchanged rather than losing it behind a synthetic generic message.
                     context.Response.Headers.Remove("Content-Length");

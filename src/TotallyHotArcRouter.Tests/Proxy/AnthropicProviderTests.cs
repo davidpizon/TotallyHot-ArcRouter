@@ -388,6 +388,33 @@ public class AnthropicProviderTests
     }
 
     [Fact]
+    public void TryExtractEmbeddedError_AnthropicErrorShape_ExtractsTypeAndMessage()
+    {
+        const string anthropicError = """
+            {"type":"error","error":{"type":"invalid_request_error","message":"messages: at least one message is required"}}
+            """;
+
+        var extracted = AnthropicPayloadTranslator.TryExtractEmbeddedError(
+            Encoding.UTF8.GetBytes(anthropicError), out var errorType, out var message);
+
+        Assert.True(extracted);
+        Assert.Equal("invalid_request_error", errorType);
+        Assert.Equal("messages: at least one message is required", message);
+    }
+
+    [Theory]
+    [InlineData("""{"reason":"unrecognized_shape"}""")]
+    [InlineData("""{"type":"error","error":{"type":"invalid_request_error","message":""}}""")]
+    [InlineData("not json")]
+    public void TryExtractEmbeddedError_NotAnAnthropicErrorShape_ReturnsFalse(string body)
+    {
+        var extracted = AnthropicPayloadTranslator.TryExtractEmbeddedError(
+            Encoding.UTF8.GetBytes(body), out _, out _);
+
+        Assert.False(extracted);
+    }
+
+    [Fact]
     public async Task Streaming_UsageWithCacheTokens_EnrichesTerminalChunkUsage()
     {
         const string anthropicSse =
