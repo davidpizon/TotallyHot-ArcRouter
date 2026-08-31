@@ -330,6 +330,17 @@ namespace TotallyHot.ArcRouter.Proxy
             // auto-select/unresolved-model paths below), so embedding-keyed memory keeps accumulating
             // regardless of which IRoutingPolicy is configured.
             var taskText = RequestTextExtractor.ExtractNewestUserMessage(jsonObject);
+
+            // The raw-body log above ([INTERCEPTOR] Intercepted agent request message) truncates at
+            // MaxLoggedBodyLength from the start of the body - for an agentic client like GitHub Copilot
+            // whose system prompt (tool descriptions, IDE context) routinely exceeds that cap on its own,
+            // the actual user question never survives the truncation. Logging the already-extracted newest
+            // user message as its own line guarantees it appears regardless of how large the surrounding
+            // request is.
+            _logger.LogDebug(
+                "[INTERCEPTOR] Newest user message: {UserMessage}",
+                taskText is null ? "(none found)" : TruncateForLog(SanitizeForLog(taskText)));
+
             var embedding = await TryComputeEmbeddingAsync(taskText, cancellationToken).ConfigureAwait(false);
             var taskEmbedding = embedding?.Vector;
 
