@@ -22,6 +22,7 @@ public sealed class ToolCallNormalizerFactory
 {
     private readonly IToolCallCapabilityStore? _capabilityStore;
     private readonly ILogger<ToolCallNormalizerFactory> _logger;
+    private readonly IModelContextWindowStore? _contextWindowStore;
 
     /// <summary>Initializes a new instance of the <see cref="ToolCallNormalizerFactory"/> class.</summary>
     /// <param name="capabilityStore">
@@ -31,12 +32,19 @@ public sealed class ToolCallNormalizerFactory
     /// behavior as a first request against a never-seen model, minus the persistence.
     /// </param>
     /// <param name="logger">Logger passed to each per-request translator, which uses it for the fail-open warnings.</param>
+    /// <param name="contextWindowStore">
+    /// The store to read probed context windows from, passed to each rewriting translator so its tool-schema
+    /// injection budget can scale to the model's actual window instead of the fixed fallback.
+    /// <see langword="null"/> (direct construction outside DI) keeps every translator on the fallback budget.
+    /// </param>
     public ToolCallNormalizerFactory(
         IToolCallCapabilityStore? capabilityStore = null,
-        ILogger<ToolCallNormalizerFactory>? logger = null)
+        ILogger<ToolCallNormalizerFactory>? logger = null,
+        IModelContextWindowStore? contextWindowStore = null)
     {
         _capabilityStore = capabilityStore;
         _logger = logger ?? NullLogger<ToolCallNormalizerFactory>.Instance;
+        _contextWindowStore = contextWindowStore;
     }
 
     /// <summary>
@@ -107,7 +115,7 @@ public sealed class ToolCallNormalizerFactory
                 IsEmulating: true);
 
             return new ConstrainedToolCallTranslator(
-                constrainedPlan, ToolCallDialectRegistry.Constrained, _capabilityStore, _logger);
+                constrainedPlan, ToolCallDialectRegistry.Constrained, _capabilityStore, _logger, _contextWindowStore);
         }
 
         // Emulation is checked before rule 1, because its gate is a different question. Rule 1 asks whether
@@ -148,7 +156,7 @@ public sealed class ToolCallNormalizerFactory
                 IsObserving: true,
                 IsEmulating: true);
 
-            return new ToolCallEmulatingTranslator(emulatedPlan, known, _capabilityStore, _logger);
+            return new ToolCallEmulatingTranslator(emulatedPlan, known, _capabilityStore, _logger, _contextWindowStore);
         }
 
         if (!requestCarriesTools)

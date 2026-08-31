@@ -36,8 +36,12 @@ internal static class ConstrainedToolCallRewriter
     /// <param name="openAiShapedBody">The request body as the client sent it (with <c>model</c> already rewritten).</param>
     /// <param name="dialect">The constrained dialect, supplying the payload key names history is re-rendered with.</param>
     /// <param name="logger">Logger for the schema-budget warning.</param>
+    /// <param name="contextWindow">
+    /// The model's probed context window, if known, forwarded to <see cref="ToolCallInstructionInjector.Inject"/>
+    /// so the schema budget scales to it instead of the fixed fallback.
+    /// </param>
     /// <returns>The rewritten body, or the original bytes when no rewrite was safe.</returns>
-    public static byte[] Rewrite(byte[] openAiShapedBody, ToolCallDialect dialect, ILogger logger)
+    public static byte[] Rewrite(byte[] openAiShapedBody, ToolCallDialect dialect, ILogger logger, ModelContextWindow? contextWindow = null)
     {
         ArgumentNullException.ThrowIfNull(openAiShapedBody);
         ArgumentNullException.ThrowIfNull(dialect);
@@ -88,7 +92,7 @@ internal static class ConstrainedToolCallRewriter
             // impossible, while the prompt is the only thing that tells the model the tools exist at all.
             // Constraining to `tools` rather than to what Inject returned would re-introduce the mismatch
             // the budget can create.
-            var described = ToolCallInstructionInjector.Inject(rendered, tools, dialect, logger);
+            var described = ToolCallInstructionInjector.Inject(rendered, tools, dialect, logger, contextWindow);
             var schema = ToolCallEnvelopeSchema.TryBuild(described);
 
             if (schema is not null)

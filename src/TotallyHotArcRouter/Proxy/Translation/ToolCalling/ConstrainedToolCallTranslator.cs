@@ -41,18 +41,26 @@ internal sealed class ConstrainedToolCallTranslator : IClientPathTranslator
     private readonly ToolCallDialect _dialect;
     private readonly IToolCallCapabilityStore? _capabilityStore;
     private readonly ILogger _logger;
+    private readonly ModelContextWindow? _contextWindow;
 
     /// <summary>Initializes a new instance of the <see cref="ConstrainedToolCallTranslator"/> class.</summary>
     /// <param name="plan">The plan this request's response is read under.</param>
     /// <param name="dialect">The constrained dialect; must carry the instruction prompt used to describe the tools.</param>
     /// <param name="capabilityStore">The store a native-<c>tool_calls</c> observation is written back to; <see langword="null"/> disables write-back.</param>
     /// <param name="logger">Logger for the budget and fail-open warnings.</param>
+    /// <param name="contextWindowStore">
+    /// The store to read this model's probed context window from, so the tool-schema injection budget can
+    /// scale to it instead of the fixed fallback; <see langword="null"/> (or no window on record for this
+    /// model) keeps the fallback. Read once here, not per-request, because the plan's (provider, model) pair
+    /// - and so the window - is fixed for this translator's lifetime.
+    /// </param>
     /// <exception cref="ArgumentException"><paramref name="dialect"/> has no instruction prompt, so the model would be constrained to call tools it was never told about.</exception>
     public ConstrainedToolCallTranslator(
         ToolCallNormalizationPlan plan,
         ToolCallDialect dialect,
         IToolCallCapabilityStore? capabilityStore,
-        ILogger logger)
+        ILogger logger,
+        IModelContextWindowStore? contextWindowStore = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(dialect);
@@ -72,6 +80,7 @@ internal sealed class ConstrainedToolCallTranslator : IClientPathTranslator
         _dialect = dialect;
         _capabilityStore = capabilityStore;
         _logger = logger;
+        _contextWindow = contextWindowStore?.GetModelContextWindow(plan.ProviderKey, plan.ModelName);
     }
 
     /// <summary>Gets the plan this request's response is read under.</summary>
@@ -91,7 +100,7 @@ internal sealed class ConstrainedToolCallTranslator : IClientPathTranslator
 
     /// <inheritdoc />
     public byte[] TranslateRequest(byte[] openAiShapedBody) =>
-        ConstrainedToolCallRewriter.Rewrite(openAiShapedBody, _dialect, _logger);
+        ConstrainedToolCallRewriter.Rewrite(openAiShapedBody, _dialect, _logger, _contextWindow);
 
     /// <inheritdoc />
     public byte[] TranslateResponse(byte[] nativeShapedBody)

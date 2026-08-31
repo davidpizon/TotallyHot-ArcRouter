@@ -31,18 +31,26 @@ internal sealed class ToolCallEmulatingTranslator : IClientPathTranslator
     private readonly ToolCallDialect _dialect;
     private readonly ToolCallNormalizingTranslator _responseTranslator;
     private readonly ILogger _logger;
+    private readonly ModelContextWindow? _contextWindow;
 
     /// <summary>Initializes a new instance of the <see cref="ToolCallEmulatingTranslator"/> class.</summary>
     /// <param name="plan">The emulated plan for this request - its candidates are the taught dialect alone.</param>
     /// <param name="dialect">The dialect being taught; must carry a <see cref="ToolCallDialect.EmulationPrompt"/>.</param>
     /// <param name="capabilityStore">The store a native-<c>tool_calls</c> observation is written back to; <see langword="null"/> disables write-back.</param>
     /// <param name="logger">Logger for the injection-budget and fail-open warnings.</param>
+    /// <param name="contextWindowStore">
+    /// The store to read this model's probed context window from, so the tool-schema injection budget can
+    /// scale to it instead of the fixed fallback; <see langword="null"/> (or no window on record for this
+    /// model) keeps the fallback. Read once here, not per-request, because the plan's (provider, model) pair
+    /// - and so the window - is fixed for this translator's lifetime.
+    /// </param>
     /// <exception cref="ArgumentException"><paramref name="dialect"/> has no emulation prompt or no delimiters, so it cannot be taught.</exception>
     public ToolCallEmulatingTranslator(
         ToolCallNormalizationPlan plan,
         ToolCallDialect dialect,
         IToolCallCapabilityStore? capabilityStore,
-        ILogger logger)
+        ILogger logger,
+        IModelContextWindowStore? contextWindowStore = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(dialect);
@@ -62,6 +70,7 @@ internal sealed class ToolCallEmulatingTranslator : IClientPathTranslator
         _dialect = dialect;
         _responseTranslator = new ToolCallNormalizingTranslator(plan, capabilityStore, logger);
         _logger = logger;
+        _contextWindow = contextWindowStore?.GetModelContextWindow(plan.ProviderKey, plan.ModelName);
     }
 
     /// <summary>Gets the plan this request's response is scanned under.</summary>
@@ -81,7 +90,7 @@ internal sealed class ToolCallEmulatingTranslator : IClientPathTranslator
 
     /// <inheritdoc />
     public byte[] TranslateRequest(byte[] openAiShapedBody) =>
-        ToolCallEmulationRewriter.Rewrite(openAiShapedBody, _dialect, _logger);
+        ToolCallEmulationRewriter.Rewrite(openAiShapedBody, _dialect, _logger, _contextWindow);
 
     /// <inheritdoc />
     public byte[] TranslateResponse(byte[] nativeShapedBody) =>

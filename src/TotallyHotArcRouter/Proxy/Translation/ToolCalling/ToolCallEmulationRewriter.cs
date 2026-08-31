@@ -39,7 +39,11 @@ internal static class ToolCallEmulationRewriter
     /// <param name="openAiShapedBody">The request body as the client sent it (with <c>model</c> already rewritten).</param>
     /// <param name="dialect">The dialect being taught - supplies both the delimiters and the instruction preamble, so teaching and re-rendering cannot drift apart.</param>
     /// <param name="logger">Logger for the bounded-overhead warning.</param>
-    public static byte[] Rewrite(byte[] openAiShapedBody, ToolCallDialect dialect, ILogger logger)
+    /// <param name="contextWindow">
+    /// The model's probed context window, if known, forwarded to <see cref="ToolCallInstructionInjector.Inject"/>
+    /// so the schema budget scales to it instead of the fixed fallback.
+    /// </param>
+    public static byte[] Rewrite(byte[] openAiShapedBody, ToolCallDialect dialect, ILogger logger, ModelContextWindow? contextWindow = null)
     {
         ArgumentNullException.ThrowIfNull(openAiShapedBody);
         ArgumentNullException.ThrowIfNull(dialect);
@@ -90,7 +94,7 @@ internal static class ToolCallEmulationRewriter
         // either way.
         if (tools is { Count: > 0 })
         {
-            ToolCallInstructionInjector.Inject(rendered, tools, dialect, logger);
+            ToolCallInstructionInjector.Inject(rendered, tools, dialect, logger, contextWindow);
         }
 
         return Encoding.UTF8.GetBytes(root.ToJsonString(SerializerOptions));
