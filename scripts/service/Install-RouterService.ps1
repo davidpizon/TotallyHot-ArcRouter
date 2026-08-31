@@ -37,11 +37,19 @@ if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
     throw "Service '$ServiceName' is already registered. Run Uninstall-RouterService.ps1 first."
 }
 
+# The display name carries the version, matching the MSI's ServiceInstall/@DisplayName. Read from the
+# exe being registered rather than from Directory.Build.props, so it describes the binary actually
+# installed even when the publish output is older than the working tree. ProductVersion maps to
+# AssemblyInformationalVersion, onto which the SDK appends "+<git-sha>" in a checkout; strip it the same
+# way GitHubReleaseCheckClient and the GUI's AppVersion do.
+$ProductVersion = (Get-Item $ExePath).VersionInfo.ProductVersion
+$Version = if ([string]::IsNullOrWhiteSpace($ProductVersion)) { "0.0.0" } else { ($ProductVersion -split '\+')[0] }
+
 New-Service `
     -Name $ServiceName `
     -BinaryPathName $ExePath `
-    -DisplayName "TotallyHot ArcRouter" `
-    -Description "TotallyHot ArcRouter LLM routing proxy." `
+    -DisplayName "TotallyHot Arc Router v$Version" `
+    -Description "TotallyHot Arc Router LLM routing proxy." `
     -StartupType Automatic
 
 Start-Service -Name $ServiceName

@@ -1,6 +1,7 @@
 using TotallyHot.ArcRouter.Hosting;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
+using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tools;
@@ -60,6 +61,42 @@ public class ServiceCollectionExtensionsTests
         Assert.NotNull(provider.GetRequiredService<ProxyMiddleware>());
         Assert.NotNull(provider.GetRequiredService<AgentAsARouter>());
         Assert.NotNull(provider.GetRequiredService<IRoutingPolicy>());
+    }
+
+    /// <summary>
+    /// Both capability stores must be registered, and must resolve to the <em>same</em> instance.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ProxyMiddleware"/> takes them as optional constructor parameters, so a missing
+    /// registration would not fail resolution - it would silently bind <see langword="null"/> and ship
+    /// <c>/api/show</c>'s <c>model_info</c> permanently absent, with every test that passes the stores
+    /// explicitly still green. This is the assertion that catches that.
+    /// <para>
+    /// Identity matters as much as presence: they are two read interfaces over one
+    /// <see cref="ToolCallCapabilityStore"/>, so that a single <c>Reload</c> refreshes both. Two instances
+    /// would mean two snapshots and a scan visible through one interface but not the other.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AddTotallyHotArcRouter_RegistersBothCapabilityStores_AsTheSameInstance()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddOptions();
+        services.Configure<RoutingOptions>(_ => { });
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+
+        services.AddTotallyHotArcRouter();
+
+        using var provider = services.BuildServiceProvider();
+
+        var capabilityStore = provider.GetRequiredService<IToolCallCapabilityStore>();
+        var contextWindowStore = provider.GetRequiredService<IModelContextWindowStore>();
+
+        Assert.NotNull(capabilityStore);
+        Assert.NotNull(contextWindowStore);
+        Assert.Same(capabilityStore, contextWindowStore);
+        Assert.Same(provider.GetRequiredService<ToolCallCapabilityStore>(), contextWindowStore);
     }
 
     [Fact]

@@ -41,17 +41,19 @@ public sealed class RouterSettingsAdminException : Exception
 /// Every model currently able to serve as the judge backbone, in configuration order. Empty when no free
 /// provider is configured, which is the honest "the judge has nothing to call" state rather than an error.
 /// </param>
+/// <param name="TranscriptCaptureEnabled">Whether the opt-in transcript store currently captures raw prompt/response text.</param>
 public sealed record RouterSettingsInfo(
     bool AdaptiveRoutingEnabled,
     int EmbeddingMemoryCapacity,
     bool JudgeEnabled,
     string JudgeModelName,
-    IReadOnlyList<string> EligibleJudgeModels);
+    IReadOnlyList<string> EligibleJudgeModels,
+    bool TranscriptCaptureEnabled);
 
 /// <summary>
-/// Client for the proxy's <c>RouterSettingsAdminService</c> - the System Settings window's Adaptive Routing
-/// and Shadow Judge read and write surface. Lives in this plain <c>net10.0</c> library rather than the Windows-only MAUI
-/// project so CI can unit-test it, exactly like <see cref="ClusterModelAdminClient"/>.
+/// Client for the proxy's <c>RouterSettingsAdminService</c> - the System Settings window's Adaptive Routing,
+/// Shadow Judge, and Transcription Capture read and write surface. Lives in this plain <c>net10.0</c> library
+/// rather than the Windows-only MAUI project so CI can unit-test it, exactly like <see cref="ClusterModelAdminClient"/>.
 /// </summary>
 public sealed class RouterSettingsAdminClient : IRouterSettingsAdminClient, IDisposable
 {
@@ -103,6 +105,7 @@ public sealed class RouterSettingsAdminClient : IRouterSettingsAdminClient, IDis
         int embeddingMemoryCapacity,
         bool judgeEnabled,
         string judgeModelName,
+        bool transcriptCaptureEnabled,
         CancellationToken cancellationToken = default)
     {
         try
@@ -115,6 +118,7 @@ public sealed class RouterSettingsAdminClient : IRouterSettingsAdminClient, IDis
                         EmbeddingMemoryCapacity = embeddingMemoryCapacity,
                         JudgeEnabled = judgeEnabled,
                         JudgeModelName = judgeModelName ?? string.Empty,
+                        TranscriptCaptureEnabled = transcriptCaptureEnabled,
                     },
                     cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
@@ -126,6 +130,22 @@ public sealed class RouterSettingsAdminClient : IRouterSettingsAdminClient, IDis
         }
     }
 
+    /// <inheritdoc />
+    public async Task<int> ClearTranscriptsAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var response = await _client
+                .ClearTranscriptsAsync(new Contract.ClearTranscriptsRequest(), cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            return response.RowsDeleted;
+        }
+        catch (RpcException ex)
+        {
+            throw Wrap(ex, "Could not clear the transcript data");
+        }
+    }
+
     /// <summary>Converts a gRPC-contract response into the client's <see cref="RouterSettingsInfo"/>.</summary>
     private static RouterSettingsInfo Map(Contract.RouterSettingsResponse response) =>
         new(
@@ -133,7 +153,8 @@ public sealed class RouterSettingsAdminClient : IRouterSettingsAdminClient, IDis
             response.EmbeddingMemoryCapacity,
             response.JudgeEnabled,
             response.JudgeModelName,
-            response.EligibleJudgeModels.ToList());
+            response.EligibleJudgeModels.ToList(),
+            response.TranscriptCaptureEnabled);
 
     // Unavailable means the proxy isn't running - an ordinary state for a GUI that can outlive it - so it
     // gets a plain-language message rather than a gRPC status dump, and is flagged so the caller can tell a

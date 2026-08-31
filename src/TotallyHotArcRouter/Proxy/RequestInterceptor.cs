@@ -47,7 +47,14 @@ namespace TotallyHot.ArcRouter.Proxy
         /// discovery endpoint. Deliberately not a real provider key: the entry is a request for a routing
         /// decision rather than a route, so no configured provider owns it.
         /// </summary>
-        private const string RouterModelProvider = "totallyhot";
+        /// <remarks>
+        /// Internal rather than private so <see cref="ProxyMiddleware"/> can recognize the synthetic entry
+        /// by provider when describing it on <c>/api/show</c>. Matching on this rather than on
+        /// <see cref="RouterModelName"/> matters: an operator may legitimately configure a real model named
+        /// <c>totallyhot-arcrouter</c>, but nothing can configure a provider under a key that is documented
+        /// never to be one.
+        /// </remarks>
+        internal const string RouterModelProvider = "totallyhot";
 
         /// <summary>
         /// The neutral prior assigned to a candidate with no recorded <see cref="RouterMemory"/> score yet
@@ -284,6 +291,8 @@ namespace TotallyHot.ArcRouter.Proxy
             {
                 body = await reader.ReadToEndAsync(cancellationToken);
             }
+
+            _logger.LogDebug("[INTERCEPTOR] Intercepted agent request message: {RequestBody}", TruncateForLog(SanitizeForLog(body)));
 
             if (string.IsNullOrWhiteSpace(body))
             {
@@ -770,6 +779,18 @@ namespace TotallyHot.ArcRouter.Proxy
         /// </summary>
         private static string SanitizeForLog(string? value) =>
             value?.Replace("\r", " ").Replace("\n", " ") ?? string.Empty;
+
+        /// <summary>
+        /// Caps the length of a full request/response body before it is placed in a Debug-level log message,
+        /// so an unbounded payload never floods a text log sink. Applied on top of <see cref="SanitizeForLog"/>,
+        /// never in place of it.
+        /// </summary>
+        private const int MaxLoggedBodyLength = 4000;
+
+        private static string TruncateForLog(string value) =>
+            value.Length <= MaxLoggedBodyLength
+                ? value
+                : string.Concat(value.AsSpan(0, MaxLoggedBodyLength), "...[truncated]");
 
         /// <summary>
         /// Rewrites the request body's <c>model</c> field to the given route's upstream model id and

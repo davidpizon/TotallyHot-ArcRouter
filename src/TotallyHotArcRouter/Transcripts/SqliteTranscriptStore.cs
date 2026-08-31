@@ -5,27 +5,59 @@ namespace TotallyHot.ArcRouter.Transcripts;
 
 /// <summary>
 /// A SQLite-backed <see cref="ITranscriptStore"/> over <see cref="TranscriptDatabase"/>'s
-/// <c>request_transcripts</c> table. Every method checks <see cref="TranscriptOptions.Enabled"/> first and
-/// no-ops when capture is disabled, so a caller never needs its own enabled check and no query ever runs
-/// against a table that startup deliberately never created.
+/// <c>request_transcripts</c> table. Every method reads <see cref="TranscriptOptions.Enabled"/> live off
+/// <see cref="IOptionsMonitor{TOptions}"/> and no-ops when capture is currently disabled, so a caller never
+/// needs its own enabled check and the System Settings window's Transcription Capture toggle takes effect
+/// immediately - the same live-gate posture <see cref="Judge.JudgeShadowScoreObserver"/> takes for
+/// <see cref="Judge.JudgeOptions.Enabled"/>.
 /// </summary>
 public sealed class SqliteTranscriptStore : ITranscriptStore
 {
     private readonly TranscriptDatabase _database;
-    private readonly TranscriptOptions _options;
+    private readonly IOptionsMonitor<TranscriptOptions> _options;
+    private readonly object _schemaLock = new();
+    private volatile bool _schemaEnsured;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SqliteTranscriptStore"/> class.
     /// </summary>
-    /// <param name="database">The database to persist rows in. Its schema must already be created when <see cref="TranscriptOptions.Enabled"/> is <see langword="true"/>.</param>
-    /// <param name="options">Supplies <see cref="TranscriptOptions.Enabled"/>.</param>
-    public SqliteTranscriptStore(TranscriptDatabase database, IOptions<TranscriptOptions> options)
+    /// <param name="database">The database to persist rows in. Its schema is created lazily, on first use, rather than only at startup - see <see cref="EnsureSchema"/>.</param>
+    /// <param name="options">Supplies the live <see cref="TranscriptOptions.Enabled"/> gate, read per call rather than captured.</param>
+    public SqliteTranscriptStore(TranscriptDatabase database, IOptionsMonitor<TranscriptOptions> options)
     {
         ArgumentNullException.ThrowIfNull(database);
         ArgumentNullException.ThrowIfNull(options);
 
         _database = database;
-        _options = options.Value;
+        _options = options;
+    }
+
+    /// <summary>
+    /// Ensures <see cref="TranscriptDatabase.EnsureCreated"/> has run at least once for this instance.
+    /// Startup only creates the schema when capture is enabled at process start
+    /// (<c>StartupHealthCheckHostedService</c>); an operator who enables capture later, live, through the
+    /// System Settings toggle needs the table to spring into existence on that request rather than on the
+    /// next restart. Idempotent and cheap to call repeatedly - <see cref="_schemaEnsured"/> short-circuits
+    /// every call after the first real one, so the DDL only ever runs once per process even though every
+    /// write path calls this.
+    /// </summary>
+    private void EnsureSchema()
+    {
+        if (_schemaEnsured)
+        {
+            return;
+        }
+
+        lock (_schemaLock)
+        {
+            if (_schemaEnsured)
+            {
+                return;
+            }
+
+            _database.EnsureCreated();
+            _schemaEnsured = true;
+        }
     }
 
     /// <inheritdoc />
@@ -34,11 +66,12 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         ArgumentNullException.ThrowIfNull(record);
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (!_options.Enabled)
+        if (!_options.CurrentValue.Enabled)
         {
             return Task.FromResult<long?>(null);
         }
 
+        EnsureSchema();
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
@@ -81,11 +114,12 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         ArgumentException.ThrowIfNullOrWhiteSpace(correlationId);
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (!_options.Enabled)
+        if (!_options.CurrentValue.Enabled)
         {
             return Task.CompletedTask;
         }
 
+        EnsureSchema();
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         // Updates every matching row, not just the newest - in the ordinary case there is exactly one
@@ -105,11 +139,12 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (!_options.Enabled)
+        if (!_options.CurrentValue.Enabled)
         {
             return Task.FromResult<IReadOnlyList<long>>(Array.Empty<long>());
         }
 
+        EnsureSchema();
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
@@ -140,11 +175,12 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (!_options.Enabled)
+        if (!_options.CurrentValue.Enabled)
         {
             return Task.FromResult<IReadOnlyList<long>>(Array.Empty<long>());
         }
 
+        EnsureSchema();
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         // "IS NOT $scorerVersion" rather than "<> $scorerVersion": SQL's three-valued logic makes
@@ -181,11 +217,12 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         ArgumentException.ThrowIfNullOrWhiteSpace(scorerVersion);
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (!_options.Enabled)
+        if (!_options.CurrentValue.Enabled)
         {
             return Task.CompletedTask;
         }
 
+        EnsureSchema();
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
@@ -207,11 +244,12 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(id);
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (!_options.Enabled)
+        if (!_options.CurrentValue.Enabled)
         {
             return Task.FromResult<TranscriptRecord?>(null);
         }
 
+        EnsureSchema();
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
@@ -241,11 +279,12 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(memoryEntryId);
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (!_options.Enabled)
+        if (!_options.CurrentValue.Enabled)
         {
             return Task.CompletedTask;
         }
 
+        EnsureSchema();
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = "UPDATE request_transcripts SET memory_entry_id = $memoryEntryId WHERE id = $transcriptId;";
@@ -261,11 +300,12 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (!_options.Enabled)
+        if (!_options.CurrentValue.Enabled)
         {
             return Task.FromResult(0);
         }
 
+        EnsureSchema();
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT COUNT(*) FROM request_transcripts;";
@@ -280,11 +320,12 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (!_options.Enabled)
+        if (!_options.CurrentValue.Enabled)
         {
             return Task.FromResult(0);
         }
 
+        EnsureSchema();
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
@@ -302,11 +343,12 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (!_options.Enabled)
+        if (!_options.CurrentValue.Enabled)
         {
             return Task.FromResult(0);
         }
 
+        EnsureSchema();
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = "DELETE FROM request_transcripts WHERE created_at_utc < $cutoff;";
@@ -317,15 +359,33 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
     }
 
     /// <inheritdoc />
+    public Task<int> DeleteAllAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Deliberately not gated on _options.CurrentValue.Enabled, unlike every other method here - see
+        // the interface doc. EnsureSchema() still makes this safe when capture has never run: the table
+        // is created empty and the DELETE affects zero rows, rather than throwing "no such table".
+        EnsureSchema();
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM request_transcripts;";
+
+        var affectedRows = command.ExecuteNonQuery();
+        return Task.FromResult(affectedRows);
+    }
+
+    /// <inheritdoc />
     public Task<IReadOnlyDictionary<long, string>> LoadPromptTextByMemoryEntryIdAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (!_options.Enabled)
+        if (!_options.CurrentValue.Enabled)
         {
             return Task.FromResult<IReadOnlyDictionary<long, string>>(new Dictionary<long, string>());
         }
 
+        EnsureSchema();
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
@@ -353,12 +413,13 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (!_options.Enabled)
+        if (!_options.CurrentValue.Enabled)
         {
             return Task.FromResult<IReadOnlyDictionary<string, ModelTokenAverage>>(
                 new Dictionary<string, ModelTokenAverage>(StringComparer.Ordinal));
         }
 
+        EnsureSchema();
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """

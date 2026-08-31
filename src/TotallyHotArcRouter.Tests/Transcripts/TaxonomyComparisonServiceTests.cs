@@ -9,6 +9,7 @@ using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Orchestrator;
 using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Telemetry;
+using TotallyHot.ArcRouter.Tests.TestSupport;
 using TotallyHot.ArcRouter.Transcripts;
 
 namespace TotallyHot.ArcRouter.Tests.Transcripts;
@@ -394,11 +395,12 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
             ClusterModelPath = _clusterModelPath,
         });
         var transcriptOptions = Options.Create(new TranscriptOptions { Enabled = transcriptsEnabled });
+        var transcriptOptionsMonitor = new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = transcriptsEnabled });
 
         var database = new TranscriptDatabase(storageOptions);
         database.EnsureCreated();
 
-        var transcriptStore = new SqliteTranscriptStore(database, transcriptOptions);
+        var transcriptStore = new SqliteTranscriptStore(database, transcriptOptionsMonitor);
         var comparisonStore = new SqliteTaxonomyComparisonStore(database, transcriptOptions);
         var memoryEntryStore = new InMemoryEntryStore();
         var routerMemory = new RouterMemory();
@@ -550,6 +552,9 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
 
         public Task<int> DeleteBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken = default) =>
             inner.DeleteBeforeAsync(cutoff, cancellationToken);
+
+        public Task<int> DeleteAllAsync(CancellationToken cancellationToken = default) =>
+            inner.DeleteAllAsync(cancellationToken);
 
         public Task<IReadOnlyDictionary<long, string>> LoadPromptTextByMemoryEntryIdAsync(CancellationToken cancellationToken = default) =>
             inner.LoadPromptTextByMemoryEntryIdAsync(cancellationToken);

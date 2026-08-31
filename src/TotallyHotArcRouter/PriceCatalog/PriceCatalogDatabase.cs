@@ -512,6 +512,27 @@ public sealed class PriceCatalogDatabase
             PRIMARY KEY(provider_key, model_name)
         );
 
+        -- Probed per-model context windows, reported through Ollama's POST /api/show model_info
+        -- (docs/router/ollama-show-capabilities-plan.md). Keyed identically to model_tool_capabilities
+        -- above and filled by the same endpoint scan, which makes the separate table look redundant - it
+        -- is not. The two have different write lifecycles: ToolCallObservationRecorder rewrites a
+        -- capability row from the request path with no context length to supply, and ClearModelCapability
+        -- DELETEs one on an operator dialect reset. Either would silently destroy a probed window if it
+        -- shared the row. See docs/adr/0002-store-probed-model-context-windows-in-their-own-table.md.
+        --
+        -- No Migrate* helper accompanies this table, unlike most of its neighbours. Those exist only
+        -- because CREATE TABLE IF NOT EXISTS cannot add a *column* to a table that already exists; a new
+        -- table has no such blind spot, so this one statement covers fresh and upgraded databases alike.
+        CREATE TABLE IF NOT EXISTS model_context_windows (
+            provider_key    TEXT    NOT NULL COLLATE NOCASE,
+            model_name      TEXT    NOT NULL COLLATE NOCASE,
+            context_length  INTEGER NOT NULL,
+            architecture    TEXT,
+            evidence        TEXT,
+            detected_at_utc TEXT    NOT NULL,
+            PRIMARY KEY(provider_key, model_name)
+        );
+
         -- The durable usage ledger (docs/router/token-tracking-implementation-plan.md Phase 2, §5.2):
         -- every priced/unpriced request's usage, surviving process restarts (unlike the in-memory-only
         -- telemetry stream). dedup_key is either the upstream provider's own request id (preferred) or a

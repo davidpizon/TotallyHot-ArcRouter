@@ -28,6 +28,7 @@ public class RouterSettingsAdminClientTests
                 JudgeEnabled = true,
                 JudgeModelName = "free-judge",
                 EligibleJudgeModels = { "free-judge", "other-free" },
+                TranscriptCaptureEnabled = true,
             },
         };
         using var client = new RouterSettingsAdminClient(stub);
@@ -39,6 +40,7 @@ public class RouterSettingsAdminClientTests
         settings.JudgeEnabled.Should().BeTrue();
         settings.JudgeModelName.Should().Be("free-judge");
         settings.EligibleJudgeModels.Should().Equal("free-judge", "other-free");
+        settings.TranscriptCaptureEnabled.Should().BeTrue();
     }
 
     [Fact]
@@ -56,7 +58,7 @@ public class RouterSettingsAdminClientTests
         };
         using var client = new RouterSettingsAdminClient(stub);
 
-        var settings = await client.UpdateAsync(true, 5_000, true, "free-judge", TestContext.Current.CancellationToken);
+        var settings = await client.UpdateAsync(true, 5_000, true, "free-judge", true, TestContext.Current.CancellationToken);
 
         settings.EmbeddingMemoryCapacity.Should().Be(5_000);
         settings.JudgeEnabled.Should().BeTrue();
@@ -66,6 +68,7 @@ public class RouterSettingsAdminClientTests
         stub.LastUpdateRequest.EmbeddingMemoryCapacity.Should().Be(5_000);
         stub.LastUpdateRequest.JudgeEnabled.Should().BeTrue();
         stub.LastUpdateRequest.JudgeModelName.Should().Be("free-judge");
+        stub.LastUpdateRequest.TranscriptCaptureEnabled.Should().BeTrue();
     }
 
     /// <summary>A null model name is the "automatic" choice, and must reach the wire as an empty string rather than throwing.</summary>
@@ -75,9 +78,32 @@ public class RouterSettingsAdminClientTests
         var stub = new StubClient { UpdateResponse = new Contract.RouterSettingsResponse() };
         using var client = new RouterSettingsAdminClient(stub);
 
-        await client.UpdateAsync(false, 5_000, false, null!, TestContext.Current.CancellationToken);
+        await client.UpdateAsync(false, 5_000, false, null!, false, TestContext.Current.CancellationToken);
 
         stub.LastUpdateRequest!.JudgeModelName.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ClearTranscriptsAsync_maps_the_deleted_row_count()
+    {
+        var stub = new StubClient { ClearTranscriptsResponse = new Contract.ClearTranscriptsResponse { RowsDeleted = 42 } };
+        using var client = new RouterSettingsAdminClient(stub);
+
+        var rowsDeleted = await client.ClearTranscriptsAsync(TestContext.Current.CancellationToken);
+
+        rowsDeleted.Should().Be(42);
+    }
+
+    [Fact]
+    public async Task ClearTranscriptsAsync_unavailable_becomes_a_plain_language_message()
+    {
+        var stub = new StubClient { ClearTranscriptsFailure = new RpcException(new Status(StatusCode.Unavailable, "failed to connect")) };
+        using var client = new RouterSettingsAdminClient(stub);
+
+        var ex = await Assert.ThrowsAsync<RouterSettingsAdminException>(() => client.ClearTranscriptsAsync(TestContext.Current.CancellationToken));
+
+        ex.Message.Should().Be("Could not clear the transcript data: the router is not reachable.");
+        ex.IsUnavailable.Should().BeTrue();
     }
 
     [Fact]
@@ -103,7 +129,7 @@ public class RouterSettingsAdminClientTests
         using var client = new RouterSettingsAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<RouterSettingsAdminException>(
-            () => client.UpdateAsync(false, 1, false, string.Empty, TestContext.Current.CancellationToken));
+            () => client.UpdateAsync(false, 1, false, string.Empty, false, TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not save the router settings: embedding_memory_capacity must be between 500 and 50000 (got 1)");
         ex.IsUnavailable.Should().BeFalse();
@@ -156,6 +182,20 @@ public class RouterSettingsAdminClientTests
         public RpcException? UpdateFailure { get; init; }
 
         public Contract.UpdateRouterSettingsRequest? LastUpdateRequest { get; private set; }
+
+        public Contract.ClearTranscriptsResponse ClearTranscriptsResponse { get; init; } = new();
+
+        public RpcException? ClearTranscriptsFailure { get; init; }
+
+        public override AsyncUnaryCall<Contract.ClearTranscriptsResponse> ClearTranscriptsAsync(
+            Contract.ClearTranscriptsRequest request,
+            CallOptions options) =>
+            new(
+                ClearTranscriptsFailure is null ? Task.FromResult(ClearTranscriptsResponse) : Task.FromException<Contract.ClearTranscriptsResponse>(ClearTranscriptsFailure),
+                Task.FromResult(new Metadata()),
+                () => Status.DefaultSuccess,
+                () => [],
+                () => { });
 
         public override AsyncUnaryCall<Contract.RouterSettingsResponse> GetRouterSettingsAsync(
             Contract.GetRouterSettingsRequest request,

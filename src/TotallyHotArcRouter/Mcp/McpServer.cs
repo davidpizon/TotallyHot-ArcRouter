@@ -83,7 +83,13 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
             // Same reasoning as ProxyServer's identical filter: this inner host is an implementation
             // detail, it never gets Serilog, and its default console provider would otherwise report a
             // bind failure with a full stack alongside McpHostedService's own one-line report of it.
-            .ConfigureLogging(logging => logging.AddFilter("Microsoft.Extensions.Hosting.Internal.Host", LogLevel.None))
+            // The "Microsoft" filter mirrors the outer host's Serilog "Microsoft": "Warning" override
+            // (see src/TotallyHotArcRouter/appsettings.json) - this inner host never reads that Serilog
+            // config, so without it Microsoft.AspNetCore.Routing.EndpointMiddleware's per-request
+            // "Executed endpoint" Information logs would flood the default console provider.
+            .ConfigureLogging(logging => logging
+                .AddFilter("Microsoft.Extensions.Hosting.Internal.Host", LogLevel.None)
+                .AddFilter("Microsoft", LogLevel.Warning))
             .ConfigureWebHostDefaults(webBuilder =>
             {
                 webBuilder.UseKestrel(options =>

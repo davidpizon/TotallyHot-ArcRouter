@@ -117,12 +117,12 @@ public sealed class ModelDialectResolverTests
         var result = await resolver.ResolveAsync(
             "local", Provider(), Flavors(ollama: true), modelId, modelId, TestContext.Current.CancellationToken);
 
-        Assert.NotNull(result);
-        Assert.Equal(expectedDialect, result.Dialect);
-        Assert.Equal(DetectionConfidence.Template, result.Confidence);
+        Assert.NotNull(result.Capability);
+        Assert.Equal(expectedDialect, result.Capability!.Dialect);
+        Assert.Equal(DetectionConfidence.Template, result.Capability!.Confidence);
 
         // The evidence names the delimiter that matched, never any of the template text around it.
-        Assert.Contains(expectedDelimiter, result.Evidence, StringComparison.Ordinal);
+        Assert.Contains(expectedDelimiter, result.Capability!.Evidence, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -137,7 +137,7 @@ public sealed class ModelDialectResolverTests
             "local", Provider(), Flavors(ollama: true), "deepseek-qwen-distill", "deepseek-qwen-distill",
             TestContext.Current.CancellationToken);
 
-        Assert.Null(result);
+        Assert.Null(result.Capability);
     }
 
     [Fact]
@@ -152,8 +152,8 @@ public sealed class ModelDialectResolverTests
             "local", Provider(), Flavors(ollama: true), "tinyllama:1.1b", "tinyllama:1.1b",
             TestContext.Current.CancellationToken);
 
-        Assert.Equal("emulated", result!.Dialect);
-        Assert.Equal(DetectionConfidence.Template, result.Confidence);
+        Assert.Equal("emulated", result.Capability!.Dialect);
+        Assert.Equal(DetectionConfidence.Template, result.Capability!.Confidence);
     }
 
     [Fact]
@@ -168,7 +168,7 @@ public sealed class ModelDialectResolverTests
             "local", Provider(), Flavors(ollama: true), "deepseek-r1:7b", "deepseek-r1:7b",
             TestContext.Current.CancellationToken);
 
-        Assert.Null(result);
+        Assert.Null(result.Capability);
     }
 
     [Fact]
@@ -182,9 +182,9 @@ public sealed class ModelDialectResolverTests
             "local", Provider(), Flavors(ollama: true), "qwen2.5-coder", "qwen2.5-coder",
             TestContext.Current.CancellationToken);
 
-        Assert.NotNull(result);
-        Assert.Equal("hermes", result.Dialect);
-        Assert.Equal(DetectionConfidence.Heuristic, result.Confidence);
+        Assert.NotNull(result.Capability);
+        Assert.Equal("hermes", result.Capability!.Dialect);
+        Assert.Equal(DetectionConfidence.Heuristic, result.Capability!.Confidence);
     }
 
     // ----- Tier 2: the architecture in the model file's metadata -----
@@ -203,10 +203,10 @@ public sealed class ModelDialectResolverTests
             "local", Provider("http://localhost:1234/v1"), Flavors(lmStudio: true), "local-model-a", "local-model-a",
             TestContext.Current.CancellationToken);
 
-        Assert.NotNull(result);
-        Assert.Equal("hermes", result.Dialect);
-        Assert.Equal(DetectionConfidence.Template, result.Confidence);
-        Assert.Contains("qwen2", result.Evidence, StringComparison.Ordinal);
+        Assert.NotNull(result.Capability);
+        Assert.Equal("hermes", result.Capability!.Dialect);
+        Assert.Equal(DetectionConfidence.Template, result.Capability!.Confidence);
+        Assert.Contains("qwen2", result.Capability!.Evidence, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -224,9 +224,9 @@ public sealed class ModelDialectResolverTests
             "local", Provider("http://localhost:1234/v1"), Flavors(lmStudio: true),
             "hermes-3-llama-3.1-8b", "hermes-3-llama-3.1-8b", TestContext.Current.CancellationToken);
 
-        Assert.NotNull(result);
-        Assert.Equal("hermes", result.Dialect);
-        Assert.Equal(DetectionConfidence.Heuristic, result.Confidence);
+        Assert.NotNull(result.Capability);
+        Assert.Equal("hermes", result.Capability!.Dialect);
+        Assert.Equal(DetectionConfidence.Heuristic, result.Capability!.Confidence);
     }
 
     [Fact]
@@ -241,9 +241,9 @@ public sealed class ModelDialectResolverTests
             "local", Provider("http://localhost:1234/v1"), Flavors(lmStudio: true), "mistral-7b", "mistral-7b",
             TestContext.Current.CancellationToken);
 
-        Assert.NotNull(result);
-        Assert.Equal("mistral", result.Dialect);
-        Assert.Equal(DetectionConfidence.Heuristic, result.Confidence);
+        Assert.NotNull(result.Capability);
+        Assert.Equal("mistral", result.Capability!.Dialect);
+        Assert.Equal(DetectionConfidence.Heuristic, result.Capability!.Confidence);
     }
 
     // ----- Tier 3: the model id -----
@@ -261,9 +261,9 @@ public sealed class ModelDialectResolverTests
         var result = await resolver.ResolveAsync(
             "local", Provider(), endpointCapabilities: null, modelId, modelId, TestContext.Current.CancellationToken);
 
-        Assert.NotNull(result);
-        Assert.Equal(expected, result.Dialect);
-        Assert.Equal(DetectionConfidence.Heuristic, result.Confidence);
+        Assert.NotNull(result.Capability);
+        Assert.Equal(expected, result.Capability!.Dialect);
+        Assert.Equal(DetectionConfidence.Heuristic, result.Capability!.Confidence);
     }
 
     [Fact]
@@ -278,7 +278,7 @@ public sealed class ModelDialectResolverTests
             "local", Provider(), endpointCapabilities: null, "Hermes-2-Pro-Mistral-7B", "Hermes-2-Pro-Mistral-7B",
             TestContext.Current.CancellationToken);
 
-        Assert.Equal("hermes", result!.Dialect);
+        Assert.Equal("hermes", result.Capability!.Dialect);
     }
 
     [Theory]
@@ -294,7 +294,7 @@ public sealed class ModelDialectResolverTests
         var result = await resolver.ResolveAsync(
             "local", Provider(), endpointCapabilities: null, modelId, modelId, TestContext.Current.CancellationToken);
 
-        Assert.Null(result);
+        Assert.Null(result.Capability);
     }
 
     [Fact]
@@ -306,8 +306,8 @@ public sealed class ModelDialectResolverTests
             "local", Provider(), endpointCapabilities: null,
             modelName: "qwen-local", providerModelId: "model-a", TestContext.Current.CancellationToken);
 
-        Assert.Equal("hermes", result!.Dialect);
-        Assert.Equal("qwen-local", result.ModelName);
+        Assert.Equal("hermes", result.Capability!.Dialect);
+        Assert.Equal("qwen-local", result.Capability!.ModelName);
     }
 
     // ----- Probing discipline -----
@@ -391,7 +391,7 @@ public sealed class ModelDialectResolverTests
             "local", Provider(), Flavors(ollama: true, lmStudio: true), "qwen2.5-coder", "qwen2.5-coder",
             TestContext.Current.CancellationToken);
 
-        Assert.Equal("hermes", result!.Dialect);
+        Assert.Equal("hermes", result.Capability!.Dialect);
     }
 
     [Fact]
@@ -407,7 +407,7 @@ public sealed class ModelDialectResolverTests
             "local", Provider(), Flavors(ollama: true, lmStudio: true), "unknown-model", "unknown-model",
             TestContext.Current.CancellationToken);
 
-        Assert.Null(result);
+        Assert.Null(result.Capability);
     }
 
     [Fact]
@@ -434,8 +434,8 @@ public sealed class ModelDialectResolverTests
             "local", Provider(), Flavors(ollama: true), "mixtral-8x7b", "mixtral-8x7b",
             TestContext.Current.CancellationToken);
 
-        Assert.Equal("mistral", result!.Dialect);
-        Assert.Equal(DetectionConfidence.Heuristic, result.Confidence);
+        Assert.Equal("mistral", result.Capability!.Dialect);
+        Assert.Equal(DetectionConfidence.Heuristic, result.Capability!.Confidence);
     }
 
     [Fact]
@@ -447,7 +447,7 @@ public sealed class ModelDialectResolverTests
             "local", Provider("not a url"), Flavors(ollama: true, lmStudio: true), "qwen2.5", "qwen2.5",
             TestContext.Current.CancellationToken);
 
-        Assert.Equal("hermes", result!.Dialect);
+        Assert.Equal("hermes", result.Capability!.Dialect);
     }
 
     // ----- Argument guards -----
@@ -472,5 +472,187 @@ public sealed class ModelDialectResolverTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             => _handler(request);
     }
-}
 
+    // ----- Context windows: the exits that used to discard the whole probe -----
+
+    private static string ShowBodyWithModelInfo(string? template, string architecture, long contextLength) =>
+        JsonSerializer.Serialize(new Dictionary<string, object?>
+        {
+            ["template"] = template,
+            ["model_info"] = new Dictionary<string, object>
+            {
+                ["general.architecture"] = architecture,
+                [$"{architecture}.context_length"] = contextLength,
+            },
+        });
+
+    [Fact]
+    public async Task ATemplateRead_AlsoRecordsTheContextLength()
+    {
+        var resolver = ResolverFor(new Dictionary<string, string>
+        {
+            ["/api/show"] = ShowBodyWithModelInfo(QwenTemplate, "qwen2", 32768),
+        });
+
+        var result = await resolver.ResolveAsync(
+            "local", Provider(), Flavors(ollama: true), "qwen2.5-coder:7b", "qwen2.5-coder:7b",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("hermes", result.Capability!.Dialect);
+        Assert.Equal(32768, result.ContextWindow!.ContextLength);
+        Assert.Equal("qwen2", result.ContextWindow!.Architecture);
+    }
+
+    // Exit B: the template rendered tools in a dialect this build does not know, so no capability is
+    // recorded. This path previously discarded the entire probe - including the most authoritative context
+    // reading obtainable, since the template was read successfully.
+    [Fact]
+    public async Task ATemplateThatMatchesNothing_StillRecordsTheContextLength()
+    {
+        var resolver = ResolverFor(new Dictionary<string, string>
+        {
+            ["/api/show"] = ShowBodyWithModelInfo(UnknownDialectTemplate, "deepseek2", 65536),
+        });
+
+        var result = await resolver.ResolveAsync(
+            "local", Provider(), Flavors(ollama: true), "deepseek-qwen-distill", "deepseek-qwen-distill",
+            TestContext.Current.CancellationToken);
+
+        Assert.Null(result.Capability);
+        Assert.Equal(65536, result.ContextWindow!.ContextLength);
+    }
+
+    // Exit F: no tier could classify anything, but the probe still read a window.
+    [Fact]
+    public async Task AModelIdHeuristicMiss_StillRecordsTheContextLength()
+    {
+        var resolver = ResolverFor(new Dictionary<string, string>
+        {
+            ["/api/show"] = ShowBodyWithModelInfo(template: null, "phi3", 4096),
+        });
+
+        var result = await resolver.ResolveAsync(
+            "local", Provider(), Flavors(ollama: true), "an-unrecognizable-model", "an-unrecognizable-model",
+            TestContext.Current.CancellationToken);
+
+        Assert.Null(result.Capability);
+        Assert.Equal(4096, result.ContextWindow!.ContextLength);
+    }
+
+    [Fact]
+    public async Task AShowResponseWithoutModelInfo_RecordsNoContextWindow()
+    {
+        var resolver = ResolverFor(new Dictionary<string, string> { ["/api/show"] = ShowBody(QwenTemplate) });
+
+        var result = await resolver.ResolveAsync(
+            "local", Provider(), Flavors(ollama: true), "qwen2.5-coder:7b", "qwen2.5-coder:7b",
+            TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result.Capability);
+        Assert.Null(result.ContextWindow);
+    }
+
+    // The suffix-scan fallback: no general.architecture to indirect through, so the key itself names it.
+    [Fact]
+    public async Task AShowResponseWithoutAGeneralArchitectureKey_StillFindsTheContextLength()
+    {
+        var body = JsonSerializer.Serialize(new Dictionary<string, object?>
+        {
+            ["template"] = QwenTemplate,
+            ["model_info"] = new Dictionary<string, object> { ["qwen2.context_length"] = 16384 },
+        });
+        var resolver = ResolverFor(new Dictionary<string, string> { ["/api/show"] = body });
+
+        var result = await resolver.ResolveAsync(
+            "local", Provider(), Flavors(ollama: true), "qwen2.5-coder:7b", "qwen2.5-coder:7b",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(16384, result.ContextWindow!.ContextLength);
+        Assert.Equal("qwen2", result.ContextWindow!.Architecture);
+    }
+
+    // A value no int can represent must read as unknown rather than throw inside a best-effort probe.
+    [Fact]
+    public async Task AContextLengthTooLargeForInt32_IsIgnored_RatherThanThrowing()
+    {
+        var resolver = ResolverFor(new Dictionary<string, string>
+        {
+            ["/api/show"] = ShowBodyWithModelInfo(QwenTemplate, "qwen2", 9_000_000_000L),
+        });
+
+        var result = await resolver.ResolveAsync(
+            "local", Provider(), Flavors(ollama: true), "qwen2.5-coder:7b", "qwen2.5-coder:7b",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("hermes", result.Capability!.Dialect);
+        Assert.Null(result.ContextWindow);
+    }
+
+    // ----- Tier 2: LM Studio -----
+
+    private static string LmStudioBodyWithContext(
+        string id, string arch, int? maxContext, int? loadedContext)
+    {
+        var entry = new Dictionary<string, object> { ["id"] = id, ["arch"] = arch };
+        if (maxContext is not null)
+        {
+            entry["max_context_length"] = maxContext.Value;
+        }
+
+        if (loadedContext is not null)
+        {
+            entry["loaded_context_length"] = loadedContext.Value;
+        }
+
+        return JsonSerializer.Serialize(new { data = new[] { entry } });
+    }
+
+    // Verified against a live LM Studio: both fields are present on every entry. `loaded` is what the
+    // runtime will actually accept, and over-reporting causes a hard upstream rejection.
+    [Fact]
+    public async Task LoadedContextLength_WinsOverMaxContextLength()
+    {
+        var resolver = ResolverFor(new Dictionary<string, string>
+        {
+            ["/api/v0/models"] = LmStudioBodyWithContext("qwen-local", "qwen2", maxContext: 32768, loadedContext: 8192),
+        });
+
+        var result = await resolver.ResolveAsync(
+            "local", Provider(), Flavors(lmStudio: true), "qwen-local", "qwen-local",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(8192, result.ContextWindow!.ContextLength);
+    }
+
+    [Fact]
+    public async Task MaxContextLength_IsUsed_WhenNoLoadedContextIsReported()
+    {
+        var resolver = ResolverFor(new Dictionary<string, string>
+        {
+            ["/api/v0/models"] = LmStudioBodyWithContext("qwen-local", "qwen2", maxContext: 32768, loadedContext: null),
+        });
+
+        var result = await resolver.ResolveAsync(
+            "local", Provider(), Flavors(lmStudio: true), "qwen-local", "qwen-local",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(32768, result.ContextWindow!.ContextLength);
+    }
+
+    // The tier-2 fall-through: an unmapped architecture moves on to tier 3 for the *dialect*, but the
+    // window read on the way past must survive. This path also previously dropped it.
+    [Fact]
+    public async Task AnUnmappedLmStudioArchitecture_StillRecordsTheContextLength()
+    {
+        var resolver = ResolverFor(new Dictionary<string, string>
+        {
+            ["/api/v0/models"] = LmStudioBodyWithContext("some-model", "llama", maxContext: 128000, loadedContext: null),
+        });
+
+        var result = await resolver.ResolveAsync(
+            "local", Provider(), Flavors(lmStudio: true), "some-model", "some-model",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(128000, result.ContextWindow!.ContextLength);
+    }
+}

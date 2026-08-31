@@ -90,7 +90,11 @@ Only files whose destination does not already exist should be moved — the two 
 traffic from different runs, and merging them would double-count spend.
 - **`ServiceInstall`/`ServiceControl`** register the `TotallyHotArcRouter` Windows Service (`LocalSystem`,
   auto-start, matching `Program.cs`'s `UseWindowsService` call exactly) and stop it before / start it after
-  the file swap on install, upgrade, and uninstall.
+  the file swap on install, upgrade, and uninstall. The service **name** stays `TotallyHotArcRouter`
+  forever — `Program.cs`, the dev scripts, and `TrayWindowManager`'s `RouterServiceName` all address the
+  service by it. Only the **display name** carries the version (`TotallyHot Arc Router v<ProductVersion>`),
+  so `services.msc` answers "which build is running as a service" without opening the GUI; it refreshes on
+  upgrade because `RemoveExistingProducts` deletes the old registration before this one re-creates it.
 - **The GUI starts at logon** via an `HKLM\Software\Microsoft\Windows\CurrentVersion\Run` value
   (`GuiAutoStartComponent`). Without it a fresh install left `TotallyHotArcRouter.Gui.exe` on disk with
   nothing to invoke it — it is a tray-resident app, so there was no visible GUI at all after installing.

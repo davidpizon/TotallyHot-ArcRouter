@@ -5,7 +5,9 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// <summary>
 /// Writable, thread-safe cache over the tool-call capability tables: which API flavors each provider
 /// answers, and how each (provider, model) expresses a tool call
-/// (<c>docs/router/tool-call-normalization.md</c> Phase 1).
+/// (<c>docs/router/tool-call-normalization.md</c> Phase 1) - plus the context window probed for each
+/// (provider, model) alongside its dialect
+/// (<c>docs/router/ollama-show-capabilities-plan.md</c>).
 /// </summary>
 /// <remarks>
 /// Shaped after <see cref="TotallyHot.ArcRouter.PriceCatalog.PriceSourceToggleStore"/>: immutable snapshots
@@ -23,7 +25,7 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// exactly what an unconfigured model should do.
 /// </para>
 /// </remarks>
-public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore
+public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore, IModelContextWindowStore
 {
     // A matched tool call carries the user's own arguments, so evidence must never be raw model output.
     // ModelToolCapability.Evidence documents that contract for callers; this cap is the backstop that keeps
@@ -45,6 +47,9 @@ public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore
     private volatile IReadOnlyDictionary<string, ProviderEndpointCapabilities> _providerSnapshot =
         new Dictionary<string, ProviderEndpointCapabilities>(StringComparer.OrdinalIgnoreCase);
 
+    private volatile IReadOnlyDictionary<ModelCapabilityKey, ModelContextWindow> _contextWindowSnapshot =
+        new Dictionary<ModelCapabilityKey, ModelContextWindow>();
+
     /// <summary>Initializes a new instance of the <see cref="ToolCallCapabilityStore"/> class with empty snapshots.</summary>
     public ToolCallCapabilityStore(ToolCallCapabilityRepository repository, ILogger<ToolCallCapabilityStore> logger)
     {
@@ -59,7 +64,7 @@ public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore
     public event Action? Changed;
 
     /// <summary>
-    /// Re-reads both capability tables and swaps the snapshots. Called once at startup, and after each
+    /// Re-reads all three capability tables and swaps the snapshots. Called once at startup, and after each
     /// write so the cache reflects what was actually persisted rather than what was requested - which
     /// matters here because a write can be silently rejected by the confidence gate.
     /// </summary>
@@ -69,11 +74,14 @@ public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore
             .ToDictionary(c => new ModelCapabilityKey(c.ProviderKey, c.ModelName), c => c);
         var providers = _repository.GetProviderCapabilities()
             .ToDictionary(c => c.ProviderKey, c => c, StringComparer.OrdinalIgnoreCase);
+        var contextWindows = _repository.GetModelContextWindows()
+            .ToDictionary(w => new ModelCapabilityKey(w.ProviderKey, w.ModelName), w => w);
 
         lock (_gate)
         {
             _modelSnapshot = models;
             _providerSnapshot = providers;
+            _contextWindowSnapshot = contextWindows;
         }
     }
 
@@ -87,6 +95,19 @@ public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore
 
         return _modelSnapshot.TryGetValue(new ModelCapabilityKey(providerKey, modelName), out var capability)
             ? capability
+            : null;
+    }
+
+    /// <inheritdoc />
+    public ModelContextWindow? GetModelContextWindow(string providerKey, string modelName)
+    {
+        if (string.IsNullOrWhiteSpace(providerKey) || string.IsNullOrWhiteSpace(modelName))
+        {
+            return null;
+        }
+
+        return _contextWindowSnapshot.TryGetValue(new ModelCapabilityKey(providerKey, modelName), out var window)
+            ? window
             : null;
     }
 
@@ -216,6 +237,52 @@ public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore
             stamped.LmStudioNative,
             stamped.OllamaNative,
             stamped.AnthropicCompatible);
+
+        Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// Persists a model's probed context window and refreshes the cache. Unconditional, like
+    /// <see cref="SetProviderCapabilities"/> and unlike the dialect path: see
+    /// <see cref="ToolCallCapabilityRepository.UpsertModelContextWindow"/> for why no confidence gate
+    /// applies to a context length.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately absent from <see cref="IModelContextWindowStore"/>: only the management scan writes a
+    /// window, and the request path - which reads one to answer <c>/api/show</c> - must not be able to.
+    /// Same split as <see cref="SetProviderCapabilities"/> and <see cref="ClearModelCapability"/>.
+    /// </remarks>
+    /// <param name="window">The window to persist.</param>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="window"/>'s length is zero or negative. Rejected at the boundary rather than
+    /// coerced, mirroring <see cref="TryRecordModelCapability"/>'s treatment of a negative observation
+    /// count: a non-positive window arriving from a caller is a programming error, while one found on disk
+    /// is corruption that <see cref="ToolCallCapabilityRepository.GetModelContextWindows"/> quietly skips.
+    /// </exception>
+    public void SetModelContextWindow(ModelContextWindow window)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        ArgumentException.ThrowIfNullOrWhiteSpace(window.ProviderKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(window.ModelName);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(window.ContextLength, nameof(window));
+
+        // A default(DateTimeOffset) reads back as "very old" and would make the row look indefinitely
+        // stale, so stamp it here rather than making every caller remember to - same as the dialect path.
+        var stamped = window with
+        {
+            Evidence = Truncate(window.Evidence),
+            DetectedAtUtc = window.DetectedAtUtc == default ? DateTimeOffset.UtcNow : window.DetectedAtUtc,
+        };
+
+        _repository.UpsertModelContextWindow(stamped);
+        Reload();
+
+        _logger.LogInformation(
+            "Context window for {Provider}/{Model} recorded as {ContextLength} tokens (architecture {Architecture}).",
+            SanitizeForLog(stamped.ProviderKey),
+            SanitizeForLog(stamped.ModelName),
+            stamped.ContextLength,
+            SanitizeForLog(stamped.Architecture ?? "unknown"));
 
         Changed?.Invoke();
     }

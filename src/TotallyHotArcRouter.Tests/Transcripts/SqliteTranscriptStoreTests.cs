@@ -1,4 +1,5 @@
 using TotallyHot.ArcRouter.PriceCatalog;
+using TotallyHot.ArcRouter.Tests.TestSupport;
 using TotallyHot.ArcRouter.Transcripts;
 using Microsoft.Extensions.Options;
 
@@ -7,8 +8,9 @@ namespace TotallyHot.ArcRouter.Tests.Transcripts;
 /// <summary>
 /// Covers <see cref="TranscriptDatabase"/> and <see cref="SqliteTranscriptStore"/>
 /// (docs/router/self-organizing-classification-plan.md Phase T1a/T1b): the insert-then-backfill-score
-/// round-trip, and the enabled/disabled-capture behavior - "with capture disabled (the default), no table
-/// is created and nothing is written" is the plan's stated exit criterion.
+/// round-trip, the enabled/disabled-capture behavior - "with capture disabled, no table is created and
+/// nothing is written" - and the live toggle (capture switched on after construction starts writing, and
+/// lazily creates the table, without a restart).
 /// </summary>
 public class SqliteTranscriptStoreTests : IDisposable
 {
@@ -26,7 +28,7 @@ public class SqliteTranscriptStoreTests : IDisposable
     {
         var database = CreateDatabase();
         database.EnsureCreated();
-        var store = new SqliteTranscriptStore(database, Options.Create(new TranscriptOptions { Enabled = true }));
+        var store = new SqliteTranscriptStore(database, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
 
         var record = MakeRecord("corr-1");
         var id = await store.InsertAsync(record, TestContext.Current.CancellationToken);
@@ -48,7 +50,7 @@ public class SqliteTranscriptStoreTests : IDisposable
     {
         var database = CreateDatabase();
         database.EnsureCreated();
-        var store = new SqliteTranscriptStore(database, Options.Create(new TranscriptOptions { Enabled = true }));
+        var store = new SqliteTranscriptStore(database, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
 
         await store.InsertAsync(MakeRecord("corr-2"), TestContext.Current.CancellationToken);
 
@@ -62,7 +64,7 @@ public class SqliteTranscriptStoreTests : IDisposable
         var database = CreateDatabase();
         // Capture disabled: EnsureCreated deliberately not called here, mirroring how the real startup
         // path skips schema creation when TranscriptOptions.Enabled is false.
-        var store = new SqliteTranscriptStore(database, Options.Create(new TranscriptOptions { Enabled = false }));
+        var store = new SqliteTranscriptStore(database, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = false }));
 
         var id = await store.InsertAsync(MakeRecord("corr-3"), TestContext.Current.CancellationToken);
 
@@ -74,7 +76,7 @@ public class SqliteTranscriptStoreTests : IDisposable
     public async Task UpdateOutcomeAsync_CaptureDisabled_IsANoOp()
     {
         var database = CreateDatabase();
-        var store = new SqliteTranscriptStore(database, Options.Create(new TranscriptOptions { Enabled = false }));
+        var store = new SqliteTranscriptStore(database, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = false }));
 
         await store.UpdateOutcomeAsync("corr-4", 0.5, TestContext.Current.CancellationToken);
 
@@ -94,7 +96,7 @@ public class SqliteTranscriptStoreTests : IDisposable
     {
         var database = CreateDatabase();
         database.EnsureCreated();
-        var store = new SqliteTranscriptStore(database, Options.Create(new TranscriptOptions { Enabled = true }));
+        var store = new SqliteTranscriptStore(database, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
 
         var id = await store.InsertAsync(
             MakeRecord("corr-dimbest") with { DimBestModel = "glm-5" }, TestContext.Current.CancellationToken);
@@ -108,7 +110,7 @@ public class SqliteTranscriptStoreTests : IDisposable
     {
         var database = CreateDatabase();
         database.EnsureCreated();
-        var store = new SqliteTranscriptStore(database, Options.Create(new TranscriptOptions { Enabled = true }));
+        var store = new SqliteTranscriptStore(database, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
 
         // An abstention means the frozen baseline expressed no preference. Defaulting it to the served
         // model would fabricate a zero-savings counterfactual out of a decision nobody made.
@@ -143,7 +145,7 @@ public class SqliteTranscriptStoreTests : IDisposable
 
         var database = CreateDatabase();
         database.EnsureCreated();
-        var store = new SqliteTranscriptStore(database, Options.Create(new TranscriptOptions { Enabled = true }));
+        var store = new SqliteTranscriptStore(database, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
 
         var id = await store.InsertAsync(
             MakeRecord("corr-migrated") with { DimBestModel = "glm-5" }, TestContext.Current.CancellationToken);
@@ -246,7 +248,7 @@ public class SqliteTranscriptStoreTests : IDisposable
     public async Task LoadPendingQualityRescanAsync_CaptureDisabled_ReturnsEmptyAndWritesNothing()
     {
         var database = CreateDatabase();
-        var store = new SqliteTranscriptStore(database, Options.Create(new TranscriptOptions { Enabled = false }));
+        var store = new SqliteTranscriptStore(database, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = false }));
 
         var pending = await store.LoadPendingQualityRescanAsync("v2", 10, TestContext.Current.CancellationToken);
 
@@ -254,11 +256,68 @@ public class SqliteTranscriptStoreTests : IDisposable
         Assert.False(File.Exists(_dbPath));
     }
 
+    [Fact]
+    public async Task InsertAsync_EnabledToggledLiveAfterConstruction_StartsWritingWithoutRestart()
+    {
+        var database = CreateDatabase();
+        var options = new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = false });
+        var store = new SqliteTranscriptStore(database, options);
+
+        var firstAttempt = await store.InsertAsync(MakeRecord("corr-live-off"), TestContext.Current.CancellationToken);
+        Assert.Null(firstAttempt);
+        Assert.False(File.Exists(_dbPath));
+
+        options.Set(new TranscriptOptions { Enabled = true });
+        var secondAttempt = await store.InsertAsync(MakeRecord("corr-live-on"), TestContext.Current.CancellationToken);
+
+        Assert.NotNull(secondAttempt);
+        Assert.True(File.Exists(_dbPath));
+    }
+
+    [Fact]
+    public async Task DeleteAllAsync_RemovesEveryRow()
+    {
+        var (_, store) = CreateEnabledStore();
+        await store.InsertAsync(MakeRecord("corr-clear-1"), TestContext.Current.CancellationToken);
+        await store.InsertAsync(MakeRecord("corr-clear-2"), TestContext.Current.CancellationToken);
+
+        var deleted = await store.DeleteAllAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, deleted);
+        Assert.Equal(0, await store.GetRowCountAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task DeleteAllAsync_CaptureCurrentlyDisabled_StillDeletesExistingRows()
+    {
+        var database = CreateDatabase();
+        var options = new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true });
+        var store = new SqliteTranscriptStore(database, options);
+        await store.InsertAsync(MakeRecord("corr-clear-disabled"), TestContext.Current.CancellationToken);
+
+        // The operator switched capture off after collecting this row, but still wants to flush it.
+        options.Set(new TranscriptOptions { Enabled = false });
+        var deleted = await store.DeleteAllAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, deleted);
+    }
+
+    [Fact]
+    public async Task DeleteAllAsync_NoDatabaseEverCreated_ReturnsZeroWithoutThrowing()
+    {
+        var database = CreateDatabase();
+        var store = new SqliteTranscriptStore(database, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = false }));
+
+        var deleted = await store.DeleteAllAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, deleted);
+    }
+
     private (TranscriptDatabase Database, SqliteTranscriptStore Store) CreateEnabledStore()
     {
         var database = CreateDatabase();
         database.EnsureCreated();
-        return (database, new SqliteTranscriptStore(database, Options.Create(new TranscriptOptions { Enabled = true })));
+        return (database, new SqliteTranscriptStore(database, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true })));
     }
 
     private static string? ReadScorerVersion(TranscriptDatabase database, string correlationId)

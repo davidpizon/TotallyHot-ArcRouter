@@ -91,4 +91,5 @@ Requires Windows Developer Mode and `git config core.symlinks true`.
 - `data/README.md`
 - `docs/gui/DESIGN.md` — GUI design system (colors, typography, components, the window/modal shell)
 - `docs/gui/MOTION.md` — GUI motion system (durations, easing, entrance/exit patterns)
+- `docs/adr/README.md` — Architecture Decision Records: when to write one, template, and process
 

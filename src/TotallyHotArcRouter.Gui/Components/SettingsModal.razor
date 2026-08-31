@@ -1,7 +1,8 @@
 @* System settings modal: telemetry connection settings, the adaptive-routing toggle and sample size
    (docs/router/self-organizing-classification-plan.md Phase T6), the shadow-judge toggle and backbone
-   picker (docs/router/geval-shadow-scoring-plan.md), plus destructive actions gated behind a typed
-   confirmation word. *@
+   picker (docs/router/geval-shadow-scoring-plan.md), the transcription-capture toggle and its Clear action
+   (docs/router/self-organizing-classification-plan.md Phase T1), destructive actions gated behind a typed
+   confirmation word, and a discreet GUI/Router version footer. *@
 @using TotallyHot.ArcRouter.Gui.Telemetry
 @implements IDisposable
 @inject LiveDataStore LiveDataStore
@@ -129,6 +130,50 @@
                 }
             </div>
 
+            @* Transcription Capture (docs/router/self-organizing-classification-plan.md Phase T1). Saves
+               instantly like Adaptive Routing/Shadow Judge above. Clear is a separate, immediate action -
+               it deletes real data, so it asks for a plain Yes/No confirmation rather than saving anything. *@
+            <div class="space-y-2">
+                <label class="text-xs text-slate-400 font-medium uppercase tracking-widest">
+                    Transcription Capture
+                </label>
+                <div class="flex items-center gap-3">
+                    <button @onclick="ToggleTranscriptCapture"
+                            disabled="@_routerSettingsSaving"
+                            aria-label="Toggle transcription capture"
+                            class="shrink-0 flex items-center gap-1.5 rounded px-2 py-1 text-xs font-semibold border transition-colors @(_transcriptCaptureEnabled ? "toggle-enabled" : "toggle-disabled")">
+                        <span class="w-1.5 h-1.5 rounded-full @(_transcriptCaptureEnabled ? "toggle-dot-enabled" : "toggle-dot-disabled")"></span>
+                        @(_transcriptCaptureEnabled ? "On" : "Off")
+                    </button>
+                    <button @onclick="StartClearTranscripts"
+                            disabled="@_clearingTranscripts"
+                            class="btn btn-ghost-critical">
+                        Clear
+                    </button>
+                </div>
+                @if (_confirmingClearTranscripts)
+                {
+                    <div class="space-y-2 ds-destructive-box-critical">
+                        <p class="text-xs text-slate-400 leading-5">
+                            This will permanently delete every captured transcript (prompt and response
+                            text). Are you sure you want to do this?
+                        </p>
+                        <div class="flex gap-2">
+                            <button @onclick="@(() => _confirmingClearTranscripts = false)" class="flex-1 btn btn-ghost">
+                                Cancel
+                            </button>
+                            <button @onclick="ClearTranscriptsConfirmed" disabled="@_clearingTranscripts" class="flex-1 btn btn-critical">
+                                @(_clearingTranscripts ? "Clearing…" : "Confirm Clear")
+                            </button>
+                        </div>
+                    </div>
+                }
+                @if (_clearTranscriptsMessage is not null)
+                {
+                    <p class="text-xs @(_clearTranscriptsFailed ? "text-red-400" : "text-emerald-400")">@_clearTranscriptsMessage</p>
+                }
+            </div>
+
             @* Software Update (docs/router/auto-update-plan.md Phase 2). Router self-update only - this
                GUI does not update itself, it only displays the Router's update status and triggers its
                apply. *@
@@ -249,6 +294,24 @@
             <p class="text-xs text-slate-600 pt-1">
                 All system configurations, routing rules, and budget caps are preserved.
             </p>
+
+            @* Build provenance, deliberately the quietest thing in the window: the same dim text-xs
+               slate-600 tier as the note above, under a divider, below everything actionable. The two
+               halves are read from two different places on purpose - the GUI's from its own assembly,
+               the Router's from whatever Router actually answered the last status poll - because the MSI
+               installing both together is exactly the assumption worth being able to disprove here when
+               a Router fails to come back after an upgrade. *@
+            @* Spacing is picked from what app.css actually ships: it is a committed, tree-shaken
+               Tailwind build, so an unused utility (pt-2, border-slate-800) is simply absent and would
+               silently no-op here. mt-3/py-2/border-slate-700 are all present. *@
+            <div class="flex items-center justify-center gap-2 mt-3 py-2 border-t border-slate-700 text-xs text-slate-600">
+                @* Explicit parens are required, not stylistic: Razor treats an "@" that directly follows
+                   a non-whitespace character as a literal so email addresses survive markup, so a bare
+                   "v@AppVersion.Current" renders as that text verbatim. *@
+                <span>GUI v@(AppVersion.Current)</span>
+                <span aria-hidden="true">·</span>
+                <span>@RouterVersionLabel</span>
+            </div>
         </div>
     </div>
 </div>
@@ -280,6 +343,11 @@
     private bool _judgeEnabled;
     private string _judgeModelName = string.Empty;
     private IReadOnlyList<string> _eligibleJudgeModels = [];
+    private bool _transcriptCaptureEnabled;
+    private bool _confirmingClearTranscripts;
+    private bool _clearingTranscripts;
+    private string? _clearTranscriptsMessage;
+    private bool _clearTranscriptsFailed;
     private bool _routerSettingsSaving;
     private string? _routerSettingsMessage;
     private bool _routerSettingsSaveFailed;
@@ -303,6 +371,23 @@
     // keystroke behind what the operator actually typed.
     /// <summary>Whether the warning icon/tooltip should render for the Sample Size text as currently typed.</summary>
     private bool ShowSampleSizeWarning => int.TryParse(_sampleSizeText, out var parsed) && parsed < RecommendedEmbeddingMemoryCapacity;
+
+    /// <summary>
+    /// The footer's Router half: the version reported by the Router that answered the most recent status
+    /// poll, or "Router unknown" when none did.
+    /// </summary>
+    /// <remarks>
+    /// Gated on <see cref="UpdateStore.IsReachable"/> rather than merely on a non-null Status, because
+    /// <see cref="UpdateStore"/> is an app-lifetime singleton that keeps its last successful status when
+    /// a later poll fails. Reading Status alone would therefore keep displaying the version of a Router
+    /// that has since stopped, which is precisely the case this label exists to make visible. A blank
+    /// CurrentVersion is treated as unknown too - a Router that answered without naming a version tells
+    /// us no more than one that did not answer.
+    /// </remarks>
+    private string RouterVersionLabel =>
+        UpdateStore is { IsReachable: true, Status.CurrentVersion: { } version } && !string.IsNullOrWhiteSpace(version)
+            ? $"Router v{version}"
+            : "Router unknown";
 
     protected override async Task OnInitializedAsync()
     {
@@ -331,6 +416,7 @@
         _sampleSizeText = settings.EmbeddingMemoryCapacity.ToString();
         _judgeEnabled = settings.JudgeEnabled;
         _eligibleJudgeModels = settings.EligibleJudgeModels;
+        _transcriptCaptureEnabled = settings.TranscriptCaptureEnabled;
 
         // A stored pick that is no longer eligible is shown as Automatic rather than as a phantom
         // option: that is what the selector will actually do at call time, and re-offering the dead
@@ -388,6 +474,45 @@
     {
         _judgeModelName = (string?)e.Value ?? string.Empty;
         return SaveRouterSettingsNow();
+    }
+
+    /// <summary>Flips the transcription-capture toggle and saves it immediately.</summary>
+    private Task ToggleTranscriptCapture()
+    {
+        _transcriptCaptureEnabled = !_transcriptCaptureEnabled;
+        return SaveRouterSettingsNow();
+    }
+
+    /// <summary>Opens the Clear confirmation and clears any stale outcome from a previous clear.</summary>
+    private void StartClearTranscripts()
+    {
+        _confirmingClearTranscripts = true;
+        _clearTranscriptsMessage = null;
+        _clearTranscriptsFailed = false;
+    }
+
+    /// <summary>Runs the confirmed Clear action, deleting every captured transcript row.</summary>
+    private async Task ClearTranscriptsConfirmed()
+    {
+        _clearingTranscripts = true;
+        try
+        {
+            var rowsDeleted = await RouterSettingsStore.ClearTranscriptsAsync();
+            _clearTranscriptsMessage = rowsDeleted == 1 ? "Cleared 1 row." : $"Cleared {rowsDeleted} rows.";
+            _clearTranscriptsFailed = false;
+        }
+        catch (RouterSettingsAdminException)
+        {
+            _clearTranscriptsMessage = RouterSettingsStore.IsReachable
+                ? RouterSettingsStore.LastError
+                : "Could not reach the router. Is the proxy running?";
+            _clearTranscriptsFailed = true;
+        }
+        finally
+        {
+            _clearingTranscripts = false;
+            _confirmingClearTranscripts = false;
+        }
     }
 
     // Only tracks the raw text here - deliberately does NOT parse into _embeddingMemoryCapacity on every
@@ -452,7 +577,8 @@
                 _adaptiveRoutingEnabled,
                 _embeddingMemoryCapacity,
                 _judgeEnabled,
-                _judgeModelName);
+                _judgeModelName,
+                _transcriptCaptureEnabled);
             _routerSettingsMessage = "Saved";
             _routerSettingsSaveFailed = false;
 

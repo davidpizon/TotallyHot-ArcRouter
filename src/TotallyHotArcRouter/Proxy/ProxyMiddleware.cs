@@ -118,6 +118,12 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     private readonly IOptionsMonitor<Judge.JudgeOptions>? _judgeOptionsMonitor;
     private readonly Router.IRoutingGate? _routingGate;
 
+    // Read only when describing models on /api/show. Both are in-memory snapshot lookups (see
+    // ToolCallCapabilityStore), so consulting them from a request handler costs a dictionary probe, not a
+    // query - which matters because a client's model picker polls this endpoint.
+    private readonly Translation.ToolCalling.IToolCallCapabilityStore? _capabilityStore;
+    private readonly Translation.ToolCalling.IModelContextWindowStore? _contextWindowStore;
+
     // The rate the router's own tokens are charged at (see RoutingOptions.SelfHostedRouterPricePerMillionTokens).
     // Read once at construction rather than per request: it is a static amortization figure, not a catalog
     // price that a background ingestion cycle can refresh underneath us.
@@ -249,6 +255,18 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// attempted; <see langword="null"/> (the default) means routing is always accepted, matching the
     /// enabled-by-default coded value <see cref="Router.RoutingGateStore"/> itself falls back to.
     /// </param>
+    /// <param name="capabilityStore">
+    /// Optional source of each model's detected tool-call dialect, used only to describe models on
+    /// <c>POST /api/show</c>. <see langword="null"/> (the default) is behaviorally inert: every model reads
+    /// as unclassified, which
+    /// <see cref="Translation.ToolCalling.OllamaModelCapabilities.ForDialect"/> already treats as
+    /// tool-capable, so the declared capabilities are unchanged.
+    /// </param>
+    /// <param name="contextWindowStore">
+    /// Optional source of each model's probed context window, used only to populate
+    /// <c>POST /api/show</c>'s <c>model_info</c>. <see langword="null"/> (the default) is behaviorally
+    /// inert: <c>model_info</c> is omitted entirely, exactly as it was before this was wired up.
+    /// </param>
     public ProxyMiddleware(
         ILogger<ProxyMiddleware> logger,
         RequestInterceptor interceptor,
@@ -278,7 +296,9 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         InFlightRequestGauge? inFlightGauge = null,
         IOptionsMonitor<Models.RoutingOptions>? routingOptionsMonitor = null,
         IOptionsMonitor<Judge.JudgeOptions>? judgeOptionsMonitor = null,
-        Router.IRoutingGate? routingGate = null)
+        Router.IRoutingGate? routingGate = null,
+        Translation.ToolCalling.IToolCallCapabilityStore? capabilityStore = null,
+        Translation.ToolCalling.IModelContextWindowStore? contextWindowStore = null)
     {
         _logger = logger;
         _interceptor = interceptor;
@@ -311,6 +331,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         _routingOptionsMonitor = routingOptionsMonitor;
         _judgeOptionsMonitor = judgeOptionsMonitor;
         _routingGate = routingGate;
+        _capabilityStore = capabilityStore;
+        _contextWindowStore = contextWindowStore;
         _selfHostedRouterPricePerMillionTokens =
             routingOptions?.Value.SelfHostedRouterPricePerMillionTokens ?? new Models.RoutingOptions().SelfHostedRouterPricePerMillionTokens;
 
@@ -967,6 +989,10 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 }
 
                 var totalDurationMs = stopwatch.ElapsedMilliseconds;
+
+                _logger.LogDebug(
+                    "[INTERCEPTOR] Intercepted agent response message: {ResponseBody}",
+                    TruncateForLog(SanitizeForLog(Encoding.UTF8.GetString(capturedResponseBytes))));
 
                 await _interceptor.InterceptResponseAsync(context);
 
@@ -1895,6 +1921,18 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         value?.Replace("\r", " ").Replace("\n", " ") ?? string.Empty;
 
     /// <summary>
+    /// Caps the length of a full request/response body before it is placed in a Debug-level log message, so
+    /// an unbounded payload never floods a text log sink. Applied on top of <see cref="SanitizeForLog"/>,
+    /// never in place of it.
+    /// </summary>
+    private const int MaxLoggedBodyLength = 4000;
+
+    private static string TruncateForLog(string value) =>
+        value.Length <= MaxLoggedBodyLength
+            ? value
+            : string.Concat(value.AsSpan(0, MaxLoggedBodyLength), "...[truncated]");
+
+    /// <summary>
     /// Reads the upstream's own request id off <paramref name="headers"/> - <c>request-id</c> (Anthropic)
     /// or, failing that, <c>x-request-id</c> (the more common convention) - for
     /// <see cref="UsageLedgerEntry.RequestId"/>. Returns <see langword="null"/> when
@@ -2305,8 +2343,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// Reads the requested model name out of the body's <c>{"model": "..."}</c> field the same way
     /// <see cref="RequestInterceptor.ResolveModelRouteAsync"/> does, and answers 404 for a model this proxy
     /// does not have configured - matching real Ollama's own behavior for an unknown model, which
-    /// <see cref="Translation.ToolCalling.ModelDialectResolver.TryReadOllamaTemplateAsync"/> already relies
-    /// on when probing a genuine Ollama endpoint.
+    /// <see cref="Translation.ToolCalling.ModelDialectResolver"/>'s own Ollama probe already relies on when
+    /// probing a genuine Ollama endpoint.
     /// </summary>
     private async Task WriteOllamaShowResponseAsync(HttpContext context)
     {
@@ -2358,6 +2396,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
         _logger.LogDebug("Answered {Path} locally for model {Model}.", OllamaShowPath, SanitizeForLog(model.ModelName));
 
+        var (capabilities, modelInfo) = DescribeModel(model);
+
         context.Response.StatusCode = StatusCodes.Status200OK;
         context.Response.ContentType = "application/json";
 
@@ -2366,9 +2406,101 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 string.Empty,
                 string.Empty,
                 string.Empty,
-                new OllamaTagDetails("gguf", string.Empty, string.Empty))),
+                new OllamaTagDetails("gguf", string.Empty, string.Empty),
+                modelInfo,
+                capabilities)),
             context.RequestAborted);
     }
+
+    /// <summary>
+    /// Describes one model the way Ollama's <c>/api/show</c> does: what it can do, and how much context it
+    /// accepts. Both are read from in-memory snapshots, never probed here - see
+    /// <see cref="Translation.ToolCalling.IModelContextWindowStore"/> for why an inline probe would be
+    /// wrong on a request path a model picker polls.
+    /// </summary>
+    /// <remarks>
+    /// The synthetic router alias is answered by aggregating over the models it could actually dispatch to:
+    /// the union of their capabilities and the maximum of their context windows, restricted to models that
+    /// pass both governance gates. Note <see cref="RequestInterceptor.ListAvailableModels"/> does no
+    /// enablement filtering of its own, so that restriction is applied here.
+    /// <para>
+    /// The alias is identified by provider key rather than by name. An operator can legitimately configure
+    /// a model called <c>totallyhot-arcrouter</c>, but the provider key
+    /// <see cref="RequestInterceptor.RouterModelProvider"/> is documented as deliberately not a real
+    /// provider, so it is unambiguous.
+    /// </para>
+    /// <para>
+    /// This is the same in-memory join <c>ManagementFacade</c> already performs to populate its per-model
+    /// admin view.
+    /// </para>
+    /// </remarks>
+    /// <param name="model">The model being described.</param>
+    /// <returns>
+    /// The capability tokens (never empty), and the <c>model_info</c> map - or <see langword="null"/> when
+    /// no context length is known, so the field is omitted rather than reported as zero.
+    /// </returns>
+    private (IReadOnlyList<string> Capabilities, IReadOnlyDictionary<string, JsonNode>? ModelInfo) DescribeModel(
+        AvailableModel model)
+    {
+        if (string.Equals(model.Provider, RequestInterceptor.RouterModelProvider, StringComparison.OrdinalIgnoreCase))
+        {
+            var eligible = _interceptor.ListAvailableModels()
+                .Where(m => !string.Equals(m.Provider, RequestInterceptor.RouterModelProvider, StringComparison.OrdinalIgnoreCase))
+                .Where(m => _interceptor.IsProviderEnabled(m.Provider) && _interceptor.IsModelEnabled(m.ModelName))
+                .ToList();
+
+            var union = Translation.ToolCalling.OllamaModelCapabilities.Union(
+                eligible.Select(m => Translation.ToolCalling.OllamaModelCapabilities.ForDialect(
+                    _capabilityStore?.GetModelCapability(m.Provider, m.ModelName)?.Dialect)));
+
+            // Max, not min: the alias advertises the best it can route to. This over-advertises by
+            // construction - auto-select may land on a model with a smaller window - which is the accepted
+            // trade-off recorded in docs/router/ollama-show-capabilities-plan.md.
+            var widest = eligible
+                .Select(m => _contextWindowStore?.GetModelContextWindow(m.Provider, m.ModelName)?.ContextLength)
+                .Where(length => length is > 0)
+                .DefaultIfEmpty(null)
+                .Max();
+
+            return (union, BuildModelInfo(RouterArchitecture, widest));
+        }
+
+        var capabilities = Translation.ToolCalling.OllamaModelCapabilities.ForDialect(
+            _capabilityStore?.GetModelCapability(model.Provider, model.ModelName)?.Dialect);
+        var window = _contextWindowStore?.GetModelContextWindow(model.Provider, model.ModelName);
+
+        return (capabilities, BuildModelInfo(window?.Architecture ?? RouterArchitecture, window?.ContextLength));
+    }
+
+    /// <summary>
+    /// Builds Ollama's <c>model_info</c> map, or <see langword="null"/> when no context length is known.
+    /// </summary>
+    /// <remarks>
+    /// The architecture and the length are always emitted together. Ollama keys the window as
+    /// <c>{arch}.context_length</c> and clients resolve it by reading <c>general.architecture</c> first, so
+    /// a length published without a matching architecture is unreachable through the standard read path.
+    /// </remarks>
+    private static IReadOnlyDictionary<string, JsonNode>? BuildModelInfo(string architecture, int? contextLength) =>
+        contextLength is > 0
+            ? new Dictionary<string, JsonNode>(StringComparer.Ordinal)
+            {
+                ["general.architecture"] = JsonValue.Create(architecture),
+                [$"{architecture}.context_length"] = JsonValue.Create(contextLength.Value),
+            }
+            : null;
+
+    /// <summary>
+    /// The architecture reported for the synthetic router alias, and for any model whose real architecture
+    /// was never probed.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not a real GGUF architecture name. The alias spans models of differing architectures,
+    /// so any real name would be wrong for most of them; a client keying behavior off this value sees
+    /// something unrecognized and falls back to generic handling, which is the safe direction. Naming a
+    /// plausible-but-wrong architecture like <c>llama</c> would be strictly worse - the same judgment
+    /// <c>ModelDialectResolver.TryMapArchitecture</c> already makes about that exact name.
+    /// </remarks>
+    private const string RouterArchitecture = "arcrouter";
 
     /// <summary>
     /// The <c>POST /api/show</c> response envelope, shaped to match Ollama's native per-model detail schema.
@@ -2377,11 +2509,27 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// <see cref="Translation.ToolCalling.ModelDialectResolver"/> for where that is actually sourced from,
     /// when it is available at all) are left as ordinary defaults rather than fabricated.
     /// </summary>
+    /// <remarks>
+    /// <c>capabilities</c> is the exception to that "leave it blank" stance, and the reason this endpoint
+    /// gained content at all: capability-filtering clients drop a model that declares nothing, so leaving
+    /// it empty made every router model invisible in Visual Studio's Copilot picker. It is the one field
+    /// here the router genuinely knows the answer to.
+    /// </remarks>
     private sealed record OllamaShowResponse(
         [property: JsonPropertyName("modelfile")] string Modelfile,
         [property: JsonPropertyName("parameters")] string Parameters,
         [property: JsonPropertyName("template")] string Template,
-        [property: JsonPropertyName("details")] OllamaTagDetails Details);
+        [property: JsonPropertyName("details")] OllamaTagDetails Details,
+
+        // Omitted rather than serialized as null when unknown. This endpoint serializes without options, so
+        // default handling would write `"model_info": null` - which a client can read as "no context
+        // limit" rather than "not stated". The per-property attribute is what keeps that promise without
+        // introducing a shared options object for one field.
+        [property: JsonPropertyName("model_info")]
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyDictionary<string, JsonNode>? ModelInfo,
+
+        [property: JsonPropertyName("capabilities")] IReadOnlyList<string> Capabilities);
 
     /// <summary>An Ollama-shaped <c>{"error": "..."}</c> envelope, used for a <c>POST /api/show</c> naming an unknown model.</summary>
     private sealed record OllamaErrorResponse(
