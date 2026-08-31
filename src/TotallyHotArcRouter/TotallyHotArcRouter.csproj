@@ -53,8 +53,8 @@
          dependency isn't implicit - matches TotallyHotArcRouter.Gui.csproj's explicit Grpc.Tools reference. -->
     <!-- Backs Program.cs's UseWindowsService() call (auto-update plan Phase 1) so the host can run
          under the Windows Service Control Manager; a no-op when launched any other way. -->
-    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.0" />
-    <PackageReference Include="AWSSDK.BedrockRuntime" Version="4.0.101.3" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.11" />
+    <PackageReference Include="AWSSDK.BedrockRuntime" Version="4.0.101.4" />
     <PackageReference Include="Grpc.AspNetCore" Version="2.83.0" />
     <PackageReference Include="Grpc.Tools" Version="2.83.0">
       <PrivateAssets>all</PrivateAssets>
