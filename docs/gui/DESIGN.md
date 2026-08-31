@@ -20,10 +20,13 @@ companion [`MOTION.md`](MOTION.md), which *is* prescriptive. For component-level
 
 ## 1. Design Principles
 
-- **Data density without claustrophobia** — `TurnCard` and `ConversationCard` pack a full stat strip
-  (ROI, Cost, Tok P/C, Steps, Cache, TTFT, Ctx, Model) into a two-line card, but every stat gets
-  consistent `gap-*`/`px-*`/`py-*` spacing and a `.ls-stat-label` (10px, uppercase, muted `#64748b`)
-  so the strip scans instead of blurring together.
+- **Data density without claustrophobia** — `ConversationSummary`'s pinned aggregate strip (Total
+  Cost, Total Tokens, Avg ROI, Turns, Trend) and `ConversationCard`'s per-session summary pack several
+  stats into a compact card, and every stat gets consistent `gap-*`/`px-*`/`py-*` spacing and a
+  `.ls-stat-label` (10px, uppercase, muted `#64748b`) so the strip scans instead of blurring together.
+  (`TurnCard`'s denser 8-stat strip — ROI, Cost, Tok P/C, Steps, Cache, TTFT, Ctx, Model — demonstrated
+  this most aggressively, but the component is orphaned since the Sessions-tab rebuild: see the
+  Progressive disclosure bullet below.)
 - **Hierarchy through weight and color tier, not decoration** — text hierarchy comes from the
   `font-bold` / `font-semibold` / `font-medium` steps and the five-tier slate text-color ladder
   (§3), never from box shadows, gradients, or size alone. Agent identity comes from a deterministic
@@ -36,9 +39,13 @@ companion [`MOTION.md`](MOTION.md), which *is* prescriptive. For component-level
 - **Trust through restraint** — one accent (Dark Green `#1ed760`) plus three semantic colors (`emerald`/
   `amber`/`red`) on a near-black base is the entire palette. No additional brand hues; no gradients
   anywhere in `app.css`.
-- **Progressive disclosure** — `ConversationSummary` shows one pinned stat strip; clicking a `TurnCard`
-  header expands the step-by-step routing-decision log and request/response payload. Cost Analytics
-  shows one chart at a time behind a ranked metric-picker pill row, not seven charts at once.
+- **Progressive disclosure** — `ConversationSummary` shows one pinned stat strip; double-clicking a
+  `ConversationCard` opens the Sessions tab's split view, replacing the full-width session list with
+  session details (left) and `SessionConversationPane`'s chat-style reproduction of the conversation
+  (right). Cost Analytics shows one chart at a time behind a ranked metric-picker pill row, not seven
+  charts at once. (`TurnCard`'s in-place click-to-expand routing-decision log was the previous
+  disclosure mechanism for turn detail; it is orphaned — unreferenced by any component — since this
+  double-click split view replaced it, and does not render anywhere today.)
 
 ## 2. Visual Theme
 
@@ -62,7 +69,7 @@ Dark theme only — there is no light mode and no theme toggle (`dashboard.md` �
 | Warning / degraded | `#f59e0b` (fill), `#fbbf24` text | `--color-warning` | `.text-amber-400` |
 | Critical / failed | `#ef4444` (fill), `#f87171` text | `--color-critical` | `.text-red-400` |
 | Inset surface — recessed | `#172033` | n/a | ticker row, active metric-picker pill |
-| Inset surface — payload block | `#020617` | n/a | `TurnCard` request/response `<pre>` blocks |
+| Inset surface — payload block | `#020617` | n/a | *Currently unused* — was `TurnCard`'s request/response `<pre>` blocks (`.ds-code-block`); orphaned since the Sessions-tab rebuild, no live component renders this surface |
 | Inset surface — console | `#0b1120` | `--surface-inset` | `ConsoleTab` log surface |
 
 \* `.bg-slate-700` is the one compiled-blob utility class actually applied to card-like surfaces in
@@ -72,10 +79,10 @@ markup; `bg-slate-800` never appears as a literal class (card surfaces are set v
 **The accent swapped from sky-400 (`#38bdf8`) to Dark Green (`#1ed760`)** as part of aspirational-design
 adoption — every reference to the old accent used as UI chrome (active tab text, focus rings, the Stop
 icon-action color, tooltip focus outline) now points at `--accent`. Semantic colors (success/warning/
-critical) are unchanged — they already matched the aspirational spec before adoption. **Sky is NOT
-fully retired**, though: it also plays a data-encoding role below (the Cost/Model stat-strip hue and
-the routing-step "Info" tone) and stays sky in those two roles specifically — see the note in the next
-section.
+critical) are unchanged — they already matched the aspirational spec before adoption. Sky's two
+data-encoding roles — the `TurnCard` stat strip's Cost/Model hue and its routing-step "Info" tone — are
+both dormant now that `TurnCard` is orphaned (see §1's Progressive disclosure bullet); see the note in
+the next section.
 
 Inset surfaces sit *below* the page background rather than above it — they mark a region as a
 well (raw data, logs) rather than a card. They are the inverse of elevation: no border-lightening,
@@ -83,11 +90,15 @@ no shadow, just a darker fill.
 
 ### Data-encoding palettes
 
-The three-color semantic palette above governs *chrome*. Two additional palettes encode *data*, and
-they are deliberately broader — collapsing them into the chrome palette would destroy the encoding:
+The three-color semantic palette above governs *chrome*. One additional palette encodes *data*
+(below); it is deliberately broader — collapsing it into the chrome palette would destroy the
+encoding.
 
-**Stat-strip categorical hues** — each stat in the `TurnCard` strip carries its own hue so a
-specific metric can be found by color in a dense two-line strip, without reading labels:
+**Stat-strip categorical hues** — *currently unused.* Each stat in `TurnCard`'s 8-stat strip carried
+its own hue so a specific metric could be found by color in a dense two-line strip, without reading
+labels. `TurnCard` is orphaned since the Sessions-tab rebuild (§1), so this palette renders nowhere
+today; the CSS (`.stat-color-tokens`, `.stat-color-ttft`, and the inline sky/emerald/amber spans in
+`TurnCard.razor`) is left in place rather than deleted in case a future dense turn view revives it:
 
 | Stat | Color | | Stat | Color |
 | --- | --- | --- | --- | --- |
@@ -95,11 +106,10 @@ specific metric can be found by color in a dense two-line strip, without reading
 | Cost, Model | `#38bdf8` sky (fallback model → amber) | | TTFT | `#fb7185` rose |
 | Tok P/C | `#a78bfa` violet | | Ctx | `#cbd5e1` slate-300 |
 
-Rose and violet appear **only** here. They are categorical labels, not brand colors — do not use
-them for chrome, borders, or status. **Sky (`#38bdf8`) is likewise preserved here as the Cost/Model
-categorical hue** even though the same hex was retired as the chrome accent (§2) — recoloring it to
-match the new green accent would make Cost visually indistinguishable from the emerald ROI/Cache stat
-in the same strip, defeating the whole point of a categorical palette.
+Rose and violet appeared **only** here, and appear nowhere in the app today. They were categorical
+labels, not brand colors — do not repurpose them for chrome, borders, or status if this palette is
+ever revived. Sky (`#38bdf8`) was likewise preserved there as the Cost/Model categorical hue distinct
+from the retired chrome accent (§2); that reasoning still applies if the strip returns.
 
 **Text on tinted semantic surfaces** — wherever a semantic color tints a background, the text steps
 one shade lighter (`-300`) for contrast against that tint. The pattern is always
@@ -107,13 +117,15 @@ one shade lighter (`-300`) for contrast against that tint. The pattern is always
 
 | Context | Background | Border | Text |
 | --- | --- | --- | --- |
-| Error banners, failed pulls | `#ef444411` | `#ef444444` | `#fca5a5` red-300 |
-| Routing step — Warn | `rgba(245,158,11,0.12)` | `#f59e0b` (left, 2px) | `#fcd34d` amber-300 |
-| Routing step — Info | `rgba(56,189,248,0.1)` | `#38bdf8` (left, 2px) | `#7dd3fc` sky-300 |
-| Routing step — OK | `rgba(16,185,129,0.08)` | `#10b981` (left, 2px) | `#6ee7b7` emerald-300 |
+| Error banners, failed pulls (`.ds-step-critical`, live: `ProviderEditDialog`, `ProvidersAdmin`) | `#ef444411` | `#ef444444` | `#fca5a5` red-300 |
+| Routing step — Warn (`.ds-step-warning`) *currently unused* | `rgba(245,158,11,0.12)` | `#f59e0b` (left, 2px) | `#fcd34d` amber-300 |
+| Routing step — Info (`.ds-step-info`) *currently unused* | `rgba(56,189,248,0.1)` | `#38bdf8` (left, 2px) | `#7dd3fc` sky-300 |
+| Routing step — OK (`.ds-step-success`) *currently unused* | `rgba(16,185,129,0.08)` | `#10b981` (left, 2px) | `#6ee7b7` emerald-300 |
 
-"Routing step — Info" also keeps sky rather than moving to the new accent green — it is a semantic
-step-outcome tone (info, distinct from OK/Warn/Error) in `TurnCard`'s routing-decision log, not chrome.
+The three "Routing step" rows were `TurnCard`'s routing-decision log tones. That log doesn't render
+anywhere today — `TurnCard` is orphaned since the Sessions-tab rebuild (§1) — but the `.ds-step-*`
+classes remain in `app.css` (§7 keeps `.ds-step-critical` alive for error banners) so the palette is
+ready if a routing-decision view returns.
 
 Fonts: `var(--font-ds)` (`"Century Gothic", "Avenir Next", "Poppins", Inter, system-ui, sans-serif`) for
 all UI text, **JetBrains Mono** for every numeric/monospace value (token counts, costs, timestamps,
@@ -162,7 +174,7 @@ actually appear in `app.css`.
 
 ## 4. Components
 
-- **Cards** (`ConversationCard`, `TurnCard`, ticker stat cards) — `--surface-card` (`#181818`)
+- **Cards** (`ConversationCard`, ticker stat cards) — `--surface-card` (`#181818`)
   background, `border-color: var(--border-button)` (1px), `rounded-lg` (8px, `.5rem`, matching
   `--radius-card`) corners, `.card-hover`/`.ds-card:hover` for interactive cards (background shift to
   `--surface-elevated-a` and/or `--shadow-elevated` over 150ms). Agent identity and fallback state are
@@ -327,7 +339,7 @@ app is Solid-only for now** — Mini is a deliberate future pass, not adopted he
 | Tier | Size | Where | Why |
 |---|---|---|---|
 | Default | **20px** | Tab bar, card header action rows, alerts/badges, modal close glyphs, search, settings — the large majority of call sites | Heroicons' own Solid-vs-Mini threshold |
-| Dense-inline exception | **16px** | `TurnCard.razor`'s inline step icons (sit next to `text-xs` stat-strip text); `ProvidersAdmin.razor`'s nested per-model row Stop/Play/Remove icons (~20-24px row height) | Jumping straight to 20px would visually dominate rows built around "data density without claustrophobia" (§1) |
+| Dense-inline exception | **16px** | `ProvidersAdmin.razor`'s nested per-model row Stop/Play/Remove icons (~20-24px row height) (`TurnCard.razor`'s inline step icons used this tier too, but the component is orphaned — see §1 — and no longer renders) | Jumping straight to 20px would visually dominate rows built around "data density without claustrophobia" (§1) |
 | Unchanged | **12–14px** | `grip-vertical` (`PriceSourcesAdmin.razor`'s drag handle, §5.3) | Hand-drawn, not a Heroicons glyph — not subject to the Solid-threshold rationale |
 
 **The one hand-drawn exception: `grip-vertical`.** Heroicons ships no drag-handle glyph — the nearest
@@ -771,7 +783,9 @@ See §4.2's `.btn-*` classes and §4's `.overlay-backdrop` as the reference patt
 following classes have been added to support this, on top of the earlier round below:
 - `.ls-turn-card`, `.ls-turn-card-toggle`, `.ls-flex-auto`, `.ls-stat-strip-gap` — `TurnCard`/
   `ConversationSummary` static chrome (the AgentColor-tinted background/border-left stays inline —
-  that part is genuinely data-driven, exception 1 above)
+  that part is genuinely data-driven, exception 1 above). `.ls-turn-card`/`.ls-turn-card-toggle` are
+  now only referenced by the orphaned `TurnCard.razor` (§1); `.ls-flex-auto`/`.ls-stat-strip-gap` stay
+  live via `ConversationSummary`.
 - `.ds-dashboard-ticker` — Dashboard ticker row border/background
 - `.ls-console-line` — `ConsoleTab` line wrapping (the per-level text color stays inline, exception 1
   above)
