@@ -1436,10 +1436,9 @@ input[type="number"] {
    double-click on a card, split view (session detail + chat reproduction) after.
    --------------------------------------------------------------------------- */
 .ls-sessions-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 8px;
-  align-content: start;
 }
 
 .ls-sessions-detail-pane {

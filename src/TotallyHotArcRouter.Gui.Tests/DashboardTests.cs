@@ -13,11 +13,12 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 /// </summary>
 public sealed class DashboardTests
 {
-    private static Bunit.BunitContext NewContext()
+    private static Bunit.BunitContext NewContext(PersistedSessionStore? persistedSessionStore = null)
     {
         var ctx = new Bunit.BunitContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
         ctx.Services.AddSingleton(new LiveDataStore(serverAddress: "https://127.0.0.1:59996"));
+        ctx.Services.AddSingleton(persistedSessionStore ?? new PersistedSessionStore(serverAddress: "https://127.0.0.1:59996"));
         ctx.Services.AddSingleton(new ProviderAdminStore(managementAddress: "http://127.0.0.1:59994"));
         ctx.Services.AddSingleton(new UsageStore(managementAddress: "http://127.0.0.1:59993"));
         ctx.Services.AddSingleton(new RouterSettingsAdminStore(serverAddress: "https://127.0.0.1:59995"));
@@ -103,6 +104,65 @@ public sealed class DashboardTests
         cut.FindAll(".fixed.inset-0 button").First().Click();
 
         cut.Markup.Should().NotContain("System Settings");
+    }
+
+    [Fact]
+    public async Task Sessions_tab_shows_a_persisted_session_when_no_live_session_exists()
+    {
+        var client = new FakePersistedSessionsClient
+        {
+            Result = new PersistedSessionsResult(
+                TranscriptCaptureEnabled: true,
+                Transcripts: [CreateTranscript(sessionId: "persisted-only")]),
+        };
+        var store = new PersistedSessionStore(client);
+        await store.LoadAsync(Xunit.TestContext.Current.CancellationToken);
+        using var ctx = NewContext(store);
+
+        var cut = ctx.Render<Dashboard>();
+
+        cut.Markup.Should().Contain("Session persist");
+    }
+
+    [Fact]
+    public async Task Sessions_tab_never_shows_No_conversations_yet_when_only_persisted_sessions_exist()
+    {
+        // Regression guard for the merge in Dashboard.MergedSessionConversations: a persisted-only
+        // session must reach LiveStream even though LiveDataStore.Conversations is empty.
+        var client = new FakePersistedSessionsClient
+        {
+            Result = new PersistedSessionsResult(
+                TranscriptCaptureEnabled: true,
+                Transcripts: [CreateTranscript(sessionId: "persisted-only")]),
+        };
+        var store = new PersistedSessionStore(client);
+        await store.LoadAsync(Xunit.TestContext.Current.CancellationToken);
+        using var ctx = NewContext(store);
+
+        var cut = ctx.Render<Dashboard>();
+
+        cut.Markup.Should().NotContain("No conversations yet.");
+    }
+
+    private static PersistedTranscriptDto CreateTranscript(string sessionId, int turnNumber = 1) => new(
+        SessionId: sessionId,
+        CorrelationId: $"{sessionId}:{turnNumber}",
+        CreatedAtUtc: DateTimeOffset.UtcNow,
+        RequestedModel: "gpt-5.4",
+        RoutedModel: "kimi-k2.5",
+        PromptText: "hello",
+        ResponseText: "hi",
+        CostUsd: 0.01m,
+        InputTokens: 10,
+        OutputTokens: 5,
+        MemoryEntryId: null);
+
+    private sealed class FakePersistedSessionsClient : IPersistedSessionsClient
+    {
+        public PersistedSessionsResult Result { get; set; } = new(true, []);
+
+        public Task<PersistedSessionsResult> ListAsync(int limit, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result);
     }
 }
 

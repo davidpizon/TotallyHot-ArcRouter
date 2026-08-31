@@ -1,23 +1,39 @@
+using System.Globalization;
 using System.Threading.Channels;
+using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
+using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Transcripts;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Telemetry;
 
 /// <summary>
-/// gRPC service dashboards connect to for live routing telemetry and log lines. Replaces the former
-/// SignalR <c>TelemetryHub</c> - see docs/router/grpc-migration.md. Mapped at the
-/// <c>TelemetryService.StreamEvents</c> RPC by <see cref="TotallyHot.ArcRouter.Proxy.ProxyServer"/>.
+/// gRPC service dashboards connect to for live routing telemetry, log lines, and (via
+/// <see cref="ListPersistedSessions"/>) persisted session history. Replaces the former SignalR
+/// <c>TelemetryHub</c> - see docs/router/grpc-migration.md. Mapped by
+/// <see cref="TotallyHot.ArcRouter.Proxy.ProxyServer"/>.
 /// </summary>
 public sealed class TelemetryGrpcService : Contract.TelemetryService.TelemetryServiceBase
 {
     private readonly TelemetryBroadcaster _broadcaster;
+    private readonly ITranscriptStore _transcriptStore;
+    private readonly IOptionsMonitor<TranscriptOptions> _transcriptOptions;
 
     /// <param name="broadcaster">Registers/unregisters each call's channel writer and receives published events.</param>
-    public TelemetryGrpcService(TelemetryBroadcaster broadcaster)
+    /// <param name="transcriptStore">Backs <see cref="ListPersistedSessions"/> with persisted <c>request_transcripts</c> rows.</param>
+    /// <param name="transcriptOptions">Supplies the live <see cref="TranscriptOptions.Enabled"/> gate for <see cref="ListPersistedSessions"/>'s response.</param>
+    public TelemetryGrpcService(
+        TelemetryBroadcaster broadcaster,
+        ITranscriptStore transcriptStore,
+        IOptionsMonitor<TranscriptOptions> transcriptOptions)
     {
         ArgumentNullException.ThrowIfNull(broadcaster);
+        ArgumentNullException.ThrowIfNull(transcriptStore);
+        ArgumentNullException.ThrowIfNull(transcriptOptions);
         _broadcaster = broadcaster;
+        _transcriptStore = transcriptStore;
+        _transcriptOptions = transcriptOptions;
     }
 
     /// <summary>
@@ -57,6 +73,78 @@ public sealed class TelemetryGrpcService : Contract.TelemetryService.TelemetrySe
         {
             _broadcaster.Unregister(channel.Writer);
         }
+    }
+
+    /// <summary>
+    /// Returns the most recent persisted <c>request_transcripts</c> rows for the GUI Sessions tab
+    /// (docs/router/sessions-tab-training-data-plan.md Phase 1). Reads
+    /// <see cref="TranscriptOptions.Enabled"/> itself, rather than trusting an empty transcript list to
+    /// imply capture is off, so the response can tell the two states apart:
+    /// <see cref="Contract.ListPersistedSessionsResponse.TranscriptCaptureEnabled"/> false means capture is
+    /// off, not that no traffic has been persisted yet.
+    /// </summary>
+    public override async Task<Contract.ListPersistedSessionsResponse> ListPersistedSessions(
+        Contract.ListPersistedSessionsRequest request,
+        ServerCallContext context)
+    {
+        var enabled = _transcriptOptions.CurrentValue.Enabled;
+        var response = new Contract.ListPersistedSessionsResponse { TranscriptCaptureEnabled = enabled };
+
+        if (!enabled)
+        {
+            return response;
+        }
+
+        var transcripts = await _transcriptStore.ListSessionsAsync(request.Limit, context.CancellationToken)
+            .ConfigureAwait(false);
+
+        response.Transcripts.AddRange(transcripts.Select(ToContract));
+        return response;
+    }
+
+    /// <summary>Maps one <see cref="SessionTranscript"/> onto its wire representation.</summary>
+    private static Contract.PersistedTranscript ToContract(SessionTranscript transcript)
+    {
+        var contract = new Contract.PersistedTranscript
+        {
+            SessionId = transcript.SessionId,
+            CorrelationId = transcript.CorrelationId,
+            CreatedAtUtc = Timestamp.FromDateTimeOffset(transcript.CreatedAtUtc),
+            RequestedModel = transcript.RequestedModel,
+            RoutedModel = transcript.RoutedModel,
+        };
+
+        if (transcript.PromptText is { } promptText)
+        {
+            contract.PromptText = promptText;
+        }
+
+        if (transcript.ResponseText is { } responseText)
+        {
+            contract.ResponseText = responseText;
+        }
+
+        if (transcript.Cost is { } cost)
+        {
+            contract.CostUsd = cost.ToString(CultureInfo.InvariantCulture);
+        }
+
+        if (transcript.InputTokens is { } inputTokens)
+        {
+            contract.InputTokens = inputTokens;
+        }
+
+        if (transcript.OutputTokens is { } outputTokens)
+        {
+            contract.OutputTokens = outputTokens;
+        }
+
+        if (transcript.MemoryEntryId is { } memoryEntryId)
+        {
+            contract.MemoryEntryId = memoryEntryId;
+        }
+
+        return contract;
     }
 }
 

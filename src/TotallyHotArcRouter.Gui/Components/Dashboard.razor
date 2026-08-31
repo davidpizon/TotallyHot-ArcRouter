@@ -1,6 +1,7 @@
 @* Root dashboard component: header with live status banner, ticker row, tab bar, and the active tab. *@
 @implements IDisposable
 @inject LiveDataStore LiveDataStore
+@inject PersistedSessionStore PersistedSessionStore
 @inject ProviderAdminStore ProviderStore
 @inject UsageStore UsageStore
 
@@ -103,7 +104,7 @@
         @switch (_activeTab)
         {
             case Tab.Live:
-                <LiveStream Conversations="LiveDataStore.Conversations" SelectedId="@_selectedConversationId" OnSelect="id => _selectedConversationId = id" />
+                <LiveStream Conversations="MergedSessionConversations()" SelectedId="@_selectedConversationId" OnSelect="id => _selectedConversationId = id" />
                 break;
             case Tab.Analytics:
                 <CostAnalytics Conversations="LiveDataStore.Conversations" InitialSessionId="@_selectedConversationId" />
@@ -169,8 +170,14 @@
     protected override async Task OnInitializedAsync()
     {
         LiveDataStore.Changed += HandleLiveDataChanged;
+        PersistedSessionStore.Changed += HandlePersistedSessionsChanged;
         ProviderStore.Changed += HandleProvidersChanged;
         await LiveDataStore.StartAsync();
+
+        // Best-effort: populates the Sessions tab's persisted history. Failures are swallowed by the
+        // store (surfaced via its IsReachable flag), so the tab simply shows only live sessions when the
+        // proxy isn't running yet.
+        await PersistedSessionStore.LoadAsync();
 
         // Best-effort: populates the budget banner. Failures are swallowed by the store (surfaced via its
         // IsReachable flag), so the dashboard renders "System Status: OK" when the proxy isn't running.
@@ -197,6 +204,35 @@
     // InvokeAsync marshals back to this component's render context before calling StateHasChanged.
     /// <summary>Re-renders when live telemetry changes.</summary>
     private void HandleLiveDataChanged() => InvokeAsync(StateHasChanged);
+
+    // PersistedSessionStore raises Changed from whatever thread the gRPC call completed on, same as
+    // LiveDataStore.Changed above.
+    /// <summary>Re-renders when the Sessions tab's persisted history changes.</summary>
+    private void HandlePersistedSessionsChanged() => InvokeAsync(StateHasChanged);
+
+    /// <summary>
+    /// The Sessions tab's full conversation list: every live session plus every persisted session not
+    /// already present live, live winning for any session id in both - a session still in flight is more
+    /// current from the live stream (turns arrive incrementally), while a persisted-only session survived
+    /// a GUI restart and has nothing more current to prefer (docs/router/sessions-tab-training-data-plan.md
+    /// Phase 2). Deliberately not cached: both source lists are already cheap, already-materialized
+    /// snapshots (<see cref="LiveDataStore.Conversations"/>/<see cref="PersistedSessionStore.Sessions"/>
+    /// are replaced wholesale on change, not mutated in place), so recomputing this on every render is a
+    /// small, bounded cost rather than a stale-cache risk.
+    /// </summary>
+    private IReadOnlyList<Conversation> MergedSessionConversations()
+    {
+        var live = LiveDataStore.Conversations;
+        if (PersistedSessionStore.Sessions.Count == 0)
+        {
+            return live;
+        }
+
+        var liveIds = new HashSet<string>(live.Select(c => c.Id), StringComparer.Ordinal);
+        var merged = new List<Conversation>(live);
+        merged.AddRange(PersistedSessionStore.Sessions.Where(c => !liveIds.Contains(c.Id)));
+        return merged;
+    }
 
     /// <summary>Recomputes the budget-alert banner and re-renders when the provider list changes.</summary>
     private void HandleProvidersChanged() => InvokeAsync(() =>
@@ -248,6 +284,7 @@
     public void Dispose()
     {
         LiveDataStore.Changed -= HandleLiveDataChanged;
+        PersistedSessionStore.Changed -= HandlePersistedSessionsChanged;
         ProviderStore.Changed -= HandleProvidersChanged;
     }
 

@@ -76,16 +76,17 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO request_transcripts (
-                correlation_id, created_at_utc, requested_model, routed_model, dimension, difficulty,
-                language, is_utility, prompt_text, response_text, score, cost, is_exploratory, propensity,
-                input_tokens, output_tokens, memory_entry_id, dim_best_model)
+                correlation_id, session_id, created_at_utc, requested_model, routed_model, dimension,
+                difficulty, language, is_utility, prompt_text, response_text, score, cost, is_exploratory,
+                propensity, input_tokens, output_tokens, memory_entry_id, dim_best_model)
             VALUES (
-                $correlationId, $createdAtUtc, $requestedModel, $routedModel, $dimension, $difficulty,
-                $language, $isUtility, $promptText, $responseText, $score, $cost, $isExploratory, $propensity,
-                $inputTokens, $outputTokens, $memoryEntryId, $dimBestModel);
+                $correlationId, $sessionId, $createdAtUtc, $requestedModel, $routedModel, $dimension,
+                $difficulty, $language, $isUtility, $promptText, $responseText, $score, $cost,
+                $isExploratory, $propensity, $inputTokens, $outputTokens, $memoryEntryId, $dimBestModel);
             SELECT last_insert_rowid();
             """;
         command.Parameters.AddWithValue("$correlationId", record.CorrelationId);
+        command.Parameters.AddWithValue("$sessionId", CorrelationIdParser.SessionIdOf(record.CorrelationId));
         command.Parameters.AddWithValue("$createdAtUtc", record.CreatedAtUtc.ToString("O"));
         command.Parameters.AddWithValue("$requestedModel", record.RequestedModel);
         command.Parameters.AddWithValue("$routedModel", record.RoutedModel);
@@ -404,10 +405,52 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         return Task.FromResult<IReadOnlyDictionary<long, string>>(promptTextByMemoryEntryId);
     }
 
-    /// <summary>
-    /// Reads a complete <see cref="TranscriptRecord"/> from a reader positioned at a row with all
-    /// columns in their standard order.
-    /// </summary>
+    /// <inheritdoc />
+    public Task<IReadOnlyList<SessionTranscript>> ListSessionsAsync(int limit, CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (!_options.CurrentValue.Enabled)
+        {
+            return Task.FromResult<IReadOnlyList<SessionTranscript>>(Array.Empty<SessionTranscript>());
+        }
+
+        EnsureSchema();
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT
+                id, session_id, correlation_id, created_at_utc, requested_model, routed_model,
+                prompt_text, response_text, cost, input_tokens, output_tokens, memory_entry_id
+            FROM request_transcripts
+            ORDER BY id DESC
+            LIMIT $limit;
+            """;
+        command.Parameters.AddWithValue("$limit", limit);
+
+        var rows = new List<SessionTranscript>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            rows.Add(new SessionTranscript(
+                Id: reader.GetInt64(0),
+                SessionId: reader.GetString(1),
+                CorrelationId: reader.GetString(2),
+                CreatedAtUtc: DateTimeOffset.Parse(reader.GetString(3)),
+                RequestedModel: reader.GetString(4),
+                RoutedModel: reader.GetString(5),
+                PromptText: reader.IsDBNull(6) ? null : reader.GetString(6),
+                ResponseText: reader.IsDBNull(7) ? null : reader.GetString(7),
+                Cost: reader.IsDBNull(8) ? null : (decimal)reader.GetDouble(8),
+                InputTokens: reader.IsDBNull(9) ? null : reader.GetInt32(9),
+                OutputTokens: reader.IsDBNull(10) ? null : reader.GetInt32(10),
+                MemoryEntryId: reader.IsDBNull(11) ? null : reader.GetInt64(11)));
+        }
+
+        return Task.FromResult<IReadOnlyList<SessionTranscript>>(rows);
+    }
+
     /// <inheritdoc />
     public Task<IReadOnlyDictionary<string, ModelTokenAverage>> LoadObservedTokenAveragesAsync(CancellationToken cancellationToken = default)
     {

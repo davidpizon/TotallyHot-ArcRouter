@@ -19,8 +19,9 @@ the Orchestrator on the live path with requested-vs-routed telemetry (Phase M, M
 capture plus the embedding-backed `logreg` trainer and its Governance admin surface
 (`live-feedback-learning-plan.md` Phases 1–5), Routing ROI's expense-and-regret comparison
 (`routing-roi-regret-plan.md`), self-organizing request classification end to end
-(`self-organizing-classification-plan.md` Phases T1–T6), and five of the regret harness's six sub-phases
-(`regret-evaluation-harness-plan.md` N1–N5) have all shipped. Narratives:
+(`self-organizing-classification-plan.md` Phases T1–T6), five of the regret harness's six sub-phases
+(`regret-evaluation-harness-plan.md` N1–N5), and the GUI's Sessions tab surfacing persisted,
+training-linked transcript history (`sessions-tab-training-data-plan.md`) have all shipped. Narratives:
 
 | Shipped work | Owning doc |
 |---|---|
@@ -36,6 +37,7 @@ capture plus the embedding-backed `logreg` trainer and its Governance admin surf
 | Phase Q0 — quality rescan over saved task data (`QualityRescanService`, `scorer_version` column, `Quality:ScorerVersion`, prompt carried onto `QualityRequest`), off by default | [`../docs/router/quality-verifier-architecture.md`](../docs/router/quality-verifier-architecture.md) §3.3, [`../docs/research/code-quality-metrics-assessment.md`](../docs/research/code-quality-metrics-assessment.md) |
 | Phase G1 — shadow judge observer (`PendingResponseTextCache`, `JudgeShadowScoreObserver`/`GEvalJudgeClient`/`JudgeModelSelector`/drain worker, `judge_shadow_scores` side table, `is_judge_scored` provenance columns), off by default, judging on a free Providers-screen model | [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md) |
 | Auto-update Phases 0-1 — versioning source of truth, Windows Service hosting — plus update *detection* (`GitHubReleaseCheckClient`, `UpdateCheckHostedService`, `UpdateAdminService` gRPC surface) as originally shipped in Phase 2. Phase 2's *apply* mechanism (a separate `TotallyHotArcRouter.Updater` helper project) is superseded — the GUI now downloads/verifies/launches a single signed MSI installer instead | [`../docs/router/auto-update-plan.md`](../docs/router/auto-update-plan.md) (historical apply design), [`../docs/router/packaging-and-distribution.md`](../docs/router/packaging-and-distribution.md) (current MSI design), [`../docs/router/version-compatibility.md`](../docs/router/version-compatibility.md) (current Router↔GUI versioning) |
+| Sessions tab shows persisted, training-linked transcripts — `request_transcripts.session_id` column + backfill, the `TelemetryService.ListPersistedSessions` RPC, GUI merge of live + persisted history, the `IsUsedForTraining` badge, and the full-width unselected-card-list CSS fix | [`../docs/router/sessions-tab-training-data-plan.md`](../docs/router/sessions-tab-training-data-plan.md) |
 
 **What is still missing**, and which remaining workstream owns it:
 

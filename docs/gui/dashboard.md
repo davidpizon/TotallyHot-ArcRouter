@@ -10,7 +10,7 @@ The dashboard presents routing, cost, and governance telemetry for the TotallyHo
 requests were routed to which upstream model, how much that saved versus a worst-case baseline, token
 volume trends, model market share, and per-provider budget status.
 
-**Current status: mixed live and mock data.** The **Live Stream** tab and the **Console** tab are
+**Current status: mixed live and mock data.** The **Sessions** tab (formerly "Live Stream") and the **Console** tab are
 wired to live telemetry pushed from the `TotallyHotArcRouter` proxy over gRPC (`Services/LiveDataStore.cs`)
 - see [`../router/telemetry.md`](../router/telemetry.md) for the routing-telemetry pipeline and this
 doc's Console tab section above for the log-line pipeline. Until the proxy is running and reachable
@@ -32,7 +32,7 @@ sub-view.
 | App shell | .NET MAUI (Windows-only, single window, tray-resident via Win32 interop) |
 | UI framework | Razor components in a MAUI `BlazorWebView` (Blazor Hybrid) |
 | Styling | A static stylesheet (`wwwroot/css/app.css`) containing the dashboard's compiled Tailwind utility classes plus custom rules; state-driven colors are inline styles in the components |
-| Charts | [Apache ECharts](https://echarts.apache.org/) (`echarts.min.js` vendored under `wwwroot/lib/echarts`, Apache-2.0), driven by `wwwroot/js/echarts-interop.js` via the shared `<EChart>` host - the seven bespoke Cost Analytics charts plus Model Distribution's grouped bars and donut; plus a hand-rolled inline SVG sparkline (no chart library) for the Live Stream summary card |
+| Charts | [Apache ECharts](https://echarts.apache.org/) (`echarts.min.js` vendored under `wwwroot/lib/echarts`, Apache-2.0), driven by `wwwroot/js/echarts-interop.js` via the shared `<EChart>` host - the seven bespoke Cost Analytics charts plus Model Distribution's grouped bars and donut; plus a hand-rolled inline SVG sparkline (no chart library) for the Sessions summary card |
 | Icons | Small inline SVG glyphs (`Components/Icon.razor`) |
 | Chart data logic | `src/TotallyHotArcRouter.Gui.Charts/` - a plain `net10.0` class library (no MAUI/Blazor dependency) holding the pure data-transformation math behind the charts (cumulative token series, sparkline coordinate normalization), so it's unit-testable on any platform even though the Gui project itself is Windows-only. See `TotallyHotArcRouter.Gui.Charts.Tests/`. |
 | Console tab logic | `src/TotallyHotArcRouter.Gui.Console/` - same pattern as the chart data logic above: a plain `net10.0` class library holding `LogLevelColorMapper` and the bounded `LogBuffer`. See `TotallyHotArcRouter.Gui.Console.Tests/`. |
@@ -62,7 +62,7 @@ scrolling internally where their content can overflow.
 flowchart TD
     Header["🤖 Router Optimization Engine — status banner — Settings"]
     Ticker["Total Saved · System Tokens · Avg. Cost Reduction · ● LIVE"]
-    Tabs["Live Stream | Cost Analytics | Model Distribution | Governance | Console"]
+    Tabs["Sessions | Cost Analytics | Model Distribution | Governance | Console"]
     Content["Active tab content"]
 
     Header --> Ticker --> Tabs --> Content
@@ -83,34 +83,44 @@ flowchart TD
 
 ### Tabs
 
-1. **Live Stream** (`LiveStream.razor`, default tab) - a conversation-centric two-panel view. The
-   panels are adjustable split panes: a full-height divider between them can be dragged to resize
-   (pointer handling in `wwwroot/js/split-pane.js`; left panel defaults to 35% width, clamped 20-65%).
-   - Left panel (`ConversationCard.razor`): a searchable, scrollable list of conversations, sourced
-     live from `Services/LiveDataStore.cs` (empty until the proxy has forwarded at least one
-     request; see [`../router/telemetry.md`](../router/telemetry.md)). Each card shows the
+1. **Sessions** (`LiveStream.razor`, default tab, formerly "Live Stream") - a conversation-centric view
+   that starts as a **full-width, oldest-first list of session cards** and opens into a two-panel split
+   view (session detail left, chat reproduction right) only once a card is double-clicked; single-clicking
+   a card just selects it (shared with Cost Analytics' initial-session behavior below) without opening the
+   split view. The split view's divider can be dragged to resize (pointer handling in
+   `wwwroot/js/split-pane.js`; left panel defaults to 35% width, clamped 20-65%), and a "Back to Sessions"
+   button in the left panel collapses back to the full-width list.
+   - **Data sources, merged** (`Dashboard.razor`'s `MergedSessionConversations()`): the live gRPC stream
+     (`Services/LiveDataStore.cs`, empty until the proxy has forwarded at least one request this GUI
+     session; see [`../router/telemetry.md`](../router/telemetry.md)) plus **persisted history** from the
+     router's `request_transcripts` table (`Services/PersistedSessionStore.cs`, loaded once on tab
+     activation via the `TelemetryService.ListPersistedSessions` RPC - see
+     [`../router/sessions-tab-training-data-plan.md`](../router/sessions-tab-training-data-plan.md)), so a
+     session survives a GUI restart instead of existing only in the current connection's live buffer. Live
+     data wins for any session id present in both. Persisted history requires transcript capture to be on
+     (`TranscriptOptions.Enabled`, the System Settings window's Transcription Capture toggle); with it off,
+     the Sessions tab shows only the live stream, same as before this merge existed.
+   - Card list (`ConversationCard.razor`): a searchable, full-width list of session cards. Each card shows the
      conversation title, first → last turn timestamps,
      total session cost, total tokens (K/M notation), turn count, and color-dotted names of the first
      two distinct agents; conversations containing fallback turns get an amber `⚠` badge and left
-     border. Search filters by title, session ID, agent name, or model name.
-   - Right panel, top (`ConversationSummary.razor`): a compact pinned summary card for the selected
+     border, and a session with at least one turn folded into the router's live-learning corpus
+     (`memory_entries`, i.e. `Conversation.IsUsedForTraining`) gets a green 🎓 "used for live training"
+     badge. Search filters by title, session ID, agent name, or model name.
+   - Split view, left panel top (`ConversationSummary.razor`): a compact pinned summary card for the selected
      conversation that stays visible while the turn list scrolls. A title row (title, fallback badge
      when applicable, session ID + time range) above a one-line stat strip - Total Cost, Total Tokens,
      Avg ROI, Turns, and a **Trend** sparkline (inline SVG polyline, per-turn total tokens, built from
      `TotallyHot.ArcRouter.Gui.Charts.SparklineLayout` - only rendered when the conversation has turns) - each
      stat with a tooltip explaining the metric.
-   - Right panel, below (`TurnCard.razor`): the scrollable list of the conversation's turns as compact
-     two-line cards, so many turns fit on screen. Each card's background and left border are tinted
-     with the selected agent's color (deterministic per-agent color from `Utils/ColorUtils.cs`, the
-     same tinted-row visual language as the routing decision log). The header line shows the turn
-     position (N/M), the first words of the turn's request text as the card title, a color-coded agent
-     chip naming the agent the router selected, a fallback badge when applicable, and the timestamp.
-     The second line is a wrapping stat strip ranked by business priority - ROI, Cost, Tok P/C, Steps,
-     Cache, TTFT, Ctx, Model - every stat carrying a tooltip that defines the metric. Prompt-token
-     growth across successive turns makes token compounding (the "hockey stick" curve) visible while
-     scrolling. Clicking the header expands a drill-down: the step-by-step "Routing Decision" log with
-     color-coded row backgrounds (`Ok` = green, `Warn` = amber, `Info` = blue) plus the turn's request
-     and response text in scrollable blocks.
+   - Split view, right panel (`SessionConversationPane.razor`): a chat-style, chronological reproduction
+     of the session's turns - a labeled separator per turn (turn number, agent chip, model, timestamp)
+     above a request bubble (left) and a response bubble (right), tinted with the turn's agent color (the
+     same tinted-row visual language `ColorUtils.GetColorForAgent` gives the routing decision log).
+     `TurnCard.razor` (the compact two-line card with the "ROI, Cost, Tok P/C, Steps, Cache, TTFT, Ctx,
+     Model" stat strip and the click-to-expand routing-decision drill-down) is not currently instantiated
+     anywhere in the Sessions tab or elsewhere in the app - it predates the double-click split view and
+     is effectively dead code, kept alive only by `TurnCardTests.cs`.
    - Tooltips: metric tooltips across the tab are floating tooltips driven by `data-tip` attributes
      (`wwwroot/js/tooltips.js`, a single body-level element) rather than native `title` attributes,
      so they render reliably inside the BlazorWebView and are never clipped by scroll containers.
@@ -119,8 +129,8 @@ flowchart TD
      `focusin`/`focusout` (in addition to hover) and dismisses on Escape. The shared tooltip element
      is hidden via opacity rather than `display:none` specifically so it stays in the accessibility
      tree (`display:none` would break `aria-describedby`). The handful of `data-tip` spans that *are*
-     nested inside a card's outer `<button>` (e.g. the turn-position/agent-chip/fallback badges in a
-     `TurnCard` header, or every stat on a `ConversationCard`) intentionally skip `tabindex` - nesting
+     nested inside a card's outer `<button>` (e.g. every stat, and the fallback/training badges, on a
+     `ConversationCard`) intentionally skip `tabindex` - nesting
      a focusable element inside a `<button>` is an ARIA anti-pattern - and instead the outer button
      carries a comprehensive `aria-label` summarizing the same facts for screen-reader users.
 
@@ -134,9 +144,10 @@ flowchart TD
    - **Time range**: Hour / Day / Week / Month / All - the window each chart's per-turn points are
      filtered to.
    - **Session scope**: a `<select>` of `All Sessions` plus each session in the corpus (live
-     conversations from `Services/LiveDataStore.cs` by title - same source as the Live Stream tab -
-     then the mock demo sessions). Defaults to whatever session the Live Stream tab has selected,
-     passed in as `InitialSessionId`.
+     conversations from `Services/LiveDataStore.cs` by title, then the mock demo sessions - live-only,
+     unlike the Sessions tab's merged live+persisted list, since Cost Analytics has no use for
+     persisted-history sessions or the training-data flag). Defaults to whatever session the Sessions tab
+     has selected, passed in as `InitialSessionId`.
    - **Bespoke per-metric charts** (Apache ECharts, one point per turn on a time x-axis): Routing ROI
      is a dual-directional bar chart (savings above 0, fallback remediation below, colored by model);
      Turn Cost a stepped cumulative area recolored per active model; Tokens a cumulative stepped area
@@ -234,15 +245,18 @@ close glyph, and `OnClose` callback are what new modals/dialogs copy rather than
 
 ## Data model (`Models/DashboardData.cs`)
 
-`Conversation`/`ConversationTurn` are shared between mock and live data: `MockData.Conversations`
-populates them by hand; `Services/LiveDataStore.cs` populates them from proxy telemetry via
-`Services/LiveConversationMapper.cs` (see [`../router/telemetry.md`](../router/telemetry.md) for the
-full pipeline, and that file's table of which `ConversationTurn` fields are real vs. honestly
-defaulted in live mode - the record shape itself hasn't changed). The other five collections below
-remain mock-only; typed via C# records:
+`Conversation`/`ConversationTurn` are shared between mock, live, and persisted-history data:
+`MockData.Conversations` populates them by hand; `Services/LiveDataStore.cs` populates them from proxy
+telemetry via `Services/LiveConversationMapper.cs` (see [`../router/telemetry.md`](../router/telemetry.md)
+for the full pipeline, and that file's table of which `ConversationTurn` fields are real vs. honestly
+defaulted in live mode - the record shape itself hasn't changed); `Services/PersistedSessionStore.cs`
+populates them from the router's persisted `request_transcripts` history via
+`Services/PersistedSessionMapper.cs`, following the same real-vs-honestly-defaulted convention (see
+[`../router/sessions-tab-training-data-plan.md`](../router/sessions-tab-training-data-plan.md)). The other
+five collections below remain mock-only; typed via C# records:
 
 - `MockData.Conversations: Conversation[]` - three hand-written sample conversations, used only as a
-  design/layout reference now that the Live Stream tab reads live data; kept for local UI
+  design/layout reference now that the Sessions tab reads live and persisted data; kept for local UI
   development when no proxy is running. Each has a title, first/last timestamps, aggregate
   cost/token totals, a fallback flag, and an ordered list of `ConversationTurn`s carrying the
   per-turn metrics (prompt/completion tokens, routing ROI, cost, tool execution steps, cache hit
@@ -251,7 +265,7 @@ remain mock-only; typed via C# records:
   tokens grow turn-over-turn to demonstrate token compounding.
 - `MockData.Entries: RoutingEntry[]` - individual routing decisions (session/trace IDs, agent, model,
   fallback flag, token counts, actual vs. worst-case cost, savings, timestamp, and an ordered
-  `RoutingSteps` log). No longer rendered by the Live Stream tab, but kept as the entry-level
+  `RoutingSteps` log). No longer rendered by the Sessions tab, but kept as the entry-level
   telemetry shape for future integration.
 - `MockData.Providers: Provider[]` - per-provider budget state (cap, current spend, estimated days
   remaining).
@@ -270,7 +284,7 @@ Wiring the dashboard to the live proxy means replacing these collections with da
 ### Chart data logic (`TotallyHotArcRouter.Gui.Charts/`)
 
 A separate, plain `net10.0` class library (referenced by `TotallyHotArcRouter.Gui.csproj` via
-`ProjectReference`) holding the pure math behind the Cost Analytics and Live Stream charts, kept out
+`ProjectReference`) holding the pure math behind the Cost Analytics and Sessions charts, kept out
 of the Windows-only Gui project so it's unit-testable on any platform:
 
 - `CostChartBuilder.Build(points, metric, range, sessionId, now)` - the Cost Analytics metric
