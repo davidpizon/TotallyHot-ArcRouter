@@ -1,69 +1,83 @@
-@* Live Stream tab: conversation list (left) and conversation drilldown (right), separated by a
-   draggable divider (wired up by wwwroot/js/split-pane.js). *@
+@* Sessions tab (formerly "Live Stream"): a full-width, oldest-first list of session cards.
+   Double-clicking a card opens a split view - session details (left) and a chat-style reproduction
+   of the conversation (right) - separated by a draggable divider (wwwroot/js/split-pane.js). The
+   left pane's back button collapses the split back to the full-width list. *@
 @using Microsoft.JSInterop
 @inject IJSRuntime Js
 
-@if (SelectedOrDefault is null)
+@if (Conversations.Count == 0)
 {
     <div class="h-full flex items-center justify-center text-xs text-slate-500">No conversations yet.</div>
     return;
 }
 
-<div @ref="_container" class="flex h-full min-h-0">
-    @* Left panel: search + conversation cards *@
-    <div @ref="_leftPanel" class="ls-left flex flex-col min-h-0">
-        <div class="relative shrink-0 mb-2">
-            <Icon Name="search" Size="20" Class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-            <input type="text"
-                   placeholder="Search conversations, agents, models..."
-                   value="@_search"
-                   @oninput="e => _search = (string?)e.Value ?? string.Empty"
-                   class="w-full pl-8 pr-3 py-2 text-xs font-mono ds-input ds-input-secondary" />
-        </div>
+@{ var opened = OpenedConversation; }
 
-        <div class="flex-1 overflow-y-auto space-y-1.5 pr-1">
+<div class="h-full flex flex-col min-h-0">
+    <div class="relative shrink-0 mb-2">
+        <Icon Name="search" Size="20" Class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+        <input type="text"
+               placeholder="Search conversations, agents, models..."
+               value="@_search"
+               @oninput="e => _search = (string?)e.Value ?? string.Empty"
+               class="w-full pl-8 pr-3 py-2 text-xs font-mono ds-input ds-input-secondary" />
+    </div>
+
+    @if (opened is null)
+    {
+        @* Full-width card list, oldest-first. *@
+        <div class="flex-1 overflow-y-auto ls-sessions-grid">
             @{ var staggerIndex = 0; }
             @foreach (var conversation in Filtered)
             {
                 <ConversationCard @key="conversation.Id"
                                   Conversation="conversation"
-                                  IsSelected="Selected.Id == conversation.Id"
+                                  IsSelected="SelectedId == conversation.Id"
                                   StaggerIndex="_listHasRendered ? 0 : Math.Min(staggerIndex++, 8)"
-                                  OnSelect="OnSelect" />
+                                  OnSelect="OnSelect"
+                                  OnDoubleClick="OpenSessionAsync" />
             }
         </div>
-    </div>
+    }
+    else
+    {
+        <div @ref="_container" class="flex flex-1 min-h-0">
+            @* Left panel: session details + back button *@
+            <div @ref="_leftPanel" class="ls-left ls-sessions-detail-pane flex flex-col min-h-0 gap-2">
+                <button @onclick="CloseSession"
+                        aria-label="Back to the sessions list"
+                        class="ls-sessions-back-btn flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-slate-200 transition-colors shrink-0">
+                    <Icon Name="x" Size="16" />
+                    <span>Back to Sessions</span>
+                </button>
+                <ConversationSummary Conversation="opened" />
+            </div>
 
-    @* Draggable divider *@
-    <div @ref="_divider" class="ls-divider" title="Drag to resize panels"></div>
+            @* Draggable divider *@
+            <div @ref="_divider" class="ls-divider" title="Drag to resize panels"></div>
 
-    @* Right panel: pinned summary + scrollable turn list *@
-    <div class="flex flex-col min-h-0 flex-1 gap-2 ls-livestream-right-panel">
-        <ConversationSummary Conversation="Selected" />
-
-        <div class="flex-1 overflow-y-auto space-y-1.5 pr-1">
-            @foreach (var turn in Selected.Turns)
-            {
-                <TurnCard @key="turn.Id" Turn="turn" TotalTurns="Selected.Turns.Count" />
-            }
+            @* Right panel: chat-style conversation reproduction *@
+            <div class="flex flex-col min-h-0 flex-1 ls-livestream-right-panel">
+                <SessionConversationPane Conversation="opened" />
+            </div>
         </div>
-    </div>
+    }
 </div>
 
 @code {
-    /// <summary>All conversations shown in the left panel, most recently active first.</summary>
+    /// <summary>All conversations shown in the session list.</summary>
     [Parameter, EditorRequired]
     public IReadOnlyList<Conversation> Conversations { get; set; } = [];
 
     /// <summary>
-    /// The id of the conversation to drill into. Falls back to the first conversation in
-    /// <see cref="Conversations"/> when it doesn't match any (e.g. empty, or the referenced session hasn't
-    /// arrived yet) - see <see cref="SelectedOrDefault"/>.
+    /// The id of the conversation Dashboard currently tracks as selected (shared with the Cost
+    /// Analytics tab's initial-session behavior). Updated when a card is double-clicked to open the
+    /// split view - see <see cref="OpenSessionAsync"/>.
     /// </summary>
     [Parameter, EditorRequired]
     public string SelectedId { get; set; } = string.Empty;
 
-    /// <summary>Invoked with a conversation's id when its card is clicked.</summary>
+    /// <summary>Invoked with a conversation's id when its card is double-clicked and the split view opens.</summary>
     [Parameter]
     public EventCallback<string> OnSelect { get; set; }
 
@@ -74,35 +88,59 @@
     // append would make a busy stream read as a slot machine (docs/gui/MOTION.md §7).
     private bool _listHasRendered;
 
+    // The id of the conversation currently opened into the split view; null means the full-width
+    // list is showing. Not the same concept as SelectedId - this is purely which session's split
+    // view is expanded, whereas SelectedId is Dashboard's shared selection (also read by Cost
+    // Analytics). Kept in sync with SelectedId in OpenSessionAsync.
+    private string? _openedConversationId;
+
     private ElementReference _container;
     private ElementReference _divider;
     private ElementReference _leftPanel;
 
-    /// <summary>Conversations matching the search box: title, id, agent, or model contains the query, case-insensitively.</summary>
+    /// <summary>Conversations matching the search box (title, id, agent, or model, case-insensitively), oldest first.</summary>
     private IEnumerable<Conversation> Filtered =>
-        Conversations.Where(c => string.IsNullOrEmpty(_search)
-            || c.Title.Contains(_search, StringComparison.OrdinalIgnoreCase)
-            || c.Id.Contains(_search, StringComparison.OrdinalIgnoreCase)
-            || c.Turns.Any(t => t.Agent.Contains(_search, StringComparison.OrdinalIgnoreCase)
-                || t.Model.Contains(_search, StringComparison.OrdinalIgnoreCase)));
+        Conversations
+            .Where(c => string.IsNullOrEmpty(_search)
+                || c.Title.Contains(_search, StringComparison.OrdinalIgnoreCase)
+                || c.Id.Contains(_search, StringComparison.OrdinalIgnoreCase)
+                || c.Turns.Any(t => t.Agent.Contains(_search, StringComparison.OrdinalIgnoreCase)
+                    || t.Model.Contains(_search, StringComparison.OrdinalIgnoreCase)))
+            .OrderBy(FirstTurnTimestampUtc);
 
-    /// <summary>The conversation matching <see cref="SelectedId"/>, falling back to the first conversation, or <see langword="null"/> when there are none.</summary>
-    private Conversation? SelectedOrDefault =>
-        Conversations.FirstOrDefault(c => c.Id == SelectedId) ?? Conversations.FirstOrDefault();
+    // Conversation carries no aggregate UTC instant of its own (FirstTimestamp/LastTimestamp are
+    // display-only "HH:mm:ss" strings, unreliable to sort by across a day boundary) - each turn's
+    // real TimestampUtc is, so the earliest turn's instant is the sort key. A conversation with no
+    // turns (shouldn't happen in practice) sorts last rather than first.
+    /// <summary>The real UTC instant of <paramref name="conversation"/>'s earliest turn, used to sort the session list oldest-first.</summary>
+    private static DateTimeOffset FirstTurnTimestampUtc(Conversation conversation) =>
+        conversation.Turns.Count == 0 ? DateTimeOffset.MaxValue : conversation.Turns.Min(t => t.TimestampUtc);
 
-    // Guarded by the @if (SelectedOrDefault is null) { ... return; } check at the top of the markup.
-    /// <summary>The conversation currently drilled into. Only accessed once the markup's null-guard has confirmed <see cref="SelectedOrDefault"/> is non-null.</summary>
-    private Conversation Selected => SelectedOrDefault!;
+    /// <summary>The conversation currently opened into the split view, or <see langword="null"/> when the full-width list is showing.</summary>
+    private Conversation? OpenedConversation =>
+        _openedConversationId is null ? null : Conversations.FirstOrDefault(c => c.Id == _openedConversationId);
+
+    /// <summary>Opens <paramref name="id"/>'s conversation into the split view and reports it as Dashboard's shared selection.</summary>
+    private async Task OpenSessionAsync(string id)
+    {
+        _openedConversationId = id;
+        await OnSelect.InvokeAsync(id);
+    }
+
+    /// <summary>Collapses the split view back to the full-width session list.</summary>
+    private void CloseSession() => _openedConversationId = null;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         // Re-invoked on every render: splitPane.init no-ops once the divider is already wired, and
-        // this covers the case where the panels first appear on a later render (empty → populated).
-        if (SelectedOrDefault is not null)
+        // this covers the case where the split view first appears on a later render.
+        if (Conversations.Count > 0)
         {
-            // The list renders for the first time on whichever render first has data, not necessarily
-            // firstRender - so the stagger flag is set here, under the same guard.
             _listHasRendered = true;
+        }
+
+        if (OpenedConversation is not null)
+        {
             await Js.InvokeVoidAsync("splitPane.init", _container, _divider, _leftPanel);
         }
     }

@@ -63,6 +63,21 @@ public sealed class ConversationCardTests
     }
 
     [Fact]
+    public void Double_clicking_the_card_invokes_OnDoubleClick_with_the_conversation_id()
+    {
+        using var ctx = new Bunit.BunitContext();
+        string? opened = null;
+
+        var cut = ctx.Render<ConversationCard>(p => p
+            .Add(c => c.Conversation, MakeConversation())
+            .Add(c => c.OnDoubleClick, (string id) => opened = id));
+
+        cut.Find("button").DoubleClick();
+
+        opened.Should().Be("sess-1");
+    }
+
+    [Fact]
     public void Aria_pressed_reflects_the_IsSelected_parameter()
     {
         using var ctx = new Bunit.BunitContext();

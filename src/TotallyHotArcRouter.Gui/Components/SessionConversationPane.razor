@@ -1,0 +1,46 @@
+@* Chronological chat-style reproduction of a session's turns: a labeled separator (turn number,
+   agent chip, model, timestamp) followed by a request bubble (left) and a response bubble (right),
+   tinted with the turn's agent color - the same tinted-row language TurnCard uses for the routing
+   decision log. Rendered in the right pane of the Sessions split view (LiveStream.razor) once a
+   session is opened via double-click on its card. *@
+<div class="flex-1 overflow-y-auto space-y-3 pr-1">
+    @foreach (var turn in OrderedTurns)
+    {
+        <div @key="turn.Id" class="space-y-1.5">
+            <div class="ls-chat-turn-separator flex items-center gap-2 flex-wrap">
+                <span>Turn @turn.TurnNumber</span>
+                <span class="shrink-0 rounded px-1.5 py-0.5 font-semibold normal-case"
+                      style="background:@(AgentColorFor(turn))22;color:@AgentColorFor(turn);border:1px solid @(AgentColorFor(turn))44">@turn.Agent</span>
+                <span class="font-mono normal-case">@turn.Model</span>
+                <span class="font-mono normal-case ml-auto">@turn.Timestamp</span>
+            </div>
+
+            <div class="rounded px-3 py-2 text-xs ls-chat-bubble-user @(HasRequest(turn) ? "text-slate-200" : "text-slate-500 italic")">
+                @(HasRequest(turn) ? turn.RequestSummary : "No request captured")
+            </div>
+
+            <div class="rounded px-3 py-2 text-xs ls-chat-bubble-model @(HasResponse(turn) ? "text-slate-200" : "text-slate-500 italic")"
+                 style="border-right:3px solid @AgentColorFor(turn)">
+                @(HasResponse(turn) ? turn.ResponseSummary : "No response captured")
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>The conversation whose turns are reproduced as a chat-style thread.</summary>
+    [Parameter, EditorRequired]
+    public Conversation Conversation { get; set; } = null!;
+
+    /// <summary><see cref="Conversation"/>'s turns in ascending <see cref="ConversationTurn.TurnNumber"/> order.</summary>
+    private IEnumerable<ConversationTurn> OrderedTurns => Conversation.Turns.OrderBy(t => t.TurnNumber);
+
+    /// <summary>The accent color for <paramref name="turn"/>'s agent, matching the coloring TurnCard and the routing-decision log use.</summary>
+    private static string AgentColorFor(ConversationTurn turn) => ColorUtils.GetColorForAgent(turn.Agent);
+
+    /// <summary>Whether <paramref name="turn"/> captured a non-empty request summary.</summary>
+    private static bool HasRequest(ConversationTurn turn) => !string.IsNullOrWhiteSpace(turn.RequestSummary);
+
+    /// <summary>Whether <paramref name="turn"/> captured a non-empty response summary.</summary>
+    private static bool HasResponse(ConversationTurn turn) => !string.IsNullOrWhiteSpace(turn.ResponseSummary);
+}

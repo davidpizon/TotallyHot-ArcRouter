@@ -371,6 +371,43 @@ the earlier attempt (and refines this plan) as follows:
 
 ---
 
+## v3: Renamed to "Sessions", rebuilt as a full-width list with a double-click split view
+
+The tab was renamed from "Live Stream" to "Sessions" and its default layout inverted: rather than an
+always-visible two-panel split with the first conversation auto-selected, the tab now opens on a
+single **full-width, oldest-first card list** with no panel split at all. A **double-click** on a
+card is what now opens the split view - previously the split was permanent and single-click drove
+selection within it.
+
+1. **Full-width list is the resting state**: `LiveStream.razor` renders `ConversationCard`s in a
+   responsive grid (`ls-sessions-grid`, `auto-fill, minmax(260px, 1fr)`) spanning the tab's full
+   width when no session is opened - there is no auto-selected first conversation and no
+   permanently-visible right panel.
+2. **Oldest-first ordering**: the card list sorts by each conversation's earliest turn
+   `TimestampUtc` ascending (`LiveStream.FirstTurnTimestampUtc`), not `Conversation.FirstTimestamp`
+   (a display-only `"HH:mm:ss"` string, unreliable to sort by across a day boundary) and not the
+   store's most-recent-active-first order.
+3. **Double-click opens the split, single-click does not**: `ConversationCard` gained a second
+   `OnDoubleClick` callback alongside its existing `OnSelect`. Single-click still invokes `OnSelect`
+   (preserved so Dashboard's shared `_selectedConversationId` - and therefore Cost Analytics'
+   initial-session behavior - keeps working), but no longer opens anything in the Sessions tab
+   itself. Double-click both opens the split view and invokes `OnSelect`, so the two stay in sync.
+4. **Split view is session details + a chat reproduction, not a pinned summary + turn-metrics
+   list**: the left pane reuses `ConversationSummary` (unchanged) behind a "Back to Sessions" button
+   that collapses the split; the right pane is a new component, `SessionConversationPane.razor`,
+   rendering each turn's `RequestSummary`/`ResponseSummary` as left/right chat bubbles
+   (`ls-chat-bubble-user`/`ls-chat-bubble-model`) tinted with the turn's agent color, in ascending
+   `TurnNumber` order. A turn with no captured summary shows a muted "No request/response captured"
+   placeholder rather than an empty bubble. The old turn-metrics list (`TurnCard`, with its
+   ROI/cost/token stat strip and expandable routing-decision log) is unchanged and still used
+   elsewhere - it is simply no longer what the Sessions split view's right pane shows.
+5. **`splitPane.init` reused as-is**: the draggable divider between the two split panes is the same
+   `wwwroot/js/split-pane.js` hook as before, now invoked only in `OnAfterRenderAsync` when a split
+   is actually open (previously it ran whenever any conversation existed, since the split was
+   permanent).
+
+---
+
 ## Critical Design Decisions
 
 1. **Metrics Priority**: Ordering by business value (ROI first, then cost, then tokens) rather than frequency

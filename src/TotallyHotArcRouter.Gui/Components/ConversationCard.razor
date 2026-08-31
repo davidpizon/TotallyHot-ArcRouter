@@ -1,8 +1,10 @@
-@* One conversation (session) in the Live Stream left panel. The data-tip spans inside this button
-   are mouse-hover-only informational text (no tabindex): nesting a focusable element inside a
-   <button> is an ARIA anti-pattern, so screen readers instead get the same facts via this button's
-   aria-label; sighted keyboard users already see all the values as plain text. *@
+@* One conversation (session) card in the Sessions tab. Single-click selects the card; double-click
+   opens the split view with session details and conversation history. The data-tip spans inside
+   this button are mouse-hover-only informational text (no tabindex): nesting a focusable element
+   inside a <button> is an ARIA anti-pattern, so screen readers instead get the same facts via
+   this button's aria-label; sighted keyboard users already see all the values as plain text. *@
 <button @onclick="() => OnSelect.InvokeAsync(Conversation.Id)"
+        @ondblclick="() => OnDoubleClick.InvokeAsync(Conversation.Id)"
         aria-label="@AriaLabel"
         aria-pressed="@IsSelected"
         class="w-full text-left rounded card-hover row-enter px-2.5 py-2 @(Conversation.HasFallbackTurns ? "card-fallback" : "") @(IsSelected ? "card-selected" : "card-unselected")"
@@ -59,13 +61,17 @@
     [Parameter, EditorRequired]
     public Conversation Conversation { get; set; } = null!;
 
-    /// <summary>Whether this card is the currently selected conversation in the Live Stream left panel.</summary>
+    /// <summary>Whether this card is the currently selected conversation in the Sessions tab.</summary>
     [Parameter]
     public bool IsSelected { get; set; }
 
-    /// <summary>Invoked with <see cref="Conversation"/>'s id when the card is clicked.</summary>
+    /// <summary>Invoked with <see cref="Conversation"/>'s id when the card is single-clicked.</summary>
     [Parameter]
     public EventCallback<string> OnSelect { get; set; }
+
+    /// <summary>Invoked with <see cref="Conversation"/>'s id when the card is double-clicked, opening the split-view session details and conversation history.</summary>
+    [Parameter]
+    public EventCallback<string> OnDoubleClick { get; set; }
 
     /// <summary>
     /// Per-item entrance delay index, multiplied by 30ms by the <c>.row-enter</c> rule
@@ -79,15 +85,18 @@
     private List<string> DistinctAgents => Conversation.Turns.Select(t => t.Agent).Distinct().ToList();
 
     // Screen-reader equivalent of the card's visible data-tip spans (see the accessibility note in
-    // the markup above for why those spans aren't independently focusable).
-    /// <summary>The card button's accessible label, restating every stat the visible data-tip spans convey.</summary>
+    // the markup above for why those spans aren't independently focusable). The label also announces
+    // that double-clicking opens the session details view, so keyboard/screen-reader users know the
+    // gesture is available without needing to discover it visually.
+    /// <summary>The card button's accessible label, restating every stat the visible data-tip spans convey and announcing the double-click action.</summary>
     private string AriaLabel =>
         $"{Conversation.Title}" +
         (Conversation.HasFallbackTurns ? ", fallback routing used" : string.Empty) +
         $". {Conversation.FirstTimestamp} to {Conversation.LastTimestamp}. " +
         $"Cost ${Conversation.TotalCost.ToString("F6", CultureInfo.InvariantCulture)}, " +
         $"{FormatTokens(Conversation.TotalPromptTokens + Conversation.TotalCompletionTokens)} tokens, " +
-        $"{Conversation.Turns.Count} {(Conversation.Turns.Count == 1 ? "turn" : "turns")}.";
+        $"{Conversation.Turns.Count} {(Conversation.Turns.Count == 1 ? "turn" : "turns")}. " +
+        "Double-click to open session details and conversation history.";
 
     /// <summary>Abbreviates a token count for compact display: "1.2M", "830.0K", or the bare number under 1,000.</summary>
     private static string FormatTokens(int tokens) => tokens switch

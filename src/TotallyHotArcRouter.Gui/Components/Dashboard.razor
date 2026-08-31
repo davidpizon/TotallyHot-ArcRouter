@@ -143,7 +143,7 @@
 
     private static readonly (Tab Tab, string Icon, string Label)[] Tabs =
     [
-        (Tab.Live, "activity", "Live Stream"),
+        (Tab.Live, "activity", "Sessions"),
         (Tab.Analytics, "bar-chart", "Cost Analytics"),
         (Tab.Distribution, "trending-up", "Model Distribution"),
         (Tab.Governance, "shield-check", "Governance"),
@@ -151,8 +151,8 @@
     ];
 
     private Tab _activeTab = Tab.Live;
-    // Live Stream starts empty (no telemetry received yet); LiveStream.razor auto-selects the first
-    // conversation once one arrives, so an empty starting id is correct rather than a mock fallback.
+    // Sessions tab starts empty (no telemetry received yet); the Sessions page shows no cards
+    // until a conversation arrives, so an empty starting id is correct rather than a mock fallback.
     private string _selectedConversationId = string.Empty;
     private bool _showSettings;
 
