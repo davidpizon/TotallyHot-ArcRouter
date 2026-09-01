@@ -33,6 +33,34 @@ namespace TotallyHot.ArcRouter.Hosting
         /// <returns>The <see cref="IServiceCollection"/> so that additional calls can be chained.</returns>
         public static IServiceCollection AddTotallyHotArcRouter(this IServiceCollection services)
         {
+            // Split into one private method per subsystem purely for readability/reviewability - DI
+            // resolution order is independent of registration order (see remarks scattered through the
+            // methods below), so this split is a pure move: every method is called here in exactly the
+            // source order the single method used to register things in, and no registration was
+            // reordered relative to any other.
+            services.AddRouterCore();
+            services.AddProxyRequestPipeline();
+            services.AddTelemetryAndTranslation();
+            services.AddQualityAndObservability();
+            services.AddProxyMiddlewareCore();
+            services.AddPriceCatalog();
+            services.AddManagement();
+            services.AddUpdate();
+            services.AddBackgroundServices();
+            services.AddProxyHost();
+
+            return services;
+        }
+
+        /// <summary>
+        /// Registers the routing core: learned memory storage, <see cref="RoutingOptions"/>/
+        /// <see cref="EmbeddingOptions"/>/<see cref="LlmRouterOptions"/> and their live-override layers, the
+        /// embedding and local text-generation clients, the Orchestrator voter ensemble, and the retrain
+        /// hosted-service triggers' training services - plus <see cref="CheckSyntax"/>, the one remaining
+        /// tool.
+        /// </summary>
+        private static IServiceCollection AddRouterCore(this IServiceCollection services)
+        {
             // Core Router. IRouterMemoryStore is backed by RouterMemoryDatabase (registered below with the
             // Phase J embedding memory that shares the same file), so both learned-memory tables live in one
             // WAL-journaled SQLite database rather than the crash-unsafe JSON file this replaced.
@@ -168,6 +196,17 @@ namespace TotallyHot.ArcRouter.Hosting
             // supersede outright.
             services.AddTransient<CheckSyntax>();
 
+            return services;
+        }
+
+        /// <summary>
+        /// Registers the request-path proxy plumbing that <see cref="RequestInterceptor"/> and
+        /// <see cref="ProxyMiddleware"/> share: live provider/model configuration, the protected secret
+        /// store, the circuit breaker, per-provider interaction status, request classification, and the
+        /// composite routing policy.
+        /// </summary>
+        private static IServiceCollection AddProxyRequestPipeline(this IServiceCollection services)
+        {
             // Proxy
             services.AddOptions<ModelRoutingOptions>()
                 .Configure<IConfiguration>((options, configuration) =>
@@ -224,6 +263,15 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddSingleton<IRoutingPolicy, CompositeRoutingPolicy>();
             services.AddSingleton<RequestInterceptor>();
 
+            return services;
+        }
+
+        /// <summary>
+        /// Registers session/turn/usage telemetry primitives, the per-provider payload translators and
+        /// tool-call normalizer, the Bedrock runtime client factory, and the spend tracker/broadcaster.
+        /// </summary>
+        private static IServiceCollection AddTelemetryAndTranslation(this IServiceCollection services)
+        {
             // Telemetry (live routing events broadcast to GUI dashboards over gRPC - see
             // docs/router/telemetry.md, docs/router/grpc-migration.md, and
             // Telemetry/TelemetryBroadcaster.cs for the outer/inner DI-container bridging this
@@ -277,6 +325,16 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddSingleton<TelemetryPublisher>();
             services.AddSingleton<ITelemetryPublisher>(sp => sp.GetRequiredService<TelemetryPublisher>());
 
+            return services;
+        }
+
+        /// <summary>
+        /// Registers the quality-observation fan-out: the score-observer caches, the transcript store, the
+        /// shadow judge, the composite <see cref="IQualityScoreObserver"/> that fans a scored result out to
+        /// all of them, and the static analyzers added by <see cref="QualityServiceCollectionExtensions.AddQuality"/>.
+        /// </summary>
+        private static IServiceCollection AddQualityAndObservability(this IServiceCollection services)
+        {
             // Quality verifier (off-path, best-effort). IQualityScoreObserver resolves to a single
             // implementation, so a CompositeRouterScoreObserver fans each scored result out to both
             // RouterMemoryScoreObserver (live dim_best scores) and EmbeddingMemoryScoreObserver
@@ -288,6 +346,47 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddSingleton<RouterMemoryScoreObserver>();
             services.AddSingleton<Router.EmbeddingMemoryScoreObserver>();
 
+            services.AddTranscripts();
+            services.AddJudge();
+
+            services.AddSingleton<IQualityScoreObserver>(sp =>
+            {
+                var observers = new List<IQualityScoreObserver>
+                {
+                    sp.GetRequiredService<RouterMemoryScoreObserver>(),
+                    sp.GetRequiredService<Router.EmbeddingMemoryScoreObserver>(),
+                };
+
+                // docs/router/self-organizing-classification-plan.md Phase T6: joins the fan-out
+                // unconditionally, like the judge observer below - TranscriptScoreObserver's own store call
+                // (SqliteTranscriptStore.UpdateOutcomeAsync) reads TranscriptOptions.Enabled live via
+                // IOptionsMonitor and no-ops when it is currently false, so a construction-time check here
+                // would only freeze the toggle in whatever state the process started in. The
+                // EnableAdaptiveRouting master switch still applies, but only at the insert site
+                // (ProxyMiddleware, gated live off IOptionsMonitor<RoutingOptions>) - a row that was never
+                // inserted has no correlation id for this backfill to match, so it naturally no-ops too.
+                observers.Add(sp.GetRequiredService<TotallyHot.ArcRouter.Transcripts.TranscriptScoreObserver>());
+
+                // docs/router/geval-shadow-scoring-plan.md Phase G1: unlike the transcript observer above,
+                // this one joins the fan-out unconditionally and checks JudgeOptions.Enabled itself on every
+                // ObserveAsync. JudgeOptions.Enabled is operator-toggleable from System Settings, and this
+                // factory runs exactly once - a check here would freeze the judge in whatever state the
+                // process started in.
+                observers.Add(sp.GetRequiredService<TotallyHot.ArcRouter.Judge.JudgeShadowScoreObserver>());
+
+                return new Router.CompositeRouterScoreObserver(observers, sp.GetRequiredService<ILogger<Router.CompositeRouterScoreObserver>>());
+            });
+            services.AddQuality();
+
+            return services;
+        }
+
+        /// <summary>
+        /// Registers the transcript store (docs/router/self-organizing-classification-plan.md Phase T1)
+        /// and its taxonomy-comparison companion store (Phase T4).
+        /// </summary>
+        private static IServiceCollection AddTranscripts(this IServiceCollection services)
+        {
             // docs/router/self-organizing-classification-plan.md Phase T1: the transcript store, on by
             // default and operator-toggleable live from the System Settings window's Transcription Capture
             // row. TranscriptDatabase/SqliteTranscriptStore are registered unconditionally
@@ -315,6 +414,16 @@ namespace TotallyHot.ArcRouter.Hosting
             // nothing to compare, so this needs no separate switch.
             services.AddSingleton<TotallyHot.ArcRouter.Transcripts.ITaxonomyComparisonStore, TotallyHot.ArcRouter.Transcripts.SqliteTaxonomyComparisonStore>();
 
+            return services;
+        }
+
+        /// <summary>
+        /// Registers the geval shadow judge (docs/router/geval-shadow-scoring-plan.md Phase G1): its cache,
+        /// queue, client, store, observer, and the availability flag that promotes it from a shadow
+        /// observer to a real quality-aggregator contributor.
+        /// </summary>
+        private static IServiceCollection AddJudge(this IServiceCollection services)
+        {
             // docs/router/geval-shadow-scoring-plan.md Phase G1: the shadow judge. Every collaborator
             // (cache, queue, client, store, observer) is registered unconditionally - PendingResponseTextCache
             // and JudgeShadowScoreQueue are inert until something writes to them, and
@@ -347,35 +456,15 @@ namespace TotallyHot.ArcRouter.Hosting
             // immediately. Registered before AddQuality so it wins that method's TryAddSingleton default.
             services.AddSingleton<TotallyHot.ArcRouter.Quality.Grading.IJudgeAvailability, TotallyHot.ArcRouter.Judge.JudgeAvailability>();
 
-            services.AddSingleton<IQualityScoreObserver>(sp =>
-            {
-                var observers = new List<IQualityScoreObserver>
-                {
-                    sp.GetRequiredService<RouterMemoryScoreObserver>(),
-                    sp.GetRequiredService<Router.EmbeddingMemoryScoreObserver>(),
-                };
+            return services;
+        }
 
-                // docs/router/self-organizing-classification-plan.md Phase T6: joins the fan-out
-                // unconditionally, like the judge observer below - TranscriptScoreObserver's own store call
-                // (SqliteTranscriptStore.UpdateOutcomeAsync) reads TranscriptOptions.Enabled live via
-                // IOptionsMonitor and no-ops when it is currently false, so a construction-time check here
-                // would only freeze the toggle in whatever state the process started in. The
-                // EnableAdaptiveRouting master switch still applies, but only at the insert site
-                // (ProxyMiddleware, gated live off IOptionsMonitor<RoutingOptions>) - a row that was never
-                // inserted has no correlation id for this backfill to match, so it naturally no-ops too.
-                observers.Add(sp.GetRequiredService<TotallyHot.ArcRouter.Transcripts.TranscriptScoreObserver>());
-
-                // docs/router/geval-shadow-scoring-plan.md Phase G1: unlike the transcript observer above,
-                // this one joins the fan-out unconditionally and checks JudgeOptions.Enabled itself on every
-                // ObserveAsync. JudgeOptions.Enabled is operator-toggleable from System Settings, and this
-                // factory runs exactly once - a check here would freeze the judge in whatever state the
-                // process started in.
-                observers.Add(sp.GetRequiredService<TotallyHot.ArcRouter.Judge.JudgeShadowScoreObserver>());
-
-                return new Router.CompositeRouterScoreObserver(observers, sp.GetRequiredService<ILogger<Router.CompositeRouterScoreObserver>>());
-            });
-            services.AddQuality();
-
+        /// <summary>
+        /// Registers the in-flight request gauge, the routing on/off kill switch, and the
+        /// <see cref="ProxyMiddleware"/> singleton itself.
+        /// </summary>
+        private static IServiceCollection AddProxyMiddlewareCore(this IServiceCollection services)
+        {
             // In-flight request gauge (docs/router/routing-roi-regret-plan.md): a singleton so
             // ProxyMiddleware (incrementing per served request) and TaxonomyComparisonService
             // (hard-pausing its comparison drain while the count is non-zero) observe one number.
@@ -388,6 +477,17 @@ namespace TotallyHot.ArcRouter.Hosting
 
             services.AddSingleton<ProxyMiddleware>();
 
+            return services;
+        }
+
+        /// <summary>
+        /// Registers the model price catalog (docs/router/model-price-catalog.md): the shared
+        /// agent_telemetry.db storage options, the CodeRouterBench corpus and its sync pipeline, the price
+        /// lookup/read surfaces, the operator budget/price-override stores, the usage ledger and rollup
+        /// store, provider cost reconciliation, and the tool-call capability/context-window store.
+        /// </summary>
+        private static IServiceCollection AddPriceCatalog(this IServiceCollection services)
+        {
             // Model price catalog (docs/router/model-price-catalog.md). Shares agent_telemetry.db with the
             // future usage ledger via the top-level Storage section. PriceCatalogOptions is validated by
             // PriceSourceRegistry's constructor (eager, at startup - mirroring ProviderConfigStore), so a
@@ -523,6 +623,16 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddSingleton<IPriceSourceRegistry>(sp => sp.GetRequiredService<PriceSourceRegistry>());
             services.AddSingleton<PriceCatalogIngestionService>();
 
+            return services;
+        }
+
+        /// <summary>
+        /// Registers the shared management core (docs/router/mcp-endpoint-plan.md): the provider-endpoint
+        /// scanner, <see cref="ManagementFacade"/>, and the MCP management endpoint hosted service that
+        /// projects the facade over a dedicated loopback TLS port.
+        /// </summary>
+        private static IServiceCollection AddManagement(this IServiceCollection services)
+        {
             // Shared management core (docs/router/mcp-endpoint-plan.md): both the REST /admin/* API and the
             // MCP endpoint's provider tools project through this one facade, so credential masking, header
             // resolution, and validation happen in exactly one place. Registered here so MCP (which lives in
@@ -547,6 +657,15 @@ namespace TotallyHot.ArcRouter.Hosting
                     configuration.GetSection(McpOptions.SectionName).Bind(options));
             services.AddHostedService<McpHostedService>();
 
+            return services;
+        }
+
+        /// <summary>
+        /// Registers the Router's self-update detection pipeline (docs/router/auto-update-plan.md Phase 2):
+        /// the GitHub release-check client, update-state store, and the hosted service that polls it.
+        /// </summary>
+        private static IServiceCollection AddUpdate(this IServiceCollection services)
+        {
             // docs/router/auto-update-plan.md Phase 2 (packaging superseded by
             // docs/router/packaging-and-distribution.md): the Router's self-update *detection* pipeline
             // only - it never downloads, verifies, or applies an update itself. GitHubReleaseCheckClient
@@ -570,6 +689,19 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddSingleton<IUpdateStateStore, UpdateStateStore>();
             services.AddHostedService<UpdateCheckHostedService>();
 
+            return services;
+        }
+
+        /// <summary>
+        /// Registers the router's background hosted services: embedding backfill/transcript retention,
+        /// the quality rescan, the judge drain/retention loops, the taxonomy comparison drain, and the
+        /// startup health check plus its dependent ingestion/reconciliation/retrain pollers. Registration
+        /// order matters here - the generic host awaits each <c>StartAsync</c> in registration order, so
+        /// the startup checks below run to completion before <see cref="AddProxyHost"/>'s
+        /// <c>ProxyHostedService</c> binds Kestrel.
+        /// </summary>
+        private static IServiceCollection AddBackgroundServices(this IServiceCollection services)
+        {
             // docs/router/self-organizing-classification-plan.md Phase T1d-T1e: background services for
             // embedding backfill and transcript retention. Both are registered unconditionally but are no-ops
             // when their respective feature flags are off (Enabled for retention, EnableEmbeddingBackfill for
@@ -606,6 +738,16 @@ namespace TotallyHot.ArcRouter.Hosting
             services.AddHostedService<LogRegRetrainHostedService>();
             services.AddHostedService<ClusterRetrainHostedService>();
 
+            return services;
+        }
+
+        /// <summary>
+        /// Registers the inner Kestrel host: <c>ProxyHostedService</c>, handed an already-constructed
+        /// <see cref="ProxyMiddleware"/> plus every dependency bag its gRPC admin surfaces need, since the
+        /// inner host has its own container and cannot resolve any of it from this one.
+        /// </summary>
+        private static IServiceCollection AddProxyHost(this IServiceCollection services)
+        {
             // ProxyServer's inner Kestrel host is handed an already-constructed ProxyMiddleware instance rather
             // than a copy of this IServiceCollection. It never gets its own IHostedService registrations, so it
             // can never end up recursively constructing another ProxyHostedService.
@@ -797,4 +939,3 @@ namespace TotallyHot.ArcRouter.Hosting
         internal static string AdminApiKeySecretName(string provider) => $"reconciliation:{provider}:admin-key";
     }
 }
-

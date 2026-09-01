@@ -6,18 +6,15 @@ namespace TotallyHot.ArcRouter.Gui.Telemetry;
 /// <summary>
 /// Thrown when a routing-gate read or write call fails. Carries a message fit to render in a tray
 /// notification rather than a raw <see cref="RpcException"/>, mirroring <see cref="RoutingModeAdminException"/>.
+/// See <see cref="GrpcAdminException.IsUnavailable"/>'s remarks.
 /// </summary>
-public sealed class RoutingGateAdminException : Exception
+public sealed class RoutingGateAdminException : GrpcAdminException
 {
     /// <summary>Initializes a new instance of the <see cref="RoutingGateAdminException"/> class.</summary>
     public RoutingGateAdminException(string message, Exception? innerException = null, bool isUnavailable = false)
-        : base(message, innerException)
+        : base(message, innerException, isUnavailable)
     {
-        IsUnavailable = isUnavailable;
     }
-
-    /// <summary>Gets whether the call failed because the router could not be reached.</summary>
-    public bool IsUnavailable { get; }
 }
 
 /// <summary>
@@ -25,20 +22,17 @@ public sealed class RoutingGateAdminException : Exception
 /// toggle. Lives in this plain <c>net10.0</c> library rather than the Windows-only MAUI project so CI can
 /// unit-test it, exactly like <c>RoutingModeAdminClient</c>.
 /// </summary>
-public sealed class RoutingGateAdminClient : IRoutingGateAdminClient, IDisposable
+public sealed class RoutingGateAdminClient
+    : GrpcAdminClientBase<Contract.RoutingGateAdminService.RoutingGateAdminServiceClient, RoutingGateAdminException>,
+      IRoutingGateAdminClient
 {
-    private readonly Contract.RoutingGateAdminService.RoutingGateAdminServiceClient _client;
-    private readonly IDisposable? _ownedChannel;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="RoutingGateAdminClient"/> class, creating and owning a
     /// channel to <paramref name="serverAddress"/>.
     /// </summary>
     public RoutingGateAdminClient(string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
+        : base(serverAddress, callInvoker => new Contract.RoutingGateAdminService.RoutingGateAdminServiceClient(callInvoker))
     {
-        var channel = TelemetryChannelFactory.Create(serverAddress);
-        _ownedChannel = channel;
-        _client = new Contract.RoutingGateAdminService.RoutingGateAdminServiceClient(TelemetryChannelFactory.Authenticated(channel));
     }
 
     /// <summary>
@@ -47,10 +41,8 @@ public sealed class RoutingGateAdminClient : IRoutingGateAdminClient, IDisposabl
     /// channel's lifetime.
     /// </summary>
     public RoutingGateAdminClient(Contract.RoutingGateAdminService.RoutingGateAdminServiceClient client)
+        : base(client)
     {
-        ArgumentNullException.ThrowIfNull(client);
-        _client = client;
-        _ownedChannel = null;
     }
 
     /// <inheritdoc />
@@ -58,7 +50,7 @@ public sealed class RoutingGateAdminClient : IRoutingGateAdminClient, IDisposabl
     {
         try
         {
-            var response = await _client
+            var response = await Client
                 .GetRoutingGateAsync(new Contract.GetRoutingGateRequest(), cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
 
@@ -66,7 +58,7 @@ public sealed class RoutingGateAdminClient : IRoutingGateAdminClient, IDisposabl
         }
         catch (RpcException ex)
         {
-            throw Wrap(ex);
+            throw Wrap(ex, "Could not reach the router: the router is not reachable.", "Could not update the routing gate");
         }
     }
 
@@ -75,7 +67,7 @@ public sealed class RoutingGateAdminClient : IRoutingGateAdminClient, IDisposabl
     {
         try
         {
-            var response = await _client
+            var response = await Client
                 .SetRoutingGateAsync(new Contract.SetRoutingGateRequest { Enabled = enabled }, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
 
@@ -83,19 +75,11 @@ public sealed class RoutingGateAdminClient : IRoutingGateAdminClient, IDisposabl
         }
         catch (RpcException ex)
         {
-            throw Wrap(ex);
+            throw Wrap(ex, "Could not reach the router: the router is not reachable.", "Could not update the routing gate");
         }
     }
 
-    // Unavailable means the proxy isn't running, which is an ordinary state for a GUI that can outlive it -
-    // so it gets a plain-language message rather than a gRPC status dump, and is flagged so the caller can
-    // tell a dead connection from a rejected request without parsing the text. Mirrors RoutingModeAdminClient's Wrap.
-    /// <summary>Wraps an <see cref="RpcException"/> into a <see cref="RoutingGateAdminException"/>, flagging router-unreachable errors distinctly.</summary>
-    private static RoutingGateAdminException Wrap(RpcException ex) =>
-        ex.StatusCode == StatusCode.Unavailable
-            ? new RoutingGateAdminException("Could not reach the router: the router is not reachable.", ex, isUnavailable: true)
-            : new RoutingGateAdminException($"Could not update the routing gate: {ex.Status.Detail}", ex);
-
     /// <inheritdoc />
-    public void Dispose() => _ownedChannel?.Dispose();
+    protected override RoutingGateAdminException CreateException(string message, Exception? innerException, bool isUnavailable) =>
+        new(message, innerException, isUnavailable);
 }

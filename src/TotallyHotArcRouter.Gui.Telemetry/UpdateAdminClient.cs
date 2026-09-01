@@ -6,22 +6,19 @@ namespace TotallyHot.ArcRouter.Gui.Telemetry;
 /// <summary>
 /// Why an <see cref="IUpdateAdminClient"/> call failed - mirrors <see cref="LlmRouterModelAdminException"/>'s
 /// "flag Unavailable distinctly" shape: the Router being down is an ordinary state for a GUI that can
-/// outlive it, not the same kind of failure as a rejected request.
+/// outlive it, not the same kind of failure as a rejected request. See
+/// <see cref="GrpcAdminException.IsUnavailable"/>'s remarks.
 /// </summary>
-public sealed class UpdateAdminException : Exception
+public sealed class UpdateAdminException : GrpcAdminException
 {
     /// <summary>Initializes a new instance of the <see cref="UpdateAdminException"/> class.</summary>
     /// <param name="message">A plain-language description of the failure.</param>
     /// <param name="innerException">The underlying <see cref="RpcException"/>, if any.</param>
     /// <param name="isUnavailable">Whether the failure was specifically the router being unreachable.</param>
     public UpdateAdminException(string message, Exception? innerException = null, bool isUnavailable = false)
-        : base(message, innerException)
+        : base(message, innerException, isUnavailable)
     {
-        IsUnavailable = isUnavailable;
     }
-
-    /// <summary>Whether this failure was specifically the router being unreachable, as opposed to a rejected request.</summary>
-    public bool IsUnavailable { get; }
 }
 
 /// <summary>Why a check could not resolve a definite answer. Mirrors <c>TotallyHot.ArcRouter.Update.ReleaseCheckUnavailableReason</c>.</summary>
@@ -102,20 +99,17 @@ public interface IUpdateAdminClient
 /// docs/router/packaging-and-distribution.md). Lives in this plain <c>net10.0</c> library rather than the
 /// Windows-only MAUI project so CI can unit-test it, exactly like <see cref="LlmRouterModelAdminClient"/>.
 /// </summary>
-public sealed class UpdateAdminClient : IUpdateAdminClient, IDisposable
+public sealed class UpdateAdminClient
+    : GrpcAdminClientBase<Contract.UpdateAdminService.UpdateAdminServiceClient, UpdateAdminException>,
+      IUpdateAdminClient
 {
-    private readonly Contract.UpdateAdminService.UpdateAdminServiceClient _client;
-    private readonly IDisposable? _ownedChannel;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="UpdateAdminClient"/> class, creating and owning a
     /// channel to <paramref name="serverAddress"/>.
     /// </summary>
     public UpdateAdminClient(string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
+        : base(serverAddress, callInvoker => new Contract.UpdateAdminService.UpdateAdminServiceClient(callInvoker))
     {
-        var channel = TelemetryChannelFactory.Create(serverAddress);
-        _ownedChannel = channel;
-        _client = new Contract.UpdateAdminService.UpdateAdminServiceClient(TelemetryChannelFactory.Authenticated(channel));
     }
 
     /// <summary>
@@ -124,10 +118,8 @@ public sealed class UpdateAdminClient : IUpdateAdminClient, IDisposable
     /// the channel's lifetime.
     /// </summary>
     public UpdateAdminClient(Contract.UpdateAdminService.UpdateAdminServiceClient client)
+        : base(client)
     {
-        ArgumentNullException.ThrowIfNull(client);
-        _client = client;
-        _ownedChannel = null;
     }
 
     /// <inheritdoc />
@@ -135,7 +127,7 @@ public sealed class UpdateAdminClient : IUpdateAdminClient, IDisposable
     {
         try
         {
-            var response = await _client
+            var response = await Client
                 .GetUpdateStatusAsync(new Contract.GetUpdateStatusRequest(), cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             return MapStatus(response);
@@ -151,7 +143,7 @@ public sealed class UpdateAdminClient : IUpdateAdminClient, IDisposable
     {
         try
         {
-            var response = await _client
+            var response = await Client
                 .CheckForUpdatesNowAsync(new Contract.CheckForUpdatesNowRequest(), cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             return MapStatus(response);
@@ -169,7 +161,7 @@ public sealed class UpdateAdminClient : IUpdateAdminClient, IDisposable
 
         try
         {
-            var response = await _client
+            var response = await Client
                 .NotifyApplyStartingAsync(new Contract.NotifyApplyStartingRequest { Version = version }, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             return new NotifyApplyStartingInfo(response.Acknowledged);
@@ -202,15 +194,7 @@ public sealed class UpdateAdminClient : IUpdateAdminClient, IDisposable
         _ => UpdateUnavailableReasonInfo.None,
     };
 
-    // Unavailable means the proxy isn't running - an ordinary state for a GUI that can outlive it - so it
-    // gets a plain-language message rather than a gRPC status dump, and is flagged so the caller can tell
-    // a dead connection from a rejected request without parsing the text. Mirrors LlmRouterModelAdminClient.Wrap.
-    /// <summary>Wraps an <see cref="RpcException"/> into an <see cref="UpdateAdminException"/>, flagging router-unreachable errors distinctly.</summary>
-    private static UpdateAdminException Wrap(RpcException ex, string action) =>
-        ex.StatusCode == StatusCode.Unavailable
-            ? new UpdateAdminException($"{action}: the router is not reachable.", ex, isUnavailable: true)
-            : new UpdateAdminException($"{action}: {ex.Status.Detail}", ex);
-
     /// <inheritdoc />
-    public void Dispose() => _ownedChannel?.Dispose();
+    protected override UpdateAdminException CreateException(string message, Exception? innerException, bool isUnavailable) =>
+        new(message, innerException, isUnavailable);
 }
