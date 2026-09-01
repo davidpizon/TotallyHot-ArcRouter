@@ -65,11 +65,10 @@ internal static class OutOfCreditsClassifier
             return false;
         }
 
-        var errorMessage = errorObject["message"]?.GetValue<string>() ?? string.Empty;
+        var errorMessage = TryGetString(errorObject["message"], out var extractedMessage) ? extractedMessage : string.Empty;
 
         // OpenAI's typed signal, checked first: higher confidence than a message-keyword guess.
-        var code = errorObject["code"]?.GetValue<string>();
-        if (string.Equals(code, "insufficient_quota", StringComparison.OrdinalIgnoreCase))
+        if (TryGetString(errorObject["code"], out var code) && string.Equals(code, "insufficient_quota", StringComparison.OrdinalIgnoreCase))
         {
             message = errorMessage.Length > 0 ? errorMessage : "insufficient_quota";
             return true;
@@ -86,4 +85,16 @@ internal static class OutOfCreditsClassifier
 
     private static bool MatchesKeywords(string text) =>
         Keywords.Any(keyword => text.Contains(keyword, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Safely reads <paramref name="node"/> as a string, without throwing when the upstream sent an
+    /// unexpected JSON type for that field (e.g. a numeric or object <c>message</c>/<c>code</c>) - unlike
+    /// <c>JsonNode.GetValue&lt;string&gt;()</c>, which throws on a type mismatch. An unexpected shape is
+    /// treated as "field absent", consistent with this classifier's fail-closed contract.
+    /// </summary>
+    private static bool TryGetString(JsonNode? node, out string value)
+    {
+        value = string.Empty;
+        return node is JsonValue jsonValue && jsonValue.TryGetValue(out value!);
+    }
 }
