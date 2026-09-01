@@ -7,22 +7,15 @@ namespace TotallyHot.ArcRouter.Gui.Telemetry;
 /// <summary>
 /// Thrown when a benchmark-data management call fails. Carries a message fit to render in the Governance
 /// panel rather than a raw <see cref="RpcException"/>, mirroring <see cref="PriceSourceAdminException"/>.
+/// See <see cref="GrpcAdminException.IsUnavailable"/>'s remarks.
 /// </summary>
-public sealed class BenchmarkDataAdminException : Exception
+public sealed class BenchmarkDataAdminException : GrpcAdminException
 {
     /// <summary>Initializes a new instance of the <see cref="BenchmarkDataAdminException"/> class.</summary>
     public BenchmarkDataAdminException(string message, Exception? innerException = null, bool isUnavailable = false)
-        : base(message, innerException)
+        : base(message, innerException, isUnavailable)
     {
-        IsUnavailable = isUnavailable;
     }
-
-    /// <summary>
-    /// Gets whether the call failed because the router could not be reached, as opposed to being rejected
-    /// by it. See <see cref="PriceSourceAdminException.IsUnavailable"/>'s remarks for why this distinction
-    /// is load-bearing for the caller.
-    /// </summary>
-    public bool IsUnavailable { get; }
 }
 
 /// <summary>The CodeRouterBench corpus's freshness relative to the published Hugging Face dataset.</summary>
@@ -128,20 +121,17 @@ public sealed record BenchmarkSyncEvent(
 /// and sync surface. Lives in this plain <c>net10.0</c> library rather than the Windows-only MAUI project
 /// so CI can unit-test it, exactly like <see cref="PriceSourceAdminClient"/>.
 /// </summary>
-public sealed class BenchmarkDataAdminClient : IBenchmarkDataAdminClient, IDisposable
+public sealed class BenchmarkDataAdminClient
+    : GrpcAdminClientBase<Contract.BenchmarkDataAdminService.BenchmarkDataAdminServiceClient, BenchmarkDataAdminException>,
+      IBenchmarkDataAdminClient
 {
-    private readonly Contract.BenchmarkDataAdminService.BenchmarkDataAdminServiceClient _client;
-    private readonly IDisposable? _ownedChannel;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="BenchmarkDataAdminClient"/> class, creating and
     /// owning a channel to <paramref name="serverAddress"/>.
     /// </summary>
     public BenchmarkDataAdminClient(string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
+        : base(serverAddress, callInvoker => new Contract.BenchmarkDataAdminService.BenchmarkDataAdminServiceClient(callInvoker))
     {
-        var channel = TelemetryChannelFactory.Create(serverAddress);
-        _ownedChannel = channel;
-        _client = new Contract.BenchmarkDataAdminService.BenchmarkDataAdminServiceClient(TelemetryChannelFactory.Authenticated(channel));
     }
 
     /// <summary>
@@ -150,10 +140,8 @@ public sealed class BenchmarkDataAdminClient : IBenchmarkDataAdminClient, IDispo
     /// the caller owns the channel's lifetime.
     /// </summary>
     public BenchmarkDataAdminClient(Contract.BenchmarkDataAdminService.BenchmarkDataAdminServiceClient client)
+        : base(client)
     {
-        ArgumentNullException.ThrowIfNull(client);
-        _client = client;
-        _ownedChannel = null;
     }
 
     /// <inheritdoc />
@@ -161,7 +149,7 @@ public sealed class BenchmarkDataAdminClient : IBenchmarkDataAdminClient, IDispo
     {
         try
         {
-            var response = await _client
+            var response = await Client
                 .GetBenchmarkStatusAsync(new Contract.GetBenchmarkStatusRequest(), cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             return MapStatus(response);
@@ -177,7 +165,7 @@ public sealed class BenchmarkDataAdminClient : IBenchmarkDataAdminClient, IDispo
     {
         try
         {
-            var response = await _client
+            var response = await Client
                 .RecheckBenchmarkDataAsync(new Contract.RecheckBenchmarkDataRequest(), cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             return MapStatus(response);
@@ -192,7 +180,7 @@ public sealed class BenchmarkDataAdminClient : IBenchmarkDataAdminClient, IDispo
     public async IAsyncEnumerable<BenchmarkSyncEvent> SyncAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        using var call = _client.SyncBenchmarkData(new Contract.SyncBenchmarkDataRequest(), cancellationToken: cancellationToken);
+        using var call = Client.SyncBenchmarkData(new Contract.SyncBenchmarkDataRequest(), cancellationToken: cancellationToken);
         var stream = call.ResponseStream;
 
         while (true)
@@ -290,15 +278,7 @@ public sealed class BenchmarkDataAdminClient : IBenchmarkDataAdminClient, IDispo
         _ => BenchmarkSyncStageInfo.Failed,
     };
 
-    // Unavailable means the proxy isn't running - an ordinary state for a GUI that can outlive it - so it
-    // gets a plain-language message rather than a gRPC status dump, and is flagged so the caller can tell
-    // a dead connection from a rejected request without parsing the text.
-    /// <summary>Wraps an <see cref="RpcException"/> into a <see cref="BenchmarkDataAdminException"/>, flagging router-unreachable errors distinctly.</summary>
-    private static BenchmarkDataAdminException Wrap(RpcException ex, string action) =>
-        ex.StatusCode == StatusCode.Unavailable
-            ? new BenchmarkDataAdminException($"{action}: the router is not reachable.", ex, isUnavailable: true)
-            : new BenchmarkDataAdminException($"{action}: {ex.Status.Detail}", ex);
-
     /// <inheritdoc />
-    public void Dispose() => _ownedChannel?.Dispose();
+    protected override BenchmarkDataAdminException CreateException(string message, Exception? innerException, bool isUnavailable) =>
+        new(message, innerException, isUnavailable);
 }

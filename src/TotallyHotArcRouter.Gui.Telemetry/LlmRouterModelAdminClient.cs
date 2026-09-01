@@ -7,23 +7,15 @@ namespace TotallyHot.ArcRouter.Gui.Telemetry;
 /// <summary>
 /// Thrown when a llm_router model management call fails. Carries a message fit to render in the
 /// Governance panel rather than a raw <see cref="RpcException"/>, mirroring
-/// <see cref="BenchmarkDataAdminException"/>.
+/// <see cref="BenchmarkDataAdminException"/>. See <see cref="GrpcAdminException.IsUnavailable"/>'s remarks.
 /// </summary>
-public sealed class LlmRouterModelAdminException : Exception
+public sealed class LlmRouterModelAdminException : GrpcAdminException
 {
     /// <summary>Initializes a new instance of the <see cref="LlmRouterModelAdminException"/> class.</summary>
     public LlmRouterModelAdminException(string message, Exception? innerException = null, bool isUnavailable = false)
-        : base(message, innerException)
+        : base(message, innerException, isUnavailable)
     {
-        IsUnavailable = isUnavailable;
     }
-
-    /// <summary>
-    /// Gets whether the call failed because the router could not be reached, as opposed to being rejected
-    /// by it. See <see cref="BenchmarkDataAdminException.IsUnavailable"/>'s remarks for why this
-    /// distinction is load-bearing for the caller.
-    /// </summary>
-    public bool IsUnavailable { get; }
 }
 
 /// <summary>One of the llm_router voter's 5 model files, as rendered by the "Local Voter Model" section.</summary>
@@ -140,20 +132,17 @@ public interface ILlmRouterModelAdminClient
 /// than the Windows-only MAUI project so CI can unit-test it, exactly like
 /// <see cref="BenchmarkDataAdminClient"/>.
 /// </summary>
-public sealed class LlmRouterModelAdminClient : ILlmRouterModelAdminClient, IDisposable
+public sealed class LlmRouterModelAdminClient
+    : GrpcAdminClientBase<Contract.LlmRouterModelAdminService.LlmRouterModelAdminServiceClient, LlmRouterModelAdminException>,
+      ILlmRouterModelAdminClient
 {
-    private readonly Contract.LlmRouterModelAdminService.LlmRouterModelAdminServiceClient _client;
-    private readonly IDisposable? _ownedChannel;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="LlmRouterModelAdminClient"/> class, creating and
     /// owning a channel to <paramref name="serverAddress"/>.
     /// </summary>
     public LlmRouterModelAdminClient(string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
+        : base(serverAddress, callInvoker => new Contract.LlmRouterModelAdminService.LlmRouterModelAdminServiceClient(callInvoker))
     {
-        var channel = TelemetryChannelFactory.Create(serverAddress);
-        _ownedChannel = channel;
-        _client = new Contract.LlmRouterModelAdminService.LlmRouterModelAdminServiceClient(TelemetryChannelFactory.Authenticated(channel));
     }
 
     /// <summary>
@@ -162,10 +151,8 @@ public sealed class LlmRouterModelAdminClient : ILlmRouterModelAdminClient, IDis
     /// the caller owns the channel's lifetime.
     /// </summary>
     public LlmRouterModelAdminClient(Contract.LlmRouterModelAdminService.LlmRouterModelAdminServiceClient client)
+        : base(client)
     {
-        ArgumentNullException.ThrowIfNull(client);
-        _client = client;
-        _ownedChannel = null;
     }
 
     /// <inheritdoc />
@@ -173,7 +160,7 @@ public sealed class LlmRouterModelAdminClient : ILlmRouterModelAdminClient, IDis
     {
         try
         {
-            var response = await _client
+            var response = await Client
                 .GetLlmRouterModelStatusAsync(new Contract.GetLlmRouterModelStatusRequest(), cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             return MapStatus(response);
@@ -191,7 +178,7 @@ public sealed class LlmRouterModelAdminClient : ILlmRouterModelAdminClient, IDis
 
         try
         {
-            var response = await _client
+            var response = await Client
                 .SetLlmRouterModelBaseUrlAsync(
                     new Contract.SetLlmRouterModelBaseUrlRequest { BaseUrl = baseUrl },
                     cancellationToken: cancellationToken)
@@ -208,7 +195,7 @@ public sealed class LlmRouterModelAdminClient : ILlmRouterModelAdminClient, IDis
     public async IAsyncEnumerable<LlmRouterModelSyncEvent> SyncAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        using var call = _client.SyncLlmRouterModel(new Contract.SyncLlmRouterModelRequest(), cancellationToken: cancellationToken);
+        using var call = Client.SyncLlmRouterModel(new Contract.SyncLlmRouterModelRequest(), cancellationToken: cancellationToken);
         var stream = call.ResponseStream;
 
         while (true)
@@ -287,15 +274,7 @@ public sealed class LlmRouterModelAdminClient : ILlmRouterModelAdminClient, IDis
         _ => LlmRouterModelSyncStageInfo.Failed,
     };
 
-    // Unavailable means the proxy isn't running - an ordinary state for a GUI that can outlive it - so it
-    // gets a plain-language message rather than a gRPC status dump, and is flagged so the caller can tell
-    // a dead connection from a rejected request without parsing the text.
-    /// <summary>Wraps an <see cref="RpcException"/> into a <see cref="LlmRouterModelAdminException"/>, flagging router-unreachable errors distinctly.</summary>
-    private static LlmRouterModelAdminException Wrap(RpcException ex, string action) =>
-        ex.StatusCode == StatusCode.Unavailable
-            ? new LlmRouterModelAdminException($"{action}: the router is not reachable.", ex, isUnavailable: true)
-            : new LlmRouterModelAdminException($"{action}: {ex.Status.Detail}", ex);
-
     /// <inheritdoc />
-    public void Dispose() => _ownedChannel?.Dispose();
+    protected override LlmRouterModelAdminException CreateException(string message, Exception? innerException, bool isUnavailable) =>
+        new(message, innerException, isUnavailable);
 }

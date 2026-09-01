@@ -6,28 +6,15 @@ namespace TotallyHot.ArcRouter.Gui.Telemetry;
 /// <summary>
 /// Thrown when a price-source management call fails. Carries a message fit to render in the Governance panel
 /// rather than a raw <see cref="RpcException"/>, mirroring how <c>ProviderAdminException</c> wraps the
-/// provider management API's failures.
+/// provider management API's failures. See <see cref="GrpcAdminException.IsUnavailable"/>'s remarks.
 /// </summary>
-public sealed class PriceSourceAdminException : Exception
+public sealed class PriceSourceAdminException : GrpcAdminException
 {
     /// <summary>Initializes a new instance of the <see cref="PriceSourceAdminException"/> class.</summary>
     public PriceSourceAdminException(string message, Exception? innerException = null, bool isUnavailable = false)
-        : base(message, innerException)
+        : base(message, innerException, isUnavailable)
     {
-        IsUnavailable = isUnavailable;
     }
-
-    /// <summary>
-    /// Gets whether the call failed because the router could not be reached, as opposed to being rejected by
-    /// it.
-    /// </summary>
-    /// <remarks>
-    /// The distinction is load-bearing for the caller, which is why it is a property rather than something to
-    /// infer from <see cref="Exception.Message"/>. "The router is down" is a fact about the whole connection
-    /// and should put the panel into its unreachable state; "no price source named X" is a fact about one
-    /// request and must not, or a single bad argument would blank a panel whose data is perfectly good.
-    /// </remarks>
-    public bool IsUnavailable { get; }
 }
 
 /// <summary>
@@ -92,24 +79,21 @@ public sealed record PriceRefreshResult(
 /// <remarks>
 /// Carries feed metadata only, never prices (D5) - see the service comment in <c>src/Protos/telemetry.proto</c>.
 /// </remarks>
-public sealed class PriceSourceAdminClient : IPriceSourceAdminClient, IDisposable
+public sealed class PriceSourceAdminClient
+    : GrpcAdminClientBase<Contract.PriceSourceAdminService.PriceSourceAdminServiceClient, PriceSourceAdminException>,
+      IPriceSourceAdminClient
 {
     // Mirrors PriceCatalogOptions.PollIntervalHours' default, for the one case where a response carries no
     // schedule. Duplicated rather than shared because this library deliberately doesn't reference the router.
     private static readonly TimeSpan DefaultPollInterval = TimeSpan.FromHours(6);
-
-    private readonly Contract.PriceSourceAdminService.PriceSourceAdminServiceClient _client;
-    private readonly IDisposable? _ownedChannel;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PriceSourceAdminClient"/> class, creating and owning a
     /// channel to <paramref name="serverAddress"/>.
     /// </summary>
     public PriceSourceAdminClient(string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
+        : base(serverAddress, callInvoker => new Contract.PriceSourceAdminService.PriceSourceAdminServiceClient(callInvoker))
     {
-        var channel = TelemetryChannelFactory.Create(serverAddress);
-        _ownedChannel = channel;
-        _client = new Contract.PriceSourceAdminService.PriceSourceAdminServiceClient(TelemetryChannelFactory.Authenticated(channel));
     }
 
     /// <summary>
@@ -118,10 +102,8 @@ public sealed class PriceSourceAdminClient : IPriceSourceAdminClient, IDisposabl
     /// channel's lifetime.
     /// </summary>
     public PriceSourceAdminClient(Contract.PriceSourceAdminService.PriceSourceAdminServiceClient client)
+        : base(client)
     {
-        ArgumentNullException.ThrowIfNull(client);
-        _client = client;
-        _ownedChannel = null;
     }
 
     /// <inheritdoc />
@@ -129,7 +111,7 @@ public sealed class PriceSourceAdminClient : IPriceSourceAdminClient, IDisposabl
     {
         try
         {
-            var response = await _client
+            var response = await Client
                 .ListPriceSourcesAsync(new Contract.ListPriceSourcesRequest(), cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             return MapList(response.Sources, response.Schedule);
@@ -150,7 +132,7 @@ public sealed class PriceSourceAdminClient : IPriceSourceAdminClient, IDisposabl
 
         try
         {
-            var response = await _client
+            var response = await Client
                 .SetPriceSourceEnabledAsync(
                     new Contract.SetPriceSourceEnabledRequest { Name = name, Enabled = enabled },
                     cancellationToken: cancellationToken)
@@ -168,7 +150,7 @@ public sealed class PriceSourceAdminClient : IPriceSourceAdminClient, IDisposabl
     {
         try
         {
-            var response = await _client
+            var response = await Client
                 .RefreshPriceSourcesAsync(new Contract.RefreshPriceSourcesRequest(), cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             return MapRefreshResult(response);
@@ -191,7 +173,7 @@ public sealed class PriceSourceAdminClient : IPriceSourceAdminClient, IDisposabl
 
         try
         {
-            var response = await _client
+            var response = await Client
                 .ReorderPriceSourcesAsync(request, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             return MapRefreshResult(response);
@@ -249,17 +231,8 @@ public sealed class PriceSourceAdminClient : IPriceSourceAdminClient, IDisposabl
                 TimeSpan.FromSeconds(schedule.PollIntervalSeconds),
                 schedule.ScheduleAnchorUtc.ToDateTimeOffset());
 
-    // Unavailable means the proxy isn't running, which is an ordinary state for a GUI that can outlive it -
-    // so it gets a plain-language message rather than a gRPC status dump, and is flagged so the caller can
-    // tell a dead connection from a rejected request without parsing the text. Everything else keeps the
-    // server's own detail, which is where NotFound's "no price source named X" comes from.
-    /// <summary>Wraps an <see cref="RpcException"/> into a <see cref="PriceSourceAdminException"/>, flagging router-unreachable errors distinctly.</summary>
-    private static PriceSourceAdminException Wrap(RpcException ex, string action) =>
-        ex.StatusCode == StatusCode.Unavailable
-            ? new PriceSourceAdminException($"{action}: the router is not reachable.", ex, isUnavailable: true)
-            : new PriceSourceAdminException($"{action}: {ex.Status.Detail}", ex);
-
     /// <inheritdoc />
-    public void Dispose() => _ownedChannel?.Dispose();
+    protected override PriceSourceAdminException CreateException(string message, Exception? innerException, bool isUnavailable) =>
+        new(message, innerException, isUnavailable);
 }
 

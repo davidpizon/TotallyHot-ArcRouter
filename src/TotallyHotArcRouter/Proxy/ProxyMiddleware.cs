@@ -164,6 +164,66 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     private readonly record struct CapturedResponse(byte[] ClientShapeBytes, byte[]? NativeBytes, IncrementalUsageScanner? TailScanner);
 
     /// <summary>
+    /// Owns the "cap the captured bytes, and once the cap is exceeded, lazily allocate an
+    /// <see cref="IncrementalUsageScanner"/> to keep scanning a tail window" accounting rule that
+    /// <see cref="TranslateAndCaptureStreamAsync"/> and <see cref="CopyAndCaptureAsync"/> each drove
+    /// independently (streamed and raw copy-through call shapes) before this type existed - both enforce
+    /// the same rule, just triggered from different loops. <see cref="TranslateAndCaptureBufferedAsync"/>
+    /// deliberately does not use this type - see its remarks. <see cref="_trackTail"/> disables the tail
+    /// scanner for a capture that never consults one (the secondary native-bytes copy in
+    /// <see cref="TranslateAndCaptureStreamAsync"/>), so a capacity-exceeding chunk there doesn't pay for a
+    /// scanner allocation nothing will ever read.
+    /// </summary>
+    private sealed class ResponseCaptureAccumulator : IDisposable
+    {
+        private readonly MemoryStream _capture = new();
+        private readonly int _captureCap;
+        private readonly bool _trackTail;
+        private IncrementalUsageScanner? _tailScanner;
+
+        public ResponseCaptureAccumulator(int captureCap, bool trackTail = true)
+        {
+            _captureCap = captureCap;
+            _trackTail = trackTail;
+        }
+
+        /// <summary>The tail scanner allocated once a chunk first exceeded the cap, or <see langword="null"/> if none has (yet), or if this accumulator does not track one.</summary>
+        public IncrementalUsageScanner? TailScanner => _tailScanner;
+
+        /// <summary>
+        /// Writes up to the remaining cap of <paramref name="chunk"/> into the capture buffer, and - when
+        /// tracking a tail scanner - appends <paramref name="chunk"/> to it in full once the cap has been
+        /// exceeded, so the very chunk that crosses the cap boundary is still captured in full there, not
+        /// just the chunks after it.
+        /// </summary>
+        public async Task AddAsync(ReadOnlyMemory<byte> chunk, CancellationToken cancellationToken)
+        {
+            if (chunk.IsEmpty)
+            {
+                return;
+            }
+
+            var remainingCapacity = _captureCap - (int)_capture.Length;
+            if (remainingCapacity > 0)
+            {
+                await _capture.WriteAsync(chunk[..Math.Min(chunk.Length, remainingCapacity)], cancellationToken);
+            }
+
+            if (_trackTail && remainingCapacity < chunk.Length)
+            {
+                _tailScanner ??= new IncrementalUsageScanner();
+                _tailScanner.Append(chunk.Span);
+            }
+        }
+
+        /// <summary>Returns the bytes captured so far, up to the configured cap.</summary>
+        public byte[] ToArray() => _capture.ToArray();
+
+        /// <inheritdoc />
+        public void Dispose() => _capture.Dispose();
+    }
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="ProxyMiddleware"/> class.
     /// </summary>
     /// <param name="logger">Logger instance.</param>
@@ -2128,6 +2188,10 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             var translated = translator.TranslateResponse(nativeBytes);
             await destination.WriteAsync(translated, cancellationToken);
 
+            // Deliberately not routed through ResponseCaptureAccumulator: unlike the two loop-based capture
+            // methods below, this is a single, already-fully-materialized buffer, and the common case (a
+            // response that fits within captureCap) can return the translated array directly instead of
+            // paying for a MemoryStream copy the accumulator's chunk-oriented API would otherwise force.
             var clientShapeBytes = translated.Length <= captureCap ? translated : translated[..captureCap];
             byte[]? capturedNativeBytes = UsageExtractor.SupportsNativeShape(translator.Provider)
                 ? (nativeBytes.Length <= captureCap ? nativeBytes : nativeBytes[..captureCap])
@@ -2175,9 +2239,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     {
         var streamTranslator = translator.CreateStreamTranslator();
         var captureNativeBytes = UsageExtractor.SupportsNativeShape(translator.Provider);
-        using var capture = new MemoryStream();
-        using var nativeCapture = captureNativeBytes ? new MemoryStream() : null;
-        IncrementalUsageScanner? tailScanner = null;
+        using var capture = new ResponseCaptureAccumulator(captureCap);
+        using var nativeCapture = captureNativeBytes ? new ResponseCaptureAccumulator(captureCap, trackTail: false) : null;
         var buffer = ArrayPool<byte>.Shared.Rent(81920);
 
         async Task EmitAsync(byte[] translated)
@@ -2190,20 +2253,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             await destination.WriteAsync(translated, cancellationToken);
             await destination.FlushAsync(cancellationToken);
 
-            var remainingCapacity = captureCap - (int)capture.Length;
-            if (remainingCapacity > 0)
-            {
-                await capture.WriteAsync(translated.AsMemory(0, Math.Min(translated.Length, remainingCapacity)), cancellationToken);
-            }
-
-            if (remainingCapacity < translated.Length)
-            {
-                // Same lazy-allocation reasoning as CopyAndCaptureAsync: only worth the tail window once
-                // the head-capped capture has actually lost bytes, and the boundary-crossing chunk itself
-                // still needs to land in the scanner in full.
-                tailScanner ??= new IncrementalUsageScanner();
-                tailScanner.Append(translated);
-            }
+            await capture.AddAsync(translated, cancellationToken);
         }
 
         try
@@ -2213,11 +2263,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             {
                 if (nativeCapture is not null)
                 {
-                    var remainingNativeCapacity = captureCap - (int)nativeCapture.Length;
-                    if (remainingNativeCapacity > 0)
-                    {
-                        await nativeCapture.WriteAsync(buffer.AsMemory(0, Math.Min(bytesRead, remainingNativeCapacity)), cancellationToken);
-                    }
+                    await nativeCapture.AddAsync(buffer.AsMemory(0, bytesRead), cancellationToken);
                 }
 
                 await EmitAsync(streamTranslator.Push(buffer.AsSpan(0, bytesRead)));
@@ -2242,7 +2288,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             ArrayPool<byte>.Shared.Return(buffer);
         }
 
-        return new CapturedResponse(capture.ToArray(), nativeCapture?.ToArray(), tailScanner);
+        return new CapturedResponse(capture.ToArray(), nativeCapture?.ToArray(), capture.TailScanner);
     }
 
     /// <summary>
@@ -2254,8 +2300,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// </summary>
     private async Task<(byte[] Captured, IncrementalUsageScanner? TailScanner)> CopyAndCaptureAsync(Stream source, Stream destination, int captureCap, CancellationToken cancellationToken)
     {
-        using var capture = new MemoryStream();
-        IncrementalUsageScanner? tailScanner = null;
+        using var capture = new ResponseCaptureAccumulator(captureCap);
         var buffer = ArrayPool<byte>.Shared.Rent(81920);
         try
         {
@@ -2272,24 +2317,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 // sees no bytes at all until the connection eventually closes (or times out first).
                 await destination.FlushAsync(cancellationToken);
 
-                var remainingCapacity = captureCap - (int)capture.Length;
-                if (remainingCapacity > 0)
-                {
-                    await capture.WriteAsync(buffer.AsMemory(0, Math.Min(bytesRead, remainingCapacity)), cancellationToken);
-                }
-
-                if (remainingCapacity < bytesRead)
-                {
-                    // This chunk pushes (or has already pushed) the head-capped capture past captureCap, so
-                    // some/all of it would otherwise be lost - exactly when the tail scanner earns its
-                    // allocation. A response that never exceeds the cap is already fully captured by
-                    // `capture` above, so tailScanner would be dead weight for the common case. Checking
-                    // remainingCapacity (computed before this chunk's write) rather than capture.Length
-                    // after it ensures the very chunk that crosses the cap boundary is still captured in
-                    // full here, not just the chunks after it.
-                    tailScanner ??= new IncrementalUsageScanner();
-                    tailScanner.Append(buffer.AsSpan(0, bytesRead));
-                }
+                await capture.AddAsync(buffer.AsMemory(0, bytesRead), cancellationToken);
             }
         }
         catch (Exception ex) when (IsStreamAbort(ex))
@@ -2304,7 +2332,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             ArrayPool<byte>.Shared.Return(buffer);
         }
 
-        return (capture.ToArray(), tailScanner);
+        return (capture.ToArray(), capture.TailScanner);
     }
 
     /// <summary>
@@ -2650,25 +2678,38 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     private sealed record OllamaErrorResponse(
         [property: JsonPropertyName("error")] string Error);
 
-    /// <summary>Writes a 400 response in an OpenAI-shaped error envelope for a request whose model could not be resolved.</summary>
-    private static async Task WriteModelNotFoundResponseAsync(HttpContext context, string errorMessage)
+    /// <summary>
+    /// Writes an OpenAI-shaped <c>{"error": {...}}</c> envelope: the shared shape every client-facing error
+    /// response in this class uses, differing only by status code, <paramref name="type"/>, message, and an
+    /// optional <paramref name="param"/> (omitted from the JSON entirely when <see langword="null"/>, via
+    /// <see cref="ErrorDetail.Param"/>'s <c>WhenWritingNull</c> condition). <paramref name="statusCode"/> is
+    /// echoed back as the envelope's string <c>code</c> field, matching every existing call site.
+    /// </summary>
+    private static async Task WriteErrorResponseAsync(HttpContext context, int statusCode, string type, string message, string? param = null)
     {
-        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        context.Response.StatusCode = statusCode;
         context.Response.ContentType = "application/json";
 
-        var payload = new
-        {
-            error = new
-            {
-                message = errorMessage,
-                type = "invalid_request_error",
-                param = "model",
-                code = "400"
-            }
-        };
+        var payload = new ErrorEnvelope(new ErrorDetail(message, type, param, statusCode.ToString(System.Globalization.CultureInfo.InvariantCulture)));
 
         await context.Response.WriteAsync(JsonSerializer.Serialize(payload), context.RequestAborted);
     }
+
+    /// <summary>The top-level <c>{"error": {...}}</c> envelope <see cref="WriteErrorResponseAsync"/> writes.</summary>
+    private sealed record ErrorEnvelope([property: JsonPropertyName("error")] ErrorDetail Error);
+
+    /// <summary>The body of an OpenAI-shaped error envelope written by <see cref="WriteErrorResponseAsync"/>.</summary>
+    private sealed record ErrorDetail(
+        [property: JsonPropertyName("message")] string Message,
+        [property: JsonPropertyName("type")] string Type,
+        [property: JsonPropertyName("param")]
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? Param,
+        [property: JsonPropertyName("code")] string Code);
+
+    /// <summary>Writes a 400 response in an OpenAI-shaped error envelope for a request whose model could not be resolved.</summary>
+    private static Task WriteModelNotFoundResponseAsync(HttpContext context, string errorMessage) =>
+        WriteErrorResponseAsync(context, StatusCodes.Status400BadRequest, "invalid_request_error", errorMessage, param: "model");
 
     /// <summary>
     /// Writes a 503 response in an OpenAI-shaped error envelope when the GUI system tray's kill switch
@@ -2676,23 +2717,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// <see cref="WriteModelNotFoundResponseAsync"/>'s envelope shape but as 503 (Service Unavailable): the
     /// request itself may be perfectly valid, it was refused solely because an operator paused routing.
     /// </summary>
-    private static async Task WriteRoutingDisabledResponseAsync(HttpContext context)
-    {
-        context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
-        context.Response.ContentType = "application/json";
-
-        var payload = new
-        {
-            error = new
-            {
-                message = "Routing is currently disabled.",
-                type = "routing_disabled",
-                code = "503"
-            }
-        };
-
-        await context.Response.WriteAsync(JsonSerializer.Serialize(payload), context.RequestAborted);
-    }
+    private static Task WriteRoutingDisabledResponseAsync(HttpContext context) =>
+        WriteErrorResponseAsync(context, StatusCodes.Status503ServiceUnavailable, "routing_disabled", "Routing is currently disabled.");
 
     /// <summary>
     /// Writes a client-facing 402 error envelope when every candidate provider for a request is over its
@@ -2701,24 +2727,13 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// operator's spend cap is exhausted, which is a distinct, retriable-next-month condition, not a
     /// malformed request or an upstream outage.
     /// </summary>
-    private static async Task WriteBudgetExhaustedResponseAsync(HttpContext context, string requestedModel)
-    {
-        context.Response.StatusCode = StatusCodes.Status402PaymentRequired;
-        context.Response.ContentType = "application/json";
-
-        var payload = new
-        {
-            error = new
-            {
-                message = $"model '{requestedModel}' and all its fallbacks are over their configured monthly budget.",
-                type = "budget_exhausted",
-                param = "model",
-                code = "402"
-            }
-        };
-
-        await context.Response.WriteAsync(JsonSerializer.Serialize(payload), context.RequestAborted);
-    }
+    private static Task WriteBudgetExhaustedResponseAsync(HttpContext context, string requestedModel) =>
+        WriteErrorResponseAsync(
+            context,
+            StatusCodes.Status402PaymentRequired,
+            "budget_exhausted",
+            $"model '{requestedModel}' and all its fallbacks are over their configured monthly budget.",
+            param: "model");
 
     /// <summary>
     /// Writes a client-facing 503 error envelope for an explicit selection whose target or provider is
@@ -2729,23 +2744,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// valid, the router simply already knows this specific target or provider isn't answering right now
     /// and never made a network call to find out again.
     /// </summary>
-    private static async Task WriteCircuitTripBlockedResponseAsync(HttpContext context, string message)
-    {
-        context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
-        context.Response.ContentType = "application/json";
-
-        var payload = new
-        {
-            error = new
-            {
-                message,
-                type = "invalid_request_error",
-                param = (string?)null,
-                code = "503"
-            }
-        };
-
-        await context.Response.WriteAsync(JsonSerializer.Serialize(payload), context.RequestAborted);
-    }
+    private static Task WriteCircuitTripBlockedResponseAsync(HttpContext context, string message) =>
+        WriteErrorResponseAsync(context, StatusCodes.Status503ServiceUnavailable, "invalid_request_error", message);
 }
 

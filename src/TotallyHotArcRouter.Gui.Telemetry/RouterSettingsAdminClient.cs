@@ -6,22 +6,15 @@ namespace TotallyHot.ArcRouter.Gui.Telemetry;
 /// <summary>
 /// Thrown when a router-settings read or write call fails. Carries a message fit to render in the System
 /// Settings window rather than a raw <see cref="RpcException"/>, mirroring <see cref="ClusterModelAdminException"/>.
+/// See <see cref="GrpcAdminException.IsUnavailable"/>'s remarks.
 /// </summary>
-public sealed class RouterSettingsAdminException : Exception
+public sealed class RouterSettingsAdminException : GrpcAdminException
 {
     /// <summary>Initializes a new instance of the <see cref="RouterSettingsAdminException"/> class.</summary>
     public RouterSettingsAdminException(string message, Exception? innerException = null, bool isUnavailable = false)
-        : base(message, innerException)
+        : base(message, innerException, isUnavailable)
     {
-        IsUnavailable = isUnavailable;
     }
-
-    /// <summary>
-    /// Gets whether the call failed because the router could not be reached, as opposed to being rejected by
-    /// it (e.g. an out-of-range capacity). See <see cref="ClusterModelAdminException.IsUnavailable"/>'s
-    /// remarks for why this distinction is load-bearing for the caller.
-    /// </summary>
-    public bool IsUnavailable { get; }
 }
 
 /// <summary>
@@ -55,20 +48,17 @@ public sealed record RouterSettingsInfo(
 /// Shadow Judge, and Transcription Capture read and write surface. Lives in this plain <c>net10.0</c> library
 /// rather than the Windows-only MAUI project so CI can unit-test it, exactly like <see cref="ClusterModelAdminClient"/>.
 /// </summary>
-public sealed class RouterSettingsAdminClient : IRouterSettingsAdminClient, IDisposable
+public sealed class RouterSettingsAdminClient
+    : GrpcAdminClientBase<Contract.RouterSettingsAdminService.RouterSettingsAdminServiceClient, RouterSettingsAdminException>,
+      IRouterSettingsAdminClient
 {
-    private readonly Contract.RouterSettingsAdminService.RouterSettingsAdminServiceClient _client;
-    private readonly IDisposable? _ownedChannel;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="RouterSettingsAdminClient"/> class, creating and owning a
     /// channel to <paramref name="serverAddress"/>.
     /// </summary>
     public RouterSettingsAdminClient(string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
+        : base(serverAddress, callInvoker => new Contract.RouterSettingsAdminService.RouterSettingsAdminServiceClient(callInvoker))
     {
-        var channel = TelemetryChannelFactory.Create(serverAddress);
-        _ownedChannel = channel;
-        _client = new Contract.RouterSettingsAdminService.RouterSettingsAdminServiceClient(TelemetryChannelFactory.Authenticated(channel));
     }
 
     /// <summary>
@@ -77,10 +67,8 @@ public sealed class RouterSettingsAdminClient : IRouterSettingsAdminClient, IDis
     /// channel's lifetime.
     /// </summary>
     public RouterSettingsAdminClient(Contract.RouterSettingsAdminService.RouterSettingsAdminServiceClient client)
+        : base(client)
     {
-        ArgumentNullException.ThrowIfNull(client);
-        _client = client;
-        _ownedChannel = null;
     }
 
     /// <inheritdoc />
@@ -88,7 +76,7 @@ public sealed class RouterSettingsAdminClient : IRouterSettingsAdminClient, IDis
     {
         try
         {
-            var response = await _client
+            var response = await Client
                 .GetRouterSettingsAsync(new Contract.GetRouterSettingsRequest(), cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             return Map(response);
@@ -110,7 +98,7 @@ public sealed class RouterSettingsAdminClient : IRouterSettingsAdminClient, IDis
     {
         try
         {
-            var response = await _client
+            var response = await Client
                 .UpdateRouterSettingsAsync(
                     new Contract.UpdateRouterSettingsRequest
                     {
@@ -135,7 +123,7 @@ public sealed class RouterSettingsAdminClient : IRouterSettingsAdminClient, IDis
     {
         try
         {
-            var response = await _client
+            var response = await Client
                 .ClearTranscriptsAsync(new Contract.ClearTranscriptsRequest(), cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             return response.RowsDeleted;
@@ -156,15 +144,7 @@ public sealed class RouterSettingsAdminClient : IRouterSettingsAdminClient, IDis
             response.EligibleJudgeModels.ToList(),
             response.TranscriptCaptureEnabled);
 
-    // Unavailable means the proxy isn't running - an ordinary state for a GUI that can outlive it - so it
-    // gets a plain-language message rather than a gRPC status dump, and is flagged so the caller can tell a
-    // dead connection from a rejected request (e.g. an out-of-range capacity) without parsing the text.
-    /// <summary>Wraps an <see cref="RpcException"/> into a <see cref="RouterSettingsAdminException"/>, flagging router-unreachable errors distinctly.</summary>
-    private static RouterSettingsAdminException Wrap(RpcException ex, string action) =>
-        ex.StatusCode == StatusCode.Unavailable
-            ? new RouterSettingsAdminException($"{action}: the router is not reachable.", ex, isUnavailable: true)
-            : new RouterSettingsAdminException($"{action}: {ex.Status.Detail}", ex);
-
     /// <inheritdoc />
-    public void Dispose() => _ownedChannel?.Dispose();
+    protected override RouterSettingsAdminException CreateException(string message, Exception? innerException, bool isUnavailable) =>
+        new(message, innerException, isUnavailable);
 }
