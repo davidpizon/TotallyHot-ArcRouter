@@ -47,3 +47,5 @@ decision changes, write a new ADR and set the old one's status to `superseded by
 | [0001](0001-git-blob-sha1-checksums-for-coderouterbench-sync.md) | Use git blob SHA-1, not MD5, to verify synced CodeRouterBench files | accepted |
 | [0002](0002-store-probed-model-context-windows-in-their-own-table.md) | Store probed model context windows in their own table | proposed |
 | [0003](0003-declare-tool-support-for-emulated-and-unclassified-models.md) | Declare tool support for emulated and unclassified models | proposed |
+| [0004](0004-surface-out-of-credits-provider-failures-on-the-providers-tab.md) | Surface out-of-credits provider failures on the Providers tab | proposed |
+| [0005](0005-protect-explicit-provider-selections-from-silent-substitution-on-any-circuit-trip.md) | Protect explicit provider selections from silent substitution on any circuit trip | proposed |

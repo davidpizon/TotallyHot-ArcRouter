@@ -391,10 +391,12 @@ namespace TotallyHot.ArcRouter.Proxy
                                         SecretWriter = managementApi.SecretWriter,
                                         SecretReader = managementApi.SecretReader,
                                         ComparisonStore = managementApi.TaxonomyComparisonStore,
-                                        // Pure in-memory and dependency-free, so it's constructed directly
-                                        // here rather than threaded through ManagementApiOptions like the
-                                        // other collaborators above - there is nothing for a caller to wire.
-                                        InteractionStatusStore = new ProviderInteractionStatusStore(),
+                                        // Falls back to a fresh, unshared instance only when the caller
+                                        // didn't supply one - see ManagementApiDependencies.InteractionStatusStore's
+                                        // remarks: the real composition root (ServiceCollectionExtensions)
+                                        // always supplies the same singleton also given to RequestInterceptor
+                                        // and ProxyMiddleware, so the Providers tab sees live-traffic state.
+                                        InteractionStatusStore = managementApi.InteractionStatusStore ?? new ProviderInteractionStatusStore(),
                                     });
                                 endpoints.MapProviderAdminEndpoints(facade, managementToken);
                                 endpoints.MapUsageAdminEndpoints(facade, managementToken);

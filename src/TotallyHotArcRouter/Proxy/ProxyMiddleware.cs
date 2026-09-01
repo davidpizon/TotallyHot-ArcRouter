@@ -10,6 +10,7 @@ using Amazon.Runtime;
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Bedrock;
+using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Proxy.Translation;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Router.Classification;
@@ -107,6 +108,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     private readonly IUsageLedger? _usageLedger;
     private readonly IRateLimitHeaderCapture _rateLimitCapture;
     private readonly ICircuitBreaker _circuitBreaker;
+    private readonly IProviderInteractionStatusStore? _interactionStatusStore;
     private readonly ToolCallNormalizerFactory _toolCallNormalizerFactory;
     private readonly Router.Embeddings.PendingTaskEmbeddingCache? _pendingTaskEmbeddingCache;
     private readonly PendingRequestCostCache? _pendingRequestCostCache;
@@ -267,6 +269,17 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// <c>POST /api/show</c>'s <c>model_info</c>. <see langword="null"/> (the default) is behaviorally
     /// inert: <c>model_info</c> is omitted entirely, exactly as it was before this was wired up.
     /// </param>
+    /// <param name="interactionStatusStore">
+    /// Optional per-provider admin-action/live-traffic status store
+    /// (docs/adr/0004-surface-out-of-credits-provider-failures-on-the-providers-tab.md,
+    /// docs/adr/0005-protect-explicit-provider-selections-from-silent-substitution-on-any-circuit-
+    /// trip.md). On a classified out-of-credits response, this records the LiveTraffic-track failure
+    /// (and success on every subsequent 2xx) that the Providers tab and <see cref="RequestInterceptor"/>'s
+    /// explicit-selection protection both read from. Must be the <em>same</em> instance given to
+    /// <see cref="RequestInterceptor"/> and <c>ManagementFacade</c> (see <c>ServiceCollectionExtensions</c>'s
+    /// DI wiring) - the same sharing requirement <paramref name="circuitBreaker"/> already has. Defaults to
+    /// <see langword="null"/>, which is behaviorally inert (no LiveTraffic state is ever recorded).
+    /// </param>
     public ProxyMiddleware(
         ILogger<ProxyMiddleware> logger,
         RequestInterceptor interceptor,
@@ -298,7 +311,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         IOptionsMonitor<Judge.JudgeOptions>? judgeOptionsMonitor = null,
         Router.IRoutingGate? routingGate = null,
         Translation.ToolCalling.IToolCallCapabilityStore? capabilityStore = null,
-        Translation.ToolCalling.IModelContextWindowStore? contextWindowStore = null)
+        Translation.ToolCalling.IModelContextWindowStore? contextWindowStore = null,
+        IProviderInteractionStatusStore? interactionStatusStore = null)
     {
         _logger = logger;
         _interceptor = interceptor;
@@ -333,6 +347,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         _routingGate = routingGate;
         _capabilityStore = capabilityStore;
         _contextWindowStore = contextWindowStore;
+        _interactionStatusStore = interactionStatusStore;
         _selfHostedRouterPricePerMillionTokens =
             routingOptions?.Value.SelfHostedRouterPricePerMillionTokens ?? new Models.RoutingOptions().SelfHostedRouterPricePerMillionTokens;
 
@@ -420,6 +435,17 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         if (!resolution.IsSuccess)
         {
             await WriteModelNotFoundResponseAsync(context, resolution.ErrorMessage!);
+            return;
+        }
+
+        // docs/adr/0004-.../0005-...: an explicit selection whose target or provider is already
+        // circuit-open never reaches the candidate loop at all - RequestInterceptor deliberately left it
+        // unsubstituted (so candidates[0] still reports the client's real choice for telemetry), and the
+        // truthful message it already resolved is written directly here instead of attempting - or
+        // silently substituting away from - a target everyone already knows is untrustworthy.
+        if (resolution.ExplicitCircuitTripBlockMessage is { } blockedMessage)
+        {
+            await WriteCircuitTripBlockedResponseAsync(context, blockedMessage);
             return;
         }
 
@@ -793,6 +819,25 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                     embeddedErrorMessage = embeddedMessage;
                 }
             }
+            else if ((statusCode == StatusCodes.Status400BadRequest || statusCode == 429) && translator is null)
+            {
+                // docs/adr/0004-surface-out-of-credits-provider-failures-on-the-providers-tab.md: an
+                // untranslated/passthrough provider (OpenAI-compatible, LM Studio, Ollama-native, etc.) has
+                // no provider-specific embedded-error extraction above - its error body is otherwise
+                // forwarded byte-for-byte untouched, so reading it here (once, for classification only)
+                // changes nothing about what the client eventually receives; see the preReadErrorBody-is-
+                // not-null forwarding branch below.
+                preReadErrorBody = await responseMessage.Content.ReadAsByteArrayAsync(context.RequestAborted);
+            }
+
+            // docs/adr/0004-surface-out-of-credits-provider-failures-on-the-providers-tab.md: additive to
+            // the embedded-error extraction above, not a replacement - embeddedErrorMessage/preReadErrorBody
+            // still drive the existing Gemini/Anthropic/passthrough forwarding behavior for a
+            // non-out-of-credits 400 exactly as before. Scoped to 400/429 (Anthropic's real case is a 400;
+            // OpenAI's insufficient_quota is typically a 429).
+            var outOfCreditsMessage = string.Empty;
+            var isOutOfCredits = (statusCode == StatusCodes.Status400BadRequest || statusCode == 429) &&
+                OutOfCreditsClassifier.IsOutOfCredits(preReadErrorBody ?? [], embeddedErrorMessage, out outOfCreditsMessage);
 
             // Circuit-breaker health signal. A 401, 403, or 405 is treated as a *provider-wide* outage: a 401
             // is almost always an invalid/expired credential, a 403 is almost always a permission/API-key-scope
@@ -848,6 +893,20 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                     SanitizeForLog(route.ModelName));
                 _circuitBreaker.RecordProviderFailure(route.Provider);
             }
+            else if (isOutOfCredits)
+            {
+                // docs/adr/0004-surface-out-of-credits-provider-failures-on-the-providers-tab.md: checked
+                // ahead of IsOutageStatus below, since a classified-out-of-credits 429 would otherwise fall
+                // into that branch's weaker per-target RecordFailure - out-of-credits is always
+                // provider-wide (the whole account is broken, not just this one target), like 401/403/405
+                // above.
+                _logger.LogError(
+                    "Upstream provider {Provider} is out of credits for model {Model}; treating as a provider-wide outage and bypassing every model on this provider until it recovers.",
+                    SanitizeForLog(route.Provider),
+                    SanitizeForLog(route.ModelName));
+                _circuitBreaker.RecordProviderFailure(route.Provider);
+                _interactionStatusStore?.RecordLiveTrafficFailure(route.Provider, ProviderInteractionKind.OutOfCredits, outOfCreditsMessage);
+            }
             else if (IsOutageStatus(statusCode))
             {
                 _circuitBreaker.RecordFailure(circuitTarget);
@@ -855,6 +914,16 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             else
             {
                 _circuitBreaker.RecordSuccess(circuitTarget);
+
+                // docs/adr/0004-...: gated strictly on an actual 2xx (not the broader "not an outage"
+                // bucket this branch otherwise covers, which also includes a plain non-out-of-credits
+                // 400/422) - a malformed request succeeding at the transport layer is not evidence the
+                // provider "works" in the billing sense LiveTraffic tracks, so it must not clear a live
+                // out-of-credits warning.
+                if (statusCode is >= 200 and < 300)
+                {
+                    _interactionStatusStore?.RecordLiveTrafficSuccess(route.Provider, "Live traffic");
+                }
             }
 
             // A retriable *outage* status: a 5xx (provider-side failure), a 404 (this target's configured
@@ -870,7 +939,30 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // isGeminiAuthFailure is folded in here alongside the numeric-status check: it's Gemini's 400
             // disguising what is, semantically, a 401 (see where it's computed above), so it gets the same
             // different-provider-only retry treatment as the real 401/403/405 case.
-            if (hasNextCandidate && (IsRetriableOutageStatus(statusCode, nextProviderDiffers) || (isGeminiAuthFailure && nextProviderDiffers)))
+            //
+            // docs/adr/0004-.../0005-...: for a *provider-wide*-trip status (401/403/405/isGeminiAuthFailure/
+            // out-of-credits), an explicit primary (never substituted so far, and this is its first attempt,
+            // not an already-failed-over hop) does NOT retry across providers even when nextProviderDiffers -
+            // it falls through to the commit block below and relays the real upstream error, exactly as ADR-
+            // 0005 requires. This overrides today's *generic* 401/403/405/429 cross-provider carve-out
+            // specifically for these provider-wide statuses; a plain 429 (not out-of-credits) is target-level
+            // (RecordFailure, not RecordProviderFailure - see above) and keeps retrying unconditionally on
+            // explicit/auto alike, matching ADR-0005's explicit "target-level trips unaffected" boundary for
+            // *this* same-request live-discovery cascade (RequestInterceptor's separate already-open-before-
+            // this-request path is what protects target-level trips - see ExplicitCircuitTripBlockMessage
+            // above).
+            var isExplicitPrimary = !isFallback && resolution.SubstitutionReason == RoutingSubstitutionReason.None;
+            var isProviderWideTripStatus = statusCode == StatusCodes.Status401Unauthorized
+                || statusCode == StatusCodes.Status403Forbidden
+                || statusCode == StatusCodes.Status405MethodNotAllowed
+                || isGeminiAuthFailure
+                || isOutOfCredits;
+
+            var shouldRetryThisCandidate = isProviderWideTripStatus
+                ? nextProviderDiffers && !isExplicitPrimary
+                : IsRetriableOutageStatus(statusCode, nextProviderDiffers);
+
+            if (hasNextCandidate && shouldRetryThisCandidate)
             {
                 _logger.LogWarning("Upstream provider {Provider} returned {Status} for model {Model}; failing over to the next backup.", SanitizeForLog(route.Provider), statusCode, SanitizeForLog(route.ModelName));
                 responseMessage.Dispose();
@@ -2622,6 +2714,34 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 type = "budget_exhausted",
                 param = "model",
                 code = "402"
+            }
+        };
+
+        await context.Response.WriteAsync(JsonSerializer.Serialize(payload), context.RequestAborted);
+    }
+
+    /// <summary>
+    /// Writes a client-facing 503 error envelope for an explicit selection whose target or provider is
+    /// already circuit-open from an earlier request (docs/adr/0004-surface-out-of-credits-provider-
+    /// failures-on-the-providers-tab.md, docs/adr/0005-protect-explicit-provider-selections-from-silent-
+    /// substitution-on-any-circuit-trip.md). Unlike <see cref="WriteBudgetExhaustedResponseAsync"/>'s 402
+    /// (a hard operator-configured cap) this is 503 (Service Unavailable): the client's own selection was
+    /// valid, the router simply already knows this specific target or provider isn't answering right now
+    /// and never made a network call to find out again.
+    /// </summary>
+    private static async Task WriteCircuitTripBlockedResponseAsync(HttpContext context, string message)
+    {
+        context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+        context.Response.ContentType = "application/json";
+
+        var payload = new
+        {
+            error = new
+            {
+                message,
+                type = "invalid_request_error",
+                param = (string?)null,
+                code = "503"
             }
         };
 

@@ -2,8 +2,10 @@ using System.Text;
 using System.Text.Json;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
+using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Quality;
+using TotallyHot.ArcRouter.Telemetry;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -592,8 +594,12 @@ public class RequestInterceptorTests
     }
 
     [Fact]
-    public async Task ResolveModelRouteAsync_PrimaryCircuitOpen_SubstitutesNextBestModel()
+    public async Task ResolveModelRouteAsync_ExplicitPrimaryTargetCircuitOpen_DoesNotSubstitute_RelaysTheTruthInstead()
     {
+        // docs/adr/0005-protect-explicit-provider-selections-from-silent-substitution-on-any-circuit-
+        // trip.md (expanded scope, "Option C"): an explicit selection is never silently substituted away
+        // from a circuit-breaker trip, even a target-level one - unlike the pre-expansion behavior this
+        // test used to assert (silent substitution to "backup").
         var resolver = ModelRouteResolverTestFactory.CreateWithModels(
             ("primary", "prov-a", "primary-upstream", "https://a.example.com"),
             ("backup", "prov-b", "backup-upstream", "https://b.example.com"));
@@ -604,6 +610,8 @@ public class RequestInterceptorTests
             circuitBreaker.RecordFailure(primaryTarget); // default FailureThreshold is 3
         }
         Assert.True(circuitBreaker.IsOpen(primaryTarget));
+        // Provider-wide state is untouched - this is a target-level-only trip.
+        Assert.False(circuitBreaker.IsProviderOpen("prov-a"));
 
         var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver, circuitBreaker: circuitBreaker);
         var context = CreateContextWithBody("""{"model":"primary"}""");
@@ -611,16 +619,145 @@ public class RequestInterceptorTests
         var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
-        // The open primary is swapped out entirely - it must not appear anywhere in the candidate list.
+        // The route is left unsubstituted - candidates[0] still reports the client's real choice.
+        Assert.Equal("primary", result.Candidates[0].Route.ModelName);
+        Assert.Equal(RoutingSubstitutionReason.None, result.SubstitutionReason);
+        // Target-level: no per-provider interaction-status record exists, so this is always the generic message.
+        Assert.Equal("Model 'primary' is temporarily unavailable.", result.ExplicitCircuitTripBlockMessage);
+    }
+
+    [Fact]
+    public async Task ResolveModelRouteAsync_ExplicitPrimaryProviderCircuitOpen_UsesLiveTrafficMessageOverAdminAction()
+    {
+        var resolver = ModelRouteResolverTestFactory.CreateWithModels(
+            ("primary", "prov-a", "primary-upstream", "https://a.example.com"),
+            ("backup", "prov-b", "backup-upstream", "https://b.example.com"));
+        var circuitBreaker = new CircuitBreaker();
+        circuitBreaker.RecordProviderFailure("prov-a");
+        Assert.True(circuitBreaker.IsProviderOpen("prov-a"));
+
+        var interactionStatus = new ProviderInteractionStatusStore();
+        interactionStatus.RecordFailure("prov-a", "Refresh from endpoint", "admin-recorded reason");
+        interactionStatus.RecordLiveTrafficFailure("prov-a", ProviderInteractionKind.OutOfCredits, "Your credit balance is too low.");
+
+        var interceptor = new RequestInterceptor(
+            Mock.Of<ILogger<RequestInterceptor>>(),
+            resolver,
+            circuitBreaker: circuitBreaker,
+            interactionStatusStore: interactionStatus);
+        var context = CreateContextWithBody("""{"model":"primary"}""");
+
+        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("primary", result.Candidates[0].Route.ModelName);
+        Assert.Equal("Your credit balance is too low.", result.ExplicitCircuitTripBlockMessage);
+    }
+
+    [Fact]
+    public async Task ResolveModelRouteAsync_ExplicitPrimaryProviderCircuitOpen_FallsBackToAdminActionMessage()
+    {
+        // The 401-via-refresh case: no LiveTraffic record exists (401 was only ever recorded against
+        // AdminAction), so the AdminAction message is used instead of the generic fallback.
+        var resolver = ModelRouteResolverTestFactory.CreateWithModels(
+            ("primary", "prov-a", "primary-upstream", "https://a.example.com"),
+            ("backup", "prov-b", "backup-upstream", "https://b.example.com"));
+        var circuitBreaker = new CircuitBreaker();
+        circuitBreaker.RecordProviderFailure("prov-a");
+
+        var interactionStatus = new ProviderInteractionStatusStore();
+        interactionStatus.RecordFailure("prov-a", "Refresh from endpoint", "Provider returned 401.");
+
+        var interceptor = new RequestInterceptor(
+            Mock.Of<ILogger<RequestInterceptor>>(),
+            resolver,
+            circuitBreaker: circuitBreaker,
+            interactionStatusStore: interactionStatus);
+        var context = CreateContextWithBody("""{"model":"primary"}""");
+
+        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+
+        Assert.Equal("Provider returned 401.", result.ExplicitCircuitTripBlockMessage);
+    }
+
+    [Fact]
+    public async Task ResolveModelRouteAsync_ExplicitPrimaryProviderCircuitOpen_NoRecordInEitherTrack_UsesGenericMessage()
+    {
+        var resolver = ModelRouteResolverTestFactory.CreateWithModels(
+            ("primary", "prov-a", "primary-upstream", "https://a.example.com"),
+            ("backup", "prov-b", "backup-upstream", "https://b.example.com"));
+        var circuitBreaker = new CircuitBreaker();
+        circuitBreaker.RecordProviderFailure("prov-a");
+
+        var interceptor = new RequestInterceptor(
+            Mock.Of<ILogger<RequestInterceptor>>(),
+            resolver,
+            circuitBreaker: circuitBreaker,
+            interactionStatusStore: new ProviderInteractionStatusStore());
+        var context = CreateContextWithBody("""{"model":"primary"}""");
+
+        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+
+        Assert.Equal("This provider is temporarily unavailable.", result.ExplicitCircuitTripBlockMessage);
+    }
+
+    [Fact]
+    public async Task ResolveModelRouteAsync_AutoSelectedPrimaryProviderCircuitOpen_StillSubstitutes()
+    {
+        // The counterpart to the explicit-selection tests above: auto-select keeps today's silent
+        // substitution behavior for a provider-wide trip too.
+        var resolver = ModelRouteResolverTestFactory.CreateWithModels(
+            ("primary", "prov-a", "primary-upstream", "https://a.example.com"),
+            ("backup", "prov-b", "backup-upstream", "https://b.example.com"));
+        var circuitBreaker = new CircuitBreaker();
+        circuitBreaker.RecordProviderFailure("prov-a");
+
+        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver, circuitBreaker: circuitBreaker);
+        var context = CreateContextWithBody("""{"model":"auto"}""");
+
+        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+
+        Assert.True(result.IsSuccess);
+        Assert.Null(result.ExplicitCircuitTripBlockMessage);
+        Assert.DoesNotContain(result.Candidates, c => c.Route.Provider == "prov-a");
+    }
+
+    [Fact]
+    public async Task ResolveModelRouteAsync_ExplicitPrimaryProviderStopped_StillSubstitutes()
+    {
+        // An operator's own Stop/disable is not a circuit trip - it keeps substituting for an explicit
+        // selection exactly as before, unlike a circuit-breaker-detected trip.
+        var options = new ModelRoutingOptions
+        {
+            Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["prov-a"] = new ProviderOptions { BaseUrl = "https://a.example.com", Enabled = false },
+                ["prov-b"] = new ProviderOptions { BaseUrl = "https://b.example.com" }
+            },
+            ModelList =
+            [
+                new ModelRouteEntry { ModelName = "primary", Provider = "prov-a", ProviderModelId = "primary-upstream" },
+                new ModelRouteEntry { ModelName = "backup", Provider = "prov-b", ProviderModelId = "backup-upstream" }
+            ]
+        };
+        var resolver = new ModelRouteResolver(new InMemoryProviderConfigStore(options), Mock.Of<IEnvironmentVariableProvider>());
+        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var context = CreateContextWithBody("""{"model":"primary"}""");
+
+        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+
+        Assert.True(result.IsSuccess);
+        Assert.Null(result.ExplicitCircuitTripBlockMessage);
         Assert.Equal("backup", result.Candidates[0].Route.ModelName);
-        Assert.DoesNotContain(result.Candidates, c => c.Route.ModelName == "primary");
     }
 
     [Fact]
     public async Task ResolveModelRouteAsync_EveryCandidateCircuitOpen_KeepsOriginalRouteAnyway()
     {
-        // "Fail open" when there is truly no eligible substitute: ProxyMiddleware's own real-time bypass
-        // check will then fail fast with a 502 without ever making the network call.
+        // "Fail open" when there is truly no eligible substitute: since this is also an explicit
+        // selection with its target circuit-open, ExplicitCircuitTripBlockMessage is set regardless of
+        // whether a substitute would have existed (docs/adr/0005 (expanded scope)), so ProxyMiddleware
+        // short-circuits with a client-facing 503 rather than ever attempting the network call.
         var resolver = ModelRouteResolverTestFactory.Create("gpt-5.4", "gpt-5.4", "https://api.openai.com");
         var circuitBreaker = new CircuitBreaker();
         var target = new CircuitBreakerTargetKey("test-provider", "https://api.openai.com/", "gpt-5.4");
@@ -637,6 +774,7 @@ public class RequestInterceptorTests
         Assert.True(result.IsSuccess);
         Assert.Single(result.Candidates);
         Assert.Equal("gpt-5.4", result.Candidates[0].Route.ModelName);
+        Assert.Equal("Model 'gpt-5.4' is temporarily unavailable.", result.ExplicitCircuitTripBlockMessage);
     }
 
     [Fact]

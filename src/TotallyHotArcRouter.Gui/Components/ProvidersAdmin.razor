@@ -66,13 +66,25 @@
                                 {
                                     <span class="rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider font-semibold ds-badge-success">@api</span>
                                 }
-                                @* Persists until the next successful interaction with this provider (refresh,
-                                   scan, or save) - see ManagementFacade.RefreshFromEndpointAsync's
+                                @* Persists until the next successful admin interaction with this provider
+                                   (refresh, scan, or save) - see ManagementFacade.RefreshFromEndpointAsync's
                                    RecordRefreshOutcome. Reuses the shared floating tooltip rather than
                                    title= for the same clipping/keyboard reasons as the action buttons below. *@
-                                @if (provider.LastInteraction is { Ok: false } failure)
+                                @if (provider.AdminAction is { Ok: false } adminFailure)
                                 {
-                                    <span data-tip="@FailureTip(failure)" aria-describedby="ls-tooltip" class="text-amber-400 flex items-center">
+                                    <span data-tip="@AdminActionTip(adminFailure)" aria-describedby="ls-tooltip" class="text-amber-400 flex items-center">
+                                        <Icon Name="alert-triangle" Size="16" />
+                                    </span>
+                                }
+                                @* Independent of AdminAction above (docs/adr/0004-surface-out-of-credits-
+                                   provider-failures-on-the-providers-tab.md) - persists until the next
+                                   successful forwarded request to this provider, regardless of whether any
+                                   admin action has run. A provider can show both warnings at once, since they
+                                   answer different questions. Distinct color (rose, not amber) so the two are
+                                   visually distinguishable at a glance. *@
+                                @if (provider.LiveTraffic is { Ok: false } liveFailure)
+                                {
+                                    <span data-tip="@LiveTrafficTip(liveFailure)" aria-describedby="ls-tooltip" class="text-rose-400 flex items-center">
                                         <Icon Name="alert-triangle" Size="16" />
                                     </span>
                                 }
@@ -676,8 +688,19 @@
     }
 
     /// <summary>The warning icon's tooltip text for a provider whose last admin interaction failed.</summary>
-    private static string FailureTip(ProviderInteractionStatusAdminView failure) =>
+    private static string AdminActionTip(ProviderInteractionStatusAdminView failure) =>
         $"{failure.Operation} failed {FormatUtc(failure.AtUtc)}: {failure.Message}";
+
+    /// <summary>
+    /// The warning icon's tooltip text for a provider whose live traffic last failed - worded per
+    /// <see cref="ProviderInteractionStatusAdminView.Kind"/> so an out-of-credits trip reads distinctly
+    /// from a generic live-traffic failure (docs/adr/0004-surface-out-of-credits-provider-failures-on-
+    /// the-providers-tab.md).
+    /// </summary>
+    private static string LiveTrafficTip(ProviderInteractionStatusAdminView failure) =>
+        failure.Kind == ProviderInteractionKindAdminView.OutOfCredits
+            ? $"Out of credits {FormatUtc(failure.AtUtc)}: {failure.Message}"
+            : $"{failure.Operation} failed {FormatUtc(failure.AtUtc)}: {failure.Message}";
 
     /// <summary>The API-flavor badge labels a provider's last capability scan detected, if any.</summary>
     private static IEnumerable<string> DetectedApis(ProviderEndpointCapabilitiesView? capabilities)

@@ -250,7 +250,7 @@ public sealed class ScanCapabilitiesTests : IDisposable
         Assert.False(string.IsNullOrWhiteSpace(stored.ScanError));
     }
 
-    // ----- Scan outcome also feeds LastInteraction -----
+    // ----- Scan outcome also feeds AdminAction -----
 
     [Fact]
     public async Task ScanCapabilities_OnSuccess_RecordsASuccessfulInteraction()
@@ -275,6 +275,23 @@ public sealed class ScanCapabilitiesTests : IDisposable
         Assert.NotNull(status);
         Assert.False(status!.Ok);
         Assert.Equal("Scan capabilities", status.Operation);
+    }
+
+    [Fact]
+    public async Task ScanCapabilities_OnSuccess_DoesNotTouchTheLiveTrafficTrack()
+    {
+        // docs/adr/0004-surface-out-of-credits-provider-failures-on-the-providers-tab.md's track
+        // separation: an admin action must never write, clear, or otherwise affect LiveTraffic.
+        var interactionStatus = new ProviderInteractionStatusStore();
+        interactionStatus.RecordLiveTrafficFailure("lmstudio", ProviderInteractionKind.OutOfCredits, "out of credits");
+        var facade = Facade(StoreWithProvider(), AlwaysOk(OpenAiBody), CapabilityStore(), interactionStatus);
+
+        await facade.ScanCapabilitiesAsync("lmstudio", TestContext.Current.CancellationToken);
+
+        Assert.True(interactionStatus.Get("lmstudio")!.Ok);
+        var liveTraffic = interactionStatus.GetLiveTraffic("lmstudio");
+        Assert.NotNull(liveTraffic);
+        Assert.False(liveTraffic!.Ok);
     }
 
     // ----- The best-effort scan on provider save -----

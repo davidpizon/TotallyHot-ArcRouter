@@ -66,8 +66,10 @@ public sealed record ManagementFacadeDependencies
 
     /// <summary>
     /// Tracks the outcome of the most recent admin-initiated interaction with each provider (refresh from
-    /// endpoint, capability scan, discovery), surfaced via <see cref="ProviderView.LastInteraction"/>. When
-    /// absent, every provider simply reports no interaction history.
+    /// endpoint, capability scan, discovery), surfaced via <see cref="ProviderView.AdminAction"/>, and
+    /// (docs/adr/0004-surface-out-of-credits-provider-failures-on-the-providers-tab.md) the most recent
+    /// classified live-traffic outcome, surfaced via <see cref="ProviderView.LiveTraffic"/>. When absent,
+    /// every provider simply reports no interaction history on either track.
     /// </summary>
     public IProviderInteractionStatusStore? InteractionStatusStore { get; init; }
 }

@@ -1,4 +1,5 @@
 using TotallyHot.ArcRouter.Proxy;
+using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Proxy.Translation;
 using TotallyHot.ArcRouter.Telemetry;
 using Microsoft.AspNetCore.Http;
@@ -156,8 +157,13 @@ public class ProxyMiddlewareFallbackTests
     }
 
     [Fact]
-    public async Task InvokeAsync_Primary401_DifferentProviderBackup_FailsOver()
+    public async Task InvokeAsync_AutoSelectedPrimary401_DifferentProviderBackup_FailsOver()
     {
+        // docs/adr/0005-protect-explicit-provider-selections-from-silent-substitution-on-any-circuit-
+        // trip.md: cross-provider failover on a provider-wide-trip status (401/403/405) is now reserved
+        // for auto-selected/already-substituted requests - see
+        // InvokeAsync_ExplicitPrimary401_DifferentProviderBackup_RelaysTheTruthInstead below for the
+        // (changed) explicit-selection behavior this test used to assert.
         var resolver = ModelRouteResolverTestFactory.CreateWithModels(
             ("primary", "prov-a", "primary-upstream", $"https://{PrimaryHost}"),
             ("backup", "prov-b", "backup-upstream", $"https://{BackupHost}"));
@@ -166,10 +172,37 @@ public class ProxyMiddlewareFallbackTests
             ? Status(HttpStatusCode.Unauthorized)
             : Ok("served-by-backup"));
 
-        var context = await RunAsync(resolver, handler, requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
+        var context = await RunAsync(resolver, handler, requestedModel: "auto", requestAborted: TestContext.Current.CancellationToken);
 
         Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
         Assert.Equal("served-by-backup", await ReadBodyAsync(context));
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ExplicitPrimary401_DifferentProviderBackup_RelaysTheTruthInstead()
+    {
+        // docs/adr/0005 (expanded scope): an explicit selection is never silently substituted away from a
+        // provider-wide trip discovered live, even when a different-provider backup exists - it sees the
+        // real 401 instead.
+        var backupCalled = false;
+        var resolver = ModelRouteResolverTestFactory.CreateWithModels(
+            ("primary", "prov-a", "primary-upstream", $"https://{PrimaryHost}"),
+            ("backup", "prov-b", "backup-upstream", $"https://{BackupHost}"));
+
+        var handler = new RoutingHandlerStub(request =>
+        {
+            if (request.RequestUri!.Host == BackupHost)
+            {
+                backupCalled = true;
+            }
+
+            return request.RequestUri!.Host == PrimaryHost ? Status(HttpStatusCode.Unauthorized) : Ok("served-by-backup");
+        });
+
+        var context = await RunAsync(resolver, handler, requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
+
+        Assert.Equal(401, context.Response.StatusCode);
+        Assert.False(backupCalled);
     }
 
     [Fact]
@@ -201,7 +234,7 @@ public class ProxyMiddlewareFallbackTests
     }
 
     [Fact]
-    public async Task InvokeAsync_PrimaryGemini400EmbeddedUnauthenticated_DifferentProviderBackup_FailsOver()
+    public async Task InvokeAsync_AutoSelectedPrimaryGemini400EmbeddedUnauthenticated_DifferentProviderBackup_FailsOver()
     {
         // Gemini reports an invalid/expired API key as 400 (not 401), since the key travels as a "key="
         // query parameter rather than an Authorization header - with an embedded
@@ -209,6 +242,9 @@ public class ProxyMiddlewareFallbackTests
         // treated exactly like a real 401: fail over to a different-provider backup instead of surfacing
         // the 400 to the client (see the generic InvokeAsync_ClientFaultStatus_DoesNotFailOver theory
         // below for the case where a 400 is *not* Gemini's disguised-401 shape and correctly stays terminal).
+        // docs/adr/0005 (expanded scope): this cross-provider failover is now reserved for auto-selected/
+        // already-substituted requests - see
+        // InvokeAsync_ExplicitPrimaryGemini400EmbeddedUnauthenticated_RelaysTheTruthInstead below.
         var resolver = ModelRouteResolverTestFactory.CreateWithModels(
             ("primary", "gemini", "gemini-2.5-pro", $"https://{PrimaryHost}"),
             ("backup", "prov-b", "backup-upstream", $"https://{BackupHost}"));
@@ -229,10 +265,53 @@ public class ProxyMiddlewareFallbackTests
             new HttpClient(handler),
             translators: translators);
 
-        var context = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
+        var context = await RunWithSharedMiddleware(middleware, requestedModel: "auto");
 
         Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
         Assert.Equal("served-by-backup", await ReadBodyAsync(context));
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ExplicitPrimaryGemini400EmbeddedUnauthenticated_RelaysTheTruthInstead()
+    {
+        // docs/adr/0005 (expanded scope): an explicit selection sees Gemini's real disguised-401 instead
+        // of being silently substituted to a different-provider backup.
+        var backupCalled = false;
+        var resolver = ModelRouteResolverTestFactory.CreateWithModels(
+            ("primary", "gemini", "gemini-2.5-pro", $"https://{PrimaryHost}"),
+            ("backup", "prov-b", "backup-upstream", $"https://{BackupHost}"));
+
+        var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["gemini"] = new GeminiPayloadTranslator(),
+        };
+
+        var handler = new RoutingHandlerStub(request =>
+        {
+            if (request.RequestUri!.Host == BackupHost)
+            {
+                backupCalled = true;
+            }
+
+            return request.RequestUri!.Host == PrimaryHost ? GeminiEmbeddedAuthErrorResponse() : Ok("served-by-backup");
+        });
+
+        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver);
+        var middleware = new ProxyMiddleware(
+            NullLogger<ProxyMiddleware>.Instance,
+            interceptor,
+            new HttpClient(handler),
+            translators: translators);
+
+        var context = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
+
+        Assert.Equal(400, context.Response.StatusCode);
+        Assert.False(backupCalled);
+
+        using var responseJson = JsonDocument.Parse(await ReadBodyAsync(context));
+        Assert.Contains(
+            "API key not valid",
+            responseJson.RootElement.GetProperty("error").GetProperty("message").GetString());
     }
 
     [Fact]
@@ -427,12 +506,268 @@ public class ProxyMiddlewareFallbackTests
         Assert.Equal(rawBody, await ReadBodyAsync(context));
     }
 
+    // ----- Out-of-credits (docs/adr/0004-surface-out-of-credits-provider-failures-on-the-providers-tab.md) -----
+
     [Fact]
-    public async Task InvokeAsync_Primary405_DifferentProviderBackup_FailsOver()
+    public async Task InvokeAsync_AutoSelectedPrimaryAnthropicOutOfCredits_DifferentProviderBackup_FailsOver()
+    {
+        var circuitBreaker = new CircuitBreaker();
+        var interactionStatus = new ProviderInteractionStatusStore();
+        var resolver = ModelRouteResolverTestFactory.CreateWithModels(
+            ("primary", "anthropic", "claude-sonnet-4-6", $"https://{PrimaryHost}"),
+            ("backup", "prov-b", "backup-upstream", $"https://{BackupHost}"));
+
+        var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["anthropic"] = new AnthropicPayloadTranslator(),
+        };
+
+        var handler = new RoutingHandlerStub(request => request.RequestUri!.Host == PrimaryHost
+            ? AnthropicOutOfCreditsResponse()
+            : Ok("served-by-backup"));
+
+        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver, circuitBreaker: circuitBreaker);
+        var middleware = new ProxyMiddleware(
+            NullLogger<ProxyMiddleware>.Instance,
+            interceptor,
+            new HttpClient(handler),
+            translators: translators,
+            circuitBreaker: circuitBreaker,
+            interactionStatusStore: interactionStatus);
+
+        var context = await RunWithSharedMiddleware(middleware, requestedModel: "auto");
+
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal("served-by-backup", await ReadBodyAsync(context));
+        Assert.True(circuitBreaker.IsProviderOpen("anthropic"));
+        var liveTraffic = interactionStatus.GetLiveTraffic("anthropic");
+        Assert.NotNull(liveTraffic);
+        Assert.False(liveTraffic!.Ok);
+        Assert.Equal(ProviderInteractionKind.OutOfCredits, liveTraffic.Kind);
+        Assert.Contains("credit balance", liveTraffic.Message);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_PrimaryAnthropicOutOfCredits_SameProviderBackup_DoesNotFailOver()
+    {
+        // Both models share "anthropic" (the same billing account), so an auto-selected request must not
+        // fail over - the backup would be out of credits identically.
+        var backupCalled = false;
+        var resolver = ModelRouteResolverTestFactory.CreateWithModels(
+            ("primary", "anthropic", "claude-sonnet-4-6", $"https://{PrimaryHost}"),
+            ("backup", "anthropic", "claude-opus-4-7", $"https://{PrimaryHost}"));
+
+        var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["anthropic"] = new AnthropicPayloadTranslator(),
+        };
+
+        var handler = new RoutingHandlerStub(request =>
+        {
+            var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            if (body.Contains("claude-opus-4-7", StringComparison.Ordinal))
+            {
+                backupCalled = true;
+                return Ok("should-not-be-served");
+            }
+
+            return AnthropicOutOfCreditsResponse();
+        });
+
+        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver);
+        var middleware = new ProxyMiddleware(
+            NullLogger<ProxyMiddleware>.Instance,
+            interceptor,
+            new HttpClient(handler),
+            translators: translators);
+
+        var context = await RunWithSharedMiddleware(middleware, requestedModel: "auto");
+
+        Assert.Equal(400, context.Response.StatusCode);
+        Assert.False(backupCalled);
+
+        using var responseJson = JsonDocument.Parse(await ReadBodyAsync(context));
+        Assert.Contains(
+            "credit balance",
+            responseJson.RootElement.GetProperty("error").GetProperty("message").GetString());
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ExplicitPrimaryAnthropicOutOfCredits_DoesNotFailOver_RelaysTheRealMessage()
+    {
+        var backupCalled = false;
+        var resolver = ModelRouteResolverTestFactory.CreateWithModels(
+            ("primary", "anthropic", "claude-sonnet-4-6", $"https://{PrimaryHost}"),
+            ("backup", "prov-b", "backup-upstream", $"https://{BackupHost}"));
+
+        var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["anthropic"] = new AnthropicPayloadTranslator(),
+        };
+
+        var handler = new RoutingHandlerStub(request =>
+        {
+            if (request.RequestUri!.Host == BackupHost)
+            {
+                backupCalled = true;
+            }
+
+            return request.RequestUri!.Host == PrimaryHost ? AnthropicOutOfCreditsResponse() : Ok("served-by-backup");
+        });
+
+        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver);
+        var middleware = new ProxyMiddleware(
+            NullLogger<ProxyMiddleware>.Instance,
+            interceptor,
+            new HttpClient(handler),
+            translators: translators);
+
+        var context = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
+
+        Assert.Equal(400, context.Response.StatusCode);
+        Assert.False(backupCalled);
+
+        using var responseJson = JsonDocument.Parse(await ReadBodyAsync(context));
+        Assert.Contains(
+            "credit balance",
+            responseJson.RootElement.GetProperty("error").GetProperty("message").GetString());
+    }
+
+    [Fact]
+    public async Task InvokeAsync_AnthropicOutOfCredits_TripsWholeProvider_SubsequentSameProviderRequestBypassesWithoutNetworkCall()
+    {
+        var circuitBreaker = new CircuitBreaker();
+        var resolver = ModelRouteResolverTestFactory.CreateWithModels(
+            ("primary", "anthropic", "claude-sonnet-4-6", $"https://{PrimaryHost}"),
+            ("sibling", "anthropic", "claude-opus-4-7", $"https://{PrimaryHost}"),
+            ("backup", "prov-b", "backup-upstream", $"https://{BackupHost}"));
+
+        var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["anthropic"] = new AnthropicPayloadTranslator(),
+        };
+
+        var siblingAttempted = false;
+        var handler = new RoutingHandlerStub(request =>
+        {
+            var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            if (body.Contains("claude-opus-4-7", StringComparison.Ordinal))
+            {
+                siblingAttempted = true;
+                return Ok("should-not-be-served");
+            }
+
+            return request.RequestUri!.Host == BackupHost ? Ok("served-by-backup") : AnthropicOutOfCreditsResponse();
+        });
+
+        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver, circuitBreaker: circuitBreaker);
+        var middleware = new ProxyMiddleware(
+            NullLogger<ProxyMiddleware>.Instance,
+            interceptor,
+            new HttpClient(handler),
+            translators: translators,
+            circuitBreaker: circuitBreaker);
+
+        // Auto-selected first request: out-of-credits discovered live, fails over cross-provider.
+        var firstContext = await RunWithSharedMiddleware(middleware, requestedModel: "auto");
+        Assert.Equal(StatusCodes.Status200OK, firstContext.Response.StatusCode);
+        Assert.True(circuitBreaker.IsProviderOpen("anthropic"));
+
+        // A second, explicit request for "sibling" (same now-open provider) is never attempted at all.
+        var secondContext = await RunWithSharedMiddleware(middleware, requestedModel: "sibling");
+        Assert.Equal(503, secondContext.Response.StatusCode);
+        Assert.False(siblingAttempted);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_AutoSelectedPrimaryOpenAiInsufficientQuota_DifferentProviderBackup_FailsOver()
+    {
+        // OpenAI-compatible providers are untranslated (translator is null) - the typed insufficient_quota
+        // error code, usually on a 429, is classified without any provider-specific extraction.
+        var resolver = ModelRouteResolverTestFactory.CreateWithModels(
+            ("primary", "openai", "gpt-5.4", $"https://{PrimaryHost}"),
+            ("backup", "prov-b", "backup-upstream", $"https://{BackupHost}"));
+
+        var handler = new RoutingHandlerStub(request => request.RequestUri!.Host == PrimaryHost
+            ? OpenAiInsufficientQuotaResponse()
+            : Ok("served-by-backup"));
+
+        var context = await RunAsync(resolver, handler, requestedModel: "auto", requestAborted: TestContext.Current.CancellationToken);
+
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal("served-by-backup", await ReadBodyAsync(context));
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ExplicitPrimaryOpenAiInsufficientQuota_DoesNotFailOver_RelaysTheRawBody()
+    {
+        var backupCalled = false;
+        var resolver = ModelRouteResolverTestFactory.CreateWithModels(
+            ("primary", "openai", "gpt-5.4", $"https://{PrimaryHost}"),
+            ("backup", "prov-b", "backup-upstream", $"https://{BackupHost}"));
+
+        var handler = new RoutingHandlerStub(request =>
+        {
+            if (request.RequestUri!.Host == BackupHost)
+            {
+                backupCalled = true;
+            }
+
+            return request.RequestUri!.Host == PrimaryHost ? OpenAiInsufficientQuotaResponse() : Ok("served-by-backup");
+        });
+
+        var context = await RunAsync(resolver, handler, requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
+
+        Assert.Equal(429, context.Response.StatusCode);
+        Assert.False(backupCalled);
+
+        using var responseJson = JsonDocument.Parse(await ReadBodyAsync(context));
+        Assert.Equal("insufficient_quota", responseJson.RootElement.GetProperty("error").GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task InvokeAsync_Primary429_SameProviderBackup_NotClassifiedAsOutOfCredits_StillDoesNotFailOver()
+    {
+        // A plain rate-limit 429 (no insufficient_quota code, no billing keywords) must not be
+        // misclassified as out-of-credits - it stays a target-level failure, same-provider backup still
+        // shares the throttle either way.
+        var backupCalled = false;
+        var resolver = ModelRouteResolverTestFactory.CreateWithModels(
+            ("primary", "shared-prov", "primary-upstream", $"https://{PrimaryHost}"),
+            ("backup", "shared-prov", "backup-upstream", $"https://{PrimaryHost}"));
+
+        var handler = new RoutingHandlerStub(request =>
+        {
+            var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            if (body.Contains("backup-upstream", StringComparison.Ordinal))
+            {
+                backupCalled = true;
+                return Ok("served-by-backup");
+            }
+
+            return new HttpResponseMessage((HttpStatusCode)429)
+            {
+                Content = new StringContent(
+                    """{"error":{"message":"Rate limit exceeded.","type":"rate_limit_error"}}""",
+                    Encoding.UTF8,
+                    "application/json"),
+            };
+        });
+
+        var context = await RunAsync(resolver, handler, requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
+
+        Assert.Equal(429, context.Response.StatusCode);
+        Assert.False(backupCalled);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_AutoSelectedPrimary405_DifferentProviderBackup_FailsOver()
     {
         // A 405 on a path ArcRouter itself constructs (the client never chooses the method) is treated like
         // a 401: a provider-side gateway/WAF block, not a genuine client-fault status - so it fails over to
         // a different-provider backup instead of being surfaced to the client immediately.
+        // docs/adr/0005 (expanded scope): reserved for auto-selected/already-substituted requests - see
+        // InvokeAsync_ExplicitPrimary405_DifferentProviderBackup_RelaysTheTruthInstead below.
         var resolver = ModelRouteResolverTestFactory.CreateWithModels(
             ("primary", "prov-a", "primary-upstream", $"https://{PrimaryHost}"),
             ("backup", "prov-b", "backup-upstream", $"https://{BackupHost}"));
@@ -441,10 +776,34 @@ public class ProxyMiddlewareFallbackTests
             ? Status(HttpStatusCode.MethodNotAllowed)
             : Ok("served-by-backup"));
 
-        var context = await RunAsync(resolver, handler, requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
+        var context = await RunAsync(resolver, handler, requestedModel: "auto", requestAborted: TestContext.Current.CancellationToken);
 
         Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
         Assert.Equal("served-by-backup", await ReadBodyAsync(context));
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ExplicitPrimary405_DifferentProviderBackup_RelaysTheTruthInstead()
+    {
+        var backupCalled = false;
+        var resolver = ModelRouteResolverTestFactory.CreateWithModels(
+            ("primary", "prov-a", "primary-upstream", $"https://{PrimaryHost}"),
+            ("backup", "prov-b", "backup-upstream", $"https://{BackupHost}"));
+
+        var handler = new RoutingHandlerStub(request =>
+        {
+            if (request.RequestUri!.Host == BackupHost)
+            {
+                backupCalled = true;
+            }
+
+            return request.RequestUri!.Host == PrimaryHost ? Status(HttpStatusCode.MethodNotAllowed) : Ok("served-by-backup");
+        });
+
+        var context = await RunAsync(resolver, handler, requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
+
+        Assert.Equal(405, context.Response.StatusCode);
+        Assert.False(backupCalled);
     }
 
     [Fact]
@@ -477,12 +836,14 @@ public class ProxyMiddlewareFallbackTests
     }
 
     [Fact]
-    public async Task InvokeAsync_Primary403_DifferentProviderBackup_FailsOver()
+    public async Task InvokeAsync_AutoSelectedPrimary403_DifferentProviderBackup_FailsOver()
     {
         // A 403 is treated like 401: almost always a permission/API-key-scope problem (API not enabled for
         // this key, region lock, tier restriction) rather than something specific to the one model
         // requested - so it fails over to a different-provider backup instead of being surfaced to the
         // client immediately.
+        // docs/adr/0005 (expanded scope): reserved for auto-selected/already-substituted requests - see
+        // InvokeAsync_ExplicitPrimary403_DifferentProviderBackup_RelaysTheTruthInstead below.
         var resolver = ModelRouteResolverTestFactory.CreateWithModels(
             ("primary", "prov-a", "primary-upstream", $"https://{PrimaryHost}"),
             ("backup", "prov-b", "backup-upstream", $"https://{BackupHost}"));
@@ -491,10 +852,34 @@ public class ProxyMiddlewareFallbackTests
             ? Status(HttpStatusCode.Forbidden)
             : Ok("served-by-backup"));
 
-        var context = await RunAsync(resolver, handler, requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
+        var context = await RunAsync(resolver, handler, requestedModel: "auto", requestAborted: TestContext.Current.CancellationToken);
 
         Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
         Assert.Equal("served-by-backup", await ReadBodyAsync(context));
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ExplicitPrimary403_DifferentProviderBackup_RelaysTheTruthInstead()
+    {
+        var backupCalled = false;
+        var resolver = ModelRouteResolverTestFactory.CreateWithModels(
+            ("primary", "prov-a", "primary-upstream", $"https://{PrimaryHost}"),
+            ("backup", "prov-b", "backup-upstream", $"https://{BackupHost}"));
+
+        var handler = new RoutingHandlerStub(request =>
+        {
+            if (request.RequestUri!.Host == BackupHost)
+            {
+                backupCalled = true;
+            }
+
+            return request.RequestUri!.Host == PrimaryHost ? Status(HttpStatusCode.Forbidden) : Ok("served-by-backup");
+        });
+
+        var context = await RunAsync(resolver, handler, requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
+
+        Assert.Equal(403, context.Response.StatusCode);
+        Assert.False(backupCalled);
     }
 
     [Fact]
@@ -527,11 +912,13 @@ public class ProxyMiddlewareFallbackTests
     }
 
     [Fact]
-    public async Task InvokeAsync_Primary403_TripsWholeProvider_SubsequentRequestBypassesADifferentModel_OnSameProvider()
+    public async Task InvokeAsync_ExplicitPrimary403_TripsWholeProvider_SubsequentExplicitRequestRelaysTheTruthWithoutNetworkCall()
     {
-        // Like 401 (InvokeAsync_Primary401_TripsWholeProvider_... above), a 403 trips every model on the
-        // provider at once (RecordProviderFailure) - a permission/API-key-scope problem would reject any
-        // model on that provider identically, not just the one that surfaced it.
+        // A 403 trips every model on the provider at once (RecordProviderFailure) - a permission/API-key-
+        // scope problem would reject any model on that provider identically, not just the one that
+        // surfaced it. docs/adr/0005 (expanded scope): both requests here are explicit, so neither is
+        // silently substituted - the first relays the real 403 it discovered live, and the second (for a
+        // sibling model on the now-open provider) is blocked with a synthesized message and never attempted.
         var circuitBreaker = new CircuitBreaker();
         var resolver = ModelRouteResolverTestFactory.CreateWithModels(
             ("primary", "prov-a", "primary-upstream", $"https://{PrimaryHost}"),
@@ -539,6 +926,7 @@ public class ProxyMiddlewareFallbackTests
             ("backup", "prov-b", "backup-upstream", $"https://{BackupHost}"));
 
         var siblingAttempted = false;
+        var backupAttempted = false;
         var handler = new RoutingHandlerStub(request =>
         {
             var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
@@ -546,6 +934,11 @@ public class ProxyMiddlewareFallbackTests
             {
                 siblingAttempted = true;
                 return Ok("should-not-be-served");
+            }
+
+            if (request.RequestUri!.Host == BackupHost)
+            {
+                backupAttempted = true;
             }
 
             return request.RequestUri!.Host == BackupHost ? Ok("served-by-backup") : Status(HttpStatusCode.Forbidden);
@@ -558,16 +951,17 @@ public class ProxyMiddlewareFallbackTests
             new HttpClient(handler),
             circuitBreaker: circuitBreaker);
 
-        // First request against "primary": 403, provider-wide trip, fails over cross-provider to "backup".
+        // First request against explicit "primary": 403 discovered live, relayed unchanged - no failover.
         var firstContext = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
-        Assert.Equal(StatusCodes.Status200OK, firstContext.Response.StatusCode);
-        Assert.Equal("served-by-backup", await ReadBodyAsync(firstContext));
+        Assert.Equal(403, firstContext.Response.StatusCode);
+        Assert.False(backupAttempted);
+        Assert.True(circuitBreaker.IsProviderOpen("prov-a"));
 
-        // A second request explicitly asking for "sibling" (same provider as "primary", never itself
-        // failed) must never be attempted at all - the provider-wide circuit bypasses it outright.
+        // A second, explicit request for "sibling" (same provider as "primary", never itself failed) is
+        // never attempted at all - the provider-wide circuit blocks it outright, and the client is told
+        // why rather than silently routed to "backup".
         var secondContext = await RunWithSharedMiddleware(middleware, requestedModel: "sibling");
-        Assert.Equal(StatusCodes.Status200OK, secondContext.Response.StatusCode);
-        Assert.Equal("served-by-backup", await ReadBodyAsync(secondContext));
+        Assert.Equal(503, secondContext.Response.StatusCode);
         Assert.False(siblingAttempted);
     }
 
@@ -663,20 +1057,24 @@ public class ProxyMiddlewareFallbackTests
         Assert.True(circuitBreaker.IsOpen(new CircuitBreakerTargetKey("prov-a", $"https://{PrimaryHost}/", "primary-upstream")));
         Assert.False(circuitBreaker.IsProviderOpen("prov-a"));
 
-        // A fourth request: the primary target's own circuit is now open, so it's bypassed with no
-        // network call - but (unlike 401) "prov-a" itself is never marked unhealthy.
+        // A fourth, explicit request: the primary target's own circuit is now open, so - docs/adr/0005
+        // (expanded scope) - it is never silently substituted, even though "prov-a" itself is never marked
+        // unhealthy (unlike 401's provider-wide trip). It is blocked with a synthesized per-model message
+        // and never attempted, rather than silently routed to "backup".
         var finalContext = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
-        Assert.Equal(StatusCodes.Status200OK, finalContext.Response.StatusCode);
-        Assert.Equal("served-by-backup", await ReadBodyAsync(finalContext));
+        Assert.Equal(503, finalContext.Response.StatusCode);
         Assert.Equal(3, primaryAttempts); // unchanged - the 4th request never touched the primary target again
     }
 
     [Fact]
-    public async Task InvokeAsync_Primary401_TripsWholeProvider_SubsequentRequestBypassesADifferentModel_OnSameProvider()
+    public async Task InvokeAsync_AutoSelectedPrimary401_TripsWholeProvider_SubsequentAutoSelectedRequestBypassesADifferentModel_OnSameProvider()
     {
         // A 401 trips every model on the provider at once (RecordProviderFailure), not just the one that
         // surfaced it - a shared, real CircuitBreaker (not each class's own independent default instance)
-        // is required for this to be visible across requests, matching production DI wiring.
+        // is required for this to be visible across requests, matching production DI wiring. Both requests
+        // here are auto-selected ("auto"), which still silently substitutes on a provider-wide trip - see
+        // InvokeAsync_ExplicitPrimary401_TripsWholeProvider_SubsequentExplicitRequestRelaysTheTruthWithoutNetworkCall
+        // below for the (changed) explicit-selection behavior this test used to assert.
         var circuitBreaker = new CircuitBreaker();
         var resolver = ModelRouteResolverTestFactory.CreateWithModels(
             ("primary", "prov-a", "primary-upstream", $"https://{PrimaryHost}"),
@@ -703,25 +1101,75 @@ public class ProxyMiddlewareFallbackTests
             new HttpClient(handler),
             circuitBreaker: circuitBreaker);
 
-        // First request against "primary": 401, provider-wide trip, fails over cross-provider to "backup".
-        var firstContext = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
+        // First auto-selected request: 401, provider-wide trip, fails over cross-provider to "backup".
+        var firstContext = await RunWithSharedMiddleware(middleware, requestedModel: "auto");
         Assert.Equal(StatusCodes.Status200OK, firstContext.Response.StatusCode);
         Assert.Equal("served-by-backup", await ReadBodyAsync(firstContext));
 
-        // A second request explicitly asking for "sibling" (same provider as "primary", never itself
-        // failed) must never be attempted at all - the provider-wide circuit bypasses it outright.
-        var secondContext = await RunWithSharedMiddleware(middleware, requestedModel: "sibling");
+        // A second auto-selected request must never attempt any model on the now-open provider at all -
+        // the provider-wide circuit bypasses it outright.
+        var secondContext = await RunWithSharedMiddleware(middleware, requestedModel: "auto");
         Assert.Equal(StatusCodes.Status200OK, secondContext.Response.StatusCode);
         Assert.Equal("served-by-backup", await ReadBodyAsync(secondContext));
         Assert.False(siblingAttempted);
     }
 
     [Fact]
-    public async Task InvokeAsync_Primary405_TripsWholeProvider_SubsequentRequestBypassesADifferentModel_OnSameProvider()
+    public async Task InvokeAsync_ExplicitPrimary401_TripsWholeProvider_SubsequentExplicitRequestRelaysTheTruthWithoutNetworkCall()
     {
-        // Like 401 (InvokeAsync_Primary401_TripsWholeProvider_... above), a 405 trips every model on the
-        // provider at once (RecordProviderFailure) - a gateway/WAF block at the edge would reject any model
-        // on that provider identically, not just the one that surfaced it.
+        // docs/adr/0005 (expanded scope): both requests here are explicit, so neither is silently
+        // substituted - the first relays the real 401 it discovered live, and the second (for a sibling
+        // model on the now-open provider) is blocked with a synthesized message and never attempted.
+        var circuitBreaker = new CircuitBreaker();
+        var resolver = ModelRouteResolverTestFactory.CreateWithModels(
+            ("primary", "prov-a", "primary-upstream", $"https://{PrimaryHost}"),
+            ("sibling", "prov-a", "sibling-upstream", $"https://{PrimaryHost}"),
+            ("backup", "prov-b", "backup-upstream", $"https://{BackupHost}"));
+
+        var siblingAttempted = false;
+        var backupAttempted = false;
+        var handler = new RoutingHandlerStub(request =>
+        {
+            var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            if (body.Contains("sibling-upstream", StringComparison.Ordinal))
+            {
+                siblingAttempted = true;
+                return Ok("should-not-be-served");
+            }
+
+            if (request.RequestUri!.Host == BackupHost)
+            {
+                backupAttempted = true;
+            }
+
+            return request.RequestUri!.Host == BackupHost ? Ok("served-by-backup") : Status(HttpStatusCode.Unauthorized);
+        });
+
+        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver, circuitBreaker: circuitBreaker);
+        var middleware = new ProxyMiddleware(
+            NullLogger<ProxyMiddleware>.Instance,
+            interceptor,
+            new HttpClient(handler),
+            circuitBreaker: circuitBreaker);
+
+        var firstContext = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
+        Assert.Equal(401, firstContext.Response.StatusCode);
+        Assert.False(backupAttempted);
+        Assert.True(circuitBreaker.IsProviderOpen("prov-a"));
+
+        var secondContext = await RunWithSharedMiddleware(middleware, requestedModel: "sibling");
+        Assert.Equal(503, secondContext.Response.StatusCode);
+        Assert.False(siblingAttempted);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_AutoSelectedPrimary405_TripsWholeProvider_SubsequentAutoSelectedRequestBypassesADifferentModel_OnSameProvider()
+    {
+        // Like 401 above, a 405 trips every model on the provider at once (RecordProviderFailure) - a
+        // gateway/WAF block at the edge would reject any model on that provider identically, not just the
+        // one that surfaced it. Both requests here are auto-selected - see
+        // InvokeAsync_ExplicitPrimary405_TripsWholeProvider_SubsequentExplicitRequestRelaysTheTruthWithoutNetworkCall
+        // below for the explicit-selection behavior.
         var circuitBreaker = new CircuitBreaker();
         var resolver = ModelRouteResolverTestFactory.CreateWithModels(
             ("primary", "prov-a", "primary-upstream", $"https://{PrimaryHost}"),
@@ -748,25 +1196,70 @@ public class ProxyMiddlewareFallbackTests
             new HttpClient(handler),
             circuitBreaker: circuitBreaker);
 
-        // First request against "primary": 405, provider-wide trip, fails over cross-provider to "backup".
-        var firstContext = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
+        var firstContext = await RunWithSharedMiddleware(middleware, requestedModel: "auto");
         Assert.Equal(StatusCodes.Status200OK, firstContext.Response.StatusCode);
         Assert.Equal("served-by-backup", await ReadBodyAsync(firstContext));
 
-        // A second request explicitly asking for "sibling" (same provider as "primary", never itself
-        // failed) must never be attempted at all - the provider-wide circuit bypasses it outright.
-        var secondContext = await RunWithSharedMiddleware(middleware, requestedModel: "sibling");
+        var secondContext = await RunWithSharedMiddleware(middleware, requestedModel: "auto");
         Assert.Equal(StatusCodes.Status200OK, secondContext.Response.StatusCode);
         Assert.Equal("served-by-backup", await ReadBodyAsync(secondContext));
         Assert.False(siblingAttempted);
     }
 
+    [Fact]
+    public async Task InvokeAsync_ExplicitPrimary405_TripsWholeProvider_SubsequentExplicitRequestRelaysTheTruthWithoutNetworkCall()
+    {
+        var circuitBreaker = new CircuitBreaker();
+        var resolver = ModelRouteResolverTestFactory.CreateWithModels(
+            ("primary", "prov-a", "primary-upstream", $"https://{PrimaryHost}"),
+            ("sibling", "prov-a", "sibling-upstream", $"https://{PrimaryHost}"),
+            ("backup", "prov-b", "backup-upstream", $"https://{BackupHost}"));
+
+        var siblingAttempted = false;
+        var backupAttempted = false;
+        var handler = new RoutingHandlerStub(request =>
+        {
+            var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            if (body.Contains("sibling-upstream", StringComparison.Ordinal))
+            {
+                siblingAttempted = true;
+                return Ok("should-not-be-served");
+            }
+
+            if (request.RequestUri!.Host == BackupHost)
+            {
+                backupAttempted = true;
+            }
+
+            return request.RequestUri!.Host == BackupHost ? Ok("served-by-backup") : Status(HttpStatusCode.MethodNotAllowed);
+        });
+
+        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver, circuitBreaker: circuitBreaker);
+        var middleware = new ProxyMiddleware(
+            NullLogger<ProxyMiddleware>.Instance,
+            interceptor,
+            new HttpClient(handler),
+            circuitBreaker: circuitBreaker);
+
+        var firstContext = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
+        Assert.Equal(405, firstContext.Response.StatusCode);
+        Assert.False(backupAttempted);
+        Assert.True(circuitBreaker.IsProviderOpen("prov-a"));
+
+        var secondContext = await RunWithSharedMiddleware(middleware, requestedModel: "sibling");
+        Assert.Equal(503, secondContext.Response.StatusCode);
+        Assert.False(siblingAttempted);
+    }
+
     // 401, 403, 405, and 404 are deliberately excluded here: 401, 403, and 405 are treated as provider-wide
     // outages (an invalid/expired credential, a permission/API-key-scope problem, or a provider-side
-    // gateway/WAF block, respectively) that DO fail over to a different-provider backup - see
-    // InvokeAsync_Primary401_DifferentProviderBackup_FailsOver, InvokeAsync_Primary403_DifferentProviderBackup_FailsOver,
-    // and InvokeAsync_Primary405_DifferentProviderBackup_FailsOver above - and 404 is treated as a per-target
-    // outage (a wrong/gone configured model id) that DOES fail over unconditionally - see
+    // gateway/WAF block, respectively) that DO fail over to a different-provider backup for an
+    // auto-selected request - see InvokeAsync_AutoSelectedPrimary401_DifferentProviderBackup_FailsOver,
+    // InvokeAsync_AutoSelectedPrimary403_DifferentProviderBackup_FailsOver, and
+    // InvokeAsync_AutoSelectedPrimary405_DifferentProviderBackup_FailsOver above (an explicit request
+    // instead relays the truth - see the InvokeAsync_ExplicitPrimary4{01,03,05}_..._RelaysTheTruthInstead
+    // tests above) - and 404 is treated as a per-target outage (a wrong/gone configured model id) that DOES
+    // fail over unconditionally, explicit or not - see
     // InvokeAsync_Primary404_DifferentProviderBackup_FailsOver / InvokeAsync_Primary404_SameProviderBackup_FailsOver
     // above. Only genuine client-fault statuses, where a backup would reject the identical request the
     // same way, belong in this theory.
@@ -840,7 +1333,10 @@ public class ProxyMiddlewareFallbackTests
 
     // Mirrors the full multi-provider cascade from the production log (zhipu 405 -> moonshot 401 ->
     // minimax 401 -> ollama connection-refused, all exhausted): every candidate fails by a different
-    // transport/HTTP mechanism, and the terminal response must still be 502, never 403.
+    // transport/HTTP mechanism, and the terminal response must still be 502, never 403. Auto-selected
+    // ("auto"), since docs/adr/0005 (expanded scope) means an explicit selection would instead stop and
+    // relay the truth at the very first provider-wide-trip status (405) rather than cascading through
+    // every candidate - this test's whole point is exercising that full cascade.
     [Fact]
     public async Task InvokeAsync_MixedFailureCascade_AllExhausted_Returns502NotForbidden()
     {
@@ -861,7 +1357,7 @@ public class ProxyMiddlewareFallbackTests
             _ => throw new InvalidOperationException("unexpected host"),
         });
 
-        var context = await RunAsync(resolver, handler, requestedModel: "zhipu-model", requestAborted: TestContext.Current.CancellationToken);
+        var context = await RunAsync(resolver, handler, requestedModel: "auto", requestAborted: TestContext.Current.CancellationToken);
 
         Assert.Equal(StatusCodes.Status502BadGateway, context.Response.StatusCode);
         Assert.NotEqual(StatusCodes.Status403Forbidden, context.Response.StatusCode);
@@ -964,12 +1460,12 @@ public class ProxyMiddlewareFallbackTests
         Assert.Equal(3, primaryAttempts);
         Assert.True(circuitBreaker.IsOpen(new CircuitBreakerTargetKey("prov-a", $"https://{PrimaryHost}/", "primary-upstream")));
 
-        // A fourth request: the primary's circuit is now open, so RequestInterceptor substitutes the backup
-        // as the primary candidate outright - no attempt against "primary" is ever made.
+        // A fourth, explicit request: the primary's circuit is now open, so - docs/adr/0005 (expanded
+        // scope) - RequestInterceptor no longer substitutes the backup; it blocks the request with a
+        // synthesized message instead, and no attempt against "primary" is ever made.
         var finalContext = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
 
-        Assert.Equal(StatusCodes.Status200OK, finalContext.Response.StatusCode);
-        Assert.Equal("served-by-backup", await ReadBodyAsync(finalContext));
+        Assert.Equal(503, finalContext.Response.StatusCode);
         Assert.Equal(3, primaryAttempts); // unchanged - the 4th request never touched the primary at all
     }
 
@@ -1010,6 +1506,22 @@ public class ProxyMiddlewareFallbackTests
     {
         Content = new StringContent(
             """{"type":"error","error":{"type":"invalid_request_error","message":"messages: at least one message is required"}}""",
+            Encoding.UTF8,
+            "application/json"),
+    };
+
+    private static HttpResponseMessage AnthropicOutOfCreditsResponse() => new(HttpStatusCode.BadRequest)
+    {
+        Content = new StringContent(
+            """{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."}}""",
+            Encoding.UTF8,
+            "application/json"),
+    };
+
+    private static HttpResponseMessage OpenAiInsufficientQuotaResponse() => new((HttpStatusCode)429)
+    {
+        Content = new StringContent(
+            """{"error":{"message":"You exceeded your current quota, please check your plan and billing details.","type":"insufficient_quota","code":"insufficient_quota"}}""",
             Encoding.UTF8,
             "application/json"),
     };

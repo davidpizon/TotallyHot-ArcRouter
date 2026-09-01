@@ -61,15 +61,16 @@ public sealed class ProviderAdminModelsTests
     }
 
     [Fact]
-    public void ProviderAdminView_LastInteraction_DefaultsToNull()
+    public void ProviderAdminView_AdminActionAndLiveTraffic_DefaultToNull()
     {
         var view = new ProviderAdminView("openai", "OpenAI API", "https://api.openai.com", "Authorization", [], []);
 
-        Assert.Null(view.LastInteraction);
+        Assert.Null(view.AdminAction);
+        Assert.Null(view.LiveTraffic);
     }
 
     [Fact]
-    public void ProviderAdminView_RoundTripsLastInteraction()
+    public void ProviderAdminView_RoundTripsAdminAction()
     {
         var options = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
         var at = DateTimeOffset.Parse("2026-08-24T09:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
@@ -80,16 +81,44 @@ public sealed class ProviderAdminModelsTests
             "Authorization",
             [],
             [],
-            LastInteraction: new ProviderInteractionStatusAdminView(false, "Refresh from endpoint", "Provider returned 401 for https://api.openai.com/v1/models.", at));
+            AdminAction: new ProviderInteractionStatusAdminView(false, "Refresh from endpoint", "Provider returned 401 for https://api.openai.com/v1/models.", at));
 
         var json = System.Text.Json.JsonSerializer.Serialize(view, options);
         var roundTripped = System.Text.Json.JsonSerializer.Deserialize<ProviderAdminView>(json, options)!;
 
-        Assert.NotNull(roundTripped.LastInteraction);
-        Assert.False(roundTripped.LastInteraction!.Ok);
-        Assert.Equal("Refresh from endpoint", roundTripped.LastInteraction.Operation);
-        Assert.Equal(view.LastInteraction!.Message, roundTripped.LastInteraction.Message);
-        Assert.Equal(view.LastInteraction!.AtUtc, roundTripped.LastInteraction.AtUtc);
+        Assert.NotNull(roundTripped.AdminAction);
+        Assert.False(roundTripped.AdminAction!.Ok);
+        Assert.Equal("Refresh from endpoint", roundTripped.AdminAction.Operation);
+        Assert.Equal(view.AdminAction!.Message, roundTripped.AdminAction.Message);
+        Assert.Equal(view.AdminAction!.AtUtc, roundTripped.AdminAction.AtUtc);
+    }
+
+    [Fact]
+    public void ProviderAdminView_RoundTripsLiveTraffic()
+    {
+        var options = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        var at = DateTimeOffset.Parse("2026-08-24T09:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
+        var view = new ProviderAdminView(
+            "openai",
+            "OpenAI API",
+            "https://api.openai.com",
+            "Authorization",
+            [],
+            [],
+            LiveTraffic: new ProviderInteractionStatusAdminView(
+                false,
+                "Live traffic",
+                "Your credit balance is too low.",
+                at,
+                ProviderInteractionKindAdminView.OutOfCredits));
+
+        var json = System.Text.Json.JsonSerializer.Serialize(view, options);
+        var roundTripped = System.Text.Json.JsonSerializer.Deserialize<ProviderAdminView>(json, options)!;
+
+        Assert.NotNull(roundTripped.LiveTraffic);
+        Assert.False(roundTripped.LiveTraffic!.Ok);
+        Assert.Equal(ProviderInteractionKindAdminView.OutOfCredits, roundTripped.LiveTraffic.Kind);
+        Assert.Equal(view.LiveTraffic!.Message, roundTripped.LiveTraffic.Message);
     }
 
     [Fact]

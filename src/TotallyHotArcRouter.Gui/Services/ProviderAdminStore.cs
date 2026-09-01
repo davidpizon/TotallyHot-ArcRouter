@@ -218,7 +218,7 @@ public sealed class ProviderAdminStore
     /// thrown <see cref="ProviderAdminException"/> - the request itself still succeeds, since the router
     /// noticed the discovery/scan failed and simply left the model list untouched (see
     /// <c>ManagementFacade.RefreshFromEndpointAsync</c>). The failure instead travels back inside the
-    /// refreshed provider's own <see cref="ProviderAdminView.LastInteraction"/>, which this method checks
+    /// refreshed provider's own <see cref="ProviderAdminView.AdminAction"/>, which this method checks
     /// after the mutation to raise the toast the caller would otherwise never see.
     /// </remarks>
     /// <exception cref="ProviderAdminException">The provider is unknown or the request failed outright.</exception>
@@ -227,7 +227,7 @@ public sealed class ProviderAdminStore
         await MutateAsync(() => _client.RefreshFromEndpointAsync(key, cancellationToken));
 
         var provider = Providers.FirstOrDefault(p => string.Equals(p.Key, key, StringComparison.OrdinalIgnoreCase));
-        if (provider?.LastInteraction is { Ok: false } failure)
+        if (provider?.AdminAction is { Ok: false } failure)
         {
             _toasts?.ShowError($"{provider.Name ?? provider.Key}: {failure.Operation} failed", failure.Message ?? "Unknown error.");
         }

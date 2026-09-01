@@ -200,6 +200,12 @@ namespace TotallyHot.ArcRouter.Hosting
                     configuration.GetSection(CircuitBreakerOptions.SectionName).Bind(options));
             services.AddSingleton<ICircuitBreaker, CircuitBreaker>();
 
+            // Shared so RequestInterceptor, ProxyMiddleware, and ManagementFacade (via ManagementApiDependencies
+            // below) all see the same per-provider admin-action/live-traffic state
+            // (docs/adr/0004-surface-out-of-credits-provider-failures-on-the-providers-tab.md) - the same
+            // sharing requirement ICircuitBreaker has just above.
+            services.AddSingleton<IProviderInteractionStatusStore, ProviderInteractionStatusStore>();
+
             // PLAN.md Phase H (the Context leg): classifies a request ahead of routing. Registered so
             // later consumers (Phase I's IRoutingPolicy) can take it as a normal DI dependency; not
             // registering IDimensionInferrer itself is deliberate - RequestInterceptor's own default
@@ -646,6 +652,9 @@ namespace TotallyHot.ArcRouter.Hosting
                             SecretReader = sp.GetRequiredService<ISecretReader>(),
                             // Backs Cost Analytics' "Routing ROI" feed (docs/router/self-organizing-classification-plan.md Phase T4).
                             TaxonomyComparisonStore = sp.GetRequiredService<TotallyHot.ArcRouter.Transcripts.ITaxonomyComparisonStore>(),
+                            // The same singleton registered above and given to RequestInterceptor/ProxyMiddleware,
+                            // so the Providers tab's AdminAction/LiveTraffic warnings reflect real hot-path state.
+                            InteractionStatusStore = sp.GetRequiredService<IProviderInteractionStatusStore>(),
                         },
 
                         // Backs the Governance > Price Sources panel's gRPC API.

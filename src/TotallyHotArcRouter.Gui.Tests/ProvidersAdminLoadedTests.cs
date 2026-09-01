@@ -293,7 +293,7 @@ public sealed class ProvidersAdminLoadedTests
     [Fact]
     public void A_provider_with_no_recorded_interaction_shows_no_warning_icon()
     {
-        // ProvidersJson (the default fixture) carries no lastInteraction on any provider.
+        // ProvidersJson (the default fixture) carries no adminAction on any provider.
         var transport = new StubTransport();
         using var ctx = NewContext(transport);
 
@@ -307,7 +307,7 @@ public sealed class ProvidersAdminLoadedTests
     {
         // The motivating bug: RefreshFromEndpointAsync returns 200 OK even when the router's discovery
         // failed (an expired API key), so ProvidersAdmin.RunAsync's own thrown-exception catch never fires -
-        // ProviderAdminStore.RefreshFromEndpointAsync must notice via LastInteraction and raise the toast
+        // ProviderAdminStore.RefreshFromEndpointAsync must notice via AdminAction and raise the toast
         // itself.
         var transport = new StubTransport { ResponseOverride = ProvidersJsonWithFailedInteraction };
         var (ctx, toasts) = NewContextWithToasts(transport);
@@ -776,7 +776,7 @@ public sealed class ProvidersAdminLoadedTests
         }
         """;
 
-    // Same anthropic/ollama/openai providers as ProvidersJson, but openai's lastInteraction carries a
+    // Same anthropic/ollama/openai providers as ProvidersJson, but openai's adminAction carries a
     // failed "Refresh from endpoint" - the expired-API-key scenario that motivated the warning icon/toast.
     private const string ProvidersJsonWithFailedInteraction = """
         {
@@ -808,7 +808,7 @@ public sealed class ProvidersAdminLoadedTests
               "headers": [],
               "isFree": false,
               "enabled": true,
-              "lastInteraction": {
+              "adminAction": {
                 "ok": false,
                 "operation": "Refresh from endpoint",
                 "message": "Provider returned 401 for https://api.openai.com/v1/models.",

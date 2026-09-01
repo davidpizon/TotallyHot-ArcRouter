@@ -150,6 +150,21 @@ public sealed record ManagementApiDependencies(IProviderConfigStore ConfigStore)
 
     /// <summary>Backs Cost Analytics' "Routing ROI" feed, <c>GET /admin/usage/routing-roi</c> (Phase T4).</summary>
     public ITaxonomyComparisonStore? TaxonomyComparisonStore { get; init; }
+
+    /// <summary>
+    /// Tracks the outcome of the most recent admin-initiated interaction with each provider AND (per
+    /// docs/adr/0004-surface-out-of-credits-provider-failures-on-the-providers-tab.md) live-traffic
+    /// health from the hot request path, surfaced via <see cref="ProviderView.AdminAction"/>/
+    /// <see cref="ProviderView.LiveTraffic"/>. Must be the <em>same</em> instance given to
+    /// <see cref="RequestInterceptor"/> and <see cref="ProxyMiddleware"/> - otherwise the Providers
+    /// tab and the hot path silently observe two disconnected stores. When omitted, <see cref="ProxyServer"/>
+    /// falls back to a fresh, unshared instance - <see cref="ProviderView.AdminAction"/> still works
+    /// normally (this facade is still the only writer/reader of the admin-triggered refresh/scan/discovery
+    /// outcomes it records), but <see cref="ProviderView.LiveTraffic"/> is the part that goes dark: with
+    /// no shared instance, the hot request path's out-of-credits classification writes to a store nothing
+    /// here ever reads, so the Providers tab never sees any live-traffic state.
+    /// </summary>
+    public IProviderInteractionStatusStore? InteractionStatusStore { get; init; }
 }
 
 /// <summary>
