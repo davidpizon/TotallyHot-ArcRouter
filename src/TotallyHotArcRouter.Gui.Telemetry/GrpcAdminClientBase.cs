@@ -25,6 +25,9 @@ public abstract class GrpcAdminClientBase<TGeneratedClient, TException> : IDispo
     /// <param name="createClient">Constructs the generated client from the authenticated call invoker.</param>
     protected GrpcAdminClientBase(string serverAddress, Func<CallInvoker, TGeneratedClient> createClient)
     {
+        ArgumentNullException.ThrowIfNull(serverAddress);
+        ArgumentNullException.ThrowIfNull(createClient);
+
         var channel = TelemetryChannelFactory.Create(serverAddress);
         _ownedChannel = channel;
         Client = createClient(TelemetryChannelFactory.Authenticated(channel));

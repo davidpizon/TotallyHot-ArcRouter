@@ -58,7 +58,7 @@ public sealed class RoutingGateAdminClient
         }
         catch (RpcException ex)
         {
-            throw Wrap(ex, "Could not reach the router: the router is not reachable.", "Could not update the routing gate");
+            throw Wrap(ex, "Could not reach the router: the router is not reachable.", "Could not read the routing gate");
         }
     }
 

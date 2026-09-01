@@ -166,12 +166,13 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// <summary>
     /// Owns the "cap the captured bytes, and once the cap is exceeded, lazily allocate an
     /// <see cref="IncrementalUsageScanner"/> to keep scanning a tail window" accounting rule that
-    /// <see cref="TranslateAndCaptureBufferedAsync"/>, <see cref="TranslateAndCaptureStreamAsync"/>, and
-    /// <see cref="CopyAndCaptureAsync"/> each drove independently (buffered, streamed, and raw copy-through
-    /// call shapes) before this type existed - all three enforce the same rule, just triggered from
-    /// different loops. <see cref="_trackTail"/> disables the tail scanner for a capture that never
-    /// consults one (the secondary native-bytes copy in <see cref="TranslateAndCaptureStreamAsync"/>), so a
-    /// capacity-exceeding chunk there doesn't pay for a scanner allocation nothing will ever read.
+    /// <see cref="TranslateAndCaptureStreamAsync"/> and <see cref="CopyAndCaptureAsync"/> each drove
+    /// independently (streamed and raw copy-through call shapes) before this type existed - both enforce
+    /// the same rule, just triggered from different loops. <see cref="TranslateAndCaptureBufferedAsync"/>
+    /// deliberately does not use this type - see its remarks. <see cref="_trackTail"/> disables the tail
+    /// scanner for a capture that never consults one (the secondary native-bytes copy in
+    /// <see cref="TranslateAndCaptureStreamAsync"/>), so a capacity-exceeding chunk there doesn't pay for a
+    /// scanner allocation nothing will ever read.
     /// </summary>
     private sealed class ResponseCaptureAccumulator : IDisposable
     {
@@ -2187,14 +2188,26 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             var translated = translator.TranslateResponse(nativeBytes);
             await destination.WriteAsync(translated, cancellationToken);
 
-            using var capture = new ResponseCaptureAccumulator(captureCap);
-            await capture.AddAsync(translated, cancellationToken);
-
+            // Deliberately not routed through ResponseCaptureAccumulator: unlike the two loop-based capture
+            // methods below, this is a single, already-fully-materialized buffer, and the common case (a
+            // response that fits within captureCap) can return the translated array directly instead of
+            // paying for a MemoryStream copy the accumulator's chunk-oriented API would otherwise force.
+            var clientShapeBytes = translated.Length <= captureCap ? translated : translated[..captureCap];
             byte[]? capturedNativeBytes = UsageExtractor.SupportsNativeShape(translator.Provider)
                 ? (nativeBytes.Length <= captureCap ? nativeBytes : nativeBytes[..captureCap])
                 : null;
 
-            return new CapturedResponse(capture.ToArray(), capturedNativeBytes, capture.TailScanner);
+            // Only worth the ~64KB tail-window allocation when the head-capped clientShapeBytes above
+            // actually lost data - a response that fits within captureCap is already fully captured, so
+            // TryExtractUsage's primary parse never needs the tail fallback.
+            IncrementalUsageScanner? tailScanner = null;
+            if (translated.Length > captureCap)
+            {
+                tailScanner = new IncrementalUsageScanner();
+                tailScanner.Append(translated);
+            }
+
+            return new CapturedResponse(clientShapeBytes, capturedNativeBytes, tailScanner);
         }
         catch (Exception ex) when (IsStreamAbort(ex) && cancellationToken.IsCancellationRequested)
         {

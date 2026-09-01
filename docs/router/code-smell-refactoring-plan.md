@@ -1,7 +1,8 @@
 # Code-Smell Refactoring Plan
 
-**Status:** Proposed — no code has been changed yet. This document is the output of a structural
-survey (CodeGraph + Serena + targeted reads), not an exhaustive line-by-line audit.
+**Status:** Phase 1 implemented (see [PR #75](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/75)).
+Phases 2-4 remain proposed only. This document is the output of a structural survey (CodeGraph + Serena +
+targeted reads), not an exhaustive line-by-line audit.
 
 **Scope surveyed:** `TotallyHotArcRouter` (router core), `TotallyHot.ArcRouter.Quality`, and all four
 GUI assemblies (`TotallyHotArcRouter.Gui`, `.Gui.Admin`, `.Gui.Charts`, `.Gui.Console`,

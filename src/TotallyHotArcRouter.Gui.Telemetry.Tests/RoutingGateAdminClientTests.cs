@@ -65,6 +65,18 @@ public class RoutingGateAdminClientTests
     }
 
     [Fact]
+    public async Task A_rejected_read_names_the_read_not_the_update()
+    {
+        var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.Internal, "boom")) };
+        using var client = new RoutingGateAdminClient(stub);
+
+        var ex = await Assert.ThrowsAsync<RoutingGateAdminException>(() => client.GetAsync(TestContext.Current.CancellationToken));
+
+        ex.Message.Should().Be("Could not read the routing gate: boom");
+        ex.IsUnavailable.Should().BeFalse();
+    }
+
+    [Fact]
     public void Disposing_a_client_over_a_caller_supplied_stub_does_not_dispose_the_callers_channel()
     {
         var client = new RoutingGateAdminClient(new StubClient());
