@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Classification;
 using TotallyHot.ArcRouter.Router.Embeddings;
@@ -76,6 +77,7 @@ namespace TotallyHot.ArcRouter.Proxy
         private readonly IEmbeddingClient? _embeddingClient;
         private readonly EmbeddingWarmupState? _embeddingWarmupState;
         private readonly int _embeddingBudgetMs;
+        private readonly IProviderInteractionStatusStore? _interactionStatusStore;
 
         /// <summary>Number of requests seen by <see cref="InterceptRequestAsync"/> so far.</summary>
         public int InterceptedRequestCount { get; private set; }
@@ -139,6 +141,17 @@ namespace TotallyHot.ArcRouter.Proxy
         /// cold ~1.3 GB download inline.
         /// </param>
         /// <param name="routingOptions">Supplies <see cref="RoutingOptions.EmbeddingBudgetMs"/>.</param>
+        /// <param name="interactionStatusStore">
+        /// Optional per-provider admin-action/live-traffic status store
+        /// (docs/adr/0004-surface-out-of-credits-provider-failures-on-the-providers-tab.md,
+        /// docs/adr/0005-protect-explicit-provider-selections-from-silent-substitution-on-any-circuit-
+        /// trip.md), consulted when an explicit selection's target or provider is already circuit-open to
+        /// synthesize a truthful client-facing message instead of silently substituting. Defaults to
+        /// <see langword="null"/> - behaviorally inert (falls back to a generic message) when omitted. In
+        /// the real app this must be the <em>same</em> DI singleton instance also given to
+        /// <see cref="ProxyMiddleware"/> and <c>ManagementFacade</c> (see <c>ServiceCollectionExtensions</c>),
+        /// the same sharing requirement <paramref name="circuitBreaker"/> already has.
+        /// </param>
         public RequestInterceptor(
             ILogger<RequestInterceptor> logger,
             IModelRouteResolver modelRouteResolver,
@@ -151,7 +164,8 @@ namespace TotallyHot.ArcRouter.Proxy
             IRoutingPolicy? routingPolicy = null,
             IEmbeddingClient? embeddingClient = null,
             EmbeddingWarmupState? embeddingWarmupState = null,
-            IOptions<RoutingOptions>? routingOptions = null)
+            IOptions<RoutingOptions>? routingOptions = null,
+            IProviderInteractionStatusStore? interactionStatusStore = null)
         {
             _logger = logger;
             _modelRouteResolver = modelRouteResolver;
@@ -165,6 +179,7 @@ namespace TotallyHot.ArcRouter.Proxy
             _embeddingClient = embeddingClient;
             _embeddingWarmupState = embeddingWarmupState;
             _embeddingBudgetMs = routingOptions?.Value.EmbeddingBudgetMs ?? new RoutingOptions().EmbeddingBudgetMs;
+            _interactionStatusStore = interactionStatusStore;
 
             if (_forcedModelName is not null &&
                 !modelRouteResolver.ListModels().Any(m => string.Equals(m.ModelName, _forcedModelName, StringComparison.OrdinalIgnoreCase)))
@@ -366,6 +381,7 @@ namespace TotallyHot.ArcRouter.Proxy
             // ultimately served - docs/router/orchestrator-live-path-plan.md §M2.2.
             var clientRequestedModelName = modelName;
             var substitutionReason = RoutingSubstitutionReason.None;
+            string? explicitCircuitTripBlockMessage = null;
 
             // Local Proxy CLI: single-model serving ignores whatever model the client
             // asked for and always routes to the one CLI-forced model (already confirmed configured in
@@ -477,10 +493,47 @@ namespace TotallyHot.ArcRouter.Proxy
                 // ProxyMiddleware's own real-time bypass check (immediately before the actual attempt) will
                 // then fail fast with a 502/503 without making the call, which is the correct "everything is
                 // unavailable" outcome.
-                if (_circuitBreaker.IsOpen(CircuitBreakerTargetKey.FromRoute(route)) ||
-                    _circuitBreaker.IsProviderOpen(route.Provider) ||
-                    !_modelRouteResolver.IsProviderEnabled(route.Provider) ||
-                    !_modelRouteResolver.IsModelEnabled(route.ModelName))
+                //
+                // docs/adr/0004-.../0005-...: this substitution is for an auto-selected/already-substituted
+                // request only. An explicit selection (substitutionReason still None at this point) whose
+                // target or provider is already circuit-open is never silently substituted for that reason -
+                // it is relayed the truth instead, via ExplicitCircuitTripBlockMessage below - regardless of
+                // whether the trip is target-level or provider-wide. Only providerStopped/modelStopped (an
+                // operator's own Stop/disable, not an outage) still substitutes for an explicit selection.
+                var targetOpen = _circuitBreaker.IsOpen(CircuitBreakerTargetKey.FromRoute(route));
+                var providerOpen = _circuitBreaker.IsProviderOpen(route.Provider);
+                var providerStopped = !_modelRouteResolver.IsProviderEnabled(route.Provider);
+                var modelStopped = !_modelRouteResolver.IsModelEnabled(route.ModelName);
+                var isExplicitSoFar = substitutionReason == RoutingSubstitutionReason.None;
+
+                if ((targetOpen || providerOpen) && isExplicitSoFar)
+                {
+                    if (providerOpen)
+                    {
+                        // Three-way fallback: LiveTrafficStatus (hot-path-detected, e.g. out-of-credits) ->
+                        // AdminActionStatus (e.g. a 401 first surfaced by "Refresh from endpoint") -> generic.
+                        // Both tracks are per-provider, so this branch only applies when the whole provider
+                        // is open.
+                        var liveTraffic = _interactionStatusStore?.GetLiveTraffic(route.Provider);
+                        var adminAction = _interactionStatusStore?.Get(route.Provider);
+                        explicitCircuitTripBlockMessage = liveTraffic?.Message
+                            ?? (adminAction is { Ok: false } ? adminAction.Message : null)
+                            ?? "This provider is temporarily unavailable.";
+                    }
+                    else
+                    {
+                        // Target-level only: no per-model interaction-status record exists to draw from
+                        // (both tracks are per-provider), so this is always a generic, honest message -
+                        // never borrows the provider-wide tracks' text, which could misattribute an
+                        // unrelated cause to this one model.
+                        explicitCircuitTripBlockMessage = $"Model '{route.ModelName}' is temporarily unavailable.";
+                    }
+
+                    _logger.LogInformation(
+                        "[INTERCEPTOR] Explicit selection '{ModelName}' is circuit-open; relaying the truth instead of substituting.",
+                        SanitizeForLog(route.ModelName));
+                }
+                else if (targetOpen || providerOpen || providerStopped || modelStopped)
                 {
                     var substitute = RankEligibleModels([route.ModelName], liveDimension).FirstOrDefault();
                     if (substitute is not null)
@@ -488,10 +541,9 @@ namespace TotallyHot.ArcRouter.Proxy
                         _logger.LogInformation(
                             "[INTERCEPTOR] Model '{ModelName}' circuit is open; substituting next-best model '{Substitute}'.",
                             SanitizeForLog(route.ModelName), SanitizeForLog(substitute.ModelName));
-                        substitutionReason = _circuitBreaker.IsOpen(CircuitBreakerTargetKey.FromRoute(route)) ||
-                            _circuitBreaker.IsProviderOpen(route.Provider)
-                                ? RoutingSubstitutionReason.CircuitOpen
-                                : RoutingSubstitutionReason.ModelStopped;
+                        substitutionReason = targetOpen || providerOpen
+                            ? RoutingSubstitutionReason.CircuitOpen
+                            : RoutingSubstitutionReason.ModelStopped;
                         route = substitute;
                     }
                 }
@@ -527,7 +579,8 @@ namespace TotallyHot.ArcRouter.Proxy
                 propensity,
                 classification,
                 taskText,
-                dimBestModel);
+                dimBestModel,
+                explicitCircuitTripBlockMessage);
         }
 
         /// <summary>

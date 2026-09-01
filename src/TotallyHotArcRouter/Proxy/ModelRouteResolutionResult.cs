@@ -86,6 +86,7 @@ public sealed record ModelRouteResolutionResult
     /// <param name="classification">See <see cref="Classification"/>.</param>
     /// <param name="taskText">See <see cref="TaskText"/>.</param>
     /// <param name="dimBestModel">See <see cref="DimBestModel"/>.</param>
+    /// <param name="explicitCircuitTripBlockMessage">See <see cref="ExplicitCircuitTripBlockMessage"/>.</param>
     private ModelRouteResolutionResult(
         bool isSuccess,
         IReadOnlyList<RouteCandidate>? candidates,
@@ -98,7 +99,8 @@ public sealed record ModelRouteResolutionResult
         double propensity,
         RequestClassification? classification,
         string? taskText,
-        string? dimBestModel)
+        string? dimBestModel,
+        string? explicitCircuitTripBlockMessage)
     {
         IsSuccess = isSuccess;
         Candidates = candidates ?? [];
@@ -112,6 +114,7 @@ public sealed record ModelRouteResolutionResult
         Classification = classification;
         TaskText = taskText;
         DimBestModel = dimBestModel;
+        ExplicitCircuitTripBlockMessage = explicitCircuitTripBlockMessage;
     }
 
     /// <summary>
@@ -238,6 +241,17 @@ public sealed record ModelRouteResolutionResult
     /// </remarks>
     public string? DimBestModel { get; }
 
+    /// <summary>
+    /// Gets the client-facing message to synthesize directly - skipping any network call and any
+    /// substitution - when this request explicitly named a model or provider whose circuit (target-level
+    /// or provider-wide) is already open (docs/adr/0005-protect-explicit-provider-selections-from-silent-
+    /// substitution-on-any-circuit-trip.md). <see langword="null"/> in every other case: an auto-selected
+    /// or already-substituted request, or an explicit request whose target/provider isn't currently open,
+    /// keeps today's behavior. <see cref="ProxyMiddleware"/> checks this before attempting
+    /// <see cref="Route"/> and, when set, writes it directly instead of ever dialing the upstream.
+    /// </summary>
+    public string? ExplicitCircuitTripBlockMessage { get; }
+
     // A single-route Success(route, rewrittenBody) overload used to sit here. It was unreachable - every
     // caller goes through the candidate-list overload below, because even a no-fallback resolution builds
     // its one candidate through RequestInterceptor.BuildCandidate - and it constructed a RouteCandidate
@@ -258,6 +272,7 @@ public sealed record ModelRouteResolutionResult
     /// <param name="classification">See <see cref="Classification"/>.</param>
     /// <param name="taskText">See <see cref="TaskText"/>.</param>
     /// <param name="dimBestModel">See <see cref="DimBestModel"/>.</param>
+    /// <param name="explicitCircuitTripBlockMessage">See <see cref="ExplicitCircuitTripBlockMessage"/>.</param>
     /// <exception cref="ArgumentException"><paramref name="candidates"/> is empty - a success must have at least the primary route, since <see cref="Route"/>/<see cref="RewrittenBody"/> index the first candidate.</exception>
     public static ModelRouteResolutionResult Success(
         IReadOnlyList<RouteCandidate> candidates,
@@ -269,7 +284,8 @@ public sealed record ModelRouteResolutionResult
         double propensity = 1.0,
         RequestClassification? classification = null,
         string? taskText = null,
-        string? dimBestModel = null)
+        string? dimBestModel = null,
+        string? explicitCircuitTripBlockMessage = null)
     {
         ArgumentNullException.ThrowIfNull(candidates);
         if (candidates.Count == 0)
@@ -277,7 +293,7 @@ public sealed record ModelRouteResolutionResult
             throw new ArgumentException("A successful resolution must contain at least the primary route candidate.", nameof(candidates));
         }
 
-        return new(true, candidates, null, requestedModelName, substitutionReason, taskEmbedding, routerTokens, isExploratory, propensity, classification, taskText, dimBestModel);
+        return new(true, candidates, null, requestedModelName, substitutionReason, taskEmbedding, routerTokens, isExploratory, propensity, classification, taskText, dimBestModel, explicitCircuitTripBlockMessage);
     }
 
     /// <summary>
@@ -289,6 +305,6 @@ public sealed record ModelRouteResolutionResult
     /// for the figure to appear on and no savings denominator it could distort.
     /// </remarks>
     public static ModelRouteResolutionResult Failure(string errorMessage) =>
-        new(false, null, errorMessage, null, RoutingSubstitutionReason.None, null, 0, false, 1.0, null, null, null);
+        new(false, null, errorMessage, null, RoutingSubstitutionReason.None, null, 0, false, 1.0, null, null, null, null);
 }
 

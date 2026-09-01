@@ -1138,7 +1138,8 @@ public sealed class ManagementFacade
                     NextResetUtc: budget.NextResetUtc,
                     HasStoredAdminKey: _secretReader?.TryRead(AdminKeySecretName(kvp.Key), out _) ?? false,
                     ReportedUsage: BuildReportedUsageView(kvp.Key),
-                    LastInteraction: _interactionStatus?.Get(kvp.Key));
+                    AdminAction: _interactionStatus?.Get(kvp.Key),
+                    LiveTraffic: _interactionStatus?.GetLiveTraffic(kvp.Key));
             })
             .OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -1833,11 +1834,18 @@ public static class HeaderValueSource
 /// repository is wired up or nothing has been fetched yet (no Admin API key configured, or the first cycle
 /// hasn't run).
 /// </param>
-/// <param name="LastInteraction">
+/// <param name="AdminAction">
 /// The outcome of the most recent admin-initiated interaction with this provider (refresh from endpoint,
 /// capability scan, discovery), or <see langword="null"/> when no interaction status store is wired up or
 /// none has happened yet since the router started. Backs the Governance card's warning icon - see
 /// <see cref="ProviderInteractionStatusStore"/>.
+/// </param>
+/// <param name="LiveTraffic">
+/// The outcome of the most recent classified live-traffic event from the hot request path (e.g. an
+/// out-of-credits response - docs/adr/0004-surface-out-of-credits-provider-failures-on-the-providers-
+/// tab.md), or <see langword="null"/> when no interaction status store is wired up or nothing has been
+/// classified yet since the router started. Independent of <paramref name="AdminAction"/> - a successful
+/// admin action never clears a live-traffic warning and vice versa, so both can be shown at once.
 /// </param>
 public sealed record ProviderView(
     string Key,
@@ -1860,7 +1868,8 @@ public sealed record ProviderView(
     DateTimeOffset? NextResetUtc = null,
     bool HasStoredAdminKey = false,
     ProviderReportedUsageView? ReportedUsage = null,
-    ProviderInteractionStatus? LastInteraction = null);
+    ProviderInteractionStatus? AdminAction = null,
+    ProviderInteractionStatus? LiveTraffic = null);
 
 /// <summary>
 /// A provider's own reported per-model daily token usage (docs/router/secrets-at-rest-plan.md §8.1), as

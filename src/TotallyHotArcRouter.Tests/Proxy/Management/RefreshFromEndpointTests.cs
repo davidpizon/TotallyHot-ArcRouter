@@ -258,7 +258,7 @@ public sealed class RefreshFromEndpointTests : IDisposable
         Assert.Equal("Discover models", status.Operation);
     }
 
-    // ----- LastInteraction (the GUI's warning-icon/toast source) -----
+    // ----- AdminAction (the GUI's warning-icon/toast source) -----
 
     [Fact]
     public async Task RefreshFromEndpoint_OnSuccess_RecordsAndSurfacesASuccessfulInteraction()
@@ -269,9 +269,9 @@ public sealed class RefreshFromEndpointTests : IDisposable
         var result = await facade.RefreshFromEndpointAsync("lmstudio", TestContext.Current.CancellationToken);
 
         var provider = Assert.Single(result.Value!.Providers);
-        Assert.NotNull(provider.LastInteraction);
-        Assert.True(provider.LastInteraction!.Ok);
-        Assert.Equal("Refresh from endpoint", provider.LastInteraction.Operation);
+        Assert.NotNull(provider.AdminAction);
+        Assert.True(provider.AdminAction!.Ok);
+        Assert.Equal("Refresh from endpoint", provider.AdminAction.Operation);
         Assert.True(interactionStatus.Get("lmstudio")!.Ok);
     }
 
@@ -289,9 +289,9 @@ public sealed class RefreshFromEndpointTests : IDisposable
         var result = await facade.RefreshFromEndpointAsync("lmstudio", TestContext.Current.CancellationToken);
 
         var provider = Assert.Single(result.Value!.Providers);
-        Assert.NotNull(provider.LastInteraction);
-        Assert.False(provider.LastInteraction!.Ok);
-        Assert.Contains("401", provider.LastInteraction.Message);
+        Assert.NotNull(provider.AdminAction);
+        Assert.False(provider.AdminAction!.Ok);
+        Assert.Contains("401", provider.AdminAction.Message);
     }
 
     [Fact]
@@ -312,8 +312,8 @@ public sealed class RefreshFromEndpointTests : IDisposable
         var result = await facade.RefreshFromEndpointAsync("lmstudio", TestContext.Current.CancellationToken);
 
         var provider = Assert.Single(result.Value!.Providers);
-        Assert.NotNull(provider.LastInteraction);
-        Assert.True(provider.LastInteraction!.Ok);
+        Assert.NotNull(provider.AdminAction);
+        Assert.True(provider.AdminAction!.Ok);
     }
 
     [Fact]
@@ -331,8 +331,8 @@ public sealed class RefreshFromEndpointTests : IDisposable
         var result = await facade.RefreshFromEndpointAsync("lmstudio", TestContext.Current.CancellationToken);
 
         var provider = Assert.Single(result.Value!.Providers);
-        Assert.NotNull(provider.LastInteraction);
-        Assert.False(provider.LastInteraction!.Ok);
+        Assert.NotNull(provider.AdminAction);
+        Assert.False(provider.AdminAction!.Ok);
     }
 
     [Fact]
@@ -344,20 +344,38 @@ public sealed class RefreshFromEndpointTests : IDisposable
 
         var result = await facade.RefreshFromEndpointAsync("lmstudio", TestContext.Current.CancellationToken);
 
-        Assert.True(Assert.Single(result.Value!.Providers).LastInteraction!.Ok);
+        Assert.True(Assert.Single(result.Value!.Providers).AdminAction!.Ok);
     }
 
     [Fact]
     public async Task RefreshFromEndpoint_WithoutAnInteractionStatusStoreWired_StillSucceeds()
     {
         // ManagementFacade is constructible without this store too (ProxyServer builds its own instance) -
-        // BuildProvidersResponse must degrade to a null LastInteraction rather than throw.
+        // BuildProvidersResponse must degrade to a null AdminAction rather than throw.
         var facade = Facade(StoreWithProvider(), DiscoveryOk(OpenAiBody));
 
         var result = await facade.RefreshFromEndpointAsync("lmstudio", TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
-        Assert.Null(Assert.Single(result.Value!.Providers).LastInteraction);
+        Assert.Null(Assert.Single(result.Value!.Providers).AdminAction);
+    }
+
+    [Fact]
+    public async Task RefreshFromEndpoint_OnSuccess_DoesNotTouchTheLiveTrafficTrack()
+    {
+        // docs/adr/0004-surface-out-of-credits-provider-failures-on-the-providers-tab.md's track
+        // separation: an admin action must never write, clear, or otherwise affect LiveTraffic - it is
+        // written only from the hot request path.
+        var interactionStatus = new ProviderInteractionStatusStore();
+        interactionStatus.RecordLiveTrafficFailure("lmstudio", ProviderInteractionKind.OutOfCredits, "out of credits");
+        var facade = Facade(StoreWithProvider(), DiscoveryOk(OpenAiBody), interactionStatusStore: interactionStatus);
+
+        var result = await facade.RefreshFromEndpointAsync("lmstudio", TestContext.Current.CancellationToken);
+
+        var provider = Assert.Single(result.Value!.Providers);
+        Assert.True(provider.AdminAction!.Ok);
+        Assert.False(provider.LiveTraffic!.Ok);
+        Assert.Equal("out of credits", provider.LiveTraffic.Message);
     }
 
     public void Dispose() => _temp.Dispose();

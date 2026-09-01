@@ -22,14 +22,15 @@ the same provider is untrusted for any other reason (e.g. an expired API key). T
 principled reason a client's explicit choice deserves respect only when the trip cause happens to be
 billing.
 
-This ADR generalizes ADR-0004's explicit-selection protection to every provider-wide circuit trip,
-not just out-of-credits.
+This ADR generalizes ADR-0004's explicit-selection protection to every circuit-breaker trip an
+explicit selection can hit — provider-wide (401/403/405/out-of-credits) and target-level (a single
+model's own trip) alike — not just out-of-credits, and not just provider-wide causes.
 
 ## Decision Drivers
 
 - **Selection-origin consistency** — whether an explicit selection is protected from silent
-  substitution should depend on how the model was selected (auto vs. explicit), not on why the
-  provider happens to be untrusted right now.
+  substitution should depend on how the model was selected (auto vs. explicit), not on why or at what
+  granularity (one model vs. the whole provider) the circuit breaker currently distrusts it.
 - **No wasted network calls** — a later explicit request arriving while a provider's circuit is
   already open (tripped by an earlier request, of any cause) should not need a doomed live call just
   to produce an honest error.
@@ -51,42 +52,56 @@ not just out-of-credits.
 
 ## Decision Outcome
 
-Chosen option: "Option B", because of **Selection-origin consistency** — the alternative (Option A)
-leaves a codebase inconsistency that would look arbitrary to the next person who hits it, and Option
-C protects against a failure mode (a single model's transient outage) that is not what an explicit
-provider/model selection is asserting a claim about.
+Chosen option: "Option C", because of **Selection-origin consistency**, pushed to its full conclusion.
+An earlier draft of this ADR chose Option B and rejected C on the grounds that a target-level trip (a
+single model's transient outage) "is not what an explicit provider/model selection is asserting a
+claim about." On reconsideration, that distinction is not one a client can act on: the client asked
+for one exact model, and whether the router quietly answers with a different one because the whole
+provider is untrusted or because just that one model is misbehaving, the surprise is the same. An
+explicit choice should never be silently overridden by the router for a circuit-breaker trip of any
+kind — the client asked for that exact model, and discovering afterward that a different one actually
+answered is a worse outcome than seeing a clear, honest error.
 
 Mechanism:
 
 - `RequestInterceptor.cs:480-497`'s substitution block currently substitutes on
   `_circuitBreaker.IsOpen(...)`/`IsProviderOpen(...)` unconditionally, whether the route was
-  auto-selected or explicit. This ADR changes that block so substitution *specifically for a
-  provider-wide trip* (`IsProviderOpen`) only fires when the request is auto-selected
-  (`isAutoSelectRequest`, or a `RoutingSubstitutionReason` other than `None`). An explicit selection
-  instead takes the "relay the error" path below. Target-level-only trips (`IsOpen` on a single
-  model's target, not a provider-wide trip) are unaffected and keep today's behavior for both
-  auto-selected and explicit requests — matching the ADR-0004 precedent this generalizes, which was
-  itself scoped to `RecordProviderFailure`'s provider-wide trip, not per-model outages.
+  auto-selected or explicit. This ADR changes that block so substitution *for any circuit-breaker
+  trip* — target-level (`IsOpen`) or provider-wide (`IsProviderOpen`) — only fires when the request is
+  auto-selected (`isAutoSelectRequest`, or a `RoutingSubstitutionReason` other than `None`). An
+  explicit selection instead takes the "relay the error" path below for either kind of trip. An
+  operator-driven Stop/disable (Governance's Stop toggle, or a model dropped by the last endpoint
+  scan) is unaffected by this and keeps substituting for explicit and auto-selected requests alike —
+  that is a deliberate administrative action, not an outage, and is outside what this ADR (or
+  ADR-0004) addresses.
 - **Trip discovered live, by this very request's attempt:** relay that attempt's real upstream error
   back to the client unchanged, exactly as ADR-0004 already does for its narrower out-of-credits
-  case.
-- **Trip already open before this request arrived:** skip the network call
-  `ShouldBypassProvider`/`IsProviderOpen` would otherwise silently swallow, and synthesize the
-  client-facing error from whichever track actually has a record, in this order:
-  1. `LiveTrafficStatus.Message` (ADR-0004's track) if present — the most likely case, and the only
-     one ADR-0004 itself needed to handle, since out-of-credits is always hot-path-detected.
-  2. `AdminActionStatus.Message` if `LiveTrafficStatus` has none but an admin action already recorded
-     why this provider is untrusted (e.g. a 401 first surfaced by "Refresh from endpoint").
-  3. A generic, circuit-breaker-sourced "provider is temporarily unavailable" message if neither
-     track has a record — a provider-wide trip with no recorded reason in either track (e.g. from a
-     lower-level condition the circuit breaker reacts to that doesn't build a text explanation
-     today).
+  case. (This applies to the provider-wide statuses this ADR generalizes to — 401/403/405/Gemini's
+  disguised-401/out-of-credits; a target-level trip discovered live, within this same request's own
+  outage cascade, e.g. a fresh 5xx, is ordinary same-request failover and is a separate mechanism from
+  bypassing an *already-open* circuit, unchanged by this ADR.)
+- **Trip already open before this request arrived** (both target-level and provider-wide): skip the
+  network call `ShouldBypass`/`ShouldBypassProvider`/`IsOpen`/`IsProviderOpen` would otherwise silently
+  swallow, and synthesize the client-facing error:
+  - **Provider-wide** (`IsProviderOpen`): from whichever track actually has a record, in this order:
+    1. `LiveTrafficStatus.Message` (ADR-0004's track) if present — the most likely case, and the only
+       one ADR-0004 itself needed to handle, since out-of-credits is always hot-path-detected.
+    2. `AdminActionStatus.Message` if `LiveTrafficStatus` has none but an admin action already
+       recorded why this provider is untrusted (e.g. a 401 first surfaced by "Refresh from
+       endpoint").
+    3. A generic, circuit-breaker-sourced "provider is temporarily unavailable" message if neither
+       track has a record.
+  - **Target-level** (`IsOpen` on a single model's target, provider not open): a generic
+    "model is temporarily unavailable" message — both interaction-status tracks are recorded
+    per-provider, not per-model, so there is no per-target record to draw from; borrowing the
+    provider-wide tracks' text here would risk misattributing an unrelated provider-wide cause to one
+    specific model.
 
 ### Consequences
 
-- Good, because explicit-selection protection is now consistent across trip causes: a client's
-  explicit choice is never silently overridden by *why* the provider is untrusted, resolving the
-  inconsistency ADR-0004 knowingly left open.
+- Good, because explicit-selection protection is now fully consistent: a client's explicit choice is
+  never silently overridden by the router for a circuit-breaker trip, regardless of whether the trip
+  is provider-wide or target-level, or why it happened.
 - Good, because it reuses ADR-0004's `LiveTrafficStatus` track and the circuit breaker's existing
   provider/target distinction rather than introducing new state.
 - Bad, because it touches `RequestInterceptor.cs`'s substitution block, which both the auto-select
@@ -96,9 +111,11 @@ Mechanism:
 - Bad, because the three-way message fallback (live-traffic → admin-action → generic) is a new piece
   of state-reading logic with its own edge cases (e.g. which track "wins" if both have a record for
   the same provider but disagree) that ADR-0004's narrower scope never had to handle.
-- Neutral, because target-level (single-model) trips remain out of scope for this protection — an
-  explicit request can still be substituted to a different model on transient per-model outages;
-  only a provider-wide trip triggers the "tell the truth" behavior.
+- Bad, because an explicit selection can now fail outright on a genuinely transient single-model blip
+  (e.g. a brief run of 5xxs from one endpoint) that a silent backup would previously have papered
+  over — the client sees an honest error instead of an invisible, working substitute. This is accepted
+  deliberately: never surprising an explicit choice is judged more valuable than the convenience of a
+  silent recovery the client never asked for.
 
 ## Pros and Cons of the Options
 
@@ -111,7 +128,7 @@ Mechanism:
   which will look arbitrary (or like a bug) to a future reader or an operator comparing the two
   behaviors.
 
-### Option B — Generalize to every provider-wide trip (chosen)
+### Option B — Generalize to every provider-wide trip
 
 - Good, because it removes the inconsistency directly, and reuses ADR-0004's track and the circuit
   breaker's existing provider/target split rather than adding new machinery.
@@ -120,19 +137,23 @@ Mechanism:
 - Bad, because it is a change to shared substitution logic (`RequestInterceptor.cs:480-497`) used by
   every request, auto-selected or not, raising the risk of an unintended behavior change for the
   auto-select path if the routing-origin check is implemented incorrectly.
+- Superseded during drafting by Option C below, before this ADR was ever accepted: Option B still
+  leaves an explicit selection silently substituted on a transient single-model trip, which on
+  reflection is the same kind of surprise this ADR exists to eliminate for provider-wide trips.
 
-### Option C — Also protect against target-level (single-model) trips
+### Option C — Also protect against target-level (single-model) trips (chosen)
 
-- Good, because it would be maximally consistent: an explicit selection is never substituted for any
-  reason, including a transient single-model outage.
+- Good, because it is maximally consistent: an explicit selection is never substituted for any
+  circuit-breaker-detected reason, including a transient single-model outage.
+- Good, because it reuses the exact same mechanism as Option B (relay-if-discovered-live,
+  synthesize-if-already-open) with no new detection or state — the only change is which circuit-open
+  checks route through it.
 - Bad, because a target-level trip is a narrower, often genuinely transient condition (e.g. a few
   consecutive 5xxs from one model endpoint) that the client's explicit selection did not assert
-  anything about the *account* being fine — conflating it with the provider-wide, account-level cases
-  this ADR and ADR-0004 are about would change behavior for a class of failure neither ADR was
-  written to address.
-- Bad, because it has no concrete motivating case in this conversation, unlike the provider-wide
-  401/out-of-credits precedent — expanding scope without a real driver risks solving a problem nobody
-  has yet.
+  anything about the *account* being fine, unlike the provider-wide, account-level cases ADR-0004 was
+  originally written around — an explicit request can now fail outright on a blip a silent backup
+  would have absorbed. Accepted deliberately: an explicit choice is judged to deserve the truth even
+  for a transient failure, not only an account-level one.
 
 ## More Information
 

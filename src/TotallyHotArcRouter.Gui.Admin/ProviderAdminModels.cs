@@ -57,11 +57,18 @@ namespace TotallyHot.ArcRouter.Gui.Admin;
 /// currently populated for <c>anthropic</c> only, or <see langword="null"/> when nothing has been fetched
 /// yet (no Admin API key configured, or the first cycle hasn't run).
 /// </param>
-/// <param name="LastInteraction">
+/// <param name="AdminAction">
 /// The outcome of the most recent admin-initiated interaction with this provider (refresh from endpoint,
 /// capability scan, discovery), or <see langword="null"/> when none has happened since the proxy started.
 /// Drives the warning icon shown next to the provider name in Governance &gt; Providers when the last
-/// interaction failed - e.g. an expired API key.
+/// admin action failed - e.g. an expired API key.
+/// </param>
+/// <param name="LiveTraffic">
+/// The outcome of the most recent classified live-traffic event from the hot request path (e.g. an
+/// out-of-credits response - docs/adr/0004-surface-out-of-credits-provider-failures-on-the-providers-
+/// tab.md), or <see langword="null"/> when nothing has been classified since the proxy started.
+/// Independent of <paramref name="AdminAction"/> - drives its own, separate warning icon so both can show
+/// at once.
 /// </param>
 public sealed record ProviderAdminView(
     string Key,
@@ -84,19 +91,42 @@ public sealed record ProviderAdminView(
     DateTimeOffset? NextResetUtc = null,
     bool HasStoredAdminKey = false,
     ProviderReportedUsageAdminView? ReportedUsage = null,
-    ProviderInteractionStatusAdminView? LastInteraction = null);
+    ProviderInteractionStatusAdminView? AdminAction = null,
+    ProviderInteractionStatusAdminView? LiveTraffic = null);
 
 /// <summary>
-/// The outcome of the most recent admin-initiated interaction with one provider (refresh from endpoint,
-/// capability scan, discovery), mirroring the proxy's <c>ProviderInteractionStatus</c>. Backs the
-/// Governance card's warning icon: a card whose <see cref="Ok"/> is <see langword="false"/> shows a
-/// tooltip naming <see cref="Operation"/> and <see cref="Message"/>.
+/// Extensible classification of why a <see cref="ProviderAdminView.LiveTraffic"/> failure was recorded,
+/// mirroring the proxy's <c>ProviderInteractionKind</c>. Member order/values must stay in sync with that
+/// type - both sides serialize this as its numeric value (no <c>JsonStringEnumConverter</c> is configured
+/// on either the admin API or this client), so a mismatch would silently misclassify the wire value.
+/// </summary>
+public enum ProviderInteractionKindAdminView
+{
+    /// <summary>No specific classification - the default for the <c>AdminAction</c> track.</summary>
+    None = 0,
+
+    /// <summary>The provider's account is out of credits/quota/billing.</summary>
+    OutOfCredits,
+}
+
+/// <summary>
+/// The outcome of one recorded interaction with a provider - either an admin-initiated action (refresh
+/// from endpoint, capability scan, discovery) or a classified live-traffic outcome from the hot request
+/// path - mirroring the proxy's <c>ProviderInteractionStatus</c>. Backs a Governance card's warning icon:
+/// a card whose <see cref="Ok"/> is <see langword="false"/> shows a tooltip naming <see cref="Operation"/>
+/// and <see cref="Message"/>.
 /// </summary>
 /// <param name="Ok">Whether the interaction succeeded.</param>
-/// <param name="Operation">A short label for the interaction (e.g. <c>"Refresh from endpoint"</c>).</param>
+/// <param name="Operation">A short label for the interaction (e.g. <c>"Refresh from endpoint"</c> or <c>"Live traffic"</c>).</param>
 /// <param name="Message">A human-readable failure reason, or <see langword="null"/> when <paramref name="Ok"/> is set.</param>
 /// <param name="AtUtc">When the interaction completed.</param>
-public sealed record ProviderInteractionStatusAdminView(bool Ok, string Operation, string? Message, DateTimeOffset AtUtc);
+/// <param name="Kind">The classification of a live-traffic failure, or <see cref="ProviderInteractionKindAdminView.None"/> for an AdminAction-track record.</param>
+public sealed record ProviderInteractionStatusAdminView(
+    bool Ok,
+    string Operation,
+    string? Message,
+    DateTimeOffset AtUtc,
+    ProviderInteractionKindAdminView Kind = ProviderInteractionKindAdminView.None);
 
 /// <summary>A provider's own reported per-model daily token usage (docs/router/secrets-at-rest-plan.md §8.1), mirroring the proxy's <c>ProviderReportedUsageView</c>.</summary>
 /// <param name="Rows">Every currently-stored row, ordered by day then model.</param>
