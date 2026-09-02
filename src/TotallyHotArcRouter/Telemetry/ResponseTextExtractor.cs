@@ -59,9 +59,10 @@ public sealed class ResponseTextExtractor : IResponseTextExtractor
             return false;
         }
 
-        // Unknown/unsupported provider (e.g. alibaba, zhipu, moonshot, minimax): no registration, so no
-        // parser shape to dispatch on. Fail gracefully rather than guessing at an unverified response shape.
-        if (!_providerRegistrations.TryGetValue(provider, out var registration))
+        // Unknown/unsupported provider (e.g. alibaba, zhipu, moonshot, minimax), or a null/blank key: no
+        // registration, so no parser shape to dispatch on. Fail gracefully rather than guessing at an
+        // unverified response shape, or throwing on a Dictionary null-key lookup for a public method.
+        if (string.IsNullOrEmpty(provider) || !_providerRegistrations.TryGetValue(provider, out var registration))
         {
             return false;
         }

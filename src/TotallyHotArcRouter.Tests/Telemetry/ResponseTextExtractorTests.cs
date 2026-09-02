@@ -100,5 +100,16 @@ public class ResponseTextExtractorTests
         Assert.True(result);
         Assert.Equal("hi", text);
     }
+
+    [Fact]
+    public void TryExtractText_NullProvider_FailsClosedInsteadOfThrowing()
+    {
+        var body = Encoding.UTF8.GetBytes("{\"choices\":[{\"message\":{\"content\":\"hi\"}}]}");
+
+        var result = _extractor.TryExtractText(null!, isStreaming: false, body, out var text);
+
+        Assert.False(result);
+        Assert.Equal(string.Empty, text);
+    }
 }
 

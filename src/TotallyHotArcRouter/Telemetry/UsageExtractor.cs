@@ -65,8 +65,14 @@ public sealed class UsageExtractor : IUsageExtractor
     /// <see cref="TryExtractUsage"/> dispatch can never drift apart over which providers are native-shaped.
     /// </summary>
     /// <param name="provider">The provider key (e.g. <c>"anthropic"</c>), case-insensitive.</param>
+    /// <returns>
+    /// <see langword="false"/> for a <see langword="null"/> or blank <paramref name="provider"/> as well
+    /// as an unrecognized one - this public hot-path helper fails closed rather than throwing, matching
+    /// its pre-registry-table <c>string.Equals</c> behavior.
+    /// </returns>
     public static bool SupportsNativeShape(string provider) =>
-        DefaultRegistrationsForStaticLookup.TryGetValue(provider, out var registration)
+        !string.IsNullOrEmpty(provider)
+        && DefaultRegistrationsForStaticLookup.TryGetValue(provider, out var registration)
         && registration.UsageParserShape == UsageParserShape.Native;
 
     /// <inheritdoc />
@@ -79,9 +85,10 @@ public sealed class UsageExtractor : IUsageExtractor
             return false;
         }
 
-        // Unknown/unsupported provider (e.g. alibaba, zhipu, moonshot, minimax): no registration, so no
-        // parser shape to dispatch on. Fail gracefully rather than guessing at an unverified response shape.
-        if (!_providerRegistrations.TryGetValue(provider, out var registration))
+        // Unknown/unsupported provider (e.g. alibaba, zhipu, moonshot, minimax), or a null/blank key: no
+        // registration, so no parser shape to dispatch on. Fail gracefully rather than guessing at an
+        // unverified response shape, or throwing on a Dictionary null-key lookup for a public method.
+        if (string.IsNullOrEmpty(provider) || !_providerRegistrations.TryGetValue(provider, out var registration))
         {
             return false;
         }

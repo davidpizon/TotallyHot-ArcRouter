@@ -101,9 +101,22 @@ public class UsageExtractorTests
     [InlineData("openai", false)]
     [InlineData("gemini", false)]
     [InlineData("ollama", false)]
-    public void SupportsNativeShape_OnlyAnthropicHasARegisteredNativeParser(string provider, bool expected)
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    public void SupportsNativeShape_OnlyAnthropicHasARegisteredNativeParser(string? provider, bool expected)
     {
-        Assert.Equal(expected, UsageExtractor.SupportsNativeShape(provider));
+        Assert.Equal(expected, UsageExtractor.SupportsNativeShape(provider!));
+    }
+
+    [Fact]
+    public void TryExtractUsage_NullProvider_FailsClosedInsteadOfThrowing()
+    {
+        var body = Encoding.UTF8.GetBytes("{\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}");
+
+        var result = _extractor.TryExtractUsage(null!, isStreaming: false, body, out var usage);
+
+        Assert.False(result);
+        Assert.Equal(default, usage);
     }
 }
 
