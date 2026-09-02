@@ -83,10 +83,16 @@ public sealed class RateLimitRepository : PriceCatalogRepositoryBase
             }
         }
 
+        // Scoped to this provider (not a global sweep) so SQLite can drive the delete off the leading edge
+        // of ix_provider_rate_limit_history_dedupe's (provider_key, minute_bucket, header_name) index - a
+        // range scan bounded to this provider's own rows - instead of a full-table scan on every capture,
+        // which is what an unscoped WHERE minute_bucket < $cutoff would force as the table grows across
+        // every provider.
         using (var prune = connection.CreateCommand())
         {
             prune.Transaction = transaction;
-            prune.CommandText = "DELETE FROM provider_rate_limit_history WHERE minute_bucket < $cutoff;";
+            prune.CommandText = "DELETE FROM provider_rate_limit_history WHERE provider_key = $key AND minute_bucket < $cutoff;";
+            prune.Parameters.AddWithValue("$key", providerKey);
             prune.Parameters.AddWithValue("$cutoff", historyCutoff);
             prune.ExecuteNonQuery();
         }

@@ -136,6 +136,31 @@ public class RateLimitRepositoryTests
     }
 
     [Fact]
+    public void UpsertRateLimitHeaders_History_PruneIsScopedToTheWritingProvider()
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRateLimitRepository();
+        var database = temp.Database;
+        var old = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var recent = old.AddDays(31);
+
+        // An old row for a different provider than the one about to write - the prune must not delete it
+        // just because it's old; it should only ever touch the writing provider's own rows.
+        repository.UpsertRateLimitHeaders(
+            "openai",
+            [new RateLimitHeaderRow("x-ratelimit-remaining-requests", "1000")],
+            old);
+        Assert.Equal(1, CountHistoryRows(database, "openai"));
+
+        repository.UpsertRateLimitHeaders(
+            "anthropic",
+            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "999")],
+            recent);
+
+        Assert.Equal(1, CountHistoryRows(database, "openai"));
+    }
+
+    [Fact]
     public void GetRateLimitHistory_ReturnsBucketsChronologicallyWithOnlyCapturedHeaders()
     {
         using var temp = new TempDatabase();
