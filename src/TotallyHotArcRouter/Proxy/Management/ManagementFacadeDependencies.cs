@@ -1,7 +1,5 @@
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
-using TotallyHot.ArcRouter.Telemetry;
-using TotallyHot.ArcRouter.Transcripts;
 
 namespace TotallyHot.ArcRouter.Proxy.Management;
 
@@ -42,9 +40,6 @@ public sealed record ManagementFacadeDependencies
     /// <summary>Operator price overrides, backing <c>PUT/DELETE /admin/price-overrides</c>.</summary>
     public ModelAliasOverrideStore? OverrideStore { get; init; }
 
-    /// <summary>Usage rollups, backing <c>GET /admin/usage/summary</c> and <c>GET /admin/usage/rollup</c>.</summary>
-    public IUsageRollupStore? RollupStore { get; init; }
-
     /// <summary>
     /// How old a captured rate-limit snapshot may be before <see cref="ProviderRateLimitView.IsStale"/> is
     /// set (§5.9). Defaults to 15 minutes.
@@ -60,9 +55,6 @@ public sealed record ManagementFacadeDependencies
     /// the write-only invariant of docs/router/secrets-at-rest-plan.md §4 a compile-time boundary.
     /// </summary>
     public ISecretReader? SecretReader { get; init; }
-
-    /// <summary>Backs Cost Analytics' "Routing ROI" feed, <c>GET /admin/usage/routing-roi</c> (Phase T4).</summary>
-    public ITaxonomyComparisonStore? ComparisonStore { get; init; }
 
     /// <summary>
     /// Tracks the outcome of the most recent admin-initiated interaction with each provider (refresh from
