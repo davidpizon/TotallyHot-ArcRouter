@@ -33,7 +33,7 @@ public sealed class SetBudgetTests
     public void SetBudget_WithRollingHoursWindow_PersistsWindowKindAndHours()
     {
         using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
+        var repository = temp.CreateBudgetRepository();
         var budgetStore = temp.CreateBudgetStore(repository);
         var store = new InMemoryProviderConfigStore(SeedOptions());
         var facade = CreateFacade(budgetStore: budgetStore, store: store);
@@ -50,7 +50,7 @@ public sealed class SetBudgetTests
     public void SetBudget_RollingHoursWithoutHours_IsInvalidRequest()
     {
         using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
+        var repository = temp.CreateBudgetRepository();
         var budgetStore = temp.CreateBudgetStore(repository);
         var store = new InMemoryProviderConfigStore(SeedOptions());
         var facade = CreateFacade(budgetStore: budgetStore, store: store);
@@ -65,7 +65,7 @@ public sealed class SetBudgetTests
     public void SetBudget_NoWindowSpecified_DefaultsToMonthly()
     {
         using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
+        var repository = temp.CreateBudgetRepository();
         var budgetStore = temp.CreateBudgetStore(repository);
         var store = new InMemoryProviderConfigStore(SeedOptions());
         var facade = CreateFacade(budgetStore: budgetStore, store: store);

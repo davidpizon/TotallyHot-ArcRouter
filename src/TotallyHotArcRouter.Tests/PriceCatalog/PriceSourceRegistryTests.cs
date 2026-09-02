@@ -74,7 +74,7 @@ public class PriceSourceRegistryTests
         // A store that has not reloaded yet (the window before the startup check runs) reports everything
         // disabled. Nothing should poll in that window - erring toward "don't fetch" is the safe direction.
         using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
+        var repository = temp.CreateSourceRepository();
         using var toggleStore = new PriceSourceToggleStore(repository, NullLogger<PriceSourceToggleStore>.Instance);
         using var registry = Build(new PriceCatalogOptions(), toggleStore);
 

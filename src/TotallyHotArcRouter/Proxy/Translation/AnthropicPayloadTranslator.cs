@@ -185,7 +185,7 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
             switch (role)
             {
                 case "system":
-                    if (ExtractText(message["content"]) is { Length: > 0 } systemText)
+                    if (PayloadTranslationHelpers.ExtractText(message["content"]) is { Length: > 0 } systemText)
                     {
                         systemParts.Add(systemText);
                     }
@@ -222,7 +222,7 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
     /// <summary>Appends a user message's text as a single Anthropic text content block, substituting a blank space when the text is empty since Anthropic rejects empty text blocks.</summary>
     private static void AppendUserContent(JsonArray messages, JsonObject message)
     {
-        var text = ExtractText(message["content"]);
+        var text = PayloadTranslationHelpers.ExtractText(message["content"]);
         var block = new JsonObject { ["type"] = "text", ["text"] = string.IsNullOrEmpty(text) ? " " : text };
         AppendMergedContent(messages, "user", new JsonArray { block });
     }
@@ -252,7 +252,7 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
             blocks.Add(new JsonObject { ["type"] = "thinking", ["thinking"] = reasoningText });
         }
 
-        if (ExtractText(message["content"]) is { Length: > 0 } text)
+        if (PayloadTranslationHelpers.ExtractText(message["content"]) is { Length: > 0 } text)
         {
             blocks.Add(new JsonObject { ["type"] = "text", ["text"] = text });
         }
@@ -281,7 +281,7 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
                     ["type"] = "tool_use",
                     ["id"] = id,
                     ["name"] = name,
-                    ["input"] = ParseArgumentsObject(function["arguments"]),
+                    ["input"] = PayloadTranslationHelpers.ParseArgumentsObject(function["arguments"]),
                 });
             }
         }
@@ -297,7 +297,7 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
     /// <summary>Appends a tool result as an Anthropic tool_result block on a user turn, falling back to a plain labeled text block when the message lacks a tool_call_id so the content isn't silently dropped.</summary>
     private static void AppendToolResult(JsonArray messages, JsonObject message)
     {
-        var content = ExtractText(message["content"]) ?? string.Empty;
+        var content = PayloadTranslationHelpers.ExtractText(message["content"]) ?? string.Empty;
 
         // Anthropic requires a non-empty tool_use_id on every tool_result block; a legacy role:"function"
         // message (or a malformed/partial client payload) may omit tool_call_id. Emitting a tool_result
@@ -410,7 +410,7 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
 
         var openAi = new JsonObject
         {
-            ["id"] = root["id"]?.GetValue<string>() ?? GenerateCompletionId(),
+            ["id"] = root["id"]?.GetValue<string>() ?? PayloadTranslationHelpers.GenerateCompletionId(),
             ["object"] = "chat.completion",
             ["created"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
             ["model"] = root["model"]?.GetValue<string>() ?? string.Empty,
@@ -596,73 +596,7 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
     /// <inheritdoc />
     public IStreamTranslator CreateStreamTranslator() => new AnthropicStreamTranslator();
 
-    // --- shared helpers, also used by AnthropicStreamTranslator ---
-
-    /// <summary>Extracts plain text from an OpenAI message <c>content</c> field (a string, or an array of content blocks - only <c>text</c> blocks contribute).</summary>
-    internal static string? ExtractText(JsonNode? content)
-    {
-        switch (content)
-        {
-            case null:
-                return null;
-            case JsonValue value when value.TryGetValue<string>(out var text):
-                return text;
-            case JsonArray array:
-                var builder = new StringBuilder();
-                foreach (var element in array)
-                {
-                    if (element is JsonObject obj &&
-                        obj["type"]?.GetValue<string>() == "text" &&
-                        obj["text"]?.GetValue<string>() is { } partText)
-                    {
-                        builder.Append(partText);
-                    }
-                }
-
-                return builder.ToString();
-            default:
-                return null;
-        }
-    }
-
-    /// <summary>Parses an OpenAI tool-call <c>arguments</c> string (JSON text) into an Anthropic <c>input</c> object; falls back to an empty object.</summary>
-    internal static JsonNode ParseArgumentsObject(JsonNode? arguments)
-    {
-        if (arguments is JsonObject alreadyObject)
-        {
-            return alreadyObject.DeepClone();
-        }
-
-        if (arguments is JsonValue value && value.TryGetValue<string>(out var text) &&
-            TryParseJsonObject(text) is { } parsed)
-        {
-            return parsed;
-        }
-
-        return new JsonObject();
-    }
-
-    /// <summary>Attempts to parse <paramref name="text"/> as a JSON object, returning null for blank input or a JSON value that isn't an object (e.g. malformed JSON or a non-object arguments payload) instead of throwing.</summary>
-    internal static JsonObject? TryParseJsonObject(string? text)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return null;
-        }
-
-        try
-        {
-            return JsonNode.Parse(text) as JsonObject;
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
-
-    /// <summary>Generates a unique OpenAI-style completion id (<c>chatcmpl-&lt;guid&gt;</c>) for use when the upstream response omits one.</summary>
-    internal static string GenerateCompletionId() =>
-        "chatcmpl-" + Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
+    // --- shared helpers now live in PayloadTranslationHelpers; see below for the provider-specific ones ---
 
     /// <summary>
     /// Attempts to extract Anthropic's native error shape (<c>{"type":"error","error":{"type":...,"message":...}}</c>)

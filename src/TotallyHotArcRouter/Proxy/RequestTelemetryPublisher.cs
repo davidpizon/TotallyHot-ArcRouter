@@ -136,6 +136,108 @@ internal sealed class RequestTelemetryPublisher
         string? taskText = null,
         string? dimBestModel = null)
     {
+        var (requestBody, sessionId, turnNumber, isSynthesized) = ResolveSessionAndTurn(context, rewrittenRequestBody);
+
+        var (
+            requestedModel,
+            substitutionReason,
+            promptTokens,
+            completionTokens,
+            cacheCreationTokens,
+            cacheReadTokens,
+            estimatedCostUsd,
+            costConfidence,
+            usageExtracted,
+            usageShapeProvider,
+            usageShapeBytes) = ExtractUsageAndCost(
+                route,
+                requestedModelName,
+                isFallback,
+                resolutionReason,
+                telemetryShapeProvider,
+                capturedResponseBytes,
+                nativeResponseBytes,
+                isStreaming,
+                tailScanner);
+
+        await RecordSpendAndBudgetAsync(
+            route,
+            requestedModel,
+            promptTokens,
+            completionTokens,
+            cacheCreationTokens,
+            cacheReadTokens,
+            estimatedCostUsd,
+            costConfidence,
+            usageExtracted,
+            sessionId,
+            turnNumber,
+            upstreamHeaders).ConfigureAwait(false);
+
+        var (newestUserMessage, requestSummary, responseSummary, responseText, correlationId) = ExtractResponseTextAndCachePending(
+            requestBody,
+            usageShapeProvider,
+            usageShapeBytes,
+            isStreaming,
+            sessionId,
+            turnNumber,
+            taskEmbedding,
+            estimatedCostUsd,
+            isExploratory,
+            propensity,
+            classification);
+
+        await PersistTranscriptAsync(
+            correlationId,
+            requestedModelName,
+            route,
+            classification,
+            taskText,
+            responseText,
+            estimatedCostUsd,
+            isExploratory,
+            propensity,
+            promptTokens,
+            completionTokens,
+            dimBestModel).ConfigureAwait(false);
+
+        await PublishTelemetryEventAsync(
+            sessionId,
+            turnNumber,
+            isSynthesized,
+            requestedModel,
+            route,
+            isFallback,
+            promptTokens,
+            completionTokens,
+            estimatedCostUsd,
+            isStreaming,
+            latencyToHeadersMs,
+            totalDurationMs,
+            statusCode,
+            cacheCreationTokens,
+            cacheReadTokens,
+            costConfidence,
+            requestSummary,
+            responseSummary,
+            correlationId,
+            routerTokens,
+            substitutionReason,
+            cancellationToken,
+            responseText,
+            newestUserMessage).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// M1 sub-phase 1 (docs/router/code-smell-refactoring-plan.md): parses the rewritten request body and
+    /// resolves this request's session id and turn number - an explicit id via <see cref="_sessionIdResolver"/>,
+    /// or else a synthesized one via <see cref="_continuityMatcher"/>'s message-history matching - and
+    /// advances the per-session counter via <see cref="_turnTracker"/>. Logs the same session-resolution
+    /// diagnostics <see cref="PublishAsync"/> always has, at the same call site, just moved here verbatim.
+    /// </summary>
+    private (JsonObject? RequestBody, string SessionId, int TurnNumber, bool IsSynthesized) ResolveSessionAndTurn(
+        HttpContext context, byte[] rewrittenRequestBody)
+    {
         var requestBody = TryParseJsonObject(rewrittenRequestBody);
         var resolvedSessionId = _sessionIdResolver.Resolve(context.Request.Headers, requestBody);
 
@@ -181,6 +283,38 @@ internal sealed class RequestTelemetryPublisher
             _logger.LogDebug("Resolved session {SessionId}, turn {TurnNumber}.", LogRedaction.Sanitize(sessionId), turnNumber);
         }
 
+        return (requestBody, sessionId, turnNumber, isSynthesized);
+    }
+
+    /// <summary>
+    /// M1 sub-phase 2: resolves the reported requested model and substitution reason, then extracts token
+    /// usage - trying, in order, the native (pre-translation) capture, the translated/client-shape capture,
+    /// and finally <paramref name="tailScanner"/> (§5.11) - and prices it via <see cref="_priceLookup"/> (or
+    /// <see cref="ModelPrice.Free"/> for a free provider). Unchanged fallback order and reasoning from the
+    /// original inlined method; see the inline comments below for why each fallback exists.
+    /// </summary>
+    private (
+        string RequestedModel,
+        RoutingSubstitutionReason SubstitutionReason,
+        int? PromptTokens,
+        int? CompletionTokens,
+        int? CacheCreationTokens,
+        int? CacheReadTokens,
+        decimal? EstimatedCostUsd,
+        CostConfidence CostConfidence,
+        bool UsageExtracted,
+        string UsageShapeProvider,
+        byte[] UsageShapeBytes) ExtractUsageAndCost(
+            ResolvedModelRoute route,
+            string requestedModelName,
+            bool isFallback,
+            RoutingSubstitutionReason resolutionReason,
+            string telemetryShapeProvider,
+            byte[] capturedResponseBytes,
+            byte[]? nativeResponseBytes,
+            bool isStreaming,
+            IncrementalUsageScanner? tailScanner)
+    {
         // The client's literal requested model (docs/router/orchestrator-live-path-plan.md §M2.2) - always
         // distinct from route.ModelName (the model that served) when any substitution or failover
         // occurred; substitutionReason below names why. isFallback additionally tells the dashboard the
@@ -311,6 +445,40 @@ internal sealed class RequestTelemetryPublisher
             }
         }
 
+        return (
+            requestedModel,
+            substitutionReason,
+            promptTokens,
+            completionTokens,
+            cacheCreationTokens,
+            cacheReadTokens,
+            estimatedCostUsd,
+            costConfidence,
+            usageExtracted,
+            usageShapeProvider,
+            usageShapeBytes);
+    }
+
+    /// <summary>
+    /// M1 sub-phase 3: records this request's spend, budget usage, durable ledger row, and OTLP/Prometheus
+    /// metrics - every one of these best-effort, matching the original inlined method's reasoning for using
+    /// <see cref="CancellationToken.None"/> throughout (this runs after the response has already been fully
+    /// sent, so recording must not be cancellable by the request's own lifetime).
+    /// </summary>
+    private async Task RecordSpendAndBudgetAsync(
+        ResolvedModelRoute route,
+        string requestedModel,
+        int? promptTokens,
+        int? completionTokens,
+        int? cacheCreationTokens,
+        int? cacheReadTokens,
+        decimal? estimatedCostUsd,
+        CostConfidence costConfidence,
+        bool usageExtracted,
+        string sessionId,
+        int turnNumber,
+        System.Net.Http.Headers.HttpResponseHeaders? upstreamHeaders)
+    {
         // Best-effort, like every other telemetry side-effect on this path - see SpendTracker's own
         // internal try/catch around its file write. Recorded even when usage/cost couldn't be
         // determined, so the running request count stays accurate; it just contributes zero cost/tokens.
@@ -378,7 +546,27 @@ internal sealed class RequestTelemetryPublisher
         {
             EmitUsageMetrics(route.Provider, requestedModel, promptTokens, completionTokens, cacheCreationTokens, cacheReadTokens, estimatedCostUsd);
         }
+    }
 
+    /// <summary>
+    /// M1 sub-phase 4: extracts the newest user message and the response text (used both for the telemetry
+    /// event's truncated summaries and for the quality-verifier ingress prompt below), computes this
+    /// request's correlation id, and seeds every pending-cache lookup a later-arriving background job
+    /// (embedding memory scoring, the judge shadow-scorer) keys off that same correlation id.
+    /// </summary>
+    private (string? NewestUserMessage, string? RequestSummary, string? ResponseSummary, string? ResponseText, string CorrelationId) ExtractResponseTextAndCachePending(
+        JsonObject? requestBody,
+        string usageShapeProvider,
+        byte[] usageShapeBytes,
+        bool isStreaming,
+        string sessionId,
+        int turnNumber,
+        float[]? taskEmbedding,
+        decimal? estimatedCostUsd,
+        bool isExploratory,
+        double propensity,
+        Router.Classification.RequestClassification? classification)
+    {
         // Extracted once and reused below for the quality-ingress prompt - both read the same newest-user-
         // message text off the same already-parsed requestBody, so a second walk of its messages array
         // would just repeat the first.
@@ -432,6 +620,30 @@ internal sealed class RequestTelemetryPublisher
             _pendingResponseTextCache?.Set(correlationId, responseText);
         }
 
+        return (newestUserMessage, requestSummary, responseSummary, responseText, correlationId);
+    }
+
+    /// <summary>
+    /// M1 sub-phase 5: writes this request's single transcript row, best-effort and off the hot path in
+    /// spirit (the response has already been fully sent to the client by this point). Gated on
+    /// <see cref="Models.RoutingOptions.EnableAdaptiveRouting"/> read live from <see cref="_routingOptionsMonitor"/>
+    /// (not captured once), and wrapped in its own try/catch so a transcript-store failure can never surface
+    /// as a routing failure, matching every other telemetry side-effect on this path.
+    /// </summary>
+    private async Task PersistTranscriptAsync(
+        string correlationId,
+        string requestedModelName,
+        ResolvedModelRoute route,
+        Router.Classification.RequestClassification? classification,
+        string? taskText,
+        string? responseText,
+        decimal? estimatedCostUsd,
+        bool isExploratory,
+        double propensity,
+        int? promptTokens,
+        int? completionTokens,
+        string? dimBestModel)
+    {
         // docs/router/self-organizing-classification-plan.md Phase T1a/T1b: the transcript store's single
         // insert. Best-effort and off the hot path in spirit (the response has already been fully sent to
         // the client by this point) - gated on TranscriptOptions.Enabled so a disabled install creates no
@@ -471,7 +683,40 @@ internal sealed class RequestTelemetryPublisher
                 _logger.LogWarning(ex, "Failed to write a transcript row for correlation {CorrelationId}; continuing without it.", correlationId);
             }
         }
+    }
 
+    /// <summary>
+    /// M1 sub-phase 6: builds the <see cref="RoutingTelemetryEvent"/> for this request, publishes it via
+    /// <see cref="_telemetryPublisher"/>, and - off-path, best-effort - hands the completed response to the
+    /// quality verifier ingress. The last side-effect on this path, matching the original inlined method's
+    /// ordering.
+    /// </summary>
+    private async Task PublishTelemetryEventAsync(
+        string sessionId,
+        int turnNumber,
+        bool isSynthesized,
+        string requestedModel,
+        ResolvedModelRoute route,
+        bool isFallback,
+        int? promptTokens,
+        int? completionTokens,
+        decimal? estimatedCostUsd,
+        bool isStreaming,
+        long latencyToHeadersMs,
+        long totalDurationMs,
+        int statusCode,
+        int? cacheCreationTokens,
+        int? cacheReadTokens,
+        CostConfidence costConfidence,
+        string? requestSummary,
+        string? responseSummary,
+        string correlationId,
+        int routerTokens,
+        RoutingSubstitutionReason substitutionReason,
+        CancellationToken cancellationToken,
+        string? responseText,
+        string? newestUserMessage)
+    {
         // What routing this request cost us, charged at the self-hosted rate (research-doc §5.1: TotTok is
         // router + model, so routing overhead is the router's to carry). Kept separate from
         // estimatedCostUsd - which is what the upstream provider charged - because a savings figure has to

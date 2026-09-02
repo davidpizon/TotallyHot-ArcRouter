@@ -5,19 +5,16 @@ namespace TotallyHot.ArcRouter.Gui.Telemetry;
 
 /// <summary>
 /// Thrown when a persisted-sessions read call fails. Carries a message fit to render in the Sessions tab
-/// rather than a raw <see cref="RpcException"/>, mirroring <see cref="RoutingModeAdminException"/>.
+/// rather than a raw <see cref="RpcException"/>, mirroring <see cref="RoutingModeAdminException"/>. See
+/// <see cref="GrpcAdminException.IsUnavailable"/>'s remarks.
 /// </summary>
-public sealed class PersistedSessionsClientException : Exception
+public sealed class PersistedSessionsClientException : GrpcAdminException
 {
     /// <summary>Initializes a new instance of the <see cref="PersistedSessionsClientException"/> class.</summary>
     public PersistedSessionsClientException(string message, Exception? innerException = null, bool isUnavailable = false)
-        : base(message, innerException)
+        : base(message, innerException, isUnavailable)
     {
-        IsUnavailable = isUnavailable;
     }
-
-    /// <summary>Gets whether the call failed because the router could not be reached.</summary>
-    public bool IsUnavailable { get; }
 }
 
 /// <summary>
@@ -48,20 +45,17 @@ public interface IPersistedSessionsClient
 /// <c>net10.0</c> library rather than the Windows-only MAUI project so CI can unit-test it, exactly like
 /// <see cref="RoutingModeAdminClient"/>.
 /// </summary>
-public sealed class PersistedSessionsClient : IPersistedSessionsClient, IDisposable
+public sealed class PersistedSessionsClient
+    : GrpcAdminClientBase<Contract.TelemetryService.TelemetryServiceClient, PersistedSessionsClientException>,
+      IPersistedSessionsClient
 {
-    private readonly Contract.TelemetryService.TelemetryServiceClient _client;
-    private readonly IDisposable? _ownedChannel;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="PersistedSessionsClient"/> class, creating and owning
     /// a channel to <paramref name="serverAddress"/>.
     /// </summary>
     public PersistedSessionsClient(string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
+        : base(serverAddress, callInvoker => new Contract.TelemetryService.TelemetryServiceClient(callInvoker))
     {
-        var channel = TelemetryChannelFactory.Create(serverAddress);
-        _ownedChannel = channel;
-        _client = new Contract.TelemetryService.TelemetryServiceClient(TelemetryChannelFactory.Authenticated(channel));
     }
 
     /// <summary>
@@ -70,10 +64,8 @@ public sealed class PersistedSessionsClient : IPersistedSessionsClient, IDisposa
     /// channel's lifetime.
     /// </summary>
     public PersistedSessionsClient(Contract.TelemetryService.TelemetryServiceClient client)
+        : base(client)
     {
-        ArgumentNullException.ThrowIfNull(client);
-        _client = client;
-        _ownedChannel = null;
     }
 
     /// <inheritdoc />
@@ -81,7 +73,7 @@ public sealed class PersistedSessionsClient : IPersistedSessionsClient, IDisposa
     {
         try
         {
-            var response = await _client
+            var response = await Client
                 .ListPersistedSessionsAsync(new Contract.ListPersistedSessionsRequest { Limit = limit }, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
 
@@ -91,7 +83,7 @@ public sealed class PersistedSessionsClient : IPersistedSessionsClient, IDisposa
         }
         catch (RpcException ex)
         {
-            throw Wrap(ex);
+            throw Wrap(ex, "Could not read persisted sessions");
         }
     }
 
@@ -110,15 +102,7 @@ public sealed class PersistedSessionsClient : IPersistedSessionsClient, IDisposa
         OutputTokens: t.HasOutputTokens ? t.OutputTokens : null,
         MemoryEntryId: t.HasMemoryEntryId ? t.MemoryEntryId : null);
 
-    // Unavailable means the proxy isn't running, which is an ordinary state for a GUI that can outlive it -
-    // so it gets a plain-language message rather than a gRPC status dump, and is flagged so the caller can
-    // tell a dead connection from a rejected request without parsing the text. Mirrors RoutingModeAdminClient.Wrap.
-    /// <summary>Wraps an <see cref="RpcException"/> into a <see cref="PersistedSessionsClientException"/>, flagging router-unreachable errors distinctly.</summary>
-    private static PersistedSessionsClientException Wrap(RpcException ex) =>
-        ex.StatusCode == StatusCode.Unavailable
-            ? new PersistedSessionsClientException("Could not read persisted sessions: the router is not reachable.", ex, isUnavailable: true)
-            : new PersistedSessionsClientException($"Could not read persisted sessions: {ex.Status.Detail}", ex);
-
     /// <inheritdoc />
-    public void Dispose() => _ownedChannel?.Dispose();
+    protected override PersistedSessionsClientException CreateException(string message, Exception? innerException, bool isUnavailable) =>
+        new(message, innerException, isUnavailable);
 }

@@ -1,0 +1,682 @@
+{
+  "Conversations": [
+    {
+      "Id": "sess-001",
+      "Title": "Code Review Analysis - PR #4521",
+      "FirstTimestamp": "14:15:32",
+      "LastTimestamp": "14:22:18",
+      "TotalCost": 0.045230,
+      "TotalPromptTokens": 15456,
+      "TotalCompletionTokens": 3894,
+      "HasFallbackTurns": false,
+      "Turns": [
+        {
+          "Id": "sess-001-t1",
+          "Agent": "Code Review Bot",
+          "Model": "claude-3-haiku",
+          "TurnNumber": 1,
+          "PromptTokens": 2104,
+          "CompletionTokens": 891,
+          "RoutingRoi": 85.01,
+          "TotalCost": 0.006310,
+          "ToolExecutionSteps": 2,
+          "CacheHitRate": 0,
+          "TimeToFirstTokenMs": 245,
+          "ContextBufferPercent": 26.2,
+          "Timestamp": "14:15:32",
+          "RoutingSteps": [
+            {
+              "Status": "Ok",
+              "Message": "Code diff parsed (214 changed lines)"
+            },
+            {
+              "Status": "Ok",
+              "Message": "Anthropic budget nominal; claude-3-haiku selected"
+            },
+            {
+              "Status": "Info",
+              "Message": "Route Confirmed: claude-3-haiku"
+            }
+          ],
+          "RequestSummary": "Review the diff for PR #4521 (src/auth/token_service.py, 214 changed lines) and flag any security issues.",
+          "ResponseSummary": "Found 3 issues: missing null check on refresh_token (L87), unbounded retry loop (L112), and the token is logged in plaintext (L145).",
+          "IsFallback": false,
+          "TimestampUtc": "0001-01-01T00:00:00+00:00",
+          "CostConfidence": null,
+          "RequestedModel": null,
+          "RoutedModel": null,
+          "SubstitutionReason": null
+        },
+        {
+          "Id": "sess-001-t2",
+          "Agent": "Code Review Bot",
+          "Model": "claude-3-haiku",
+          "TurnNumber": 2,
+          "PromptTokens": 3240,
+          "CompletionTokens": 1205,
+          "RoutingRoi": 84.50,
+          "TotalCost": 0.009870,
+          "ToolExecutionSteps": 3,
+          "CacheHitRate": 72,
+          "TimeToFirstTokenMs": 198,
+          "ContextBufferPercent": 40.5,
+          "Timestamp": "14:17:45",
+          "RoutingSteps": [
+            {
+              "Status": "Ok",
+              "Message": "History carried forward (3,240 prompt tokens)"
+            },
+            {
+              "Status": "Ok",
+              "Message": "Prompt cache hit: 2,333 tokens read from cache"
+            },
+            {
+              "Status": "Info",
+              "Message": "Route Confirmed: claude-3-haiku"
+            }
+          ],
+          "RequestSummary": "Suggest a concrete fix for the unbounded retry loop you flagged at L112.",
+          "ResponseSummary": "Replace the while-loop with a tenacity retry decorator: stop_after_attempt(3) with exponential backoff, re-raising on final failure.",
+          "IsFallback": false,
+          "TimestampUtc": "0001-01-01T00:00:00+00:00",
+          "CostConfidence": null,
+          "RequestedModel": null,
+          "RoutedModel": null,
+          "SubstitutionReason": null
+        },
+        {
+          "Id": "sess-001-t3",
+          "Agent": "Code Review Bot",
+          "Model": "claude-3-haiku",
+          "TurnNumber": 3,
+          "PromptTokens": 4567,
+          "CompletionTokens": 1798,
+          "RoutingRoi": 83.20,
+          "TotalCost": 0.013820,
+          "ToolExecutionSteps": 4,
+          "CacheHitRate": 68,
+          "TimeToFirstTokenMs": 211,
+          "ContextBufferPercent": 57.0,
+          "Timestamp": "14:19:22",
+          "RoutingSteps": [
+            {
+              "Status": "Ok",
+              "Message": "History carried forward (4,567 prompt tokens)"
+            },
+            {
+              "Status": "Warn",
+              "Message": "Prompt growth trending up 41% turn-over-turn"
+            },
+            {
+              "Status": "Ok",
+              "Message": "Prompt cache hit: 3,106 tokens read from cache"
+            },
+            {
+              "Status": "Info",
+              "Message": "Route Confirmed: claude-3-haiku"
+            }
+          ],
+          "RequestSummary": "Apply the same retry pattern to session_service.py and show me the diff.",
+          "ResponseSummary": "Patched 2 call sites; session_refresh now shares the retry policy. Diff: \u002B18/-9 across session_service.py and retry_util.py.",
+          "IsFallback": false,
+          "TimestampUtc": "0001-01-01T00:00:00+00:00",
+          "CostConfidence": null,
+          "RequestedModel": null,
+          "RoutedModel": null,
+          "SubstitutionReason": null
+        },
+        {
+          "Id": "sess-001-t4",
+          "Agent": "Code Review Bot",
+          "Model": "claude-3-haiku",
+          "TurnNumber": 4,
+          "PromptTokens": 5545,
+          "CompletionTokens": 0,
+          "RoutingRoi": 88.75,
+          "TotalCost": 0.015230,
+          "ToolExecutionSteps": 1,
+          "CacheHitRate": 75,
+          "TimeToFirstTokenMs": 189,
+          "ContextBufferPercent": 69.2,
+          "Timestamp": "14:22:18",
+          "RoutingSteps": [
+            {
+              "Status": "Ok",
+              "Message": "Final summary pass (no completion requested)"
+            },
+            {
+              "Status": "Ok",
+              "Message": "Prompt cache hit: 4,159 tokens read from cache"
+            },
+            {
+              "Status": "Info",
+              "Message": "Route Confirmed: claude-3-haiku"
+            }
+          ],
+          "RequestSummary": "Summarize all applied changes for the PR description.",
+          "ResponseSummary": null,
+          "IsFallback": false,
+          "TimestampUtc": "0001-01-01T00:00:00+00:00",
+          "CostConfidence": null,
+          "RequestedModel": null,
+          "RoutedModel": null,
+          "SubstitutionReason": null
+        }
+      ],
+      "UnpricedTurns": 0,
+      "IsUsedForTraining": false
+    },
+    {
+      "Id": "sess-002",
+      "Title": "Data Pipeline Debugging - ETL Job #892",
+      "FirstTimestamp": "14:08:15",
+      "LastTimestamp": "14:14:42",
+      "TotalCost": 0.025450,
+      "TotalPromptTokens": 8932,
+      "TotalCompletionTokens": 2456,
+      "HasFallbackTurns": false,
+      "Turns": [
+        {
+          "Id": "sess-002-t1",
+          "Agent": "Data Analyst Wrapper",
+          "Model": "gpt-4o-mini",
+          "TurnNumber": 1,
+          "PromptTokens": 1890,
+          "CompletionTokens": 623,
+          "RoutingRoi": 87.56,
+          "TotalCost": 0.005340,
+          "ToolExecutionSteps": 2,
+          "CacheHitRate": 0,
+          "TimeToFirstTokenMs": 312,
+          "ContextBufferPercent": 23.4,
+          "Timestamp": "14:08:15",
+          "RoutingSteps": [
+            {
+              "Status": "Ok",
+              "Message": "SQL error log parsed (1,234 lines)"
+            },
+            {
+              "Status": "Ok",
+              "Message": "Short context: gpt-4o-mini sufficient"
+            },
+            {
+              "Status": "Info",
+              "Message": "Route Confirmed: gpt-4o-mini"
+            }
+          ],
+          "RequestSummary": "ETL job #892 failed at stage 3 with ORA-01555. Here is the log excerpt - what is the root cause?",
+          "ResponseSummary": "ORA-01555 (snapshot too old): the MERGE reads a table that is mutated mid-run. Isolate the read with a staging CTAS before the merge.",
+          "IsFallback": false,
+          "TimestampUtc": "0001-01-01T00:00:00+00:00",
+          "CostConfidence": null,
+          "RequestedModel": null,
+          "RoutedModel": null,
+          "SubstitutionReason": null
+        },
+        {
+          "Id": "sess-002-t2",
+          "Agent": "Data Analyst Wrapper",
+          "Model": "gpt-4o-mini",
+          "TurnNumber": 2,
+          "PromptTokens": 3456,
+          "CompletionTokens": 912,
+          "RoutingRoi": 86.20,
+          "TotalCost": 0.009870,
+          "ToolExecutionSteps": 3,
+          "CacheHitRate": 45,
+          "TimeToFirstTokenMs": 267,
+          "ContextBufferPercent": 42.8,
+          "Timestamp": "14:10:33",
+          "RoutingSteps": [
+            {
+              "Status": "Ok",
+              "Message": "Query execution plan added to context"
+            },
+            {
+              "Status": "Ok",
+              "Message": "Prompt cache hit: 1,555 tokens read from cache"
+            },
+            {
+              "Status": "Info",
+              "Message": "Route Confirmed: gpt-4o-mini"
+            }
+          ],
+          "RequestSummary": "Here is the EXPLAIN PLAN output for the failing MERGE - where is the long read window coming from?",
+          "ResponseSummary": "The full-table scan on FACT_ORDERS forces a 40-minute read window. Add a partition-pruning predicate on LOAD_DATE to cut it.",
+          "IsFallback": false,
+          "TimestampUtc": "0001-01-01T00:00:00+00:00",
+          "CostConfidence": null,
+          "RequestedModel": null,
+          "RoutedModel": null,
+          "SubstitutionReason": null
+        },
+        {
+          "Id": "sess-002-t3",
+          "Agent": "Data Analyst Wrapper",
+          "Model": "gpt-4o-mini",
+          "TurnNumber": 3,
+          "PromptTokens": 3586,
+          "CompletionTokens": 921,
+          "RoutingRoi": 85.90,
+          "TotalCost": 0.010240,
+          "ToolExecutionSteps": 2,
+          "CacheHitRate": 52,
+          "TimeToFirstTokenMs": 278,
+          "ContextBufferPercent": 44.3,
+          "Timestamp": "14:14:42",
+          "RoutingSteps": [
+            {
+              "Status": "Ok",
+              "Message": "Fix verification pass (3,586 prompt tokens)"
+            },
+            {
+              "Status": "Ok",
+              "Message": "Prompt cache hit: 1,865 tokens read from cache"
+            },
+            {
+              "Status": "Info",
+              "Message": "Route Confirmed: gpt-4o-mini"
+            }
+          ],
+          "RequestSummary": "Validate the revised MERGE statement before I schedule the rerun.",
+          "ResponseSummary": "The revised statement is safe: partition pruning cuts the read window to roughly 90 seconds, well inside undo retention.",
+          "IsFallback": false,
+          "TimestampUtc": "0001-01-01T00:00:00+00:00",
+          "CostConfidence": null,
+          "RequestedModel": null,
+          "RoutedModel": null,
+          "SubstitutionReason": null
+        }
+      ],
+      "UnpricedTurns": 0,
+      "IsUsedForTraining": false
+    },
+    {
+      "Id": "sess-003",
+      "Title": "Customer Support - Issue #78234",
+      "FirstTimestamp": "13:52:10",
+      "LastTimestamp": "14:05:33",
+      "TotalCost": 0.004560,
+      "TotalPromptTokens": 6234,
+      "TotalCompletionTokens": 1845,
+      "HasFallbackTurns": true,
+      "Turns": [
+        {
+          "Id": "sess-003-t1",
+          "Agent": "Customer Support NLP",
+          "Model": "claude-3-haiku",
+          "TurnNumber": 1,
+          "PromptTokens": 1456,
+          "CompletionTokens": 567,
+          "RoutingRoi": 82.30,
+          "TotalCost": 0.004560,
+          "ToolExecutionSteps": 1,
+          "CacheHitRate": 0,
+          "TimeToFirstTokenMs": 189,
+          "ContextBufferPercent": 18.0,
+          "Timestamp": "13:52:10",
+          "RoutingSteps": [
+            {
+              "Status": "Ok",
+              "Message": "Customer inquiry classified: billing dispute"
+            },
+            {
+              "Status": "Ok",
+              "Message": "Anthropic budget nominal; claude-3-haiku selected"
+            },
+            {
+              "Status": "Info",
+              "Message": "Route Confirmed: claude-3-haiku"
+            }
+          ],
+          "RequestSummary": "Ticket #78234: customer reports being charged twice for the June invoice. Verify and draft a response.",
+          "ResponseSummary": "Duplicate charge confirmed against payment records. A refund-and-apology draft is ready for agent review.",
+          "IsFallback": false,
+          "TimestampUtc": "0001-01-01T00:00:00+00:00",
+          "CostConfidence": null,
+          "RequestedModel": null,
+          "RoutedModel": null,
+          "SubstitutionReason": null
+        },
+        {
+          "Id": "sess-003-t2",
+          "Agent": "Customer Support NLP",
+          "Model": "fallback-cheapest-local",
+          "TurnNumber": 2,
+          "PromptTokens": 2389,
+          "CompletionTokens": 734,
+          "RoutingRoi": 0,
+          "TotalCost": 0.000000,
+          "ToolExecutionSteps": 2,
+          "CacheHitRate": 0,
+          "TimeToFirstTokenMs": 445,
+          "ContextBufferPercent": 29.5,
+          "Timestamp": "13:54:28",
+          "RoutingSteps": [
+            {
+              "Status": "Warn",
+              "Message": "Anthropic hourly budget breached; routing restricted"
+            },
+            {
+              "Status": "Ok",
+              "Message": "Fallback routing activated: local model"
+            },
+            {
+              "Status": "Info",
+              "Message": "Route Confirmed: fallback-cheapest-local"
+            }
+          ],
+          "RequestSummary": "The customer replied asking about the refund timeline. Draft a follow-up.",
+          "ResponseSummary": "Refunds post within 5-7 business days of approval. Suggested reply drafted with the confirmation number.",
+          "IsFallback": true,
+          "TimestampUtc": "0001-01-01T00:00:00+00:00",
+          "CostConfidence": null,
+          "RequestedModel": null,
+          "RoutedModel": null,
+          "SubstitutionReason": null
+        },
+        {
+          "Id": "sess-003-t3",
+          "Agent": "Customer Support NLP",
+          "Model": "fallback-cheapest-local",
+          "TurnNumber": 3,
+          "PromptTokens": 2389,
+          "CompletionTokens": 544,
+          "RoutingRoi": 0,
+          "TotalCost": 0.000000,
+          "ToolExecutionSteps": 1,
+          "CacheHitRate": 0,
+          "TimeToFirstTokenMs": 512,
+          "ContextBufferPercent": 29.5,
+          "Timestamp": "14:05:33",
+          "RoutingSteps": [
+            {
+              "Status": "Warn",
+              "Message": "Anthropic budget still breached; staying on fallback"
+            },
+            {
+              "Status": "Ok",
+              "Message": "Local model serving request"
+            },
+            {
+              "Status": "Info",
+              "Message": "Route Confirmed: fallback-cheapest-local"
+            }
+          ],
+          "RequestSummary": "Close out the ticket with a resolution summary.",
+          "ResponseSummary": "Ticket #78234 resolved: duplicate June charge refunded and a confirmation email queued to the customer.",
+          "IsFallback": true,
+          "TimestampUtc": "0001-01-01T00:00:00+00:00",
+          "CostConfidence": null,
+          "RequestedModel": null,
+          "RoutedModel": null,
+          "SubstitutionReason": null
+        }
+      ],
+      "UnpricedTurns": 0,
+      "IsUsedForTraining": false
+    }
+  ],
+  "Entries": [
+    {
+      "Id": "1",
+      "SessionId": "e89a2bc",
+      "TraceId": "a4f89c02",
+      "Agent": "Data Analyst Wrapper",
+      "Model": "gpt-4o-mini",
+      "IsFallback": false,
+      "PromptTokens": 1230,
+      "CompletionTokens": 702,
+      "ActualCost": 0.000480,
+      "WorstCaseCost": 0.003860,
+      "SavingsAmount": 0.003380,
+      "SavingsPercent": 87.56,
+      "Timestamp": "14:32:01",
+      "RoutingSteps": [
+        {
+          "Status": "Ok",
+          "Message": "Input text contains source code telemetry"
+        },
+        {
+          "Status": "Ok",
+          "Message": "Budget nominal: gpt-4o-mini selected"
+        },
+        {
+          "Status": "Ok",
+          "Message": "Context window validated (1,932 tokens)"
+        },
+        {
+          "Status": "Info",
+          "Message": "Route Confirmed: gpt-4o-mini"
+        }
+      ]
+    },
+    {
+      "Id": "2",
+      "SessionId": "d32a1ff",
+      "TraceId": "b7c21e45",
+      "Agent": "Code Review Bot",
+      "Model": "fallback-cheapest-local",
+      "IsFallback": true,
+      "PromptTokens": 890,
+      "CompletionTokens": 312,
+      "ActualCost": 0.000000,
+      "WorstCaseCost": 0.002100,
+      "SavingsAmount": 0.000000,
+      "SavingsPercent": 0.00,
+      "Timestamp": "14:31:48",
+      "RoutingSteps": [
+        {
+          "Status": "Ok",
+          "Message": "Input text contains source code telemetry"
+        },
+        {
+          "Status": "Warn",
+          "Message": "OpenAI budget breached; routing restricted"
+        },
+        {
+          "Status": "Ok",
+          "Message": "Fallback routing activated for destination"
+        },
+        {
+          "Status": "Info",
+          "Message": "Route Confirmed: fallback-cheapest-local"
+        }
+      ]
+    },
+    {
+      "Id": "3",
+      "SessionId": "f12b8de",
+      "TraceId": "c9d34f67",
+      "Agent": "Customer Support NLP",
+      "Model": "claude-3-haiku",
+      "IsFallback": false,
+      "PromptTokens": 2104,
+      "CompletionTokens": 891,
+      "ActualCost": 0.000631,
+      "WorstCaseCost": 0.004210,
+      "SavingsAmount": 0.003579,
+      "SavingsPercent": 85.01,
+      "Timestamp": "14:31:35",
+      "RoutingSteps": [
+        {
+          "Status": "Ok",
+          "Message": "Conversation context parsed (3 turns)"
+        },
+        {
+          "Status": "Ok",
+          "Message": "Anthropic budget nominal; claude-3-haiku selected"
+        },
+        {
+          "Status": "Ok",
+          "Message": "Response latency target: \u003C800ms"
+        },
+        {
+          "Status": "Info",
+          "Message": "Route Confirmed: claude-3-haiku"
+        }
+      ]
+    },
+    {
+      "Id": "4",
+      "SessionId": "a45c7fe",
+      "TraceId": "d2e56g78",
+      "Agent": "SQL Query Optimizer",
+      "Model": "gpt-4o-mini",
+      "IsFallback": false,
+      "PromptTokens": 445,
+      "CompletionTokens": 203,
+      "ActualCost": 0.000096,
+      "WorstCaseCost": 0.000780,
+      "SavingsAmount": 0.000684,
+      "SavingsPercent": 87.69,
+      "Timestamp": "14:31:22",
+      "RoutingSteps": [
+        {
+          "Status": "Ok",
+          "Message": "SQL schema fingerprint matched"
+        },
+        {
+          "Status": "Ok",
+          "Message": "Short context: mini-model sufficient"
+        },
+        {
+          "Status": "Info",
+          "Message": "Route Confirmed: gpt-4o-mini"
+        }
+      ]
+    },
+    {
+      "Id": "5",
+      "SessionId": "c78d2ae",
+      "TraceId": "e3f67h89",
+      "Agent": "Log Anomaly Detector",
+      "Model": "gemini-1.5-flash",
+      "IsFallback": false,
+      "PromptTokens": 3840,
+      "CompletionTokens": 128,
+      "ActualCost": 0.000192,
+      "WorstCaseCost": 0.002304,
+      "SavingsAmount": 0.002112,
+      "SavingsPercent": 91.67,
+      "Timestamp": "14:31:09",
+      "RoutingSteps": [
+        {
+          "Status": "Ok",
+          "Message": "Long-context log batch detected (3,840 tokens)"
+        },
+        {
+          "Status": "Ok",
+          "Message": "Gemini flash selected for cost efficiency"
+        },
+        {
+          "Status": "Ok",
+          "Message": "Output: classification only (128 tokens)"
+        },
+        {
+          "Status": "Info",
+          "Message": "Route Confirmed: gemini-1.5-flash"
+        }
+      ]
+    },
+    {
+      "Id": "6",
+      "SessionId": "b91e3cd",
+      "TraceId": "f4a78i90",
+      "Agent": "Summarization Pipeline",
+      "Model": "fallback-cheapest-local",
+      "IsFallback": true,
+      "PromptTokens": 1560,
+      "CompletionTokens": 420,
+      "ActualCost": 0.000000,
+      "WorstCaseCost": 0.003120,
+      "SavingsAmount": 0.000000,
+      "SavingsPercent": 0.00,
+      "Timestamp": "14:30:55",
+      "RoutingSteps": [
+        {
+          "Status": "Ok",
+          "Message": "Document chunking completed (4 chunks)"
+        },
+        {
+          "Status": "Warn",
+          "Message": "OpenAI monthly cap reached: fallback triggered"
+        },
+        {
+          "Status": "Warn",
+          "Message": "Gemini quota exhausted for current period"
+        },
+        {
+          "Status": "Ok",
+          "Message": "Local model activated as final fallback"
+        },
+        {
+          "Status": "Info",
+          "Message": "Route Confirmed: fallback-cheapest-local"
+        }
+      ]
+    },
+    {
+      "Id": "7",
+      "SessionId": "g23f4bc",
+      "TraceId": "g5b89j01",
+      "Agent": "Embedding Generator",
+      "Model": "text-embedding-3-small",
+      "IsFallback": false,
+      "PromptTokens": 512,
+      "CompletionTokens": 0,
+      "ActualCost": 0.000002,
+      "WorstCaseCost": 0.000010,
+      "SavingsAmount": 0.000008,
+      "SavingsPercent": 80.00,
+      "Timestamp": "14:30:42",
+      "RoutingSteps": [
+        {
+          "Status": "Ok",
+          "Message": "Embedding task detected: no completion needed"
+        },
+        {
+          "Status": "Ok",
+          "Message": "text-embedding-3-small selected (optimal cost)"
+        },
+        {
+          "Status": "Info",
+          "Message": "Route Confirmed: text-embedding-3-small"
+        }
+      ]
+    },
+    {
+      "Id": "8",
+      "SessionId": "h67g8de",
+      "TraceId": "h6c90k12",
+      "Agent": "Data Analyst Wrapper",
+      "Model": "claude-3-5-sonnet",
+      "IsFallback": false,
+      "PromptTokens": 4200,
+      "CompletionTokens": 1890,
+      "ActualCost": 0.018270,
+      "WorstCaseCost": 0.037800,
+      "SavingsAmount": 0.019530,
+      "SavingsPercent": 51.67,
+      "Timestamp": "14:30:29",
+      "RoutingSteps": [
+        {
+          "Status": "Ok",
+          "Message": "Complex reasoning task detected"
+        },
+        {
+          "Status": "Ok",
+          "Message": "High token count requires Sonnet-tier model"
+        },
+        {
+          "Status": "Ok",
+          "Message": "Anthropic budget nominal"
+        },
+        {
+          "Status": "Info",
+          "Message": "Route Confirmed: claude-3-5-sonnet"
+        }
+      ]
+    }
+  ]
+}

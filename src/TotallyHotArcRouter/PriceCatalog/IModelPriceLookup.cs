@@ -4,7 +4,7 @@ namespace TotallyHot.ArcRouter.PriceCatalog;
 
 /// <summary>
 /// Narrow, request-path seam for looking up a model's current catalog price. Abstracts the SQLite-backed
-/// <see cref="PriceCatalogRepository"/> (and its freshness policy) away from
+/// <see cref="PriceRepository"/> (and its freshness policy) away from
 /// <see cref="TotallyHot.ArcRouter.Proxy.ProxyMiddleware"/>, so the per-request cost path depends only on this one
 /// method and can be unit-tested without standing up a real catalog database.
 /// </summary>

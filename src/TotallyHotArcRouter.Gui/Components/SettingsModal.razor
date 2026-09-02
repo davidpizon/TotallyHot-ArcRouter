@@ -9,21 +9,7 @@
 @inject IGuiSettingsStore SettingsStore
 @inject RouterSettingsAdminStore RouterSettingsStore
 @inject TotallyHot.ArcRouter.Gui.Services.UpdateStore UpdateStore
-<div class="overlay-backdrop fixed inset-0 z-50 flex items-center justify-center"
-     @onclick="OnClose">
-    <div class="overlay-panel w-full max-w-md rounded-lg border border-slate-700"
-         @onclick:stopPropagation="true">
-        @* Header *@
-        <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
-            <span class="text-sm font-semibold text-slate-200 tracking-wide uppercase">System Settings</span>
-            <button @onclick="OnClose"
-                    aria-label="Close system settings"
-                    class="text-slate-400 hover:text-slate-200 transition-colors">
-                <Icon Name="x" Size="20" />
-            </button>
-        </div>
-
-        <div class="overlay-content p-5 space-y-4">
+<DialogShell Title="System Settings" CloseAriaLabel="Close system settings" OnClose="OnClose">
             @* Connection settings. Unlike the router settings below, this is local-only (no round trip to
                the router) and needs an app restart to take effect, so it keeps its own explicit Save/Undo
                pair rather than saving on every keystroke. Both buttons stay disabled until the field holds
@@ -312,7 +298,5 @@
                 <span aria-hidden="true">·</span>
                 <span>@RouterVersionLabel</span>
             </div>
-        </div>
-    </div>
-</div>
+</DialogShell>
 

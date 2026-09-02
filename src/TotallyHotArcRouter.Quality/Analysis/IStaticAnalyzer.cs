@@ -41,3 +41,26 @@ public sealed record StaticAnalysisFinding(string Analyzer, double Score, IReadO
 /// </param>
 /// <param name="Notes">Every contributing analyzer's notes, flattened and prefixed with the analyzer name.</param>
 public sealed record StaticAnalysisReport(double? Score, IReadOnlyList<string> Notes);
+
+/// <summary>
+/// Shared scoring arithmetic for <see cref="IStaticAnalyzer"/> implementations that grade a snippet by
+/// deducting a per-occurrence penalty from a perfect score, floored so no single axis can reach zero on
+/// its own.
+/// </summary>
+/// <remarks>
+/// Every analyzer in this namespace that scores by penalty independently reimplemented
+/// <c>Math.Max(floor, 1.0 - penalty)</c> with its own floor and its own penalty computation. This factors
+/// out the one line all of them share; each analyzer still owns its own floor constant and the arithmetic
+/// that turns its findings into a penalty.
+/// </remarks>
+public static class StaticAnalyzerScoring
+{
+    /// <summary>
+    /// Deducts <paramref name="penalty"/> from a perfect score of 1.0, clamped so the result never drops
+    /// below <paramref name="floor"/>.
+    /// </summary>
+    /// <param name="floor">The lowest score this call may return.</param>
+    /// <param name="penalty">The total deduction to apply before flooring, computed by the caller.</param>
+    /// <returns>The floored score.</returns>
+    public static double ClampScore(double floor, double penalty) => Math.Max(floor, 1.0 - penalty);
+}

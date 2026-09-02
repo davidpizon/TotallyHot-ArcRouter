@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -109,7 +108,7 @@ public sealed class GeminiPayloadTranslator : IPayloadTranslator
             switch (role)
             {
                 case "system":
-                    if (ExtractText(message["content"]) is { Length: > 0 } systemText)
+                    if (PayloadTranslationHelpers.ExtractText(message["content"]) is { Length: > 0 } systemText)
                     {
                         systemParts.Add(new JsonObject { ["text"] = systemText });
                     }
@@ -127,7 +126,7 @@ public sealed class GeminiPayloadTranslator : IPayloadTranslator
 
                 case "user":
                 default:
-                    AppendTextContent(contents, "user", ExtractText(message["content"]));
+                    AppendTextContent(contents, "user", PayloadTranslationHelpers.ExtractText(message["content"]));
                     break;
             }
         }
@@ -150,7 +149,7 @@ public sealed class GeminiPayloadTranslator : IPayloadTranslator
     {
         var parts = new JsonArray();
 
-        if (ExtractText(message["content"]) is { Length: > 0 } text)
+        if (PayloadTranslationHelpers.ExtractText(message["content"]) is { Length: > 0 } text)
         {
             parts.Add(new JsonObject { ["text"] = text });
         }
@@ -175,7 +174,7 @@ public sealed class GeminiPayloadTranslator : IPayloadTranslator
                     ["functionCall"] = new JsonObject
                     {
                         ["name"] = name,
-                        ["args"] = ParseArgumentsObject(function["arguments"]),
+                        ["args"] = PayloadTranslationHelpers.ParseArgumentsObject(function["arguments"]),
                     },
                 });
             }
@@ -193,11 +192,11 @@ public sealed class GeminiPayloadTranslator : IPayloadTranslator
     private static void AppendToolResult(JsonArray contents, JsonObject message)
     {
         var name = message["name"]?.GetValue<string>() ?? string.Empty;
-        var responseText = ExtractText(message["content"]) ?? string.Empty;
+        var responseText = PayloadTranslationHelpers.ExtractText(message["content"]) ?? string.Empty;
 
         // Gemini's functionResponse.response is an object; wrap a plain string result under a
         // conventional "content" key (a raw JSON object result is passed through as-is).
-        JsonNode responseValue = TryParseJsonObject(responseText) is { } parsed
+        JsonNode responseValue = PayloadTranslationHelpers.TryParseJsonObject(responseText) is { } parsed
             ? parsed
             : new JsonObject { ["content"] = responseText };
 
@@ -394,7 +393,7 @@ public sealed class GeminiPayloadTranslator : IPayloadTranslator
 
         var openAi = new JsonObject
         {
-            ["id"] = root["responseId"]?.GetValue<string>() ?? GenerateCompletionId(),
+            ["id"] = root["responseId"]?.GetValue<string>() ?? PayloadTranslationHelpers.GenerateCompletionId(),
             ["object"] = "chat.completion",
             ["created"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
             ["model"] = root["modelVersion"]?.GetValue<string>() ?? string.Empty,
@@ -563,72 +562,6 @@ public sealed class GeminiPayloadTranslator : IPayloadTranslator
         return true;
     }
 
-    // --- shared helpers, also used by GeminiStreamTranslator ---
-
-    /// <summary>Extracts plain text from an OpenAI message <c>content</c> field (a string, or an array of content blocks - only <c>text</c> blocks contribute).</summary>
-    internal static string? ExtractText(JsonNode? content)
-    {
-        switch (content)
-        {
-            case null:
-                return null;
-            case JsonValue value when value.TryGetValue<string>(out var text):
-                return text;
-            case JsonArray array:
-                var builder = new StringBuilder();
-                foreach (var element in array)
-                {
-                    if (element is JsonObject obj &&
-                        obj["type"]?.GetValue<string>() == "text" &&
-                        obj["text"]?.GetValue<string>() is { } partText)
-                    {
-                        builder.Append(partText);
-                    }
-                }
-
-                return builder.ToString();
-            default:
-                return null;
-        }
-    }
-
-    /// <summary>Parses an OpenAI tool-call <c>arguments</c> string (JSON text) into a Gemini <c>args</c> object; falls back to an empty object.</summary>
-    internal static JsonNode ParseArgumentsObject(JsonNode? arguments)
-    {
-        if (arguments is JsonObject alreadyObject)
-        {
-            return alreadyObject.DeepClone();
-        }
-
-        if (arguments is JsonValue value && value.TryGetValue<string>(out var text) &&
-            TryParseJsonObject(text) is { } parsed)
-        {
-            return parsed;
-        }
-
-        return new JsonObject();
-    }
-
-    /// <summary>Attempts to parse <paramref name="text"/> as a JSON object, returning null for blank input or a JSON value that isn't an object instead of throwing.</summary>
-    internal static JsonObject? TryParseJsonObject(string? text)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return null;
-        }
-
-        try
-        {
-            return JsonNode.Parse(text) as JsonObject;
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
-
-    /// <summary>Generates a unique OpenAI-style completion id (<c>chatcmpl-&lt;guid&gt;</c>) for use when the upstream response omits one.</summary>
-    internal static string GenerateCompletionId() =>
-        "chatcmpl-" + Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
+    // --- shared helpers now live in PayloadTranslationHelpers ---
 }
 

@@ -13,9 +13,9 @@ public sealed record RateLimitHeaderRow(string HeaderName, string HeaderValue);
 
 /// <summary>
 /// One provider's captured rate-limit headers for a single minute bucket, as returned by
-/// <see cref="PriceCatalogRepository.GetRateLimitHistory"/>. Carries only the headers actually captured in
+/// <see cref="RateLimitRepository.GetRateLimitHistory"/>. Carries only the headers actually captured in
 /// that bucket (not filled forward from a prior one) - callers reuse <see cref="RateLimitSnapshotParser.Parse"/>
-/// per bucket, exactly as <see cref="PriceCatalogRepository.GetRateLimitSnapshot"/>'s callers do for the
+/// per bucket, exactly as <see cref="RateLimitRepository.GetRateLimitSnapshot"/>'s callers do for the
 /// latest snapshot.
 /// </summary>
 /// <param name="BucketUtc">The minute bucket's start instant, UTC.</param>

@@ -1,3 +1,4 @@
+using TotallyHot.ArcRouter.Proxy.Concurrency;
 using Microsoft.Extensions.Logging;
 
 namespace TotallyHot.ArcRouter.PriceCatalog;
@@ -9,32 +10,33 @@ namespace TotallyHot.ArcRouter.PriceCatalog;
 /// flipped from Governance → Price Sources takes effect live rather than at the next restart.
 /// </summary>
 /// <remarks>
-/// Shaped after <see cref="TotallyHot.ArcRouter.Proxy.ProviderConfigStore"/>: an immutable snapshot swapped in one
-/// atomic reference write, plus a <see cref="Changed"/> event. The database is authoritative; this holds a
-/// cache so <see cref="IsEnabled"/> - which the ingestion loop calls per source per cycle - is a dictionary
-/// read rather than a query. <see cref="List"/> deliberately does <em>not</em> use that cache; see its
-/// remarks for why.
+/// Shaped after <see cref="TotallyHot.ArcRouter.Proxy.ProviderConfigStore"/>: an immutable snapshot swapped via
+/// <see cref="SnapshotCache{T}"/>, plus a <see cref="Changed"/> event. The database is authoritative; this
+/// holds a cache so <see cref="IsEnabled"/> - which the ingestion loop calls per source per cycle - is a
+/// dictionary read rather than a query. <see cref="List"/> deliberately does <em>not</em> use that cache -
+/// it always reads through to <see cref="_repository"/>; see its remarks for why.
 /// <para>
-/// It also owns a <see cref="CancellationTokenSource"/> per source. Disabling a source cancels its token,
-/// which is what makes "stop using this data the moment I switch it off" (D6) true even for a fetch already
-/// in flight, rather than only from the next cycle onward.
+/// It also owns a <see cref="CancellationTokenSource"/> per source, guarded by its own <c>_gate</c> - a
+/// lock private to that unrelated concern, kept separate from the snapshot cache's own internal gate so the
+/// two never contend with each other. Disabling a source cancels its token, which is what makes "stop using
+/// this data the moment I switch it off" (D6) true even for a fetch already in flight, rather than only from
+/// the next cycle onward.
 /// </para>
 /// </remarks>
 public sealed class PriceSourceToggleStore : IDisposable
 {
-    private readonly PriceCatalogRepository _repository;
+    private readonly PriceSourceRepository _repository;
     private readonly ILogger<PriceSourceToggleStore> _logger;
+
+    // Guards only _sourceTokens/_disposed below - an unrelated concern to the snapshot cache, which owns its
+    // own private gate (SnapshotCache<T>'s invariant explicitly calls out why the two must not share one).
     private readonly object _gate = new();
 
-    // Always assigned a brand-new (never mutated) dictionary under _gate, and volatile so that swap is
-    // published to IsEnabled's lock-free read - the same arrangement ModelRouteResolver._routes uses.
-    // Volatile is doing real work here, not decoration: reference assignment is atomic, which only rules out
-    // a torn read. It says nothing about visibility, so without this a reader taking no lock has no acquire
-    // barrier and may keep observing a stale snapshot - which for this field means the ingestion loop
-    // continuing to treat a source as enabled after the operator switched it off, defeating both the
-    // per-cycle filter and the post-fetch re-check.
-    private volatile IReadOnlyDictionary<string, PriceSourceState> _snapshot =
-        new Dictionary<string, PriceSourceState>(StringComparer.OrdinalIgnoreCase);
+    // Rebuilt and swapped as a whole via SnapshotCache<T> (docs/router/code-smell-refactoring-plan.md M2),
+    // so IsEnabled's lock-free read - called by the ingestion loop per source per cycle - always sees a
+    // fully-formed map, never a torn one.
+    private readonly SnapshotCache<IReadOnlyDictionary<string, PriceSourceState>> _cache =
+        new(new Dictionary<string, PriceSourceState>(StringComparer.OrdinalIgnoreCase));
 
     private readonly Dictionary<string, CancellationTokenSource> _sourceTokens =
         new(StringComparer.OrdinalIgnoreCase);
@@ -53,7 +55,7 @@ public sealed class PriceSourceToggleStore : IDisposable
     /// the schema, which is what populates the snapshot. Until then every source reads as disabled, which is
     /// the safe direction: nothing polls before the startup check says the catalog is ready.
     /// </remarks>
-    public PriceSourceToggleStore(PriceCatalogRepository repository, ILogger<PriceSourceToggleStore> logger)
+    public PriceSourceToggleStore(PriceSourceRepository repository, ILogger<PriceSourceToggleStore> logger)
     {
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(logger);
@@ -69,23 +71,16 @@ public sealed class PriceSourceToggleStore : IDisposable
     /// Re-reads every source's state from the database and swaps the snapshot. Called once at startup, and
     /// after each write so the cache reflects what was actually persisted rather than what was requested.
     /// </summary>
-    public void Reload()
-    {
-        var states = _repository.GetSourceStates();
-        var next = states.ToDictionary(s => s.Name, s => s, StringComparer.OrdinalIgnoreCase);
-
-        lock (_gate)
-        {
-            _snapshot = next;
-        }
-    }
+    public void Reload() =>
+        _cache.Rebuild(() => _repository.GetSourceStates()
+            .ToDictionary(s => s.Name, s => s, StringComparer.OrdinalIgnoreCase));
 
     /// <summary>
     /// Gets every known source's current state, ordered by rank then name. Read live from the database, not
     /// from the cache.
     /// </summary>
     /// <remarks>
-    /// Deliberately not served from <see cref="_snapshot"/>, and this is the whole reason the two reads are
+    /// Deliberately not served from the snapshot cache, and this is the whole reason the two reads are
     /// split. The snapshot exists for <see cref="IsEnabled"/>, which the ingestion loop calls per source per
     /// cycle; it is only refreshed when a toggle is written. But this method's payload also carries
     /// <see cref="PriceSourceState.PriceCount"/>, which every ingestion cycle changes without touching a
@@ -111,7 +106,7 @@ public sealed class PriceSourceToggleStore : IDisposable
     /// exist.
     /// </remarks>
     public bool IsEnabled(string sourceName) =>
-        _snapshot.TryGetValue(sourceName, out var state) && state.Enabled;
+        _cache.Current.TryGetValue(sourceName, out var state) && state.Enabled;
 
     /// <summary>
     /// Persists a source's toggle, cancels its in-flight fetch when disabling, refreshes the cache, and
@@ -153,7 +148,7 @@ public sealed class PriceSourceToggleStore : IDisposable
     /// </summary>
     /// <returns>
     /// <see langword="false"/> when the name set doesn't match every existing source exactly once; nothing is
-    /// changed. See <see cref="PriceCatalogRepository.ReorderSources"/> for why that is rejected outright
+    /// changed. See <see cref="PriceSourceRepository.ReorderSources"/> for why that is rejected outright
     /// rather than best-effort applied.
     /// </returns>
     public bool Reorder(IReadOnlyList<string> namesInPriorityOrder)

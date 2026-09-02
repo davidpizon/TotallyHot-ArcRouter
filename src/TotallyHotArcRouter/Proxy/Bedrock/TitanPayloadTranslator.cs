@@ -117,7 +117,7 @@ public sealed class TitanPayloadTranslator : IBedrockPayloadTranslator
                 continue;
             }
 
-            var text = AnthropicPayloadTranslator.ExtractText(message["content"]) ?? string.Empty;
+            var text = PayloadTranslationHelpers.ExtractText(message["content"]) ?? string.Empty;
 
             switch (message["role"]?.GetValue<string>())
             {
@@ -175,7 +175,7 @@ public sealed class TitanPayloadTranslator : IBedrockPayloadTranslator
 
         var openAi = new JsonObject
         {
-            ["id"] = AnthropicPayloadTranslator.GenerateCompletionId(),
+            ["id"] = PayloadTranslationHelpers.GenerateCompletionId(),
             ["object"] = "chat.completion",
             ["created"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
             // Titan's own response body carries no model identifier to echo (unlike Claude/Gemini,
@@ -231,7 +231,7 @@ internal sealed class TitanStreamChunkTranslator : IBedrockStreamChunkTranslator
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
-    private readonly string _id = AnthropicPayloadTranslator.GenerateCompletionId();
+    private readonly string _id = PayloadTranslationHelpers.GenerateCompletionId();
     private readonly long _created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
     private readonly string _modelIdentifier;
     private bool _roleSent;

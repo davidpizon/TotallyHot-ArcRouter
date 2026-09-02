@@ -133,8 +133,14 @@ public sealed record ManagementApiDependencies(IProviderConfigStore ConfigStore)
     /// <summary>Persists endpoint/model capability records. Useful on its own for reading them back, even with no <see cref="EndpointScanner"/>.</summary>
     public ToolCallCapabilityStore? CapabilityStore { get; init; }
 
-    /// <summary>Supplies each provider's captured <c>anthropic-ratelimit-*</c> snapshot to <c>GET /admin/providers</c>.</summary>
-    public PriceCatalogRepository? PriceCatalogRepository { get; init; }
+    /// <summary>Reads a fresh catalog price, backing the price-resolution diagnosis view.</summary>
+    public PriceRepository? PriceRepository { get; init; }
+
+    /// <summary>Supplies each provider's captured <c>anthropic-ratelimit-*</c> snapshot/history to <c>GET /admin/providers</c>.</summary>
+    public RateLimitRepository? RateLimitRepository { get; init; }
+
+    /// <summary>Supplies each provider's own reported usage (docs/router/secrets-at-rest-plan.md §8.1) to <c>GET /admin/providers</c>.</summary>
+    public ReportedUsageRepository? ReportedUsageRepository { get; init; }
 
     /// <summary>Operator price overrides, backing <c>PUT/DELETE /admin/price-overrides</c>.</summary>
     public ModelAliasOverrideStore? ModelAliasOverrideStore { get; init; }

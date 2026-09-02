@@ -104,17 +104,17 @@ public sealed class KeywordDimensionInferrer : IDimensionInferrer
     /// followed by another word) to avoid matching the English verb, e.g. "to go faster".</summary>
     private static bool MatchesAsLanguageName(string text, string languageName)
     {
-        var index = 0;
-        while ((index = text.IndexOf(languageName, index, StringComparison.Ordinal)) >= 0)
+        if (languageName != "go")
         {
-            var before = index == 0 || !char.IsLetterOrDigit(text[index - 1]);
-            var after = index + languageName.Length >= text.Length || !char.IsLetterOrDigit(text[index + languageName.Length]);
-            if (before && after && (languageName != "go" || IsGoLanguageContext(text, index)))
+            return WordMatching.ContainsWholeWord(text, languageName);
+        }
+
+        foreach (var index in WordMatching.WholeWordOccurrences(text, languageName))
+        {
+            if (IsGoLanguageContext(text, index))
             {
                 return true;
             }
-
-            index += languageName.Length;
         }
 
         return false;

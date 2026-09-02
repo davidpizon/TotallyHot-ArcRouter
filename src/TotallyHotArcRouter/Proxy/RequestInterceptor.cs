@@ -57,14 +57,6 @@ namespace TotallyHot.ArcRouter.Proxy
         /// </remarks>
         internal const string RouterModelProvider = "totallyhot";
 
-        /// <summary>
-        /// The neutral prior assigned to a candidate with no recorded <see cref="RouterMemory"/> score yet
-        /// (cold start), used when ranking fallback/substitute candidates. Cold-start candidates therefore
-        /// interleave with scored ones (score range 0.0-1.0) instead of always sinking to the bottom or
-        /// jumping to the top.
-        /// </summary>
-        private const double ColdStartRankingScore = 0.5;
-
         private readonly ILogger<RequestInterceptor> _logger;
         private readonly IModelRouteResolver _modelRouteResolver;
         private readonly string? _forcedModelName;
@@ -78,6 +70,16 @@ namespace TotallyHot.ArcRouter.Proxy
         private readonly EmbeddingWarmupState? _embeddingWarmupState;
         private readonly int _embeddingBudgetMs;
         private readonly IProviderInteractionStatusStore? _interactionStatusStore;
+
+        /// <summary>
+        /// Owns circuit-breaker-eligible candidate building/ranking (see <see cref="RoutingCandidateBuilder"/>),
+        /// constructed from this class's own collaborators rather than taken as a separate constructor
+        /// parameter - every input it needs (<see cref="_circuitBreaker"/>, <see cref="_modelRouteResolver"/>,
+        /// <see cref="_routerMemory"/>, <see cref="_interactionStatusStore"/>, <see cref="_logger"/>) is
+        /// already required or optional here, so adding a fourteenth constructor parameter would only
+        /// duplicate what this class already holds.
+        /// </summary>
+        private readonly RoutingCandidateBuilder _routingCandidateBuilder;
 
         /// <summary>Number of requests seen by <see cref="InterceptRequestAsync"/> so far.</summary>
         public int InterceptedRequestCount { get; private set; }
@@ -124,7 +126,8 @@ namespace TotallyHot.ArcRouter.Proxy
         /// <param name="routingPolicy">
         /// PLAN.md Phase I's Action leg (<c>docs/router/utility-model-routing.md</c> §B4): consulted, when
         /// supplied, to pick the model for the router alias and the unresolved-model fallback instead of
-        /// the memory-only ranking <see cref="RankEligibleModels"/> otherwise falls back to. <see langword="null"/>
+        /// the memory-only ranking <see cref="RoutingCandidateBuilder.RankEligibleModels"/> otherwise falls
+        /// back to. <see langword="null"/>
         /// (the default) preserves the pre-Phase-I memory-only behavior exactly.
         /// </param>
         /// <exception cref="InvalidOperationException">
@@ -180,6 +183,8 @@ namespace TotallyHot.ArcRouter.Proxy
             _embeddingWarmupState = embeddingWarmupState;
             _embeddingBudgetMs = routingOptions?.Value.EmbeddingBudgetMs ?? new RoutingOptions().EmbeddingBudgetMs;
             _interactionStatusStore = interactionStatusStore;
+            _routingCandidateBuilder = new RoutingCandidateBuilder(
+                _circuitBreaker, _modelRouteResolver, _routerMemory, _interactionStatusStore, _logger);
 
             if (_forcedModelName is not null &&
                 !modelRouteResolver.ListModels().Any(m => string.Equals(m.ModelName, _forcedModelName, StringComparison.OrdinalIgnoreCase)))
@@ -477,96 +482,18 @@ namespace TotallyHot.ArcRouter.Proxy
                 // ProxyMiddleware still applies its real-time ShouldBypass/ShouldBypassProvider checks to
                 // this forced candidate like any other, so a request still fails fast with a 502 if the
                 // forced model's target or provider is currently OPEN.
-                candidates = [BuildCandidate(jsonObject, route)];
+                candidates = [RequestBodyIntrospection.BuildCandidate(jsonObject, route)];
             }
             else
             {
-                // docs/router/agent-resilience-strategies.md's Circuit Breaker: when the resolved primary's
-                // own upstream target is presently OPEN (unhealthy, still cooling down) - or its whole
-                // provider is (e.g. a 401 tripped every model on that provider at once, see
-                // ICircuitBreaker.RecordProviderFailure) - or the provider has been switched off via
-                // Governance > Providers' Stop control - or the model itself has been stopped or dropped by
-                // its provider's last scan - swap in the next-best eligible model instead of ever attempting
-                // it - "the router bypasses this agent entirely... without making a network call." If
-                // literally nothing else is eligible (every configured model, including this one, is open or
-                // disabled), there's no substitute to swap in; the original route is kept and
-                // ProxyMiddleware's own real-time bypass check (immediately before the actual attempt) will
-                // then fail fast with a 502/503 without making the call, which is the correct "everything is
-                // unavailable" outcome.
-                //
-                // docs/adr/0004-.../0005-...: this substitution is for an auto-selected/already-substituted
-                // request only. An explicit selection (substitutionReason still None at this point) whose
-                // target or provider is already circuit-open is never silently substituted for that reason -
-                // it is relayed the truth instead, via ExplicitCircuitTripBlockMessage below - regardless of
-                // whether the trip is target-level or provider-wide. Only providerStopped/modelStopped (an
-                // operator's own Stop/disable, not an outage) still substitutes for an explicit selection.
-                var targetOpen = _circuitBreaker.IsOpen(CircuitBreakerTargetKey.FromRoute(route));
-                var providerOpen = _circuitBreaker.IsProviderOpen(route.Provider);
-                var providerStopped = !_modelRouteResolver.IsProviderEnabled(route.Provider);
-                var modelStopped = !_modelRouteResolver.IsModelEnabled(route.ModelName);
-                var isExplicitSoFar = substitutionReason == RoutingSubstitutionReason.None;
-
-                if ((targetOpen || providerOpen) && isExplicitSoFar)
-                {
-                    if (providerOpen)
-                    {
-                        // Three-way fallback: LiveTrafficStatus (hot-path-detected, e.g. out-of-credits) ->
-                        // AdminActionStatus (e.g. a 401 first surfaced by "Refresh from endpoint") -> generic.
-                        // Both tracks are per-provider, so this branch only applies when the whole provider
-                        // is open.
-                        var liveTraffic = _interactionStatusStore?.GetLiveTraffic(route.Provider);
-                        var adminAction = _interactionStatusStore?.Get(route.Provider);
-                        explicitCircuitTripBlockMessage = liveTraffic?.Message
-                            ?? (adminAction is { Ok: false } ? adminAction.Message : null)
-                            ?? "This provider is temporarily unavailable.";
-                    }
-                    else
-                    {
-                        // Target-level only: no per-model interaction-status record exists to draw from
-                        // (both tracks are per-provider), so this is always a generic, honest message -
-                        // never borrows the provider-wide tracks' text, which could misattribute an
-                        // unrelated cause to this one model.
-                        explicitCircuitTripBlockMessage = $"Model '{route.ModelName}' is temporarily unavailable.";
-                    }
-
-                    _logger.LogInformation(
-                        "[INTERCEPTOR] Explicit selection '{ModelName}' is circuit-open; relaying the truth instead of substituting.",
-                        SanitizeForLog(route.ModelName));
-                }
-                else if (targetOpen || providerOpen || providerStopped || modelStopped)
-                {
-                    var substitute = RankEligibleModels([route.ModelName], liveDimension).FirstOrDefault();
-                    if (substitute is not null)
-                    {
-                        _logger.LogInformation(
-                            "[INTERCEPTOR] Model '{ModelName}' circuit is open; substituting next-best model '{Substitute}'.",
-                            SanitizeForLog(route.ModelName), SanitizeForLog(substitute.ModelName));
-                        substitutionReason = targetOpen || providerOpen
-                            ? RoutingSubstitutionReason.CircuitOpen
-                            : RoutingSubstitutionReason.ModelStopped;
-                        route = substitute;
-                    }
-                }
-
-                // Build the ordered list of upstreams to try: the (possibly substituted) primary, then every
-                // other currently-eligible configured model ranked by RouterMemory score - the dynamic
-                // replacement for the old static per-model Fallbacks list. Each candidate gets its own
-                // rewritten body because a backup on a different provider needs a different upstream model
-                // id substituted into the same request.
-                candidates = [BuildCandidate(jsonObject, route)];
-
-                var seenTargets = new HashSet<CircuitBreakerTargetKey> { CircuitBreakerTargetKey.FromRoute(route) };
-                foreach (var fallbackRoute in RankEligibleModels([route.ModelName], liveDimension))
-                {
-                    // Skip a candidate that resolves to the same upstream target (same provider, base URL,
-                    // and model id) as one already queued - a duplicate hop would just repeat the same
-                    // failing call. Keyed on the full target, not ProviderModelId alone, so two genuinely
-                    // distinct providers that happen to share a model-id string are both kept as valid hops.
-                    if (seenTargets.Add(CircuitBreakerTargetKey.FromRoute(fallbackRoute)))
-                    {
-                        candidates.Add(BuildCandidate(jsonObject, fallbackRoute));
-                    }
-                }
+                // docs/adr/0004-.../0005-...: circuit-breaker substitution and the explicit-selection
+                // truthful-error carve-out both live in RoutingCandidateBuilder now - see its Build's doc
+                // comment for the full rationale, unchanged from when it lived inline here.
+                var buildResult = _routingCandidateBuilder.Build(jsonObject, route, substitutionReason, liveDimension);
+                candidates = buildResult.Candidates;
+                route = buildResult.Route;
+                substitutionReason = buildResult.SubstitutionReason;
+                explicitCircuitTripBlockMessage = buildResult.ExplicitCircuitTripBlockMessage;
             }
 
             return ModelRouteResolutionResult.Success(
@@ -637,7 +564,8 @@ namespace TotallyHot.ArcRouter.Proxy
         /// traffic, <see cref="AgentAsARouter"/>'s memory ranking otherwise. A policy pick that doesn't
         /// resolve to a live route (e.g. it named a model outside the configured <c>ModelList</c>) degrades
         /// to the memory-only ranking rather than failing the request. With no policy configured - the
-        /// pre-Phase-I default - this is exactly <see cref="RankEligibleModels"/>'s top pick, unchanged.
+        /// pre-Phase-I default - this is exactly <see cref="RoutingCandidateBuilder.RankEligibleModels"/>'s
+        /// top pick, unchanged.
         /// </remarks>
         /// <param name="classification">The request's Phase H classification, from <see cref="ResolveModelRouteAsync"/>.</param>
         /// <param name="liveDimension">The request's live dimension key, from <see cref="ResolveModelRouteAsync"/>.</param>
@@ -723,7 +651,7 @@ namespace TotallyHot.ArcRouter.Proxy
             // The memory-ranking fallback below was never a policy pick - IsExploratory=false,
             // Propensity=1.0 (certain selection) is the correct provenance for it, matching the same
             // default IRoutingPolicy.DecideOutcomeAsync's default implementation reports.
-            var fallbackRoute = RankEligibleModels([], liveDimension).FirstOrDefault();
+            var fallbackRoute = _routingCandidateBuilder.RankEligibleModels([], liveDimension).FirstOrDefault();
             return fallbackRoute is null ? null : new AgenticRouteResult(fallbackRoute, IsExploratory: false, Propensity: 1.0);
         }
 
@@ -748,88 +676,27 @@ namespace TotallyHot.ArcRouter.Proxy
 
         /// <summary>
         /// Builds one <see cref="RoutingCandidate"/> per currently-eligible model (the same eligibility
-        /// rules <see cref="GetEligibleRoutes"/> applies for <see cref="RankEligibleModels"/>), ranked by
-        /// <see cref="RouterMemory"/> score - falling back to <see cref="ColdStartRankingScore"/> for a
-        /// candidate with no recorded score yet, matching <see cref="RankEligibleModels"/>'s cold-start
-        /// treatment - for better policy fallback behavior, for handing to an <see cref="IRoutingPolicy"/>.
+        /// rules <see cref="RoutingCandidateBuilder.GetEligibleRoutes"/> applies for
+        /// <see cref="RoutingCandidateBuilder.RankEligibleModels"/>), ranked by <see cref="RouterMemory"/>
+        /// score - falling back to <see cref="RoutingCandidateBuilder.ColdStartRankingScore"/> for a
+        /// candidate with no recorded score yet, matching <see cref="RoutingCandidateBuilder.RankEligibleModels"/>'s
+        /// cold-start treatment - for better policy fallback behavior, for handing to an
+        /// <see cref="IRoutingPolicy"/>.
         /// </summary>
         /// <param name="liveDimension">The request's live dimension key for score lookup.</param>
         private List<RoutingCandidate> BuildRoutingCandidates(string liveDimension)
         {
-            var candidates = GetEligibleRoutes([]);
+            var candidates = _routingCandidateBuilder.GetEligibleRoutes([]);
             if (_routerMemory is not null && candidates.Count > 0)
             {
                 candidates = candidates
-                    .OrderByDescending(e => _routerMemory.GetAverageScore(liveDimension, e.ModelName) ?? ColdStartRankingScore)
+                    .OrderByDescending(e => _routerMemory.GetAverageScore(liveDimension, e.ModelName) ?? RoutingCandidateBuilder.ColdStartRankingScore)
                     .ToList();
             }
 
             return candidates
                 .Select(e => new RoutingCandidate(e.Route.ModelName, e.Route.Provider, e.Route.IsFree))
                 .ToList();
-        }
-
-        /// <summary>
-        /// Ranks every currently-configured model other than <paramref name="excludeModelNames"/>, whose
-        /// upstream target isn't presently open per <see cref="ICircuitBreaker.IsOpen"/>, whose provider
-        /// isn't presently open per <see cref="ICircuitBreaker.IsProviderOpen"/> (both read-only checks -
-        /// building this list never itself claims a half-open probe slot; that's reserved for
-        /// <see cref="ICircuitBreaker.ShouldBypass"/>/<see cref="ICircuitBreaker.ShouldBypassProvider"/>,
-        /// called by <see cref="ProxyMiddleware"/> immediately before it actually attempts a candidate), and
-        /// whose provider hasn't been switched off via Governance &gt; Providers' Stop control (see
-        /// <see cref="IModelRouteResolver.IsProviderEnabled"/>), and whose own Start/Stop toggle or last
-        /// endpoint scan hasn't stopped it (see <see cref="IModelRouteResolver.IsModelEnabled"/>), by
-        /// <see cref="RouterMemory.GetAverageScore"/> under <paramref name="liveDimension"/>, descending. A
-        /// candidate with no recorded score yet is treated as <see cref="ColdStartRankingScore"/> rather
-        /// than assumed worst, so cold-start candidates interleave with scored ones instead of always
-        /// sinking to the bottom; ties preserve <see cref="IModelRouteResolver.ListModels"/>'s configured
-        /// order (LINQ's <c>OrderByDescending</c> is a stable sort).
-        /// </summary>
-        /// <param name="excludeModelNames">Model names to omit from the ranking (e.g. the primary already queued).</param>
-        /// <param name="liveDimension">The request's inferred live dimension.</param>
-        private List<ResolvedModelRoute> RankEligibleModels(IReadOnlyCollection<string> excludeModelNames, string liveDimension) =>
-            GetEligibleRoutes(excludeModelNames)
-                .OrderByDescending(e => _routerMemory?.GetAverageScore(liveDimension, e.ModelName) ?? ColdStartRankingScore)
-                .Select(e => e.Route)
-                .ToList();
-
-        /// <summary>
-        /// The shared eligibility filter <see cref="RankEligibleModels"/> and <see cref="BuildRoutingCandidates"/>
-        /// both build on: every currently-configured model other than <paramref name="excludeModelNames"/>,
-        /// excluding any whose upstream target or provider is presently circuit-open, or whose provider or
-        /// model has been administratively disabled. See <see cref="RankEligibleModels"/>'s remarks for the
-        /// full rationale behind each check.
-        /// </summary>
-        /// <param name="excludeModelNames">Model names to omit from the result.</param>
-        private List<(string ModelName, ResolvedModelRoute Route)> GetEligibleRoutes(IReadOnlyCollection<string> excludeModelNames)
-        {
-            var excluded = new HashSet<string>(excludeModelNames, StringComparer.OrdinalIgnoreCase);
-            var eligible = new List<(string ModelName, ResolvedModelRoute Route)>();
-
-            foreach (var candidate in _modelRouteResolver.ListModels())
-            {
-                if (excluded.Contains(candidate.ModelName))
-                {
-                    continue;
-                }
-
-                if (!_modelRouteResolver.TryResolve(candidate.ModelName, out var candidateRoute))
-                {
-                    continue;
-                }
-
-                if (_circuitBreaker.IsOpen(CircuitBreakerTargetKey.FromRoute(candidateRoute)) ||
-                    _circuitBreaker.IsProviderOpen(candidateRoute.Provider) ||
-                    !_modelRouteResolver.IsProviderEnabled(candidateRoute.Provider) ||
-                    !_modelRouteResolver.IsModelEnabled(candidate.ModelName))
-                {
-                    continue;
-                }
-
-                eligible.Add((candidate.ModelName, candidateRoute));
-            }
-
-            return eligible;
         }
 
         /// <summary>
@@ -855,91 +722,6 @@ namespace TotallyHot.ArcRouter.Proxy
             value.Length <= MaxLoggedBodyLength
                 ? value
                 : string.Concat(value.AsSpan(0, MaxLoggedBodyLength), "...[truncated]");
-
-        /// <summary>
-        /// Rewrites the request body's <c>model</c> field to the given route's upstream model id and
-        /// serializes it, producing one failover candidate. Reuses (and mutates) <paramref name="jsonObject"/>
-        /// in place - callers invoke this sequentially per candidate, and only the serialized snapshot each
-        /// call returns is retained, so the shared node's transient state between calls is never observed.
-        /// </summary>
-        private static RouteCandidate BuildCandidate(JsonObject jsonObject, ResolvedModelRoute route)
-        {
-            jsonObject["model"] = route.ProviderModelId;
-            var rewrittenBody = Encoding.UTF8.GetBytes(jsonObject.ToJsonString());
-            return new RouteCandidate(
-                route,
-                rewrittenBody,
-                CarriesTools(jsonObject),
-                CarriesToolHistory(jsonObject),
-                CarriesResponseFormat(jsonObject));
-        }
-
-        /// <summary>
-        /// Whether this request offers the model any tools at all - the gate on installing tool-call
-        /// normalization downstream (<c>docs/router/tool-call-normalization.md</c> §3.4 performance rule 1).
-        /// Read from the body this method has already parsed rather than re-parsing it, which is what makes
-        /// the check free.
-        /// </summary>
-        /// <remarks>
-        /// An empty <c>tools</c> array counts as no tools: the model was offered nothing, so any tool-call
-        /// syntax in its reply is prose about tool calling, not an invocation - exactly the false positive
-        /// per-model arming exists to avoid.
-        /// </remarks>
-        private static bool CarriesTools(JsonObject jsonObject) =>
-            jsonObject["tools"] is JsonArray { Count: > 0 };
-
-        /// <summary>
-        /// Whether the client set its own <c>response_format</c>, which makes constrained tool calling
-        /// unavailable for this request - see <see cref="RouteCandidate.CarriesResponseFormat"/>.
-        /// </summary>
-        /// <remarks>
-        /// Any non-null value counts, including a shape this build does not recognize. The question is not
-        /// "did the client ask for something we understand" but "would setting our own overwrite theirs",
-        /// and the answer to that is yes for every value they could have sent.
-        /// </remarks>
-        private static bool CarriesResponseFormat(JsonObject jsonObject) =>
-            jsonObject["response_format"] is not null;
-
-        /// <summary>
-        /// Whether the conversation already contains tool-calling turns, which an emulated model's chat
-        /// template cannot render (<c>docs/router/tool-call-normalization.md</c> Phase 5). Read from the
-        /// same already-parsed body as <see cref="CarriesTools"/>.
-        /// </summary>
-        /// <remarks>
-        /// Stops at the first match rather than surveying the whole conversation: the answer is a single
-        /// bool, and a long chat's message list is the largest thing in the request body. Both shapes are
-        /// checked because either alone is enough to confuse the model - an assistant turn it cannot read
-        /// as its own, or a result whose role its template has never seen.
-        /// </remarks>
-        private static bool CarriesToolHistory(JsonObject jsonObject)
-        {
-            if (jsonObject["messages"] is not JsonArray messages)
-            {
-                return false;
-            }
-
-            foreach (var node in messages)
-            {
-                if (node is not JsonObject message)
-                {
-                    continue;
-                }
-
-                if (message["tool_calls"] is JsonArray { Count: > 0 })
-                {
-                    return true;
-                }
-
-                if (message["role"] is JsonValue role &&
-                    role.TryGetValue<string>(out var value) &&
-                    string.Equals(value, "tool", StringComparison.Ordinal))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
     }
 }
 

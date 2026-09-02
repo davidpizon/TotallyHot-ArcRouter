@@ -283,6 +283,14 @@ namespace TotallyHot.ArcRouter.Hosting
             // a session's turn number now survives a proxy restart. ConversationTurnTracker itself remains in
             // the codebase for tests and any no-ledger direct construction of ProxyMiddleware.
             services.AddSingleton<IConversationTurnTracker, PersistentConversationTurnTracker>();
+            // The provider dispatch table (docs/router/code-smell-refactoring-plan.md's dispatch-table
+            // task): which response-body shape each provider's captured telemetry bytes are parsed as, and
+            // (for a future task) which IProviderCostReconciler reconciles its billed spend. Registered
+            // before IUsageExtractor/IResponseTextExtractor so the container injects it into both
+            // constructors' optional providerRegistrations parameter - mirroring the IPayloadTranslator
+            // dictionary pattern just below, but keyed on parser shape rather than translation logic since
+            // that's the only thing that varies between providers for these two extractors.
+            services.AddSingleton<IReadOnlyDictionary<string, Proxy.ProviderRegistration>>(_ => Proxy.ProviderRegistrations.BuildDefault());
             services.AddSingleton<IUsageExtractor, UsageExtractor>();
             services.AddSingleton<IResponseTextExtractor, ResponseTextExtractor>();
 
@@ -569,9 +577,19 @@ namespace TotallyHot.ArcRouter.Hosting
             // D3/§5.7 alias resolver (docs/router/d3-alias-resolution.md, docs/router/token-tracking-improvements.md
             // §5.7): maps each source's own model/provider naming onto the configured router identity at
             // ingest via the resolution ladder, so cost resolves on the client-facing ModelName. Registered
-            // so the container injects it into PriceCatalogRepository's optional param.
+            // so the container injects it into PriceRepository's optional param.
             services.AddSingleton<IModelIdentityResolver, ConfigModelIdentityResolver>();
-            services.AddSingleton<PriceCatalogRepository>();
+            // The six repositories the former monolithic PriceCatalogRepository was split into
+            // (docs/router/code-smell-refactoring-plan.md M3), one per confirmed concern: price upsert/read,
+            // source-toggle CRUD, provider-budget CRUD, provider-spend accounting, rate-limit header/history,
+            // and reported-usage persistence. Each is a thin, independently-testable ADO.NET wrapper sharing
+            // only PriceCatalogRepositoryBase's connection/timestamp plumbing.
+            services.AddSingleton<PriceRepository>();
+            services.AddSingleton<PriceSourceRepository>();
+            services.AddSingleton<ProviderBudgetRepository>();
+            services.AddSingleton<ProviderSpendRepository>();
+            services.AddSingleton<RateLimitRepository>();
+            services.AddSingleton<ReportedUsageRepository>();
             // Request-path price lookup (docs/router/model-price-catalog.md): ProxyMiddleware
             // estimates each paid request's cost from the catalog through this seam. Registered so the
             // container injects it into ProxyMiddleware's optional priceLookup constructor parameter.
@@ -637,7 +655,7 @@ namespace TotallyHot.ArcRouter.Hosting
             // account with none configured (Claude Pro/Max) simply gets a permanent no-op.
             services.AddSingleton(sp => new AnthropicUsageReportService(
                 sp.GetRequiredService<HttpClient>(),
-                sp.GetRequiredService<PriceCatalogRepository>(),
+                sp.GetRequiredService<ReportedUsageRepository>(),
                 () =>
                 {
                     var reconciliationOptions = sp.GetRequiredService<IOptions<CostReconciliationOptions>>().Value;
@@ -684,10 +702,10 @@ namespace TotallyHot.ArcRouter.Hosting
             // (docs/router/tool-call-normalization.md §3.3). Registered before the facade so the container
             // injects it into the facade's optional constructor parameters.
             services.AddSingleton<ProviderEndpointScanner>();
-            // ManagementFacade's constructor resolves PriceCatalogRepository automatically (registered
-            // above) into its optional priceCatalogRepository parameter, so the Anthropic Usage card's
-            // rate-limit snapshot is available on this MCP-facing facade the same way it is on the REST one
-            // ProxyHostedService builds below.
+            // ManagementFacade's constructor resolves the price-catalog repositories registered above
+            // (PriceRepository, RateLimitRepository, ReportedUsageRepository) automatically, so the
+            // Anthropic Usage card's rate-limit snapshot is available on this MCP-facing facade the same way
+            // it is on the REST one ProxyHostedService builds below.
             services.AddSingleton<ManagementFacade>();
 
             // MCP (Model Context Protocol) management endpoint - agent-facing access to the same
@@ -828,7 +846,9 @@ namespace TotallyHot.ArcRouter.Hosting
                             BudgetStore = sp.GetRequiredService<ProviderBudgetStore>(),
                             EndpointScanner = sp.GetRequiredService<ProviderEndpointScanner>(),
                             CapabilityStore = sp.GetRequiredService<ToolCallCapabilityStore>(),
-                            PriceCatalogRepository = sp.GetRequiredService<PriceCatalogRepository>(),
+                            PriceRepository = sp.GetRequiredService<PriceRepository>(),
+                            RateLimitRepository = sp.GetRequiredService<RateLimitRepository>(),
+                            ReportedUsageRepository = sp.GetRequiredService<ReportedUsageRepository>(),
                             ModelAliasOverrideStore = sp.GetRequiredService<ModelAliasOverrideStore>(),
                             UsageRollupStore = sp.GetRequiredService<IUsageRollupStore>(),
                             SecretWriter = sp.GetRequiredService<ISecretWriter>(),

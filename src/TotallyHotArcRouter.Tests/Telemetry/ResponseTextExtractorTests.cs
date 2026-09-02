@@ -44,6 +44,35 @@ public class ResponseTextExtractorTests
     }
 
     [Fact]
+    public void TryExtractText_OllamaProvider_NonStreaming_DispatchesToOpenAiParser()
+    {
+        // Regression test: this branch previously omitted "ollama" even though IUsageExtractor's
+        // equivalent branch already included it, so response-text extraction silently failed for every
+        // Ollama request despite Ollama's OpenAI-compatible routes answering in OpenAI's own
+        // choices[].message shape with no translator in front of them.
+        var body = Encoding.UTF8.GetBytes("""{"choices":[{"message":{"content":"Hi from Ollama!"}}]}""");
+
+        var result = _extractor.TryExtractText("ollama", isStreaming: false, body, out var text);
+
+        Assert.True(result);
+        Assert.Equal("Hi from Ollama!", text);
+    }
+
+    [Theory]
+    [InlineData("bedrock-titan")]
+    [InlineData("bedrock-llama")]
+    [InlineData("bedrock-anthropic")]
+    public void TryExtractText_BedrockRoutedProvider_NonStreaming_DispatchesToOpenAiParser(string providerKey)
+    {
+        var body = Encoding.UTF8.GetBytes("""{"choices":[{"message":{"content":"Hi from Bedrock!"}}]}""");
+
+        var result = _extractor.TryExtractText(providerKey, isStreaming: false, body, out var text);
+
+        Assert.True(result);
+        Assert.Equal("Hi from Bedrock!", text);
+    }
+
+    [Fact]
     public void TryExtractText_UnknownProvider_ReturnsFalse()
     {
         var body = Encoding.UTF8.GetBytes("""{"choices":[{"message":{"content":"hi"}}]}""");
@@ -70,6 +99,17 @@ public class ResponseTextExtractorTests
 
         Assert.True(result);
         Assert.Equal("hi", text);
+    }
+
+    [Fact]
+    public void TryExtractText_NullProvider_FailsClosedInsteadOfThrowing()
+    {
+        var body = Encoding.UTF8.GetBytes("{\"choices\":[{\"message\":{\"content\":\"hi\"}}]}");
+
+        var result = _extractor.TryExtractText(null!, isStreaming: false, body, out var text);
+
+        Assert.False(result);
+        Assert.Equal(string.Empty, text);
     }
 }
 

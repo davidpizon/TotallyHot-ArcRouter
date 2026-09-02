@@ -136,7 +136,7 @@ public sealed class PriceCatalogOptions
 /// <param name="Name">The registry name, matching <see cref="TotallyHot.ArcRouter.PriceCatalog.Sources.IPriceSourceClient.Name"/>.</param>
 /// <param name="DefaultPriorityScore">
 /// The rank assigned on first seed. Ranking now arbitrates contested cells (see
-/// <c>PriceCatalogRepository.UpsertPrices</c>'s priority gate); this default only ever applies once, when a
+/// <c>PriceRepository.UpsertPrices</c>'s priority gate); this default only ever applies once, when a
 /// row is first seeded - see <see cref="PriceCatalogOptions.KnownSources"/>'s remarks for why the two known
 /// sources' defaults are unequal.
 /// </param>

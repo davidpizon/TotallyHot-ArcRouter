@@ -13,13 +13,14 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// Depends on <see cref="PriceCatalogDatabase"/> purely as the owner of the connection string and schema
 /// bootstrap - the naming is a historical artifact of that type being the repository's first database, and
 /// its own summary already acknowledges the file is shared. Kept as a separate repository rather than more
-/// methods on <see cref="PriceCatalogRepository"/> so pricing and tool-calling stay independently
-/// readable; they share a file, not a domain.
+/// methods on one of the price-catalog repositories (<see cref="PriceRepository"/>, and its five siblings
+/// in that namespace) so pricing and tool-calling stay independently readable; they share a file, not a
+/// domain.
 /// </para>
 /// </summary>
 public sealed class ToolCallCapabilityRepository
 {
-    // Matches PriceCatalogRepository's own constant: a fixed-width, sortable, culture-invariant UTC form,
+    // Matches PriceCatalogRepositoryBase's own constant: a fixed-width, sortable, culture-invariant UTC form,
     // so a string comparison in SQL is also a chronological one.
     private const string TimestampFormat = "yyyy-MM-ddTHH:mm:ss.fffffffZ";
 

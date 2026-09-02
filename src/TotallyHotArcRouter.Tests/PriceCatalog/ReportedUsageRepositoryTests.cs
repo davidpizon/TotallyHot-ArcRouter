@@ -2,7 +2,7 @@ using TotallyHot.ArcRouter.PriceCatalog;
 
 namespace TotallyHot.ArcRouter.Tests.PriceCatalog;
 
-/// <summary>Covers <see cref="PriceCatalogRepository.UpsertReportedUsage"/>/<see cref="PriceCatalogRepository.GetReportedUsage"/> (docs/router/secrets-at-rest-plan.md §8.1).</summary>
+/// <summary>Covers <see cref="ReportedUsageRepository.UpsertReportedUsage"/>/<see cref="ReportedUsageRepository.GetReportedUsage"/> (docs/router/secrets-at-rest-plan.md §8.1).</summary>
 public class ReportedUsageRepositoryTests
 {
     private static DateOnly Yesterday => DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(-1));
@@ -12,7 +12,7 @@ public class ReportedUsageRepositoryTests
     {
         using var temp = new TempDatabase();
         temp.Database.EnsureCreated();
-        var repository = new PriceCatalogRepository(temp.Database);
+        var repository = new ReportedUsageRepository(temp.Database);
 
         var (rows, fetchedAt) = repository.GetReportedUsage("anthropic");
 
@@ -25,7 +25,7 @@ public class ReportedUsageRepositoryTests
     {
         using var temp = new TempDatabase();
         temp.Database.EnsureCreated();
-        var repository = new PriceCatalogRepository(temp.Database);
+        var repository = new ReportedUsageRepository(temp.Database);
         var fetchedAt = DateTimeOffset.UtcNow;
 
         repository.UpsertReportedUsage(
@@ -52,7 +52,7 @@ public class ReportedUsageRepositoryTests
     {
         using var temp = new TempDatabase();
         temp.Database.EnsureCreated();
-        var repository = new PriceCatalogRepository(temp.Database);
+        var repository = new ReportedUsageRepository(temp.Database);
         var day = Yesterday;
 
         repository.UpsertReportedUsage("anthropic", [new ReportedUsageRow(day, "claude-opus-4-1", 100, 50, 0, 0)], DateTimeOffset.UtcNow);
@@ -70,7 +70,7 @@ public class ReportedUsageRepositoryTests
     {
         using var temp = new TempDatabase();
         temp.Database.EnsureCreated();
-        var repository = new PriceCatalogRepository(temp.Database);
+        var repository = new ReportedUsageRepository(temp.Database);
         var day = Yesterday;
 
         repository.UpsertReportedUsage("anthropic", [new ReportedUsageRow(day, "claude-opus-4-1", 1, 1, 0, 0)], DateTimeOffset.UtcNow);
@@ -85,7 +85,7 @@ public class ReportedUsageRepositoryTests
     {
         using var temp = new TempDatabase();
         temp.Database.EnsureCreated();
-        var repository = new PriceCatalogRepository(temp.Database);
+        var repository = new ReportedUsageRepository(temp.Database);
         var day = Yesterday;
         repository.UpsertReportedUsage("anthropic", [new ReportedUsageRow(day, "claude-opus-4-1", 1, 1, 0, 0)], DateTimeOffset.UtcNow);
 
@@ -99,7 +99,7 @@ public class ReportedUsageRepositoryTests
     {
         using var temp = new TempDatabase();
         temp.Database.EnsureCreated();
-        var repository = new PriceCatalogRepository(temp.Database);
+        var repository = new ReportedUsageRepository(temp.Database);
         var oldDay = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(-100));
         var oldFetchedAt = DateTimeOffset.UtcNow.AddDays(-100);
         repository.UpsertReportedUsage("anthropic", [new ReportedUsageRow(oldDay, "claude-opus-4-1", 1, 1, 0, 0)], oldFetchedAt);

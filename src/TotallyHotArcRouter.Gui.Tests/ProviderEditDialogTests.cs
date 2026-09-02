@@ -38,7 +38,7 @@ public sealed class ProviderEditDialogTests
     {
         using var ctx = new Bunit.BunitContext();
 
-        var cut = ctx.Render<ProviderEditDialog>(SeedEditParameters);
+        var cut = ctx.Render<ProviderEditDialog>(parameters => SeedEditParameters(parameters));
 
         cut.Markup.Should().Contain("Edit Provider");
     }
@@ -60,7 +60,7 @@ public sealed class ProviderEditDialogTests
 
         // A live-telemetry tick re-renders the parent, which re-supplies the dialog's ORIGINAL parameters.
         // This is the exact event that used to clobber the in-progress edit.
-        cut.Render(SeedEditParameters);
+        cut.Render(parameters => SeedEditParameters(parameters));
 
         // The user clicks Save.
         FindSaveButton(cut).Click();
@@ -94,11 +94,7 @@ public sealed class ProviderEditDialogTests
     {
         using var ctx = new Bunit.BunitContext();
 
-        var cut = ctx.Render<ProviderEditDialog>(parameters =>
-        {
-            SeedEditParameters(parameters);
-            parameters.Add(p => p.IsFree, true);
-        });
+        var cut = ctx.Render<ProviderEditDialog>(parameters => SeedEditParameters(parameters, isFree: true));
 
         cut.Find("[data-testid='is-free']").HasAttribute("checked").Should().BeTrue();
     }
@@ -118,7 +114,7 @@ public sealed class ProviderEditDialogTests
         });
 
         cut.Find("[data-testid='is-free']").Change(true);
-        cut.Render(SeedEditParameters);
+        cut.Render(parameters => SeedEditParameters(parameters));
         FindSaveButton(cut).Click();
 
         saved.Should().NotBeNull();
@@ -177,8 +173,7 @@ public sealed class ProviderEditDialogTests
     {
         using var ctx = new Bunit.BunitContext();
 
-        var cut = ctx.Render<ProviderEditDialog>(parameters => parameters
-            .Add(p => p.IsNew, true));
+        var cut = ctx.Render<ProviderEditDialog>(parameters => SeedEditParameters(parameters, isNew: true));
 
         cut.Find("[data-testid='provider-type']").Change(nameof(ProviderType.Anthropic));
 
@@ -192,8 +187,7 @@ public sealed class ProviderEditDialogTests
     {
         using var ctx = new Bunit.BunitContext();
 
-        var cut = ctx.Render<ProviderEditDialog>(parameters => parameters
-            .Add(p => p.IsNew, true));
+        var cut = ctx.Render<ProviderEditDialog>(parameters => SeedEditParameters(parameters, isNew: true));
 
         cut.Find("[data-testid='provider-type']").Change(nameof(ProviderType.LocalRuntime));
 
@@ -226,10 +220,7 @@ public sealed class ProviderEditDialogTests
         using var ctx = new Bunit.BunitContext();
 
         var cut = ctx.Render<ProviderEditDialog>(parameters =>
-        {
-            SeedEditParameters(parameters);
-            parameters.Add(p => p.ProviderType, nameof(ProviderType.Anthropic));
-        });
+            SeedEditParameters(parameters, providerType: nameof(ProviderType.Anthropic)));
 
         // Guards the round-trip bug: ProvidersAdmin used to hardcode "Other", so an Anthropic provider
         // always reopened as Other and lost its type on the next save.
@@ -294,9 +285,8 @@ public sealed class ProviderEditDialogTests
         ProviderEditDialog.ProviderEditResult? saved = null;
         var cut = ctx.Render<ProviderEditDialog>(parameters =>
         {
-            SeedEditParameters(parameters);
             // A locked header's literal value is never carried by a GET, only the fact that one is set.
-            parameters.Add(p => p.Headers, new[] { LockedHeader });
+            SeedEditParameters(parameters, headers: [LockedHeader]);
             parameters.Add(p => p.OnSave, (ProviderEditDialog.ProviderEditResult r) => saved = r);
         });
 
@@ -327,8 +317,7 @@ public sealed class ProviderEditDialogTests
         ProviderEditDialog.ProviderEditResult? saved = null;
         var cut = ctx.Render<ProviderEditDialog>(parameters =>
         {
-            SeedEditParameters(parameters);
-            parameters.Add(p => p.Headers, new[] { UnlockedHeader });
+            SeedEditParameters(parameters, headers: [UnlockedHeader]);
             parameters.Add(p => p.OnSave, (ProviderEditDialog.ProviderEditResult r) => saved = r);
         });
 
@@ -353,8 +342,7 @@ public sealed class ProviderEditDialogTests
         ProviderEditDialog.ProviderEditResult? saved = null;
         var cut = ctx.Render<ProviderEditDialog>(parameters =>
         {
-            SeedEditParameters(parameters);
-            parameters.Add(p => p.Headers, new[] { UnlockedHeader });
+            SeedEditParameters(parameters, headers: [UnlockedHeader]);
             parameters.Add(p => p.OnSave, (ProviderEditDialog.ProviderEditResult r) => saved = r);
         });
 
@@ -378,8 +366,7 @@ public sealed class ProviderEditDialogTests
         ProviderEditDialog.ProviderEditResult? saved = null;
         var cut = ctx.Render<ProviderEditDialog>(parameters =>
         {
-            SeedEditParameters(parameters);
-            parameters.Add(p => p.Headers, new[] { LockedHeader });
+            SeedEditParameters(parameters, headers: [LockedHeader]);
             parameters.Add(p => p.OnSave, (ProviderEditDialog.ProviderEditResult r) => saved = r);
         });
 
@@ -443,8 +430,7 @@ public sealed class ProviderEditDialogTests
 
         var cut = ctx.Render<ProviderEditDialog>(parameters =>
         {
-            SeedEditParameters(parameters);
-            parameters.Add(p => p.Headers, new[] { new ProviderHeaderView("X-Secret", HeaderValueSource.EnvVar, "MY_SECRET_VAR") });
+            SeedEditParameters(parameters, headers: [new ProviderHeaderView("X-Secret", HeaderValueSource.EnvVar, "MY_SECRET_VAR")]);
         });
 
         // An env-var header names a variable; the secret lives outside the config file, so there is
@@ -461,8 +447,7 @@ public sealed class ProviderEditDialogTests
         ProviderEditDialog.ProviderEditResult? saved = null;
         var cut = ctx.Render<ProviderEditDialog>(parameters =>
         {
-            SeedEditParameters(parameters);
-            parameters.Add(p => p.Headers, new[] { LockedHeader });
+            SeedEditParameters(parameters, headers: [LockedHeader]);
             parameters.Add(p => p.OnSave, (ProviderEditDialog.ProviderEditResult r) => saved = r);
         });
 
@@ -480,7 +465,7 @@ public sealed class ProviderEditDialogTests
     {
         using var ctx = new Bunit.BunitContext();
 
-        var cut = ctx.Render<ProviderEditDialog>(SeedEditParameters);
+        var cut = ctx.Render<ProviderEditDialog>(parameters => SeedEditParameters(parameters));
 
         cut.Find("[data-testid='add-header']").Click();
         cut.Find("[data-testid='add-header']").Click();
@@ -500,7 +485,7 @@ public sealed class ProviderEditDialogTests
     {
         using var ctx = new Bunit.BunitContext();
 
-        var cut = ctx.Render<ProviderEditDialog>(SeedEditParameters);
+        var cut = ctx.Render<ProviderEditDialog>(parameters => SeedEditParameters(parameters));
 
         cut.Find("[data-testid='add-header']").Click();
         cut.Find("[data-testid='add-header']").Click();
@@ -516,7 +501,7 @@ public sealed class ProviderEditDialogTests
     {
         using var ctx = new Bunit.BunitContext();
 
-        var cut = ctx.Render<ProviderEditDialog>(SeedEditParameters);
+        var cut = ctx.Render<ProviderEditDialog>(parameters => SeedEditParameters(parameters));
 
         cut.Find("[data-testid='add-header']").Click();
         cut.Find("[data-testid='add-header']").Click();
@@ -531,12 +516,25 @@ public sealed class ProviderEditDialogTests
         FindSaveButton(cut).HasAttribute("disabled").Should().BeFalse();
     }
 
-    private static void SeedEditParameters(ComponentParameterCollectionBuilder<ProviderEditDialog> parameters) =>
-        parameters
-            .Add(p => p.IsNew, false)
-            .Add(p => p.Key, Key)
-            .Add(p => p.BaseUrl, OriginalBaseUrl)
-            .Add(p => p.AuthHeaderName, "x-api-key");
+    private static void SeedEditParameters(
+        ComponentParameterCollectionBuilder<ProviderEditDialog> parameters,
+        bool isNew = false,
+        string key = Key,
+        string baseUrl = OriginalBaseUrl,
+        string authHeaderName = "x-api-key",
+        IReadOnlyList<ProviderHeaderView>? headers = null,
+        bool isFree = false,
+        string providerType = "",
+        string providerName = "") =>
+        parameters.Add(p => p.Model, new ProviderEditDialog.ProviderEditModel(
+            Key: key,
+            IsNew: isNew,
+            BaseUrl: baseUrl,
+            AuthHeaderName: authHeaderName,
+            Headers: headers ?? [],
+            IsFree: isFree,
+            ProviderType: providerType,
+            ProviderName: providerName));
 
     private static AngleSharp.Dom.IElement FindSaveButton(IRenderedComponent<ProviderEditDialog> cut) =>
         cut.FindAll("button").First(b => b.TextContent.Trim() == "Save");

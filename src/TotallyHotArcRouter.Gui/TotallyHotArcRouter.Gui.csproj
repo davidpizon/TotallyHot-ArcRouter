@@ -101,6 +101,17 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- MockData's literal fixture data (Models/DashboardData.cs) lives here instead of as C# object
+         initializers; embedded (not copied to output) so Models/DashboardData.cs's LoadFixture reads it
+         via Assembly.GetManifestResourceStream regardless of the process's working directory - unlike
+         appsettings.json above, this never needs to be edited by hand outside the build, so there is no
+         reason to expose it as a loose file next to the executable. -->
+    <EmbeddedResource Include="Models\DashboardMockData.json">
+      <LogicalName>TotallyHot.ArcRouter.Gui.Models.DashboardMockData.json</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Plain net10.0 libraries: pure data-transformation logic kept out of this Windows-only
          project so it's unit-testable on any platform. See the matching .Tests projects.
          TotallyHotArcRouter.Gui.Telemetry also compiles Protos/telemetry.proto's gRPC client stub

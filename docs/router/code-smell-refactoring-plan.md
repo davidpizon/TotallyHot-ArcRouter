@@ -2,11 +2,60 @@
 
 **Status:** Phase 1 implemented (see [PR #75](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/75)).
 Phase 2 (all 5 steps) and Phase 3 steps 1-2 are implemented. The Phase 4 Razor `.razor.cs` code-behind
-split is also implemented (`ProvidersAdmin`, `SettingsModal`, `BenchmarkData`, `PriceSourcesAdmin`). Phase
-3 step 3 (further `ManagementFacade` splitting) remains ADR-gated and unimplemented; the remaining Phase 4
-items (`PriceCatalogRepository`, `RequestInterceptor`, the HTTP-vs-gRPC transport inconsistency) remain
-tracked backlog, not scheduled. This document is the output of a structural survey (CodeGraph + Serena +
-targeted reads), not an exhaustive line-by-line audit.
+split is also implemented (`ProvidersAdmin`, `SettingsModal`, `BenchmarkData`, `PriceSourcesAdmin`).
+
+A second, independent audit (session "Codebase architectural audit," `~/.claude/plans/act-as-a-brutal-cozy-pascal.md`)
+re-surveyed the codebase blind to this document, confirmed both of this plan's still-open items below,
+and found 10 additional items this plan missed. Per that audit's own recommendation, its findings are
+folded into this document rather than tracked separately. All of its Critical and Moderate items are
+now implemented except the two ADR-gated ones and the Gemini cost reconciler:
+
+- **Implemented** (commits on `refactoring`): `PersistedSessionsClient` extended `GrpcAdminClientBase<,>`
+  (fixing a regression of the exact smell Phase 1 fixed once already); the four duplicated translator
+  helper methods across `AnthropicPayloadTranslator`/`GeminiPayloadTranslator`/Bedrock's translators were
+  deduplicated into `PayloadTranslationHelpers`; `ProxyMiddleware.InvokeCoreAsync`'s six per-candidate
+  failover gates are now an explicit ordered `CandidateGates` sequence (Phase 2 step 4, previously
+  deferred); `ManagementFacade`'s 23 colocated DTO/enum/record types moved to `ManagementFacadeModels.cs`;
+  `RequestTelemetryPublisher.PublishAsync` decomposed into 6 named private methods with a new
+  characterization-test suite (it previously had none); a `SnapshotCache<T>` now backs
+  `ProviderBudgetStore`/`PriceSourceToggleStore`/`ToolCallCapabilityStore`'s lock-and-volatile-swap
+  concurrency idiom; `PriceCatalogRepository` split into 6 per-concern repositories (Phase 4's backlog
+  item, re-litigated and promoted — see the audit's M3); `RequestInterceptor` split via
+  `RequestBodyIntrospection` and `RoutingCandidateBuilder` (Phase 4's other backlog item, likewise
+  promoted — see the audit's M4); a shared `DialogShell` component now backs all four Governance dialogs;
+  `TrayWindowManager`'s single-UI-thread invariant is documented; a `ProviderRegistration` dispatch table
+  now drives `UsageExtractor`/`ResponseTextExtractor` and fixed a real gap (Ollama's response text was
+  silently unhandled); several small Quality-assembly and GUI cleanups (deduplicated scoring/word-boundary
+  helpers, stale doc-comment fixes, `DashboardData`'s mock fixtures moved to a JSON resource).
+- **ADR-approved and implemented:**
+  [ADR-0006](../adr/0006-split-managementfacade-along-crud-aggregate-boundaries.md) (accepted) decided
+  `ManagementFacade`'s remaining write/security-boundary surface splits into internal collaborators
+  along CRUD-aggregate lines (Phase 3 step 3, now complete) — `ManagementFacade.cs` shrank from 1562 to
+  ~450 lines, delegating to `ProviderManagementService`, `BudgetAndPriceOverrideService`, and
+  `SecretManagementService`, each reachable only through the facade's own public methods. Zero
+  public-surface or call-site changes.
+  [ADR-0007](../adr/0007-provider-admin-client-stays-on-http.md) (accepted) decides `ProviderAdminClient`
+  stays on HTTP rather than migrating to gRPC (the Phase 4 transport item, below) — no migration code is
+  planned, closing that item with documentation only.
+- **Tracked as an open TODO, not implemented:** a real `IProviderCostReconciler` for Gemini needs new
+  external integration surface (GCP Cloud Billing/BigQuery export, a service-account credential) that a
+  mechanical refactor pass shouldn't decide the shape of alone — see
+  [`tracked-todos.md` #6](tracked-todos.md#6-build-a-real-iprovidercostreconciler-for-gemini). Bedrock and
+  Ollama reconcilers were assessed and ruled out permanently (not deferred) — AWS Cost Explorer reports
+  account-wide rather than per-model, and Ollama has no billing API at all, being local/free.
+  `ProviderRegistration.CostReconciler` is already wired to accept an implementation once one exists.
+- **Adopted as a going-forward norm, not swept:** GUI singleton stores (13 of 14) still have no
+  interface — extract one when a store is next touched for an unrelated reason, not as a dedicated pass.
+- **C1's manual smoke test** (AGENTS.md's "test the golden path… before reporting complete" rule for
+  hot-path changes) — streaming, buffered, Bedrock, and local-endpoint (`/v1/models`, `/api/tags`,
+  `/api/show`) request paths through the running proxy, after the `CandidateGates` change — complete.
+
+Phase 3 step 3 (further `ManagementFacade` splitting) is complete, implementing ADR-0006's accepted
+decision; the HTTP-vs-gRPC transport inconsistency is resolved by ADR-0007 (documented, not migrated).
+Every item from both this plan and the brutal-cozy-pascal audit is now either shipped, closed by an
+accepted ADR, or tracked as an explicit open TODO — see [`tracked-todos.md` #6](tracked-todos.md#6-build-a-real-iprovidercostreconciler-for-gemini)
+for the one remaining piece of work (the Gemini cost reconciler). This document is the output of a
+structural survey (CodeGraph + Serena + targeted reads), not an exhaustive line-by-line audit.
 
 **Scope surveyed:** `TotallyHotArcRouter` (router core), `TotallyHot.ArcRouter.Quality`, and all four
 GUI assemblies (`TotallyHotArcRouter.Gui`, `.Gui.Admin`, `.Gui.Charts`, `.Gui.Console`,

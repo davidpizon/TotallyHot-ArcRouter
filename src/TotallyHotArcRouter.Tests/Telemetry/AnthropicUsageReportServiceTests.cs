@@ -15,7 +15,7 @@ public class AnthropicUsageReportServiceTests
     {
         using var temp = new TempDatabase();
         temp.Database.EnsureCreated();
-        var repository = new PriceCatalogRepository(temp.Database);
+        var repository = new ReportedUsageRepository(temp.Database);
         var handler = new QueuedResponsesHandler([]);
         var service = new AnthropicUsageReportService(
             new HttpClient(handler), repository, () => null, NullLogger<AnthropicUsageReportService>.Instance);
@@ -31,7 +31,7 @@ public class AnthropicUsageReportServiceTests
     {
         using var temp = new TempDatabase();
         temp.Database.EnsureCreated();
-        var repository = new PriceCatalogRepository(temp.Database);
+        var repository = new ReportedUsageRepository(temp.Database);
         var startingAt = DateTime.UtcNow.Date.AddDays(-1).ToString("O", System.Globalization.CultureInfo.InvariantCulture);
         var page = $$"""
             {
@@ -61,7 +61,7 @@ public class AnthropicUsageReportServiceTests
     {
         using var temp = new TempDatabase();
         temp.Database.EnsureCreated();
-        var repository = new PriceCatalogRepository(temp.Database);
+        var repository = new ReportedUsageRepository(temp.Database);
         // No queued responses - the handler throws IndexOutOfRangeException on the first request, exercising
         // the catch-and-log path rather than an HTTP error status.
         var handler = new QueuedResponsesHandler([]);

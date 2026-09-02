@@ -1,4 +1,5 @@
 using System.Text;
+using TotallyHot.ArcRouter.Proxy;
 
 namespace TotallyHot.ArcRouter.Telemetry;
 
@@ -12,7 +13,7 @@ public interface IResponseTextExtractor
     /// <summary>
     /// Attempts to extract the assistant's reply text for a completed request.
     /// </summary>
-    /// <param name="provider">The provider key the request was routed to (e.g. <c>"openai"</c>, <c>"anthropic"</c>).</param>
+    /// <param name="provider">The provider key the request was routed to (e.g. <c>"openai"</c>, <c>"anthropic"</c>), case-insensitive.</param>
     /// <param name="isStreaming">Whether the response was a streaming (SSE) response.</param>
     /// <param name="bufferedResponseBody">The captured response bytes (may be truncated for very large responses - see the capture-cap note on the caller).</param>
     /// <param name="text">The extracted text, when this method returns <see langword="true"/>.</param>
@@ -23,12 +24,45 @@ public interface IResponseTextExtractor
 /// <inheritdoc cref="IResponseTextExtractor" />
 public sealed class ResponseTextExtractor : IResponseTextExtractor
 {
+    private readonly IReadOnlyDictionary<string, ProviderRegistration> _providerRegistrations;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ResponseTextExtractor"/> class.
+    /// </summary>
+    /// <param name="providerRegistrations">
+    /// The provider dispatch table (<c>provider key -&gt; <see cref="ProviderRegistration"/></c>) that
+    /// decides which parser shape a given provider's captured bytes are in. Defaults to
+    /// <see cref="ProviderRegistrations.BuildDefault"/> when not supplied - the same table
+    /// <c>ServiceCollectionExtensions</c> registers for DI, and the same one <see cref="UsageExtractor"/>
+    /// falls back to - so direct construction (production fallback construction in
+    /// <c>ProxyMiddleware</c>, or a test building this type on its own) still dispatches every known
+    /// provider correctly, and the two extractors can never disagree about a given provider's shape.
+    /// Re-keyed onto <see cref="StringComparer.OrdinalIgnoreCase"/> regardless of the comparer the
+    /// caller's own dictionary used, so <see cref="TryExtractText"/>'s documented case-insensitive
+    /// lookup contract holds no matter what a caller supplies here - not just for the case-insensitive
+    /// default table.
+    /// </param>
+    public ResponseTextExtractor(IReadOnlyDictionary<string, ProviderRegistration>? providerRegistrations = null)
+    {
+        _providerRegistrations = providerRegistrations is null
+            ? ProviderRegistrations.BuildDefault()
+            : new Dictionary<string, ProviderRegistration>(providerRegistrations, StringComparer.OrdinalIgnoreCase);
+    }
+
     /// <inheritdoc />
     public bool TryExtractText(string provider, bool isStreaming, ReadOnlyMemory<byte> bufferedResponseBody, out string text)
     {
         text = string.Empty;
 
         if (bufferedResponseBody.IsEmpty)
+        {
+            return false;
+        }
+
+        // Unknown/unsupported provider (e.g. alibaba, zhipu, moonshot, minimax), or a null/blank key: no
+        // registration, so no parser shape to dispatch on. Fail gracefully rather than guessing at an
+        // unverified response shape, or throwing on a Dictionary null-key lookup for a public method.
+        if (string.IsNullOrEmpty(provider) || !_providerRegistrations.TryGetValue(provider, out var registration))
         {
             return false;
         }
@@ -43,20 +77,15 @@ public sealed class ResponseTextExtractor : IResponseTextExtractor
             return false;
         }
 
-        return provider.ToLowerInvariant() switch
+        return registration.UsageParserShape switch
         {
-            // "gemini" is OpenAI-shaped by this point - ProxyMiddleware translates the Gemini response
-            // to OpenAI's choices[] shape before capturing it (docs/router/unified-api-translation.md §4.3).
-            "openai" or "gemini" => isStreaming
+            UsageParserShape.OpenAiCompatible => isStreaming
                 ? OpenAiResponseTextParser.TryExtractFromStreamingBuffer(body, out text)
                 : OpenAiResponseTextParser.TryExtractFromNonStreamingBody(body, out text),
-            "anthropic" => isStreaming
+            UsageParserShape.Native => isStreaming
                 ? AnthropicResponseTextParser.TryExtractFromStreamingBuffer(body, out text)
                 : AnthropicResponseTextParser.TryExtractFromNonStreamingBody(body, out text),
-            // Unknown/unsupported provider (e.g. alibaba, zhipu, moonshot, minimax): no parser wired
-            // up yet. Fail gracefully rather than guessing at an unverified response shape.
             _ => false,
         };
     }
 }
-
