@@ -112,4 +112,3 @@ which callers can mutate what" while fixing the file-size/cohesion problem.
 Implements `docs/router/code-smell-refactoring-plan.md` Phase 3 step 3, and item C2 of the
 brutal-cozy-pascal structural audit. The DTO/enum/record file move (this ADR's Option A, done
 unconditionally) corresponds to that audit's item m5.
-</content>

@@ -60,13 +60,20 @@ internal sealed class SnapshotCache<T>
     /// instead of putting the expensive work inside <paramref name="build"/>.
     /// </remarks>
     /// <param name="build">Produces the next snapshot from scratch. Its result becomes the new <see cref="Current"/>.</param>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="build"/> returned <see langword="null"/>. Publishing a null snapshot would break the
+    /// "always a fully-formed snapshot" invariant <see cref="Current"/> documents, so a misbehaving builder
+    /// fails loudly here rather than handing every lock-free reader a value they were never meant to see.
+    /// </exception>
     public void Rebuild(Func<T> build)
     {
         ArgumentNullException.ThrowIfNull(build);
 
         lock (_gate)
         {
-            _current = build();
+            var next = build() ?? throw new InvalidOperationException(
+                $"{nameof(SnapshotCache<T>)}<{typeof(T).Name}>.{nameof(Rebuild)}'s build callback returned null; a snapshot must never be null.");
+            _current = next;
         }
     }
 }

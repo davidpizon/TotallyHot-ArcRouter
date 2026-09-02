@@ -105,4 +105,3 @@ transport" backlog item in `docs/router/code-smell-refactoring-plan.md` Phase 4.
 independently-resolved third-pattern regression (`PersistedSessionsClient` hand-rolling gRPC instead of
 extending `GrpcAdminClientBase<,>`, audit item C4) is what motivated re-raising this question now
 rather than leaving it further deferred; that fix ships as its own change, not as part of this ADR.
-</content>
