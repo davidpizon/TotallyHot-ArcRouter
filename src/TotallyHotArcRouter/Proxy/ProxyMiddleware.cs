@@ -63,73 +63,37 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     // "incorrect header check"). Not asking upstream to compress at all sidesteps both failure modes.
     private static readonly string[] AlwaysSkippedRequestHeaders = ["Host", "Content-Type", "Content-Length", "Authorization", "Accept-Encoding"];
 
-    // The OpenAI-compatible model discovery path. Answered locally from configuration (mirroring LiteLLM's
-    // /v1/models behavior) since it has no request body to resolve a single upstream provider from, and no
-    // single upstream to forward it to anyway when ModelList spans multiple providers.
-    private const string ModelsListPath = "/v1/models";
-
-    // Ollama's native model discovery path. A client that adds this proxy as an "Ollama" provider (e.g.
-    // Visual Studio's AI model picker) probes this GET endpoint - with no body - to list models, exactly
-    // like ModelsListPath above but in Ollama's own response shape rather than OpenAI's. Answered the same
-    // way: locally from configuration, never forwarded, since there is no body to resolve a single upstream
-    // from and no single upstream anyway when ModelList spans multiple providers.
-    private const string OllamaTagsPath = "/api/tags";
-
-    // Ollama's native per-model detail path. A client that discovers models via OllamaTagsPath above (e.g.
-    // Visual Studio's AI model picker) follows up with one POST here per model to fetch its details before
-    // use. Answered locally from configuration, exactly like OllamaTagsPath: without this, the request falls
-    // through to the normal per-model routing path, which resolves its {"model": "..."} body to a real
-    // upstream candidate and forwards it there verbatim - a malformed chat/completion request that the
-    // upstream (correctly) rejects, surfacing as a confusing 400 with no indication /api/show was involved.
-    private const string OllamaShowPath = "/api/show";
-
     // Cap on how much of the response body telemetry captures for usage parsing (see CopyAndCaptureAsync).
     // Real chat/completion responses are almost always well under this; a response that exceeds it just
     // means usage parsing has less to work with (a truncated/partial buffer that the usage parsers already
     // handle gracefully by finding nothing), never a failure of the actual client-facing forward, which is
     // unaffected by this cap - every byte is still copied to the client regardless.
-    private const int MaxCapturedResponseBytes = 4 * 1024 * 1024;
+    internal const int MaxCapturedResponseBytes = 4 * 1024 * 1024;
 
     private readonly ILogger<ProxyMiddleware> _logger;
     private readonly HttpClient _httpClient;
     private readonly RequestInterceptor _interceptor;
-    private readonly ISessionIdResolver _sessionIdResolver;
-    private readonly IConversationContinuityMatcher _continuityMatcher;
-    private readonly IConversationTurnTracker _turnTracker;
-    private readonly IUsageExtractor _usageExtractor;
-    private readonly IResponseTextExtractor _responseTextExtractor;
-    private readonly ITelemetryPublisher _telemetryPublisher;
-    private readonly IQualityIngress? _qualityIngress;
-    private readonly ISpendTracker _spendTracker;
-    private readonly IModelPriceLookup? _priceLookup;
     private readonly IReadOnlyDictionary<string, IPayloadTranslator> _translators;
     private readonly IBedrockRuntimeClientFactory _bedrockClientFactory;
     private readonly PriceCatalog.IBudgetEnforcer? _budgetStore;
-    private readonly IUsageLedger? _usageLedger;
     private readonly IRateLimitHeaderCapture _rateLimitCapture;
     private readonly ICircuitBreaker _circuitBreaker;
     private readonly IProviderInteractionStatusStore? _interactionStatusStore;
     private readonly ToolCallNormalizerFactory _toolCallNormalizerFactory;
-    private readonly Router.Embeddings.PendingTaskEmbeddingCache? _pendingTaskEmbeddingCache;
-    private readonly PendingRequestCostCache? _pendingRequestCostCache;
-    private readonly PendingRequestProvenanceCache? _pendingRequestProvenanceCache;
-    private readonly PendingResponseTextCache? _pendingResponseTextCache;
-    private readonly ITranscriptStore? _transcriptStore;
     private readonly InFlightRequestGauge? _inFlightGauge;
-    private readonly IOptionsMonitor<Models.RoutingOptions>? _routingOptionsMonitor;
-    private readonly IOptionsMonitor<Judge.JudgeOptions>? _judgeOptionsMonitor;
     private readonly Router.IRoutingGate? _routingGate;
 
-    // Read only when describing models on /api/show. Both are in-memory snapshot lookups (see
-    // ToolCallCapabilityStore), so consulting them from a request handler costs a dictionary probe, not a
-    // query - which matters because a client's model picker polls this endpoint.
-    private readonly Translation.ToolCalling.IToolCallCapabilityStore? _capabilityStore;
-    private readonly Translation.ToolCalling.IModelContextWindowStore? _contextWindowStore;
+    // Answers the three self-contained local endpoints (/v1/models, /api/tags, /api/show) - see
+    // LocalEndpointResponder's own remarks for why this was the first cut out of this class.
+    private readonly LocalEndpointResponder _localEndpointResponder;
 
-    // The rate the router's own tokens are charged at (see RoutingOptions.SelfHostedRouterPricePerMillionTokens).
-    // Read once at construction rather than per request: it is a static amortization figure, not a catalog
-    // price that a background ingestion cycle can refresh underneath us.
-    private readonly decimal _selfHostedRouterPricePerMillionTokens;
+    // Resolves session/turn identity, extracts usage/cost, and publishes telemetry for a served request -
+    // see RequestTelemetryPublisher's own remarks for why this was the second cut out of this class.
+    private readonly RequestTelemetryPublisher _requestTelemetryPublisher;
+
+    // Invokes Bedrock directly via its SDK, mirroring the HTTP forwarding path - see
+    // BedrockInvocationHandler's own remarks for why this was the third cut out of this class.
+    private readonly BedrockInvocationHandler _bedrockInvocationHandler;
 
     // True only when no factory was supplied and this instance built its own fallback - in that case
     // ProxyMiddleware is the sole owner of that factory's lifetime and must dispose it (it caches AWS SDK
@@ -142,13 +106,13 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Response header carrying the client's literal requested model (docs/router/orchestrator-live-path-plan.md §M2.2).</summary>
-    private const string RequestedModelHeaderName = "X-ArcRouter-Requested-Model";
+    internal const string RequestedModelHeaderName = "X-ArcRouter-Requested-Model";
 
     /// <summary>Response header carrying the model that actually served the request.</summary>
-    private const string RoutedModelHeaderName = "X-ArcRouter-Routed-Model";
+    internal const string RoutedModelHeaderName = "X-ArcRouter-Routed-Model";
 
     /// <summary>Response header carrying the <see cref="RoutingSubstitutionReason"/> for why the two headers above differ, if they do.</summary>
-    private const string SubstitutionReasonHeaderName = "X-ArcRouter-Substitution-Reason";
+    internal const string SubstitutionReasonHeaderName = "X-ArcRouter-Substitution-Reason";
 
     /// <summary>
     /// The result of capturing a translated response for telemetry: the OpenAI-shaped bytes actually sent
@@ -158,7 +122,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// <see langword="null"/> for a pass-through (no translator ran, so the client bytes already are native)
     /// or an unsupported translated provider (e.g. Gemini). <see cref="TailScanner"/> retained a trailing
     /// window over the client-shape stream, independent of <see cref="ClientShapeBytes"/>'s head cap -
-    /// consulted by <c>PublishTelemetryAsync</c> only when usage extraction fails against both the
+    /// consulted by <see cref="RequestTelemetryPublisher.PublishAsync"/> only when usage extraction fails against both the
     /// head-capped and native captures (§5.11).
     /// </summary>
     private readonly record struct CapturedResponse(byte[] ClientShapeBytes, byte[]? NativeBytes, IncrementalUsageScanner? TailScanner);
@@ -381,35 +345,36 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             AllowAutoRedirect = false,
             UseCookies = false
         });
-        _sessionIdResolver = sessionIdResolver ?? new SessionIdResolver();
-        _continuityMatcher = continuityMatcher ?? new MessageHistoryContinuityMatcher();
-        _turnTracker = turnTracker ?? new ConversationTurnTracker();
-        _usageExtractor = usageExtractor ?? new UsageExtractor();
-        _responseTextExtractor = responseTextExtractor ?? new ResponseTextExtractor();
-        _telemetryPublisher = telemetryPublisher ?? new TelemetryPublisher(new TelemetryBroadcaster());
-        _qualityIngress = qualityIngress;
-        _spendTracker = spendTracker ?? NullSpendTracker.Instance;
-        _priceLookup = priceLookup;
         _translators = translators ?? NoTranslators;
         _budgetStore = budgetStore;
-        _usageLedger = usageLedger;
         _rateLimitCapture = rateLimitCapture ?? NullRateLimitHeaderCapture.Instance;
         _circuitBreaker = circuitBreaker ?? new CircuitBreaker();
         _toolCallNormalizerFactory = toolCallNormalizerFactory ?? new ToolCallNormalizerFactory();
-        _pendingTaskEmbeddingCache = pendingTaskEmbeddingCache;
-        _pendingRequestCostCache = pendingRequestCostCache;
-        _pendingRequestProvenanceCache = pendingRequestProvenanceCache;
-        _pendingResponseTextCache = pendingResponseTextCache;
-        _transcriptStore = transcriptStore;
         _inFlightGauge = inFlightGauge;
-        _routingOptionsMonitor = routingOptionsMonitor;
-        _judgeOptionsMonitor = judgeOptionsMonitor;
         _routingGate = routingGate;
-        _capabilityStore = capabilityStore;
-        _contextWindowStore = contextWindowStore;
+        _localEndpointResponder = new LocalEndpointResponder(logger, interceptor, capabilityStore, contextWindowStore);
         _interactionStatusStore = interactionStatusStore;
-        _selfHostedRouterPricePerMillionTokens =
-            routingOptions?.Value.SelfHostedRouterPricePerMillionTokens ?? new Models.RoutingOptions().SelfHostedRouterPricePerMillionTokens;
+        _requestTelemetryPublisher = new RequestTelemetryPublisher(
+            logger,
+            sessionIdResolver ?? new SessionIdResolver(),
+            continuityMatcher ?? new MessageHistoryContinuityMatcher(),
+            turnTracker ?? new ConversationTurnTracker(),
+            usageExtractor ?? new UsageExtractor(),
+            responseTextExtractor ?? new ResponseTextExtractor(),
+            telemetryPublisher ?? new TelemetryPublisher(new TelemetryBroadcaster()),
+            qualityIngress,
+            spendTracker ?? NullSpendTracker.Instance,
+            priceLookup,
+            budgetStore,
+            usageLedger,
+            pendingTaskEmbeddingCache,
+            pendingRequestCostCache,
+            pendingRequestProvenanceCache,
+            pendingResponseTextCache,
+            transcriptStore,
+            routingOptionsMonitor,
+            judgeOptionsMonitor,
+            routingOptions?.Value.SelfHostedRouterPricePerMillionTokens ?? new Models.RoutingOptions().SelfHostedRouterPricePerMillionTokens);
 
         if (bedrockClientFactory is null)
         {
@@ -420,6 +385,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         {
             _bedrockClientFactory = bedrockClientFactory;
         }
+
+        _bedrockInvocationHandler = new BedrockInvocationHandler(logger, _bedrockClientFactory, _circuitBreaker, _requestTelemetryPublisher);
     }
 
     /// <summary>
@@ -456,23 +423,23 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// <param name="next">The next middleware delegate (unused; the proxy is terminal).</param>
     private async Task InvokeCoreAsync(HttpContext context, RequestDelegate next)
     {
-        _logger.LogInformation("Proxy middleware caught request to {Path}", SanitizeForLog(context.Request.Path.ToString()));
+        _logger.LogInformation("Proxy middleware caught request to {Path}", LogRedaction.Sanitize(context.Request.Path.ToString()));
 
-        if (IsModelsListRequest(context.Request))
+        if (LocalEndpointResponder.IsModelsListRequest(context.Request))
         {
-            await WriteModelsListResponseAsync(context);
+            await _localEndpointResponder.WriteModelsListResponseAsync(context);
             return;
         }
 
-        if (IsOllamaTagsRequest(context.Request))
+        if (LocalEndpointResponder.IsOllamaTagsRequest(context.Request))
         {
-            await WriteOllamaTagsResponseAsync(context);
+            await _localEndpointResponder.WriteOllamaTagsResponseAsync(context);
             return;
         }
 
-        if (IsOllamaShowRequest(context.Request))
+        if (LocalEndpointResponder.IsOllamaShowRequest(context.Request))
         {
-            await WriteOllamaShowResponseAsync(context);
+            await _localEndpointResponder.WriteOllamaShowResponseAsync(context);
             return;
         }
 
@@ -527,7 +494,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         {
             _logger.LogWarning(
                 "All candidate providers for model {Model} are over their monthly budget; rejecting with 402.",
-                SanitizeForLog(requestedModelName));
+                LogRedaction.Sanitize(requestedModelName));
             await WriteBudgetExhaustedResponseAsync(context, requestedModelName);
             return;
         }
@@ -551,8 +518,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             {
                 _logger.LogInformation(
                     "Skipping provider {Provider} for model {Model}: monthly budget exhausted.",
-                    SanitizeForLog(route.Provider),
-                    SanitizeForLog(route.ModelName));
+                    LogRedaction.Sanitize(route.Provider),
+                    LogRedaction.Sanitize(route.ModelName));
                 continue;
             }
 
@@ -564,8 +531,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             {
                 _logger.LogInformation(
                     "Bypassing provider {Provider} for model {Model}: provider is stopped.",
-                    SanitizeForLog(route.Provider),
-                    SanitizeForLog(route.ModelName));
+                    LogRedaction.Sanitize(route.Provider),
+                    LogRedaction.Sanitize(route.ModelName));
                 continue;
             }
 
@@ -578,7 +545,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             {
                 _logger.LogInformation(
                     "Bypassing model {Model}: stopped or not currently reported by its provider's endpoint.",
-                    SanitizeForLog(route.ModelName));
+                    LogRedaction.Sanitize(route.ModelName));
                 continue;
             }
 
@@ -595,8 +562,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             {
                 _logger.LogInformation(
                     "Bypassing provider {Provider} for model {Model}: circuit breaker is open.",
-                    SanitizeForLog(route.Provider),
-                    SanitizeForLog(route.ModelName));
+                    LogRedaction.Sanitize(route.Provider),
+                    LogRedaction.Sanitize(route.ModelName));
                 continue;
             }
 
@@ -609,8 +576,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             {
                 _logger.LogInformation(
                     "Bypassing provider {Provider} for model {Model}: circuit breaker is open.",
-                    SanitizeForLog(route.Provider),
-                    SanitizeForLog(route.ModelName));
+                    LogRedaction.Sanitize(route.Provider),
+                    LogRedaction.Sanitize(route.ModelName));
                 continue;
             }
 
@@ -624,8 +591,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             {
                 _logger.LogInformation(
                     "Bypassing provider {Provider} for model {Model}: provider-wide circuit breaker is open.",
-                    SanitizeForLog(route.Provider),
-                    SanitizeForLog(route.ModelName));
+                    LogRedaction.Sanitize(route.Provider),
+                    LogRedaction.Sanitize(route.ModelName));
                 continue;
             }
 
@@ -640,9 +607,9 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 "Attempting candidate {Index}/{Total}: provider={Provider} model={Model} providerModelId={ProviderModelId} baseUrl={BaseUrl} isFallback={IsFallback}",
                 i + 1,
                 candidates.Count,
-                SanitizeForLog(route.Provider),
-                SanitizeForLog(route.ModelName),
-                SanitizeForLog(route.ProviderModelId),
+                LogRedaction.Sanitize(route.Provider),
+                LogRedaction.Sanitize(route.ModelName),
+                LogRedaction.Sanitize(route.ProviderModelId),
                 route.UpstreamBaseUrl,
                 isFallback);
 
@@ -678,7 +645,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // for streaming - AWS's binary event-stream decoding are all the SDK's job, not a forwarded
             // HttpRequestMessage's), which is a different enough invocation shape that it gets its own path
             // entirely rather than reusing the HttpClient-forwarding code below. A Bedrock candidate is no
-            // longer unconditionally terminal: InvokeBedrockAsync returns true once it has actually written
+            // longer unconditionally terminal: BedrockInvocationHandler.InvokeAsync returns true once it has actually written
             // a response to the client (success, or a failure with no eligible next candidate) - that's
             // this request's final outcome, so the loop stops. It returns false when the SDK call failed
             // *before* writing anything (same "nothing committed yet" invariant the HTTP path below relies
@@ -686,7 +653,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // exactly like an HTTP outage does.
             if (translator is IBedrockPayloadTranslator bedrockTranslator)
             {
-                if (await InvokeBedrockAsync(context, route, bedrockTranslator, rewrittenBody, requestedModelName, isFallback, hasNextCandidate, nextProviderDiffers, resolution.TaskEmbedding, resolution.RouterTokens, resolution.SubstitutionReason, resolution.IsExploratory, resolution.Propensity, resolution.Classification, resolution.TaskText, resolution.DimBestModel))
+                if (await _bedrockInvocationHandler.InvokeAsync(context, route, bedrockTranslator, rewrittenBody, requestedModelName, isFallback, hasNextCandidate, nextProviderDiffers, resolution.TaskEmbedding, resolution.RouterTokens, resolution.SubstitutionReason, resolution.IsExploratory, resolution.Propensity, resolution.Classification, resolution.TaskText, resolution.DimBestModel))
                 {
                     return;
                 }
@@ -816,11 +783,11 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 requestMessage.Dispose();
                 if (hasNextCandidate)
                 {
-                    _logger.LogWarning(ex, "Upstream provider {Provider} unreachable for model {Model}; failing over to the next backup.", SanitizeForLog(route.Provider), SanitizeForLog(route.ModelName));
+                    _logger.LogWarning(ex, "Upstream provider {Provider} unreachable for model {Model}; failing over to the next backup.", LogRedaction.Sanitize(route.Provider), LogRedaction.Sanitize(route.ModelName));
                     continue;
                 }
 
-                _logger.LogWarning(ex, "Upstream provider {Provider} unreachable for model {Model}; no backup remains.", SanitizeForLog(route.Provider), SanitizeForLog(route.ModelName));
+                _logger.LogWarning(ex, "Upstream provider {Provider} unreachable for model {Model}; no backup remains.", LogRedaction.Sanitize(route.Provider), LogRedaction.Sanitize(route.ModelName));
                 if (!context.Response.HasStarted)
                 {
                     // Deliberately a generic message, not ex.Message: transport-exception text can carry
@@ -909,7 +876,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // once (RecordProviderFailure) rather than just this target (RecordFailure). (This is distinct
             // from a *client*-authored 405 against ArcRouter's own listener, e.g. a GET to
             // /v1/chat/completions, which never reaches this upstream-handling code at all - see
-            // IsModelsListRequest/routing earlier in the pipeline.) Any 5xx, 429, or 404 still counts as a
+            // LocalEndpointResponder.IsModelsListRequest/routing earlier in the pipeline.) Any 5xx, 429, or 404 still counts as a
             // per-target failure regardless of whether a backup is actually attempted next (that's
             // IsRetriableOutageStatus's separate concern, below) - a same-provider 429 that isn't worth
             // failing over to a backup for is still proof this target itself is unhealthy right now, and a
@@ -922,24 +889,24 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             {
                 _logger.LogError(
                     "Upstream provider {Provider} returned 401 Unauthorized for model {Model}; treating as a provider-wide outage (likely an invalid or expired credential) and bypassing every model on this provider until it recovers.",
-                    SanitizeForLog(route.Provider),
-                    SanitizeForLog(route.ModelName));
+                    LogRedaction.Sanitize(route.Provider),
+                    LogRedaction.Sanitize(route.ModelName));
                 _circuitBreaker.RecordProviderFailure(route.Provider);
             }
             else if (isGeminiAuthFailure)
             {
                 _logger.LogError(
                     "Upstream provider {Provider} returned 400 with an embedded UNAUTHENTICATED error for model {Model} (Gemini reports an invalid API key as 400, not 401); treating as a provider-wide outage and bypassing every model on this provider until it recovers.",
-                    SanitizeForLog(route.Provider),
-                    SanitizeForLog(route.ModelName));
+                    LogRedaction.Sanitize(route.Provider),
+                    LogRedaction.Sanitize(route.ModelName));
                 _circuitBreaker.RecordProviderFailure(route.Provider);
             }
             else if (statusCode == StatusCodes.Status403Forbidden)
             {
                 _logger.LogError(
                     "Upstream provider {Provider} returned 403 Forbidden for model {Model}; treating as a provider-wide outage (likely a permission or API-key-scope problem) and bypassing every model on this provider until it recovers.",
-                    SanitizeForLog(route.Provider),
-                    SanitizeForLog(route.ModelName));
+                    LogRedaction.Sanitize(route.Provider),
+                    LogRedaction.Sanitize(route.ModelName));
                 _circuitBreaker.RecordProviderFailure(route.Provider);
             }
             else if (statusCode == StatusCodes.Status405MethodNotAllowed)
@@ -949,8 +916,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 // rejection of this request, not evidence about the request's actual validity.
                 _logger.LogError(
                     "Upstream provider {Provider} returned 405 Method Not Allowed for model {Model}; treating as a provider-wide gateway/WAF block and bypassing every model on this provider until it recovers.",
-                    SanitizeForLog(route.Provider),
-                    SanitizeForLog(route.ModelName));
+                    LogRedaction.Sanitize(route.Provider),
+                    LogRedaction.Sanitize(route.ModelName));
                 _circuitBreaker.RecordProviderFailure(route.Provider);
             }
             else if (isOutOfCredits)
@@ -962,8 +929,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 // above.
                 _logger.LogError(
                     "Upstream provider {Provider} is out of credits for model {Model}; treating as a provider-wide outage and bypassing every model on this provider until it recovers.",
-                    SanitizeForLog(route.Provider),
-                    SanitizeForLog(route.ModelName));
+                    LogRedaction.Sanitize(route.Provider),
+                    LogRedaction.Sanitize(route.ModelName));
                 _circuitBreaker.RecordProviderFailure(route.Provider);
                 _interactionStatusStore?.RecordLiveTrafficFailure(route.Provider, ProviderInteractionKind.OutOfCredits, outOfCreditsMessage);
             }
@@ -1024,7 +991,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
             if (hasNextCandidate && shouldRetryThisCandidate)
             {
-                _logger.LogWarning("Upstream provider {Provider} returned {Status} for model {Model}; failing over to the next backup.", SanitizeForLog(route.Provider), statusCode, SanitizeForLog(route.ModelName));
+                _logger.LogWarning("Upstream provider {Provider} returned {Status} for model {Model}; failing over to the next backup.", LogRedaction.Sanitize(route.Provider), statusCode, LogRedaction.Sanitize(route.ModelName));
                 responseMessage.Dispose();
                 requestMessage.Dispose();
                 continue;
@@ -1079,7 +1046,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 // rest of this hop's response headers above.
                 context.Response.Headers[RequestedModelHeaderName] = requestedModelName;
                 context.Response.Headers[RoutedModelHeaderName] = route.ModelName;
-                context.Response.Headers[SubstitutionReasonHeaderName] = ResolveSubstitutionReason(isFallback, resolution.SubstitutionReason).ToString();
+                context.Response.Headers[SubstitutionReasonHeaderName] = RequestTelemetryPublisher.ResolveSubstitutionReason(isFallback, resolution.SubstitutionReason).ToString();
 
                 byte[] capturedResponseBytes;
                 byte[]? nativeResponseBytes = null;
@@ -1157,7 +1124,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
                 _logger.LogDebug(
                     "[INTERCEPTOR] Intercepted agent response message: {ResponseBody}",
-                    TruncateForLog(SanitizeForLog(Encoding.UTF8.GetString(capturedResponseBytes))));
+                    LogRedaction.Truncate(LogRedaction.Sanitize(Encoding.UTF8.GetString(capturedResponseBytes))));
 
                 await _interceptor.InterceptResponseAsync(context);
 
@@ -1175,7 +1142,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                     // ResponseTextExtractor pick the right parser per request instead of assuming one shape per
                     // provider, which broke once "anthropic" became dual-mode.
                     var telemetryShapeProvider = translator is not null ? "openai" : route.Provider;
-                    await PublishTelemetryAsync(context, route, requestedModelName, isFallback, telemetryShapeProvider, rewrittenBody, capturedResponseBytes, nativeResponseBytes, isStreaming, latencyToHeadersMs, totalDurationMs, statusCode, context.RequestAborted, responseMessage.Headers, tailScanner, resolution.TaskEmbedding, resolution.RouterTokens, resolution.SubstitutionReason, resolution.IsExploratory, resolution.Propensity, resolution.Classification, resolution.TaskText, resolution.DimBestModel);
+                    await _requestTelemetryPublisher.PublishAsync(context, route, requestedModelName, isFallback, telemetryShapeProvider, rewrittenBody, capturedResponseBytes, nativeResponseBytes, isStreaming, latencyToHeadersMs, totalDurationMs, statusCode, context.RequestAborted, responseMessage.Headers, tailScanner, resolution.TaskEmbedding, resolution.RouterTokens, resolution.SubstitutionReason, resolution.IsExploratory, resolution.Propensity, resolution.Classification, resolution.TaskText, resolution.DimBestModel);
                 }
                 catch (Exception ex)
                 {
@@ -1200,14 +1167,14 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             {
                 _logger.LogWarning(
                     "All candidate providers for model {Model} became over budget mid-request; rejecting with 402.",
-                    SanitizeForLog(requestedModelName));
+                    LogRedaction.Sanitize(requestedModelName));
                 await WriteBudgetExhaustedResponseAsync(context, requestedModelName);
             }
             else if (candidates.All(c => !_interceptor.IsProviderEnabled(c.Route.Provider) || !_interceptor.IsModelEnabled(c.Route.ModelName)))
             {
                 _logger.LogWarning(
                     "All candidate routes for model {Model} are stopped (provider stopped, model stopped, or not currently reported by its provider's endpoint); rejecting with 503.",
-                    SanitizeForLog(requestedModelName));
+                    LogRedaction.Sanitize(requestedModelName));
                 await WriteUpstreamErrorResponseAsync(
                     context,
                     "All configured routes for this model are currently stopped.",
@@ -1217,7 +1184,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             {
                 _logger.LogWarning(
                     "All candidate routes for model {Model} are currently circuit-broken; rejecting with 502.",
-                    SanitizeForLog(requestedModelName));
+                    LogRedaction.Sanitize(requestedModelName));
                 await WriteUpstreamErrorResponseAsync(context, "All configured routes for this model are currently unavailable.");
             }
         }
@@ -1249,7 +1216,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// existing <see cref="GeminiStreamException"/>/<see cref="AnthropicStreamException"/> handling - there
     /// is nothing to do but stop forwarding and log it; the status can no longer change.
     /// </summary>
-    private static bool IsStreamAbort(Exception ex) => ex is OperationCanceledException or IOException or SocketException;
+    internal static bool IsStreamAbort(Exception ex) => ex is OperationCanceledException or IOException or SocketException;
 
     /// <summary>
     /// Determines whether an upstream HTTP <paramref name="statusCode"/> is a retriable outage: any 5xx
@@ -1298,296 +1265,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     private static bool IsOutageStatus(int statusCode) =>
         statusCode is >= 500 and <= 599 || statusCode == 429 || statusCode == StatusCodes.Status404NotFound;
 
-    /// <summary>
-    /// Invokes an Amazon Bedrock provider via the AWS SDK (<see cref="IAmazonBedrockRuntime"/>) instead
-    /// of the raw-HTTP forwarding path every other translated provider uses - the SDK handles SigV4
-    /// signing, endpoint resolution, and (for streaming) AWS's binary event-stream decoding internally,
-    /// so none of that is this method's concern. Bedrock is always translated (no native-passthrough
-    /// mode exists for it, unlike Anthropic), so the response is always OpenAI-shaped by the time
-    /// telemetry parses it.
-    /// </summary>
-    /// <param name="context">The inbound request/response context.</param>
-    /// <param name="route">The resolved candidate to attempt.</param>
-    /// <param name="translator">The Bedrock payload translator for this candidate's provider.</param>
-    /// <param name="rewrittenBody">The request body with <c>model</c> already rewritten to this candidate.</param>
-    /// <param name="requestedModelName">The client's originally requested model name (for telemetry).</param>
-    /// <param name="isFallback">Whether this candidate is a fallback (not the primary) (for telemetry).</param>
-    /// <param name="hasNextCandidate">Whether another candidate remains in the caller's cascade.</param>
-    /// <param name="nextProviderDiffers">
-    /// Whether any remaining candidate is on a different provider - mirrors the HTTP path's identically
-    /// named local, used the same way: a credential failure is only worth retrying against a genuinely
-    /// different provider, since a same-provider backup shares the identical broken credential.
-    /// </param>
-    /// <param name="taskEmbedding">The request's task embedding (see <see cref="ModelRouteResolutionResult.TaskEmbedding"/>), forwarded to <see cref="PublishTelemetryAsync"/>.</param>
-    /// <param name="routerTokens">The router's own token consumption for this request (see <see cref="ModelRouteResolutionResult.RouterTokens"/>), forwarded to <see cref="PublishTelemetryAsync"/>.</param>
-    /// <param name="resolutionReason">The resolution-time <see cref="RoutingSubstitutionReason"/> (see <see cref="ModelRouteResolutionResult.SubstitutionReason"/>), forwarded to <see cref="PublishTelemetryAsync"/> and the requested/routed response headers.</param>
-    /// <param name="isExploratory">See <see cref="ModelRouteResolutionResult.IsExploratory"/>, forwarded to <see cref="PublishTelemetryAsync"/>.</param>
-    /// <param name="propensity">See <see cref="ModelRouteResolutionResult.Propensity"/>, forwarded to <see cref="PublishTelemetryAsync"/>.</param>
-    /// <param name="classification">See <see cref="ModelRouteResolutionResult.Classification"/>, forwarded to <see cref="PublishTelemetryAsync"/>.</param>
-    /// <param name="taskText">See <see cref="ModelRouteResolutionResult.TaskText"/>, forwarded to <see cref="PublishTelemetryAsync"/>.</param>
-    /// <param name="dimBestModel">See <see cref="ModelRouteResolutionResult.DimBestModel"/>, forwarded to <see cref="PublishTelemetryAsync"/>.</param>
-    /// <returns>
-    /// <see langword="true"/> if a response was written to the client (success, or a failure with no
-    /// eligible next candidate) - the caller's cascade is over. <see langword="false"/> if the SDK call
-    /// failed before anything was written and a next candidate should be tried - the caller should
-    /// <c>continue</c> its loop.
-    /// </returns>
-    private async Task<bool> InvokeBedrockAsync(
-        HttpContext context,
-        ResolvedModelRoute route,
-        IBedrockPayloadTranslator translator,
-        byte[] rewrittenBody,
-        string requestedModelName,
-        bool isFallback,
-        bool hasNextCandidate,
-        bool nextProviderDiffers,
-        float[]? taskEmbedding,
-        int routerTokens,
-        RoutingSubstitutionReason resolutionReason,
-        bool isExploratory = false,
-        double propensity = 1.0,
-        RequestClassification? classification = null,
-        string? taskText = null,
-        string? dimBestModel = null)
-    {
-        var circuitTarget = CircuitBreakerTargetKey.FromRoute(route);
-        var nativeRequestBody = translator.TranslateRequest(rewrittenBody);
-        var isStreamingRequest = IsStreamingRequest(rewrittenBody);
-
-        // Not disposed here: the singleton factory owns the client's lifetime and reuses it across
-        // requests (AWS SDK clients are thread-safe and meant to be long-lived). See BedrockRuntimeClientFactory.
-        var client = _bedrockClientFactory.Create(route);
-
-        var stopwatch = Stopwatch.StartNew();
-        byte[] capturedResponseBytes;
-        long latencyToHeadersMs;
-        IncrementalUsageScanner? tailScanner = null;
-
-        try
-        {
-            if (isStreamingRequest)
-            {
-                var request = new InvokeModelWithResponseStreamRequest
-                {
-                    ModelId = route.ProviderModelId,
-                    Body = new MemoryStream(nativeRequestBody),
-                    ContentType = "application/json",
-                };
-
-                var response = await client.InvokeModelWithResponseStreamAsync(request, context.RequestAborted);
-                latencyToHeadersMs = stopwatch.ElapsedMilliseconds;
-
-                context.Response.StatusCode = StatusCodes.Status200OK;
-                context.Response.ContentType = "text/event-stream";
-                context.Response.Headers[RequestedModelHeaderName] = requestedModelName;
-                context.Response.Headers[RoutedModelHeaderName] = route.ModelName;
-                context.Response.Headers[SubstitutionReasonHeaderName] = ResolveSubstitutionReason(isFallback, resolutionReason).ToString();
-
-                (capturedResponseBytes, tailScanner) = await TranslateAndCaptureBedrockStreamAsync(translator, response.Body, context.Response.Body, MaxCapturedResponseBytes, context.RequestAborted);
-            }
-            else
-            {
-                var request = new InvokeModelRequest
-                {
-                    ModelId = route.ProviderModelId,
-                    Body = new MemoryStream(nativeRequestBody),
-                    ContentType = "application/json",
-                };
-
-                var response = await client.InvokeModelAsync(request, context.RequestAborted);
-                latencyToHeadersMs = stopwatch.ElapsedMilliseconds;
-
-                var translated = translator.TranslateResponse(response.Body.ToArray());
-
-                context.Response.StatusCode = StatusCodes.Status200OK;
-                context.Response.ContentType = "application/json";
-                context.Response.Headers[RequestedModelHeaderName] = requestedModelName;
-                context.Response.Headers[RoutedModelHeaderName] = route.ModelName;
-                context.Response.Headers[SubstitutionReasonHeaderName] = ResolveSubstitutionReason(isFallback, resolutionReason).ToString();
-                await context.Response.Body.WriteAsync(translated, context.RequestAborted);
-
-                capturedResponseBytes = translated.Length <= MaxCapturedResponseBytes ? translated : translated[..MaxCapturedResponseBytes];
-
-                // Only worth the ~64KB tail-window allocation when capturedResponseBytes above actually
-                // lost data - a response that fits within the cap is already fully captured.
-                if (translated.Length > MaxCapturedResponseBytes)
-                {
-                    var bufferedTailScanner = new IncrementalUsageScanner();
-                    bufferedTailScanner.Append(translated);
-                    tailScanner = bufferedTailScanner;
-                }
-            }
-        }
-        catch (AmazonClientException ex)
-        {
-            // A client-side SDK failure that never reached AWS at all - most commonly a missing/invalid
-            // credential (e.g. "Failed to resolve bearer token in DefaultAWSTokenIdentityResolver" when
-            // none of AwsAccessKeyIdEnvVar/AwsSecretAccessKeyEnvVar/AwsSessionTokenEnvVar resolve and the
-            // SDK's default credential chain also comes up empty). AmazonServiceException (and its
-            // Bedrock-specific subtype below, caught separately) is a *sibling* type - both derive directly
-            // from Exception, not from AmazonClientException - so this clause and the
-            // AmazonBedrockRuntimeException one below never overlap: a real service-level error (auth
-            // rejected *by* AWS, throttling, etc.) only ever matches the other handler. Treated like the HTTP
-            // path's 401 handling: logged at Error (not Warning - this is a provider misconfiguration an
-            // operator needs to see, not a transient blip), tripping the *provider-wide* circuit
-            // (RecordProviderFailure, not the per-target RecordFailure) since a missing/invalid credential
-            // breaks every model on this Bedrock provider identically, and surfaced to the client as a 401
-            // rather than the generic 502 other Bedrock failures get.
-            _circuitBreaker.RecordProviderFailure(route.Provider);
-            _logger.LogError(
-                ex,
-                "Bedrock invocation for provider {Provider} failed to resolve AWS credentials ({Message}); treating as an unauthorized (401) provider-wide outage and bypassing every model on this provider until it recovers.",
-                SanitizeForLog(route.Provider),
-                SanitizeForLog(ex.Message));
-
-            // Same same-fate reasoning as the HTTP path's 401 handling (see the circuit-breaker comment
-            // there): a same-provider backup shares the identical broken credential, so only a genuinely
-            // different-provider candidate is worth retrying.
-            if (hasNextCandidate && nextProviderDiffers)
-            {
-                _logger.LogWarning(
-                    "Bedrock provider {Provider} failed to authorize for model {Model}; failing over to the next backup.",
-                    SanitizeForLog(route.Provider),
-                    SanitizeForLog(route.ModelName));
-                return false;
-            }
-
-            if (!context.Response.HasStarted)
-            {
-                // Generic client message, not ex.Message: an AWS SDK exception can carry internal endpoint,
-                // region, or request-id detail. The full exception is logged above for operators.
-                await WriteUpstreamErrorResponseAsync(context, "The upstream provider rejected the request as unauthorized.", StatusCodes.Status401Unauthorized);
-            }
-
-            return true;
-        }
-        catch (AmazonBedrockRuntimeException ex)
-        {
-            // A Bedrock SDK-level failure (auth, throttling, unknown model id, region misconfiguration,
-            // etc.) surfaced before (or, for InvokeModel, without) any bytes reaching the client. Treated
-            // like the HTTP path's generic 5xx/outage handling: a per-target circuit failure (RecordFailure,
-            // not RecordProviderFailure - unlike the credential case above, this bucket doesn't carry a
-            // confident "every model on this provider is equally broken" signal), retried against any next
-            // candidate unconditionally (no same-provider exclusion - unlike a shared bad credential, a
-            // throttle/misconfiguration on this one model id says nothing about a sibling model's health).
-            _circuitBreaker.RecordFailure(circuitTarget);
-            _logger.LogWarning(ex, "Bedrock invocation failed for provider {Provider}.", SanitizeForLog(route.Provider));
-
-            if (hasNextCandidate)
-            {
-                _logger.LogWarning(
-                    "Bedrock provider {Provider} failed for model {Model}; failing over to the next backup.",
-                    SanitizeForLog(route.Provider),
-                    SanitizeForLog(route.ModelName));
-                return false;
-            }
-
-            if (!context.Response.HasStarted)
-            {
-                // Generic client message, not ex.Message: an AWS SDK exception can carry internal endpoint,
-                // region, or request-id detail. The full exception is logged above for operators.
-                await WriteUpstreamErrorResponseAsync(context, "The upstream provider is unavailable.");
-            }
-
-            return true;
-        }
-
-        _circuitBreaker.RecordSuccess(circuitTarget);
-        var totalDurationMs = stopwatch.ElapsedMilliseconds;
-
-        try
-        {
-            // Bedrock's native tap is out of scope (docs/router/openai-format-usage-accuracy-plan.md §4.2):
-            // its streaming chunks aren't SSE-framed, so the same capture approach doesn't apply. Always
-            // null here - telemetry falls back to parsing the translated "openai"-shaped bytes, unchanged
-            // from before this plan.
-            await PublishTelemetryAsync(context, route, requestedModelName, isFallback, "openai", rewrittenBody, capturedResponseBytes, nativeResponseBytes: null, isStreamingRequest, latencyToHeadersMs, totalDurationMs, StatusCodes.Status200OK, context.RequestAborted, upstreamHeaders: null, tailScanner: tailScanner, taskEmbedding: taskEmbedding, routerTokens: routerTokens, resolutionReason: resolutionReason, isExploratory: isExploratory, propensity: propensity, classification: classification, taskText: taskText, dimBestModel: dimBestModel);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to publish routing telemetry; the forwarded response was unaffected.");
-        }
-
-        return true;
-    }
-
-    /// <summary>
-    /// Consumes each already-decoded chunk from a Bedrock <c>InvokeModelWithResponseStream</c> response
-    /// (the AWS SDK has already parsed its binary event-stream framing into discrete
-    /// <see cref="PayloadPart"/> items), translates each to an OpenAI-shaped SSE chunk, writes it to the
-    /// client as it's produced, and captures up to <paramref name="captureCap"/> bytes for telemetry -
-    /// mirrors <see cref="TranslateAndCaptureStreamAsync"/>'s role for the raw-HTTP path.
-    /// </summary>
-    private async Task<(byte[] Captured, IncrementalUsageScanner? TailScanner)> TranslateAndCaptureBedrockStreamAsync(IBedrockPayloadTranslator translator, ResponseStream body, Stream destination, int captureCap, CancellationToken cancellationToken)
-    {
-        var chunkTranslator = translator.CreateBedrockStreamChunkTranslator();
-        using var capture = new MemoryStream();
-        IncrementalUsageScanner? tailScanner = null;
-
-        async Task EmitAsync(byte[] translated)
-        {
-            if (translated.Length == 0)
-            {
-                return;
-            }
-
-            await destination.WriteAsync(translated, cancellationToken);
-            await destination.FlushAsync(cancellationToken);
-
-            var remainingCapacity = captureCap - (int)capture.Length;
-            if (remainingCapacity > 0)
-            {
-                await capture.WriteAsync(translated.AsMemory(0, Math.Min(translated.Length, remainingCapacity)), cancellationToken);
-            }
-
-            if (remainingCapacity < translated.Length)
-            {
-                // Same lazy-allocation reasoning as CopyAndCaptureAsync: only worth the tail window once
-                // the head-capped capture has actually lost bytes, and the boundary-crossing chunk itself
-                // still needs to land in the scanner in full.
-                tailScanner ??= new IncrementalUsageScanner();
-                tailScanner.Append(translated);
-            }
-        }
-
-        try
-        {
-            await foreach (var streamEvent in body.WithCancellation(cancellationToken))
-            {
-                if (streamEvent is PayloadPart part)
-                {
-                    await EmitAsync(chunkTranslator.TranslateChunk(part.Bytes.ToArray()));
-                }
-
-                // A non-PayloadPart event (e.g. a future AWS-added event kind this codebase doesn't yet
-                // know about) carries nothing client-visible today - skipped rather than guessed at.
-            }
-
-            await EmitAsync(chunkTranslator.Flush());
-        }
-        catch (AnthropicStreamException ex)
-        {
-            // An embedded error inside a Bedrock Claude chunk (AnthropicOnBedrockStreamChunkTranslator
-            // reuses AnthropicStreamTranslator's per-event handling, which throws on one) - truncate the
-            // client stream, mirroring native Anthropic's and Gemini's mid-stream-error handling.
-            _logger.LogWarning(ex, "Bedrock Claude streaming response terminated by an error event; the client stream was truncated.");
-        }
-        catch (ModelStreamErrorException ex)
-        {
-            // An AWS-level mid-stream error (surfaced by the SDK itself while enumerating ResponseStream,
-            // not an embedded provider-JSON error) - same truncation response as the case above.
-            _logger.LogWarning(ex, "Bedrock streaming response terminated by a ModelStreamErrorException; the client stream was truncated.");
-        }
-        catch (Exception ex) when (IsStreamAbort(ex))
-        {
-            _logger.LogWarning(ex, "Streaming response to the client was interrupted (client disconnected, or the connection was aborted); the forward was terminated early.");
-        }
-
-        return (capture.ToArray(), tailScanner);
-    }
-
     /// <summary>Writes a client-facing error envelope for a failed upstream call (a Bedrock SDK failure, or an exhausted transport-outage cascade), matching <see cref="WriteModelNotFoundResponseAsync"/>'s shape. Defaults to 502 (the request was valid; the upstream call failed) rather than 400 (a malformed/unknown-model client request); <paramref name="statusCode"/> lets a caller override this - e.g. 401 for a Bedrock credential-resolution failure treated like the HTTP path's 401 handling. Callers pass a client-safe <paramref name="errorMessage"/> - never a raw transport-exception message, which can leak infrastructure detail.</summary>
-    private static async Task WriteUpstreamErrorResponseAsync(HttpContext context, string errorMessage, int statusCode = StatusCodes.Status502BadGateway)
+    internal static async Task WriteUpstreamErrorResponseAsync(HttpContext context, string errorMessage, int statusCode = StatusCodes.Status502BadGateway)
     {
         context.Response.StatusCode = statusCode;
         context.Response.ContentType = "application/json";
@@ -1607,553 +1286,11 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     }
 
     /// <summary>
-    /// Resolves the request's session and turn number, extracts usage and cost from the captured response,
-    /// and publishes a telemetry record for the completed proxy call.
-    ///
-    /// <para>
-    /// <c>nativeResponseBytes</c> is a captured pre-translation copy of the upstream response, when one was
-    /// taken (see <see cref="CapturedResponse"/> and <c>docs/router/openai-format-usage-accuracy-plan.md</c>
-    /// §4). When non-null and non-empty, usage and response-text extraction read from these bytes under
-    /// <c>route</c>'s own provider key instead of from <c>capturedResponseBytes</c> under
-    /// <c>telemetryShapeProvider</c> - the native shape is immune to translation lossiness (e.g. dropped
-    /// Anthropic cache-token fields), so it is always preferred when available.
-    /// </para>
-    /// <para>
-    /// <c>resolutionReason</c> is the <see cref="RoutingSubstitutionReason"/> as known when
-    /// <c>RequestInterceptor</c> resolved this request, before any transport-level failover. Overridden
-    /// by <see cref="RoutingSubstitutionReason.Failover"/> when <c>isFallback</c> is <see langword="true"/>
-    /// - see <see cref="ResolveSubstitutionReason"/>.
-    /// </para>
-    /// </summary>
-    private async Task PublishTelemetryAsync(
-        HttpContext context,
-        ResolvedModelRoute route,
-        string requestedModelName,
-        bool isFallback,
-        string telemetryShapeProvider,
-        byte[] rewrittenRequestBody,
-        byte[] capturedResponseBytes,
-        byte[]? nativeResponseBytes,
-        bool isStreaming,
-        long latencyToHeadersMs,
-        long totalDurationMs,
-        int statusCode,
-        CancellationToken cancellationToken,
-        System.Net.Http.Headers.HttpResponseHeaders? upstreamHeaders = null,
-        IncrementalUsageScanner? tailScanner = null,
-        float[]? taskEmbedding = null,
-        int routerTokens = 0,
-        RoutingSubstitutionReason resolutionReason = RoutingSubstitutionReason.None,
-        bool isExploratory = false,
-        double propensity = 1.0,
-        RequestClassification? classification = null,
-        string? taskText = null,
-        string? dimBestModel = null)
-    {
-        var requestBody = TryParseJsonObject(rewrittenRequestBody);
-        var resolvedSessionId = _sessionIdResolver.Resolve(context.Request.Headers, requestBody);
-
-        var isSynthesized = resolvedSessionId is null;
-        // No explicit session id found: fall back to matching this request's "messages" array against
-        // previously-tracked conversations (see MessageHistoryContinuityMatcher), which itself falls
-        // back to a fresh id if nothing matches - covers clients (e.g. GitHub Copilot's OpenAI-compatible
-        // model providers) that send no session identifier of any kind, not even under an unrecognized name.
-        var sessionId = resolvedSessionId ?? _continuityMatcher.MatchOrTrack(requestBody?["messages"] as JsonArray);
-        var turnNumber = _turnTracker.NextTurn(sessionId);
-
-        if (isSynthesized)
-        {
-            if (turnNumber == 1)
-            {
-                // No known session-id convention (see SessionIdResolver) matched anything on this
-                // request, and no tracked conversation's message history was a prefix of this request's
-                // messages either, so this is a brand-new tracked session. Logs header *names* (never
-                // values, to avoid leaking auth tokens/cookies) and top-level body *keys* (never values)
-                // so an unrecognized client's actual conventions can be spotted and, if there's a stable
-                // per-conversation field under a different name, added to SessionIdResolver.
-                _logger.LogDebug(
-                    "No session id found on request to {Path}, and no tracked conversation's message " +
-                    "history matched; started tracking new session {SessionId}. Request header names: " +
-                    "[{HeaderNames}]. Top-level body keys: [{BodyKeys}].",
-                    SanitizeForLog(context.Request.Path.ToString()),
-                    SanitizeForLog(sessionId),
-                    string.Join(", ", context.Request.Headers.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase).Select(SanitizeForLog)),
-                    requestBody is null ? "(not a JSON object)" : string.Join(", ", requestBody.Select(kv => SanitizeForLog(kv.Key))));
-            }
-            else
-            {
-                _logger.LogDebug(
-                    "No session id found on request to {Path}, but its message history matched tracked " +
-                    "session {SessionId}; treating as turn {TurnNumber}.",
-                    SanitizeForLog(context.Request.Path.ToString()),
-                    SanitizeForLog(sessionId),
-                    turnNumber);
-            }
-        }
-        else
-        {
-            _logger.LogDebug("Resolved session {SessionId}, turn {TurnNumber}.", SanitizeForLog(sessionId), turnNumber);
-        }
-
-        // The client's literal requested model (docs/router/orchestrator-live-path-plan.md §M2.2) - always
-        // distinct from route.ModelName (the model that served) when any substitution or failover
-        // occurred; substitutionReason below names why. isFallback additionally tells the dashboard the
-        // resolved primary specifically was bypassed at the transport layer. See the failover loop in
-        // InvokeAsync. This is the infrastructure-outage cascade, not the paper's Verifier-driven
-        // semantic re-routing.
-        var requestedModel = requestedModelName;
-
-        // Failover (a transport-level bypass ProxyMiddleware's own loop discovered) always wins over
-        // whatever RequestInterceptor knew at resolution time: if isFallback is true, the primary that
-        // resolutionReason describes was never actually served, so Failover is the more accurate account
-        // of why route differs from requestedModel.
-        var substitutionReason = ResolveSubstitutionReason(isFallback, resolutionReason);
-
-        int? promptTokens = null;
-        int? completionTokens = null;
-        int? cacheCreationTokens = null;
-        int? cacheReadTokens = null;
-        decimal? estimatedCostUsd = null;
-        var costConfidence = CostConfidence.NoUsage;
-
-        // Telemetry stops depending on translation fidelity: when a native (pre-translation) capture was
-        // taken, it is parsed under the provider's own key instead of the translated bytes under
-        // telemetryShapeProvider - the native shape carries fields (e.g. Anthropic cache tokens) that
-        // TranslateResponse/EmitChunk currently drop on the way to the OpenAI-shaped client response (see
-        // docs/router/openai-format-usage-accuracy-plan.md §1).
-        // Explicit typed locals plus a plain if/else, rather than a ternary/tuple-deconstruction one-liner,
-        // so usageShapeBytes's static type is byte[] (not the byte[]? a ternary over nativeResponseBytes
-        // would otherwise infer) - the `is { Length: > 0 }` pattern below already proves it non-null on the
-        // branch that assigns it.
-        string usageShapeProvider;
-        byte[] usageShapeBytes;
-        bool usedNativeBytes;
-        if (nativeResponseBytes is { Length: > 0 } nonEmptyNativeBytes)
-        {
-            usedNativeBytes = true;
-            usageShapeProvider = route.Provider;
-            usageShapeBytes = nonEmptyNativeBytes;
-        }
-        else
-        {
-            usedNativeBytes = false;
-            usageShapeProvider = telemetryShapeProvider;
-            usageShapeBytes = capturedResponseBytes;
-        }
-
-        var usageExtracted = _usageExtractor.TryExtractUsage(usageShapeProvider, isStreaming, usageShapeBytes, out var usage);
-        if (!usageExtracted && usedNativeBytes)
-        {
-            // The native capture and the translated/client-shape capture are independently truncated at
-            // MaxCapturedResponseBytes (see CopyAndCaptureAsync), so a large response can cut the native
-            // bytes off before the usage block - often the last thing to arrive in a streamed response -
-            // while the other capture still has it. Falling back recovers usage/cost for budget enforcement
-            // and the spend ledger instead of recording nothing purely because the preferred capture was
-            // the one that got cut off. usageShapeProvider/usageShapeBytes are reassigned too (not just the
-            // local usage result), so the response-text extraction below - which reuses the same pair -
-            // benefits from the same fallback instead of independently failing against the truncated bytes.
-            usageExtracted = _usageExtractor.TryExtractUsage(telemetryShapeProvider, isStreaming, capturedResponseBytes, out usage);
-            if (usageExtracted)
-            {
-                usageShapeProvider = telemetryShapeProvider;
-                usageShapeBytes = capturedResponseBytes;
-            }
-        }
-
-        // Last resort (§5.11): both captures above are head-capped at MaxCapturedResponseBytes, so a
-        // response larger than the cap can cut off entirely before reaching its usage block (typically the
-        // final SSE event of a streamed response). tailScanner retained a trailing window over the stream
-        // independent of that cap - deliberately NOT reassigning usageShapeProvider/usageShapeBytes here,
-        // unlike the native-capture fallback above: the response-text extraction below reuses that same
-        // pair, and a tail-only buffer holds only the end of a long streamed answer, which would make
-        // ResponseSummary a worse (truncated-from-the-front) result than what the head-capped bytes already
-        // gave it - the tail is only trustworthy for recovering the trailing usage numbers, not the text.
-        if (!usageExtracted && tailScanner is not null)
-        {
-            usageExtracted = tailScanner.TryExtractUsage(telemetryShapeProvider, isStreaming, _usageExtractor, out usage);
-        }
-
-        if (!usageExtracted)
-        {
-            // Tagged with route.Provider (the real upstream provider), not telemetryShapeProvider: for a
-            // translated provider (gemini, ollama), telemetryShapeProvider is forced to "openai" (the
-            // shape the extractor parses, not who actually served the request), and the metric's own doc
-            // comment promises per-provider attribution so a regression in one translator's output is
-            // distinguishable from another's.
-            UsageMetrics.ExtractionFailedTotal.Add(1, new KeyValuePair<string, object?>("provider", route.Provider));
-            _logger.LogDebug(
-                "Could not extract usage for provider {Provider} (telemetry shape {TelemetryShapeProvider}, streaming: {IsStreaming}); no cost/token telemetry will be recorded for this request.",
-                SanitizeForLog(route.Provider),
-                SanitizeForLog(telemetryShapeProvider),
-                isStreaming);
-        }
-
-        if (usageExtracted)
-        {
-            promptTokens = usage.PromptTokens;
-            completionTokens = usage.CompletionTokens;
-            cacheCreationTokens = usage.CacheCreationTokens;
-            cacheReadTokens = usage.CacheReadTokens;
-
-            // A free provider (a local Ollama runtime, say) has a *known* price of zero. A paid model's
-            // price comes from the auto-refreshed price catalog (docs/router/model-price-catalog.md) via
-            // _priceLookup; when the catalog has no fresh price for it (lookup returns null, or none was
-            // injected), cost stays null - unknown, never silently zero. Zero and unknown are different
-            // answers and must not collapse into one. Both real branches run through EstimateCost so there is
-            // exactly one cost formula. The catalog keys prices on the client-facing (ModelName, provider)
-            // once D3 alias resolution has mapped each source's own naming onto it at ingest
-            // (docs/router/d3-alias-resolution.md), so we look up route.ModelName - a model the catalog has no
-            // resolved price for simply yields null here, the safe "unknown" outcome.
-            // §5.6: the cost-confidence label travels alongside the cost itself, so a caller never has to
-            // re-derive from EstimatedCostUsd alone whether "$0" means free, unknown, or an approximate
-            // catalog match - see docs/router/token-tracking-improvements.md §5.6.
-            if (route.IsFree)
-            {
-                estimatedCostUsd = ModelPrice.Free.EstimateCost(usage);
-                costConfidence = CostConfidence.Exact;
-            }
-            else if (_priceLookup?.TryGetPrice(new ModelKey(ModelName: route.ModelName, Provider: route.Provider)) is { } price)
-            {
-                estimatedCostUsd = price.EstimateCost(usage, out var usedCacheRateFallback);
-                costConfidence = price.IsApproximateMatch || usedCacheRateFallback
-                    ? CostConfidence.CatalogApproximate
-                    : CostConfidence.Catalog;
-            }
-            else
-            {
-                costConfidence = CostConfidence.Unknown;
-            }
-        }
-
-        // Best-effort, like every other telemetry side-effect on this path - see SpendTracker's own
-        // internal try/catch around its file write. Recorded even when usage/cost couldn't be
-        // determined, so the running request count stays accurate; it just contributes zero cost/tokens.
-        // Uses CancellationToken.None rather than the request's cancellationToken (context.RequestAborted):
-        // this runs after the response has already been fully sent, and RequestAborted fires the moment the
-        // client disconnects - which for a streaming response happens right as the client finishes reading
-        // it - so recording must not be cancellable by the request's own lifetime or it gets silently dropped.
-        // Attributed to route.ModelName - the model that actually served (M2.3, decided: a value fix, not
-        // a schema change) - not requestedModel, which on an auto-majority deployment would otherwise file
-        // nearly all spend under the literal string "auto".
-        await _spendTracker.RecordAsync(route.ModelName, promptTokens, completionTokens, estimatedCostUsd, CancellationToken.None).ConfigureAwait(false);
-
-        // Attribute this request's usage to the provider that actually served it (route.Provider is the
-        // post-failover, post-budget-skip winner), so per-provider monthly spend and the Governance budget
-        // bars stay accurate. Best-effort and self-guarding, exactly like the spend tracker above - same
-        // CancellationToken.None reasoning applies. Gated on usageExtracted (unlike the spend tracker
-        // above): a zero-usage row here would advance LastUsageAtUtc and make the admin UI report a
-        // misleading "last recorded" time for a provider whose response simply carried no usage block.
-        if (_budgetStore is not null && usageExtracted)
-        {
-            await _budgetStore.RecordUsageAsync(
-                route.Provider,
-                estimatedCostUsd,
-                promptTokens,
-                completionTokens,
-                cacheCreationTokens,
-                cacheReadTokens,
-                DateTimeOffset.UtcNow,
-                CancellationToken.None).ConfigureAwait(false);
-        }
-
-        // The durable usage ledger (docs/router/token-tracking-implementation-plan.md Phase 2): recorded
-        // immediately after the budget store, under the same best-effort/CancellationToken.None reasoning,
-        // and gated on usageExtracted for the same "don't advance state on a zero-usage row" reason. The
-        // dedup key prefers the upstream's own request id (request-id/x-request-id, read from the response
-        // headers already in hand here) over the composite hash, so a replayed publish of the same request
-        // collides with its own earlier write instead of double-counting.
-        if (_usageLedger is not null && usageExtracted)
-        {
-            var ledgerEntry = new UsageLedgerEntry(
-                SessionId: sessionId,
-                TurnNumber: turnNumber,
-                Provider: route.Provider,
-                // The model that served (M2.3) - matches this column's documented meaning
-                // (docs/router/agent-cost-tracking.md: "the model this spend belongs to"), not the one
-                // lined up first when a substitution or failover occurred.
-                RequestedModel: route.ModelName,
-                ResolvedModel: route.ProviderModelId,
-                PromptTokens: promptTokens,
-                CompletionTokens: completionTokens,
-                CacheCreationTokens: cacheCreationTokens,
-                CacheReadTokens: cacheReadTokens,
-                EstimatedCostUsd: estimatedCostUsd,
-                CostConfidence: costConfidence,
-                OccurredAtUtc: DateTimeOffset.UtcNow,
-                RequestId: ExtractUpstreamRequestId(upstreamHeaders));
-            await _usageLedger.RecordAsync(ledgerEntry, CancellationToken.None).ConfigureAwait(false);
-        }
-
-        // §5.12: published unconditionally (not gated on _usageLedger being configured) so an operator who
-        // wants OTLP/Prometheus export but not the SQLite ledger still gets it. Creating a Meter/instrument
-        // and calling Add on it is cheap with no listener attached - only an actually-configured OTLP
-        // exporter (a hosting-level decision, not this class's) turns these into real exported metrics.
-        if (usageExtracted)
-        {
-            EmitUsageMetrics(route.Provider, requestedModel, promptTokens, completionTokens, cacheCreationTokens, cacheReadTokens, estimatedCostUsd);
-        }
-
-        // Extracted once and reused below for the quality-ingress prompt - both read the same newest-user-
-        // message text off the same already-parsed requestBody, so a second walk of its messages array
-        // would just repeat the first.
-        var newestUserMessage = RequestTextExtractor.ExtractNewestUserMessage(requestBody);
-        var requestSummary = TextTruncator.Truncate(newestUserMessage);
-        var responseSummary = _responseTextExtractor.TryExtractText(usageShapeProvider, isStreaming, usageShapeBytes, out var responseText)
-            ? TextTruncator.Truncate(responseText)
-            : null;
-
-        // The raw-body log above ([INTERCEPTOR] Intercepted agent response message) dumps the response
-        // exactly as it crossed the wire - for a streamed completion that's dozens of single-token SSE
-        // "delta" chunks on one log line, so the answer text itself is never a contiguous, searchable
-        // substring (e.g. "The application's name is Totally Hot Arc Router." appears only as separate
-        // " The", " application", "'s", " name", ... tokens). Logging the assembled text extracted above
-        // for telemetry gives the actual answer as one readable, searchable line.
-        _logger.LogDebug(
-            "[INTERCEPTOR] Assembled LLM response text: {ResponseText}",
-            responseSummary is null ? "(none found)" : TruncateForLog(SanitizeForLog(responseText)));
-
-        // A stable id shared by this telemetry event and any off-path quality signal derived from the same
-        // response, so a dashboard can join the two.
-        var correlationId = FormattableString.Invariant($"{sessionId}:{turnNumber}");
-
-        // docs/router/live-feedback-learning-plan.md Phase 2c: this is the earliest point the correlation
-        // id a later-arriving QualityResult carries is actually known - RequestInterceptor.ResolveModelRouteAsync
-        // computed taskEmbedding well before session/turn resolution ran, so it could not key this itself.
-        // Recorded here, immediately once both halves exist, rather than passed to RequestInterceptor.
-        if (taskEmbedding is not null)
-        {
-            _pendingTaskEmbeddingCache?.Set(correlationId, taskEmbedding);
-        }
-
-        // docs/router/self-organizing-classification-plan.md Phase T1c: mirrors the embedding cache
-        // Set above exactly - same correlation id, same "this is the earliest point the value is known
-        // alongside the correlation id" reasoning - so EmbeddingMemoryScoreObserver can recover the real
-        // cost and provenance once the verifier score arrives instead of writing cost 0.0 / certain
-        // non-exploratory provenance unconditionally.
-        _pendingRequestCostCache?.Set(correlationId, estimatedCostUsd ?? 0m);
-        _pendingRequestProvenanceCache?.Set(correlationId, isExploratory, propensity, classification?.Dimension);
-
-        // docs/router/geval-shadow-scoring-plan.md §Raw-text preservation: the response text is already in
-        // hand from the TryExtractText call above (responseSummary's source) - this adds retention only,
-        // for JudgeShadowScoreObserver's later-arriving background job to recover by TryTake. Gated on
-        // extraction having actually succeeded (responseText is only assigned when TryExtractText returns
-        // true) and on the judge being switched on right now - read from the monitor, not captured once,
-        // exactly like the EnableAdaptiveRouting gate below. That live read is the whole point here: the
-        // judge toggle is what authorizes retaining raw response text in memory at all, so switching it off
-        // has to stop retention immediately rather than at the next restart.
-        if (responseSummary is not null && (_judgeOptionsMonitor?.CurrentValue.Enabled ?? false))
-        {
-            _pendingResponseTextCache?.Set(correlationId, responseText);
-        }
-
-        // docs/router/self-organizing-classification-plan.md Phase T1a/T1b: the transcript store's single
-        // insert. Best-effort and off the hot path in spirit (the response has already been fully sent to
-        // the client by this point) - gated on TranscriptOptions.Enabled so a disabled install creates no
-        // table and writes nothing, and wrapped in its own try/catch so a transcript-store failure can
-        // never surface as a routing failure, matching every other telemetry side-effect in this method.
-        // Phase T6 adds RoutingOptions.EnableAdaptiveRouting as a second, live gate - read from the
-        // monitor (not captured once) so toggling it stops or resumes writes without a restart.
-        if (_transcriptStore is not null && (_routingOptionsMonitor?.CurrentValue.EnableAdaptiveRouting ?? false))
-        {
-            try
-            {
-                await _transcriptStore.InsertAsync(
-                    new TranscriptRecord(
-                        Id: 0,
-                        CorrelationId: correlationId,
-                        CreatedAtUtc: DateTimeOffset.UtcNow,
-                        RequestedModel: requestedModelName,
-                        RoutedModel: route.ModelName,
-                        Dimension: classification?.Dimension,
-                        Difficulty: classification?.Difficulty,
-                        Language: classification?.Language,
-                        IsUtility: classification?.IsUtility ?? false,
-                        PromptText: taskText,
-                        ResponseText: responseText,
-                        Score: null,
-                        Cost: estimatedCostUsd,
-                        IsExploratory: isExploratory,
-                        Propensity: propensity,
-                        InputTokens: promptTokens,
-                        OutputTokens: completionTokens,
-                        MemoryEntryId: null,
-                        DimBestModel: dimBestModel),
-                    CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogWarning(ex, "Failed to write a transcript row for correlation {CorrelationId}; continuing without it.", correlationId);
-            }
-        }
-
-        // What routing this request cost us, charged at the self-hosted rate (research-doc §5.1: TotTok is
-        // router + model, so routing overhead is the router's to carry). Kept separate from
-        // estimatedCostUsd - which is what the upstream provider charged - because a savings figure has to
-        // be net of this, and folding the two together would make that impossible to unwind downstream.
-        var routerCostUsd = routerTokens / 1_000_000m * _selfHostedRouterPricePerMillionTokens;
-
-        var telemetryEvent = new RoutingTelemetryEvent(
-            SessionId: sessionId,
-            TurnNumber: turnNumber,
-            IsSessionSynthesized: isSynthesized,
-            RequestedModel: requestedModel,
-            ResolvedModel: route.ProviderModelId,
-            Provider: route.Provider,
-            IsFallback: isFallback,
-            PromptTokens: promptTokens,
-            CompletionTokens: completionTokens,
-            EstimatedCostUsd: estimatedCostUsd,
-            IsStreaming: isStreaming,
-            LatencyToHeadersMs: latencyToHeadersMs,
-            TotalDurationMs: totalDurationMs,
-            StatusCode: statusCode,
-            TimestampUtc: DateTimeOffset.UtcNow,
-            RoutedModel: route.ModelName,
-            CacheCreationTokens: cacheCreationTokens,
-            CacheReadTokens: cacheReadTokens,
-            CostConfidence: costConfidence,
-            RequestSummary: requestSummary,
-            ResponseSummary: responseSummary,
-            CorrelationId: correlationId,
-            RouterTokens: routerTokens,
-            RouterCostUsd: routerCostUsd,
-            SubstitutionReason: substitutionReason);
-
-        await _telemetryPublisher.PublishAsync(telemetryEvent, cancellationToken);
-
-        // Off-path, best-effort: hand the completed response to the quality verifier for static and
-        // scoring. The ingress samples, extracts, and enqueues without blocking; it never throws. Reuses
-        // the already-extracted (untruncated) response text so no second copy of the body is made.
-        if (_qualityIngress is not null && !string.IsNullOrEmpty(responseText))
-        {
-            _qualityIngress.TryIngest(new QualityIngestContext(
-                ResponseText: responseText,
-                Prompt: newestUserMessage ?? string.Empty,
-                Model: requestedModel,
-                CorrelationId: correlationId,
-                SessionId: sessionId));
-        }
-    }
-
-    /// <summary>
-    /// Resolves the <see cref="RoutingSubstitutionReason"/> actually reported for a served request:
-    /// <see cref="RoutingSubstitutionReason.Failover"/> when <paramref name="isFallback"/> is
-    /// <see langword="true"/> (the candidate <c>RequestInterceptor</c> lined up first was attempted and
-    /// failed at the transport layer, so whatever reason it computed no longer describes what happened),
-    /// otherwise <paramref name="resolutionReason"/> unchanged.
-    /// </summary>
-    private static RoutingSubstitutionReason ResolveSubstitutionReason(bool isFallback, RoutingSubstitutionReason resolutionReason) =>
-        isFallback ? RoutingSubstitutionReason.Failover : resolutionReason;
-
-    /// <summary>
-    /// Publishes one request's usage to <see cref="UsageMetrics"/> (§5.12): a token count per non-zero
-    /// dimension, cost when known, and <see cref="UsageMetrics.UnpricedRequestsTotal"/> when it isn't -
-    /// mirroring the ledger's own "unknown is not zero" distinction rather than defaulting a missing cost
-    /// to 0.0 in the exported metric.
-    /// </summary>
-    private static void EmitUsageMetrics(string provider, string model, int? promptTokens, int? completionTokens, int? cacheCreationTokens, int? cacheReadTokens, decimal? estimatedCostUsd)
-    {
-        void AddTokens(int? value, string kind)
-        {
-            if (value is > 0)
-            {
-                UsageMetrics.TokensTotal.Add(
-                    value.Value,
-                    new KeyValuePair<string, object?>("provider", provider),
-                    new KeyValuePair<string, object?>("model", model),
-                    new KeyValuePair<string, object?>("kind", kind));
-            }
-        }
-
-        AddTokens(promptTokens, "prompt");
-        AddTokens(completionTokens, "completion");
-        AddTokens(cacheCreationTokens, "cache_creation");
-        AddTokens(cacheReadTokens, "cache_read");
-
-        if (estimatedCostUsd is decimal cost)
-        {
-            UsageMetrics.CostUsdTotal.Add(
-                (double)cost,
-                new KeyValuePair<string, object?>("provider", provider),
-                new KeyValuePair<string, object?>("model", model));
-        }
-        else
-        {
-            UsageMetrics.UnpricedRequestsTotal.Add(1, new KeyValuePair<string, object?>("provider", provider));
-        }
-    }
-
-    /// <summary>
-    /// Strips CR/LF from a value that originated from the client (request path, header names, JSON body
-    /// keys, a client-supplied session id) before it's placed in a log message template. Without this, a
-    /// crafted value could inject newlines into a text-rendering log sink and forge what looks like
-    /// additional, fabricated log entries (CodeQL: "Log entries created from user input" / log forging,
-    /// CWE-117). Chained <see cref="string.Replace(string, string)"/> calls directly on the tainted value
-    /// - rather than e.g. a hand-rolled character loop - is the sanitizer shape CodeQL's data-flow
-    /// analysis recognizes as breaking the taint path from source to sink.
-    /// </summary>
-    private static string SanitizeForLog(string? value) =>
-        value?.Replace("\r", " ").Replace("\n", " ") ?? string.Empty;
-
-    /// <summary>
-    /// Caps the length of a full request/response body before it is placed in a Debug-level log message, so
-    /// an unbounded payload never floods a text log sink. Applied on top of <see cref="SanitizeForLog"/>,
-    /// never in place of it.
-    /// </summary>
-    private const int MaxLoggedBodyLength = 4000;
-
-    private static string TruncateForLog(string value) =>
-        value.Length <= MaxLoggedBodyLength
-            ? value
-            : string.Concat(value.AsSpan(0, MaxLoggedBodyLength), "...[truncated]");
-
-    /// <summary>
-    /// Reads the upstream's own request id off <paramref name="headers"/> - <c>request-id</c> (Anthropic)
-    /// or, failing that, <c>x-request-id</c> (the more common convention) - for
-    /// <see cref="UsageLedgerEntry.RequestId"/>. Returns <see langword="null"/> when
-    /// <paramref name="headers"/> is absent (the Bedrock invocation path has no HTTP response headers to
-    /// read) or neither header was sent, in which case <see cref="Telemetry.UsageLedger"/> falls back to
-    /// its composite dedup key.
-    /// </summary>
-    private static string? ExtractUpstreamRequestId(System.Net.Http.Headers.HttpResponseHeaders? headers)
-    {
-        if (headers is null)
-        {
-            return null;
-        }
-
-        if (headers.TryGetValues("request-id", out var requestIdValues))
-        {
-            return requestIdValues.FirstOrDefault();
-        }
-
-        if (headers.TryGetValues("x-request-id", out var xRequestIdValues))
-        {
-            return xRequestIdValues.FirstOrDefault();
-        }
-
-        return null;
-    }
-
-    /// <summary>Attempts to parse the given bytes as a JSON object, returning null if they are not valid JSON or not an object.</summary>
-    private static JsonObject? TryParseJsonObject(byte[] bytes)
-    {
-        try
-        {
-            return JsonNode.Parse(bytes) as JsonObject;
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
-
-    /// <summary>
     /// Determines whether the (OpenAI-shaped) request body asked for a streaming response, i.e. its
     /// top-level <c>stream</c> field is <see langword="true"/>. Used only for translated providers, to
     /// pick the streaming vs non-streaming upstream URL and response path.
     /// </summary>
-    private static bool IsStreamingRequest(byte[] requestBody)
+    internal static bool IsStreamingRequest(byte[] requestBody)
     {
         try
         {
@@ -2358,325 +1495,6 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
         return names;
     }
-
-    /// <summary>
-    /// Determines whether a request targets the OpenAI-compatible model discovery endpoint
-    /// (<c>GET /v1/models</c>), matched case-insensitively and with an optional trailing slash tolerated,
-    /// since both conventions vary by client.
-    /// </summary>
-    private static bool IsModelsListRequest(HttpRequest request) =>
-        HttpMethods.IsGet(request.Method) &&
-        string.Equals(request.Path.Value?.TrimEnd('/'), ModelsListPath, StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// Writes the configured model list as an OpenAI-compatible <c>/v1/models</c> response, mirroring
-    /// LiteLLM's behavior of answering this endpoint from local configuration rather than forwarding it
-    /// upstream.
-    /// </summary>
-    private async Task WriteModelsListResponseAsync(HttpContext context)
-    {
-        var entries = _interceptor.ListAvailableModels()
-            .Select(model => new ModelListEntry(model.ModelName, "model", 0, model.Provider))
-            .ToList();
-
-        context.Response.StatusCode = StatusCodes.Status200OK;
-        context.Response.ContentType = "application/json";
-
-        await context.Response.WriteAsync(
-            JsonSerializer.Serialize(new ModelsListResponse("list", entries)),
-            context.RequestAborted);
-    }
-
-    /// <summary>
-    /// A single entry in the <c>/v1/models</c> response, shaped to match OpenAI's model list schema.
-    /// </summary>
-    private sealed record ModelListEntry(
-        [property: JsonPropertyName("id")] string Id,
-        [property: JsonPropertyName("object")] string Object,
-        [property: JsonPropertyName("created")] long Created,
-        [property: JsonPropertyName("owned_by")] string OwnedBy);
-
-    /// <summary>
-    /// The top-level <c>/v1/models</c> response envelope, shaped to match OpenAI's model list schema.
-    /// </summary>
-    private sealed record ModelsListResponse(
-        [property: JsonPropertyName("object")] string Object,
-        [property: JsonPropertyName("data")] IReadOnlyList<ModelListEntry> Data);
-
-    /// <summary>
-    /// Determines whether a request targets Ollama's native model discovery endpoint
-    /// (<c>GET /api/tags</c>), matched case-insensitively and with an optional trailing slash tolerated,
-    /// mirroring <see cref="IsModelsListRequest"/>.
-    /// </summary>
-    private static bool IsOllamaTagsRequest(HttpRequest request) =>
-        HttpMethods.IsGet(request.Method) &&
-        string.Equals(request.Path.Value?.TrimEnd('/'), OllamaTagsPath, StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// Writes the configured model list as an Ollama-native <c>/api/tags</c> response, so a client that
-    /// added this proxy as an "Ollama" provider (e.g. Visual Studio's AI model picker) can discover the
-    /// configured models the same way <see cref="WriteModelsListResponseAsync"/> answers the OpenAI-shaped
-    /// discovery endpoint.
-    /// </summary>
-    private async Task WriteOllamaTagsResponseAsync(HttpContext context)
-    {
-        var entries = _interceptor.ListAvailableModels()
-            .Select(model => new OllamaTagEntry(
-                model.ModelName,
-                model.ModelName,
-                DateTimeOffset.UtcNow.ToString("O"),
-                0,
-                string.Empty,
-                new OllamaTagDetails("gguf", string.Empty, string.Empty)))
-            .ToList();
-
-        // Debug, not Information: this fires on every poll from an Ollama-shaped client's model picker
-        // (potentially frequent), and its outcome is fully captured by the response itself - this exists so
-        // a trace can distinguish "answered locally from /api/tags" from the per-model routing path's own
-        // logging, without adding noise at the default log level.
-        _logger.LogDebug("Answered {Path} locally with {Count} configured model(s).", OllamaTagsPath, entries.Count);
-
-        context.Response.StatusCode = StatusCodes.Status200OK;
-        context.Response.ContentType = "application/json";
-
-        await context.Response.WriteAsync(
-            JsonSerializer.Serialize(new OllamaTagsResponse(entries)),
-            context.RequestAborted);
-    }
-
-    /// <summary>
-    /// The <c>details</c> object of one <see cref="OllamaTagEntry"/>, shaped to match Ollama's
-    /// <c>/api/tags</c> schema. Only the fields Ollama always populates are set; format-specific fields the
-    /// router has no equivalent for are left as ordinary defaults rather than fabricated.
-    /// </summary>
-    private sealed record OllamaTagDetails(
-        [property: JsonPropertyName("format")] string Format,
-        [property: JsonPropertyName("family")] string Family,
-        [property: JsonPropertyName("parameter_size")] string ParameterSize);
-
-    /// <summary>
-    /// A single entry in the <c>/api/tags</c> response, shaped to match Ollama's native model list schema.
-    /// </summary>
-    private sealed record OllamaTagEntry(
-        [property: JsonPropertyName("name")] string Name,
-        [property: JsonPropertyName("model")] string Model,
-        [property: JsonPropertyName("modified_at")] string ModifiedAt,
-        [property: JsonPropertyName("size")] long Size,
-        [property: JsonPropertyName("digest")] string Digest,
-        [property: JsonPropertyName("details")] OllamaTagDetails Details);
-
-    /// <summary>
-    /// The top-level <c>/api/tags</c> response envelope, shaped to match Ollama's native model list schema.
-    /// </summary>
-    private sealed record OllamaTagsResponse(
-        [property: JsonPropertyName("models")] IReadOnlyList<OllamaTagEntry> Models);
-
-    /// <summary>
-    /// Determines whether a request targets Ollama's native per-model detail endpoint (<c>POST /api/show</c>),
-    /// matched case-insensitively and with an optional trailing slash tolerated, mirroring
-    /// <see cref="IsOllamaTagsRequest"/>.
-    /// </summary>
-    private static bool IsOllamaShowRequest(HttpRequest request) =>
-        HttpMethods.IsPost(request.Method) &&
-        string.Equals(request.Path.Value?.TrimEnd('/'), OllamaShowPath, StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// Answers Ollama's native <c>POST /api/show</c> from local configuration instead of forwarding it
-    /// upstream - see <see cref="OllamaShowPath"/>'s remarks for why forwarding it produces a confusing 400.
-    /// Reads the requested model name out of the body's <c>{"model": "..."}</c> field the same way
-    /// <see cref="RequestInterceptor.ResolveModelRouteAsync"/> does, and answers 404 for a model this proxy
-    /// does not have configured - matching real Ollama's own behavior for an unknown model, which
-    /// <see cref="Translation.ToolCalling.ModelDialectResolver"/>'s own Ollama probe already relies on when
-    /// probing a genuine Ollama endpoint.
-    /// </summary>
-    private async Task WriteOllamaShowResponseAsync(HttpContext context)
-    {
-        string body;
-        using (var reader = new StreamReader(context.Request.Body, Encoding.UTF8, leaveOpen: true))
-        {
-            body = await reader.ReadToEndAsync(context.RequestAborted);
-        }
-
-        string? modelName = null;
-        try
-        {
-            if (JsonNode.Parse(body) is JsonObject jsonObject &&
-                jsonObject["model"] is JsonValue modelValue &&
-                modelValue.TryGetValue<string>(out var value))
-            {
-                modelName = value;
-            }
-        }
-        catch (JsonException)
-        {
-            // Falls through to the "model not found" response below, matching real Ollama's own behavior
-            // for a request it cannot make sense of.
-        }
-
-        var model = modelName is null
-            ? null
-            : _interceptor.ListAvailableModels()
-                .FirstOrDefault(m => string.Equals(m.ModelName, modelName, StringComparison.OrdinalIgnoreCase));
-
-        if (model is null)
-        {
-            // Information, not Debug: unlike the tags poll above, this is the direct diagnostic signal for
-            // exactly the failure mode this endpoint exists to prevent - a client naming a model this proxy
-            // doesn't know, which without this local answer would instead fall through to the per-model
-            // routing path and surface as a confusing 400 from whatever upstream that name happened to
-            // resolve to (see OllamaShowPath's remarks).
-            _logger.LogInformation(
-                "Answered {Path} locally: unknown model '{ModelName}' requested; returning 404.",
-                OllamaShowPath,
-                SanitizeForLog(modelName));
-            context.Response.StatusCode = StatusCodes.Status404NotFound;
-            context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync(
-                JsonSerializer.Serialize(new OllamaErrorResponse($"model '{modelName}' not found")),
-                context.RequestAborted);
-            return;
-        }
-
-        _logger.LogDebug("Answered {Path} locally for model {Model}.", OllamaShowPath, SanitizeForLog(model.ModelName));
-
-        var (capabilities, modelInfo) = DescribeModel(model);
-
-        context.Response.StatusCode = StatusCodes.Status200OK;
-        context.Response.ContentType = "application/json";
-
-        await context.Response.WriteAsync(
-            JsonSerializer.Serialize(new OllamaShowResponse(
-                string.Empty,
-                string.Empty,
-                string.Empty,
-                new OllamaTagDetails("gguf", string.Empty, string.Empty),
-                modelInfo,
-                capabilities)),
-            context.RequestAborted);
-    }
-
-    /// <summary>
-    /// Describes one model the way Ollama's <c>/api/show</c> does: what it can do, and how much context it
-    /// accepts. Both are read from in-memory snapshots, never probed here - see
-    /// <see cref="Translation.ToolCalling.IModelContextWindowStore"/> for why an inline probe would be
-    /// wrong on a request path a model picker polls.
-    /// </summary>
-    /// <remarks>
-    /// The synthetic router alias is answered by aggregating over the models it could actually dispatch to:
-    /// the union of their capabilities and the maximum of their context windows, restricted to models that
-    /// pass both governance gates. Note <see cref="RequestInterceptor.ListAvailableModels"/> does no
-    /// enablement filtering of its own, so that restriction is applied here.
-    /// <para>
-    /// The alias is identified by provider key rather than by name. An operator can legitimately configure
-    /// a model called <c>totallyhot-arcrouter</c>, but the provider key
-    /// <see cref="RequestInterceptor.RouterModelProvider"/> is documented as deliberately not a real
-    /// provider, so it is unambiguous.
-    /// </para>
-    /// <para>
-    /// This is the same in-memory join <c>ManagementFacade</c> already performs to populate its per-model
-    /// admin view.
-    /// </para>
-    /// </remarks>
-    /// <param name="model">The model being described.</param>
-    /// <returns>
-    /// The capability tokens (never empty), and the <c>model_info</c> map - or <see langword="null"/> when
-    /// no context length is known, so the field is omitted rather than reported as zero.
-    /// </returns>
-    private (IReadOnlyList<string> Capabilities, IReadOnlyDictionary<string, JsonNode>? ModelInfo) DescribeModel(
-        AvailableModel model)
-    {
-        if (string.Equals(model.Provider, RequestInterceptor.RouterModelProvider, StringComparison.OrdinalIgnoreCase))
-        {
-            var eligible = _interceptor.ListAvailableModels()
-                .Where(m => !string.Equals(m.Provider, RequestInterceptor.RouterModelProvider, StringComparison.OrdinalIgnoreCase))
-                .Where(m => _interceptor.IsProviderEnabled(m.Provider) && _interceptor.IsModelEnabled(m.ModelName))
-                .ToList();
-
-            var union = Translation.ToolCalling.OllamaModelCapabilities.Union(
-                eligible.Select(m => Translation.ToolCalling.OllamaModelCapabilities.ForDialect(
-                    _capabilityStore?.GetModelCapability(m.Provider, m.ModelName)?.Dialect)));
-
-            // Max, not min: the alias advertises the best it can route to. This over-advertises by
-            // construction - auto-select may land on a model with a smaller window - which is the accepted
-            // trade-off recorded in docs/router/ollama-show-capabilities-plan.md.
-            var widest = eligible
-                .Select(m => _contextWindowStore?.GetModelContextWindow(m.Provider, m.ModelName)?.ContextLength)
-                .Where(length => length is > 0)
-                .DefaultIfEmpty(null)
-                .Max();
-
-            return (union, BuildModelInfo(RouterArchitecture, widest));
-        }
-
-        var capabilities = Translation.ToolCalling.OllamaModelCapabilities.ForDialect(
-            _capabilityStore?.GetModelCapability(model.Provider, model.ModelName)?.Dialect);
-        var window = _contextWindowStore?.GetModelContextWindow(model.Provider, model.ModelName);
-
-        return (capabilities, BuildModelInfo(window?.Architecture ?? RouterArchitecture, window?.ContextLength));
-    }
-
-    /// <summary>
-    /// Builds Ollama's <c>model_info</c> map, or <see langword="null"/> when no context length is known.
-    /// </summary>
-    /// <remarks>
-    /// The architecture and the length are always emitted together. Ollama keys the window as
-    /// <c>{arch}.context_length</c> and clients resolve it by reading <c>general.architecture</c> first, so
-    /// a length published without a matching architecture is unreachable through the standard read path.
-    /// </remarks>
-    private static IReadOnlyDictionary<string, JsonNode>? BuildModelInfo(string architecture, int? contextLength) =>
-        contextLength is > 0
-            ? new Dictionary<string, JsonNode>(StringComparer.Ordinal)
-            {
-                ["general.architecture"] = JsonValue.Create(architecture),
-                [$"{architecture}.context_length"] = JsonValue.Create(contextLength.Value),
-            }
-            : null;
-
-    /// <summary>
-    /// The architecture reported for the synthetic router alias, and for any model whose real architecture
-    /// was never probed.
-    /// </summary>
-    /// <remarks>
-    /// Deliberately not a real GGUF architecture name. The alias spans models of differing architectures,
-    /// so any real name would be wrong for most of them; a client keying behavior off this value sees
-    /// something unrecognized and falls back to generic handling, which is the safe direction. Naming a
-    /// plausible-but-wrong architecture like <c>llama</c> would be strictly worse - the same judgment
-    /// <c>ModelDialectResolver.TryMapArchitecture</c> already makes about that exact name.
-    /// </remarks>
-    private const string RouterArchitecture = "arcrouter";
-
-    /// <summary>
-    /// The <c>POST /api/show</c> response envelope, shaped to match Ollama's native per-model detail schema.
-    /// Only the fields every Ollama install always populates are set; format-specific fields the router has
-    /// no equivalent for (the model's literal chat template among them - see
-    /// <see cref="Translation.ToolCalling.ModelDialectResolver"/> for where that is actually sourced from,
-    /// when it is available at all) are left as ordinary defaults rather than fabricated.
-    /// </summary>
-    /// <remarks>
-    /// <c>capabilities</c> is the exception to that "leave it blank" stance, and the reason this endpoint
-    /// gained content at all: capability-filtering clients drop a model that declares nothing, so leaving
-    /// it empty made every router model invisible in Visual Studio's Copilot picker. It is the one field
-    /// here the router genuinely knows the answer to.
-    /// </remarks>
-    private sealed record OllamaShowResponse(
-        [property: JsonPropertyName("modelfile")] string Modelfile,
-        [property: JsonPropertyName("parameters")] string Parameters,
-        [property: JsonPropertyName("template")] string Template,
-        [property: JsonPropertyName("details")] OllamaTagDetails Details,
-
-        // Omitted rather than serialized as null when unknown. This endpoint serializes without options, so
-        // default handling would write `"model_info": null` - which a client can read as "no context
-        // limit" rather than "not stated". The per-property attribute is what keeps that promise without
-        // introducing a shared options object for one field.
-        [property: JsonPropertyName("model_info")]
-        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        IReadOnlyDictionary<string, JsonNode>? ModelInfo,
-
-        [property: JsonPropertyName("capabilities")] IReadOnlyList<string> Capabilities);
-
-    /// <summary>An Ollama-shaped <c>{"error": "..."}</c> envelope, used for a <c>POST /api/show</c> naming an unknown model.</summary>
-    private sealed record OllamaErrorResponse(
-        [property: JsonPropertyName("error")] string Error);
 
     /// <summary>
     /// Writes an OpenAI-shaped <c>{"error": {...}}</c> envelope: the shared shape every client-facing error

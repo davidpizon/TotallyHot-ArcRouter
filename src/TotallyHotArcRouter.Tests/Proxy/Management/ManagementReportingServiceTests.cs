@@ -1,52 +1,27 @@
-using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
-using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tests.PriceCatalog;
-using Moq;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy.Management;
 
 /// <summary>
-/// Covers <see cref="ManagementFacade.GetUsageSummary"/>, <see cref="ManagementFacade.GetUsageRollup"/>,
-/// and the budget-window fields <see cref="ManagementFacade.SetBudget"/> now accepts (Phase 4, §5.10/§5.15).
+/// Covers <see cref="ManagementReportingService.GetUsageSummary"/>, <see cref="ManagementReportingService.GetUsageRollup"/>,
+/// and <see cref="ManagementReportingService.GetRoutingRoiAsync"/> (Phase 4, §5.15;
+/// docs/router/self-organizing-classification-plan.md Phase T4) - the read-only reporting surface split out
+/// of <see cref="ManagementFacade"/> (docs/router/code-smell-refactoring-plan.md Phase 3 step 1).
 /// </summary>
-public sealed class UsageAdminFacadeTests
+public sealed class ManagementReportingServiceTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
-
-    private static ModelRoutingOptions SeedOptions() => new()
-    {
-        Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["openai"] = new ProviderOptions { BaseUrl = "https://api.openai.com", AuthHeaderName = "Authorization" }
-        },
-        ModelList = [new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "openai", ProviderModelId = "gpt-5.4" }]
-    };
-
-    private static ManagementFacade CreateFacade(
-        IUsageRollupStore? rollupStore = null,
-        ProviderBudgetStore? budgetStore = null,
-        IProviderConfigStore? store = null,
-        TotallyHot.ArcRouter.Transcripts.ITaxonomyComparisonStore? comparisonStore = null) =>
-        new(
-            store ?? new InMemoryProviderConfigStore(SeedOptions()),
-            Mock.Of<IEnvironmentVariableProvider>(),
-            new HttpClient(),
-            new ManagementFacadeDependencies
-            {
-                BudgetStore = budgetStore,
-                RollupStore = rollupStore,
-                ComparisonStore = comparisonStore,
-            });
 
     [Fact]
     public async Task GetRoutingRoiAsync_NoComparisonStore_IsUnavailableNotEmpty()
     {
         // "Unavailable" and "an empty range" are different answers: collapsing them would let a disabled
         // feature render as a measured break-even result.
-        var result = await CreateFacade().GetRoutingRoiAsync(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow, cancellationToken: Ct);
+        var service = new ManagementReportingService(rollupStore: null, comparisonStore: null);
+        var result = await service.GetRoutingRoiAsync(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow, cancellationToken: Ct);
 
         Assert.False(result.Success);
         Assert.Equal(ManagementErrorType.Unavailable, result.ErrorType);
@@ -55,10 +30,10 @@ public sealed class UsageAdminFacadeTests
     [Fact]
     public async Task GetRoutingRoiAsync_InvertedRange_IsInvalidRequest()
     {
-        var facade = CreateFacade(comparisonStore: new StubComparisonStore([]));
+        var service = new ManagementReportingService(rollupStore: null, new StubComparisonStore([]));
         var now = DateTimeOffset.UtcNow;
 
-        var result = await facade.GetRoutingRoiAsync(now, now.AddDays(-1), cancellationToken: Ct);
+        var result = await service.GetRoutingRoiAsync(now, now.AddDays(-1), cancellationToken: Ct);
 
         Assert.False(result.Success);
         Assert.Equal(ManagementErrorType.InvalidRequest, result.ErrorType);
@@ -70,9 +45,9 @@ public sealed class UsageAdminFacadeTests
         var now = DateTimeOffset.UtcNow;
         var inRange = MakeComparison(1, now.AddHours(-2), 0.09m);
         var pastEnd = MakeComparison(2, now.AddHours(2), 0.50m);
-        var facade = CreateFacade(comparisonStore: new StubComparisonStore([inRange, pastEnd]));
+        var service = new ManagementReportingService(rollupStore: null, new StubComparisonStore([inRange, pastEnd]));
 
-        var result = await facade.GetRoutingRoiAsync(now.AddDays(-1), now, cancellationToken: Ct);
+        var result = await service.GetRoutingRoiAsync(now.AddDays(-1), now, cancellationToken: Ct);
 
         Assert.True(result.Success);
         var point = Assert.Single(result.Value!);
@@ -122,7 +97,8 @@ public sealed class UsageAdminFacadeTests
     [Fact]
     public void GetUsageSummary_NoRollupStore_IsUnavailable()
     {
-        var result = CreateFacade().GetUsageSummary("day");
+        var service = new ManagementReportingService(rollupStore: null, comparisonStore: null);
+        var result = service.GetUsageSummary("day");
 
         Assert.False(result.Success);
         Assert.Equal(ManagementErrorType.Unavailable, result.ErrorType);
@@ -132,9 +108,9 @@ public sealed class UsageAdminFacadeTests
     public void GetUsageSummary_UnknownWindow_IsInvalidRequest()
     {
         using var temp = new TempDatabase();
-        var facade = CreateFacade(rollupStore: temp.CreateRollupStore());
+        var service = new ManagementReportingService(temp.CreateRollupStore(), comparisonStore: null);
 
-        var result = facade.GetUsageSummary("fortnight");
+        var result = service.GetUsageSummary("fortnight");
 
         Assert.False(result.Success);
         Assert.Equal(ManagementErrorType.InvalidRequest, result.ErrorType);
@@ -153,8 +129,8 @@ public sealed class UsageAdminFacadeTests
                 DateTimeOffset.UtcNow.AddDays(-2), Guid.NewGuid().ToString("N")),
             Ct);
 
-        var facade = CreateFacade(rollupStore: rollup);
-        var result = facade.GetUsageSummary("week");
+        var service = new ManagementReportingService(rollup, comparisonStore: null);
+        var result = service.GetUsageSummary("week");
 
         Assert.True(result.Success);
         Assert.Equal(1, result.Value!.Requests);
@@ -164,7 +140,8 @@ public sealed class UsageAdminFacadeTests
     [Fact]
     public void GetUsageRollup_NoRollupStore_IsUnavailable()
     {
-        var result = CreateFacade().GetUsageRollup(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow, "day", "model");
+        var service = new ManagementReportingService(rollupStore: null, comparisonStore: null);
+        var result = service.GetUsageRollup(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow, "day", "model");
 
         Assert.False(result.Success);
         Assert.Equal(ManagementErrorType.Unavailable, result.ErrorType);
@@ -174,9 +151,9 @@ public sealed class UsageAdminFacadeTests
     public void GetUsageRollup_ToBeforeFrom_IsInvalidRequest()
     {
         using var temp = new TempDatabase();
-        var facade = CreateFacade(rollupStore: temp.CreateRollupStore());
+        var service = new ManagementReportingService(temp.CreateRollupStore(), comparisonStore: null);
 
-        var result = facade.GetUsageRollup(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(-1), "day", "model");
+        var result = service.GetUsageRollup(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(-1), "day", "model");
 
         Assert.False(result.Success);
         Assert.Equal(ManagementErrorType.InvalidRequest, result.ErrorType);
@@ -188,9 +165,9 @@ public sealed class UsageAdminFacadeTests
     public void GetUsageRollup_UnknownWidth_IsInvalidRequest(string width)
     {
         using var temp = new TempDatabase();
-        var facade = CreateFacade(rollupStore: temp.CreateRollupStore());
+        var service = new ManagementReportingService(temp.CreateRollupStore(), comparisonStore: null);
 
-        var result = facade.GetUsageRollup(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow, width, "model");
+        var result = service.GetUsageRollup(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow, width, "model");
 
         Assert.False(result.Success);
         Assert.Equal(ManagementErrorType.InvalidRequest, result.ErrorType);
@@ -200,58 +177,11 @@ public sealed class UsageAdminFacadeTests
     public void GetUsageRollup_UnknownGroupBy_IsInvalidRequest()
     {
         using var temp = new TempDatabase();
-        var facade = CreateFacade(rollupStore: temp.CreateRollupStore());
+        var service = new ManagementReportingService(temp.CreateRollupStore(), comparisonStore: null);
 
-        var result = facade.GetUsageRollup(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow, "day", "region");
-
-        Assert.False(result.Success);
-        Assert.Equal(ManagementErrorType.InvalidRequest, result.ErrorType);
-    }
-
-    [Fact]
-    public void SetBudget_WithRollingHoursWindow_PersistsWindowKindAndHours()
-    {
-        using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
-        var budgetStore = temp.CreateBudgetStore(repository);
-        var store = new InMemoryProviderConfigStore(SeedOptions());
-        var facade = CreateFacade(budgetStore: budgetStore, store: store);
-
-        var result = facade.SetBudget("openai", new ProviderBudgetWriteRequest(100m, null, "RollingHours", 5));
-
-        Assert.True(result.Success);
-        var provider = Assert.Single(result.Value!.Providers);
-        Assert.Equal("RollingHours", provider.WindowKind);
-        Assert.NotNull(provider.NextResetUtc);
-    }
-
-    [Fact]
-    public void SetBudget_RollingHoursWithoutHours_IsInvalidRequest()
-    {
-        using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
-        var budgetStore = temp.CreateBudgetStore(repository);
-        var store = new InMemoryProviderConfigStore(SeedOptions());
-        var facade = CreateFacade(budgetStore: budgetStore, store: store);
-
-        var result = facade.SetBudget("openai", new ProviderBudgetWriteRequest(100m, null, "RollingHours", null));
+        var result = service.GetUsageRollup(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow, "day", "region");
 
         Assert.False(result.Success);
         Assert.Equal(ManagementErrorType.InvalidRequest, result.ErrorType);
-    }
-
-    [Fact]
-    public void SetBudget_NoWindowSpecified_DefaultsToMonthly()
-    {
-        using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
-        var budgetStore = temp.CreateBudgetStore(repository);
-        var store = new InMemoryProviderConfigStore(SeedOptions());
-        var facade = CreateFacade(budgetStore: budgetStore, store: store);
-
-        var result = facade.SetBudget("openai", new ProviderBudgetWriteRequest(100m, null));
-
-        Assert.True(result.Success);
-        Assert.Equal("Monthly", Assert.Single(result.Value!.Providers).WindowKind);
     }
 }

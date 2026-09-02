@@ -11,8 +11,8 @@ namespace TotallyHot.ArcRouter.Proxy.Management;
 /// Analytics GUI tabs read Phase 4 rollups through. The GUI only ever talks to the proxy
 /// (<c>docs/router/telemetry.md#gui-consumption</c>) - this is the "new REST endpoint... served by the
 /// proxy" that principle requires, never a direct read of <c>agent_telemetry.db</c>. All logic lives in
-/// <see cref="ManagementFacade"/>; this file only translates HTTP requests into facade calls and
-/// <see cref="ManagementResult{T}"/> outcomes into HTTP responses, mirroring
+/// <see cref="ManagementReportingService"/>; this file only translates HTTP requests into service calls
+/// and <see cref="ManagementResult{T}"/> outcomes into HTTP responses, mirroring
 /// <see cref="ProviderAdminEndpoints"/>.
 /// </summary>
 public static class UsageAdminEndpoints
@@ -24,7 +24,7 @@ public static class UsageAdminEndpoints
     /// <c>X-Admin-Token</c> header as every other <c>/admin/*</c> route.
     /// </summary>
     /// <param name="endpoints">The endpoint route builder (the proxy's inner Kestrel host).</param>
-    /// <param name="facade">The shared management facade backing every read.</param>
+    /// <param name="reportingService">The shared reporting service backing every read.</param>
     /// <param name="managementToken">
     /// Optional shared secret; when non-empty, every <c>/admin/usage/*</c> request must present it in the
     /// <c>X-Admin-Token</c> header or receive a 401. See <see cref="ProviderAdminEndpoints.MapProviderAdminEndpoints"/>
@@ -32,11 +32,11 @@ public static class UsageAdminEndpoints
     /// </param>
     public static IEndpointRouteBuilder MapUsageAdminEndpoints(
         this IEndpointRouteBuilder endpoints,
-        ManagementFacade facade,
+        ManagementReportingService reportingService,
         string? managementToken)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
-        ArgumentNullException.ThrowIfNull(facade);
+        ArgumentNullException.ThrowIfNull(reportingService);
 
         var group = endpoints.MapGroup("/admin/usage");
 
@@ -57,7 +57,7 @@ public static class UsageAdminEndpoints
         // Totals for the header ticker and summary tiles - a preset window rather than an explicit range,
         // since every caller of this endpoint wants "the last day/week/month/all-time", not an arbitrary span.
         group.MapGet("/summary", (string? window) =>
-            ToResult(facade.GetUsageSummary(window ?? "day")));
+            ToResult(reportingService.GetUsageSummary(window ?? "day")));
 
         // The Model Distribution / Cost Analytics chart feed - an explicit range, since these callers drive
         // a filter bar the operator controls directly.
@@ -73,7 +73,7 @@ public static class UsageAdminEndpoints
                 return Error(StatusCodes.Status400BadRequest, "'to' must be a valid ISO 8601 instant.", "invalid_request_error");
             }
 
-            return ToResult(facade.GetUsageRollup(fromInstant, toInstant, width ?? "day", groupBy ?? "day"));
+            return ToResult(reportingService.GetUsageRollup(fromInstant, toInstant, width ?? "day", groupBy ?? "day"));
         });
 
         // docs/router/self-organizing-classification-plan.md Phase T4: the Cost Analytics "Routing ROI"
@@ -91,7 +91,7 @@ public static class UsageAdminEndpoints
                 return Error(StatusCodes.Status400BadRequest, "'to' must be a valid ISO 8601 instant.", "invalid_request_error");
             }
 
-            return ToResult(await facade.GetRoutingRoiAsync(fromInstant, toInstant, session, cancellationToken));
+            return ToResult(await reportingService.GetRoutingRoiAsync(fromInstant, toInstant, session, cancellationToken));
         });
 
         // §5.12: reuses the exact same GetUsageRollup query the chart feed above does - export is a
@@ -115,7 +115,7 @@ public static class UsageAdminEndpoints
                 return Error(StatusCodes.Status400BadRequest, "'format' must be 'csv' or 'json'.", "invalid_request_error");
             }
 
-            var result = facade.GetUsageRollup(fromInstant, toInstant, width ?? "day", groupBy ?? "day");
+            var result = reportingService.GetUsageRollup(fromInstant, toInstant, width ?? "day", groupBy ?? "day");
             if (!result.Success)
             {
                 return ToResult(result);

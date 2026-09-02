@@ -387,10 +387,8 @@ namespace TotallyHot.ArcRouter.Proxy
                                         CapabilityStore = managementApi.CapabilityStore,
                                         PriceCatalogRepository = managementApi.PriceCatalogRepository,
                                         OverrideStore = managementApi.ModelAliasOverrideStore,
-                                        RollupStore = managementApi.UsageRollupStore,
                                         SecretWriter = managementApi.SecretWriter,
                                         SecretReader = managementApi.SecretReader,
-                                        ComparisonStore = managementApi.TaxonomyComparisonStore,
                                         // Falls back to a fresh, unshared instance only when the caller
                                         // didn't supply one - see ManagementApiDependencies.InteractionStatusStore's
                                         // remarks: the real composition root (ServiceCollectionExtensions)
@@ -398,8 +396,14 @@ namespace TotallyHot.ArcRouter.Proxy
                                         // and ProxyMiddleware, so the Providers tab sees live-traffic state.
                                         InteractionStatusStore = managementApi.InteractionStatusStore ?? new ProviderInteractionStatusStore(),
                                     });
+                                // The read-only reporting surface (usage summary/rollup/routing-ROI) split
+                                // out of ManagementFacade (docs/router/code-smell-refactoring-plan.md Phase
+                                // 3 step 1) - a separate, stateless collaborator rather than a facade member.
+                                var reportingService = new ManagementReportingService(
+                                    managementApi.UsageRollupStore,
+                                    managementApi.TaxonomyComparisonStore);
                                 endpoints.MapProviderAdminEndpoints(facade, managementToken);
-                                endpoints.MapUsageAdminEndpoints(facade, managementToken);
+                                endpoints.MapUsageAdminEndpoints(reportingService, managementToken);
                             }
                         });
                         app.Run(context => proxyMiddleware.InvokeAsync(context, _ => Task.CompletedTask));
