@@ -27,10 +27,13 @@ now implemented except the two ADR-gated ones and the Gemini cost reconciler:
   now drives `UsageExtractor`/`ResponseTextExtractor` and fixed a real gap (Ollama's response text was
   silently unhandled); several small Quality-assembly and GUI cleanups (deduplicated scoring/word-boundary
   helpers, stale doc-comment fixes, `DashboardData`'s mock fixtures moved to a JSON resource).
-- **ADR-approved, implementation in progress:**
-  [ADR-0006](../adr/0006-split-managementfacade-along-crud-aggregate-boundaries.md) (accepted) decides
+- **ADR-approved and implemented:**
+  [ADR-0006](../adr/0006-split-managementfacade-along-crud-aggregate-boundaries.md) (accepted) decided
   `ManagementFacade`'s remaining write/security-boundary surface splits into internal collaborators
-  along CRUD-aggregate lines (Phase 3 step 3, below), with zero public-surface change.
+  along CRUD-aggregate lines (Phase 3 step 3, now complete) — `ManagementFacade.cs` shrank from 1562 to
+  ~450 lines, delegating to `ProviderManagementService`, `BudgetAndPriceOverrideService`, and
+  `SecretManagementService`, each reachable only through the facade's own public methods. Zero
+  public-surface or call-site changes.
   [ADR-0007](../adr/0007-provider-admin-client-stays-on-http.md) (accepted) decides `ProviderAdminClient`
   stays on HTTP rather than migrating to gRPC (the Phase 4 transport item, below) — no migration code is
   planned, closing that item with documentation only.
@@ -47,10 +50,12 @@ now implemented except the two ADR-gated ones and the Gemini cost reconciler:
   hot-path changes) — streaming, buffered, Bedrock, and local-endpoint (`/v1/models`, `/api/tags`,
   `/api/show`) request paths through the running proxy, after the `CandidateGates` change — complete.
 
-Phase 3 step 3 (further `ManagementFacade` splitting) is now implementing ADR-0006's accepted decision;
-the HTTP-vs-gRPC transport inconsistency is resolved by ADR-0007 (documented, not migrated). This
-document is the output of a structural survey (CodeGraph + Serena + targeted reads), not an exhaustive
-line-by-line audit.
+Phase 3 step 3 (further `ManagementFacade` splitting) is complete, implementing ADR-0006's accepted
+decision; the HTTP-vs-gRPC transport inconsistency is resolved by ADR-0007 (documented, not migrated).
+Every item from both this plan and the brutal-cozy-pascal audit is now either shipped, closed by an
+accepted ADR, or tracked as an explicit open TODO — see [`tracked-todos.md` #6](tracked-todos.md#6-build-a-real-iprovidercostreconciler-for-gemini)
+for the one remaining piece of work (the Gemini cost reconciler). This document is the output of a
+structural survey (CodeGraph + Serena + targeted reads), not an exhaustive line-by-line audit.
 
 **Scope surveyed:** `TotallyHotArcRouter` (router core), `TotallyHot.ArcRouter.Quality`, and all four
 GUI assemblies (`TotallyHotArcRouter.Gui`, `.Gui.Admin`, `.Gui.Charts`, `.Gui.Console`,
