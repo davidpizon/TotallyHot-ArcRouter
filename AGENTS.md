@@ -60,6 +60,34 @@ This repository contains the TotallyHot Arc Router project.
   - Use structured logging, and **always keep the message template a static string literal** — never string interpolation and never string formatting. Write `logger.LogInformation("Model selected: {Model} with confidence {Confidence}", model, confidence)`, not `logger.LogInformation($"Model selected: {model} with confidence {confidence}")`.
   - Log all routing decisions, proxy interceptions, memory updates, and errors to enable audit trails and diagnostics.
 
+## Dual-engine code-smell analysis (CodeGraph + Serena)
+
+Architectural surveys, coupling questions, and refactor planning use two MCP engines as a pair.
+The method, severity matrix, live catalog, and safety protocol live in
+[ADR-0008](docs/adr/0008-codegraph-serena-dual-engine-code-smell-pipeline.md). Mechanical work stays in
+[`docs/router/code-smell-refactoring-plan.md`](docs/router/code-smell-refactoring-plan.md) — do not
+start a parallel smell tracker.
+
+1. **CodeGraph MCP (structural engine)** — namespace `user-codegraph`, tool `codegraph_explore`.
+   Call it *first* for production `src/` symbols: call paths, type hierarchies, instantiations, and
+   blast radius. Treat returned source as already read. Score smells on production
+   `src/TotallyHotArcRouter*` only (router, Quality, GUI). Test projects are the regression net, not
+   the catalog. Do not re-grep indexed code to confirm the graph.
+2. **Serena MCP (cognitive engine)** — namespace `plugin-serena-serena`. Given CodeGraph evidence
+   (not a raw file dump), name anti-patterns (God Object, Shotgun Surgery, Feature Envy, callback
+   coupling), classify **Critical / Major / Minor** per ADR-0008's matrix, and propose a phased
+   refactor that respects existing ADRs. If Serena fails tool discovery or auth, proceed
+   CodeGraph-only, classify explicitly as the agent, and record **Serena skipped** so the catalog is
+   not mistaken for a dual-engine result.
+3. **Fold, don't fork.** New mechanical items append to the existing refactoring plan. Security
+   boundary, public surface, or transport changes get a new ADR first (see ADR-0006, ADR-0007).
+   Product work such as the Gemini cost reconciler stays in `docs/router/tracked-todos.md`.
+4. **Safety before edits.** Re-run CodeGraph on hubs (`RequestInterceptor`, `ManagementFacade`,
+   `ProxyMiddleware`) and list production callers. Do not change `ManagementFacade`'s public method
+   set or register its internal collaborators as independently injectable services. Hot-path
+   changes keep static Serilog templates and need the golden-path smoke in the existing plan's
+   validation gate.
+
 ## Agent instruction files
 
 This repo keeps **one** canonical agent-instruction file. `CLAUDE.md` and
@@ -92,4 +120,6 @@ Requires Windows Developer Mode and `git config core.symlinks true`.
 - `docs/gui/DESIGN.md` — GUI design system (colors, typography, components, the window/modal shell)
 - `docs/gui/MOTION.md` — GUI motion system (durations, easing, entrance/exit patterns)
 - `docs/adr/README.md` — Architecture Decision Records: when to write one, template, and process
+- [ADR-0008](docs/adr/0008-codegraph-serena-dual-engine-code-smell-pipeline.md) — CodeGraph + Serena dual-engine code-smell pipeline
+- `docs/router/code-smell-refactoring-plan.md` — in-flight mechanical smell-refactor work list
 
