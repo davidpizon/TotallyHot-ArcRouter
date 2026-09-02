@@ -42,11 +42,16 @@ public sealed class UsageExtractor : IUsageExtractor
     /// <see cref="ProviderRegistrations.BuildDefault"/> when not supplied - the same table
     /// <c>ServiceCollectionExtensions</c> registers for DI - so direct construction (production fallback
     /// construction in <c>ProxyMiddleware</c>, or a test building this type on its own) still dispatches
-    /// every known provider correctly.
+    /// every known provider correctly. Re-keyed onto <see cref="StringComparer.OrdinalIgnoreCase"/>
+    /// regardless of the comparer the caller's own dictionary used, so <see cref="TryExtractUsage"/>'s
+    /// documented case-insensitive lookup contract holds no matter what a caller supplies here - not
+    /// just for the case-insensitive default table.
     /// </param>
     public UsageExtractor(IReadOnlyDictionary<string, ProviderRegistration>? providerRegistrations = null)
     {
-        _providerRegistrations = providerRegistrations ?? ProviderRegistrations.BuildDefault();
+        _providerRegistrations = providerRegistrations is null
+            ? ProviderRegistrations.BuildDefault()
+            : new Dictionary<string, ProviderRegistration>(providerRegistrations, StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>

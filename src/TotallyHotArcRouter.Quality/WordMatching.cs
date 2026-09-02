@@ -31,10 +31,18 @@ public static class WordMatching
     /// <paramref name="haystack"/> that is not immediately preceded or followed by a letter or digit.
     /// </summary>
     /// <param name="haystack">The text to search.</param>
-    /// <param name="needle">The token to look for, matched with an ordinal comparison.</param>
+    /// <param name="needle">The non-empty token to look for, matched with an ordinal comparison.</param>
     /// <returns>The zero-based start index of each whole-word match, in order.</returns>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="needle"/> is empty. An empty needle would otherwise loop forever: an empty-string
+    /// <see cref="string.IndexOf(string, int, StringComparison)"/> match never advances past its own start
+    /// index, and every caller of this helper only ever searches for a fixed, non-empty keyword - so a
+    /// caller reaching this with an empty needle has a bug worth failing loudly on rather than hanging.
+    /// </exception>
     public static IEnumerable<int> WholeWordOccurrences(string haystack, string needle)
     {
+        ArgumentException.ThrowIfNullOrEmpty(needle);
+
         var index = 0;
         while ((index = haystack.IndexOf(needle, index, StringComparison.Ordinal)) >= 0)
         {

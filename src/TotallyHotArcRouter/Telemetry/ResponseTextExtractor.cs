@@ -13,7 +13,7 @@ public interface IResponseTextExtractor
     /// <summary>
     /// Attempts to extract the assistant's reply text for a completed request.
     /// </summary>
-    /// <param name="provider">The provider key the request was routed to (e.g. <c>"openai"</c>, <c>"anthropic"</c>).</param>
+    /// <param name="provider">The provider key the request was routed to (e.g. <c>"openai"</c>, <c>"anthropic"</c>), case-insensitive.</param>
     /// <param name="isStreaming">Whether the response was a streaming (SSE) response.</param>
     /// <param name="bufferedResponseBody">The captured response bytes (may be truncated for very large responses - see the capture-cap note on the caller).</param>
     /// <param name="text">The extracted text, when this method returns <see langword="true"/>.</param>
@@ -37,10 +37,16 @@ public sealed class ResponseTextExtractor : IResponseTextExtractor
     /// falls back to - so direct construction (production fallback construction in
     /// <c>ProxyMiddleware</c>, or a test building this type on its own) still dispatches every known
     /// provider correctly, and the two extractors can never disagree about a given provider's shape.
+    /// Re-keyed onto <see cref="StringComparer.OrdinalIgnoreCase"/> regardless of the comparer the
+    /// caller's own dictionary used, so <see cref="TryExtractText"/>'s documented case-insensitive
+    /// lookup contract holds no matter what a caller supplies here - not just for the case-insensitive
+    /// default table.
     /// </param>
     public ResponseTextExtractor(IReadOnlyDictionary<string, ProviderRegistration>? providerRegistrations = null)
     {
-        _providerRegistrations = providerRegistrations ?? ProviderRegistrations.BuildDefault();
+        _providerRegistrations = providerRegistrations is null
+            ? ProviderRegistrations.BuildDefault()
+            : new Dictionary<string, ProviderRegistration>(providerRegistrations, StringComparer.OrdinalIgnoreCase);
     }
 
     /// <inheritdoc />
