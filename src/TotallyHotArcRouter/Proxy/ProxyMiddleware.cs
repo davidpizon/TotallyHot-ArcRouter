@@ -29,10 +29,84 @@ using System.Collections.Generic;
 namespace TotallyHot.ArcRouter.Proxy;
 
 /// <summary>
+/// One entry in <see cref="ProxyMiddleware.CandidateGates"/>'s ordered per-candidate pre-flight
+/// sequence: a named predicate plus the exact logging its <c>InvokeCoreAsync</c> call site performed
+/// before this became data-driven, so re-expressing the sequence as a list changes nothing observable
+/// - same conditions, same log templates and arguments, same order.
+/// </summary>
+/// <param name="Name">Short identifier for the gate, used only for readability at the call site (e.g. in a debugger or future diagnostics) - never logged or compared against.</param>
+/// <param name="Predicate">Returns <see langword="true"/> when this gate blocks <paramref name="Predicate"/>'s candidate. Takes the owning <see cref="ProxyMiddleware"/> explicitly (an open instance delegate) because the six underlying checks are instance methods; the <see cref="CircuitBreakerTargetKey"/> parameter is unused by the gates that do not need it.</param>
+/// <param name="LogBlocked">Emits the gate's specific "why this candidate was skipped" log entry. Invoked only when <see cref="Predicate"/> returned <see langword="true"/>.</param>
+internal readonly record struct GateCheck(
+    string Name,
+    Func<ProxyMiddleware, ResolvedModelRoute, CircuitBreakerTargetKey, bool> Predicate,
+    Action<ProxyMiddleware, ResolvedModelRoute> LogBlocked);
+
+/// <summary>
 /// Middleware for handling and forwarding proxy requests.
 /// </summary>
 public class ProxyMiddleware : IMiddleware, IDisposable
 {
+    /// <summary>
+    /// The per-candidate pre-flight gate sequence <see cref="InvokeCoreAsync"/> walks, in this exact
+    /// order, for every candidate before attempting it. The order is load-bearing, not incidental: gate
+    /// (4), the read-only circuit-breaker pre-check, MUST run before gates (5) and (6) - each of which
+    /// can mutate breaker state and claim a target's single half-open probe slot. If a mutating gate
+    /// claimed that slot and a *later* gate then rejected the candidate anyway, the probe would never be
+    /// resolved via <c>RecordSuccess</c>/<c>RecordFailure</c> (this candidate is never attempted) and
+    /// would stay "in flight" forever, permanently bypassing that target. Running the deterministic,
+    /// non-mutating pre-check first filters out the already-OPEN case before either mutating gate is
+    /// even reached. Gates (1)-(3) carry no such ordering constraint among themselves; they keep their
+    /// historical order only to avoid an unnecessary diff. Expressing the sequence as data (rather than
+    /// as inline <c>if</c> statements) makes this invariant explicit in one place instead of only in a
+    /// comment, so a future reordering has to touch this list deliberately rather than silently
+    /// violating it.
+    /// </summary>
+    private static readonly IReadOnlyList<GateCheck> CandidateGates =
+    [
+        new(
+            "budget",
+            static (middleware, route, _) => middleware.IsBudgetGateBlocked(route),
+            static (middleware, route) => middleware._logger.LogInformation(
+                "Skipping provider {Provider} for model {Model}: monthly budget exhausted.",
+                LogRedaction.Sanitize(route.Provider),
+                LogRedaction.Sanitize(route.ModelName))),
+        new(
+            "provider-disabled",
+            static (middleware, route, _) => middleware.IsProviderDisabledGateBlocked(route),
+            static (middleware, route) => middleware._logger.LogInformation(
+                "Bypassing provider {Provider} for model {Model}: provider is stopped.",
+                LogRedaction.Sanitize(route.Provider),
+                LogRedaction.Sanitize(route.ModelName))),
+        new(
+            "model-disabled",
+            static (middleware, route, _) => middleware.IsModelDisabledGateBlocked(route),
+            static (middleware, route) => middleware._logger.LogInformation(
+                "Bypassing model {Model}: stopped or not currently reported by its provider's endpoint.",
+                LogRedaction.Sanitize(route.ModelName))),
+        new(
+            "circuit-open-precheck",
+            static (middleware, route, circuitTarget) => middleware.IsCircuitOpenPreCheckGateBlocked(route, circuitTarget),
+            static (middleware, route) => middleware._logger.LogInformation(
+                "Bypassing provider {Provider} for model {Model}: circuit breaker is open.",
+                LogRedaction.Sanitize(route.Provider),
+                LogRedaction.Sanitize(route.ModelName))),
+        new(
+            "circuit-bypass-target",
+            static (middleware, _, circuitTarget) => middleware.IsCircuitBypassGateBlocked(circuitTarget),
+            static (middleware, route) => middleware._logger.LogInformation(
+                "Bypassing provider {Provider} for model {Model}: circuit breaker is open.",
+                LogRedaction.Sanitize(route.Provider),
+                LogRedaction.Sanitize(route.ModelName))),
+        new(
+            "circuit-bypass-provider",
+            static (middleware, route, _) => middleware.IsCircuitBypassProviderGateBlocked(route),
+            static (middleware, route) => middleware._logger.LogInformation(
+                "Bypassing provider {Provider} for model {Model}: provider-wide circuit breaker is open.",
+                LogRedaction.Sanitize(route.Provider),
+                LogRedaction.Sanitize(route.ModelName))),
+    ];
+
     // RFC 7230 Section 6.1 hop-by-hop headers: meaningful only for a single transport-level connection,
     // so they must never be blindly forwarded between the client, this proxy, and the upstream.
     private static readonly string[] HopByHopHeaders =
@@ -373,105 +447,40 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         // backup is a *different* provider (a separate quota/rate-limit pool), since a same-provider backup
         // shares the throttle. Failover can only happen before any response byte is committed to the
         // client; once a hop's body starts streaming, its outcome is final.
-        // The candidate pre-flight gate sequence below runs, in order: (1) budget breach, (2)
-        // provider-enabled, (3) model-enabled, (4) circuit-breaker read-only pre-check, (5) circuit
-        // ShouldBypass (target-level), (6) circuit ShouldBypassProvider (provider-wide). The order of (4)
-        // before (5)/(6) is load-bearing, not incidental: ShouldBypass/ShouldBypassProvider can each claim
-        // a target's single half-open probe slot, and running the read-only pre-check first filters out
-        // the deterministic already-OPEN case before either mutating check is even reached - see gate (4)'s
-        // own comment below for why a claimed-then-abandoned probe would otherwise strand that target
-        // forever. Gates (1)-(3) have no such ordering constraint among themselves but are kept in their
-        // historical order to avoid a behavior-neutral but unnecessary diff.
+        // The candidate pre-flight gate sequence below is CandidateGates, walked in order: (1) budget
+        // breach, (2) provider-enabled, (3) model-enabled, (4) circuit-breaker read-only pre-check, (5)
+        // circuit ShouldBypass (target-level), (6) circuit ShouldBypassProvider (provider-wide). The
+        // order of (4) before (5)/(6) is load-bearing, not incidental: ShouldBypass/ShouldBypassProvider
+        // can each claim a target's single half-open probe slot, and running the read-only pre-check
+        // first filters out the deterministic already-OPEN case before either mutating check is even
+        // reached - see CandidateGates' own documentation, and gate (4)'s predicate below, for why a
+        // claimed-then-abandoned probe would otherwise strand that target forever. Gates (1)-(3) have no
+        // such ordering constraint among themselves but are kept in their historical order to avoid a
+        // behavior-neutral but unnecessary diff.
         for (var i = 0; i < candidates.Count; i++)
         {
             var route = candidates[i].Route;
 
-            // Gate (1): skip a candidate whose provider is over its monthly budget - it is never attempted.
-            // The pre-loop check above guarantees at least one candidate is under budget, so this cannot
-            // skip every iteration. A budget-skipped primary means the served candidate is a genuine
-            // fallback, which the isFallback flag (i > 0) then reports truthfully.
-            if (IsBudgetGateBlocked(route))
-            {
-                _logger.LogInformation(
-                    "Skipping provider {Provider} for model {Model}: monthly budget exhausted.",
-                    LogRedaction.Sanitize(route.Provider),
-                    LogRedaction.Sanitize(route.ModelName));
-                continue;
-            }
-
-            // Gate (2): Governance > Providers' Stop control - a disabled provider is bypassed with no
-            // network call, exactly like an open circuit, but logged distinctly so an operator can tell "I
-            // stopped this" from "this is unhealthy" apart. Checked here (not just when RequestInterceptor
-            // built the candidate list) so a provider stopped between list-building and this attempt is
-            // still caught.
-            if (IsProviderDisabledGateBlocked(route))
-            {
-                _logger.LogInformation(
-                    "Bypassing provider {Provider} for model {Model}: provider is stopped.",
-                    LogRedaction.Sanitize(route.Provider),
-                    LogRedaction.Sanitize(route.ModelName));
-                continue;
-            }
-
-            // Gate (3): the model-level twin of gate (2) - a model stopped via its own Start/Stop toggle,
-            // or dropped by the last "Refresh from endpoint" scan (not currently reported by the provider's
-            // endpoint), is bypassed the same way - logged distinctly so "I stopped this model" and "the
-            // endpoint doesn't currently serve this" are each identifiable, same rationale as the
-            // provider-vs-circuit distinction above.
-            if (IsModelDisabledGateBlocked(route))
-            {
-                _logger.LogInformation(
-                    "Bypassing model {Model}: stopped or not currently reported by its provider's endpoint.",
-                    LogRedaction.Sanitize(route.ModelName));
-                continue;
-            }
-
+            // circuitTarget is computed up front (rather than only just before gate (4), as it used to
+            // be) purely so every gate can share one uniform (route, circuitTarget) signature below - it
+            // is a pure struct construction with no side effects, so hoisting it earlier changes nothing
+            // observable. See CandidateGates' own documentation for why gates (1)-(6) must run in this
+            // exact order.
             var circuitTarget = CircuitBreakerTargetKey.FromRoute(route);
 
-            // Gate (4): read-only pre-check for gates (5)/(6) before either mutating one is touched.
-            // ShouldBypass and ShouldBypassProvider (below) can each transition their target from OPEN to
-            // HALF-OPEN and claim its single probe slot - if that claim is made and *then* the other gate
-            // turns out to reject this candidate anyway, the claimed probe would never be resolved via
-            // RecordSuccess/RecordFailure (this candidate is never attempted) and would stay "in flight"
-            // forever, permanently bypassing that target. Filtering out the deterministic, non-racing case
-            // here first (an already-OPEN circuit still cooling down) means neither mutating check below is
-            // even reached for it. This is why gate (4) MUST run before gates (5) and (6) - see the ordering
-            // note above the loop.
-            if (IsCircuitOpenPreCheckGateBlocked(route, circuitTarget))
+            var candidateGateBlocked = false;
+            foreach (var gate in CandidateGates)
             {
-                _logger.LogInformation(
-                    "Bypassing provider {Provider} for model {Model}: circuit breaker is open.",
-                    LogRedaction.Sanitize(route.Provider),
-                    LogRedaction.Sanitize(route.ModelName));
-                continue;
+                if (gate.Predicate(this, route, circuitTarget))
+                {
+                    gate.LogBlocked(this, route);
+                    candidateGateBlocked = true;
+                    break;
+                }
             }
 
-            // Gate (5): docs/router/agent-resilience-strategies.md's Circuit Breaker - an OPEN target is
-            // bypassed with no network call at all. Checked here (not just when RequestInterceptor built
-            // the candidate list) so a target that trips between list-building and this attempt - or whose
-            // half-open probe slot another concurrent request just claimed - is still caught, and so that
-            // this exact moment is what claims the single half-open probe (see ICircuitBreaker.ShouldBypass).
-            if (IsCircuitBypassGateBlocked(circuitTarget))
+            if (candidateGateBlocked)
             {
-                _logger.LogInformation(
-                    "Bypassing provider {Provider} for model {Model}: circuit breaker is open.",
-                    LogRedaction.Sanitize(route.Provider),
-                    LogRedaction.Sanitize(route.ModelName));
-                continue;
-            }
-
-            // Gate (6): a 401 (see below) trips every model on a provider at once, not just the one that
-            // surfaced it - checked here as a second, provider-wide gate so a *different* model on that
-            // same now-untrusted provider is bypassed too, without ever having failed itself. Gate (4)
-            // above already filtered out the common case where this would reject a probe gate (5) just
-            // claimed; what's left is the narrow race of a concurrent request claiming the provider's own
-            // probe slot between the two calls.
-            if (IsCircuitBypassProviderGateBlocked(route))
-            {
-                _logger.LogInformation(
-                    "Bypassing provider {Provider} for model {Model}: provider-wide circuit breaker is open.",
-                    LogRedaction.Sanitize(route.Provider),
-                    LogRedaction.Sanitize(route.ModelName));
                 continue;
             }
 

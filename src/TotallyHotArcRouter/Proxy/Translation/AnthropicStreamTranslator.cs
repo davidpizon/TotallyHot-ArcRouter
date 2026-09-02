@@ -38,7 +38,7 @@ public sealed class AnthropicStreamTranslator : IStreamTranslator
     private readonly List<byte> _buffer = new();
 
     // Stable across the whole stream, seeded from message_start.
-    private string _id = AnthropicPayloadTranslator.GenerateCompletionId();
+    private string _id = PayloadTranslationHelpers.GenerateCompletionId();
     private string _model = string.Empty;
     private readonly long _created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 

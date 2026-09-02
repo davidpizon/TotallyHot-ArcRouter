@@ -30,7 +30,7 @@ public sealed class GeminiStreamTranslator : IStreamTranslator
     private readonly List<byte> _buffer = new();
 
     // Stable across the whole stream, seeded from the first chunk that carries them.
-    private string _id = GeminiPayloadTranslator.GenerateCompletionId();
+    private string _id = PayloadTranslationHelpers.GenerateCompletionId();
     private string _model = string.Empty;
     private long _created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
