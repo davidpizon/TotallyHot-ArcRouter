@@ -52,9 +52,13 @@ public class BedrockProviderTests
         return new ProxyMiddleware(
             Mock.Of<ILogger<ProxyMiddleware>>(),
             interceptor,
-            telemetryPublisher: telemetry,
-            translators: translators,
-            bedrockClientFactory: new FakeBedrockRuntimeClientFactory(client));
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                TelemetryPublisher = telemetry,
+                Translators = translators,
+                BedrockClientFactory = new FakeBedrockRuntimeClientFactory(client)
+            }
+        );
     }
 
     private static DefaultHttpContext BuildContext(string requestBody)
@@ -240,8 +244,12 @@ public class BedrockProviderTests
         var middleware = new ProxyMiddleware(
             Mock.Of<ILogger<ProxyMiddleware>>(),
             new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver),
-            translators: translators,
-            bedrockClientFactory: new FakeBedrockRuntimeClientFactory(mockClient.Object));
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                Translators = translators,
+                BedrockClientFactory = new FakeBedrockRuntimeClientFactory(mockClient.Object)
+            }
+        );
 
         var context = BuildContext("""{"model":"primary-claude","messages":[{"role":"user","content":"hi"}]}""");
         await middleware.InvokeAsync(context, _ => Task.CompletedTask);
@@ -285,8 +293,12 @@ public class BedrockProviderTests
         var middleware = new ProxyMiddleware(
             Mock.Of<ILogger<ProxyMiddleware>>(),
             new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver),
-            translators: translators,
-            bedrockClientFactory: new FakeBedrockRuntimeClientFactory(mockClient.Object));
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                Translators = translators,
+                BedrockClientFactory = new FakeBedrockRuntimeClientFactory(mockClient.Object)
+            }
+        );
 
         var context = BuildContext("""{"model":"primary-claude","messages":[{"role":"user","content":"hi"}]}""");
         await middleware.InvokeAsync(context, _ => Task.CompletedTask);
@@ -323,8 +335,12 @@ public class BedrockProviderTests
         var middleware = new ProxyMiddleware(
             Mock.Of<ILogger<ProxyMiddleware>>(),
             new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver),
-            translators: translators,
-            bedrockClientFactory: new FakeBedrockRuntimeClientFactory(mockClient.Object));
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                Translators = translators,
+                BedrockClientFactory = new FakeBedrockRuntimeClientFactory(mockClient.Object)
+            }
+        );
 
         var context = BuildContext("""{"model":"primary-claude","messages":[{"role":"user","content":"hi"}]}""");
         await middleware.InvokeAsync(context, _ => Task.CompletedTask);

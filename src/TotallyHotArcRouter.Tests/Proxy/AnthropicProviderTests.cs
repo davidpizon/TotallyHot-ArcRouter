@@ -48,8 +48,12 @@ public class AnthropicProviderTests
             Mock.Of<ILogger<ProxyMiddleware>>(),
             interceptor,
             new HttpClient(handler),
-            telemetryPublisher: telemetry,
-            translators: translators);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                TelemetryPublisher = telemetry,
+                Translators = translators
+            }
+        );
     }
 
     private static DefaultHttpContext BuildContext(string requestPath, string requestBody)
@@ -498,8 +502,12 @@ public class AnthropicProviderTests
             Mock.Of<ILogger<ProxyMiddleware>>(),
             interceptor,
             new HttpClient(handler),
-            translators: translators,
-            budgetStore: budgetStore.Object);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                Translators = translators,
+                BudgetStore = budgetStore.Object
+            }
+        );
 
         var context = BuildContext("/v1/chat/completions", """
             {"model":"claude-sonnet-5","messages":[{"role":"user","content":"hi"}]}

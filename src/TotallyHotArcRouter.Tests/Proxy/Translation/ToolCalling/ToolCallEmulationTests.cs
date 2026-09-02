@@ -728,7 +728,11 @@ public class ToolCallEmulationTests
             Mock.Of<ILogger<ProxyMiddleware>>(),
             new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver),
             new HttpClient(handler),
-            toolCallNormalizerFactory: new ToolCallNormalizerFactory(store));
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                ToolCallNormalizerFactory = new ToolCallNormalizerFactory(store)
+            }
+        );
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;

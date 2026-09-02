@@ -263,7 +263,11 @@ public class ProxyMiddlewareFallbackTests
             NullLogger<ProxyMiddleware>.Instance,
             interceptor,
             new HttpClient(handler),
-            translators: translators);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                Translators = translators
+            }
+        );
 
         var context = await RunWithSharedMiddleware(middleware, requestedModel: "auto");
 
@@ -301,7 +305,11 @@ public class ProxyMiddlewareFallbackTests
             NullLogger<ProxyMiddleware>.Instance,
             interceptor,
             new HttpClient(handler),
-            translators: translators);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                Translators = translators
+            }
+        );
 
         var context = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
 
@@ -348,7 +356,11 @@ public class ProxyMiddlewareFallbackTests
             NullLogger<ProxyMiddleware>.Instance,
             interceptor,
             new HttpClient(handler),
-            translators: translators);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                Translators = translators
+            }
+        );
 
         var context = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
 
@@ -401,7 +413,11 @@ public class ProxyMiddlewareFallbackTests
             NullLogger<ProxyMiddleware>.Instance,
             interceptor,
             new HttpClient(handler),
-            translators: translators);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                Translators = translators
+            }
+        );
 
         var context = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
 
@@ -446,7 +462,11 @@ public class ProxyMiddlewareFallbackTests
             NullLogger<ProxyMiddleware>.Instance,
             interceptor,
             new HttpClient(handler),
-            translators: translators);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                Translators = translators
+            }
+        );
 
         var context = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
 
@@ -497,7 +517,11 @@ public class ProxyMiddlewareFallbackTests
             NullLogger<ProxyMiddleware>.Instance,
             interceptor,
             new HttpClient(handler),
-            translators: translators);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                Translators = translators
+            }
+        );
 
         var context = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
 
@@ -531,9 +555,13 @@ public class ProxyMiddlewareFallbackTests
             NullLogger<ProxyMiddleware>.Instance,
             interceptor,
             new HttpClient(handler),
-            translators: translators,
-            circuitBreaker: circuitBreaker,
-            interactionStatusStore: interactionStatus);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                Translators = translators,
+                CircuitBreaker = circuitBreaker,
+                InteractionStatusStore = interactionStatus
+            }
+        );
 
         var context = await RunWithSharedMiddleware(middleware, requestedModel: "auto");
 
@@ -579,7 +607,11 @@ public class ProxyMiddlewareFallbackTests
             NullLogger<ProxyMiddleware>.Instance,
             interceptor,
             new HttpClient(handler),
-            translators: translators);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                Translators = translators
+            }
+        );
 
         var context = await RunWithSharedMiddleware(middleware, requestedModel: "auto");
 
@@ -620,7 +652,11 @@ public class ProxyMiddlewareFallbackTests
             NullLogger<ProxyMiddleware>.Instance,
             interceptor,
             new HttpClient(handler),
-            translators: translators);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                Translators = translators
+            }
+        );
 
         var context = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
 
@@ -665,8 +701,12 @@ public class ProxyMiddlewareFallbackTests
             NullLogger<ProxyMiddleware>.Instance,
             interceptor,
             new HttpClient(handler),
-            translators: translators,
-            circuitBreaker: circuitBreaker);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                Translators = translators,
+                CircuitBreaker = circuitBreaker
+            }
+        );
 
         // Auto-selected first request: out-of-credits discovered live, fails over cross-provider.
         var firstContext = await RunWithSharedMiddleware(middleware, requestedModel: "auto");
@@ -949,7 +989,11 @@ public class ProxyMiddlewareFallbackTests
             NullLogger<ProxyMiddleware>.Instance,
             interceptor,
             new HttpClient(handler),
-            circuitBreaker: circuitBreaker);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                CircuitBreaker = circuitBreaker
+            }
+        );
 
         // First request against explicit "primary": 403 discovered live, relayed unchanged - no failover.
         var firstContext = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
@@ -1042,7 +1086,11 @@ public class ProxyMiddlewareFallbackTests
             NullLogger<ProxyMiddleware>.Instance,
             interceptor,
             new HttpClient(handler),
-            circuitBreaker: circuitBreaker);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                CircuitBreaker = circuitBreaker
+            }
+        );
 
         // Default FailureThreshold is 3: the first three requests each attempt (and 404 on) "primary"
         // before failing over to the backup within the same request.
@@ -1099,7 +1147,11 @@ public class ProxyMiddlewareFallbackTests
             NullLogger<ProxyMiddleware>.Instance,
             interceptor,
             new HttpClient(handler),
-            circuitBreaker: circuitBreaker);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                CircuitBreaker = circuitBreaker
+            }
+        );
 
         // First auto-selected request: 401, provider-wide trip, fails over cross-provider to "backup".
         var firstContext = await RunWithSharedMiddleware(middleware, requestedModel: "auto");
@@ -1150,7 +1202,11 @@ public class ProxyMiddlewareFallbackTests
             NullLogger<ProxyMiddleware>.Instance,
             interceptor,
             new HttpClient(handler),
-            circuitBreaker: circuitBreaker);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                CircuitBreaker = circuitBreaker
+            }
+        );
 
         var firstContext = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
         Assert.Equal(401, firstContext.Response.StatusCode);
@@ -1194,7 +1250,11 @@ public class ProxyMiddlewareFallbackTests
             NullLogger<ProxyMiddleware>.Instance,
             interceptor,
             new HttpClient(handler),
-            circuitBreaker: circuitBreaker);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                CircuitBreaker = circuitBreaker
+            }
+        );
 
         var firstContext = await RunWithSharedMiddleware(middleware, requestedModel: "auto");
         Assert.Equal(StatusCodes.Status200OK, firstContext.Response.StatusCode);
@@ -1239,7 +1299,11 @@ public class ProxyMiddlewareFallbackTests
             NullLogger<ProxyMiddleware>.Instance,
             interceptor,
             new HttpClient(handler),
-            circuitBreaker: circuitBreaker);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                CircuitBreaker = circuitBreaker
+            }
+        );
 
         var firstContext = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
         Assert.Equal(405, firstContext.Response.StatusCode);
@@ -1447,7 +1511,11 @@ public class ProxyMiddlewareFallbackTests
             NullLogger<ProxyMiddleware>.Instance,
             interceptor,
             new HttpClient(handler),
-            circuitBreaker: circuitBreaker);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                CircuitBreaker = circuitBreaker
+            }
+        );
 
         // Default FailureThreshold is 3: the first three requests each attempt (and fail on) the primary
         // before falling over to the backup within the same request.
@@ -1545,7 +1613,11 @@ public class ProxyMiddlewareFallbackTests
             NullLogger<ProxyMiddleware>.Instance,
             interceptor,
             new HttpClient(handler),
-            telemetryPublisher: telemetryPublisher);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                TelemetryPublisher = telemetryPublisher
+            }
+        );
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;

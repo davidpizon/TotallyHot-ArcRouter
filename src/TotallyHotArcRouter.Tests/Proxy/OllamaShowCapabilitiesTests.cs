@@ -206,8 +206,12 @@ public class OllamaShowCapabilitiesTests
             Mock.Of<ILogger<ProxyMiddleware>>(),
             interceptor,
             new HttpClient(handler),
-            capabilityStore: store,
-            contextWindowStore: store);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                CapabilityStore = store,
+                ContextWindowStore = store
+            }
+        );
     }
 
     private static async Task<JsonElement> ShowAsync(
