@@ -73,7 +73,7 @@ public sealed class ComplexityAnalyzer : IStaticAnalyzer
             notes.Add($"branch density {density:F2} per line exceeds a budget of {BranchDensityBudget:F2}");
         }
 
-        return new StaticAnalysisFinding(Name, Math.Max(Floor, 1.0 - penalty), notes);
+        return new StaticAnalysisFinding(Name, StaticAnalyzerScoring.ClampScore(Floor, penalty), notes);
     }
 
     /// <summary>
@@ -91,27 +91,6 @@ public sealed class ComplexityAnalyzer : IStaticAnalyzer
     }
 
     /// <summary>Counts branch keywords on one line, matching whole words so <c>ifconfig</c> is not a branch.</summary>
-    private static int CountBranches(string line)
-    {
-        var count = 0;
-        foreach (var keyword in BranchKeywords)
-        {
-            var index = 0;
-            while ((index = line.IndexOf(keyword, index, StringComparison.Ordinal)) >= 0)
-            {
-                var beforeOk = index == 0 || !char.IsLetterOrDigit(line[index - 1]);
-                var after = index + keyword.Length;
-                var afterOk = after >= line.Length || !char.IsLetterOrDigit(line[after]);
-
-                if (beforeOk && afterOk)
-                {
-                    count++;
-                }
-
-                index = after;
-            }
-        }
-
-        return count;
-    }
+    private static int CountBranches(string line) =>
+        BranchKeywords.Sum(keyword => WordMatching.WholeWordOccurrences(line, keyword).Count());
 }

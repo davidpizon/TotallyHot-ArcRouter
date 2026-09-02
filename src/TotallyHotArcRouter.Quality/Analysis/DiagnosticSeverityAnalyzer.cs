@@ -59,7 +59,7 @@ public sealed class DiagnosticSeverityAnalyzer : IStaticAnalyzer
         var notes = new List<string> { $"{warnings.Count} parse warning(s)" };
         notes.AddRange(warnings.Take(MaxQuotedDiagnostics));
 
-        var score = Math.Max(Floor, 1.0 - (PenaltyPerWarning * warnings.Count));
+        var score = StaticAnalyzerScoring.ClampScore(Floor, PenaltyPerWarning * warnings.Count);
         return new StaticAnalysisFinding(Name, score, notes);
     }
 }

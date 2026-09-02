@@ -1,7 +1,9 @@
 namespace TotallyHot.ArcRouter.Quality;
 
 /// <summary>
-/// Produces a <see cref="SyntaxVerdict"/> for a snippet without executing it (Tier 0 static analysis).
+/// Produces a <see cref="SyntaxVerdict"/> for a snippet without executing it, by parsing it in-process
+/// (authoritatively where a managed parser exists for the language, and by a delimiter-balance heuristic
+/// otherwise, as <see cref="SyntaxVerdict.IsAuthoritative"/> reports).
 /// </summary>
 public interface IStructuralParser
 {

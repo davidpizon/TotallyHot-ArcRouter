@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using TotallyHot.ArcRouter.Gui.Charts;
 
 namespace TotallyHot.ArcRouter.Gui.Models;
@@ -126,439 +128,52 @@ public sealed record Conversation(
 public static class MockData
 {
     /// <summary>Mock conversation history for the Console tab.</summary>
-    public static readonly IReadOnlyList<Conversation> Conversations =
-    [
-        new(
-            Id: "sess-001",
-            Title: "Code Review Analysis - PR #4521",
-            FirstTimestamp: "14:15:32",
-            LastTimestamp: "14:22:18",
-            TotalCost: 0.045230m,
-            TotalPromptTokens: 15456,
-            TotalCompletionTokens: 3894,
-            HasFallbackTurns: false,
-            Turns:
-            [
-                new(
-                    Id: "sess-001-t1",
-                    Agent: "Code Review Bot",
-                    Model: "claude-3-haiku",
-                    TurnNumber: 1,
-                    PromptTokens: 2104,
-                    CompletionTokens: 891,
-                    RoutingRoi: 85.01m,
-                    TotalCost: 0.006310m,
-                    ToolExecutionSteps: 2,
-                    CacheHitRate: 0m,
-                    TimeToFirstTokenMs: 245,
-                    ContextBufferPercent: 26.2m,
-                    Timestamp: "14:15:32",
-                    RoutingSteps:
-                    [
-                        new(StepStatus.Ok, "Code diff parsed (214 changed lines)"),
-                        new(StepStatus.Ok, "Anthropic budget nominal; claude-3-haiku selected"),
-                        new(StepStatus.Info, "Route Confirmed: claude-3-haiku"),
-                    ],
-                    RequestSummary: "Review the diff for PR #4521 (src/auth/token_service.py, 214 changed lines) and flag any security issues.",
-                    ResponseSummary: "Found 3 issues: missing null check on refresh_token (L87), unbounded retry loop (L112), and the token is logged in plaintext (L145)."),
-                new(
-                    Id: "sess-001-t2",
-                    Agent: "Code Review Bot",
-                    Model: "claude-3-haiku",
-                    TurnNumber: 2,
-                    PromptTokens: 3240,
-                    CompletionTokens: 1205,
-                    RoutingRoi: 84.50m,
-                    TotalCost: 0.009870m,
-                    ToolExecutionSteps: 3,
-                    CacheHitRate: 72m,
-                    TimeToFirstTokenMs: 198,
-                    ContextBufferPercent: 40.5m,
-                    Timestamp: "14:17:45",
-                    RoutingSteps:
-                    [
-                        new(StepStatus.Ok, "History carried forward (3,240 prompt tokens)"),
-                        new(StepStatus.Ok, "Prompt cache hit: 2,333 tokens read from cache"),
-                        new(StepStatus.Info, "Route Confirmed: claude-3-haiku"),
-                    ],
-                    RequestSummary: "Suggest a concrete fix for the unbounded retry loop you flagged at L112.",
-                    ResponseSummary: "Replace the while-loop with a tenacity retry decorator: stop_after_attempt(3) with exponential backoff, re-raising on final failure."),
-                new(
-                    Id: "sess-001-t3",
-                    Agent: "Code Review Bot",
-                    Model: "claude-3-haiku",
-                    TurnNumber: 3,
-                    PromptTokens: 4567,
-                    CompletionTokens: 1798,
-                    RoutingRoi: 83.20m,
-                    TotalCost: 0.013820m,
-                    ToolExecutionSteps: 4,
-                    CacheHitRate: 68m,
-                    TimeToFirstTokenMs: 211,
-                    ContextBufferPercent: 57.0m,
-                    Timestamp: "14:19:22",
-                    RoutingSteps:
-                    [
-                        new(StepStatus.Ok, "History carried forward (4,567 prompt tokens)"),
-                        new(StepStatus.Warn, "Prompt growth trending up 41% turn-over-turn"),
-                        new(StepStatus.Ok, "Prompt cache hit: 3,106 tokens read from cache"),
-                        new(StepStatus.Info, "Route Confirmed: claude-3-haiku"),
-                    ],
-                    RequestSummary: "Apply the same retry pattern to session_service.py and show me the diff.",
-                    ResponseSummary: "Patched 2 call sites; session_refresh now shares the retry policy. Diff: +18/-9 across session_service.py and retry_util.py."),
-                new(
-                    Id: "sess-001-t4",
-                    Agent: "Code Review Bot",
-                    Model: "claude-3-haiku",
-                    TurnNumber: 4,
-                    PromptTokens: 5545,
-                    CompletionTokens: 0,
-                    RoutingRoi: 88.75m,
-                    TotalCost: 0.015230m,
-                    ToolExecutionSteps: 1,
-                    CacheHitRate: 75m,
-                    TimeToFirstTokenMs: 189,
-                    ContextBufferPercent: 69.2m,
-                    Timestamp: "14:22:18",
-                    RoutingSteps:
-                    [
-                        new(StepStatus.Ok, "Final summary pass (no completion requested)"),
-                        new(StepStatus.Ok, "Prompt cache hit: 4,159 tokens read from cache"),
-                        new(StepStatus.Info, "Route Confirmed: claude-3-haiku"),
-                    ],
-                    RequestSummary: "Summarize all applied changes for the PR description."),
-            ]),
-        new(
-            Id: "sess-002",
-            Title: "Data Pipeline Debugging - ETL Job #892",
-            FirstTimestamp: "14:08:15",
-            LastTimestamp: "14:14:42",
-            TotalCost: 0.025450m,
-            TotalPromptTokens: 8932,
-            TotalCompletionTokens: 2456,
-            HasFallbackTurns: false,
-            Turns:
-            [
-                new(
-                    Id: "sess-002-t1",
-                    Agent: "Data Analyst Wrapper",
-                    Model: "gpt-4o-mini",
-                    TurnNumber: 1,
-                    PromptTokens: 1890,
-                    CompletionTokens: 623,
-                    RoutingRoi: 87.56m,
-                    TotalCost: 0.005340m,
-                    ToolExecutionSteps: 2,
-                    CacheHitRate: 0m,
-                    TimeToFirstTokenMs: 312,
-                    ContextBufferPercent: 23.4m,
-                    Timestamp: "14:08:15",
-                    RoutingSteps:
-                    [
-                        new(StepStatus.Ok, "SQL error log parsed (1,234 lines)"),
-                        new(StepStatus.Ok, "Short context: gpt-4o-mini sufficient"),
-                        new(StepStatus.Info, "Route Confirmed: gpt-4o-mini"),
-                    ],
-                    RequestSummary: "ETL job #892 failed at stage 3 with ORA-01555. Here is the log excerpt - what is the root cause?",
-                    ResponseSummary: "ORA-01555 (snapshot too old): the MERGE reads a table that is mutated mid-run. Isolate the read with a staging CTAS before the merge."),
-                new(
-                    Id: "sess-002-t2",
-                    Agent: "Data Analyst Wrapper",
-                    Model: "gpt-4o-mini",
-                    TurnNumber: 2,
-                    PromptTokens: 3456,
-                    CompletionTokens: 912,
-                    RoutingRoi: 86.20m,
-                    TotalCost: 0.009870m,
-                    ToolExecutionSteps: 3,
-                    CacheHitRate: 45m,
-                    TimeToFirstTokenMs: 267,
-                    ContextBufferPercent: 42.8m,
-                    Timestamp: "14:10:33",
-                    RoutingSteps:
-                    [
-                        new(StepStatus.Ok, "Query execution plan added to context"),
-                        new(StepStatus.Ok, "Prompt cache hit: 1,555 tokens read from cache"),
-                        new(StepStatus.Info, "Route Confirmed: gpt-4o-mini"),
-                    ],
-                    RequestSummary: "Here is the EXPLAIN PLAN output for the failing MERGE - where is the long read window coming from?",
-                    ResponseSummary: "The full-table scan on FACT_ORDERS forces a 40-minute read window. Add a partition-pruning predicate on LOAD_DATE to cut it."),
-                new(
-                    Id: "sess-002-t3",
-                    Agent: "Data Analyst Wrapper",
-                    Model: "gpt-4o-mini",
-                    TurnNumber: 3,
-                    PromptTokens: 3586,
-                    CompletionTokens: 921,
-                    RoutingRoi: 85.90m,
-                    TotalCost: 0.010240m,
-                    ToolExecutionSteps: 2,
-                    CacheHitRate: 52m,
-                    TimeToFirstTokenMs: 278,
-                    ContextBufferPercent: 44.3m,
-                    Timestamp: "14:14:42",
-                    RoutingSteps:
-                    [
-                        new(StepStatus.Ok, "Fix verification pass (3,586 prompt tokens)"),
-                        new(StepStatus.Ok, "Prompt cache hit: 1,865 tokens read from cache"),
-                        new(StepStatus.Info, "Route Confirmed: gpt-4o-mini"),
-                    ],
-                    RequestSummary: "Validate the revised MERGE statement before I schedule the rerun.",
-                    ResponseSummary: "The revised statement is safe: partition pruning cuts the read window to roughly 90 seconds, well inside undo retention."),
-            ]),
-        new(
-            Id: "sess-003",
-            Title: "Customer Support - Issue #78234",
-            FirstTimestamp: "13:52:10",
-            LastTimestamp: "14:05:33",
-            TotalCost: 0.004560m,
-            TotalPromptTokens: 6234,
-            TotalCompletionTokens: 1845,
-            HasFallbackTurns: true,
-            Turns:
-            [
-                new(
-                    Id: "sess-003-t1",
-                    Agent: "Customer Support NLP",
-                    Model: "claude-3-haiku",
-                    TurnNumber: 1,
-                    PromptTokens: 1456,
-                    CompletionTokens: 567,
-                    RoutingRoi: 82.30m,
-                    TotalCost: 0.004560m,
-                    ToolExecutionSteps: 1,
-                    CacheHitRate: 0m,
-                    TimeToFirstTokenMs: 189,
-                    ContextBufferPercent: 18.0m,
-                    Timestamp: "13:52:10",
-                    RoutingSteps:
-                    [
-                        new(StepStatus.Ok, "Customer inquiry classified: billing dispute"),
-                        new(StepStatus.Ok, "Anthropic budget nominal; claude-3-haiku selected"),
-                        new(StepStatus.Info, "Route Confirmed: claude-3-haiku"),
-                    ],
-                    RequestSummary: "Ticket #78234: customer reports being charged twice for the June invoice. Verify and draft a response.",
-                    ResponseSummary: "Duplicate charge confirmed against payment records. A refund-and-apology draft is ready for agent review."),
-                new(
-                    Id: "sess-003-t2",
-                    Agent: "Customer Support NLP",
-                    Model: "fallback-cheapest-local",
-                    TurnNumber: 2,
-                    PromptTokens: 2389,
-                    CompletionTokens: 734,
-                    RoutingRoi: 0m,
-                    TotalCost: 0.000000m,
-                    ToolExecutionSteps: 2,
-                    CacheHitRate: 0m,
-                    TimeToFirstTokenMs: 445,
-                    ContextBufferPercent: 29.5m,
-                    Timestamp: "13:54:28",
-                    RoutingSteps:
-                    [
-                        new(StepStatus.Warn, "Anthropic hourly budget breached; routing restricted"),
-                        new(StepStatus.Ok, "Fallback routing activated: local model"),
-                        new(StepStatus.Info, "Route Confirmed: fallback-cheapest-local"),
-                    ],
-                    RequestSummary: "The customer replied asking about the refund timeline. Draft a follow-up.",
-                    ResponseSummary: "Refunds post within 5-7 business days of approval. Suggested reply drafted with the confirmation number.",
-                    IsFallback: true),
-                new(
-                    Id: "sess-003-t3",
-                    Agent: "Customer Support NLP",
-                    Model: "fallback-cheapest-local",
-                    TurnNumber: 3,
-                    PromptTokens: 2389,
-                    CompletionTokens: 544,
-                    RoutingRoi: 0m,
-                    TotalCost: 0.000000m,
-                    ToolExecutionSteps: 1,
-                    CacheHitRate: 0m,
-                    TimeToFirstTokenMs: 512,
-                    ContextBufferPercent: 29.5m,
-                    Timestamp: "14:05:33",
-                    RoutingSteps:
-                    [
-                        new(StepStatus.Warn, "Anthropic budget still breached; staying on fallback"),
-                        new(StepStatus.Ok, "Local model serving request"),
-                        new(StepStatus.Info, "Route Confirmed: fallback-cheapest-local"),
-                    ],
-                    RequestSummary: "Close out the ticket with a resolution summary.",
-                    ResponseSummary: "Ticket #78234 resolved: duplicate June charge refunded and a confirmation email queued to the customer.",
-                    IsFallback: true),
-            ]),
-    ];
+    public static IReadOnlyList<Conversation> Conversations => Fixture.Value.Conversations;
 
     /// <summary>Mock routing decisions for the Live Stream tab.</summary>
-    public static readonly IReadOnlyList<RoutingEntry> Entries =
-    [
-        new(
-            Id: "1",
-            SessionId: "e89a2bc",
-            TraceId: "a4f89c02",
-            Agent: "Data Analyst Wrapper",
-            Model: "gpt-4o-mini",
-            IsFallback: false,
-            PromptTokens: 1230,
-            CompletionTokens: 702,
-            ActualCost: 0.000480m,
-            WorstCaseCost: 0.003860m,
-            SavingsAmount: 0.003380m,
-            SavingsPercent: 87.56m,
-            Timestamp: "14:32:01",
-            RoutingSteps:
-            [
-                new(StepStatus.Ok, "Input text contains source code telemetry"),
-                new(StepStatus.Ok, "Budget nominal: gpt-4o-mini selected"),
-                new(StepStatus.Ok, "Context window validated (1,932 tokens)"),
-                new(StepStatus.Info, "Route Confirmed: gpt-4o-mini"),
-            ]),
-        new(
-            Id: "2",
-            SessionId: "d32a1ff",
-            TraceId: "b7c21e45",
-            Agent: "Code Review Bot",
-            Model: "fallback-cheapest-local",
-            IsFallback: true,
-            PromptTokens: 890,
-            CompletionTokens: 312,
-            ActualCost: 0.000000m,
-            WorstCaseCost: 0.002100m,
-            SavingsAmount: 0.000000m,
-            SavingsPercent: 0.00m,
-            Timestamp: "14:31:48",
-            RoutingSteps:
-            [
-                new(StepStatus.Ok, "Input text contains source code telemetry"),
-                new(StepStatus.Warn, "OpenAI budget breached; routing restricted"),
-                new(StepStatus.Ok, "Fallback routing activated for destination"),
-                new(StepStatus.Info, "Route Confirmed: fallback-cheapest-local"),
-            ]),
-        new(
-            Id: "3",
-            SessionId: "f12b8de",
-            TraceId: "c9d34f67",
-            Agent: "Customer Support NLP",
-            Model: "claude-3-haiku",
-            IsFallback: false,
-            PromptTokens: 2104,
-            CompletionTokens: 891,
-            ActualCost: 0.000631m,
-            WorstCaseCost: 0.004210m,
-            SavingsAmount: 0.003579m,
-            SavingsPercent: 85.01m,
-            Timestamp: "14:31:35",
-            RoutingSteps:
-            [
-                new(StepStatus.Ok, "Conversation context parsed (3 turns)"),
-                new(StepStatus.Ok, "Anthropic budget nominal; claude-3-haiku selected"),
-                new(StepStatus.Ok, "Response latency target: <800ms"),
-                new(StepStatus.Info, "Route Confirmed: claude-3-haiku"),
-            ]),
-        new(
-            Id: "4",
-            SessionId: "a45c7fe",
-            TraceId: "d2e56g78",
-            Agent: "SQL Query Optimizer",
-            Model: "gpt-4o-mini",
-            IsFallback: false,
-            PromptTokens: 445,
-            CompletionTokens: 203,
-            ActualCost: 0.000096m,
-            WorstCaseCost: 0.000780m,
-            SavingsAmount: 0.000684m,
-            SavingsPercent: 87.69m,
-            Timestamp: "14:31:22",
-            RoutingSteps:
-            [
-                new(StepStatus.Ok, "SQL schema fingerprint matched"),
-                new(StepStatus.Ok, "Short context: mini-model sufficient"),
-                new(StepStatus.Info, "Route Confirmed: gpt-4o-mini"),
-            ]),
-        new(
-            Id: "5",
-            SessionId: "c78d2ae",
-            TraceId: "e3f67h89",
-            Agent: "Log Anomaly Detector",
-            Model: "gemini-1.5-flash",
-            IsFallback: false,
-            PromptTokens: 3840,
-            CompletionTokens: 128,
-            ActualCost: 0.000192m,
-            WorstCaseCost: 0.002304m,
-            SavingsAmount: 0.002112m,
-            SavingsPercent: 91.67m,
-            Timestamp: "14:31:09",
-            RoutingSteps:
-            [
-                new(StepStatus.Ok, "Long-context log batch detected (3,840 tokens)"),
-                new(StepStatus.Ok, "Gemini flash selected for cost efficiency"),
-                new(StepStatus.Ok, "Output: classification only (128 tokens)"),
-                new(StepStatus.Info, "Route Confirmed: gemini-1.5-flash"),
-            ]),
-        new(
-            Id: "6",
-            SessionId: "b91e3cd",
-            TraceId: "f4a78i90",
-            Agent: "Summarization Pipeline",
-            Model: "fallback-cheapest-local",
-            IsFallback: true,
-            PromptTokens: 1560,
-            CompletionTokens: 420,
-            ActualCost: 0.000000m,
-            WorstCaseCost: 0.003120m,
-            SavingsAmount: 0.000000m,
-            SavingsPercent: 0.00m,
-            Timestamp: "14:30:55",
-            RoutingSteps:
-            [
-                new(StepStatus.Ok, "Document chunking completed (4 chunks)"),
-                new(StepStatus.Warn, "OpenAI monthly cap reached: fallback triggered"),
-                new(StepStatus.Warn, "Gemini quota exhausted for current period"),
-                new(StepStatus.Ok, "Local model activated as final fallback"),
-                new(StepStatus.Info, "Route Confirmed: fallback-cheapest-local"),
-            ]),
-        new(
-            Id: "7",
-            SessionId: "g23f4bc",
-            TraceId: "g5b89j01",
-            Agent: "Embedding Generator",
-            Model: "text-embedding-3-small",
-            IsFallback: false,
-            PromptTokens: 512,
-            CompletionTokens: 0,
-            ActualCost: 0.000002m,
-            WorstCaseCost: 0.000010m,
-            SavingsAmount: 0.000008m,
-            SavingsPercent: 80.00m,
-            Timestamp: "14:30:42",
-            RoutingSteps:
-            [
-                new(StepStatus.Ok, "Embedding task detected: no completion needed"),
-                new(StepStatus.Ok, "text-embedding-3-small selected (optimal cost)"),
-                new(StepStatus.Info, "Route Confirmed: text-embedding-3-small"),
-            ]),
-        new(
-            Id: "8",
-            SessionId: "h67g8de",
-            TraceId: "h6c90k12",
-            Agent: "Data Analyst Wrapper",
-            Model: "claude-3-5-sonnet",
-            IsFallback: false,
-            PromptTokens: 4200,
-            CompletionTokens: 1890,
-            ActualCost: 0.018270m,
-            WorstCaseCost: 0.037800m,
-            SavingsAmount: 0.019530m,
-            SavingsPercent: 51.67m,
-            Timestamp: "14:30:29",
-            RoutingSteps:
-            [
-                new(StepStatus.Ok, "Complex reasoning task detected"),
-                new(StepStatus.Ok, "High token count requires Sonnet-tier model"),
-                new(StepStatus.Ok, "Anthropic budget nominal"),
-                new(StepStatus.Info, "Route Confirmed: claude-3-5-sonnet"),
-            ]),
-    ];
+    public static IReadOnlyList<RoutingEntry> Entries => Fixture.Value.Entries;
+
+    /// <summary>
+    /// The literal fixture data backing <see cref="Conversations"/> and <see cref="Entries"/>, lazily
+    /// deserialized once from the embedded <c>DashboardMockData.json</c> resource rather than kept as C#
+    /// object-initializer literals - the JSON shape is identical, but ~430 lines of literal test data no
+    /// longer has to be read (or recompiled) every time this source file is opened for its real logic,
+    /// <see cref="BuildMetricHistory"/>.
+    /// </summary>
+    private static readonly Lazy<MockDataFixture> Fixture = new(LoadFixture);
+
+    /// <summary>The deserialization target for <c>DashboardMockData.json</c>'s top-level shape.</summary>
+    /// <param name="Conversations">Deserializes into <see cref="MockData.Conversations"/>.</param>
+    /// <param name="Entries">Deserializes into <see cref="MockData.Entries"/>.</param>
+    private sealed record MockDataFixture(IReadOnlyList<Conversation> Conversations, IReadOnlyList<RoutingEntry> Entries);
+
+    /// <summary>
+    /// Reads and deserializes the <c>DashboardMockData.json</c> resource embedded in this assembly under
+    /// <see cref="MockDataResourceName"/>.
+    /// </summary>
+    /// <returns>The deserialized fixture data.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The embedded resource is missing, or deserializes to <see langword="null"/> - both indicate the
+    /// resource was not packaged correctly rather than a runtime condition callers can recover from.
+    /// </exception>
+    private static MockDataFixture LoadFixture()
+    {
+        var assembly = typeof(MockData).Assembly;
+        using var stream = assembly.GetManifestResourceStream(MockDataResourceName)
+            ?? throw new InvalidOperationException($"Embedded resource '{MockDataResourceName}' was not found in {assembly.FullName}.");
+
+        return JsonSerializer.Deserialize<MockDataFixture>(stream, SerializerOptions)
+            ?? throw new InvalidOperationException($"Embedded resource '{MockDataResourceName}' deserialized to null.");
+    }
+
+    /// <summary>The manifest resource name <c>DashboardMockData.json</c> is embedded under.</summary>
+    private const string MockDataResourceName = "TotallyHot.ArcRouter.Gui.Models.DashboardMockData.json";
+
+    /// <summary>Deserialization options for the mock data fixture: <see cref="StepStatus"/> is stored as its enum-member name, not a number.</summary>
+    private static readonly JsonSerializerOptions SerializerOptions = new()
+    {
+        Converters = { new JsonStringEnumConverter() },
+    };
 
     /// <summary>Mock monthly cost trend for the Cost Analytics tab.</summary>
     public static readonly IReadOnlyList<CostDataPoint> CostData =

@@ -55,7 +55,7 @@ public sealed partial class PlaceholderAnalyzer : IStaticAnalyzer
             return new StaticAnalysisFinding(Name, 1.0, []);
         }
 
-        var score = Math.Max(Floor, 1.0 - (PenaltyPerHit * notes.Count));
+        var score = StaticAnalyzerScoring.ClampScore(Floor, PenaltyPerHit * notes.Count);
         return new StaticAnalysisFinding(Name, score, notes);
     }
 

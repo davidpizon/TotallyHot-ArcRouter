@@ -29,6 +29,16 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
 
     private readonly Dictionary<string, Entry> _pending = new(StringComparer.Ordinal);
     private readonly Queue<string> _insertionOrder = new();
+
+    /// <summary>
+    /// Guards <see cref="_pending"/> and <see cref="_insertionOrder"/>. All five public methods
+    /// (<see cref="SubmitAsync"/>, <see cref="CompleteWithJudgeAsync"/>, <see cref="AbandonJudgeAsync"/>,
+    /// <see cref="SweepExpiredAsync"/>, and the <see cref="PendingCount"/> diagnostic) currently serialize
+    /// through this single lock. That is a deliberate simplicity choice, not an oversight: the pending
+    /// table is small (bounded by <see cref="_capacity"/>) and contention is expected to be low, so a
+    /// single lock is easier to reason about correctly than finer-grained locking. Revisit only if
+    /// judge-scoring volume grows enough to make this lock a measurable bottleneck.
+    /// </summary>
     private readonly object _lock = new();
 
     private readonly IQualityScoreObserver _observer;
