@@ -5,7 +5,7 @@ using TotallyHot.ArcRouter.Telemetry;
 namespace TotallyHot.ArcRouter.PriceCatalog;
 
 /// <summary>
-/// <see cref="IModelPriceCatalog"/> backed by <see cref="PriceCatalogRepository"/> with a
+/// <see cref="IModelPriceCatalog"/> backed by <see cref="PriceRepository"/> with a
 /// <see cref="ConcurrentDictionary{TKey,TValue}"/> in front of it. The cache is a <b>correctness enabler,
 /// not a performance tweak</b>: the routing read happens inline with a live request, so it has to be an
 /// in-memory hit - no read path may await I/O, and refreshing rows is always the background ingestion
@@ -20,7 +20,7 @@ namespace TotallyHot.ArcRouter.PriceCatalog;
 /// </remarks>
 public sealed class ModelPriceCatalog : IModelPriceCatalog
 {
-    private readonly PriceCatalogRepository _repository;
+    private readonly PriceRepository _repository;
     private readonly ILogger<ModelPriceCatalog> _logger;
 
     // Entries hold the raw row plus its fetch timestamp, never a tier-selected price: the same cached row
@@ -33,7 +33,7 @@ public sealed class ModelPriceCatalog : IModelPriceCatalog
     /// Records a cache-miss read that failed against the repository - see <see cref="GetEntry"/>'s remarks
     /// for why that is swallowed rather than propagated.
     /// </param>
-    public ModelPriceCatalog(PriceCatalogRepository repository, ILogger<ModelPriceCatalog> logger)
+    public ModelPriceCatalog(PriceRepository repository, ILogger<ModelPriceCatalog> logger)
     {
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(logger);

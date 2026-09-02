@@ -1,3 +1,4 @@
+using TotallyHot.ArcRouter.Proxy.Concurrency;
 using Microsoft.Extensions.Logging;
 
 namespace TotallyHot.ArcRouter.PriceCatalog;
@@ -67,18 +68,19 @@ public readonly record struct ProviderBudgetState(
 /// (<see cref="IsBreached"/>), which skips a provider whose cap is exhausted.
 /// </summary>
 /// <remarks>
-/// Shaped after <see cref="PriceSourceToggleStore"/>: an immutable snapshot swapped under a gate with a
-/// <see cref="Changed"/> event, so <see cref="IsBreached"/> - called per candidate on the routing hot path -
-/// is a lock-free dictionary read. Each provider carries its own <see cref="BudgetWindow"/> (§5.10 - caps
+/// Shaped after <see cref="PriceSourceToggleStore"/>: an immutable snapshot swapped via
+/// <see cref="Proxy.Concurrency.SnapshotCache{T}"/> with a <see cref="Changed"/> event, so
+/// <see cref="IsBreached"/> - called per candidate on the routing hot path - is a lock-free dictionary read.
+/// Each provider carries its own <see cref="BudgetWindow"/> (§5.10 - caps
 /// need not all reset on the same schedule) and the period key its slice of the snapshot was built for; a
 /// rollover for any one provider is detected on the next access and triggers a full reload, which is what
 /// makes auto-reset true without any scheduled job (the new period simply has no rows yet).
 /// </remarks>
 public sealed class ProviderBudgetStore : IBudgetEnforcer, IDisposable
 {
-    private readonly PriceCatalogRepository _repository;
+    private readonly ProviderBudgetRepository _budgetRepository;
+    private readonly ProviderSpendRepository _spendRepository;
     private readonly ILogger<ProviderBudgetStore>? _logger;
-    private readonly object _gate = new();
     private bool _disposed;
 
     // Serializes the read-modify-write in AddProviderSpend. The store runs in a single proxy process (the
@@ -86,12 +88,13 @@ public sealed class ProviderBudgetStore : IBudgetEnforcer, IDisposable
     // same provider from losing an update - the same guard SpendTracker uses for its file appends.
     private readonly SemaphoreSlim _spendWriteMutex = new(1, 1);
 
-    // Swapped as a whole under _gate; volatile so IsBreached's lock-free read observes the swap. The value
-    // is the current-period state per provider key - each provider carries its own PeriodKey (§5.10:
-    // providers can be on different BudgetWindow kinds), unlike the single global period this store used
-    // before per-provider windows existed.
-    private volatile IReadOnlyDictionary<string, ProviderBudgetState> _snapshot =
-        new Dictionary<string, ProviderBudgetState>(StringComparer.OrdinalIgnoreCase);
+    // Rebuilt and swapped as a whole via SnapshotCache<T> (docs/router/code-smell-refactoring-plan.md M2),
+    // so IsBreached's lock-free read on the routing hot path always sees a fully-formed map. The value is
+    // the current-period state per provider key - each provider carries its own PeriodKey (§5.10: providers
+    // can be on different BudgetWindow kinds), unlike the single global period this store used before
+    // per-provider windows existed.
+    private readonly SnapshotCache<IReadOnlyDictionary<string, ProviderBudgetState>> _cache =
+        new(new Dictionary<string, ProviderBudgetState>(StringComparer.OrdinalIgnoreCase));
 
     /// <summary>Initializes a new instance of the <see cref="ProviderBudgetStore"/> class with an empty snapshot.</summary>
     /// <remarks>
@@ -99,10 +102,15 @@ public sealed class ProviderBudgetStore : IBudgetEnforcer, IDisposable
     /// constructed before <see cref="PriceCatalogDatabase.EnsureCreated"/> has run, so the schema may not
     /// exist yet. The startup health check calls <see cref="Reload"/> right after creating the schema.
     /// </remarks>
-    public ProviderBudgetStore(PriceCatalogRepository repository, ILogger<ProviderBudgetStore>? logger = null)
+    public ProviderBudgetStore(
+        ProviderBudgetRepository budgetRepository,
+        ProviderSpendRepository spendRepository,
+        ILogger<ProviderBudgetStore>? logger = null)
     {
-        ArgumentNullException.ThrowIfNull(repository);
-        _repository = repository;
+        ArgumentNullException.ThrowIfNull(budgetRepository);
+        ArgumentNullException.ThrowIfNull(spendRepository);
+        _budgetRepository = budgetRepository;
+        _spendRepository = spendRepository;
         _logger = logger;
     }
 
@@ -114,15 +122,8 @@ public sealed class ProviderBudgetStore : IBudgetEnforcer, IDisposable
     /// its spend for its own configured period (§5.10: providers can be on different <see cref="BudgetWindow"/>
     /// kinds). Called at startup, after each cap write, and automatically on a period rollover.
     /// </summary>
-    public void Reload()
-    {
-        var next = BuildSnapshot(DateTimeOffset.UtcNow);
-
-        lock (_gate)
-        {
-            _snapshot = next;
-        }
-    }
+    public void Reload() =>
+        _cache.Rebuild(() => BuildSnapshot(DateTimeOffset.UtcNow));
 
     /// <summary>
     /// Builds the current-period state per provider by joining each provider's caps and configured window
@@ -135,7 +136,7 @@ public sealed class ProviderBudgetStore : IBudgetEnforcer, IDisposable
     // provider's own spend rows only ever carry a period string its own window would have produced.
     private Dictionary<string, ProviderBudgetState> BuildSnapshot(DateTimeOffset now)
     {
-        var budgets = _repository.GetProviderBudgets()
+        var budgets = _budgetRepository.GetProviderBudgets()
             .ToDictionary(b => b.ProviderKey, b => b, StringComparer.OrdinalIgnoreCase);
 
         var defaultMonthlyPeriod = new BudgetWindow.Monthly().PeriodKey(now);
@@ -150,7 +151,7 @@ public sealed class ProviderBudgetStore : IBudgetEnforcer, IDisposable
         foreach (var period in periodByProvider.Values.Distinct(StringComparer.Ordinal)
                      .Append(defaultMonthlyPeriod))
         {
-            foreach (var row in _repository.GetProviderSpend(period))
+            foreach (var row in _spendRepository.GetProviderSpend(period))
             {
                 // A budgeted provider's spend only counts if it matches that provider's own current period;
                 // an unbudgeted provider (no entry in periodByProvider) is assumed Monthly, the only window
@@ -194,7 +195,7 @@ public sealed class ProviderBudgetStore : IBudgetEnforcer, IDisposable
     public ProviderBudgetState GetStatus(string providerKey)
     {
         EnsureCurrentPeriod();
-        return _snapshot.TryGetValue(providerKey, out var state) ? state : default;
+        return _cache.Current.TryGetValue(providerKey, out var state) ? state : default;
     }
 
     /// <summary>
@@ -204,7 +205,7 @@ public sealed class ProviderBudgetStore : IBudgetEnforcer, IDisposable
     public bool IsBreached(string providerKey)
     {
         EnsureCurrentPeriod();
-        return _snapshot.TryGetValue(providerKey, out var state) && state.IsBreached;
+        return _cache.Current.TryGetValue(providerKey, out var state) && state.IsBreached;
     }
 
     /// <summary>
@@ -232,7 +233,7 @@ public sealed class ProviderBudgetStore : IBudgetEnforcer, IDisposable
         // round-trip on this hot path); an unbudgeted or not-yet-seen provider defaults to Monthly.
         // BudgetWindowCodec.Decode already treats a null/unrecognized WindowKind as Monthly, so this reads
         // correctly whether or not providerKey has a snapshot entry yet.
-        _snapshot.TryGetValue(providerKey, out var existingState);
+        _cache.Current.TryGetValue(providerKey, out var existingState);
         var window = existingState.Window;
         var period = window.PeriodKey(DateTimeOffset.UtcNow);
         var cost = costUsd ?? 0m;
@@ -250,48 +251,48 @@ public sealed class ProviderBudgetStore : IBudgetEnforcer, IDisposable
             await _spendWriteMutex.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                _repository.AddProviderSpend(providerKey, period, cost, prompt, completion, cacheCreation, cacheRead, usageAtUtc);
+                _spendRepository.AddProviderSpend(providerKey, period, cost, prompt, completion, cacheCreation, cacheRead, usageAtUtc);
             }
             finally
             {
                 _spendWriteMutex.Release();
             }
 
-            lock (_gate)
+            // Done inside SnapshotCache<T>.Rebuild's own gate, so IsBreached never sees a half-updated map
+            // and two concurrent recordings can't race each other's read-then-swap.
+            _cache.Rebuild(() =>
             {
+                var snapshot = _cache.Current;
+
                 // TryGetValue on a miss yields default(ProviderBudgetState), whose PeriodKey is null (record
                 // struct defaults skip primary-constructor default values) - IsNullOrEmpty, not a bare
                 // .Length check, is what makes the "no snapshot entry yet" case not throw.
-                _snapshot.TryGetValue(providerKey, out var beforeUpdate);
+                snapshot.TryGetValue(providerKey, out var beforeUpdate);
                 if (string.IsNullOrEmpty(beforeUpdate.PeriodKey) || !string.Equals(period, beforeUpdate.PeriodKey, StringComparison.Ordinal))
                 {
                     // This provider's period rolled over (or it has no snapshot entry yet); rebuild rather
-                    // than incrementing a stale tally. Done under the gate so IsBreached never sees a
-                    // half-updated map.
-                    _snapshot = BuildSnapshot(DateTimeOffset.UtcNow);
+                    // than incrementing a stale tally.
+                    return BuildSnapshot(DateTimeOffset.UtcNow);
                 }
-                else
+
+                snapshot.TryGetValue(providerKey, out var current);
+                var cacheTokens = cacheCreation + cacheRead;
+                return new Dictionary<string, ProviderBudgetState>(snapshot, StringComparer.OrdinalIgnoreCase)
                 {
-                    _snapshot.TryGetValue(providerKey, out var current);
-                    var cacheTokens = cacheCreation + cacheRead;
-                    var next = new Dictionary<string, ProviderBudgetState>(_snapshot, StringComparer.OrdinalIgnoreCase)
+                    [providerKey] = current with
                     {
-                        [providerKey] = current with
-                        {
-                            DollarSpent = current.DollarSpent + cost,
-                            TokensUsed = current.TokensUsed + prompt + completion + cacheTokens,
-                            CacheTokensUsed = current.CacheTokensUsed + cacheTokens,
-                            // Same monotonic-advance rule as AddProviderSpend's SQL MAX, so the in-memory
-                            // snapshot this fast-path updates can't disagree with the database it mirrors
-                            // when two requests for the same provider complete out of order.
-                            LastUsageAtUtc = current.LastUsageAtUtc is { } existing && existing > usageAtUtc
-                                ? existing
-                                : usageAtUtc,
-                        },
-                    };
-                    _snapshot = next;
-                }
-            }
+                        DollarSpent = current.DollarSpent + cost,
+                        TokensUsed = current.TokensUsed + prompt + completion + cacheTokens,
+                        CacheTokensUsed = current.CacheTokensUsed + cacheTokens,
+                        // Same monotonic-advance rule as AddProviderSpend's SQL MAX, so the in-memory
+                        // snapshot this fast-path updates can't disagree with the database it mirrors
+                        // when two requests for the same provider complete out of order.
+                        LastUsageAtUtc = current.LastUsageAtUtc is { } existing && existing > usageAtUtc
+                            ? existing
+                            : usageAtUtc,
+                    },
+                };
+            });
         }
         catch (OperationCanceledException)
         {
@@ -334,7 +335,7 @@ public sealed class ProviderBudgetStore : IBudgetEnforcer, IDisposable
 
         try
         {
-            _repository.SetProviderBudget(providerKey, dollarCap, tokenCap, window);
+            _budgetRepository.SetProviderBudget(providerKey, dollarCap, tokenCap, window);
             Reload();
         }
         catch (Exception ex)
@@ -373,7 +374,7 @@ public sealed class ProviderBudgetStore : IBudgetEnforcer, IDisposable
     private void EnsureCurrentPeriod()
     {
         var now = DateTimeOffset.UtcNow;
-        foreach (var state in _snapshot.Values)
+        foreach (var state in _cache.Current.Values)
         {
             if (!string.Equals(state.PeriodKey, state.Window.PeriodKey(now), StringComparison.Ordinal))
             {

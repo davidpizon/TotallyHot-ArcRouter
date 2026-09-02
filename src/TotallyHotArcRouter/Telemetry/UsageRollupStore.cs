@@ -81,7 +81,7 @@ public interface IUsageRollupStore
 /// </remarks>
 public sealed class UsageRollupStore : IUsageRollupStore, IDisposable
 {
-    // Round-trip UTC ISO 8601, matching PriceCatalogRepository.TimestampFormat and UsageLedger's - fixed
+    // Round-trip UTC ISO 8601, matching PriceCatalogRepositoryBase.TimestampFormat and UsageLedger's - fixed
     // width and lexicographically ordered, so the range filter in ReadRawBuckets needs no date parsing.
     private const string TimestampFormat = "yyyy-MM-ddTHH:mm:ss.fffffffZ";
 
@@ -572,7 +572,7 @@ public sealed class UsageRollupStore : IUsageRollupStore, IDisposable
         using var transaction = connection.BeginTransaction();
 
         // Read-modify-write the decimal cost under this transaction, same pattern as
-        // PriceCatalogRepository.AddProviderSpend: SQL '+' is fine for the integer counters below, but a
+        // ProviderSpendRepository.AddProviderSpend: SQL '+' is fine for the integer counters below, but a
         // money column stored as TEXT needs true decimal addition, not SQL arithmetic on a string.
         decimal existingCost = 0m;
         using (var read = connection.CreateCommand())

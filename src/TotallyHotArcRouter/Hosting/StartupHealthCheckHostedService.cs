@@ -25,7 +25,7 @@ public sealed class StartupHealthCheckHostedService : IHostedService
 
     private readonly ILogger<StartupHealthCheckHostedService> _logger;
     private readonly PriceCatalogDatabase _database;
-    private readonly PriceCatalogRepository _repository;
+    private readonly PriceSourceRepository _repository;
     private readonly PriceCatalogIngestionService _ingestionService;
     private readonly PriceSourceToggleStore _toggleStore;
     private readonly ProviderBudgetStore _budgetStore;
@@ -55,7 +55,7 @@ public sealed class StartupHealthCheckHostedService : IHostedService
     public StartupHealthCheckHostedService(
         ILogger<StartupHealthCheckHostedService> logger,
         PriceCatalogDatabase database,
-        PriceCatalogRepository repository,
+        PriceSourceRepository repository,
         PriceCatalogIngestionService ingestionService,
         PriceSourceToggleStore toggleStore,
         ProviderBudgetStore budgetStore,

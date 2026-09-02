@@ -20,7 +20,7 @@ public sealed class AnthropicUsageReportService
     private const string Provider = "anthropic";
 
     private readonly HttpClient _httpClient;
-    private readonly PriceCatalogRepository _repository;
+    private readonly ReportedUsageRepository _repository;
     private readonly Func<string?> _resolveAdminApiKey;
     private readonly ILogger<AnthropicUsageReportService> _logger;
 
@@ -37,7 +37,7 @@ public sealed class AnthropicUsageReportService
     /// <param name="logger">Logs a failed fetch (swallowed - retried next cycle).</param>
     public AnthropicUsageReportService(
         HttpClient httpClient,
-        PriceCatalogRepository repository,
+        ReportedUsageRepository repository,
         Func<string?> resolveAdminApiKey,
         ILogger<AnthropicUsageReportService> logger)
     {

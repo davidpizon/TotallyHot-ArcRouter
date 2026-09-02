@@ -2,25 +2,7 @@
    cascades to the provider's models, so the consequence is spelled out before the user commits -
    the same safeguard GitHub uses for deleting a repository. Follows SettingsModal's shell
    (docs/gui/DESIGN.md 4.1) and its "Destructive Actions Zone" body treatment. *@
-<div class="overlay-backdrop fixed inset-0 z-50 flex items-center justify-center"
-     @onclick="OnCancel">
-    @* Escape is handled on the panel, not the input, so it works whichever control has focus - keydown
-       bubbles up from every focusable descendant. Enter stays on the input alone (see below). *@
-    <div class="overlay-panel w-full max-w-md rounded-lg border border-slate-700"
-         tabindex="-1"
-         @onkeydown="HandlePanelKeyDown"
-         @onclick:stopPropagation="true">
-        @* Header *@
-        <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
-            <span class="text-sm font-semibold text-slate-200 tracking-wide uppercase">Remove Provider</span>
-            <button @onclick="OnCancel"
-                    aria-label="Close remove provider dialog"
-                    class="text-slate-400 hover:text-slate-200 transition-colors">
-                <Icon Name="x" Size="20" />
-            </button>
-        </div>
-
-        <div class="overlay-content p-5 space-y-4">
+<DialogShell Title="Remove Provider" CloseAriaLabel="Close remove provider dialog" OnClose="OnCancel" EnableEscapeToClose="true">
             @* Destructive zone label - matches SettingsModal's. *@
             <div class="flex items-center gap-2 text-xs text-amber-400 font-medium uppercase tracking-widest">
                 <Icon Name="alert-triangle" Size="20" />
@@ -66,9 +48,7 @@
                     </button>
                 </div>
             </div>
-        </div>
-    </div>
-</div>
+</DialogShell>
 
 @code {
     /// <summary>The key of the provider being removed - also the word the user must type to confirm.</summary>
@@ -107,21 +87,10 @@
         await OnConfirm.InvokeAsync();
     }
 
-    // Bound on the panel so Escape closes the dialog regardless of which control has focus - Cancel,
-    // Remove, and the close glyph are all focusable, and keydown bubbles from each of them. Handles
-    // *only* Escape: Enter is left to HandleInputKeyDown so one keypress can't confirm twice as it
-    // bubbles past both handlers.
-    /// <summary>Closes the dialog when Escape is pressed anywhere within the panel.</summary>
-    private async Task HandlePanelKeyDown(KeyboardEventArgs args)
-    {
-        if (args.Key == "Escape")
-        {
-            await OnCancel.InvokeAsync();
-        }
-    }
-
     // Enter confirms only while typing in the confirmation field, matching the muscle memory of
-    // submitting a form. Escape deliberately isn't handled here - the panel above owns it.
+    // submitting a form. Escape is handled by DialogShell (EnableEscapeToClose="true"), bound on its
+    // panel so it works regardless of which control has focus - not handled here, so one keypress can't
+    // confirm twice as it bubbles past both handlers.
     /// <summary>Confirms removal when Enter is pressed in the confirmation input.</summary>
     private async Task HandleInputKeyDown(KeyboardEventArgs args)
     {

@@ -33,13 +33,14 @@ public class ProviderBudgetStoreTests
     public void SetBudget_PersistsAcrossAFreshStore()
     {
         using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
+        var budgetRepository = temp.CreateBudgetRepository();
+        var spendRepository = temp.CreateSpendRepository();
 
-        var store = temp.CreateBudgetStore(repository);
+        var store = temp.CreateBudgetStore(budgetRepository, spendRepository);
         store.SetBudget("openai", dollarCap: 500m, tokenCap: 1_000_000L);
 
         // A second store over the same database stands in for a restart: SQLite owns the caps.
-        var reopened = temp.CreateBudgetStore(repository);
+        var reopened = temp.CreateBudgetStore(budgetRepository, spendRepository);
         var status = reopened.GetStatus("openai");
         Assert.Equal(500m, status.DollarCap);
         Assert.Equal(1_000_000L, status.TokenCap);
@@ -49,13 +50,13 @@ public class ProviderBudgetStoreTests
     public void SetBudget_BothNull_RemovesTheBudget()
     {
         using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
-        var store = temp.CreateBudgetStore(repository);
+        var budgetRepository = temp.CreateBudgetRepository();
+        var store = temp.CreateBudgetStore(budgetRepository);
 
         store.SetBudget("openai", dollarCap: 500m, tokenCap: null);
         store.SetBudget("openai", dollarCap: null, tokenCap: null);
 
-        Assert.Empty(repository.GetProviderBudgets());
+        Assert.Empty(budgetRepository.GetProviderBudgets());
         Assert.Null(store.GetStatus("openai").DollarCap);
     }
 
@@ -78,12 +79,12 @@ public class ProviderBudgetStoreTests
     public void SetBudget_NegativeCap_ThrowsAndPersistsNothing(int? dollar, int? token)
     {
         using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
-        var store = temp.CreateBudgetStore(repository);
+        var budgetRepository = temp.CreateBudgetRepository();
+        var store = temp.CreateBudgetStore(budgetRepository);
 
         Assert.Throws<ArgumentOutOfRangeException>(() => store.SetBudget("openai", dollar, token));
 
-        Assert.Empty(repository.GetProviderBudgets());
+        Assert.Empty(budgetRepository.GetProviderBudgets());
     }
 
     [Fact]
@@ -117,12 +118,12 @@ public class ProviderBudgetStoreTests
     public async Task Spend_IsScopedToItsPeriod_SoLastMonthDoesNotCountAgainstThisMonth()
     {
         using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
+        var spendRepository = temp.CreateSpendRepository();
 
         // Write spend directly into a prior period; the store only ever reads the current month.
-        repository.AddProviderSpend("openai", "2000-01", 999m, 1_000, 1_000, cacheCreationTokens: 0, cacheReadTokens: 0, usageAtUtc: FixedUsageAt);
+        spendRepository.AddProviderSpend("openai", "2000-01", 999m, 1_000, 1_000, cacheCreationTokens: 0, cacheReadTokens: 0, usageAtUtc: FixedUsageAt);
 
-        var store = temp.CreateBudgetStore(repository);
+        var store = temp.CreateBudgetStore(spendRepository: spendRepository);
         await store.RecordUsageAsync("openai", costUsd: 2m, promptTokens: 3, completionTokens: 4, cacheCreationTokens: null, cacheReadTokens: null, usageAtUtc: FixedUsageAt, cancellationToken: Ct);
 
         var status = store.GetStatus("openai");
@@ -218,12 +219,13 @@ public class ProviderBudgetStoreTests
     public async Task RecordUsage_LastUsageAtUtc_SurvivesReload()
     {
         using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
-        var store = temp.CreateBudgetStore(repository);
+        var budgetRepository = temp.CreateBudgetRepository();
+        var spendRepository = temp.CreateSpendRepository();
+        var store = temp.CreateBudgetStore(budgetRepository, spendRepository);
 
         await store.RecordUsageAsync("openai", costUsd: 1m, promptTokens: 1, completionTokens: 1, cacheCreationTokens: null, cacheReadTokens: null, usageAtUtc: FixedUsageAt, cancellationToken: Ct);
 
-        var reopened = temp.CreateBudgetStore(repository);
+        var reopened = temp.CreateBudgetStore(budgetRepository, spendRepository);
         Assert.Equal(FixedUsageAt, reopened.GetStatus("openai").LastUsageAtUtc);
     }
 }

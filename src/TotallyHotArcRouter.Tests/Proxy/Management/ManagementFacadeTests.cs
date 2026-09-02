@@ -33,7 +33,8 @@ public sealed class ManagementFacadeTests
     private static ManagementFacade CreateFacade(
         IProviderConfigStore? store = null,
         ProviderBudgetStore? budgetStore = null,
-        PriceCatalogRepository? priceCatalogRepository = null,
+        PriceRepository? priceRepository = null,
+        RateLimitRepository? rateLimitRepository = null,
         ModelAliasOverrideStore? overrideStore = null,
         TimeSpan? rateLimitStalenessThreshold = null) =>
         new(
@@ -43,7 +44,8 @@ public sealed class ManagementFacadeTests
             new ManagementFacadeDependencies
             {
                 BudgetStore = budgetStore,
-                PriceCatalogRepository = priceCatalogRepository,
+                PriceRepository = priceRepository,
+                RateLimitRepository = rateLimitRepository,
                 OverrideStore = overrideStore,
                 RateLimitStalenessThreshold = rateLimitStalenessThreshold,
             });
@@ -416,7 +418,7 @@ public sealed class ManagementFacadeTests
     [Fact]
     public void GetPriceResolutionDiagnosis_NoRepository_ReturnsUnavailable()
     {
-        var facade = CreateFacade(priceCatalogRepository: null);
+        var facade = CreateFacade(priceRepository: null);
 
         var result = facade.GetPriceResolutionDiagnosis();
 
@@ -428,7 +430,7 @@ public sealed class ManagementFacadeTests
     public void GetPriceResolutionDiagnosis_UnresolvedModel_ReportsUnresolved()
     {
         using var temp = new TempDatabase();
-        var facade = CreateFacade(priceCatalogRepository: temp.CreateRepository());
+        var facade = CreateFacade(priceRepository: temp.CreateRepository());
 
         var result = facade.GetPriceResolutionDiagnosis();
 
@@ -448,7 +450,7 @@ public sealed class ManagementFacadeTests
             ModelIdentifier: "gpt-5.4", Provider: "openai", StandardInputPrice: 2m, StandardOutputPrice: 6m,
             CachedInputPrice: null, BatchInputPrice: null, BatchOutputPrice: null);
         repository.UpsertPrices("litellm", 0, [price], DateTimeOffset.UtcNow);
-        var facade = CreateFacade(priceCatalogRepository: repository);
+        var facade = CreateFacade(priceRepository: repository);
 
         var row = Assert.Single(facade.GetPriceResolutionDiagnosis().Value!);
 
@@ -548,7 +550,7 @@ public sealed class ManagementFacadeTests
     [Fact]
     public void ListProviders_NoPriceCatalogRepository_RateLimitIsNull()
     {
-        var facade = CreateFacade(priceCatalogRepository: null);
+        var facade = CreateFacade(rateLimitRepository: null);
 
         var provider = facade.ListProviders().Providers.Single();
 
@@ -559,7 +561,7 @@ public sealed class ManagementFacadeTests
     public void ListProviders_NoHeadersCapturedYet_RateLimitIsNull()
     {
         using var temp = new TempDatabase();
-        var facade = CreateFacade(priceCatalogRepository: temp.CreateRepository());
+        var facade = CreateFacade(rateLimitRepository: temp.CreateRateLimitRepository());
 
         var provider = facade.ListProviders().Providers.Single();
 
@@ -570,13 +572,13 @@ public sealed class ManagementFacadeTests
     public void ListProviders_HeadersCaptured_PopulatesRateLimitSnapshotAndObservedAt()
     {
         using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
+        var repository = temp.CreateRateLimitRepository();
         var observedAt = new DateTimeOffset(2026, 3, 1, 12, 0, 0, TimeSpan.Zero);
         repository.UpsertRateLimitHeaders(
             "openai",
             [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
             observedAt);
-        var facade = CreateFacade(priceCatalogRepository: repository);
+        var facade = CreateFacade(rateLimitRepository: repository);
 
         var provider = facade.ListProviders().Providers.Single();
 
@@ -589,12 +591,12 @@ public sealed class ManagementFacadeTests
     public void ListProviders_RecentCapture_IsNotStale()
     {
         using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
+        var repository = temp.CreateRateLimitRepository();
         repository.UpsertRateLimitHeaders(
             "openai",
             [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
             DateTimeOffset.UtcNow.AddMinutes(-1));
-        var facade = CreateFacade(priceCatalogRepository: repository);
+        var facade = CreateFacade(rateLimitRepository: repository);
 
         var provider = facade.ListProviders().Providers.Single();
 
@@ -605,12 +607,12 @@ public sealed class ManagementFacadeTests
     public void ListProviders_CaptureOlderThanStalenessThreshold_IsStale()
     {
         using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
+        var repository = temp.CreateRateLimitRepository();
         repository.UpsertRateLimitHeaders(
             "openai",
             [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
             DateTimeOffset.UtcNow.AddMinutes(-30));
-        var facade = CreateFacade(priceCatalogRepository: repository, rateLimitStalenessThreshold: TimeSpan.FromMinutes(15));
+        var facade = CreateFacade(rateLimitRepository: repository, rateLimitStalenessThreshold: TimeSpan.FromMinutes(15));
 
         var provider = facade.ListProviders().Providers.Single();
 
@@ -622,16 +624,16 @@ public sealed class ManagementFacadeTests
     {
         // Pins the "last-good" contract (§5.9): a header-free response never clears/replaces a prior
         // snapshot - RateLimitHeaderCapture.CaptureAsync already no-ops on an empty header list (see
-        // PriceCatalogRepositoryTests.UpsertRateLimitHeaders_EmptyList_IsNoOp), so simulating "no headers
+        // RateLimitRepositoryTests.UpsertRateLimitHeaders_EmptyList_IsNoOp), so simulating "no headers
         // this time" here is simply not calling UpsertRateLimitHeaders again.
         using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
+        var repository = temp.CreateRateLimitRepository();
         var observedAt = DateTimeOffset.UtcNow.AddMinutes(-2);
         repository.UpsertRateLimitHeaders(
             "openai",
             [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
             observedAt);
-        var facade = CreateFacade(priceCatalogRepository: repository);
+        var facade = CreateFacade(rateLimitRepository: repository);
 
         var first = facade.ListProviders().Providers.Single().RateLimit;
         var second = facade.ListProviders().Providers.Single().RateLimit;
@@ -647,7 +649,7 @@ public sealed class ManagementFacadeTests
     public void ListProviders_TwoHistoryObservations_PopulatesExhaustionProjection()
     {
         using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
+        var repository = temp.CreateRateLimitRepository();
         var earlier = DateTimeOffset.UtcNow.AddMinutes(-20);
         var later = DateTimeOffset.UtcNow.AddMinutes(-10);
         repository.UpsertRateLimitHeaders(
@@ -658,7 +660,7 @@ public sealed class ManagementFacadeTests
             "openai",
             [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "8000")],
             later);
-        var facade = CreateFacade(priceCatalogRepository: repository);
+        var facade = CreateFacade(rateLimitRepository: repository);
 
         var rateLimit = facade.ListProviders().Providers.Single().RateLimit!;
 
@@ -671,12 +673,12 @@ public sealed class ManagementFacadeTests
     public void ListProviders_OnlyOneObservation_ProjectionsIsEmpty()
     {
         using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
+        var repository = temp.CreateRateLimitRepository();
         repository.UpsertRateLimitHeaders(
             "openai",
             [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
             DateTimeOffset.UtcNow.AddMinutes(-1));
-        var facade = CreateFacade(priceCatalogRepository: repository);
+        var facade = CreateFacade(rateLimitRepository: repository);
 
         var rateLimit = facade.ListProviders().Providers.Single().RateLimit!;
 
@@ -687,7 +689,7 @@ public sealed class ManagementFacadeTests
     public void GetRateLimitHistory_UnknownProvider_ReturnsNotFound()
     {
         using var temp = new TempDatabase();
-        var facade = CreateFacade(priceCatalogRepository: temp.CreateRepository());
+        var facade = CreateFacade(rateLimitRepository: temp.CreateRateLimitRepository());
 
         var result = facade.GetRateLimitHistory("does-not-exist", hours: 6);
 
@@ -698,7 +700,7 @@ public sealed class ManagementFacadeTests
     [Fact]
     public void GetRateLimitHistory_NoPriceCatalogRepository_ReturnsUnavailable()
     {
-        var facade = CreateFacade(priceCatalogRepository: null);
+        var facade = CreateFacade(rateLimitRepository: null);
 
         var result = facade.GetRateLimitHistory("openai", hours: 6);
 
@@ -710,7 +712,7 @@ public sealed class ManagementFacadeTests
     public void GetRateLimitHistory_ReturnsChronologicalPointsPerDimension()
     {
         using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
+        var repository = temp.CreateRateLimitRepository();
         var first = DateTimeOffset.UtcNow.AddMinutes(-5);
         var second = DateTimeOffset.UtcNow.AddMinutes(-3);
         repository.UpsertRateLimitHeaders(
@@ -721,7 +723,7 @@ public sealed class ManagementFacadeTests
             "openai",
             [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "900")],
             second);
-        var facade = CreateFacade(priceCatalogRepository: repository);
+        var facade = CreateFacade(rateLimitRepository: repository);
 
         var result = facade.GetRateLimitHistory("openai", hours: 1);
 
@@ -739,7 +741,7 @@ public sealed class ManagementFacadeTests
     public void GetRateLimitHistory_NoGapBetweenBuckets_DoesNotInsertNullPoint()
     {
         using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
+        var repository = temp.CreateRateLimitRepository();
         var first = DateTimeOffset.UtcNow.AddMinutes(-2);
         var second = DateTimeOffset.UtcNow.AddMinutes(-1);
         repository.UpsertRateLimitHeaders(
@@ -750,7 +752,7 @@ public sealed class ManagementFacadeTests
             "openai",
             [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "900")],
             second);
-        var facade = CreateFacade(priceCatalogRepository: repository);
+        var facade = CreateFacade(rateLimitRepository: repository);
 
         var result = facade.GetRateLimitHistory("openai", hours: 1);
 
@@ -769,7 +771,7 @@ public sealed class ManagementFacadeTests
         // get an explicit null point at the second bucket's timestamp rather than simply skipping the
         // x-value, so the stepped chart (connectNulls: false) renders a gap instead of holding steady.
         using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
+        var repository = temp.CreateRateLimitRepository();
         var first = DateTimeOffset.UtcNow.AddMinutes(-2);
         var second = DateTimeOffset.UtcNow.AddMinutes(-1);
         repository.UpsertRateLimitHeaders(
@@ -783,7 +785,7 @@ public sealed class ManagementFacadeTests
             "openai",
             [new RateLimitHeaderRow("anthropic-ratelimit-requests-remaining", "49")],
             second);
-        var facade = CreateFacade(priceCatalogRepository: repository);
+        var facade = CreateFacade(rateLimitRepository: repository);
 
         var result = facade.GetRateLimitHistory("openai", hours: 1);
 

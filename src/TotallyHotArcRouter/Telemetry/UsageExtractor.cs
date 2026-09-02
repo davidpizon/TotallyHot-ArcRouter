@@ -1,4 +1,5 @@
 using System.Text;
+using TotallyHot.ArcRouter.Proxy;
 
 namespace TotallyHot.ArcRouter.Telemetry;
 
@@ -25,18 +26,43 @@ public interface IUsageExtractor
 /// <inheritdoc cref="IUsageExtractor" />
 public sealed class UsageExtractor : IUsageExtractor
 {
+    // Cached rather than rebuilt per call: SupportsNativeShape is a static helper ProxyMiddleware calls
+    // once per response, independent of any DI-constructed UsageExtractor instance, so it needs its own
+    // copy of the default table rather than reading an instance field.
+    private static readonly IReadOnlyDictionary<string, ProviderRegistration> DefaultRegistrationsForStaticLookup = ProviderRegistrations.BuildDefault();
+
+    private readonly IReadOnlyDictionary<string, ProviderRegistration> _providerRegistrations;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="UsageExtractor"/> class.
+    /// </summary>
+    /// <param name="providerRegistrations">
+    /// The provider dispatch table (<c>provider key -&gt; <see cref="ProviderRegistration"/></c>) that
+    /// decides which parser shape a given provider's captured bytes are in. Defaults to
+    /// <see cref="ProviderRegistrations.BuildDefault"/> when not supplied - the same table
+    /// <c>ServiceCollectionExtensions</c> registers for DI - so direct construction (production fallback
+    /// construction in <c>ProxyMiddleware</c>, or a test building this type on its own) still dispatches
+    /// every known provider correctly.
+    /// </param>
+    public UsageExtractor(IReadOnlyDictionary<string, ProviderRegistration>? providerRegistrations = null)
+    {
+        _providerRegistrations = providerRegistrations ?? ProviderRegistrations.BuildDefault();
+    }
+
     /// <summary>
     /// Reports whether <paramref name="provider"/> has a registered parser for its own <b>native</b>
     /// response shape (as opposed to only being reachable via a translated OpenAI-shaped body). Used by
     /// <c>ProxyMiddleware</c> to decide whether it is worth capturing a second, pre-translation copy of a
     /// translated provider's response for a native telemetry tap
     /// (<c>docs/router/openai-format-usage-accuracy-plan.md</c> §4) - capturing native bytes for a provider
-    /// with no native parser would just be wasted memory. A single source of truth here, rather than a
-    /// duplicated string check in the middleware, is what keeps the two from drifting apart.
+    /// with no native parser would just be wasted memory. Reads the same default provider dispatch table
+    /// <see cref="ProviderRegistrations.BuildDefault"/> builds for DI, so this and the instance-level
+    /// <see cref="TryExtractUsage"/> dispatch can never drift apart over which providers are native-shaped.
     /// </summary>
     /// <param name="provider">The provider key (e.g. <c>"anthropic"</c>), case-insensitive.</param>
     public static bool SupportsNativeShape(string provider) =>
-        string.Equals(provider, "anthropic", StringComparison.OrdinalIgnoreCase);
+        DefaultRegistrationsForStaticLookup.TryGetValue(provider, out var registration)
+        && registration.UsageParserShape == UsageParserShape.Native;
 
     /// <inheritdoc />
     public bool TryExtractUsage(string provider, bool isStreaming, ReadOnlyMemory<byte> bufferedResponseBody, out UsageInfo usage)
@@ -44,6 +70,13 @@ public sealed class UsageExtractor : IUsageExtractor
         usage = default;
 
         if (bufferedResponseBody.IsEmpty)
+        {
+            return false;
+        }
+
+        // Unknown/unsupported provider (e.g. alibaba, zhipu, moonshot, minimax): no registration, so no
+        // parser shape to dispatch on. Fail gracefully rather than guessing at an unverified response shape.
+        if (!_providerRegistrations.TryGetValue(provider, out var registration))
         {
             return false;
         }
@@ -58,26 +91,15 @@ public sealed class UsageExtractor : IUsageExtractor
             return false;
         }
 
-        return provider.ToLowerInvariant() switch
+        return registration.UsageParserShape switch
         {
-            // Ollama's OpenAI-compatible routes answer in OpenAI's own response shape - same
-            // choices[].message + usage.prompt_tokens/completion_tokens, same SSE framing (see
-            // docs/router/unified-api-translation.md §4.1, pinned by OllamaProviderTests) - so it shares
-            // the parser rather than getting a duplicate of it. This is a verified shape, not a guess at
-            // one, which is what separates it from the unsupported providers below.
-            // "gemini" is OpenAI-shaped by the time usage is parsed: ProxyMiddleware runs the Gemini
-            // response/stream through GeminiPayloadTranslator before capturing it, so the captured bytes
-            // are already OpenAI's choices[]/usage shape (see docs/router/unified-api-translation.md §4.3).
-            "openai" or "ollama" or "gemini" => isStreaming
+            UsageParserShape.OpenAiCompatible => isStreaming
                 ? OpenAiUsageParser.TryExtractFromStreamingBuffer(text, out usage)
                 : OpenAiUsageParser.TryExtractFromNonStreamingBody(text, out usage),
-            "anthropic" => isStreaming
+            UsageParserShape.Native => isStreaming
                 ? AnthropicUsageParser.TryExtractFromStreamingBuffer(text, out usage)
                 : AnthropicUsageParser.TryExtractFromNonStreamingBody(text, out usage),
-            // Unknown/unsupported provider (e.g. alibaba, zhipu, moonshot, minimax): no parser wired
-            // up yet. Fail gracefully rather than guessing at an unverified response shape.
             _ => false,
         };
     }
 }
-

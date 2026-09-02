@@ -421,14 +421,7 @@
 
 @if (_showDialog)
 {
-    <ProviderEditDialog Key="@_dialogKey"
-                        IsNew="@_dialogIsNew"
-                        BaseUrl="@_dialogBaseUrl"
-                        AuthHeaderName="@_dialogAuthName"
-                        Headers="@_dialogHeaders"
-                        IsFree="@_dialogIsFree"
-                        ProviderType="@_dialogProviderType"
-                        ProviderName="@_dialogProviderName"
+    <ProviderEditDialog Model="@_dialogModel"
                         Error="@_dialogError"
                         OnSave="SaveDialog"
                         OnCancel="CancelDialog" />

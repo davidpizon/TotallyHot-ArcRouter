@@ -27,14 +27,15 @@ public partial class ProvidersAdmin
     private int _removeModelCount;
 
     private bool _showDialog;
-    private bool _dialogIsNew;
-    private string _dialogKey = string.Empty;
-    private string _dialogBaseUrl = string.Empty;
-    private string _dialogAuthName = "Authorization";
-    private IReadOnlyList<ProviderHeaderView> _dialogHeaders = [];
-    private bool _dialogIsFree;
-    private string _dialogProviderType = "Other";
-    private string _dialogProviderName = string.Empty;
+    private ProviderEditDialog.ProviderEditModel _dialogModel = new(
+        Key: string.Empty,
+        IsNew: false,
+        BaseUrl: string.Empty,
+        AuthHeaderName: "Authorization",
+        Headers: [],
+        IsFree: false,
+        ProviderType: "Other",
+        ProviderName: string.Empty);
     private string? _dialogError;
 
     // Providers whose rate-limit trend history has already been requested this session - loaded once per
@@ -92,14 +93,15 @@ public partial class ProvidersAdmin
     /// <summary>Opens the edit dialog seeded with blank/default fields for adding a new provider.</summary>
     private void OpenAdd()
     {
-        _dialogIsNew = true;
-        _dialogKey = string.Empty;
-        _dialogBaseUrl = string.Empty;
-        _dialogAuthName = "Authorization";
-        _dialogHeaders = [];
-        _dialogIsFree = false;
-        _dialogProviderType = "Other";
-        _dialogProviderName = string.Empty;
+        _dialogModel = new ProviderEditDialog.ProviderEditModel(
+            Key: string.Empty,
+            IsNew: true,
+            BaseUrl: string.Empty,
+            AuthHeaderName: "Authorization",
+            Headers: [],
+            IsFree: false,
+            ProviderType: "Other",
+            ProviderName: string.Empty);
         _dialogError = null;
         _showDialog = true;
     }
@@ -107,17 +109,18 @@ public partial class ProvidersAdmin
     /// <summary>Opens the edit dialog seeded with an existing provider's current fields.</summary>
     private void OpenEdit(ProviderAdminView provider)
     {
-        _dialogIsNew = false;
-        _dialogKey = provider.Key;
-        _dialogBaseUrl = provider.BaseUrl;
-        _dialogAuthName = provider.AuthHeaderName;
-        _dialogHeaders = provider.Headers;
-        _dialogIsFree = provider.IsFree;
-        // A provider stored before ProviderType existed has none; the dialog falls back to "Other" itself,
-        // but pass through what is stored so an Anthropic provider reopens as Anthropic rather than
-        // silently reverting to Other on every edit.
-        _dialogProviderType = provider.ProviderType ?? "Other";
-        _dialogProviderName = provider.Name ?? string.Empty;
+        _dialogModel = new ProviderEditDialog.ProviderEditModel(
+            Key: provider.Key,
+            IsNew: false,
+            BaseUrl: provider.BaseUrl,
+            AuthHeaderName: provider.AuthHeaderName,
+            Headers: provider.Headers,
+            IsFree: provider.IsFree,
+            // A provider stored before ProviderType existed has none; the dialog falls back to "Other"
+            // itself, but pass through what is stored so an Anthropic provider reopens as Anthropic rather
+            // than silently reverting to Other on every edit.
+            ProviderType: provider.ProviderType ?? "Other",
+            ProviderName: provider.Name ?? string.Empty);
         _dialogError = null;
         _showDialog = true;
     }

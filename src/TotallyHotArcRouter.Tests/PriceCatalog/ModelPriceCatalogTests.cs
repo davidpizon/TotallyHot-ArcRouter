@@ -14,7 +14,7 @@ public class ModelPriceCatalogTests
 {
     private static readonly TimeSpan Floor = TimeSpan.FromHours(24);
 
-    private static ModelPriceCatalog CreateCatalog(PriceCatalogRepository repository) =>
+    private static ModelPriceCatalog CreateCatalog(PriceRepository repository) =>
         new(repository, NullLogger<ModelPriceCatalog>.Instance);
 
     [Fact]
@@ -244,11 +244,11 @@ public class ModelPriceCatalogTests
 
     private static ModelKey Key => new("claude-opus", "anthropic");
 
-    private static void WriteFullyTieredRow(PriceCatalogRepository repository, DateTimeOffset fetchedAt) =>
+    private static void WriteFullyTieredRow(PriceRepository repository, DateTimeOffset fetchedAt) =>
         WriteRow(repository, fetchedAt, cachedInput: 1.50m, batchInput: 7.50m, batchOutput: 37.50m);
 
     private static void WriteRow(
-        PriceCatalogRepository repository,
+        PriceRepository repository,
         DateTimeOffset fetchedAt,
         decimal? cachedInput,
         decimal? batchInput,

@@ -29,7 +29,11 @@ public sealed class PriceCatalogIngestionService
     public const string DisabledDuringFetch = "disabled during fetch";
 
     private readonly IPriceSourceRegistry _registry;
-    private readonly PriceCatalogRepository _repository;
+    private readonly PriceRepository _repository;
+    // CountFreshPrices is a source-toggle-CRUD concern (it joins on aggregator_sources.enabled), not a
+    // price upsert/read one - see PriceSourceRepository's remarks - so this service needs both narrow
+    // repositories rather than one, the same cross-concern shape ManagementFacade needs for its own reads.
+    private readonly PriceSourceRepository _sourceRepository;
     private readonly PriceSourceToggleStore _toggleStore;
     private readonly ILogger<PriceCatalogIngestionService> _logger;
     private readonly IModelPriceCatalog? _priceCatalog;
@@ -50,6 +54,7 @@ public sealed class PriceCatalogIngestionService
     /// </summary>
     /// <param name="registry">The enabled price-source clients this service fetches from each cycle.</param>
     /// <param name="repository">The catalog repository each cycle's normalized prices are upserted into.</param>
+    /// <param name="sourceRepository">Reads the fresh-price count that decides D4's zero-fresh-prices condition.</param>
     /// <param name="toggleStore">Owns each source's enabled state (D6), including the mid-fetch cancellation token.</param>
     /// <param name="logger">Structured log sink for per-source outcomes and D4's zero-fresh-prices error.</param>
     /// <param name="priceCatalog">
@@ -59,18 +64,21 @@ public sealed class PriceCatalogIngestionService
     /// </param>
     public PriceCatalogIngestionService(
         IPriceSourceRegistry registry,
-        PriceCatalogRepository repository,
+        PriceRepository repository,
+        PriceSourceRepository sourceRepository,
         PriceSourceToggleStore toggleStore,
         ILogger<PriceCatalogIngestionService> logger,
         IModelPriceCatalog? priceCatalog = null)
     {
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(repository);
+        ArgumentNullException.ThrowIfNull(sourceRepository);
         ArgumentNullException.ThrowIfNull(toggleStore);
         ArgumentNullException.ThrowIfNull(logger);
 
         _registry = registry;
         _repository = repository;
+        _sourceRepository = sourceRepository;
         _toggleStore = toggleStore;
         _logger = logger;
         _priceCatalog = priceCatalog;
@@ -146,7 +154,7 @@ public sealed class PriceCatalogIngestionService
                 _priceCatalog?.Invalidate();
             }
 
-            var freshPriceCount = _repository.CountFreshPrices(FreshnessFloor);
+            var freshPriceCount = _sourceRepository.CountFreshPrices(FreshnessFloor);
             return new IngestionCycleSummary(freshPriceCount, Outcomes: []);
         }
         finally
@@ -230,7 +238,7 @@ public sealed class PriceCatalogIngestionService
             _priceCatalog?.Invalidate();
         }
 
-        var freshPriceCount = _repository.CountFreshPrices(FreshnessFloor);
+        var freshPriceCount = _sourceRepository.CountFreshPrices(FreshnessFloor);
         var summary = new IngestionCycleSummary(freshPriceCount, outcomes);
 
         // Per D4: a cycle that ran at least one source but ended with zero fresh prices is an Error, not

@@ -43,7 +43,7 @@ public sealed class RateLimitHeaderCapture : IRateLimitHeaderCapture, IDisposabl
     // a queue's worth of writes hasn't drained in this long, shutdown proceeds anyway rather than hanging.
     private static readonly TimeSpan DisposeDrainTimeout = TimeSpan.FromSeconds(5);
 
-    private readonly PriceCatalogRepository _repository;
+    private readonly RateLimitRepository _repository;
     private readonly ILogger<RateLimitHeaderCapture>? _logger;
     private readonly Channel<CaptureItem> _channel;
     private readonly Task _consumerLoop;
@@ -52,7 +52,7 @@ public sealed class RateLimitHeaderCapture : IRateLimitHeaderCapture, IDisposabl
     /// Initializes a new instance of the <see cref="RateLimitHeaderCapture"/> class and starts its single
     /// background consumer.
     /// </summary>
-    public RateLimitHeaderCapture(PriceCatalogRepository repository, ILogger<RateLimitHeaderCapture>? logger = null)
+    public RateLimitHeaderCapture(RateLimitRepository repository, ILogger<RateLimitHeaderCapture>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(repository);
         _repository = repository;

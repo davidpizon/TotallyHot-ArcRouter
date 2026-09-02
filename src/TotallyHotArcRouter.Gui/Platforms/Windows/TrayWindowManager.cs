@@ -81,6 +81,18 @@ internal static class TrayWindowManager
     /// </summary>
     private delegate IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
+    // Single-thread invariant: every mutation of the static fields below happens on the UI/window-owning
+    // thread. Attach (the only place that sets them up) has exactly one call site - MauiProgram.cs's
+    // windows.OnWindowCreated(TrayWindowManager.Attach) - which WinUI invokes on the UI thread; WindowProc
+    // (the subclassed WndProc) is likewise only ever called by Windows on that same thread; and every
+    // other method here either runs synchronously from one of those two or is reached via a tray-menu
+    // command, which is itself driven from WindowProc. The one confirmed exception is
+    // RoutingGateStore.BecameUnusable, raised from RoutingGateStore's background poll thread: its handler
+    // (OnRoutingGateBecameUnusable) does not touch any field below directly - it marshals back onto the UI
+    // thread first via _dispatcherQueue.TryEnqueue(...) before ShowRouterUnavailableBalloon reads _hwnd/
+    // _routingGateStore. No lock protects these fields, and none is needed as long as that invariant
+    // holds; a future caller of Attach (or any new cross-thread event source) from a different thread
+    // would break it.
     private static IntPtr _hwnd;
     private static IntPtr _originalWndProc;
 

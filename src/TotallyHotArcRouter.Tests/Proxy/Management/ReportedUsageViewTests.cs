@@ -35,10 +35,10 @@ public sealed class ReportedUsageViewTests
     {
         using var temp = new TempDatabase();
         temp.Database.EnsureCreated();
-        var repository = new PriceCatalogRepository(temp.Database);
+        var repository = new ReportedUsageRepository(temp.Database);
         var facade = new ManagementFacade(
             new InMemoryProviderConfigStore(SeedOptions()), Mock.Of<IEnvironmentVariableProvider>(), new HttpClient(),
-            new ManagementFacadeDependencies { PriceCatalogRepository = repository });
+            new ManagementFacadeDependencies { ReportedUsageRepository = repository });
 
         var provider = Assert.Single(facade.ListProviders().Providers);
 
@@ -50,7 +50,7 @@ public sealed class ReportedUsageViewTests
     {
         using var temp = new TempDatabase();
         temp.Database.EnsureCreated();
-        var repository = new PriceCatalogRepository(temp.Database);
+        var repository = new ReportedUsageRepository(temp.Database);
         var fetchedAt = new DateTimeOffset(2026, 1, 16, 4, 0, 0, TimeSpan.Zero);
         repository.UpsertReportedUsage(
             "anthropic",
@@ -58,7 +58,7 @@ public sealed class ReportedUsageViewTests
             fetchedAt);
         var facade = new ManagementFacade(
             new InMemoryProviderConfigStore(SeedOptions()), Mock.Of<IEnvironmentVariableProvider>(), new HttpClient(),
-            new ManagementFacadeDependencies { PriceCatalogRepository = repository });
+            new ManagementFacadeDependencies { ReportedUsageRepository = repository });
 
         var provider = Assert.Single(facade.ListProviders().Providers);
 

@@ -1,4 +1,5 @@
 using System.Text;
+using TotallyHot.ArcRouter.Proxy;
 
 namespace TotallyHot.ArcRouter.Telemetry;
 
@@ -23,12 +24,38 @@ public interface IResponseTextExtractor
 /// <inheritdoc cref="IResponseTextExtractor" />
 public sealed class ResponseTextExtractor : IResponseTextExtractor
 {
+    private readonly IReadOnlyDictionary<string, ProviderRegistration> _providerRegistrations;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ResponseTextExtractor"/> class.
+    /// </summary>
+    /// <param name="providerRegistrations">
+    /// The provider dispatch table (<c>provider key -&gt; <see cref="ProviderRegistration"/></c>) that
+    /// decides which parser shape a given provider's captured bytes are in. Defaults to
+    /// <see cref="ProviderRegistrations.BuildDefault"/> when not supplied - the same table
+    /// <c>ServiceCollectionExtensions</c> registers for DI, and the same one <see cref="UsageExtractor"/>
+    /// falls back to - so direct construction (production fallback construction in
+    /// <c>ProxyMiddleware</c>, or a test building this type on its own) still dispatches every known
+    /// provider correctly, and the two extractors can never disagree about a given provider's shape.
+    /// </param>
+    public ResponseTextExtractor(IReadOnlyDictionary<string, ProviderRegistration>? providerRegistrations = null)
+    {
+        _providerRegistrations = providerRegistrations ?? ProviderRegistrations.BuildDefault();
+    }
+
     /// <inheritdoc />
     public bool TryExtractText(string provider, bool isStreaming, ReadOnlyMemory<byte> bufferedResponseBody, out string text)
     {
         text = string.Empty;
 
         if (bufferedResponseBody.IsEmpty)
+        {
+            return false;
+        }
+
+        // Unknown/unsupported provider (e.g. alibaba, zhipu, moonshot, minimax): no registration, so no
+        // parser shape to dispatch on. Fail gracefully rather than guessing at an unverified response shape.
+        if (!_providerRegistrations.TryGetValue(provider, out var registration))
         {
             return false;
         }
@@ -43,20 +70,15 @@ public sealed class ResponseTextExtractor : IResponseTextExtractor
             return false;
         }
 
-        return provider.ToLowerInvariant() switch
+        return registration.UsageParserShape switch
         {
-            // "gemini" is OpenAI-shaped by this point - ProxyMiddleware translates the Gemini response
-            // to OpenAI's choices[] shape before capturing it (docs/router/unified-api-translation.md §4.3).
-            "openai" or "gemini" => isStreaming
+            UsageParserShape.OpenAiCompatible => isStreaming
                 ? OpenAiResponseTextParser.TryExtractFromStreamingBuffer(body, out text)
                 : OpenAiResponseTextParser.TryExtractFromNonStreamingBody(body, out text),
-            "anthropic" => isStreaming
+            UsageParserShape.Native => isStreaming
                 ? AnthropicResponseTextParser.TryExtractFromStreamingBuffer(body, out text)
                 : AnthropicResponseTextParser.TryExtractFromNonStreamingBody(body, out text),
-            // Unknown/unsupported provider (e.g. alibaba, zhipu, moonshot, minimax): no parser wired
-            // up yet. Fail gracefully rather than guessing at an unverified response shape.
             _ => false,
         };
     }
 }
-

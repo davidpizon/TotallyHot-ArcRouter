@@ -45,6 +45,25 @@ public class UsageExtractorTests
         Assert.True(result);
     }
 
+    [Theory]
+    [InlineData("bedrock-titan")]
+    [InlineData("bedrock-llama")]
+    [InlineData("bedrock-anthropic")]
+    public void TryExtractUsage_BedrockRoutedProvider_NonStreaming_DispatchesToOpenAiParser(string providerKey)
+    {
+        // All three Bedrock translators (TitanPayloadTranslator, LlamaPayloadTranslator,
+        // AnthropicOnBedrockPayloadTranslator) convert AWS's native response into OpenAI's choices[]/usage
+        // shape in TranslateResponse, so the bytes reaching this extractor for any of them are OpenAI-shaped
+        // - this regression-tests the previously-missing dispatch branch for all three.
+        var body = Encoding.UTF8.GetBytes("""{"usage":{"prompt_tokens":7,"completion_tokens":3}}""");
+
+        var result = _extractor.TryExtractUsage(providerKey, isStreaming: false, body, out var usage);
+
+        Assert.True(result);
+        Assert.Equal(7, usage.PromptTokens);
+        Assert.Equal(3, usage.CompletionTokens);
+    }
+
     [Fact]
     public void TryExtractUsage_UnknownProvider_ReturnsFalse()
     {

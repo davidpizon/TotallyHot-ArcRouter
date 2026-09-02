@@ -56,7 +56,7 @@ public interface IUsageLedger
 /// <inheritdoc cref="IUsageLedger" />
 public sealed class UsageLedger : IUsageLedger
 {
-    // Same round-trip UTC ISO 8601 layout as PriceCatalogRepository.TimestampFormat, so lexicographic TEXT
+    // Same round-trip UTC ISO 8601 layout as PriceCatalogRepositoryBase.TimestampFormat, so lexicographic TEXT
     // comparison agrees with chronological order for the retention sweep and the occurred_at index.
     private const string TimestampFormat = "yyyy-MM-ddTHH:mm:ss.fffffffZ";
 

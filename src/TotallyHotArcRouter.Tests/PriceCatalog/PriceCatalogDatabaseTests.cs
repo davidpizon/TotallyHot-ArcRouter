@@ -54,7 +54,7 @@ public class PriceCatalogDatabaseTests
         // whatever model_prices already held.
         using var temp = new TempDatabase();
         temp.Database.EnsureCreated();
-        var repository = new PriceCatalogRepository(temp.Database);
+        var repository = new PriceRepository(temp.Database);
         repository.UpsertPrices("litellm", 0, [new NormalizedPrice("gpt-4o", "openai", 2.50m, 10.00m, null, null, null)], DateTimeOffset.UtcNow);
 
         temp.Database.EnsureCreated();
@@ -99,7 +99,7 @@ public class PriceCatalogDatabaseTests
 
         // Rows previously appeared only after a successful poll, which left a fresh install with nothing to
         // toggle and no way to switch a source off before the startup pull fired.
-        var states = new PriceCatalogRepository(temp.Database).GetSourceStates();
+        var states = new PriceSourceRepository(temp.Database).GetSourceStates();
         Assert.Equal(2, states.Count);
         Assert.All(states, s => Assert.Equal(0, s.PriceCount));
         Assert.All(states, s => Assert.True(s.Enabled));
@@ -111,7 +111,7 @@ public class PriceCatalogDatabaseTests
         using var temp = new TempDatabase();
         temp.Database.EnsureCreated();
 
-        var states = new PriceCatalogRepository(temp.Database).GetSourceStates();
+        var states = new PriceSourceRepository(temp.Database).GetSourceStates();
         var liteLlm = states.Single(s => s.Name == PriceCatalogOptions.LiteLlmSourceName);
         var openRouter = states.Single(s => s.Name == PriceCatalogOptions.OpenRouterSourceName);
 
@@ -122,7 +122,7 @@ public class PriceCatalogDatabaseTests
     public void EnsureCreated_DoesNotReEnableADisabledSource()
     {
         using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
+        var repository = temp.CreateSourceRepository();
         repository.SetSourceEnabled(PriceCatalogOptions.LiteLlmSourceName, enabled: false);
 
         // EnsureCreated runs on every startup. If the seed used DO UPDATE instead of DO NOTHING, an operator
@@ -137,7 +137,7 @@ public class PriceCatalogDatabaseTests
     public void EnsureCreated_DoesNotDisturbAnOperatorSetPriority()
     {
         using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
+        var repository = temp.CreateSourceRepository();
         Assert.True(repository.ReorderSources([PriceCatalogOptions.OpenRouterSourceName, PriceCatalogOptions.LiteLlmSourceName]));
 
         // EnsureCreated runs on every startup, and its seed step must not rewrite a rank the operator (or a
@@ -161,7 +161,7 @@ public class PriceCatalogDatabaseTests
         // "no such column: enabled".
         temp.Database.EnsureCreated();
 
-        var states = new PriceCatalogRepository(temp.Database).GetSourceStates();
+        var states = new PriceSourceRepository(temp.Database).GetSourceStates();
         var liteLlm = states.Single(s => s.Name == "litellm");
         Assert.True(liteLlm.Enabled, "an existing source must migrate to enabled, matching its pre-toggle behavior");
 

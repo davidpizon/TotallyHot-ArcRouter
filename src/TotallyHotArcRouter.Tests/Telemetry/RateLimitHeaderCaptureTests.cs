@@ -14,7 +14,7 @@ public class RateLimitHeaderCaptureTests
     public async Task CaptureAsync_CapturesStandardAndUnifiedAndUnknownAnthropicHeaders()
     {
         using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
+        var repository = temp.CreateRateLimitRepository();
         using var capture = new RateLimitHeaderCapture(repository);
 
         var headers = BuildHeaders(
@@ -32,7 +32,7 @@ public class RateLimitHeaderCaptureTests
     public async Task CaptureAsync_CapturesOpenAiXRateLimitHeaders()
     {
         using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
+        var repository = temp.CreateRateLimitRepository();
         using var capture = new RateLimitHeaderCapture(repository);
 
         var headers = BuildHeaders(
@@ -51,7 +51,7 @@ public class RateLimitHeaderCaptureTests
     public async Task CaptureAsync_BothAnthropicAndOpenAiFamiliesCapturedWhenBothAppear()
     {
         using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
+        var repository = temp.CreateRateLimitRepository();
         using var capture = new RateLimitHeaderCapture(repository);
 
         var headers = BuildHeaders(
@@ -68,7 +68,7 @@ public class RateLimitHeaderCaptureTests
     public async Task CaptureAsync_IgnoresHeadersWithoutThePrefix()
     {
         using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
+        var repository = temp.CreateRateLimitRepository();
         using var capture = new RateLimitHeaderCapture(repository);
 
         var headers = BuildHeaders(
@@ -86,7 +86,7 @@ public class RateLimitHeaderCaptureTests
     public async Task CaptureAsync_UnknownProvider_IsNoOp()
     {
         using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
+        var repository = temp.CreateRateLimitRepository();
         using var capture = new RateLimitHeaderCapture(repository);
 
         await capture.CaptureAsync(string.Empty, BuildHeaders(("anthropic-ratelimit-tokens-remaining", "1")), Ct);
@@ -104,7 +104,7 @@ public class RateLimitHeaderCaptureTests
         temp.Database.EnsureCreated();
         var brokenDatabase = new PriceCatalogDatabase(
             Microsoft.Extensions.Options.Options.Create(new StorageOptions { DatabasePath = Path.Combine(temp.Path_, "does", "not", "exist.db") }));
-        var repository = new PriceCatalogRepository(brokenDatabase);
+        var repository = new RateLimitRepository(brokenDatabase);
         using var capture = new RateLimitHeaderCapture(repository);
 
         var exception = await Record.ExceptionAsync(() =>

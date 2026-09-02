@@ -23,11 +23,46 @@ internal sealed class TempDatabase : IDisposable
 
     public PriceCatalogDatabase Database { get; }
 
-    /// <summary>Creates the schema (seeding the known sources) and returns a repository over it.</summary>
-    public PriceCatalogRepository CreateRepository()
+    /// <summary>Creates the schema (seeding the known sources) and returns a price repository over it.</summary>
+    public PriceRepository CreateRepository()
     {
         Database.EnsureCreated();
-        return new PriceCatalogRepository(Database);
+        return new PriceRepository(Database);
+    }
+
+    /// <summary>Creates the schema (seeding the known sources) and returns a source-toggle repository over it.</summary>
+    public PriceSourceRepository CreateSourceRepository()
+    {
+        Database.EnsureCreated();
+        return new PriceSourceRepository(Database);
+    }
+
+    /// <summary>Creates the schema and returns a provider-budget repository over it.</summary>
+    public ProviderBudgetRepository CreateBudgetRepository()
+    {
+        Database.EnsureCreated();
+        return new ProviderBudgetRepository(Database);
+    }
+
+    /// <summary>Creates the schema and returns a provider-spend repository over it.</summary>
+    public ProviderSpendRepository CreateSpendRepository()
+    {
+        Database.EnsureCreated();
+        return new ProviderSpendRepository(Database);
+    }
+
+    /// <summary>Creates the schema and returns a rate-limit repository over it.</summary>
+    public RateLimitRepository CreateRateLimitRepository()
+    {
+        Database.EnsureCreated();
+        return new RateLimitRepository(Database);
+    }
+
+    /// <summary>Creates the schema and returns a reported-usage repository over it.</summary>
+    public ReportedUsageRepository CreateReportedUsageRepository()
+    {
+        Database.EnsureCreated();
+        return new ReportedUsageRepository(Database);
     }
 
     /// <summary>
@@ -62,10 +97,10 @@ internal sealed class TempDatabase : IDisposable
     /// <see cref="TotallyHot.ArcRouter.Hosting.StartupHealthCheckHostedService"/> does at startup: EnsureCreated
     /// first, then Reload - a store that never reloads reports every source disabled.
     /// </summary>
-    public PriceSourceToggleStore CreateToggleStore(PriceCatalogRepository? repository = null)
+    public PriceSourceToggleStore CreateToggleStore(PriceSourceRepository? repository = null)
     {
         var store = new PriceSourceToggleStore(
-            repository ?? CreateRepository(),
+            repository ?? CreateSourceRepository(),
             NullLogger<PriceSourceToggleStore>.Instance);
         store.Reload();
         return store;
@@ -75,10 +110,13 @@ internal sealed class TempDatabase : IDisposable
     /// Creates the schema and returns a loaded <see cref="ProviderBudgetStore"/>, mirroring the startup path
     /// (EnsureCreated, then Reload). A store that never reloads reports every provider unbudgeted.
     /// </summary>
-    public ProviderBudgetStore CreateBudgetStore(PriceCatalogRepository? repository = null)
+    public ProviderBudgetStore CreateBudgetStore(
+        ProviderBudgetRepository? budgetRepository = null,
+        ProviderSpendRepository? spendRepository = null)
     {
         var store = new ProviderBudgetStore(
-            repository ?? CreateRepository(),
+            budgetRepository ?? CreateBudgetRepository(),
+            spendRepository ?? CreateSpendRepository(),
             NullLogger<ProviderBudgetStore>.Instance);
         store.Reload();
         return store;

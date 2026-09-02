@@ -44,7 +44,14 @@ public sealed class ManagementFacade
     private readonly ProviderBudgetStore? _budgetStore;
     private readonly ProviderEndpointScanner? _endpointScanner;
     private readonly ToolCallCapabilityStore? _capabilityStore;
-    private readonly PriceCatalogRepository? _priceCatalogRepository;
+    // Split across the three narrow price-catalog repositories this facade actually reads from (M3): a
+    // fresh price for the diagnosis view, a provider's rate-limit snapshot/history, and its reported usage.
+    // Kept as three fields rather than the former monolithic PriceCatalogRepository - this facade is exactly
+    // the kind of genuine cross-concern caller that split anticipated, so it takes each concern it needs
+    // directly instead of reintroducing a combined type.
+    private readonly PriceRepository? _priceRepository;
+    private readonly RateLimitRepository? _rateLimitRepository;
+    private readonly ReportedUsageRepository? _reportedUsageRepository;
     private readonly ModelAliasOverrideStore? _overrideStore;
     private readonly ISecretWriter? _secretWriter;
     private readonly ISecretReader? _secretReader;
@@ -97,7 +104,9 @@ public sealed class ManagementFacade
         _budgetStore = dependencies?.BudgetStore;
         _endpointScanner = dependencies?.EndpointScanner;
         _capabilityStore = dependencies?.CapabilityStore;
-        _priceCatalogRepository = dependencies?.PriceCatalogRepository;
+        _priceRepository = dependencies?.PriceRepository;
+        _rateLimitRepository = dependencies?.RateLimitRepository;
+        _reportedUsageRepository = dependencies?.ReportedUsageRepository;
         _overrideStore = dependencies?.OverrideStore;
         _rateLimitStalenessThreshold = dependencies?.RateLimitStalenessThreshold ?? DefaultRateLimitStalenessThreshold;
         _secretWriter = dependencies?.SecretWriter;
@@ -630,7 +639,7 @@ public sealed class ManagementFacade
     /// </summary>
     public ManagementResult<IReadOnlyList<PriceResolutionDiagnosisView>> GetPriceResolutionDiagnosis()
     {
-        if (_priceCatalogRepository is null)
+        if (_priceRepository is null)
         {
             return ManagementResult<IReadOnlyList<PriceResolutionDiagnosisView>>.Fail(
                 ManagementErrorType.Unavailable, "The price catalog is not available.");
@@ -639,7 +648,7 @@ public sealed class ManagementFacade
         var rows = _store.Snapshot.Options.ModelList
             .Select(entry =>
             {
-                var price = _priceCatalogRepository.GetFreshPrice(new ModelKey(entry.ModelName, entry.Provider), PriceFreshnessFloor);
+                var price = _priceRepository.GetFreshPrice(new ModelKey(entry.ModelName, entry.Provider), PriceFreshnessFloor);
                 return new PriceResolutionDiagnosisView(entry.ModelName, entry.Provider, price is not null, price?.IsApproximateMatch ?? false);
             })
             .OrderBy(r => r.ModelName, StringComparer.OrdinalIgnoreCase)
@@ -989,12 +998,12 @@ public sealed class ManagementFacade
     /// </summary>
     private ProviderRateLimitView? BuildRateLimitView(string providerKey)
     {
-        if (_priceCatalogRepository is null)
+        if (_rateLimitRepository is null)
         {
             return null;
         }
 
-        var (headers, observedAtUtc) = _priceCatalogRepository.GetRateLimitSnapshot(providerKey);
+        var (headers, observedAtUtc) = _rateLimitRepository.GetRateLimitSnapshot(providerKey);
         if (headers.Count == 0 || observedAtUtc is not { } observedAt)
         {
             return null;
@@ -1014,12 +1023,12 @@ public sealed class ManagementFacade
     /// </summary>
     private ProviderReportedUsageView? BuildReportedUsageView(string providerKey)
     {
-        if (_priceCatalogRepository is null)
+        if (_reportedUsageRepository is null)
         {
             return null;
         }
 
-        var (rows, fetchedAtUtc) = _priceCatalogRepository.GetReportedUsage(providerKey);
+        var (rows, fetchedAtUtc) = _reportedUsageRepository.GetReportedUsage(providerKey);
         if (rows.Count == 0 || fetchedAtUtc is not { } fetchedAt)
         {
             return null;
@@ -1046,7 +1055,7 @@ public sealed class ManagementFacade
             return projections;
         }
 
-        var history = _priceCatalogRepository!.GetRateLimitHistory(providerKey, observedAtUtc - ProjectionLookback);
+        var history = _rateLimitRepository!.GetRateLimitHistory(providerKey, observedAtUtc - ProjectionLookback);
 
         // Parse each history bucket once and reuse the parsed snapshot across all dimensions below,
         // rather than reparsing the same headers once per dimension.
@@ -1100,7 +1109,7 @@ public sealed class ManagementFacade
             return ManagementResult<RateLimitHistoryResponse>.Fail(ManagementErrorType.NotFound, $"Provider '{providerKey}' not found.");
         }
 
-        if (_priceCatalogRepository is null)
+        if (_rateLimitRepository is null)
         {
             return ManagementResult<RateLimitHistoryResponse>.Fail(ManagementErrorType.Unavailable, "Rate-limit history is not available.");
         }
@@ -1112,7 +1121,7 @@ public sealed class ManagementFacade
 
         var clampedHours = Math.Clamp(hours, 0.25, 24 * 30);
         var sinceUtc = DateTimeOffset.UtcNow.AddHours(-clampedHours);
-        var buckets = _priceCatalogRepository.GetRateLimitHistory(providerKey, sinceUtc);
+        var buckets = _rateLimitRepository.GetRateLimitHistory(providerKey, sinceUtc);
 
         var series = new Dictionary<string, List<RateLimitHistoryPointView>>(StringComparer.OrdinalIgnoreCase);
         DateTimeOffset? previousBucketUtc = null;

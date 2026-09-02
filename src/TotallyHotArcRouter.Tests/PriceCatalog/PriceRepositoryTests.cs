@@ -3,8 +3,8 @@ using TotallyHot.ArcRouter.PriceCatalog.Sources;
 
 namespace TotallyHot.ArcRouter.Tests.PriceCatalog;
 
-/// <summary>Covers <see cref="PriceCatalogRepository"/>'s upsert and freshness queries.</summary>
-public class PriceCatalogRepositoryTests
+/// <summary>Covers <see cref="PriceRepository"/>'s upsert and freshness queries.</summary>
+public class PriceRepositoryTests
 {
     [Fact]
     public void UpsertPrices_SameModelTwoProviders_CoexistAsSeparateRows()
@@ -13,7 +13,7 @@ public class PriceCatalogRepositoryTests
         // silently collapse these two into one arbitrary winner.
         using var temp = new TempDatabase();
         temp.Database.EnsureCreated();
-        var repository = new PriceCatalogRepository(temp.Database);
+        var repository = new PriceRepository(temp.Database);
 
         var written = repository.UpsertPrices(
             "litellm",
@@ -41,12 +41,13 @@ public class PriceCatalogRepositoryTests
     {
         using var temp = new TempDatabase();
         temp.Database.EnsureCreated();
-        var repository = new PriceCatalogRepository(temp.Database);
+        var repository = new PriceRepository(temp.Database);
+        var sourceRepository = new PriceSourceRepository(temp.Database);
 
         repository.UpsertPrices("litellm", 0, new[] { Price("gpt-4o", "openai", 2.50m, 10.00m) }, DateTimeOffset.UtcNow);
         repository.UpsertPrices("litellm", 0, new[] { Price("gpt-4o", "openai", 3.00m, 12.00m) }, DateTimeOffset.UtcNow);
 
-        Assert.Equal(1, repository.CountFreshPrices(TimeSpan.FromHours(24)));
+        Assert.Equal(1, sourceRepository.CountFreshPrices(TimeSpan.FromHours(24)));
         var price = repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24));
         Assert.Equal(3.00m, price!.InputPerMillionTokens);
     }
@@ -56,7 +57,8 @@ public class PriceCatalogRepositoryTests
     {
         using var temp = new TempDatabase();
         temp.Database.EnsureCreated();
-        var repository = new PriceCatalogRepository(temp.Database);
+        var repository = new PriceRepository(temp.Database);
+        var sourceRepository = new PriceSourceRepository(temp.Database);
 
         repository.UpsertPrices(
             "litellm",
@@ -65,7 +67,7 @@ public class PriceCatalogRepositoryTests
             DateTimeOffset.UtcNow - TimeSpan.FromHours(48));
 
         Assert.Null(repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24)));
-        Assert.Equal(0, repository.CountFreshPrices(TimeSpan.FromHours(24)));
+        Assert.Equal(0, sourceRepository.CountFreshPrices(TimeSpan.FromHours(24)));
     }
 
     [Fact]
@@ -73,7 +75,7 @@ public class PriceCatalogRepositoryTests
     {
         using var temp = new TempDatabase();
         temp.Database.EnsureCreated();
-        var repository = new PriceCatalogRepository(temp.Database);
+        var repository = new PriceRepository(temp.Database);
 
         Assert.Null(repository.GetFreshPrice(new ModelKey("does-not-exist", "nowhere"), TimeSpan.FromHours(24)));
     }
@@ -85,7 +87,8 @@ public class PriceCatalogRepositoryTests
         // for routing, so the fresh-price query must return null rather than a fabricated zero.
         using var temp = new TempDatabase();
         temp.Database.EnsureCreated();
-        var repository = new PriceCatalogRepository(temp.Database);
+        var repository = new PriceRepository(temp.Database);
+        var sourceRepository = new PriceSourceRepository(temp.Database);
 
         repository.UpsertPrices(
             "litellm",
@@ -95,7 +98,7 @@ public class PriceCatalogRepositoryTests
 
         Assert.Null(repository.GetFreshPrice(new ModelKey("odd-model", "openai"), TimeSpan.FromHours(24)));
         // The row still counts toward the fresh-price total (it exists and is recent).
-        Assert.Equal(1, repository.CountFreshPrices(TimeSpan.FromHours(24)));
+        Assert.Equal(1, sourceRepository.CountFreshPrices(TimeSpan.FromHours(24)));
     }
 
     [Fact]
@@ -105,29 +108,14 @@ public class PriceCatalogRepositoryTests
         // the moment it is switched off, rather than steering routing until its rows age out 24h later.
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
+        var sourceRepository = temp.CreateSourceRepository();
         repository.UpsertPrices("litellm", 0, new[] { Price("gpt-4o", "openai", 2.50m, 10.00m) }, DateTimeOffset.UtcNow);
 
         Assert.NotNull(repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24)));
 
-        repository.SetSourceEnabled("litellm", enabled: false);
+        sourceRepository.SetSourceEnabled("litellm", enabled: false);
 
         Assert.Null(repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24)));
-    }
-
-    [Fact]
-    public void CountFreshPrices_ExcludesRowsOwnedByADisabledSource()
-    {
-        // Without this filter a disabled source's rows would suppress the zero-fresh-prices Error (D4),
-        // reporting a healthy feed while nothing usable is actually being served.
-        using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
-        repository.UpsertPrices("litellm", 0, new[] { Price("gpt-4o", "openai", 2.50m, 10.00m) }, DateTimeOffset.UtcNow);
-
-        Assert.Equal(1, repository.CountFreshPrices(TimeSpan.FromHours(24)));
-
-        repository.SetSourceEnabled("litellm", enabled: false);
-
-        Assert.Equal(0, repository.CountFreshPrices(TimeSpan.FromHours(24)));
     }
 
     [Fact]
@@ -137,38 +125,13 @@ public class PriceCatalogRepositoryTests
         // than waiting for the next poll to rewrite them.
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
+        var sourceRepository = temp.CreateSourceRepository();
         repository.UpsertPrices("litellm", 0, new[] { Price("gpt-4o", "openai", 2.50m, 10.00m) }, DateTimeOffset.UtcNow);
 
-        repository.SetSourceEnabled("litellm", enabled: false);
-        repository.SetSourceEnabled("litellm", enabled: true);
+        sourceRepository.SetSourceEnabled("litellm", enabled: false);
+        sourceRepository.SetSourceEnabled("litellm", enabled: true);
 
         Assert.NotNull(repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24)));
-    }
-
-    [Fact]
-    public void GetSourceStates_ListsDisabledSourcesToo()
-    {
-        // The opposite of GetFreshPrice: this describes the sources themselves, so a disabled one must still
-        // be listed - otherwise the panel could never switch it back on.
-        using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
-        repository.UpsertPrices("litellm", 0, new[] { Price("gpt-4o", "openai", 2.50m, 10.00m) }, DateTimeOffset.UtcNow);
-        repository.SetSourceEnabled("litellm", enabled: false);
-
-        var source = repository.GetSourceStates().Single(s => s.Name == "litellm");
-
-        Assert.False(source.Enabled);
-        Assert.Equal(1, source.PriceCount);
-    }
-
-    [Fact]
-    public void SetSourceEnabled_UnknownSource_ReturnsFalse()
-    {
-        using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
-
-        // openpipe, not openrouter: openrouter is a real, seeded source now.
-        Assert.False(repository.SetSourceEnabled("openpipe", enabled: true));
     }
 
     [Fact]
@@ -179,10 +142,11 @@ public class PriceCatalogRepositoryTests
         using var temp = new TempDatabase();
         temp.SeedExtraSource("litellm", enabled: true, priorityScore: 7);
         var repository = temp.CreateRepository();
+        var sourceRepository = temp.CreateSourceRepository();
 
         repository.UpsertPrices("litellm", priorityScore: 0, new[] { Price("gpt-4o", "openai", 2.50m, 10.00m) }, DateTimeOffset.UtcNow);
 
-        Assert.Equal(7, repository.GetSourceStates().Single(s => s.Name == "litellm").PriorityScore);
+        Assert.Equal(7, sourceRepository.GetSourceStates().Single(s => s.Name == "litellm").PriorityScore);
     }
 
     [Fact]
@@ -256,63 +220,6 @@ public class PriceCatalogRepositoryTests
     }
 
     [Fact]
-    public void ReorderSources_RewritesContiguousScoresFromListPosition()
-    {
-        using var temp = new TempDatabase();
-        var repository = temp.CreateRepository(); // seeds litellm (0) and openrouter (-10)
-
-        var reordered = repository.ReorderSources(
-            [PriceCatalogOptions.OpenRouterSourceName, PriceCatalogOptions.LiteLlmSourceName]);
-
-        Assert.True(reordered);
-        var states = repository.GetSourceStates();
-        var openRouter = states.Single(s => s.Name == PriceCatalogOptions.OpenRouterSourceName);
-        var liteLlm = states.Single(s => s.Name == PriceCatalogOptions.LiteLlmSourceName);
-        Assert.Equal(1, openRouter.PriorityScore);
-        Assert.Equal(0, liteLlm.PriorityScore);
-    }
-
-    [Fact]
-    public void ReorderSources_MissingASource_RejectsAndChangesNothing()
-    {
-        using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
-        var before = repository.GetSourceStates().ToDictionary(s => s.Name, s => s.PriorityScore);
-
-        var reordered = repository.ReorderSources([PriceCatalogOptions.LiteLlmSourceName]);
-
-        // A partial list would leave the unlisted source's rank stale relative to the ones that moved -
-        // rejected outright rather than applied best-effort.
-        Assert.False(reordered);
-        var after = repository.GetSourceStates().ToDictionary(s => s.Name, s => s.PriorityScore);
-        Assert.Equal(before, after);
-    }
-
-    [Fact]
-    public void ReorderSources_UnknownSourceName_Rejects()
-    {
-        using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
-
-        var reordered = repository.ReorderSources(
-            [PriceCatalogOptions.LiteLlmSourceName, PriceCatalogOptions.OpenRouterSourceName, "openpipe"]);
-
-        Assert.False(reordered);
-    }
-
-    [Fact]
-    public void ReorderSources_DuplicateName_Rejects()
-    {
-        using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
-
-        var reordered = repository.ReorderSources(
-            [PriceCatalogOptions.LiteLlmSourceName, PriceCatalogOptions.LiteLlmSourceName]);
-
-        Assert.False(reordered);
-    }
-
-    [Fact]
     public void ReorderSources_ThenRecomputeWinners_FlipsContestedCellImmediately()
     {
         // Reordering alone doesn't retouch model_prices - it only rewrites priority_score. It is
@@ -322,11 +229,12 @@ public class PriceCatalogRepositoryTests
         temp.SeedExtraSource("high", enabled: true, priorityScore: 10);
         temp.SeedExtraSource("low", enabled: true, priorityScore: 0);
         var repository = temp.CreateRepository();
+        var sourceRepository = temp.CreateSourceRepository();
         repository.UpsertPrices("high", 10, new[] { Price("gpt-4o", "openai", 2.50m, 10.00m) }, DateTimeOffset.UtcNow);
         repository.UpsertPrices("low", 0, new[] { Price("gpt-4o", "openai", 999m, 999m) }, DateTimeOffset.UtcNow);
         Assert.Equal(2.50m, repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24))!.InputPerMillionTokens);
 
-        Assert.True(repository.ReorderSources(["low", "high", PriceCatalogOptions.LiteLlmSourceName, PriceCatalogOptions.OpenRouterSourceName]));
+        Assert.True(sourceRepository.ReorderSources(["low", "high", PriceCatalogOptions.LiteLlmSourceName, PriceCatalogOptions.OpenRouterSourceName]));
         var changed = repository.RecomputeWinners();
 
         Assert.True(changed > 0);
@@ -344,7 +252,7 @@ public class PriceCatalogRepositoryTests
         using var temp = new TempDatabase();
         temp.Database.EnsureCreated(); // seeds litellm (0) and openrouter (-10)
         var resolver = new StubIdentityResolver(new ResolvedModelIdentity("gpt-5.4", "openai"));
-        var repository = new PriceCatalogRepository(temp.Database, resolver);
+        var repository = new PriceRepository(temp.Database, resolver);
 
         repository.UpsertPrices("litellm", 0, new[] { Price("gpt-4o", "openai", 2.50m, 10.00m) }, DateTimeOffset.UtcNow);
         var written = repository.UpsertPrices("openrouter", -10, new[] { Price("openai/gpt-4o", "openai", 999m, 999m) }, DateTimeOffset.UtcNow);
@@ -369,7 +277,7 @@ public class PriceCatalogRepositoryTests
         // as it was before D3, so an unmatched model stays unresolved-by-routing-key rather than disappearing.
         using var temp = new TempDatabase();
         temp.Database.EnsureCreated();
-        var repository = new PriceCatalogRepository(temp.Database, new StubIdentityResolver(null));
+        var repository = new PriceRepository(temp.Database, new StubIdentityResolver(null));
 
         repository.UpsertPrices("litellm", 0, new[] { Price("mystery-model", "openai", 1m, 2m) }, DateTimeOffset.UtcNow);
 
@@ -382,7 +290,7 @@ public class PriceCatalogRepositoryTests
         using var temp = new TempDatabase();
         temp.Database.EnsureCreated();
         var resolver = new StubIdentityResolver(new ResolvedModelIdentity("gpt-5.4", "openai"), ResolutionRung.Exact);
-        var repository = new PriceCatalogRepository(temp.Database, resolver);
+        var repository = new PriceRepository(temp.Database, resolver);
 
         repository.UpsertPrices("litellm", 0, new[] { Price("gpt-4o", "openai", 2m, 6m) }, DateTimeOffset.UtcNow);
 
@@ -398,7 +306,7 @@ public class PriceCatalogRepositoryTests
         using var temp = new TempDatabase();
         temp.Database.EnsureCreated();
         var resolver = new StubIdentityResolver(new ResolvedModelIdentity("gpt-5.4", "openai"), ResolutionRung.SnapshotSuffixStripped);
-        var repository = new PriceCatalogRepository(temp.Database, resolver);
+        var repository = new PriceRepository(temp.Database, resolver);
 
         repository.UpsertPrices("litellm", 0, new[] { Price("gpt-4o-20250101", "openai", 2m, 6m) }, DateTimeOffset.UtcNow);
 
@@ -411,7 +319,7 @@ public class PriceCatalogRepositoryTests
     {
         using var temp = new TempDatabase();
         temp.Database.EnsureCreated();
-        var repository = new PriceCatalogRepository(temp.Database);
+        var repository = new PriceRepository(temp.Database);
 
         repository.UpsertPrices("litellm", 0, new[] { Price("gpt-4o", "openai", 2m, 6m) }, DateTimeOffset.UtcNow);
 
@@ -533,214 +441,6 @@ public class PriceCatalogRepositoryTests
     }
 
     [Fact]
-    public void AddProviderSpend_RepeatedCalls_AccumulatesCacheTokensAndAdvancesLastUsageAt()
-    {
-        using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
-        var firstUsageAt = new DateTimeOffset(2026, 3, 1, 0, 0, 0, TimeSpan.Zero);
-        var secondUsageAt = firstUsageAt.AddHours(1);
-
-        repository.AddProviderSpend("anthropic", "2026-03", 1m, 10, 5, cacheCreationTokens: 100, cacheReadTokens: 200, usageAtUtc: firstUsageAt);
-        repository.AddProviderSpend("anthropic", "2026-03", 2m, 20, 10, cacheCreationTokens: 50, cacheReadTokens: 25, usageAtUtc: secondUsageAt);
-
-        var row = Assert.Single(repository.GetProviderSpend("2026-03"));
-        Assert.Equal(150L, row.CacheCreationTokens);
-        Assert.Equal(225L, row.CacheReadTokens);
-        Assert.Equal(secondUsageAt, row.LastUsageAtUtc);
-    }
-
-    [Fact]
-    public void UpsertRateLimitHeaders_EmptyList_IsNoOp()
-    {
-        using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
-
-        repository.UpsertRateLimitHeaders("anthropic", [], DateTimeOffset.UtcNow);
-
-        var (headers, observedAt) = repository.GetRateLimitSnapshot("anthropic");
-        Assert.Empty(headers);
-        Assert.Null(observedAt);
-    }
-
-    [Fact]
-    public void UpsertRateLimitHeaders_UpsertsLatestValuePerHeader()
-    {
-        using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
-        var first = new DateTimeOffset(2026, 3, 1, 12, 0, 0, TimeSpan.Zero);
-        var second = first.AddMinutes(1);
-
-        repository.UpsertRateLimitHeaders(
-            "anthropic",
-            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
-            first);
-        repository.UpsertRateLimitHeaders(
-            "anthropic",
-            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "500")],
-            second);
-
-        var (headers, observedAt) = repository.GetRateLimitSnapshot("anthropic");
-        var row = Assert.Single(headers);
-        Assert.Equal("500", row.HeaderValue);
-        Assert.Equal(second, observedAt);
-    }
-
-    [Fact]
-    public void UpsertRateLimitHeaders_HeaderNameIsLowercased()
-    {
-        using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
-
-        repository.UpsertRateLimitHeaders(
-            "anthropic",
-            [new RateLimitHeaderRow("Anthropic-Ratelimit-Requests-Limit", "50")],
-            DateTimeOffset.UtcNow);
-
-        var (headers, _) = repository.GetRateLimitSnapshot("anthropic");
-        Assert.Equal("anthropic-ratelimit-requests-limit", Assert.Single(headers).HeaderName);
-    }
-
-    [Fact]
-    public void GetRateLimitSnapshot_UnknownProvider_ReturnsEmptyAndNullObservedAt()
-    {
-        using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
-
-        var (headers, observedAt) = repository.GetRateLimitSnapshot("does-not-exist");
-
-        Assert.Empty(headers);
-        Assert.Null(observedAt);
-    }
-
-    [Fact]
-    public void UpsertRateLimitHeaders_History_DedupesWithinTheSameMinuteBucket()
-    {
-        using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
-        var database = temp.Database;
-        var timestamp = new DateTimeOffset(2026, 3, 1, 12, 0, 30, TimeSpan.Zero);
-        var laterSameMinute = timestamp.AddSeconds(20);
-
-        repository.UpsertRateLimitHeaders(
-            "anthropic",
-            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
-            timestamp);
-        repository.UpsertRateLimitHeaders(
-            "anthropic",
-            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "999")],
-            laterSameMinute);
-
-        Assert.Equal(1, CountHistoryRows(database, "anthropic"));
-    }
-
-    [Fact]
-    public void UpsertRateLimitHeaders_History_AddsARowForANewMinuteBucket()
-    {
-        using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
-        var database = temp.Database;
-        var first = new DateTimeOffset(2026, 3, 1, 12, 0, 0, TimeSpan.Zero);
-        var nextMinute = first.AddMinutes(1);
-
-        repository.UpsertRateLimitHeaders(
-            "anthropic",
-            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
-            first);
-        repository.UpsertRateLimitHeaders(
-            "anthropic",
-            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "999")],
-            nextMinute);
-
-        Assert.Equal(2, CountHistoryRows(database, "anthropic"));
-    }
-
-    [Fact]
-    public void UpsertRateLimitHeaders_History_PrunesRowsOlderThan30Days()
-    {
-        using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
-        var database = temp.Database;
-        var old = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
-        var recent = old.AddDays(31);
-
-        repository.UpsertRateLimitHeaders(
-            "anthropic",
-            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
-            old);
-        Assert.Equal(1, CountHistoryRows(database, "anthropic"));
-
-        // The write itself carries the pruning: a capture more than 30 days after the old row is what
-        // triggers its removal, not a background job.
-        repository.UpsertRateLimitHeaders(
-            "anthropic",
-            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "999")],
-            recent);
-
-        Assert.Equal(1, CountHistoryRows(database, "anthropic"));
-    }
-
-    [Fact]
-    public void GetRateLimitHistory_ReturnsBucketsChronologicallyWithOnlyCapturedHeaders()
-    {
-        using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
-        var first = new DateTimeOffset(2026, 3, 1, 12, 0, 0, TimeSpan.Zero);
-        var second = first.AddMinutes(1);
-
-        repository.UpsertRateLimitHeaders(
-            "anthropic",
-            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
-            first);
-        repository.UpsertRateLimitHeaders(
-            "anthropic",
-            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "900")],
-            second);
-
-        var buckets = repository.GetRateLimitHistory("anthropic", first.AddMinutes(-5));
-
-        Assert.Equal(2, buckets.Count);
-        Assert.Equal(first, buckets[0].BucketUtc);
-        Assert.Single(buckets[0].Headers);
-        Assert.Equal("1000", buckets[0].Headers[0].HeaderValue);
-        Assert.Equal(second, buckets[1].BucketUtc);
-        Assert.Equal("900", buckets[1].Headers[0].HeaderValue);
-    }
-
-    [Fact]
-    public void GetRateLimitHistory_ExcludesBucketsBeforeSince()
-    {
-        using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
-        var old = new DateTimeOffset(2026, 3, 1, 12, 0, 0, TimeSpan.Zero);
-        var recent = old.AddMinutes(10);
-
-        repository.UpsertRateLimitHeaders(
-            "anthropic",
-            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
-            old);
-        repository.UpsertRateLimitHeaders(
-            "anthropic",
-            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "900")],
-            recent);
-
-        var buckets = repository.GetRateLimitHistory("anthropic", old.AddMinutes(5));
-
-        Assert.Single(buckets);
-        Assert.Equal(recent, buckets[0].BucketUtc);
-    }
-
-    [Fact]
-    public void GetRateLimitHistory_UnknownProvider_ReturnsEmpty()
-    {
-        using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
-
-        var buckets = repository.GetRateLimitHistory("does-not-exist", DateTimeOffset.UtcNow.AddDays(-1));
-
-        Assert.Empty(buckets);
-    }
-
-    [Fact]
     public void RecomputeWinners_ThreeSourcesContestOneCell_PicksHighestPriority()
     {
         using var temp = new TempDatabase();
@@ -748,6 +448,7 @@ public class PriceCatalogRepositoryTests
         temp.SeedExtraSource("b", enabled: true, priorityScore: 2);
         temp.SeedExtraSource("c", enabled: true, priorityScore: 3);
         var repository = temp.CreateRepository();
+        var sourceRepository = temp.CreateSourceRepository();
 
         repository.UpsertPrices("a", 1, new[] { Price("gpt-4o", "openai", 1.00m, 1.00m) }, DateTimeOffset.UtcNow);
         repository.UpsertPrices("b", 2, new[] { Price("gpt-4o", "openai", 2.00m, 2.00m) }, DateTimeOffset.UtcNow);
@@ -757,7 +458,7 @@ public class PriceCatalogRepositoryTests
 
         // Reorder so "a" now outranks everything, then recompute with no intervening UpsertPrices call - the
         // literal "no live pull" contract: the flip can only have come from a's already-stored observation.
-        Assert.True(repository.ReorderSources(["a", "c", "b", PriceCatalogOptions.LiteLlmSourceName, PriceCatalogOptions.OpenRouterSourceName]));
+        Assert.True(sourceRepository.ReorderSources(["a", "c", "b", PriceCatalogOptions.LiteLlmSourceName, PriceCatalogOptions.OpenRouterSourceName]));
         repository.RecomputeWinners();
 
         Assert.Equal(1.00m, repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24))!.InputPerMillionTokens);
@@ -770,10 +471,11 @@ public class PriceCatalogRepositoryTests
         temp.SeedExtraSource("disabled-high", enabled: true, priorityScore: 100);
         temp.SeedExtraSource("enabled-low", enabled: true, priorityScore: 1);
         var repository = temp.CreateRepository();
+        var sourceRepository = temp.CreateSourceRepository();
 
         repository.UpsertPrices("enabled-low", 1, new[] { Price("gpt-4o", "openai", 2.00m, 2.00m) }, DateTimeOffset.UtcNow);
         repository.UpsertPrices("disabled-high", 100, new[] { Price("gpt-4o", "openai", 999m, 999m) }, DateTimeOffset.UtcNow);
-        repository.SetSourceEnabled("disabled-high", enabled: false);
+        sourceRepository.SetSourceEnabled("disabled-high", enabled: false);
 
         repository.RecomputeWinners();
 
@@ -830,16 +532,6 @@ public class PriceCatalogRepositoryTests
         Assert.Equal(999m, observed["low"]); // retained even though it lost the cell
     }
 
-    private static int CountHistoryRows(PriceCatalogDatabase database, string providerKey)
-    {
-        using var connection = database.OpenConnection();
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM provider_rate_limit_history WHERE provider_key = $key;";
-        command.Parameters.AddWithValue("$key", providerKey);
-        return Convert.ToInt32(command.ExecuteScalar());
-    }
-
     private static NormalizedPrice Price(string model, string provider, decimal input, decimal output) =>
         new(model, provider, input, output, CachedInputPrice: null, BatchInputPrice: null, BatchOutputPrice: null);
 }
-

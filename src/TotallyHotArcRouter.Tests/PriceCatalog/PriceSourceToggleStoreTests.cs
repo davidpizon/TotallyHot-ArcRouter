@@ -29,7 +29,7 @@ public class PriceSourceToggleStoreTests
         // The store is constructed while the host graph is built, before the startup check has created the
         // schema. Reporting "disabled" until it reloads is the safe direction: nothing polls in that window.
         using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
+        var repository = temp.CreateSourceRepository();
         using var store = new PriceSourceToggleStore(repository, NullLogger<PriceSourceToggleStore>.Instance);
 
         Assert.False(store.IsEnabled(PriceCatalogOptions.LiteLlmSourceName));
@@ -43,7 +43,8 @@ public class PriceSourceToggleStoreTests
         // list reads through to the database while only the toggle stays cached.
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
-        using var store = temp.CreateToggleStore(repository);
+        var sourceRepository = temp.CreateSourceRepository();
+        using var store = temp.CreateToggleStore(sourceRepository);
 
         Assert.Equal(0, store.List().Single(s => s.Name == PriceCatalogOptions.LiteLlmSourceName).PriceCount);
 
@@ -73,7 +74,7 @@ public class PriceSourceToggleStoreTests
     public void SetEnabled_PersistsAcrossAFreshStore()
     {
         using var temp = new TempDatabase();
-        var repository = temp.CreateRepository();
+        var repository = temp.CreateSourceRepository();
         using (var store = temp.CreateToggleStore(repository))
         {
             Assert.True(store.SetEnabled(PriceCatalogOptions.LiteLlmSourceName, enabled: false));
@@ -193,7 +194,8 @@ public class PriceSourceToggleStoreTests
         using var temp = new TempDatabase();
         temp.SeedExtraSource("high", enabled: true, priorityScore: 10);
         var repository = temp.CreateRepository();
-        using var store = temp.CreateToggleStore(repository);
+        var sourceRepository = temp.CreateSourceRepository();
+        using var store = temp.CreateToggleStore(sourceRepository);
         repository.UpsertPrices("high", 10, [new TotallyHot.ArcRouter.PriceCatalog.Sources.NormalizedPrice("gpt-4o", "openai", 2.50m, 10.00m, null, null, null)], DateTimeOffset.UtcNow);
         repository.UpsertPrices(PriceCatalogOptions.LiteLlmSourceName, 0, [new TotallyHot.ArcRouter.PriceCatalog.Sources.NormalizedPrice("gpt-4o", "openai", 999m, 999m, null, null, null)], DateTimeOffset.UtcNow);
 

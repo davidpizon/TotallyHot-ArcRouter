@@ -30,6 +30,7 @@ public class StartupHealthCheckHostedServiceTests
     {
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
+        var sourceRepository = temp.CreateSourceRepository();
         var ledger = temp.CreateUsageLedger();
 
         var retentionDays = 30;
@@ -39,7 +40,7 @@ public class StartupHealthCheckHostedServiceTests
 
         var registry = Mock.Of<IPriceSourceRegistry>(r => r.EnabledClients == Array.Empty<IPriceSourceClient>());
         var ingestionService = new PriceCatalogIngestionService(
-            registry, repository, temp.CreateToggleStore(repository), NullLogger<PriceCatalogIngestionService>.Instance);
+            registry, repository, sourceRepository, temp.CreateToggleStore(sourceRepository), NullLogger<PriceCatalogIngestionService>.Instance);
 
         var transcriptDb = CreateTranscriptDatabase(temp);
         var transcriptStore = new SqliteTranscriptStore(
@@ -47,10 +48,10 @@ public class StartupHealthCheckHostedServiceTests
         var service = new StartupHealthCheckHostedService(
             NullLogger<StartupHealthCheckHostedService>.Instance,
             temp.Database,
-            repository,
+            sourceRepository,
             ingestionService,
-            temp.CreateToggleStore(repository),
-            temp.CreateBudgetStore(repository),
+            temp.CreateToggleStore(sourceRepository),
+            temp.CreateBudgetStore(),
             temp.CreateToolCallCapabilityStore(),
             ledger,
             temp.CreateRollupStore(),
@@ -78,6 +79,7 @@ public class StartupHealthCheckHostedServiceTests
     {
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
+        var sourceRepository = temp.CreateSourceRepository();
         var ledger = temp.CreateUsageLedger();
 
         var now = DateTimeOffset.UtcNow;
@@ -85,7 +87,7 @@ public class StartupHealthCheckHostedServiceTests
 
         var registry = Mock.Of<IPriceSourceRegistry>(r => r.EnabledClients == Array.Empty<IPriceSourceClient>());
         var ingestionService = new PriceCatalogIngestionService(
-            registry, repository, temp.CreateToggleStore(repository), NullLogger<PriceCatalogIngestionService>.Instance);
+            registry, repository, sourceRepository, temp.CreateToggleStore(sourceRepository), NullLogger<PriceCatalogIngestionService>.Instance);
 
         var transcriptDb = CreateTranscriptDatabase(temp);
         var transcriptStore = new SqliteTranscriptStore(
@@ -93,10 +95,10 @@ public class StartupHealthCheckHostedServiceTests
         var service = new StartupHealthCheckHostedService(
             NullLogger<StartupHealthCheckHostedService>.Instance,
             temp.Database,
-            repository,
+            sourceRepository,
             ingestionService,
-            temp.CreateToggleStore(repository),
-            temp.CreateBudgetStore(repository),
+            temp.CreateToggleStore(sourceRepository),
+            temp.CreateBudgetStore(),
             temp.CreateToolCallCapabilityStore(),
             ledger,
             temp.CreateRollupStore(),
@@ -159,15 +161,16 @@ public class StartupHealthCheckHostedServiceTests
     /// </summary>
     private static StartupHealthCheckHostedService CreateMinimalService(
         TempDatabase temp,
-        out PriceCatalogRepository repository,
+        out PriceRepository repository,
         IEmbeddingClient? embeddingClient,
         out EmbeddingWarmupState? warmupState)
     {
         repository = temp.CreateRepository();
+        var sourceRepository = temp.CreateSourceRepository();
         var ledger = temp.CreateUsageLedger();
         var registry = Mock.Of<IPriceSourceRegistry>(r => r.EnabledClients == Array.Empty<IPriceSourceClient>());
         var ingestionService = new PriceCatalogIngestionService(
-            registry, repository, temp.CreateToggleStore(repository), NullLogger<PriceCatalogIngestionService>.Instance);
+            registry, repository, sourceRepository, temp.CreateToggleStore(sourceRepository), NullLogger<PriceCatalogIngestionService>.Instance);
         warmupState = embeddingClient is null ? null : new EmbeddingWarmupState();
 
         var transcriptDb = CreateTranscriptDatabase(temp);
@@ -177,10 +180,10 @@ public class StartupHealthCheckHostedServiceTests
         return new StartupHealthCheckHostedService(
             NullLogger<StartupHealthCheckHostedService>.Instance,
             temp.Database,
-            repository,
+            sourceRepository,
             ingestionService,
-            temp.CreateToggleStore(repository),
-            temp.CreateBudgetStore(repository),
+            temp.CreateToggleStore(sourceRepository),
+            temp.CreateBudgetStore(),
             temp.CreateToolCallCapabilityStore(),
             ledger,
             temp.CreateRollupStore(),

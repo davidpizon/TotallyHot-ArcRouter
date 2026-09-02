@@ -1,3 +1,4 @@
+using TotallyHot.ArcRouter.Proxy.Concurrency;
 using Microsoft.Extensions.Logging;
 
 namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
@@ -10,11 +11,13 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// (<c>docs/router/ollama-show-capabilities-plan.md</c>).
 /// </summary>
 /// <remarks>
-/// Shaped after <see cref="TotallyHot.ArcRouter.PriceCatalog.PriceSourceToggleStore"/>: immutable snapshots
-/// swapped under a lock and published through <c>volatile</c> fields, so the read path takes no lock at
-/// all. That matters here more than it does for price sources -
-/// <see cref="GetModelCapability"/> sits on the request path, consulted for every request that carries
-/// <c>tools</c>, so it must be a dictionary lookup rather than a query.
+/// Shaped after <see cref="TotallyHot.ArcRouter.PriceCatalog.PriceSourceToggleStore"/>: an immutable
+/// snapshot swapped via <see cref="SnapshotCache{T}"/>, so the read path takes no lock at all. That matters
+/// here more than it does for price sources - <see cref="GetModelCapability"/> sits on the request path,
+/// consulted for every request that carries <c>tools</c>, so it must be a dictionary lookup rather than a
+/// query. The three underlying tables' snapshots are bundled into one <see cref="CapabilitySnapshots"/>
+/// record rather than swapped as three separate fields, so one <see cref="Reload"/> call is one atomic
+/// publish, not three a reader could observe mid-sequence.
 /// <para>
 /// Like the toggle and budget stores, the constructor deliberately does <em>not</em> read the database.
 /// This is a singleton built while the DI graph is assembled, before
@@ -34,21 +37,11 @@ public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore, IModelCo
 
     private readonly ToolCallCapabilityRepository _repository;
     private readonly ILogger<ToolCallCapabilityStore> _logger;
-    private readonly object _gate = new();
 
-    // Assigned brand-new (never mutated) dictionaries under _gate. Volatile for the same reason
-    // PriceSourceToggleStore's snapshot is: reference assignment being atomic only rules out a torn read,
-    // it says nothing about visibility, so a lock-free reader could otherwise keep observing a stale
-    // snapshot indefinitely - here that would mean scanning a model with a dialect an operator has since
-    // corrected.
-    private volatile IReadOnlyDictionary<ModelCapabilityKey, ModelToolCapability> _modelSnapshot =
-        new Dictionary<ModelCapabilityKey, ModelToolCapability>();
-
-    private volatile IReadOnlyDictionary<string, ProviderEndpointCapabilities> _providerSnapshot =
-        new Dictionary<string, ProviderEndpointCapabilities>(StringComparer.OrdinalIgnoreCase);
-
-    private volatile IReadOnlyDictionary<ModelCapabilityKey, ModelContextWindow> _contextWindowSnapshot =
-        new Dictionary<ModelCapabilityKey, ModelContextWindow>();
+    // The three capability tables' snapshots bundled into one record (docs/router/code-smell-refactoring-plan.md
+    // M2) so Reload's swap is a single atomic reference assignment via SnapshotCache<T>, rather than three
+    // separately-swapped volatile fields a reader could observe half-updated across.
+    private readonly SnapshotCache<CapabilitySnapshots> _cache = new(CapabilitySnapshots.Empty);
 
     /// <summary>Initializes a new instance of the <see cref="ToolCallCapabilityStore"/> class with empty snapshots.</summary>
     public ToolCallCapabilityStore(ToolCallCapabilityRepository repository, ILogger<ToolCallCapabilityStore> logger)
@@ -68,22 +61,14 @@ public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore, IModelCo
     /// write so the cache reflects what was actually persisted rather than what was requested - which
     /// matters here because a write can be silently rejected by the confidence gate.
     /// </summary>
-    public void Reload()
-    {
-        var models = _repository.GetModelCapabilities()
-            .ToDictionary(c => new ModelCapabilityKey(c.ProviderKey, c.ModelName), c => c);
-        var providers = _repository.GetProviderCapabilities()
-            .ToDictionary(c => c.ProviderKey, c => c, StringComparer.OrdinalIgnoreCase);
-        var contextWindows = _repository.GetModelContextWindows()
-            .ToDictionary(w => new ModelCapabilityKey(w.ProviderKey, w.ModelName), w => w);
-
-        lock (_gate)
-        {
-            _modelSnapshot = models;
-            _providerSnapshot = providers;
-            _contextWindowSnapshot = contextWindows;
-        }
-    }
+    public void Reload() =>
+        _cache.Rebuild(() => new CapabilitySnapshots(
+            Models: _repository.GetModelCapabilities()
+                .ToDictionary(c => new ModelCapabilityKey(c.ProviderKey, c.ModelName), c => c),
+            Providers: _repository.GetProviderCapabilities()
+                .ToDictionary(c => c.ProviderKey, c => c, StringComparer.OrdinalIgnoreCase),
+            ContextWindows: _repository.GetModelContextWindows()
+                .ToDictionary(w => new ModelCapabilityKey(w.ProviderKey, w.ModelName), w => w)));
 
     /// <inheritdoc />
     public ModelToolCapability? GetModelCapability(string providerKey, string modelName)
@@ -93,7 +78,7 @@ public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore, IModelCo
             return null;
         }
 
-        return _modelSnapshot.TryGetValue(new ModelCapabilityKey(providerKey, modelName), out var capability)
+        return _cache.Current.Models.TryGetValue(new ModelCapabilityKey(providerKey, modelName), out var capability)
             ? capability
             : null;
     }
@@ -106,7 +91,7 @@ public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore, IModelCo
             return null;
         }
 
-        return _contextWindowSnapshot.TryGetValue(new ModelCapabilityKey(providerKey, modelName), out var window)
+        return _cache.Current.ContextWindows.TryGetValue(new ModelCapabilityKey(providerKey, modelName), out var window)
             ? window
             : null;
     }
@@ -119,7 +104,7 @@ public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore, IModelCo
             return null;
         }
 
-        return _providerSnapshot.TryGetValue(providerKey, out var capabilities) ? capabilities : null;
+        return _cache.Current.Providers.TryGetValue(providerKey, out var capabilities) ? capabilities : null;
     }
 
     /// <inheritdoc />
@@ -301,6 +286,29 @@ public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore, IModelCo
     /// </summary>
     private static string SanitizeForLog(string value) =>
         value.Replace("\r", " ").Replace("\n", " ");
+}
+
+/// <summary>
+/// The three capability tables' read snapshots, bundled into one immutable record so
+/// <see cref="ToolCallCapabilityStore.Reload"/> can swap all three together as a single atomic reference
+/// assignment via <see cref="TotallyHot.ArcRouter.Proxy.Concurrency.SnapshotCache{T}"/>. Before this
+/// bundling, the three tables were three separately-swapped <see langword="volatile"/> fields under one
+/// lock - correct, but not what <see cref="TotallyHot.ArcRouter.Proxy.Concurrency.SnapshotCache{T}"/> models,
+/// which publishes exactly one snapshot per swap (docs/router/code-smell-refactoring-plan.md M2).
+/// </summary>
+/// <param name="Models">Per-(provider, model) tool-call dialect capabilities.</param>
+/// <param name="Providers">Per-provider endpoint-flavor capabilities.</param>
+/// <param name="ContextWindows">Per-(provider, model) probed context windows.</param>
+internal sealed record CapabilitySnapshots(
+    IReadOnlyDictionary<ModelCapabilityKey, ModelToolCapability> Models,
+    IReadOnlyDictionary<string, ProviderEndpointCapabilities> Providers,
+    IReadOnlyDictionary<ModelCapabilityKey, ModelContextWindow> ContextWindows)
+{
+    /// <summary>The all-empty snapshot every store starts with before its first <see cref="ToolCallCapabilityStore.Reload"/>.</summary>
+    public static CapabilitySnapshots Empty { get; } = new(
+        new Dictionary<ModelCapabilityKey, ModelToolCapability>(),
+        new Dictionary<string, ProviderEndpointCapabilities>(StringComparer.OrdinalIgnoreCase),
+        new Dictionary<ModelCapabilityKey, ModelContextWindow>());
 }
 
 /// <summary>

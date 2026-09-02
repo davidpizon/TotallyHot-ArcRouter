@@ -3,22 +3,10 @@
    Authorization). Mirrors SettingsModal's overlay/stop-propagation/EventCallback pattern. *@
 @using TotallyHot.ArcRouter.Gui.Admin
 
-<div class="overlay-backdrop fixed inset-0 z-50 flex items-center justify-center"
-     @onclick="OnCancel">
-    <div class="overlay-panel w-full max-w-md rounded-lg border border-slate-700"
-         @onclick:stopPropagation="true">
-        <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
-            <span class="text-sm font-semibold text-slate-200 tracking-wide uppercase">
-                @(IsNew ? "Add Provider" : "Edit Provider")
-            </span>
-            <button @onclick="OnCancel"
-                    aria-label="@(IsNew ? "Close add provider dialog" : $"Close edit dialog for provider {Key}")"
-                    class="text-slate-400 hover:text-slate-200 transition-colors">
-                <Icon Name="x" Size="20" />
-            </button>
-        </div>
-
-        <div class="overlay-content p-5 space-y-3">
+<DialogShell Title="@(Model.IsNew ? "Add Provider" : "Edit Provider")"
+             CloseAriaLabel="@(Model.IsNew ? "Close add provider dialog" : $"Close edit dialog for provider {Model.Key}")"
+             OnClose="OnCancel"
+             ContentClass="overlay-content p-5 space-y-3">
             <div>
                 <div class="text-xs text-slate-500 mb-1">Provider Name</div>
                 <input type="text" data-testid="provider-name" value="@_providerName" @oninput="e => _providerName = AsString(e.Value)"
@@ -157,37 +145,24 @@
                     Save
                 </button>
             </div>
-        </div>
-    </div>
-</div>
+</DialogShell>
 
 @code {
-    /// <summary>The provider key. Passed when editing an existing provider; ignored when adding a new one (auto-generated as a GUID).</summary>
-    [Parameter] public string Key { get; set; } = string.Empty;
-
-    /// <summary>Whether the dialog is adding a new provider (vs. editing an existing one).</summary>
-    [Parameter] public bool IsNew { get; set; }
-
-    /// <summary>Initial base URL.</summary>
-    [Parameter] public string BaseUrl { get; set; } = string.Empty;
-
-    /// <summary>The provider's existing auth header name. This dialog no longer edits it directly; on save it
-    /// is only used as a fallback for provider types with no <see cref="ProviderTemplates"/> entry (see
-    /// <see cref="ResolveSavedAuthHeaderName"/>) - otherwise the selected type's documented auth header wins.</summary>
-    [Parameter] public string AuthHeaderName { get; set; } = "Authorization";
-
-    /// <summary>The provider's existing custom headers, seeded into the editable rows.</summary>
-    [Parameter] public IReadOnlyList<ProviderHeaderView> Headers { get; set; } = [];
-
-    /// <summary>Whether the existing provider is flagged as costing nothing.</summary>
-    [Parameter] public bool IsFree { get; set; }
-
-    /// <summary>The name of the provider's <see cref="TotallyHot.ArcRouter.Gui.Admin.ProviderType"/> member,
-    /// or empty/unrecognized for a provider stored before the field existed (falls back to <c>Other</c>).</summary>
-    [Parameter] public string ProviderType { get; set; } = string.Empty;
-
-    /// <summary>A user-friendly display name for the provider, distinct from the unique <see cref="Key"/>.</summary>
-    [Parameter] public string ProviderName { get; set; } = string.Empty;
+    /// <summary>The provider's current field values, seeded once into the editable form on
+    /// <see cref="OnInitialized"/>. Bundled into one parameter (rather than eight flat ones) because every
+    /// field here is part of the same provider snapshot the caller (<c>ProvidersAdmin</c>) reads and writes
+    /// together; <see cref="Error"/> stays a separate parameter because it is transient dialog UI state, not
+    /// part of the provider being edited.</summary>
+    [Parameter, EditorRequired]
+    public ProviderEditModel Model { get; set; } = new(
+        Key: string.Empty,
+        IsNew: false,
+        BaseUrl: string.Empty,
+        AuthHeaderName: "Authorization",
+        Headers: [],
+        IsFree: false,
+        ProviderType: string.Empty,
+        ProviderName: string.Empty);
 
     /// <summary>An error message to display (e.g. a validation failure returned by the proxy).</summary>
     [Parameter] public string? Error { get; set; }
@@ -211,7 +186,7 @@
     /// <summary>Whether the form has enough to submit: a base URL, a display name when adding a new provider, and no duplicate header names.</summary>
     private bool CanSave =>
         !string.IsNullOrWhiteSpace(_baseUrl)
-        && (!IsNew || !string.IsNullOrWhiteSpace(_providerName))
+        && (!Model.IsNew || !string.IsNullOrWhiteSpace(_providerName))
         && DuplicateHeaderError is null;
 
     // Seed the editable fields from the parameters exactly once, when the dialog opens. The dialog is
@@ -221,16 +196,16 @@
     // revert the user's in-progress edits between typing and clicking Save.
     protected override void OnInitialized()
     {
-        _key = Key;
-        _baseUrl = BaseUrl;
-        _isFree = IsFree;
-        _providerName = ProviderName;
-        _selectedProviderType = Enum.TryParse<TotallyHot.ArcRouter.Gui.Admin.ProviderType>(ProviderType, out var providerType)
+        _key = Model.Key;
+        _baseUrl = Model.BaseUrl;
+        _isFree = Model.IsFree;
+        _providerName = Model.ProviderName;
+        _selectedProviderType = Enum.TryParse<TotallyHot.ArcRouter.Gui.Admin.ProviderType>(Model.ProviderType, out var providerType)
             && ProviderTemplates.Templates.ContainsKey(providerType)
                 ? providerType
                 : TotallyHot.ArcRouter.Gui.Admin.ProviderType.Other;
 
-        foreach (var header in Headers)
+        foreach (var header in Model.Headers)
         {
             var useEnvVar = header.Source == HeaderValueSource.EnvVar;
             // A protected-store header is write-only exactly like a locked literal (its value is never
@@ -371,23 +346,25 @@
 
     /// <summary>The auth header name to show in the "add a header" hint: the selected provider type's
     /// documented auth header when known, falling back to the provider's existing
-    /// <see cref="AuthHeaderName"/> (and then <c>Authorization</c>) otherwise. Keeps the hint from steering
-    /// an operator toward the wrong header name for providers that don't use <c>Authorization</c>.</summary>
+    /// <see cref="ProviderEditModel.AuthHeaderName"/> (and then <c>Authorization</c>) otherwise. Keeps the
+    /// hint from steering an operator toward the wrong header name for providers that don't use
+    /// <c>Authorization</c>.</summary>
     private string AuthHeaderHint =>
         TryGetTemplateAuthHeaderName(out var templateAuthHeaderName)
             ? templateAuthHeaderName
-            : string.IsNullOrWhiteSpace(AuthHeaderName) ? "Authorization" : AuthHeaderName.Trim();
+            : string.IsNullOrWhiteSpace(Model.AuthHeaderName) ? "Authorization" : Model.AuthHeaderName.Trim();
 
     /// <summary>The <see cref="ProviderEditResult.AuthHeaderName"/> to save. It must track the header the
     /// operator actually authenticates with rather than a stale value from before this dialog stopped
     /// letting them edit it directly: prefers the selected provider type's documented auth header (the same
-    /// lookup as <see cref="AuthHeaderHint"/>), falling back to the existing <see cref="AuthHeaderName"/>
-    /// parameter for types with no authoritative template entry - which keeps an already-configured
-    /// provider's non-default header (e.g. "x-api-key") intact across saves that don't change its type.</summary>
+    /// lookup as <see cref="AuthHeaderHint"/>), falling back to the existing
+    /// <see cref="ProviderEditModel.AuthHeaderName"/> for types with no authoritative template entry - which
+    /// keeps an already-configured provider's non-default header (e.g. "x-api-key") intact across saves that
+    /// don't change its type.</summary>
     private string ResolveSavedAuthHeaderName() =>
         TryGetTemplateAuthHeaderName(out var templateAuthHeaderName)
             ? templateAuthHeaderName
-            : string.IsNullOrWhiteSpace(AuthHeaderName) ? "Authorization" : AuthHeaderName.Trim();
+            : string.IsNullOrWhiteSpace(Model.AuthHeaderName) ? "Authorization" : Model.AuthHeaderName.Trim();
 
     /// <summary>Builds a <see cref="ProviderEditResult"/> from the form's current fields and raises <see cref="OnSave"/>.</summary>
     private async Task Save()
@@ -400,7 +377,7 @@
         var authHeaderName = ResolveSavedAuthHeaderName();
 
         var result = new ProviderEditResult(
-            Key: IsNew ? Guid.NewGuid().ToString() : Key,
+            Key: Model.IsNew ? Guid.NewGuid().ToString() : Model.Key,
             BaseUrl: _baseUrl.Trim(),
             AuthHeaderName: authHeaderName,
             Headers: BuildHeaders(authHeaderName),
@@ -455,6 +432,33 @@
         string ProviderType,
         string ProviderName,
         bool IsFree = false);
+
+    /// <summary>The provider snapshot the dialog is seeded from: everything <see cref="OnInitialized"/>
+    /// copies into the editable form. Bundles the eight data fields the dialog previously took as flat
+    /// <c>[Parameter]</c>s into one object, since the caller (<c>ProvidersAdmin</c>) always reads and
+    /// writes them together as a single provider's state.</summary>
+    /// <param name="Key">The provider key. Read when editing an existing provider; ignored when adding a
+    /// new one (auto-generated as a GUID on save).</param>
+    /// <param name="IsNew">Whether the dialog is adding a new provider (vs. editing an existing one).</param>
+    /// <param name="BaseUrl">The initial base URL.</param>
+    /// <param name="AuthHeaderName">The provider's existing auth header name. The dialog no longer edits
+    /// it directly; on save it is only used as a fallback for provider types with no
+    /// <see cref="ProviderTemplates"/> entry (see <see cref="ResolveSavedAuthHeaderName"/>) - otherwise the
+    /// selected type's documented auth header wins.</param>
+    /// <param name="Headers">The provider's existing custom headers, seeded into the editable rows.</param>
+    /// <param name="IsFree">Whether the existing provider is flagged as costing nothing.</param>
+    /// <param name="ProviderType">The name of the provider's <see cref="TotallyHot.ArcRouter.Gui.Admin.ProviderType"/>
+    /// member, or empty/unrecognized for a provider stored before the field existed (falls back to <c>Other</c>).</param>
+    /// <param name="ProviderName">A user-friendly display name for the provider, distinct from the unique <paramref name="Key"/>.</param>
+    public sealed record ProviderEditModel(
+        string Key,
+        bool IsNew,
+        string BaseUrl,
+        string AuthHeaderName,
+        IReadOnlyList<ProviderHeaderView> Headers,
+        bool IsFree,
+        string ProviderType,
+        string ProviderName);
 
     /// <summary>A mutable editor row for one custom header. <see cref="Value"/> holds the literal value or,
     /// when <see cref="UseEnvVar"/> is set, the environment-variable name.</summary>

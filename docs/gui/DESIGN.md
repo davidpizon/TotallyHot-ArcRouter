@@ -228,10 +228,10 @@ actually appear in `app.css`.
   `box-shadow: var(--shadow-lift)` — one of two heavy shadow values in the whole stylesheet, reserved
   for floating/elevated UI (§6). Focus-visible state: `outline: 2px solid var(--accent);
   outline-offset: 2px`.
-- **Modals / windows** — panel on `#121212` (the deepest surface, not the card surface — see §4.1),
-  `border-color: var(--border-button)`, backdrop blur, elevated with `var(--shadow-dialog)`
-  (`0 8px 24px rgba(0,0,0,0.5)`). **`SettingsModal.razor` ("System Settings") is the reference
-  implementation every new window matches** — see §4.1.
+- **Modals / windows** — panel on `var(--surface-card)` (`#181818`), `border-color:
+  var(--border-button)`, backdrop blur, elevated with `var(--shadow-dialog)`
+  (`0 8px 24px rgba(0,0,0,0.5)`). **`DialogShell.razor` is the shared shell implementation every new
+  window builds on** — see §4.1.
 
 ### 4.2 Buttons: Primary / Secondary / Ghost / Circular Action
 
@@ -263,53 +263,52 @@ dense repeated row actions.
 
 ### 4.1 New windows follow the System Settings pattern
 
-Any new modal, dialog, or window copies the shell of
-[`SettingsModal.razor`](../../src/TotallyHotArcRouter.Gui/Components/SettingsModal.razor) rather than
-inventing its own chrome. `ProviderEditDialog.razor` already does this, so the two are identical
-above the body — that consistency is the point, and it is what new windows are expected to preserve.
+Any new modal, dialog, or window builds on
+[`DialogShell.razor`](../../src/TotallyHotArcRouter.Gui/Components/DialogShell.razor) rather than
+inventing its own chrome. `DialogShell` is the extracted, shared implementation of the shell every
+dialog in this app already followed by convention (`SettingsModal.razor` "System Settings",
+`ProviderEditDialog.razor`, `RemoveProviderDialog.razor`, `UnlockSecretFieldDialog.razor`) - that
+consistency is the point, and `DialogShell` is what makes it structural instead of copy-pasted.
 
-The shell, verbatim:
+Usage:
 
 ```razor
-<div class="overlay-backdrop fixed inset-0 z-50 flex items-center justify-center"
-     style="background-color:rgba(0,0,0,0.7);backdrop-filter:blur(4px)"
-     @onclick="OnClose">
-    <div class="overlay-panel w-full rounded-lg border border-slate-700" style="background:#121212"
-         @onclick:stopPropagation="true">
-        <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
-            <span class="text-sm font-semibold text-slate-200 tracking-wide uppercase">Window Title</span>
-            <button @onclick="OnClose"
-                    aria-label="Close window title"
-                    class="text-slate-400 hover:text-slate-200 transition-colors">
-                <Icon Name="x" Size="20" />
-            </button>
-        </div>
-        <div class="overlay-content p-5 space-y-4">
-            @* body *@
-        </div>
-    </div>
-</div>
+<DialogShell Title="Window Title"
+             CloseAriaLabel="Close window title"
+             OnClose="OnClose">
+    @* body *@
+</DialogShell>
 ```
 
-The load-bearing details:
+`DialogShell`'s parameters:
+
+| Parameter | Contract |
+| --- | --- |
+| `Title` (required) | The uppercase header title. |
+| `CloseAriaLabel` (required) | The close glyph's accessible name - the button's only content is an SVG, so without one a screen reader announces an unnamed button. |
+| `OnClose` (required) | `EventCallback` invoked by the backdrop click, the close glyph, and (when `EnableEscapeToClose` is set) Escape. The shell never closes itself - the caller decides what closing means. A caller whose own public parameter is named `OnCancel` (matching `docs/gui/DESIGN.md`'s historical either/or) wires it straight through: `OnClose="OnCancel"`. |
+| `ChildContent` (required) | The body, rendered inside the scrollable `.overlay-content` wrapper. |
+| `ContentClass` (optional, default `overlay-content p-5 space-y-4`) | The body wrapper's classes - override the `space-y-*` gap for a denser layout (`ProviderEditDialog` uses `overlay-content p-5 space-y-3`) while keeping the `overlay-content p-5` base. |
+| `EnableEscapeToClose` (optional, default `false`) | Whether Escape closes the dialog, bound on the panel (not the body) so it fires regardless of which descendant has focus. Off by default - only opt in for a dialog that genuinely wants it (`RemoveProviderDialog`, `UnlockSecretFieldDialog` do; `SettingsModal`, `ProviderEditDialog` don't). |
+
+What `DialogShell` renders, and the contract behind it:
 
 | Element | Contract |
 | --- | --- |
-| Backdrop | `.overlay-backdrop`, `rgba(0,0,0,0.7)` + `backdrop-filter:blur(4px)`, `z-50`, centers its panel |
-| Dismissal | Backdrop `@onclick` closes; panel carries `@onclick:stopPropagation="true"` so body clicks don't |
-| Panel | `.overlay-panel`, `rounded-lg`, `border-slate-700` (→ `var(--border-button)`), `background:#121212` — the deepest surface (`--surface-base`), not the card surface. **Dynamic sizing via CSS**: max-width `min(90vw, 700px)`, min-width `min(100% - 2rem, 400px)`, max-height `calc(100vh - 120px)` to fit viewport; `display: flex; flex-direction: column` for layout |
+| Backdrop | `.overlay-backdrop` (`rgba(0,0,0,0.7)` + `backdrop-filter:blur(4px)`, both from the CSS class - no inline `style`), `z-50`, centers its panel. Backdrop click invokes `OnClose` |
+| Dismissal | Backdrop click closes; panel carries `@onclick:stopPropagation="true"` so body clicks don't |
+| Panel | `.overlay-panel w-full max-w-md rounded-lg border border-slate-700`. `.overlay-panel`'s own CSS supplies `background: var(--surface-card)` (`#181818`) and the **dynamic sizing**: max-width `min(90vw, 700px)`, min-width `min(100% - 2rem, 400px)`, max-height `calc(100vh - 120px)`, `display: flex; flex-direction: column` |
 | Header | `px-5 py-4`, `border-b border-slate-700`, title left / close `x` right. **Always stays fixed** during content scroll |
 | Title | `text-sm font-semibold text-slate-200 tracking-wide uppercase` — **not** a large heading |
-| Close glyph | `<Icon Name="x" Size="20" />`, `slate-400`→`slate-200` on hover, 150ms `transition-colors`. **Requires an `aria-label`** — the button's only content is an SVG, so without one a screen reader announces an unnamed button |
-| Content area | **Must wrap body in `.overlay-content`** for scrollable content: `<div class="overlay-content p-5 space-y-3/4">`. This enables vertical scrolling when content exceeds `max-height`, while keeping header and footer fixed |
-| Body | `p-5` with `space-y-3`/`space-y-4` between blocks. Primary/secondary/destructive action buttons in the body use `.btn-*` (§4.2), not ad hoc `rounded` + inline-color styling. **No horizontal overflow**: if fields risk wrapping, stack them vertically rather than shrinking |
-| Close API | A `[Parameter] public EventCallback OnClose` (or `OnCancel`) — the window never closes itself |
+| Close glyph | `<Icon Name="x" Size="20" />`, `slate-400`→`slate-200` on hover, 150ms `transition-colors`, labeled by `CloseAriaLabel` |
+| Content area | The `ChildContent` you pass is wrapped in `.overlay-content` (classes from `ContentClass`) automatically, enabling vertical scrolling when content exceeds `max-height` while keeping the header fixed |
+| Body | Primary/secondary/destructive action buttons in the body use `.btn-*` (§4.2), not ad hoc `rounded` + inline-color styling. **No horizontal overflow**: if fields risk wrapping, stack them vertically rather than shrinking |
 
 `.overlay-backdrop`/`.overlay-panel` also supply the entrance animation for free (see
 [`MOTION.md`](MOTION.md) §Overlay Rise); a window that hand-rolls its backdrop loses it.
 
 **Modal Content Sizing Requirements:**
-- Every modal **must dynamically adjust to fit its content** with no horizontal overflow. Use the `.overlay-content` wrapper on the body div to enable scrolling.
+- Every modal **must dynamically adjust to fit its content** with no horizontal overflow - `DialogShell`'s `.overlay-content` wrapper handles this for free.
 - Modals grow to fit content up to `max-width: min(90vw, 700px)` and `max-height: calc(100vh - 120px)` — staying within the viewport with breathing room.
 - Only the content area scrolls vertically; the header bar (title + close button) and action buttons remain fixed and visible.
 - **Never use horizontal scroll** in modals. If fields risk wrapping, stack them vertically (e.g., custom headers in ProviderEditDialog).

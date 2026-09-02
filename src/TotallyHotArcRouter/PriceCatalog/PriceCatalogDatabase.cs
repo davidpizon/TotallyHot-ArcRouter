@@ -251,7 +251,7 @@ public sealed class PriceCatalogDatabase
     }
 
     // Every source with a client gets a row up front, so the GUI has something to toggle before the first
-    // poll has ever run. Without this, rows only appear via PriceCatalogRepository.UpsertPrices - i.e. only
+    // poll has ever run. Without this, rows only appear via PriceRepository.UpsertPrices - i.e. only
     // after a *successful* fetch - which would leave a fresh install with an empty panel and no way to
     // disable a source before the startup pull fires.
     //
@@ -465,7 +465,7 @@ public sealed class PriceCatalogDatabase
         );
 
         -- Minute-bucketed history of the same headers, for future trend charts. At most one row per
-        -- (provider, minute bucket, header) is kept - see PriceCatalogRepository.UpsertRateLimitHeaders -
+        -- (provider, minute bucket, header) is kept - see RateLimitRepository.UpsertRateLimitHeaders -
         -- so a provider proxying steady traffic doesn't grow this table once per request.
         CREATE TABLE IF NOT EXISTS provider_rate_limit_history (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
