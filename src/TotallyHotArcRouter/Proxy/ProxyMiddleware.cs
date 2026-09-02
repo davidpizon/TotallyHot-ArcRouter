@@ -68,7 +68,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     // means usage parsing has less to work with (a truncated/partial buffer that the usage parsers already
     // handle gracefully by finding nothing), never a failure of the actual client-facing forward, which is
     // unaffected by this cap - every byte is still copied to the client regardless.
-    private const int MaxCapturedResponseBytes = 4 * 1024 * 1024;
+    internal const int MaxCapturedResponseBytes = 4 * 1024 * 1024;
 
     private readonly ILogger<ProxyMiddleware> _logger;
     private readonly HttpClient _httpClient;
@@ -91,6 +91,10 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     // see RequestTelemetryPublisher's own remarks for why this was the second cut out of this class.
     private readonly RequestTelemetryPublisher _requestTelemetryPublisher;
 
+    // Invokes Bedrock directly via its SDK, mirroring the HTTP forwarding path - see
+    // BedrockInvocationHandler's own remarks for why this was the third cut out of this class.
+    private readonly BedrockInvocationHandler _bedrockInvocationHandler;
+
     // True only when no factory was supplied and this instance built its own fallback - in that case
     // ProxyMiddleware is the sole owner of that factory's lifetime and must dispose it (it caches AWS SDK
     // clients and implements IDisposable; see BedrockRuntimeClientFactory's remarks). When a factory is
@@ -102,13 +106,13 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Response header carrying the client's literal requested model (docs/router/orchestrator-live-path-plan.md §M2.2).</summary>
-    private const string RequestedModelHeaderName = "X-ArcRouter-Requested-Model";
+    internal const string RequestedModelHeaderName = "X-ArcRouter-Requested-Model";
 
     /// <summary>Response header carrying the model that actually served the request.</summary>
-    private const string RoutedModelHeaderName = "X-ArcRouter-Routed-Model";
+    internal const string RoutedModelHeaderName = "X-ArcRouter-Routed-Model";
 
     /// <summary>Response header carrying the <see cref="RoutingSubstitutionReason"/> for why the two headers above differ, if they do.</summary>
-    private const string SubstitutionReasonHeaderName = "X-ArcRouter-Substitution-Reason";
+    internal const string SubstitutionReasonHeaderName = "X-ArcRouter-Substitution-Reason";
 
     /// <summary>
     /// The result of capturing a translated response for telemetry: the OpenAI-shaped bytes actually sent
@@ -381,6 +385,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         {
             _bedrockClientFactory = bedrockClientFactory;
         }
+
+        _bedrockInvocationHandler = new BedrockInvocationHandler(logger, _bedrockClientFactory, _circuitBreaker, _requestTelemetryPublisher);
     }
 
     /// <summary>
@@ -639,7 +645,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // for streaming - AWS's binary event-stream decoding are all the SDK's job, not a forwarded
             // HttpRequestMessage's), which is a different enough invocation shape that it gets its own path
             // entirely rather than reusing the HttpClient-forwarding code below. A Bedrock candidate is no
-            // longer unconditionally terminal: InvokeBedrockAsync returns true once it has actually written
+            // longer unconditionally terminal: BedrockInvocationHandler.InvokeAsync returns true once it has actually written
             // a response to the client (success, or a failure with no eligible next candidate) - that's
             // this request's final outcome, so the loop stops. It returns false when the SDK call failed
             // *before* writing anything (same "nothing committed yet" invariant the HTTP path below relies
@@ -647,7 +653,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // exactly like an HTTP outage does.
             if (translator is IBedrockPayloadTranslator bedrockTranslator)
             {
-                if (await InvokeBedrockAsync(context, route, bedrockTranslator, rewrittenBody, requestedModelName, isFallback, hasNextCandidate, nextProviderDiffers, resolution.TaskEmbedding, resolution.RouterTokens, resolution.SubstitutionReason, resolution.IsExploratory, resolution.Propensity, resolution.Classification, resolution.TaskText, resolution.DimBestModel))
+                if (await _bedrockInvocationHandler.InvokeAsync(context, route, bedrockTranslator, rewrittenBody, requestedModelName, isFallback, hasNextCandidate, nextProviderDiffers, resolution.TaskEmbedding, resolution.RouterTokens, resolution.SubstitutionReason, resolution.IsExploratory, resolution.Propensity, resolution.Classification, resolution.TaskText, resolution.DimBestModel))
                 {
                     return;
                 }
@@ -1210,7 +1216,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// existing <see cref="GeminiStreamException"/>/<see cref="AnthropicStreamException"/> handling - there
     /// is nothing to do but stop forwarding and log it; the status can no longer change.
     /// </summary>
-    private static bool IsStreamAbort(Exception ex) => ex is OperationCanceledException or IOException or SocketException;
+    internal static bool IsStreamAbort(Exception ex) => ex is OperationCanceledException or IOException or SocketException;
 
     /// <summary>
     /// Determines whether an upstream HTTP <paramref name="statusCode"/> is a retriable outage: any 5xx
@@ -1259,296 +1265,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     private static bool IsOutageStatus(int statusCode) =>
         statusCode is >= 500 and <= 599 || statusCode == 429 || statusCode == StatusCodes.Status404NotFound;
 
-    /// <summary>
-    /// Invokes an Amazon Bedrock provider via the AWS SDK (<see cref="IAmazonBedrockRuntime"/>) instead
-    /// of the raw-HTTP forwarding path every other translated provider uses - the SDK handles SigV4
-    /// signing, endpoint resolution, and (for streaming) AWS's binary event-stream decoding internally,
-    /// so none of that is this method's concern. Bedrock is always translated (no native-passthrough
-    /// mode exists for it, unlike Anthropic), so the response is always OpenAI-shaped by the time
-    /// telemetry parses it.
-    /// </summary>
-    /// <param name="context">The inbound request/response context.</param>
-    /// <param name="route">The resolved candidate to attempt.</param>
-    /// <param name="translator">The Bedrock payload translator for this candidate's provider.</param>
-    /// <param name="rewrittenBody">The request body with <c>model</c> already rewritten to this candidate.</param>
-    /// <param name="requestedModelName">The client's originally requested model name (for telemetry).</param>
-    /// <param name="isFallback">Whether this candidate is a fallback (not the primary) (for telemetry).</param>
-    /// <param name="hasNextCandidate">Whether another candidate remains in the caller's cascade.</param>
-    /// <param name="nextProviderDiffers">
-    /// Whether any remaining candidate is on a different provider - mirrors the HTTP path's identically
-    /// named local, used the same way: a credential failure is only worth retrying against a genuinely
-    /// different provider, since a same-provider backup shares the identical broken credential.
-    /// </param>
-    /// <param name="taskEmbedding">The request's task embedding (see <see cref="ModelRouteResolutionResult.TaskEmbedding"/>), forwarded to <see cref="RequestTelemetryPublisher.PublishAsync"/>.</param>
-    /// <param name="routerTokens">The router's own token consumption for this request (see <see cref="ModelRouteResolutionResult.RouterTokens"/>), forwarded to <see cref="RequestTelemetryPublisher.PublishAsync"/>.</param>
-    /// <param name="resolutionReason">The resolution-time <see cref="RoutingSubstitutionReason"/> (see <see cref="ModelRouteResolutionResult.SubstitutionReason"/>), forwarded to <see cref="RequestTelemetryPublisher.PublishAsync"/> and the requested/routed response headers.</param>
-    /// <param name="isExploratory">See <see cref="ModelRouteResolutionResult.IsExploratory"/>, forwarded to <see cref="RequestTelemetryPublisher.PublishAsync"/>.</param>
-    /// <param name="propensity">See <see cref="ModelRouteResolutionResult.Propensity"/>, forwarded to <see cref="RequestTelemetryPublisher.PublishAsync"/>.</param>
-    /// <param name="classification">See <see cref="ModelRouteResolutionResult.Classification"/>, forwarded to <see cref="RequestTelemetryPublisher.PublishAsync"/>.</param>
-    /// <param name="taskText">See <see cref="ModelRouteResolutionResult.TaskText"/>, forwarded to <see cref="RequestTelemetryPublisher.PublishAsync"/>.</param>
-    /// <param name="dimBestModel">See <see cref="ModelRouteResolutionResult.DimBestModel"/>, forwarded to <see cref="RequestTelemetryPublisher.PublishAsync"/>.</param>
-    /// <returns>
-    /// <see langword="true"/> if a response was written to the client (success, or a failure with no
-    /// eligible next candidate) - the caller's cascade is over. <see langword="false"/> if the SDK call
-    /// failed before anything was written and a next candidate should be tried - the caller should
-    /// <c>continue</c> its loop.
-    /// </returns>
-    private async Task<bool> InvokeBedrockAsync(
-        HttpContext context,
-        ResolvedModelRoute route,
-        IBedrockPayloadTranslator translator,
-        byte[] rewrittenBody,
-        string requestedModelName,
-        bool isFallback,
-        bool hasNextCandidate,
-        bool nextProviderDiffers,
-        float[]? taskEmbedding,
-        int routerTokens,
-        RoutingSubstitutionReason resolutionReason,
-        bool isExploratory = false,
-        double propensity = 1.0,
-        RequestClassification? classification = null,
-        string? taskText = null,
-        string? dimBestModel = null)
-    {
-        var circuitTarget = CircuitBreakerTargetKey.FromRoute(route);
-        var nativeRequestBody = translator.TranslateRequest(rewrittenBody);
-        var isStreamingRequest = IsStreamingRequest(rewrittenBody);
-
-        // Not disposed here: the singleton factory owns the client's lifetime and reuses it across
-        // requests (AWS SDK clients are thread-safe and meant to be long-lived). See BedrockRuntimeClientFactory.
-        var client = _bedrockClientFactory.Create(route);
-
-        var stopwatch = Stopwatch.StartNew();
-        byte[] capturedResponseBytes;
-        long latencyToHeadersMs;
-        IncrementalUsageScanner? tailScanner = null;
-
-        try
-        {
-            if (isStreamingRequest)
-            {
-                var request = new InvokeModelWithResponseStreamRequest
-                {
-                    ModelId = route.ProviderModelId,
-                    Body = new MemoryStream(nativeRequestBody),
-                    ContentType = "application/json",
-                };
-
-                var response = await client.InvokeModelWithResponseStreamAsync(request, context.RequestAborted);
-                latencyToHeadersMs = stopwatch.ElapsedMilliseconds;
-
-                context.Response.StatusCode = StatusCodes.Status200OK;
-                context.Response.ContentType = "text/event-stream";
-                context.Response.Headers[RequestedModelHeaderName] = requestedModelName;
-                context.Response.Headers[RoutedModelHeaderName] = route.ModelName;
-                context.Response.Headers[SubstitutionReasonHeaderName] = RequestTelemetryPublisher.ResolveSubstitutionReason(isFallback, resolutionReason).ToString();
-
-                (capturedResponseBytes, tailScanner) = await TranslateAndCaptureBedrockStreamAsync(translator, response.Body, context.Response.Body, MaxCapturedResponseBytes, context.RequestAborted);
-            }
-            else
-            {
-                var request = new InvokeModelRequest
-                {
-                    ModelId = route.ProviderModelId,
-                    Body = new MemoryStream(nativeRequestBody),
-                    ContentType = "application/json",
-                };
-
-                var response = await client.InvokeModelAsync(request, context.RequestAborted);
-                latencyToHeadersMs = stopwatch.ElapsedMilliseconds;
-
-                var translated = translator.TranslateResponse(response.Body.ToArray());
-
-                context.Response.StatusCode = StatusCodes.Status200OK;
-                context.Response.ContentType = "application/json";
-                context.Response.Headers[RequestedModelHeaderName] = requestedModelName;
-                context.Response.Headers[RoutedModelHeaderName] = route.ModelName;
-                context.Response.Headers[SubstitutionReasonHeaderName] = RequestTelemetryPublisher.ResolveSubstitutionReason(isFallback, resolutionReason).ToString();
-                await context.Response.Body.WriteAsync(translated, context.RequestAborted);
-
-                capturedResponseBytes = translated.Length <= MaxCapturedResponseBytes ? translated : translated[..MaxCapturedResponseBytes];
-
-                // Only worth the ~64KB tail-window allocation when capturedResponseBytes above actually
-                // lost data - a response that fits within the cap is already fully captured.
-                if (translated.Length > MaxCapturedResponseBytes)
-                {
-                    var bufferedTailScanner = new IncrementalUsageScanner();
-                    bufferedTailScanner.Append(translated);
-                    tailScanner = bufferedTailScanner;
-                }
-            }
-        }
-        catch (AmazonClientException ex)
-        {
-            // A client-side SDK failure that never reached AWS at all - most commonly a missing/invalid
-            // credential (e.g. "Failed to resolve bearer token in DefaultAWSTokenIdentityResolver" when
-            // none of AwsAccessKeyIdEnvVar/AwsSecretAccessKeyEnvVar/AwsSessionTokenEnvVar resolve and the
-            // SDK's default credential chain also comes up empty). AmazonServiceException (and its
-            // Bedrock-specific subtype below, caught separately) is a *sibling* type - both derive directly
-            // from Exception, not from AmazonClientException - so this clause and the
-            // AmazonBedrockRuntimeException one below never overlap: a real service-level error (auth
-            // rejected *by* AWS, throttling, etc.) only ever matches the other handler. Treated like the HTTP
-            // path's 401 handling: logged at Error (not Warning - this is a provider misconfiguration an
-            // operator needs to see, not a transient blip), tripping the *provider-wide* circuit
-            // (RecordProviderFailure, not the per-target RecordFailure) since a missing/invalid credential
-            // breaks every model on this Bedrock provider identically, and surfaced to the client as a 401
-            // rather than the generic 502 other Bedrock failures get.
-            _circuitBreaker.RecordProviderFailure(route.Provider);
-            _logger.LogError(
-                ex,
-                "Bedrock invocation for provider {Provider} failed to resolve AWS credentials ({Message}); treating as an unauthorized (401) provider-wide outage and bypassing every model on this provider until it recovers.",
-                LogRedaction.Sanitize(route.Provider),
-                LogRedaction.Sanitize(ex.Message));
-
-            // Same same-fate reasoning as the HTTP path's 401 handling (see the circuit-breaker comment
-            // there): a same-provider backup shares the identical broken credential, so only a genuinely
-            // different-provider candidate is worth retrying.
-            if (hasNextCandidate && nextProviderDiffers)
-            {
-                _logger.LogWarning(
-                    "Bedrock provider {Provider} failed to authorize for model {Model}; failing over to the next backup.",
-                    LogRedaction.Sanitize(route.Provider),
-                    LogRedaction.Sanitize(route.ModelName));
-                return false;
-            }
-
-            if (!context.Response.HasStarted)
-            {
-                // Generic client message, not ex.Message: an AWS SDK exception can carry internal endpoint,
-                // region, or request-id detail. The full exception is logged above for operators.
-                await WriteUpstreamErrorResponseAsync(context, "The upstream provider rejected the request as unauthorized.", StatusCodes.Status401Unauthorized);
-            }
-
-            return true;
-        }
-        catch (AmazonBedrockRuntimeException ex)
-        {
-            // A Bedrock SDK-level failure (auth, throttling, unknown model id, region misconfiguration,
-            // etc.) surfaced before (or, for InvokeModel, without) any bytes reaching the client. Treated
-            // like the HTTP path's generic 5xx/outage handling: a per-target circuit failure (RecordFailure,
-            // not RecordProviderFailure - unlike the credential case above, this bucket doesn't carry a
-            // confident "every model on this provider is equally broken" signal), retried against any next
-            // candidate unconditionally (no same-provider exclusion - unlike a shared bad credential, a
-            // throttle/misconfiguration on this one model id says nothing about a sibling model's health).
-            _circuitBreaker.RecordFailure(circuitTarget);
-            _logger.LogWarning(ex, "Bedrock invocation failed for provider {Provider}.", LogRedaction.Sanitize(route.Provider));
-
-            if (hasNextCandidate)
-            {
-                _logger.LogWarning(
-                    "Bedrock provider {Provider} failed for model {Model}; failing over to the next backup.",
-                    LogRedaction.Sanitize(route.Provider),
-                    LogRedaction.Sanitize(route.ModelName));
-                return false;
-            }
-
-            if (!context.Response.HasStarted)
-            {
-                // Generic client message, not ex.Message: an AWS SDK exception can carry internal endpoint,
-                // region, or request-id detail. The full exception is logged above for operators.
-                await WriteUpstreamErrorResponseAsync(context, "The upstream provider is unavailable.");
-            }
-
-            return true;
-        }
-
-        _circuitBreaker.RecordSuccess(circuitTarget);
-        var totalDurationMs = stopwatch.ElapsedMilliseconds;
-
-        try
-        {
-            // Bedrock's native tap is out of scope (docs/router/openai-format-usage-accuracy-plan.md §4.2):
-            // its streaming chunks aren't SSE-framed, so the same capture approach doesn't apply. Always
-            // null here - telemetry falls back to parsing the translated "openai"-shaped bytes, unchanged
-            // from before this plan.
-            await _requestTelemetryPublisher.PublishAsync(context, route, requestedModelName, isFallback, "openai", rewrittenBody, capturedResponseBytes, nativeResponseBytes: null, isStreamingRequest, latencyToHeadersMs, totalDurationMs, StatusCodes.Status200OK, context.RequestAborted, upstreamHeaders: null, tailScanner: tailScanner, taskEmbedding: taskEmbedding, routerTokens: routerTokens, resolutionReason: resolutionReason, isExploratory: isExploratory, propensity: propensity, classification: classification, taskText: taskText, dimBestModel: dimBestModel);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to publish routing telemetry; the forwarded response was unaffected.");
-        }
-
-        return true;
-    }
-
-    /// <summary>
-    /// Consumes each already-decoded chunk from a Bedrock <c>InvokeModelWithResponseStream</c> response
-    /// (the AWS SDK has already parsed its binary event-stream framing into discrete
-    /// <see cref="PayloadPart"/> items), translates each to an OpenAI-shaped SSE chunk, writes it to the
-    /// client as it's produced, and captures up to <paramref name="captureCap"/> bytes for telemetry -
-    /// mirrors <see cref="TranslateAndCaptureStreamAsync"/>'s role for the raw-HTTP path.
-    /// </summary>
-    private async Task<(byte[] Captured, IncrementalUsageScanner? TailScanner)> TranslateAndCaptureBedrockStreamAsync(IBedrockPayloadTranslator translator, ResponseStream body, Stream destination, int captureCap, CancellationToken cancellationToken)
-    {
-        var chunkTranslator = translator.CreateBedrockStreamChunkTranslator();
-        using var capture = new MemoryStream();
-        IncrementalUsageScanner? tailScanner = null;
-
-        async Task EmitAsync(byte[] translated)
-        {
-            if (translated.Length == 0)
-            {
-                return;
-            }
-
-            await destination.WriteAsync(translated, cancellationToken);
-            await destination.FlushAsync(cancellationToken);
-
-            var remainingCapacity = captureCap - (int)capture.Length;
-            if (remainingCapacity > 0)
-            {
-                await capture.WriteAsync(translated.AsMemory(0, Math.Min(translated.Length, remainingCapacity)), cancellationToken);
-            }
-
-            if (remainingCapacity < translated.Length)
-            {
-                // Same lazy-allocation reasoning as CopyAndCaptureAsync: only worth the tail window once
-                // the head-capped capture has actually lost bytes, and the boundary-crossing chunk itself
-                // still needs to land in the scanner in full.
-                tailScanner ??= new IncrementalUsageScanner();
-                tailScanner.Append(translated);
-            }
-        }
-
-        try
-        {
-            await foreach (var streamEvent in body.WithCancellation(cancellationToken))
-            {
-                if (streamEvent is PayloadPart part)
-                {
-                    await EmitAsync(chunkTranslator.TranslateChunk(part.Bytes.ToArray()));
-                }
-
-                // A non-PayloadPart event (e.g. a future AWS-added event kind this codebase doesn't yet
-                // know about) carries nothing client-visible today - skipped rather than guessed at.
-            }
-
-            await EmitAsync(chunkTranslator.Flush());
-        }
-        catch (AnthropicStreamException ex)
-        {
-            // An embedded error inside a Bedrock Claude chunk (AnthropicOnBedrockStreamChunkTranslator
-            // reuses AnthropicStreamTranslator's per-event handling, which throws on one) - truncate the
-            // client stream, mirroring native Anthropic's and Gemini's mid-stream-error handling.
-            _logger.LogWarning(ex, "Bedrock Claude streaming response terminated by an error event; the client stream was truncated.");
-        }
-        catch (ModelStreamErrorException ex)
-        {
-            // An AWS-level mid-stream error (surfaced by the SDK itself while enumerating ResponseStream,
-            // not an embedded provider-JSON error) - same truncation response as the case above.
-            _logger.LogWarning(ex, "Bedrock streaming response terminated by a ModelStreamErrorException; the client stream was truncated.");
-        }
-        catch (Exception ex) when (IsStreamAbort(ex))
-        {
-            _logger.LogWarning(ex, "Streaming response to the client was interrupted (client disconnected, or the connection was aborted); the forward was terminated early.");
-        }
-
-        return (capture.ToArray(), tailScanner);
-    }
-
     /// <summary>Writes a client-facing error envelope for a failed upstream call (a Bedrock SDK failure, or an exhausted transport-outage cascade), matching <see cref="WriteModelNotFoundResponseAsync"/>'s shape. Defaults to 502 (the request was valid; the upstream call failed) rather than 400 (a malformed/unknown-model client request); <paramref name="statusCode"/> lets a caller override this - e.g. 401 for a Bedrock credential-resolution failure treated like the HTTP path's 401 handling. Callers pass a client-safe <paramref name="errorMessage"/> - never a raw transport-exception message, which can leak infrastructure detail.</summary>
-    private static async Task WriteUpstreamErrorResponseAsync(HttpContext context, string errorMessage, int statusCode = StatusCodes.Status502BadGateway)
+    internal static async Task WriteUpstreamErrorResponseAsync(HttpContext context, string errorMessage, int statusCode = StatusCodes.Status502BadGateway)
     {
         context.Response.StatusCode = statusCode;
         context.Response.ContentType = "application/json";
@@ -1572,7 +1290,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// top-level <c>stream</c> field is <see langword="true"/>. Used only for translated providers, to
     /// pick the streaming vs non-streaming upstream URL and response path.
     /// </summary>
-    private static bool IsStreamingRequest(byte[] requestBody)
+    internal static bool IsStreamingRequest(byte[] requestBody)
     {
         try
         {
