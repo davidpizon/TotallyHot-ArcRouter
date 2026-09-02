@@ -1,6 +1,6 @@
 # 0007. ProviderAdminClient stays on HTTP; document the split instead of migrating it
 
-**Status:** proposed <!-- proposed | accepted | rejected | deprecated | superseded by ADR-NNNN -->
+**Status:** accepted <!-- proposed | accepted | rejected | deprecated | superseded by ADR-NNNN -->
 **Date:** 2026-09-02
 **Deciders:** David Pizon
 

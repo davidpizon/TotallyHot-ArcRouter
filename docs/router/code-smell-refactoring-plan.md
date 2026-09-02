@@ -27,25 +27,30 @@ now implemented except the two ADR-gated ones and the Gemini cost reconciler:
   now drives `UsageExtractor`/`ResponseTextExtractor` and fixed a real gap (Ollama's response text was
   silently unhandled); several small Quality-assembly and GUI cleanups (deduplicated scoring/word-boundary
   helpers, stale doc-comment fixes, `DashboardData`'s mock fixtures moved to a JSON resource).
-- **ADR-gated, drafted, awaiting sign-off before any further code moves:**
-  [ADR-0006](../adr/0006-split-managementfacade-along-crud-aggregate-boundaries.md) records the decision
-  to split `ManagementFacade`'s remaining write/security-boundary surface along CRUD-aggregate lines
-  (Phase 3 step 3, below) — its class-split has **not** shipped yet, only the DTO move.
-  [ADR-0007](../adr/0007-provider-admin-client-stays-on-http.md) records the decision to leave
-  `ProviderAdminClient` on HTTP rather than migrate it to gRPC (the Phase 4 transport item, below) — no
-  migration code is planned regardless of the ADR's outcome, since a migration was independently assessed
-  as High risk by both audits.
-- **Explicitly deferred:** a real `IProviderCostReconciler` for Gemini (would need GCP Cloud Billing/
-  BigQuery export integration — new external credential surface, paused pending an operator decision on
-  configuration). Bedrock and Ollama reconcilers were assessed and ruled out — AWS Cost Explorer reports
-  account-wide rather than per-model, and Ollama has no billing API at all being local/free.
+- **ADR-approved, implementation in progress:**
+  [ADR-0006](../adr/0006-split-managementfacade-along-crud-aggregate-boundaries.md) (accepted) decides
+  `ManagementFacade`'s remaining write/security-boundary surface splits into internal collaborators
+  along CRUD-aggregate lines (Phase 3 step 3, below), with zero public-surface change.
+  [ADR-0007](../adr/0007-provider-admin-client-stays-on-http.md) (accepted) decides `ProviderAdminClient`
+  stays on HTTP rather than migrating to gRPC (the Phase 4 transport item, below) — no migration code is
+  planned, closing that item with documentation only.
+- **Tracked as an open TODO, not implemented:** a real `IProviderCostReconciler` for Gemini needs new
+  external integration surface (GCP Cloud Billing/BigQuery export, a service-account credential) that a
+  mechanical refactor pass shouldn't decide the shape of alone — see
+  [`tracked-todos.md` #6](tracked-todos.md#6-build-a-real-iprovidercostreconciler-for-gemini). Bedrock and
+  Ollama reconcilers were assessed and ruled out permanently (not deferred) — AWS Cost Explorer reports
+  account-wide rather than per-model, and Ollama has no billing API at all, being local/free.
+  `ProviderRegistration.CostReconciler` is already wired to accept an implementation once one exists.
 - **Adopted as a going-forward norm, not swept:** GUI singleton stores (13 of 14) still have no
   interface — extract one when a store is next touched for an unrelated reason, not as a dedicated pass.
+- **C1's manual smoke test** (AGENTS.md's "test the golden path… before reporting complete" rule for
+  hot-path changes) — streaming, buffered, Bedrock, and local-endpoint (`/v1/models`, `/api/tags`,
+  `/api/show`) request paths through the running proxy, after the `CandidateGates` change — complete.
 
-Phase 3 step 3 (further `ManagementFacade` splitting) remains ADR-gated and unimplemented pending sign-off
-on ADR-0006; the HTTP-vs-gRPC transport inconsistency is resolved by ADR-0007 (documented, not migrated).
-This document is the output of a structural survey (CodeGraph + Serena + targeted reads), not an
-exhaustive line-by-line audit.
+Phase 3 step 3 (further `ManagementFacade` splitting) is now implementing ADR-0006's accepted decision;
+the HTTP-vs-gRPC transport inconsistency is resolved by ADR-0007 (documented, not migrated). This
+document is the output of a structural survey (CodeGraph + Serena + targeted reads), not an exhaustive
+line-by-line audit.
 
 **Scope surveyed:** `TotallyHotArcRouter` (router core), `TotallyHot.ArcRouter.Quality`, and all four
 GUI assemblies (`TotallyHotArcRouter.Gui`, `.Gui.Admin`, `.Gui.Charts`, `.Gui.Console`,

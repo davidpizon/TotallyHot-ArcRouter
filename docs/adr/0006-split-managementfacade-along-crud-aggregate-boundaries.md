@@ -1,6 +1,6 @@
 # 0006. Split ManagementFacade along CRUD-aggregate boundaries, not its public surface
 
-**Status:** proposed <!-- proposed | accepted | rejected | deprecated | superseded by ADR-NNNN -->
+**Status:** accepted <!-- proposed | accepted | rejected | deprecated | superseded by ADR-NNNN -->
 **Date:** 2026-09-02
 **Deciders:** David Pizon
 

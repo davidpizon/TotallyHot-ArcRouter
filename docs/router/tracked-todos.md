@@ -14,6 +14,7 @@ and this is the nearer of the two repos' doc folders to where the work is being 
 | [3](#3-research-deepseek-tool-call-delimiters-and-register-a-deepseek-dialect) | Open | ArcRouter | Research DeepSeek tool-call delimiters and register a `deepseek` dialect |
 | [4](#4-add-test-coverage-for-zero-coverage-classes-in-TotallyHotArcRouter-and-TotallyHotArcRoutersandbox) | Open | ArcRouter | Add test coverage for zero-coverage classes in `TotallyHotArcRouter` and `TotallyHot.ArcRouter.Quality` |
 | [5](#5-get-a-human-review-of-phase-5s-three-design-decisions) | Open | ArcRouter | Get a human review of Phase 5's three design decisions |
+| [6](#6-build-a-real-iprovidercostreconciler-for-gemini) | Open | ArcRouter | Build a real `IProviderCostReconciler` for Gemini |
 
 ---
 
@@ -344,4 +345,53 @@ Each of the three decisions has been either confirmed, corrected, or explicitly 
 risk by a human, with the outcome written back into
 [`tool-call-normalization.md`](tool-call-normalization.md) Phase 5 so the next reader inherits the
 judgment rather than re-deriving it.
+
+---
+
+## #6 Build a real `IProviderCostReconciler` for Gemini
+
+**Repo:** ArcRouter · **Status:** Open · **Filed:** 2026-09-02, from the brutal-cozy-pascal structural
+audit's item M9 (see [`code-smell-refactoring-plan.md`](code-smell-refactoring-plan.md))
+
+### Why this is open
+
+`IProviderCostReconciler` (`src/TotallyHotArcRouter/Telemetry/IProviderCostReconciler.cs`) exists so a
+provider's own independently-reported org-level spend can be compared against the router's local usage
+estimate — `AnthropicCostReconciler` and `OpenAiCostReconciler` already do this against each vendor's
+per-day cost-reporting REST endpoint. Gemini has no equivalent simple per-day endpoint: Google Cloud
+Billing reporting is BigQuery-export-based, which means a real Gemini reconciler needs new external
+integration surface, not a mechanical addition alongside the other two:
+
+- The operator must already have GCP Cloud Billing export to BigQuery enabled on their project — this
+  is a one-time GCP-side setup the router cannot do for them — plus a service-account credential the
+  router can use to query it, distinct from any Gemini API key configured for inference.
+- A new configuration section is needed (project id, dataset, table, service-account credential path),
+  parallel to how `AnthropicCostReconciler`/`OpenAiCostReconciler` take an Admin API key today.
+- `ProviderRegistration.CostReconciler` (`src/TotallyHotArcRouter/Proxy/ProviderRegistration.cs`) is
+  already wired to accept one — it's `null` for every provider today, including Gemini — so plugging
+  a real implementation in is the last step, not a separate refactor.
+
+Bedrock (Titan/Llama/Anthropic-on-Bedrock) and Ollama were assessed in the same pass and ruled out
+permanently, not deferred: AWS Cost Explorer reports account-wide rather than per-model (cannot isolate
+this router's Bedrock spend from anything else on the AWS account), and Ollama is local/free with no
+billing API to reconcile against at all. Neither should be revisited under this item.
+
+### What to do
+
+1. Decide where the GCP project id / BigQuery dataset+table / service-account credential path config
+   lives — likely `appsettings.json` alongside the existing cost-reconciler config, but confirm the
+   established pattern first.
+2. Implement `GeminiCostReconciler : IProviderCostReconciler` querying the operator-configured BigQuery
+   billing export table for the given day, summing cost the same way `AnthropicCostReconciler`/
+   `OpenAiCostReconciler` do.
+3. Register it in `ProviderRegistrations.BuildDefault()`'s Gemini entry and wherever
+   `AnthropicCostReconciler`/`OpenAiCostReconciler` are wired into DI.
+4. Document it in `agent-cost-tracking.md` §5.8 alongside the existing two reconcilers.
+
+### Acceptance
+
+`GeminiCostReconciler` exists, is registered, and has unit test coverage against a fake/mocked BigQuery
+client (there is no way to test against real GCP billing data in CI). Since this cannot be verified
+end-to-end without a real GCP billing export, the PR that adds it should say so explicitly rather than
+implying parity with the Anthropic/OpenAI reconcilers' live-tested confidence.
 
