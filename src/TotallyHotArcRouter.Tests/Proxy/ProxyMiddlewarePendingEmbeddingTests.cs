@@ -41,7 +41,11 @@ public class ProxyMiddlewarePendingEmbeddingTests
             Mock.Of<ILogger<ProxyMiddleware>>(),
             interceptor,
             new HttpClient(handler),
-            pendingTaskEmbeddingCache: pendingCache);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                PendingTaskEmbeddingCache = pendingCache
+            }
+        );
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
@@ -76,7 +80,11 @@ public class ProxyMiddlewarePendingEmbeddingTests
             Mock.Of<ILogger<ProxyMiddleware>>(),
             interceptor,
             new HttpClient(handler),
-            pendingTaskEmbeddingCache: pendingCache);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                PendingTaskEmbeddingCache = pendingCache
+            }
+        );
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;

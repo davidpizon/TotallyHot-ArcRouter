@@ -47,8 +47,12 @@ public class GeminiProviderTests
             Mock.Of<ILogger<ProxyMiddleware>>(),
             interceptor,
             new HttpClient(handler),
-            telemetryPublisher: telemetry,
-            translators: translators);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                TelemetryPublisher = telemetry,
+                Translators = translators
+            }
+        );
     }
 
     private static DefaultHttpContext BuildContext(string openAiRequestBody)

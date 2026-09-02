@@ -193,150 +193,17 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// <param name="logger">Logger instance.</param>
     /// <param name="interceptor">Request/response interceptor.</param>
     /// <param name="httpClient">Optional HTTP client used for forwarding requests.</param>
-    /// <param name="sessionIdResolver">Optional session-id resolver; defaults to <see cref="SessionIdResolver"/>.</param>
-    /// <param name="continuityMatcher">Optional continuity matcher, used when <paramref name="sessionIdResolver"/> finds nothing; defaults to a fresh <see cref="MessageHistoryContinuityMatcher"/> private to this instance.</param>
-    /// <param name="turnTracker">Optional turn tracker; defaults to a fresh <see cref="ConversationTurnTracker"/> private to this instance.</param>
-    /// <param name="usageExtractor">Optional usage extractor; defaults to <see cref="UsageExtractor"/>.</param>
-    /// <param name="responseTextExtractor">Optional response-text extractor; defaults to <see cref="ResponseTextExtractor"/>.</param>
-    /// <param name="telemetryPublisher">Optional telemetry publisher; defaults to a fresh <see cref="TelemetryPublisher"/> backed by a private, unshared <see cref="TelemetryBroadcaster"/> (a safe no-op, since nothing is ever registered to receive from it).</param>
-    /// <param name="qualityIngress">Optional quality-verifier ingress façade; when supplied, completed responses are enqueued for off-path grading. Best-effort and non-blocking; defaults to <see langword="null"/> (disabled).</param>
-    /// <param name="spendTracker">Optional running-spend tracker; defaults to <see cref="NullSpendTracker"/> (a safe no-op) so existing callers/tests that don't need it are unaffected.</param>
-    /// <param name="priceLookup">Optional catalog price lookup (docs/router/model-price-catalog.md); when supplied, a paid route's per-request cost is estimated from the auto-refreshed price catalog. Defaults to <see langword="null"/> (disabled), leaving paid-model cost unknown as before.</param>
-    /// <param name="translators">Optional per-provider payload translators (docs/router/unified-api-translation.md), keyed by provider name. A provider present here has its request/response/stream translated to and from OpenAI's shape (Gemini and Bedrock providers always; Anthropic when <see cref="IPayloadTranslator.ShouldTranslate"/> allows it for the request); a provider absent here, or whose translator vetoes this request, is forwarded byte-for-byte, exactly as before. Defaults to an empty map (all providers pass through unchanged).</param>
-    /// <param name="bedrockClientFactory">Optional factory for the Amazon Bedrock Runtime SDK client used by any translator implementing <see cref="IBedrockPayloadTranslator"/>. In the real app this is always supplied via DI (a shared singleton the container owns and disposes); when omitted (direct construction outside DI, e.g. a caller that never touches the Bedrock path), this instance builds and owns its own <see cref="BedrockRuntimeClientFactory"/> and disposes it in <see cref="Dispose"/>. Overridable for tests, which substitute a fake <c>IAmazonBedrockRuntime</c> so no live AWS call is made.</param>
-    /// <param name="budgetStore">Optional per-provider monthly budget store (Governance &gt; Providers). When supplied, a provider whose cap is exhausted is skipped for the request, an all-breached request is rejected with 402, and each served request's usage is recorded against the serving provider. Defaults to <see langword="null"/> (no budgets enforced or recorded), so existing callers/tests are unaffected.</param>
-    /// <param name="circuitBreaker">Optional per-upstream-target circuit breaker (<c>docs/router/agent-resilience-strategies.md</c>). Must be the <em>same</em> instance given to the <see cref="RequestInterceptor"/> this middleware wraps (see <c>ServiceCollectionExtensions</c>'s DI wiring) - this class is what records the successes/failures <see cref="RequestInterceptor"/> reads back when ranking candidates. Defaults to a fresh, always-CLOSED instance when omitted, which is behaviorally inert (existing callers/tests unaffected) but decoupled from any interceptor-side instance, so circuit state recorded here would never be seen there.</param>
-    /// <param name="toolCallNormalizerFactory">Optional per-request tool-call normalization (<c>docs/router/tool-call-normalization.md</c> Phase 4), consulted for any candidate with no other translator registered: it decides from the (provider, model) capability row and whether the request carried <c>tools</c> whether the response needs a dialect scan at all, and rewrites a dialect-framed tool call into a real <c>tool_calls</c> shape. Replaces the provider-wide echo guard of <c>unified-api-translation.md</c> §4.5. In the real app this is always supplied via DI (a shared singleton reading the capability store); when omitted (direct construction outside DI), this instance builds a store-less one - so a tools-carrying request is still normalized with the union of dialects, but nothing is classified or persisted, mirroring <paramref name="circuitBreaker"/>'s "behaviorally inert when defaulted" pattern.</param>
-    /// <param name="rateLimitCapture">Optional capture for upstream <c>anthropic-ratelimit-*</c> response headers (<c>docs/router/anthropic-reported-usage-plan.md</c> §5), invoked as soon as each attempt's response headers arrive. Defaults to a no-op, so existing callers/tests are unaffected.</param>
-    /// <param name="usageLedger">Optional durable usage ledger (<c>docs/router/token-tracking-implementation-plan.md</c> Phase 2), recorded to immediately after <paramref name="budgetStore"/> on the request path. When <see langword="null"/> (e.g. tests constructing this type directly), no ledger row is written - the rest of telemetry is unaffected.</param>
-    /// <param name="pendingTaskEmbeddingCache">
-    /// Optional bridge (docs/router/live-feedback-learning-plan.md Phase 2c) between
-    /// <see cref="RequestInterceptor"/>'s Phase 2b embedding computation and the request's
-    /// later-arriving verifier score, which is only correlated by the id computed below alongside session
-    /// and turn resolution - the earliest point that id is actually known, since
-    /// <see cref="RequestInterceptor.ResolveModelRouteAsync"/> runs before it. Defaults to
-    /// <see langword="null"/> (no entries recorded), so existing callers/tests are unaffected.
-    /// </param>
-    /// <param name="routingOptions">
-    /// Supplies <see cref="Models.RoutingOptions.SelfHostedRouterPricePerMillionTokens"/>, the rate the
-    /// router's own token consumption is charged at when published on
-    /// <see cref="Telemetry.RoutingTelemetryEvent.RouterCostUsd"/>. When <see langword="null"/> (direct
-    /// construction outside DI) the compiled-in default applies, so the figure is still real rather than
-    /// suppressed - unlike the optional collaborators above, there is no "unavailable" state for a static
-    /// amortization rate.
-    /// </param>
-    /// <param name="pendingRequestCostCache">
-    /// Optional bridge (docs/router/self-organizing-classification-plan.md Phase T1c) between this
-    /// request's estimated cost, computed below, and its later-arriving verifier score - mirrors
-    /// <paramref name="pendingTaskEmbeddingCache"/>'s role exactly, for a different value. Defaults to
-    /// <see langword="null"/> (no entries recorded), so existing callers/tests are unaffected.
-    /// </param>
-    /// <param name="pendingRequestProvenanceCache">
-    /// Optional bridge (docs/router/self-organizing-classification-plan.md Phase T1c) between this
-    /// request's exploration provenance (is-exploratory/propensity, resolved earlier by
-    /// <see cref="RequestInterceptor"/>) and its later-arriving verifier score. Defaults to
-    /// <see langword="null"/> (no entries recorded), so existing callers/tests are unaffected.
-    /// </param>
-    /// <param name="pendingResponseTextCache">
-    /// Optional bridge (docs/router/geval-shadow-scoring-plan.md §Raw-text preservation) between this
-    /// request's already-extracted response text and the shadow judge's later-arriving background job -
-    /// mirrors <paramref name="pendingTaskEmbeddingCache"/>'s role exactly, for a different value.
-    /// Populated at the same point <paramref name="responseTextExtractor"/>'s result is already in hand, so
-    /// this adds retention, not parsing. Defaults to <see langword="null"/> (no entries recorded), so
-    /// existing callers/tests are unaffected.
-    /// </param>
-    /// <param name="transcriptStore">
-    /// Optional opt-in transcript store (docs/router/self-organizing-classification-plan.md Phase T1a/T1b).
-    /// When supplied and transcript capture is enabled, one row is inserted per served request with the
-    /// prompt/response text, classification, cost, and provenance already in scope at this point; the
-    /// score is backfilled later by <see cref="Transcripts.TranscriptScoreObserver"/>. Defaults to
-    /// <see langword="null"/> (no rows written), matching the feature's opt-in-and-off-by-default posture.
-    /// </param>
-    /// <param name="inFlightGauge">
-    /// Optional in-flight request gauge (docs/router/routing-roi-regret-plan.md). When supplied, every
-    /// request is counted for the full duration of <see cref="InvokeAsync"/> so background analysis work
-    /// (the taxonomy-comparison drain) can hard-pause while traffic is being served. Defaults to
-    /// <see langword="null"/> (no tracking), so existing callers/tests are unaffected.
-    /// </param>
-    /// <param name="routingOptionsMonitor">
-    /// Optional live routing-options monitor (docs/router/self-organizing-classification-plan.md Phase T6),
-    /// consulted alongside <see cref="Transcripts.TranscriptOptions.Enabled"/> at the transcript-insert
-    /// site so a <see cref="Models.RoutingOptions.EnableAdaptiveRouting"/> toggle stops (or resumes) new
-    /// transcript writes without a restart. Defaults to <see langword="null"/>, which is treated as
-    /// adaptive routing being disabled - matching <see cref="Models.RoutingOptions.EnableAdaptiveRouting"/>'s
-    /// own off-by-default coded value.
-    /// </param>
-    /// <param name="judgeOptionsMonitor">
-    /// Optional live shadow-judge options monitor, consulted at the response-text retention site so raw
-    /// response text is held for judging only while <see cref="Judge.JudgeOptions.Enabled"/> is actually
-    /// on. Read live rather than captured because that flag is operator-toggleable at runtime, and this is
-    /// the gate that decides whether raw text is retained at all - it must go off the moment the operator
-    /// says so, not at the next restart. Defaults to <see langword="null"/>, treated as the judge being
-    /// disabled, matching <see cref="Judge.JudgeOptions.Enabled"/>'s own off-by-default coded value.
-    /// </param>
-    /// <param name="routingGate">
-    /// Optional runtime kill switch, toggled from the GUI system tray via
-    /// <see cref="Router.RoutingGateAdminGrpcService"/>. When <see cref="Router.IRoutingGate.IsEnabled"/> is
-    /// <see langword="false"/>, every LLM-forwarding request is rejected with 503 before routing is
-    /// attempted; <see langword="null"/> (the default) means routing is always accepted, matching the
-    /// enabled-by-default coded value <see cref="Router.RoutingGateStore"/> itself falls back to.
-    /// </param>
-    /// <param name="capabilityStore">
-    /// Optional source of each model's detected tool-call dialect, used only to describe models on
-    /// <c>POST /api/show</c>. <see langword="null"/> (the default) is behaviorally inert: every model reads
-    /// as unclassified, which
-    /// <see cref="Translation.ToolCalling.OllamaModelCapabilities.ForDialect"/> already treats as
-    /// tool-capable, so the declared capabilities are unchanged.
-    /// </param>
-    /// <param name="contextWindowStore">
-    /// Optional source of each model's probed context window, used only to populate
-    /// <c>POST /api/show</c>'s <c>model_info</c>. <see langword="null"/> (the default) is behaviorally
-    /// inert: <c>model_info</c> is omitted entirely, exactly as it was before this was wired up.
-    /// </param>
-    /// <param name="interactionStatusStore">
-    /// Optional per-provider admin-action/live-traffic status store
-    /// (docs/adr/0004-surface-out-of-credits-provider-failures-on-the-providers-tab.md,
-    /// docs/adr/0005-protect-explicit-provider-selections-from-silent-substitution-on-any-circuit-
-    /// trip.md). On a classified out-of-credits response, this records the LiveTraffic-track failure
-    /// (and success on every subsequent 2xx) that the Providers tab and <see cref="RequestInterceptor"/>'s
-    /// explicit-selection protection both read from. Must be the <em>same</em> instance given to
-    /// <see cref="RequestInterceptor"/> and <c>ManagementFacade</c> (see <c>ServiceCollectionExtensions</c>'s
-    /// DI wiring) - the same sharing requirement <paramref name="circuitBreaker"/> already has. Defaults to
-    /// <see langword="null"/>, which is behaviorally inert (no LiveTraffic state is ever recorded).
+    /// <param name="dependencies">
+    /// The optional collaborators this instance can be given, carried as one named object - see
+    /// <see cref="ProxyMiddlewareDependencies"/>'s own remarks for why. <see langword="null"/> (the
+    /// default) is equivalent to an empty <see cref="ProxyMiddlewareDependencies"/>: every optional
+    /// feature falls back to its documented behaviorally-inert default, exactly as before this bag existed.
     /// </param>
     public ProxyMiddleware(
         ILogger<ProxyMiddleware> logger,
         RequestInterceptor interceptor,
         HttpClient? httpClient = null,
-        ISessionIdResolver? sessionIdResolver = null,
-        IConversationContinuityMatcher? continuityMatcher = null,
-        IConversationTurnTracker? turnTracker = null,
-        IUsageExtractor? usageExtractor = null,
-        IResponseTextExtractor? responseTextExtractor = null,
-        ITelemetryPublisher? telemetryPublisher = null,
-        IQualityIngress? qualityIngress = null,
-        ISpendTracker? spendTracker = null,
-        IModelPriceLookup? priceLookup = null,
-        IReadOnlyDictionary<string, IPayloadTranslator>? translators = null,
-        IBedrockRuntimeClientFactory? bedrockClientFactory = null,
-        PriceCatalog.IBudgetEnforcer? budgetStore = null,
-        ICircuitBreaker? circuitBreaker = null,
-        ToolCallNormalizerFactory? toolCallNormalizerFactory = null,
-        IRateLimitHeaderCapture? rateLimitCapture = null,
-        IUsageLedger? usageLedger = null,
-        Router.Embeddings.PendingTaskEmbeddingCache? pendingTaskEmbeddingCache = null,
-        IOptions<Models.RoutingOptions>? routingOptions = null,
-        PendingRequestCostCache? pendingRequestCostCache = null,
-        PendingRequestProvenanceCache? pendingRequestProvenanceCache = null,
-        PendingResponseTextCache? pendingResponseTextCache = null,
-        ITranscriptStore? transcriptStore = null,
-        InFlightRequestGauge? inFlightGauge = null,
-        IOptionsMonitor<Models.RoutingOptions>? routingOptionsMonitor = null,
-        IOptionsMonitor<Judge.JudgeOptions>? judgeOptionsMonitor = null,
-        Router.IRoutingGate? routingGate = null,
-        Translation.ToolCalling.IToolCallCapabilityStore? capabilityStore = null,
-        Translation.ToolCalling.IModelContextWindowStore? contextWindowStore = null,
-        IProviderInteractionStatusStore? interactionStatusStore = null)
+        ProxyMiddlewareDependencies? dependencies = null)
     {
         _logger = logger;
         _interceptor = interceptor;
@@ -345,45 +212,45 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             AllowAutoRedirect = false,
             UseCookies = false
         });
-        _translators = translators ?? NoTranslators;
-        _budgetStore = budgetStore;
-        _rateLimitCapture = rateLimitCapture ?? NullRateLimitHeaderCapture.Instance;
-        _circuitBreaker = circuitBreaker ?? new CircuitBreaker();
-        _toolCallNormalizerFactory = toolCallNormalizerFactory ?? new ToolCallNormalizerFactory();
-        _inFlightGauge = inFlightGauge;
-        _routingGate = routingGate;
-        _localEndpointResponder = new LocalEndpointResponder(logger, interceptor, capabilityStore, contextWindowStore);
-        _interactionStatusStore = interactionStatusStore;
+        _translators = dependencies?.Translators ?? NoTranslators;
+        _budgetStore = dependencies?.BudgetStore;
+        _rateLimitCapture = dependencies?.RateLimitCapture ?? NullRateLimitHeaderCapture.Instance;
+        _circuitBreaker = dependencies?.CircuitBreaker ?? new CircuitBreaker();
+        _toolCallNormalizerFactory = dependencies?.ToolCallNormalizerFactory ?? new ToolCallNormalizerFactory();
+        _inFlightGauge = dependencies?.InFlightGauge;
+        _routingGate = dependencies?.RoutingGate;
+        _localEndpointResponder = new LocalEndpointResponder(logger, interceptor, dependencies?.CapabilityStore, dependencies?.ContextWindowStore);
+        _interactionStatusStore = dependencies?.InteractionStatusStore;
         _requestTelemetryPublisher = new RequestTelemetryPublisher(
             logger,
-            sessionIdResolver ?? new SessionIdResolver(),
-            continuityMatcher ?? new MessageHistoryContinuityMatcher(),
-            turnTracker ?? new ConversationTurnTracker(),
-            usageExtractor ?? new UsageExtractor(),
-            responseTextExtractor ?? new ResponseTextExtractor(),
-            telemetryPublisher ?? new TelemetryPublisher(new TelemetryBroadcaster()),
-            qualityIngress,
-            spendTracker ?? NullSpendTracker.Instance,
-            priceLookup,
-            budgetStore,
-            usageLedger,
-            pendingTaskEmbeddingCache,
-            pendingRequestCostCache,
-            pendingRequestProvenanceCache,
-            pendingResponseTextCache,
-            transcriptStore,
-            routingOptionsMonitor,
-            judgeOptionsMonitor,
-            routingOptions?.Value.SelfHostedRouterPricePerMillionTokens ?? new Models.RoutingOptions().SelfHostedRouterPricePerMillionTokens);
+            dependencies?.SessionIdResolver ?? new SessionIdResolver(),
+            dependencies?.ContinuityMatcher ?? new MessageHistoryContinuityMatcher(),
+            dependencies?.TurnTracker ?? new ConversationTurnTracker(),
+            dependencies?.UsageExtractor ?? new UsageExtractor(),
+            dependencies?.ResponseTextExtractor ?? new ResponseTextExtractor(),
+            dependencies?.TelemetryPublisher ?? new TelemetryPublisher(new TelemetryBroadcaster()),
+            dependencies?.QualityIngress,
+            dependencies?.SpendTracker ?? NullSpendTracker.Instance,
+            dependencies?.PriceLookup,
+            dependencies?.BudgetStore,
+            dependencies?.UsageLedger,
+            dependencies?.PendingTaskEmbeddingCache,
+            dependencies?.PendingRequestCostCache,
+            dependencies?.PendingRequestProvenanceCache,
+            dependencies?.PendingResponseTextCache,
+            dependencies?.TranscriptStore,
+            dependencies?.RoutingOptionsMonitor,
+            dependencies?.JudgeOptionsMonitor,
+            dependencies?.RoutingOptions?.Value.SelfHostedRouterPricePerMillionTokens ?? new Models.RoutingOptions().SelfHostedRouterPricePerMillionTokens);
 
-        if (bedrockClientFactory is null)
+        if (dependencies?.BedrockClientFactory is null)
         {
             _bedrockClientFactory = new BedrockRuntimeClientFactory();
             _ownsBedrockClientFactory = true;
         }
         else
         {
-            _bedrockClientFactory = bedrockClientFactory;
+            _bedrockClientFactory = dependencies.BedrockClientFactory;
         }
 
         _bedrockInvocationHandler = new BedrockInvocationHandler(logger, _bedrockClientFactory, _circuitBreaker, _requestTelemetryPublisher);
@@ -506,15 +373,24 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         // backup is a *different* provider (a separate quota/rate-limit pool), since a same-provider backup
         // shares the throttle. Failover can only happen before any response byte is committed to the
         // client; once a hop's body starts streaming, its outcome is final.
+        // The candidate pre-flight gate sequence below runs, in order: (1) budget breach, (2)
+        // provider-enabled, (3) model-enabled, (4) circuit-breaker read-only pre-check, (5) circuit
+        // ShouldBypass (target-level), (6) circuit ShouldBypassProvider (provider-wide). The order of (4)
+        // before (5)/(6) is load-bearing, not incidental: ShouldBypass/ShouldBypassProvider can each claim
+        // a target's single half-open probe slot, and running the read-only pre-check first filters out
+        // the deterministic already-OPEN case before either mutating check is even reached - see gate (4)'s
+        // own comment below for why a claimed-then-abandoned probe would otherwise strand that target
+        // forever. Gates (1)-(3) have no such ordering constraint among themselves but are kept in their
+        // historical order to avoid a behavior-neutral but unnecessary diff.
         for (var i = 0; i < candidates.Count; i++)
         {
             var route = candidates[i].Route;
 
-            // Skip a candidate whose provider is over its monthly budget - it is never attempted. The
-            // pre-loop check above guarantees at least one candidate is under budget, so this cannot skip
-            // every iteration. A budget-skipped primary means the served candidate is a genuine fallback,
-            // which the isFallback flag (i > 0) then reports truthfully.
-            if (_budgetStore is not null && _budgetStore.IsBreached(route.Provider))
+            // Gate (1): skip a candidate whose provider is over its monthly budget - it is never attempted.
+            // The pre-loop check above guarantees at least one candidate is under budget, so this cannot
+            // skip every iteration. A budget-skipped primary means the served candidate is a genuine
+            // fallback, which the isFallback flag (i > 0) then reports truthfully.
+            if (IsBudgetGateBlocked(route))
             {
                 _logger.LogInformation(
                     "Skipping provider {Provider} for model {Model}: monthly budget exhausted.",
@@ -523,11 +399,12 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 continue;
             }
 
-            // Governance > Providers' Stop control: a disabled provider is bypassed with no network call,
-            // exactly like an open circuit, but logged distinctly so an operator can tell "I stopped this"
-            // from "this is unhealthy" apart. Checked here (not just when RequestInterceptor built the
-            // candidate list) so a provider stopped between list-building and this attempt is still caught.
-            if (!_interceptor.IsProviderEnabled(route.Provider))
+            // Gate (2): Governance > Providers' Stop control - a disabled provider is bypassed with no
+            // network call, exactly like an open circuit, but logged distinctly so an operator can tell "I
+            // stopped this" from "this is unhealthy" apart. Checked here (not just when RequestInterceptor
+            // built the candidate list) so a provider stopped between list-building and this attempt is
+            // still caught.
+            if (IsProviderDisabledGateBlocked(route))
             {
                 _logger.LogInformation(
                     "Bypassing provider {Provider} for model {Model}: provider is stopped.",
@@ -536,12 +413,12 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 continue;
             }
 
-            // The model-level twin of the provider check above: a model stopped via its own Start/Stop
-            // toggle, or dropped by the last "Refresh from endpoint" scan (not currently reported by the
-            // provider's endpoint), is bypassed the same way - logged distinctly so "I stopped this model"
-            // and "the endpoint doesn't currently serve this" are each identifiable, same rationale as the
+            // Gate (3): the model-level twin of gate (2) - a model stopped via its own Start/Stop toggle,
+            // or dropped by the last "Refresh from endpoint" scan (not currently reported by the provider's
+            // endpoint), is bypassed the same way - logged distinctly so "I stopped this model" and "the
+            // endpoint doesn't currently serve this" are each identifiable, same rationale as the
             // provider-vs-circuit distinction above.
-            if (!_interceptor.IsModelEnabled(route.ModelName))
+            if (IsModelDisabledGateBlocked(route))
             {
                 _logger.LogInformation(
                     "Bypassing model {Model}: stopped or not currently reported by its provider's endpoint.",
@@ -551,14 +428,16 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
             var circuitTarget = CircuitBreakerTargetKey.FromRoute(route);
 
-            // Read-only pre-check for both gates before either mutating one is touched. ShouldBypass and
-            // ShouldBypassProvider (below) can each transition their target from OPEN to HALF-OPEN and claim
-            // its single probe slot - if that claim is made and *then* the other gate turns out to reject
-            // this candidate anyway, the claimed probe would never be resolved via RecordSuccess/RecordFailure
-            // (this candidate is never attempted) and would stay "in flight" forever, permanently bypassing
-            // that target. Filtering out the deterministic, non-racing case here first (an already-OPEN
-            // circuit still cooling down) means neither mutating check below is even reached for it.
-            if (_circuitBreaker.IsOpen(circuitTarget) || _circuitBreaker.IsProviderOpen(route.Provider))
+            // Gate (4): read-only pre-check for gates (5)/(6) before either mutating one is touched.
+            // ShouldBypass and ShouldBypassProvider (below) can each transition their target from OPEN to
+            // HALF-OPEN and claim its single probe slot - if that claim is made and *then* the other gate
+            // turns out to reject this candidate anyway, the claimed probe would never be resolved via
+            // RecordSuccess/RecordFailure (this candidate is never attempted) and would stay "in flight"
+            // forever, permanently bypassing that target. Filtering out the deterministic, non-racing case
+            // here first (an already-OPEN circuit still cooling down) means neither mutating check below is
+            // even reached for it. This is why gate (4) MUST run before gates (5) and (6) - see the ordering
+            // note above the loop.
+            if (IsCircuitOpenPreCheckGateBlocked(route, circuitTarget))
             {
                 _logger.LogInformation(
                     "Bypassing provider {Provider} for model {Model}: circuit breaker is open.",
@@ -567,12 +446,12 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 continue;
             }
 
-            // docs/router/agent-resilience-strategies.md's Circuit Breaker: an OPEN target is bypassed with
-            // no network call at all. Checked here (not just when RequestInterceptor built the candidate
-            // list) so a target that trips between list-building and this attempt - or whose half-open
-            // probe slot another concurrent request just claimed - is still caught, and so that this exact
-            // moment is what claims the single half-open probe (see ICircuitBreaker.ShouldBypass).
-            if (_circuitBreaker.ShouldBypass(circuitTarget))
+            // Gate (5): docs/router/agent-resilience-strategies.md's Circuit Breaker - an OPEN target is
+            // bypassed with no network call at all. Checked here (not just when RequestInterceptor built
+            // the candidate list) so a target that trips between list-building and this attempt - or whose
+            // half-open probe slot another concurrent request just claimed - is still caught, and so that
+            // this exact moment is what claims the single half-open probe (see ICircuitBreaker.ShouldBypass).
+            if (IsCircuitBypassGateBlocked(circuitTarget))
             {
                 _logger.LogInformation(
                     "Bypassing provider {Provider} for model {Model}: circuit breaker is open.",
@@ -581,13 +460,13 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 continue;
             }
 
-            // A 401 (see below) trips every model on a provider at once, not just the one that surfaced
-            // it - checked here as a second, provider-wide gate so a *different* model on that same
-            // now-untrusted provider is bypassed too, without ever having failed itself. The IsOpen/
-            // IsProviderOpen pre-check above already filtered out the common case where this would reject a
-            // probe ShouldBypass just claimed; what's left is the narrow race of a concurrent request
-            // claiming the provider's own probe slot between the two calls.
-            if (_circuitBreaker.ShouldBypassProvider(route.Provider))
+            // Gate (6): a 401 (see below) trips every model on a provider at once, not just the one that
+            // surfaced it - checked here as a second, provider-wide gate so a *different* model on that
+            // same now-untrusted provider is bypassed too, without ever having failed itself. Gate (4)
+            // above already filtered out the common case where this would reject a probe gate (5) just
+            // claimed; what's left is the narrow race of a concurrent request claiming the provider's own
+            // probe slot between the two calls.
+            if (IsCircuitBypassProviderGateBlocked(route))
             {
                 _logger.LogInformation(
                     "Bypassing provider {Provider} for model {Model}: provider-wide circuit breaker is open.",
@@ -1264,6 +1143,34 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// </summary>
     private static bool IsOutageStatus(int statusCode) =>
         statusCode is >= 500 and <= 599 || statusCode == 429 || statusCode == StatusCodes.Status404NotFound;
+
+    /// <summary>Gate (1) of <see cref="InvokeCoreAsync"/>'s candidate pre-flight sequence: <see langword="true"/> when <paramref name="route"/>'s provider is over its monthly budget.</summary>
+    private bool IsBudgetGateBlocked(ResolvedModelRoute route) =>
+        _budgetStore is not null && _budgetStore.IsBreached(route.Provider);
+
+    /// <summary>Gate (2) of <see cref="InvokeCoreAsync"/>'s candidate pre-flight sequence: <see langword="true"/> when <paramref name="route"/>'s provider is stopped (Governance &gt; Providers).</summary>
+    private bool IsProviderDisabledGateBlocked(ResolvedModelRoute route) =>
+        !_interceptor.IsProviderEnabled(route.Provider);
+
+    /// <summary>Gate (3) of <see cref="InvokeCoreAsync"/>'s candidate pre-flight sequence: <see langword="true"/> when <paramref name="route"/>'s model is stopped or no longer reported by its provider's endpoint.</summary>
+    private bool IsModelDisabledGateBlocked(ResolvedModelRoute route) =>
+        !_interceptor.IsModelEnabled(route.ModelName);
+
+    /// <summary>
+    /// Gate (4) of <see cref="InvokeCoreAsync"/>'s candidate pre-flight sequence: the read-only circuit
+    /// pre-check that MUST run before gates (5)/(6) - see the ordering note above the loop in
+    /// <see cref="InvokeCoreAsync"/> for why.
+    /// </summary>
+    private bool IsCircuitOpenPreCheckGateBlocked(ResolvedModelRoute route, CircuitBreakerTargetKey circuitTarget) =>
+        _circuitBreaker.IsOpen(circuitTarget) || _circuitBreaker.IsProviderOpen(route.Provider);
+
+    /// <summary>Gate (5) of <see cref="InvokeCoreAsync"/>'s candidate pre-flight sequence: the target-level circuit breaker, which may claim a half-open probe slot - see gate (4)'s remarks.</summary>
+    private bool IsCircuitBypassGateBlocked(CircuitBreakerTargetKey circuitTarget) =>
+        _circuitBreaker.ShouldBypass(circuitTarget);
+
+    /// <summary>Gate (6) of <see cref="InvokeCoreAsync"/>'s candidate pre-flight sequence: the provider-wide circuit breaker, which may claim a half-open probe slot - see gate (4)'s remarks.</summary>
+    private bool IsCircuitBypassProviderGateBlocked(ResolvedModelRoute route) =>
+        _circuitBreaker.ShouldBypassProvider(route.Provider);
 
     /// <summary>Writes a client-facing error envelope for a failed upstream call (a Bedrock SDK failure, or an exhausted transport-outage cascade), matching <see cref="WriteModelNotFoundResponseAsync"/>'s shape. Defaults to 502 (the request was valid; the upstream call failed) rather than 400 (a malformed/unknown-model client request); <paramref name="statusCode"/> lets a caller override this - e.g. 401 for a Bedrock credential-resolution failure treated like the HTTP path's 401 handling. Callers pass a client-safe <paramref name="errorMessage"/> - never a raw transport-exception message, which can leak infrastructure detail.</summary>
     internal static async Task WriteUpstreamErrorResponseAsync(HttpContext context, string errorMessage, int statusCode = StatusCodes.Status502BadGateway)

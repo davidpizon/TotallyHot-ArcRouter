@@ -1,7 +1,11 @@
 # Code-Smell Refactoring Plan
 
 **Status:** Phase 1 implemented (see [PR #75](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/75)).
-Phases 2-4 remain proposed only. This document is the output of a structural survey (CodeGraph + Serena +
+Phase 2 (all 5 steps) and Phase 3 steps 1-2 are implemented. The Phase 4 Razor `.razor.cs` code-behind
+split is also implemented (`ProvidersAdmin`, `SettingsModal`, `BenchmarkData`, `PriceSourcesAdmin`). Phase
+3 step 3 (further `ManagementFacade` splitting) remains ADR-gated and unimplemented; the remaining Phase 4
+items (`PriceCatalogRepository`, `RequestInterceptor`, the HTTP-vs-gRPC transport inconsistency) remain
+tracked backlog, not scheduled. This document is the output of a structural survey (CodeGraph + Serena +
 targeted reads), not an exhaustive line-by-line audit.
 
 **Scope surveyed:** `TotallyHotArcRouter` (router core), `TotallyHot.ArcRouter.Quality`, and all four

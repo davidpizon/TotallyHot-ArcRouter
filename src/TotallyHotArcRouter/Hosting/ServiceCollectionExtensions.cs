@@ -475,6 +475,47 @@ namespace TotallyHot.ArcRouter.Hosting
             // tray calls to read/toggle it), so a toggle takes effect on the very next request.
             services.AddSingleton<IRoutingGate, RoutingGateStore>();
 
+            // ProxyMiddleware takes its ~25 optional collaborators as one ProxyMiddlewareDependencies
+            // bag rather than individual constructor parameters, so the container can no longer
+            // auto-assemble it via plain constructor injection - this factory does that assembly
+            // explicitly. GetService (not GetRequiredService) for every member preserves the
+            // "unregistered = null = feature off" fallback the old parameter-default-value behavior gave
+            // for free; this runs once, when ProxyMiddleware's singleton is first resolved, by which point
+            // every Add* method in this class has already registered its services regardless of the order
+            // those methods were called in.
+            services.AddSingleton(sp => new ProxyMiddlewareDependencies
+            {
+                SessionIdResolver = sp.GetService<ISessionIdResolver>(),
+                ContinuityMatcher = sp.GetService<IConversationContinuityMatcher>(),
+                TurnTracker = sp.GetService<IConversationTurnTracker>(),
+                UsageExtractor = sp.GetService<IUsageExtractor>(),
+                ResponseTextExtractor = sp.GetService<IResponseTextExtractor>(),
+                TelemetryPublisher = sp.GetService<ITelemetryPublisher>(),
+                QualityIngress = sp.GetService<TotallyHot.ArcRouter.Quality.Ingress.IQualityIngress>(),
+                SpendTracker = sp.GetService<ISpendTracker>(),
+                PriceLookup = sp.GetService<IModelPriceLookup>(),
+                Translators = sp.GetService<IReadOnlyDictionary<string, IPayloadTranslator>>(),
+                BedrockClientFactory = sp.GetService<IBedrockRuntimeClientFactory>(),
+                BudgetStore = sp.GetService<IBudgetEnforcer>(),
+                CircuitBreaker = sp.GetService<ICircuitBreaker>(),
+                ToolCallNormalizerFactory = sp.GetService<ToolCallNormalizerFactory>(),
+                RateLimitCapture = sp.GetService<IRateLimitHeaderCapture>(),
+                UsageLedger = sp.GetService<IUsageLedger>(),
+                PendingTaskEmbeddingCache = sp.GetService<Router.Embeddings.PendingTaskEmbeddingCache>(),
+                RoutingOptions = sp.GetService<IOptions<Models.RoutingOptions>>(),
+                PendingRequestCostCache = sp.GetService<Router.Embeddings.PendingRequestCostCache>(),
+                PendingRequestProvenanceCache = sp.GetService<Router.Embeddings.PendingRequestProvenanceCache>(),
+                PendingResponseTextCache = sp.GetService<TotallyHot.ArcRouter.Judge.PendingResponseTextCache>(),
+                TranscriptStore = sp.GetService<TotallyHot.ArcRouter.Transcripts.ITranscriptStore>(),
+                InFlightGauge = sp.GetService<InFlightRequestGauge>(),
+                RoutingOptionsMonitor = sp.GetService<IOptionsMonitor<Models.RoutingOptions>>(),
+                JudgeOptionsMonitor = sp.GetService<IOptionsMonitor<TotallyHot.ArcRouter.Judge.JudgeOptions>>(),
+                RoutingGate = sp.GetService<IRoutingGate>(),
+                CapabilityStore = sp.GetService<IToolCallCapabilityStore>(),
+                ContextWindowStore = sp.GetService<IModelContextWindowStore>(),
+                InteractionStatusStore = sp.GetService<IProviderInteractionStatusStore>()
+            });
+
             services.AddSingleton<ProxyMiddleware>();
 
             return services;

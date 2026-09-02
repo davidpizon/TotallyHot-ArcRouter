@@ -88,7 +88,11 @@ public sealed class ProxyMiddlewareRoutingGateTests
             NullLogger<ProxyMiddleware>.Instance,
             interceptor,
             new HttpClient(handler),
-            routingGate: new FakeRoutingGate(isEnabled: false));
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                RoutingGate = new FakeRoutingGate(isEnabled: false)
+            }
+        );
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Get;
@@ -123,7 +127,11 @@ public sealed class ProxyMiddlewareRoutingGateTests
             NullLogger<ProxyMiddleware>.Instance,
             interceptor,
             new HttpClient(handler),
-            routingGate: routingGate);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                RoutingGate = routingGate
+            }
+        );
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;

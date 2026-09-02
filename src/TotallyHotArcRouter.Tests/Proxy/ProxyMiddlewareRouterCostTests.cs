@@ -100,8 +100,12 @@ public class ProxyMiddlewareRouterCostTests
             Mock.Of<ILogger<ProxyMiddleware>>(),
             interceptor,
             new HttpClient(handler),
-            telemetryPublisher: publisher,
-            routingOptions: Options.Create(routingOptions ?? new RoutingOptions()));
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                TelemetryPublisher = publisher,
+                RoutingOptions = Options.Create(routingOptions ?? new RoutingOptions())
+            }
+        );
     }
 
     private static DefaultHttpContext BuildContext()

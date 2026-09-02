@@ -70,7 +70,14 @@ public class InFlightRequestGaugeTests
         });
 
         var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler), inFlightGauge: gauge);
+            Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor,
+            new HttpClient(handler),
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                InFlightGauge = gauge
+            }
+        );
 
         await middleware.InvokeAsync(CreateChatContext(), _ => Task.CompletedTask);
 
@@ -94,7 +101,14 @@ public class InFlightRequestGaugeTests
             throw new HttpRequestException("connection refused"));
 
         var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler), inFlightGauge: gauge);
+            Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor,
+            new HttpClient(handler),
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                InFlightGauge = gauge
+            }
+        );
 
         await middleware.InvokeAsync(CreateChatContext(), _ => Task.CompletedTask);
 

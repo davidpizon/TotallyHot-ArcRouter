@@ -323,7 +323,11 @@ public class LiteLlmParityTests
         var middleware = new ProxyMiddleware(
             NullLogger<ProxyMiddleware>.Instance,
             interceptor,
-            telemetryPublisher: telemetryPublisher);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                TelemetryPublisher = telemetryPublisher
+            }
+        );
 
         // port: 0 / grpcPort: 0 bind ephemeral loopback ports (see ProxyServer's constructor remarks)
         // so this test never flakes on a fixed port already being in use, unlike the disabled

@@ -898,7 +898,11 @@ public class ProxyMiddlewareTests
             Mock.Of<ILogger<ProxyMiddleware>>(),
             interceptor,
             new HttpClient(handler),
-            telemetryPublisher: telemetryPublisherMock.Object);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                TelemetryPublisher = telemetryPublisherMock.Object
+            }
+        );
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
@@ -958,7 +962,11 @@ public class ProxyMiddlewareTests
             Mock.Of<ILogger<ProxyMiddleware>>(),
             interceptor,
             new HttpClient(handler),
-            spendTracker: spendTrackerMock.Object);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                SpendTracker = spendTrackerMock.Object
+            }
+        );
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
@@ -1012,7 +1020,11 @@ public class ProxyMiddlewareTests
             Mock.Of<ILogger<ProxyMiddleware>>(),
             interceptor,
             new HttpClient(handler),
-            spendTracker: spendTrackerMock.Object);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                SpendTracker = spendTrackerMock.Object
+            }
+        );
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
@@ -1068,8 +1080,12 @@ public class ProxyMiddlewareTests
             Mock.Of<ILogger<ProxyMiddleware>>(),
             interceptor,
             new HttpClient(handler),
-            spendTracker: spendTrackerMock.Object,
-            priceLookup: priceLookup.Object);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                SpendTracker = spendTrackerMock.Object,
+                PriceLookup = priceLookup.Object
+            }
+        );
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
@@ -1105,8 +1121,14 @@ public class ProxyMiddlewareTests
         }));
         var telemetryPublisherMock = new Mock<ITelemetryPublisher>();
         var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler),
-            telemetryPublisher: telemetryPublisherMock.Object);
+            Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor,
+            new HttpClient(handler),
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                TelemetryPublisher = telemetryPublisherMock.Object
+            }
+        );
 
         var context = NewJsonPostContext("""{"model":"llama3"}""");
         await middleware.InvokeAsync(context, _ => Task.CompletedTask);
@@ -1132,8 +1154,15 @@ public class ProxyMiddlewareTests
         priceLookup.Setup(l => l.TryGetPrice(new ModelKey("gpt-5.4", "openai"))).Returns(new ModelPrice(2m, 6m));
         var telemetryPublisherMock = new Mock<ITelemetryPublisher>();
         var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler),
-            telemetryPublisher: telemetryPublisherMock.Object, priceLookup: priceLookup.Object);
+            Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor,
+            new HttpClient(handler),
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                TelemetryPublisher = telemetryPublisherMock.Object,
+                PriceLookup = priceLookup.Object
+            }
+        );
 
         var context = NewJsonPostContext("""{"model":"gpt-5.4"}""");
         await middleware.InvokeAsync(context, _ => Task.CompletedTask);
@@ -1161,8 +1190,15 @@ public class ProxyMiddlewareTests
         priceLookup.Setup(l => l.TryGetPrice(new ModelKey("gpt-5.4", "openai"))).Returns(new ModelPrice(2m, 6m));
         var telemetryPublisherMock = new Mock<ITelemetryPublisher>();
         var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler),
-            telemetryPublisher: telemetryPublisherMock.Object, priceLookup: priceLookup.Object);
+            Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor,
+            new HttpClient(handler),
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                TelemetryPublisher = telemetryPublisherMock.Object,
+                PriceLookup = priceLookup.Object
+            }
+        );
 
         var context = NewJsonPostContext("""{"model":"gpt-5.4"}""");
         await middleware.InvokeAsync(context, _ => Task.CompletedTask);
@@ -1186,8 +1222,14 @@ public class ProxyMiddlewareTests
         }));
         var telemetryPublisherMock = new Mock<ITelemetryPublisher>();
         var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler),
-            telemetryPublisher: telemetryPublisherMock.Object);
+            Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor,
+            new HttpClient(handler),
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                TelemetryPublisher = telemetryPublisherMock.Object
+            }
+        );
 
         var context = NewJsonPostContext("""{"model":"gpt-5.4"}""");
         await middleware.InvokeAsync(context, _ => Task.CompletedTask);
@@ -1209,8 +1251,14 @@ public class ProxyMiddlewareTests
         }));
         var telemetryPublisherMock = new Mock<ITelemetryPublisher>();
         var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler),
-            telemetryPublisher: telemetryPublisherMock.Object);
+            Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor,
+            new HttpClient(handler),
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                TelemetryPublisher = telemetryPublisherMock.Object
+            }
+        );
 
         var context = NewJsonPostContext("""{"model":"gpt-5.4"}""");
         await middleware.InvokeAsync(context, _ => Task.CompletedTask);
@@ -1257,7 +1305,11 @@ public class ProxyMiddlewareTests
             loggerMock.Object,
             interceptor,
             new HttpClient(handler),
-            telemetryPublisher: telemetryPublisherMock.Object);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                TelemetryPublisher = telemetryPublisherMock.Object
+            }
+        );
 
         const string maliciousSessionId = "sess-1\r\nINFO: FAKE INJECTED LOG LINE";
 
@@ -1318,7 +1370,11 @@ public class ProxyMiddlewareTests
             Mock.Of<ILogger<ProxyMiddleware>>(),
             interceptor,
             new HttpClient(handler),
-            telemetryPublisher: telemetryPublisherMock.Object);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                TelemetryPublisher = telemetryPublisherMock.Object
+            }
+        );
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
@@ -1362,7 +1418,11 @@ public class ProxyMiddlewareTests
             Mock.Of<ILogger<ProxyMiddleware>>(),
             interceptor,
             new HttpClient(handler),
-            telemetryPublisher: telemetryPublisherMock.Object);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                TelemetryPublisher = telemetryPublisherMock.Object
+            }
+        );
 
         async Task SendOnceAsync()
         {
@@ -1405,7 +1465,11 @@ public class ProxyMiddlewareTests
             Mock.Of<ILogger<ProxyMiddleware>>(),
             interceptor,
             new HttpClient(handler),
-            telemetryPublisher: telemetryPublisherMock.Object);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                TelemetryPublisher = telemetryPublisherMock.Object
+            }
+        );
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
@@ -1448,7 +1512,11 @@ public class ProxyMiddlewareTests
             Mock.Of<ILogger<ProxyMiddleware>>(),
             interceptor,
             new HttpClient(handler),
-            telemetryPublisher: telemetryPublisherMock.Object);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                TelemetryPublisher = telemetryPublisherMock.Object
+            }
+        );
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;

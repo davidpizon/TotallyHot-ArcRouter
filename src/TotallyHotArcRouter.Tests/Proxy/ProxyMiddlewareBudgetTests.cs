@@ -160,8 +160,12 @@ public class ProxyMiddlewareBudgetTests
             NullLogger<ProxyMiddleware>.Instance,
             interceptor,
             new HttpClient(handler),
-            telemetryPublisher: telemetryPublisher,
-            budgetStore: budgetStore);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                TelemetryPublisher = telemetryPublisher,
+                BudgetStore = budgetStore
+            }
+        );
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;

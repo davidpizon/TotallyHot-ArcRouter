@@ -78,7 +78,11 @@ public class ProxyMiddlewareCaptureRecoveryTests
             NullLogger<ProxyMiddleware>.Instance,
             interceptor,
             new HttpClient(handler),
-            usageLedger: usageLedger);
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                UsageLedger = usageLedger
+            }
+        );
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
