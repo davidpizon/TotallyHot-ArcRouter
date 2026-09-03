@@ -1,5 +1,4 @@
 using System.Text.Json;
-using TotallyHot.ArcRouter.Gui.Charts;
 
 namespace TotallyHot.ArcRouter.Gui.Charts.Tests;
 

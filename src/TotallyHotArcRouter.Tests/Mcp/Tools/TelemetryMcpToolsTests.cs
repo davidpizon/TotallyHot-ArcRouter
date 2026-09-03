@@ -1,8 +1,7 @@
+using Moq;
 using TotallyHot.ArcRouter.Mcp.Tools;
-using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tests.PriceCatalog;
-using Moq;
 
 namespace TotallyHot.ArcRouter.Tests.Mcp.Tools;
 

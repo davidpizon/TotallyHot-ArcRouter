@@ -1,8 +1,7 @@
+using Moq;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Management;
-using TotallyHot.ArcRouter.Tests.Proxy;
-using Moq;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy.Management;
 

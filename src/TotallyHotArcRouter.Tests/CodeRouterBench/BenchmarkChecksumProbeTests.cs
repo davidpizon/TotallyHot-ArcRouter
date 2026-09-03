@@ -1,8 +1,8 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using System.Net;
 using System.Text;
 using TotallyHot.ArcRouter.Checksums;
 using TotallyHot.ArcRouter.CodeRouterBench;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace TotallyHot.ArcRouter.Tests.CodeRouterBench;
 

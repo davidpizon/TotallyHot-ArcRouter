@@ -1,5 +1,3 @@
-using TotallyHot.ArcRouter.Models;
-
 namespace TotallyHot.ArcRouter.Router;
 
 /// <summary>

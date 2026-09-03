@@ -1,6 +1,6 @@
-using TotallyHot.ArcRouter.Telemetry;
 using Grpc.Core;
 using Grpc.Core.Testing;
+using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Tests.Telemetry;
 

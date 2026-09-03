@@ -1,5 +1,3 @@
-using TotallyHot.ArcRouter.Gui.Telemetry;
-
 namespace TotallyHot.ArcRouter.Gui.Telemetry.Tests;
 
 /// <summary>Covers <see cref="PersistedSessionAggregator.Aggregate"/>: grouping, turn-number parsing, ordering, and totals.</summary>

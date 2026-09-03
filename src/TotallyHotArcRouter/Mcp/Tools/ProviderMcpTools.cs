@@ -1,6 +1,6 @@
+using ModelContextProtocol.Server;
 using System.ComponentModel;
 using TotallyHot.ArcRouter.Proxy.Management;
-using ModelContextProtocol.Server;
 
 namespace TotallyHot.ArcRouter.Mcp.Tools;
 

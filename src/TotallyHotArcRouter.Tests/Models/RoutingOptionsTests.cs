@@ -1,5 +1,5 @@
-using TotallyHot.ArcRouter.Models;
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Models;
 
 namespace TotallyHot.ArcRouter.Tests.Models;
 

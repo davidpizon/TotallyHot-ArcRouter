@@ -1,5 +1,3 @@
-using TotallyHot.ArcRouter.Gui.Charts;
-
 namespace TotallyHot.ArcRouter.Gui.Charts.Tests;
 
 /// <summary>

@@ -1,15 +1,14 @@
-using TotallyHot.ArcRouter.Models;
-using TotallyHot.ArcRouter.PriceCatalog;
-using TotallyHot.ArcRouter.Proxy;
-using TotallyHot.ArcRouter.Telemetry;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Moq;
 using System.Net;
-using System.Net.Http;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.PriceCatalog;
+using TotallyHot.ArcRouter.Proxy;
+using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 

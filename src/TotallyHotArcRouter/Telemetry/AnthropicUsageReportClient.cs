@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.Text.Json.Nodes;
 using TotallyHot.ArcRouter.PriceCatalog;
-using Microsoft.Extensions.Logging;
 
 namespace TotallyHot.ArcRouter.Telemetry;
 

@@ -1,11 +1,10 @@
-using TotallyHot.ArcRouter.PriceCatalog;
-using TotallyHot.ArcRouter.Hosting;
-using TotallyHot.ArcRouter.Proxy;
-using TotallyHot.ArcRouter.Proxy.Management;
-using TotallyHot.ArcRouter.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Moq;
+using TotallyHot.ArcRouter.PriceCatalog;
+using TotallyHot.ArcRouter.Proxy;
+using TotallyHot.ArcRouter.Proxy.Management;
+using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Tests.Hosting;
 

@@ -1,7 +1,7 @@
-using TotallyHot.ArcRouter.Telemetry;
 using Moq;
 using Serilog.Events;
 using Serilog.Parsing;
+using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Tests.Telemetry;
 

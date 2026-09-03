@@ -1,10 +1,10 @@
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Tests.Proxy;
 using TotallyHot.ArcRouter.Tests.TestSupport;
-using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
 
 namespace TotallyHot.ArcRouter.Tests.Judge;
 

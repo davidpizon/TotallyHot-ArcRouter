@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using TotallyHot.ArcRouter.Router;
 
 namespace TotallyHot.ArcRouter.Judge;

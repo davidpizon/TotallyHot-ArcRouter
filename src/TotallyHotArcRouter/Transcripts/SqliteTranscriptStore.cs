@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Transcripts;

@@ -1,5 +1,5 @@
-using TotallyHot.ArcRouter.PriceCatalog;
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.PriceCatalog;
 
 namespace TotallyHot.ArcRouter.Tests.PriceCatalog;
 

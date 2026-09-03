@@ -1,5 +1,4 @@
 using TotallyHot.ArcRouter.Proxy.Management;
-using Microsoft.AspNetCore.Http;
 
 namespace TotallyHot.ArcRouter.Mcp;
 

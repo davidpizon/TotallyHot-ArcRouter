@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;

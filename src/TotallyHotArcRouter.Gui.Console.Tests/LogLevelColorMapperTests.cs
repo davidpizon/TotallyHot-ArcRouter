@@ -1,5 +1,3 @@
-using TotallyHot.ArcRouter.Gui.Console;
-
 namespace TotallyHot.ArcRouter.Gui.Console.Tests;
 
 /// <summary>Covers <see cref="LogLevelColorMapper"/>: level-to-color mapping for the log viewport.</summary>

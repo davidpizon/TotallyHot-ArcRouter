@@ -1,8 +1,8 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Orchestrator;
-using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Tests.CodeRouterBench;
 
 namespace TotallyHot.ArcRouter.Tests.Router.Orchestrator;

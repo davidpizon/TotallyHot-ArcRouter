@@ -1,7 +1,7 @@
+using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router;
-using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Tests.Judge;
 

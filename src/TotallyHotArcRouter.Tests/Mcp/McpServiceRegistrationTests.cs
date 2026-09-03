@@ -1,12 +1,11 @@
-using TotallyHot.ArcRouter.Hosting;
-using TotallyHot.ArcRouter.Mcp;
-using TotallyHot.ArcRouter.Models;
-using TotallyHot.ArcRouter.Proxy.Management;
-using TotallyHot.ArcRouter.Router;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Hosting;
+using TotallyHot.ArcRouter.Mcp;
+using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.Proxy.Management;
 
 namespace TotallyHot.ArcRouter.Tests.Mcp;
 

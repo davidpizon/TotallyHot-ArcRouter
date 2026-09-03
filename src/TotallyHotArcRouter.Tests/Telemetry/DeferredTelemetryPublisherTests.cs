@@ -1,6 +1,6 @@
-using TotallyHot.ArcRouter.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
+using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Tests.Telemetry;
 

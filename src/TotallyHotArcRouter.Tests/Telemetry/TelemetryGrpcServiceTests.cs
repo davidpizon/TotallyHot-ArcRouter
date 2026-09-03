@@ -1,8 +1,8 @@
+using Grpc.Core;
+using Grpc.Core.Testing;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tests.TestSupport;
 using TotallyHot.ArcRouter.Transcripts;
-using Grpc.Core;
-using Grpc.Core.Testing;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Tests.Telemetry;

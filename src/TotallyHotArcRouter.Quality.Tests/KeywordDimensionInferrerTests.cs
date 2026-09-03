@@ -1,4 +1,3 @@
-using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Quality.Extraction;
 
 namespace TotallyHot.ArcRouter.Quality.Tests;

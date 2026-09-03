@@ -1,8 +1,7 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router;
-using TotallyHot.ArcRouter.Router.Embeddings;
 using TotallyHot.ArcRouter.Tests.TestSupport;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace TotallyHot.ArcRouter.Tests.Router;
 

@@ -1,5 +1,3 @@
-using System;
-
 namespace TotallyHot.ArcRouter.Proxy;
 
 /// <summary>

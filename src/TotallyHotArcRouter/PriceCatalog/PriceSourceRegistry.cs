@@ -1,6 +1,5 @@
-using TotallyHot.ArcRouter.PriceCatalog.Sources;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.PriceCatalog.Sources;
 
 namespace TotallyHot.ArcRouter.PriceCatalog;
 

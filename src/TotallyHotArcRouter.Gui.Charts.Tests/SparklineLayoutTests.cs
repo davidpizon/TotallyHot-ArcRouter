@@ -1,5 +1,3 @@
-using TotallyHot.ArcRouter.Gui.Charts;
-
 namespace TotallyHot.ArcRouter.Gui.Charts.Tests;
 
 /// <summary>Covers <see cref="SparklineLayout"/>: the coordinate math behind the mini token-growth chart.</summary>

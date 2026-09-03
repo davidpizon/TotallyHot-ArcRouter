@@ -1,11 +1,11 @@
-using TotallyHot.ArcRouter.Models;
-using TotallyHot.ArcRouter.PriceCatalog;
-using TotallyHot.ArcRouter.Router;
-using TotallyHot.ArcRouter.Router.Orchestrator;
 using Grpc.Core;
 using Grpc.Core.Testing;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.PriceCatalog;
+using TotallyHot.ArcRouter.Router;
+using TotallyHot.ArcRouter.Router.Orchestrator;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Tests.Router.Orchestrator;

@@ -1,6 +1,6 @@
+using AwesomeAssertions;
 using Microsoft.Extensions.Configuration;
 using TotallyHot.ArcRouter.Gui.Services;
-using AwesomeAssertions;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 

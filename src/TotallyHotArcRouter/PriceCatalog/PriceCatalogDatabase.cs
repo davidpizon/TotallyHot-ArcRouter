@@ -1,6 +1,6 @@
-using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
+using System.Globalization;
 
 namespace TotallyHot.ArcRouter.PriceCatalog;
 

@@ -1,7 +1,7 @@
+using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Tests.TestSupport;
 using TotallyHot.ArcRouter.Transcripts;
-using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Tests.Transcripts;
 

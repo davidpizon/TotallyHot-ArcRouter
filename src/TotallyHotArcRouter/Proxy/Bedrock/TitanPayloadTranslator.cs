@@ -2,7 +2,6 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using TotallyHot.ArcRouter.Proxy.Translation;
-using Microsoft.AspNetCore.Http;
 
 namespace TotallyHot.ArcRouter.Proxy.Bedrock;
 

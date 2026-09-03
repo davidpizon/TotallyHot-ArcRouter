@@ -1,3 +1,6 @@
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
+using Moq;
 using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
@@ -6,9 +9,6 @@ using System.Text.Json;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Translation;
 using TotallyHot.ArcRouter.Telemetry;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging;
-using Moq;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 

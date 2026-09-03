@@ -1,6 +1,7 @@
+using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.CodeRouterBench;
-using TotallyHot.ArcRouter.Mcp;
 using TotallyHot.ArcRouter.Hosting;
+using TotallyHot.ArcRouter.Mcp;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Bedrock;
@@ -11,7 +12,6 @@ using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Classification;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Update;
-using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Proxy;
 

@@ -1,8 +1,7 @@
+using AwesomeAssertions;
 using System.Net.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using TotallyHot.ArcRouter.Gui.Telemetry;
-using AwesomeAssertions;
 
 namespace TotallyHot.ArcRouter.Gui.Telemetry.Tests;
 

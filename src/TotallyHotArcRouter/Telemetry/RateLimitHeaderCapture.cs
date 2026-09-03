@@ -1,6 +1,5 @@
 using System.Net.Http.Headers;
 using System.Threading.Channels;
-using Microsoft.Extensions.Logging;
 using TotallyHot.ArcRouter.PriceCatalog;
 
 namespace TotallyHot.ArcRouter.Telemetry;

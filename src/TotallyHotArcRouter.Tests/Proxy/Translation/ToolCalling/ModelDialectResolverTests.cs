@@ -1,9 +1,9 @@
+using Moq;
 using System.Net;
 using System.Text.Json;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
-using Moq;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
 

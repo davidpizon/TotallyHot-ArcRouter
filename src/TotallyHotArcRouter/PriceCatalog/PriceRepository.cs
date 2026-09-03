@@ -1,7 +1,7 @@
+using Microsoft.Data.Sqlite;
 using System.Globalization;
 using TotallyHot.ArcRouter.PriceCatalog.Sources;
 using TotallyHot.ArcRouter.Telemetry;
-using Microsoft.Data.Sqlite;
 
 namespace TotallyHot.ArcRouter.PriceCatalog;
 

@@ -1,18 +1,3 @@
-using TotallyHot.ArcRouter.Proxy;
-using TotallyHot.ArcRouter.Proxy.Bedrock;
-using TotallyHot.ArcRouter.Proxy.Management;
-using TotallyHot.ArcRouter.Proxy.Translation;
-using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
-using TotallyHot.ArcRouter.Router;
-using TotallyHot.ArcRouter.Router.Classification;
-using TotallyHot.ArcRouter.Quality.DependencyInjection;
-using TotallyHot.ArcRouter.Quality.Grading;
-using TotallyHot.ArcRouter.Telemetry;
-using TotallyHot.ArcRouter.Tools;
-using TotallyHot.ArcRouter.Update;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Judge;

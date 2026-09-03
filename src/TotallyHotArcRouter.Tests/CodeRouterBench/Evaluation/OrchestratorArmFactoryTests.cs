@@ -36,7 +36,7 @@ public class OrchestratorArmFactoryTests
                 ["model-b"] = new RegretOutcomeCell(Score: 1.0, CostUsd: 0.01, TotalTokens: 100),
             };
             oodOutcomes.Add(new RegretTaskOutcome(taskId, "algorithm", cells, TaskText: $"task {i}"));
-            embeddingsByTaskId[taskId] = new KnnRetrievalEntry(taskId, [1f, (float)i / 20f], "model-b");
+            embeddingsByTaskId[taskId] = new KnnRetrievalEntry(taskId, [1f, i / 20f], "model-b");
         }
 
         var knnArtifact = new KnnRetrievalArtifact(

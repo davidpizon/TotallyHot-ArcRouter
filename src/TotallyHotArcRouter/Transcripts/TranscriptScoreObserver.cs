@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Logging;
 using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Quality.Grading;
 

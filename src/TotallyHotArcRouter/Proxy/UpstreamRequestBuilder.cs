@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Http;
 using TotallyHot.ArcRouter.Proxy.Translation;
 
 namespace TotallyHot.ArcRouter.Proxy;

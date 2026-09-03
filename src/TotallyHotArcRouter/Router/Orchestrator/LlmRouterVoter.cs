@@ -1,6 +1,5 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Microsoft.Extensions.Logging;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router.TextGeneration;
 

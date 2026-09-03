@@ -1,11 +1,5 @@
-using TotallyHot.ArcRouter.Proxy;
 using Microsoft.AspNetCore.Connections;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using System;
-using System.IO;
-using System.Threading;
-using System.Threading.Tasks;
+using TotallyHot.ArcRouter.Proxy;
 
 namespace TotallyHot.ArcRouter.Hosting
 {

@@ -1,10 +1,10 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Maui.LifecycleEvents;
+using Serilog;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using TotallyHot.ArcRouter.Gui.Platforms.Windows;
 using TotallyHot.ArcRouter.Gui.Services;
-using Microsoft.Extensions.Logging;
-using Microsoft.Maui.LifecycleEvents;
-using Serilog;
 
 namespace TotallyHot.ArcRouter.Gui;
 

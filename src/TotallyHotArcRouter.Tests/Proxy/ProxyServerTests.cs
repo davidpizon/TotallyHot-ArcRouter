@@ -1,9 +1,6 @@
-using TotallyHot.ArcRouter.Proxy;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using System;
-using System.Linq;
 using System.Net.Sockets;
+using TotallyHot.ArcRouter.Proxy;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 

@@ -1,8 +1,6 @@
-using System.Net.Http.Json;
+using Microsoft.Extensions.Options;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Proxy;
 
 namespace TotallyHot.ArcRouter.Judge;

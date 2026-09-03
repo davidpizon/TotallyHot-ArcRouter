@@ -1,4 +1,3 @@
-using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router;
 
 namespace TotallyHot.ArcRouter.Tests.Router;

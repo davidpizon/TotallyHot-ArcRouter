@@ -1,7 +1,7 @@
+using ModelContextProtocol.Server;
 using System.ComponentModel;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Telemetry;
-using ModelContextProtocol.Server;
 
 namespace TotallyHot.ArcRouter.Mcp.Tools;
 

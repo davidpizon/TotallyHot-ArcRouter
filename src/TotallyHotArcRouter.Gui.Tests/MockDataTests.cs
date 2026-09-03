@@ -1,5 +1,5 @@
-using TotallyHot.ArcRouter.Gui.Models;
 using AwesomeAssertions;
+using TotallyHot.ArcRouter.Gui.Models;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 

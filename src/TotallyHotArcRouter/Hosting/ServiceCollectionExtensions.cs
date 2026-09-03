@@ -1,9 +1,9 @@
+using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
-using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Quality.DependencyInjection;
 using TotallyHot.ArcRouter.Quality.Grading;
-using TotallyHot.ArcRouter.Judge;
+using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Transcripts;
 using TotallyHot.ArcRouter.Update;
 

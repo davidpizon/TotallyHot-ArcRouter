@@ -430,7 +430,7 @@ public partial class ProvidersAdmin
                 var row = usage.Rows.FirstOrDefault(r => r.UsageDay == day && r.Model == model);
                 return row is null
                     ? 0m
-                    : (decimal)(row.InputTokens + row.OutputTokens + row.CacheCreationTokens + row.CacheReadTokens);
+                    : row.InputTokens + row.OutputTokens + row.CacheCreationTokens + row.CacheReadTokens;
             }).ToList();
             return new DistributionSeries(model, ReportedUsageSeriesColors[index % ReportedUsageSeriesColors.Length], data);
         }).ToList();

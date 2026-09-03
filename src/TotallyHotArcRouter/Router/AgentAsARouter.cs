@@ -1,6 +1,5 @@
-using TotallyHot.ArcRouter.Models;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Models;
 
 namespace TotallyHot.ArcRouter.Router;
 

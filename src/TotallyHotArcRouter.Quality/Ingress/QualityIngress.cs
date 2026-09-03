@@ -1,6 +1,6 @@
-using TotallyHot.ArcRouter.Quality.Grading;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Quality.Grading;
 
 namespace TotallyHot.ArcRouter.Quality.Ingress;
 

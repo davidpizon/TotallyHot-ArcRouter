@@ -1,9 +1,9 @@
-using TotallyHot.ArcRouter.Gui.Console;
-using TotallyHot.ArcRouter.Gui.Models;
-using TotallyHot.ArcRouter.Gui.Telemetry;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
+using TotallyHot.ArcRouter.Gui.Console;
+using TotallyHot.ArcRouter.Gui.Models;
+using TotallyHot.ArcRouter.Gui.Telemetry;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Services;

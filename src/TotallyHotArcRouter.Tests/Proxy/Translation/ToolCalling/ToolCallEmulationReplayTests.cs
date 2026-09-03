@@ -1,8 +1,8 @@
+using Microsoft.Extensions.Logging;
+using Moq;
 using System.Text;
 using System.Text.Json;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
-using Microsoft.Extensions.Logging;
-using Moq;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
 

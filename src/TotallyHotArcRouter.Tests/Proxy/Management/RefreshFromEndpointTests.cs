@@ -1,12 +1,10 @@
+using Moq;
 using System.Net;
 using TotallyHot.ArcRouter.Models;
-using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Tests.PriceCatalog;
-using TotallyHot.ArcRouter.Tests.Proxy;
-using Moq;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy.Management;
 

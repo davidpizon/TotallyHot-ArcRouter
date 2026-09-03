@@ -1,7 +1,6 @@
-using TotallyHot.ArcRouter.Router.Embeddings;
 using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Quality.Grading;
-using Microsoft.Extensions.Logging;
+using TotallyHot.ArcRouter.Router.Embeddings;
 
 namespace TotallyHot.ArcRouter.Router;
 

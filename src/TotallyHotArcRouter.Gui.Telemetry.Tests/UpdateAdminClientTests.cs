@@ -1,4 +1,3 @@
-using TotallyHot.ArcRouter.Gui.Telemetry;
 using AwesomeAssertions;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;

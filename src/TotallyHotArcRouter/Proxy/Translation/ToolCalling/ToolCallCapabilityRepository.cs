@@ -1,6 +1,5 @@
 using System.Globalization;
 using TotallyHot.ArcRouter.PriceCatalog;
-using Microsoft.Data.Sqlite;
 
 namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 

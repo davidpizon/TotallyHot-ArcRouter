@@ -1,9 +1,8 @@
-using System.Text;
-using TotallyHot.ArcRouter.Gui.Telemetry;
+using AwesomeAssertions;
 using Grpc.Core;
 using Grpc.Core.Interceptors;
 using Grpc.Core.Testing;
-using AwesomeAssertions;
+using System.Text;
 
 namespace TotallyHot.ArcRouter.Gui.Telemetry.Tests;
 

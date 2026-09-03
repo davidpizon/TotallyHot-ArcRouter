@@ -1,8 +1,8 @@
+using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 using TotallyHot.ArcRouter.PriceCatalog;
-using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Tests.CodeRouterBench.Evaluation;
 

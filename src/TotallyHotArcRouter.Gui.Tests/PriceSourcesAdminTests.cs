@@ -1,9 +1,8 @@
+using AwesomeAssertions;
+using Bunit;
 using TotallyHot.ArcRouter.Gui.Components;
 using TotallyHot.ArcRouter.Gui.Services;
 using TotallyHot.ArcRouter.Gui.Telemetry;
-using Bunit;
-using AwesomeAssertions;
-
 // MAUI's implicit usings bring in a Microsoft.Maui.Controls.PointerEventArgs that collides with Blazor's.
 using PointerEventArgs = Microsoft.AspNetCore.Components.Web.PointerEventArgs;
 

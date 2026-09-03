@@ -1,10 +1,10 @@
-using System.Text;
-using TotallyHot.ArcRouter.Proxy;
-using TotallyHot.ArcRouter.Router;
-using TotallyHot.ArcRouter.Quality;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Moq;
+using System.Text;
+using TotallyHot.ArcRouter.Proxy;
+using TotallyHot.ArcRouter.Quality;
+using TotallyHot.ArcRouter.Router;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 

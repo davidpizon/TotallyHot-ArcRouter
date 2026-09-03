@@ -1,5 +1,4 @@
 using TotallyHot.ArcRouter.Proxy.Concurrency;
-using Microsoft.Extensions.Logging;
 
 namespace TotallyHot.ArcRouter.PriceCatalog;
 

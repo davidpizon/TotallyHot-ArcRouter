@@ -1,9 +1,7 @@
 using System.Text.Json.Nodes;
-using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Telemetry;
-using Microsoft.Extensions.Logging;
 
 namespace TotallyHot.ArcRouter.Proxy
 {

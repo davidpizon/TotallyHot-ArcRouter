@@ -1,9 +1,8 @@
+using AwesomeAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
-using AwesomeAssertions;
-using Microsoft.Extensions.Logging.Abstractions;
-using TotallyHot.ArcRouter.Gui.Telemetry;
 
 namespace TotallyHot.ArcRouter.Gui.Telemetry.Tests;
 

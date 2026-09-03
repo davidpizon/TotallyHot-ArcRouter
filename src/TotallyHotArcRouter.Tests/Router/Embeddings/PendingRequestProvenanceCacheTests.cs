@@ -1,6 +1,6 @@
+using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router.Embeddings;
-using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Tests.Router.Embeddings;
 

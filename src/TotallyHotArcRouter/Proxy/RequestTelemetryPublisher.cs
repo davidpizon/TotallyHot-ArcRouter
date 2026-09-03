@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using System.Text.Json.Nodes;
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.PriceCatalog;
@@ -5,9 +6,6 @@ using TotallyHot.ArcRouter.Quality.Ingress;
 using TotallyHot.ArcRouter.Router.Embeddings;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Transcripts;
-using Microsoft.Extensions.Logging;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Proxy;
 

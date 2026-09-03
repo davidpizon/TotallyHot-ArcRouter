@@ -1,4 +1,3 @@
-using TotallyHot.ArcRouter.Gui.Telemetry;
 using AwesomeAssertions;
 using Grpc.Core;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;

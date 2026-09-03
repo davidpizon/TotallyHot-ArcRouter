@@ -1,9 +1,7 @@
-using System.Diagnostics;
 using Amazon.BedrockRuntime;
 using Amazon.BedrockRuntime.Model;
 using Amazon.Runtime;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging;
+using System.Diagnostics;
 using TotallyHot.ArcRouter.Proxy.Bedrock;
 using TotallyHot.ArcRouter.Proxy.Translation;
 using TotallyHot.ArcRouter.Router.Classification;

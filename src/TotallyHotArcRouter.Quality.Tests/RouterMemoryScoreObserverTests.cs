@@ -1,9 +1,8 @@
-using TotallyHot.ArcRouter.Router;
-using TotallyHot.ArcRouter.Quality;
-using TotallyHot.ArcRouter.Telemetry;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
+using TotallyHot.ArcRouter.Router;
+using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Quality.Tests;
 

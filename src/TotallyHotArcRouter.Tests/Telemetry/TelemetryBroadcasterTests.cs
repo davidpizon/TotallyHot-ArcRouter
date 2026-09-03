@@ -1,7 +1,7 @@
+using Moq;
 using System.Globalization;
 using System.Threading.Channels;
 using TotallyHot.ArcRouter.Telemetry;
-using Moq;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Tests.Telemetry;

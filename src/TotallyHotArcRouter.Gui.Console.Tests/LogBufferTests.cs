@@ -1,5 +1,3 @@
-using TotallyHot.ArcRouter.Gui.Console;
-
 namespace TotallyHot.ArcRouter.Gui.Console.Tests;
 
 /// <summary>Covers <see cref="LogBuffer"/>: the bounded FIFO buffer backing the Console viewport.</summary>

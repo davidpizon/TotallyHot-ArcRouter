@@ -1,6 +1,6 @@
+using Microsoft.Extensions.Logging;
 using TotallyHot.ArcRouter.Gui.Models;
 using TotallyHot.ArcRouter.Gui.Telemetry;
-using Microsoft.Extensions.Logging;
 
 namespace TotallyHot.ArcRouter.Gui.Services;
 

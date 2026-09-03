@@ -1,10 +1,10 @@
-using TotallyHot.ArcRouter.Proxy;
-using TotallyHot.ArcRouter.Telemetry;
-using TotallyHot.ArcRouter.Tests.PriceCatalog;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Net;
 using System.Text;
+using TotallyHot.ArcRouter.Proxy;
+using TotallyHot.ArcRouter.Telemetry;
+using TotallyHot.ArcRouter.Tests.PriceCatalog;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 

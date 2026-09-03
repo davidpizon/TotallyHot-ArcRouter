@@ -1,5 +1,5 @@
-using TotallyHot.ArcRouter.Tools;
 using Microsoft.CodeAnalysis;
+using TotallyHot.ArcRouter.Tools;
 
 namespace TotallyHot.ArcRouter.Tests.Tools;
 

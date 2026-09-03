@@ -1,5 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
-
 namespace TotallyHot.ArcRouter.Telemetry;
 
 /// <summary>

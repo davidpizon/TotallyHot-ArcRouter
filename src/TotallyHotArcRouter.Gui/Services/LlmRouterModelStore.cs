@@ -1,5 +1,5 @@
-using TotallyHot.ArcRouter.Gui.Telemetry;
 using Microsoft.Extensions.Logging;
+using TotallyHot.ArcRouter.Gui.Telemetry;
 
 namespace TotallyHot.ArcRouter.Gui.Services;
 

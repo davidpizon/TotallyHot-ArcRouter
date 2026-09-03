@@ -1,6 +1,6 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Transcripts;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace TotallyHot.ArcRouter.Tests.Transcripts;
 

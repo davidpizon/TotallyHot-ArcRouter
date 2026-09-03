@@ -1,11 +1,11 @@
+using Microsoft.UI.Dispatching;
+using Serilog;
 using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using System.ServiceProcess;
 using TotallyHot.ArcRouter.Gui.Services;
 using TotallyHot.ArcRouter.Gui.Telemetry;
-using Microsoft.UI.Dispatching;
-using Serilog;
 
 namespace TotallyHot.ArcRouter.Gui.Platforms.Windows;
 
@@ -280,11 +280,11 @@ internal static class TrayWindowManager
                 // A greyed, uncommandable caption rather than a real item - TrackPopupMenuEx never returns
                 // MF_GRAYED entries, so it needs no CMD_ id and can share CMD_SHOW_DASHBOARD's harmlessly.
                 // This carries the short form of what the balloon says at length; see BuildRouterStatusLabel.
-                AppendMenuW(menu, MF_STRING | MF_GRAYED, (UIntPtr)CMD_SHOW_DASHBOARD, BuildRouterStatusLabel());
+                AppendMenuW(menu, MF_STRING | MF_GRAYED, CMD_SHOW_DASHBOARD, BuildRouterStatusLabel());
                 AppendMenuW(menu, MF_SEPARATOR, UIntPtr.Zero, null);
             }
 
-            AppendMenuW(menu, MF_STRING, (UIntPtr)CMD_SHOW_DASHBOARD, "Show Dashboard");
+            AppendMenuW(menu, MF_STRING, CMD_SHOW_DASHBOARD, "Show Dashboard");
             AppendMenuW(menu, MF_SEPARATOR, UIntPtr.Zero, null);
 
             // A single flipping item rather than two always-present entries: its label and action reflect
@@ -294,9 +294,9 @@ internal static class TrayWindowManager
             var routingLabel = routerUsable
                 ? (_routingGateStore?.IsEnabled == false ? "Enable Routing" : "Disable Routing")
                 : "Routing Unavailable";
-            AppendMenuW(menu, routerUsable ? MF_STRING : MF_STRING | MF_GRAYED, (UIntPtr)CMD_TOGGLE_ROUTING, routingLabel);
+            AppendMenuW(menu, routerUsable ? MF_STRING : MF_STRING | MF_GRAYED, CMD_TOGGLE_ROUTING, routingLabel);
             AppendMenuW(menu, MF_SEPARATOR, UIntPtr.Zero, null);
-            AppendMenuW(menu, MF_STRING, (UIntPtr)CMD_EXIT, "Exit");
+            AppendMenuW(menu, MF_STRING, CMD_EXIT, "Exit");
 
             GetCursorPos(out var cursor);
             var command = TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON, cursor.X, cursor.Y, _hwnd, IntPtr.Zero);
@@ -552,7 +552,7 @@ internal static class TrayWindowManager
         }
 
         _trayIconHandle = IntPtr.Zero;
-        return LoadIconW(IntPtr.Zero, (IntPtr)IDI_APPLICATION);
+        return LoadIconW(IntPtr.Zero, IDI_APPLICATION);
     }
 
     /// <summary>

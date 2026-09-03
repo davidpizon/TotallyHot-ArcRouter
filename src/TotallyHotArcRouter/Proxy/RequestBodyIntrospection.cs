@@ -1,6 +1,5 @@
 using System.Text;
 using System.Text.Json.Nodes;
-using TotallyHot.ArcRouter.Router;
 
 namespace TotallyHot.ArcRouter.Proxy;
 

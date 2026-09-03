@@ -1,5 +1,5 @@
-using System.Runtime.CompilerServices;
 using Grpc.Core;
+using System.Runtime.CompilerServices;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Telemetry;

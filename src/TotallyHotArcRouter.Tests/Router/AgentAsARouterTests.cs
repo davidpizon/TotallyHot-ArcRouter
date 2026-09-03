@@ -1,8 +1,8 @@
-using TotallyHot.ArcRouter.Models;
-using TotallyHot.ArcRouter.Router;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
+using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.Router;
 
 namespace TotallyHot.ArcRouter.Tests.Router;
 

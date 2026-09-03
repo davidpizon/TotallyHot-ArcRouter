@@ -106,7 +106,7 @@ public sealed class ManagementReportingService
         }
 
         return ManagementResultExecutor.TryExecute(
-            () => (IReadOnlyList<UsageRollupBucket>)_rollupStore.Query(from, to, bucketWidth, groupBy),
+            () => _rollupStore.Query(from, to, bucketWidth, groupBy),
             "Failed to read usage rollups.");
     }
 

@@ -1,6 +1,6 @@
-using TotallyHot.ArcRouter.Quality.Parsing;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Quality.Parsing;
 
 namespace TotallyHot.ArcRouter.Quality.Extraction;
 

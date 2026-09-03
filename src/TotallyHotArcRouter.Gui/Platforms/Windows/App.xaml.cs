@@ -1,5 +1,5 @@
-using System.Diagnostics.CodeAnalysis;
 using Serilog;
+using System.Diagnostics.CodeAnalysis;
 
 namespace TotallyHot.ArcRouter.Gui.WinUI;
 

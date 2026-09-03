@@ -1,8 +1,8 @@
-using TotallyHot.ArcRouter.Telemetry;
-using TotallyHot.ArcRouter.Tests.PriceCatalog;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Telemetry;
+using TotallyHot.ArcRouter.Tests.PriceCatalog;
 
 namespace TotallyHot.ArcRouter.Tests.Telemetry;
 

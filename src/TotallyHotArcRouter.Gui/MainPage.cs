@@ -1,7 +1,7 @@
-using System.Diagnostics.CodeAnalysis;
 using Microsoft.AspNetCore.Components.WebView;
 using Microsoft.AspNetCore.Components.WebView.Maui;
 using Serilog;
+using System.Diagnostics.CodeAnalysis;
 using WebView2Control = Microsoft.UI.Xaml.Controls.WebView2;
 
 namespace TotallyHot.ArcRouter.Gui;

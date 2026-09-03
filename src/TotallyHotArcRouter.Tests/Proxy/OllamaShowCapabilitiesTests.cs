@@ -1,13 +1,12 @@
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
+using Moq;
+using System.Text;
+using System.Text.Json;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging;
-using Moq;
-using System.Net.Http;
-using System.Text;
-using System.Text.Json;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 

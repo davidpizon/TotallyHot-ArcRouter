@@ -1,5 +1,4 @@
 using TotallyHot.ArcRouter.PriceCatalog;
-using Microsoft.Extensions.Logging;
 
 namespace TotallyHot.ArcRouter.Telemetry;
 

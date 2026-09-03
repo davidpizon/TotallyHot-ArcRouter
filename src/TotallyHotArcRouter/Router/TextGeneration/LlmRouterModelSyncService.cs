@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using System.Net;
-using Microsoft.Extensions.Logging;
 using TotallyHot.ArcRouter.Checksums;
 using TotallyHot.ArcRouter.CodeRouterBench;
 

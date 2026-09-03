@@ -1,8 +1,8 @@
+using Microsoft.Extensions.Options;
+using Moq;
 using System.Text.Json;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
-using Microsoft.Extensions.Options;
-using Moq;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 

@@ -1,5 +1,5 @@
-using TotallyHot.ArcRouter.Judge;
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Judge;
 
 namespace TotallyHot.ArcRouter.Tests.Judge;
 

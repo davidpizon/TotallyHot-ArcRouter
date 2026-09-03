@@ -1,9 +1,8 @@
+using Amazon;
+using Amazon.BedrockRuntime;
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
-using Amazon;
-using Amazon.BedrockRuntime;
-using Amazon.Runtime;
 
 namespace TotallyHot.ArcRouter.Proxy.Bedrock;
 

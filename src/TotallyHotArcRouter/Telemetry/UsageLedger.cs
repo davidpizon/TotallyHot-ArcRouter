@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
-using Microsoft.Extensions.Logging;
 using TotallyHot.ArcRouter.PriceCatalog;
 
 namespace TotallyHot.ArcRouter.Telemetry;
@@ -149,7 +148,7 @@ public sealed class UsageLedger : IUsageLedger
             command.Parameters.AddWithValue("$cacheReadTokens", (object?)entry.CacheReadTokens ?? DBNull.Value);
             command.Parameters.AddWithValue(
                 "$estimatedCostUsd",
-                entry.EstimatedCostUsd is { } cost ? cost.ToString(CultureInfo.InvariantCulture) : (object)DBNull.Value);
+                entry.EstimatedCostUsd is { } cost ? cost.ToString(CultureInfo.InvariantCulture) : DBNull.Value);
             command.Parameters.AddWithValue("$costConfidence", entry.CostConfidence.ToString());
             command.Parameters.AddWithValue("$occurredAt", occurredAt);
 
