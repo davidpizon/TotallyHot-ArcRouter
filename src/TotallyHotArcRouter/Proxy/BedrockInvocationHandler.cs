@@ -103,7 +103,7 @@ internal sealed class BedrockInvocationHandler
                 context.Response.Headers[ProxyMiddleware.RoutedModelHeaderName] = route.ModelName;
                 context.Response.Headers[ProxyMiddleware.SubstitutionReasonHeaderName] = RequestTelemetryPublisher.ResolveSubstitutionReason(isFallback, resolutionReason).ToString();
 
-                (capturedResponseBytes, tailScanner) = await TranslateAndCaptureBedrockStreamAsync(translator, response.Body, context.Response.Body, ProxyMiddleware.MaxCapturedResponseBytes, context.RequestAborted);
+                (capturedResponseBytes, tailScanner) = await TranslateAndCaptureBedrockStreamAsync(translator, response.Body, context.Response.Body, UpstreamResponseWriter.MaxCapturedResponseBytes, context.RequestAborted);
             }
             else
             {
@@ -126,11 +126,11 @@ internal sealed class BedrockInvocationHandler
                 context.Response.Headers[ProxyMiddleware.SubstitutionReasonHeaderName] = RequestTelemetryPublisher.ResolveSubstitutionReason(isFallback, resolutionReason).ToString();
                 await context.Response.Body.WriteAsync(translated, context.RequestAborted);
 
-                capturedResponseBytes = translated.Length <= ProxyMiddleware.MaxCapturedResponseBytes ? translated : translated[..ProxyMiddleware.MaxCapturedResponseBytes];
+                capturedResponseBytes = translated.Length <= UpstreamResponseWriter.MaxCapturedResponseBytes ? translated : translated[..UpstreamResponseWriter.MaxCapturedResponseBytes];
 
                 // Only worth the ~64KB tail-window allocation when capturedResponseBytes above actually
                 // lost data - a response that fits within the cap is already fully captured.
-                if (translated.Length > ProxyMiddleware.MaxCapturedResponseBytes)
+                if (translated.Length > UpstreamResponseWriter.MaxCapturedResponseBytes)
                 {
                     var bufferedTailScanner = new IncrementalUsageScanner();
                     bufferedTailScanner.Append(translated);

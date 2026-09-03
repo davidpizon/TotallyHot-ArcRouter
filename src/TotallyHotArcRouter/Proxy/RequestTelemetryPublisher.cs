@@ -365,7 +365,7 @@ internal sealed class RequestTelemetryPublisher
         if (!usageExtracted && usedNativeBytes)
         {
             // The native capture and the translated/client-shape capture are independently truncated at
-            // MaxCapturedResponseBytes (see CopyAndCaptureAsync), so a large response can cut the native
+            // MaxCapturedResponseBytes (see UpstreamResponseWriter.CopyAndCaptureAsync), so a large response can cut the native
             // bytes off before the usage block - often the last thing to arrive in a streamed response -
             // while the other capture still has it. Falling back recovers usage/cost for budget enforcement
             // and the spend ledger instead of recording nothing purely because the preferred capture was
