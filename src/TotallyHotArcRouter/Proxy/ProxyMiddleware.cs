@@ -121,22 +121,6 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         "Upgrade"
     ];
 
-    // "Authorization" carries the client's inbound credential to the proxy itself (e.g. a placeholder
-    // token an IDE/BYOK client requires but never validates), not a credential for the upstream provider.
-    // It must never be forwarded as-is: for providers whose AuthHeaderName is something else (e.g.
-    // Anthropic's "x-api-key"), forwarding it would send the client's bogus token to the upstream
-    // alongside the real injected credential, and some providers reject the request outright when both
-    // are present.
-    //
-    // "Accept-Encoding" is skipped because _httpClient never configures AutomaticDecompression: if the
-    // client's own "Accept-Encoding: gzip" were relayed upstream, a provider that honors it would send a
-    // gzip-compressed body that this proxy reads (and, for a translated provider, re-parses as plain-text
-    // SSE/JSON) without ever decompressing it - producing either a translation failure or, worse, a
-    // successful-looking response whose Content-Encoding header (copied from upstream) is a lie once the
-    // body has been rewritten by a translator, which the client then fails to gunzip (zlib
-    // "incorrect header check"). Not asking upstream to compress at all sidesteps both failure modes.
-    private static readonly string[] AlwaysSkippedRequestHeaders = ["Host", "Content-Type", "Content-Length", "Authorization", "Accept-Encoding"];
-
     // Cap on how much of the response body telemetry captures for usage parsing (see CopyAndCaptureAsync).
     // Real chat/completion responses are almost always well under this; a response that exceeds it just
     // means usage parsing has less to work with (a truncated/partial buffer that the usage parsers already
@@ -559,102 +543,10 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 translator = null;
             }
 
-            // A response-only translator is treated like "no translator" for request-forwarding purposes,
-            // while still being "not null" below for response handling (streaming/buffered dispatch,
-            // Content-Length/Content-Encoding stripping, etc.) - see IResponseOnlyTranslator for why its
-            // request side cannot be routed through BuildRequestUri.
-            var isRequestReshapingTranslator = translator is not null and not IResponseOnlyTranslator;
-
-            // Reshaping the body and owning the upstream URL are two axes, not one. Every translator before
-            // Phase 5 did both or neither, so one flag covered it; tool-call emulation rewrites the body
-            // heavily while still addressing the same OpenAI-compatible endpoint on the client's own path -
-            // see IClientPathTranslator.
-            var buildsOwnRequestUri = isRequestReshapingTranslator && translator is not IClientPathTranslator;
-
-            var requestIsStreaming = buildsOwnRequestUri && IsStreamingRequest(rewrittenBody);
-
-            Uri targetUri;
-            byte[] forwardBody;
-            if (buildsOwnRequestUri)
-            {
-                targetUri = translator!.BuildRequestUri(route.UpstreamBaseUrl, route.ProviderModelId, requestIsStreaming);
-                forwardBody = translator.TranslateRequest(rewrittenBody);
-            }
-            else
-            {
-                // Deliberately neither `new Uri(route.UpstreamBaseUrl, relativePath)` nor plain string
-                // concatenation - both are lossy in opposite directions, and BuildPassthroughUrl exists to
-                // be neither. Combining drops a BaseUrl's own path (an ASP.NET Core path always starts with
-                // "/", making it an absolute-path reference that *replaces* the base's path); concatenating
-                // emits a shared prefix twice, so an LM Studio base of "http://127.0.0.1:1234/v1" meeting a
-                // client's "/v1/chat/completions" forwards to "/v1/v1/chat/completions" - which LM Studio
-                // answers 200 with an error body, so it fails silently everywhere downstream. See
-                // ProviderUrlBuilder.BuildPassthroughUrl and src/README.md's "Provider base URLs".
-                // `.Value` on both rather than PathString's implicit string conversion and
-                // QueryString.ToString(). The two disagree about empty - `Value` is null, ToString() is ""
-                // - and BuildPassthroughUrl accepts either, so the choice is about which one says so. The
-                // explicit nullable spelling is the one that matches the documented contract; going
-                // through ToString() would quietly guarantee non-null here and make the null handling on
-                // the other side look like dead defensive code the next reader deletes.
-                targetUri = new Uri(ProviderUrlBuilder.BuildPassthroughUrl(
-                    route.UpstreamBaseUrl,
-                    context.Request.Path.Value,
-                    context.Request.QueryString.Value));
-
-                // Still consulted for the body, so a client-path translator gets its rewrite. A
-                // response-only translator's TranslateRequest is the identity by contract, which keeps this
-                // the byte-for-byte forwarding path it has always been for everything else.
-                forwardBody = isRequestReshapingTranslator ? translator!.TranslateRequest(rewrittenBody) : rewrittenBody;
-            }
-
-            var requestMessage = new HttpRequestMessage
-            {
-                RequestUri = targetUri,
-                Method = new HttpMethod(context.Request.Method)
-            };
-
-            var requestHopByHopHeaders = GetHopByHopHeaderNames(
-                context.Request.Headers.TryGetValue("Connection", out var requestConnectionValues) ? requestConnectionValues : default);
-
-            // A client header matching the provider's configured auth header name is only skipped here when
-            // the provider's configuration actually declares one (route.AuthHeaderConfigured) - otherwise an
-            // unauthenticated provider (e.g. a free local runtime with no auth header entry) would silently
-            // drop a client's own header of that name with nothing forwarded in its place. This is deliberately
-            // based on configuration intent rather than whether the header resolved into route.ExtraHeaders
-            // *this request* - a provider whose credential env var is temporarily unset must still have the
-            // client's own header stripped (failing closed with no credential forwarded), not let the client's
-            // header through as a stand-in for the operator-configured one.
-            var providerSuppliesAuthHeader = route.AuthHeaderConfigured;
-
-            foreach (var header in context.Request.Headers)
-            {
-                if (AlwaysSkippedRequestHeaders.Contains(header.Key, StringComparer.OrdinalIgnoreCase) ||
-                    requestHopByHopHeaders.Contains(header.Key) ||
-                    (providerSuppliesAuthHeader && string.Equals(header.Key, route.AuthHeaderName, StringComparison.OrdinalIgnoreCase)))
-                {
-                    continue;
-                }
-
-                requestMessage.Headers.TryAddWithoutValidation(header.Key, header.Value.ToArray());
-            }
-
-            requestMessage.Content = new ByteArrayContent(forwardBody);
-            requestMessage.Content.Headers.TryAddWithoutValidation("Content-Type", "application/json");
-
-            // Provider-configured custom headers (e.g. anthropic-version, and whichever header carries
-            // authentication). Added only when the client didn't already send that header, so a client
-            // supplying its own value keeps it rather than having it clobbered or duplicated. Client headers
-            // were copied into requestMessage.Headers above - except the auth header, which was skipped there
-            // by name (and thus sourced from here instead) only when the provider actually has one configured
-            // (route.AuthHeaderConfigured); for a provider with no auth header configured, the client's own
-            // header of that name was left in place and nothing here touches it.
-            foreach (var (headerName, headerValue) in route.ExtraHeaders)
-            {
-                if (!requestMessage.Headers.Contains(headerName))
-                {
-                    requestMessage.Headers.TryAddWithoutValidation(headerName, headerValue);
-                }
-            }
+            // Target URL, translated body, and the forwarded header set are all UpstreamRequestBuilder's.
+            // A fresh message per candidate is mandatory, not incidental: an HttpRequestMessage cannot be
+            // sent twice, so the failover path below must rebuild rather than retry this instance.
+            var requestMessage = UpstreamRequestBuilder.Build(context, route, translator, rewrittenBody);
 
             var stopwatch = Stopwatch.StartNew();
             HttpResponseMessage responseMessage;
@@ -804,7 +696,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 // Content-Type framing is re-emitted by us): drop the copied Content-Length so Kestrel sizes the
                 // rewritten body itself rather than truncating it against a stale length. Content-Encoding is
                 // dropped for the same reason and belt-and-suspenders alongside skipping the client's own
-                // Accept-Encoding on the way upstream (see AlwaysSkippedRequestHeaders): the translator always
+                // Accept-Encoding on the way upstream (see UpstreamRequestBuilder.AlwaysSkippedRequestHeaders): the translator always
                 // writes fresh, uncompressed UTF-8 text, so a copied "Content-Encoding: gzip" (or any other
                 // value) would be a lie the client then fails to decode.
                 if (translator is not null)
@@ -1349,7 +1241,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// Builds the set of hop-by-hop header names to strip: the fixed RFC 7230 set, plus any additional header
     /// names nominated by a <c>Connection</c> header value (e.g. <c>Connection: Foo</c> makes <c>Foo</c> hop-by-hop).
     /// </summary>
-    private static HashSet<string> GetHopByHopHeaderNames(IEnumerable<string>? connectionHeaderValues)
+    internal static HashSet<string> GetHopByHopHeaderNames(IEnumerable<string>? connectionHeaderValues)
     {
         var names = new HashSet<string>(HopByHopHeaders, StringComparer.OrdinalIgnoreCase);
 
