@@ -154,6 +154,12 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     // disposing it here would pull it out from under other consumers of the same DI-owned instance.
     private readonly bool _ownsBedrockClientFactory;
 
+    // Same ownership rule as _ownsBedrockClientFactory, for the same reason: true only when no client was
+    // supplied and this instance built its own. A supplied HttpClient belongs to whoever supplied it -
+    // in the real app that is the DI container, and in tests it is usually a client wrapping a stub
+    // handler the test still uses afterward - so disposing it here would pull it out from under its owner.
+    private readonly bool _ownsHttpClient;
+
     private static readonly IReadOnlyDictionary<string, IPayloadTranslator> NoTranslators =
         new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase);
 
@@ -186,6 +192,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     {
         _logger = logger;
         _interceptor = interceptor;
+        _ownsHttpClient = httpClient is null;
         _httpClient = httpClient ?? new HttpClient(new HttpClientHandler
         {
             AllowAutoRedirect = false,
@@ -237,17 +244,24 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     }
 
     /// <summary>
-    /// Disposes the self-owned fallback <see cref="BedrockRuntimeClientFactory"/> when this instance
-    /// created one (see <see cref="_ownsBedrockClientFactory"/>'s remarks) - a no-op when a factory was
-    /// supplied, since that one's lifetime belongs to its own owner (the DI container in the real app).
-    /// <see cref="ProxyMiddleware"/> is itself a DI-registered singleton, so the container invokes this
-    /// at shutdown the same way it would for any other disposable singleton.
+    /// Disposes the collaborators this instance created for itself: the fallback
+    /// <see cref="BedrockRuntimeClientFactory"/> (see <see cref="_ownsBedrockClientFactory"/>) and the
+    /// fallback <see cref="HttpClient"/> (see <see cref="_ownsHttpClient"/>). Each is a no-op when the
+    /// corresponding dependency was supplied, since a supplied instance's lifetime belongs to its own
+    /// owner - the DI container in the real app. <see cref="ProxyMiddleware"/> is itself a DI-registered
+    /// singleton, so the container invokes this at shutdown the same way it would for any other
+    /// disposable singleton.
     /// </summary>
     public void Dispose()
     {
         if (_ownsBedrockClientFactory && _bedrockClientFactory is IDisposable disposable)
         {
             disposable.Dispose();
+        }
+
+        if (_ownsHttpClient)
+        {
+            _httpClient.Dispose();
         }
     }
 

@@ -11,10 +11,14 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 /// switches and degrades gracefully (falling back to demo data) when the proxy isn't running or has no
 /// rollup store wired up. Registered in <c>MauiProgram</c>.
 /// </summary>
-public sealed class UsageStore
+public sealed class UsageStore : IDisposable
 {
     private readonly UsageQueryClient _client;
     private readonly ILogger<UsageStore>? _logger;
+
+    // This store always builds its own HttpClient (even over a caller-supplied transport), so it always
+    // owns that client's lifetime - see Dispose. Mirrors UpdateStore's _ownedHttpClient.
+    private readonly HttpClient _ownedHttpClient;
 
     // Keyed per distinct range/width/groupBy so repeated filter-bar clicks over an already-seen range don't
     // re-fetch. Small and unbounded by design: a session's worth of distinct filter selections is a handful
@@ -43,10 +47,20 @@ public sealed class UsageStore
     {
         _logger = logger;
         var normalized = managementAddress.EndsWith('/') ? managementAddress : managementAddress + "/";
-        var httpClient = transport is null ? new HttpClient() : new HttpClient(transport);
+
+        // disposeHandler: false for a caller-supplied transport - see ProviderAdminStore's identical note.
+        var httpClient = transport is null ? new HttpClient() : new HttpClient(transport, disposeHandler: false);
         httpClient.BaseAddress = new Uri(normalized);
+        _ownedHttpClient = httpClient;
         _client = new UsageQueryClient(httpClient, adminToken ?? ManagementTokenReader.TryRead());
     }
+
+    /// <summary>
+    /// Disposes the <see cref="HttpClient"/> this store built for itself, leaving any caller-supplied
+    /// transport alone. Registered as a DI singleton in <c>MauiProgram</c>, so the container invokes this
+    /// at shutdown.
+    /// </summary>
+    public void Dispose() => _ownedHttpClient.Dispose();
 
     /// <summary>The most recently loaded summary totals, or <see langword="null"/> until <see cref="LoadSummaryAsync"/> succeeds at least once.</summary>
     public UsageSummaryView? Summary { get; private set; }

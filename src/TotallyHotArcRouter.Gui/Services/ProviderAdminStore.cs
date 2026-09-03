@@ -12,7 +12,7 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 /// <see cref="LiveDataStore"/>, so the UI survives tab switches and degrades gracefully when the proxy
 /// isn't running. Registered in <c>MauiProgram</c>.
 /// </summary>
-public sealed class ProviderAdminStore
+public sealed class ProviderAdminStore : IDisposable
 {
     /// <summary>
     /// The proxy's plain-HTTP management origin. The management API shares the LLM-forwarding port
@@ -23,6 +23,10 @@ public sealed class ProviderAdminStore
     private readonly ProviderAdminClient _client;
     private readonly ILogger<ProviderAdminStore>? _logger;
     private readonly ToastService? _toasts;
+
+    // This store always builds its own HttpClient (even over a caller-supplied transport), so it always
+    // owns that client's lifetime - see Dispose. Mirrors UpdateStore's _ownedHttpClient.
+    private readonly HttpClient _ownedHttpClient;
 
     /// <summary>Initializes a new instance of the <see cref="ProviderAdminStore"/> class.</summary>
     /// <param name="logger">Optional logger.</param>
@@ -55,10 +59,23 @@ public sealed class ProviderAdminStore
         _logger = logger;
         _toasts = toasts;
         var normalized = managementAddress.EndsWith('/') ? managementAddress : managementAddress + "/";
-        var httpClient = transport is null ? new HttpClient() : new HttpClient(transport);
+
+        // disposeHandler: false for a caller-supplied transport. HttpClient's single-argument constructor
+        // defaults to disposing its handler, which would reach past this store's own client and dispose a
+        // test's handler out from under it. This store owns the client it built; it never owns the
+        // transport it was handed.
+        var httpClient = transport is null ? new HttpClient() : new HttpClient(transport, disposeHandler: false);
         httpClient.BaseAddress = new Uri(normalized);
+        _ownedHttpClient = httpClient;
         _client = new ProviderAdminClient(httpClient, adminToken ?? ManagementTokenReader.TryRead());
     }
+
+    /// <summary>
+    /// Disposes the <see cref="HttpClient"/> this store built for itself. A caller-supplied
+    /// <c>transport</c> is deliberately left alone - see the constructor's <c>disposeHandler</c> note.
+    /// Registered as a DI singleton in <c>MauiProgram</c>, so the container invokes this at shutdown.
+    /// </summary>
+    public void Dispose() => _ownedHttpClient.Dispose();
 
     /// <summary>The providers currently known, refreshed after each load or successful edit.</summary>
     public IReadOnlyList<ProviderAdminView> Providers { get; private set; } = [];
