@@ -17,11 +17,17 @@ outstanding** — waived for the implementation work itself, but per
 [ADR-0008 Amendment 1](../adr/0008-codegraph-serena-dual-engine-code-smell-pipeline.md#amendment-1-2026-09-02-stop-rules)
 rule 4 this plan does not close until it is run.
 
-The **Medium and Low items (B2, A2, A3, C2–C7, D1–D5) are deliberately not started.** Amendment 1's
-rule 1 requires an observed cost — a traced bug, a merge conflict, a blocked feature — and states that
-line count and blast radius are evidence *about* an item, never the cost itself. Most of those items
-were argued on size, symmetry, or consistency, which that rule rejects. They are to be re-tested
-against it and dropped if they cannot pass, rather than scheduled by default.
+**A2 and C3/C4 were then re-tested against Amendment 1's rule 1 and implemented** (2026-09-02) — see
+each item below. C3/C4 are a resource leak rather than a structural smell, so rule 1's observed-cost
+gate does not really bear on them: a defect is self-justifying. A2's case is weaker and is recorded
+honestly in its own section — history yields co-change frequency but **no bug traced to the DI
+structure and no merge conflict** (this repo rebases, so conflicts leave no trace either).
+
+The **remaining Medium and Low items (B2, A3, C2, C5, C6, C7, D1–D5) are still deliberately not
+started.** Rule 1 requires an observed cost — a traced bug, a merge conflict, a blocked feature — and
+states that line count and blast radius are evidence *about* an item, never the cost itself. Those were
+argued on size, symmetry, or consistency, which that rule rejects. They are to be re-tested against it
+and dropped if they cannot pass, rather than scheduled by default.
 
 The paragraph below, written before that audit, should be read as "everything *this plan and the
 brutal-cozy-pascal audit* raised is closed" — not as "the codebase is clean."
@@ -411,7 +417,7 @@ generated gRPC contracts (`.Gui.Telemetry`) and HTTP (`.Gui.Admin`), and the ref
 (`router → Quality`; `Gui → Admin/Charts/Console/Telemetry`, each a leaf) is acyclic. A genuine
 architectural strength; recorded so a future audit does not "fix" it.
 
-**A2 · `Hosting/ServiceCollectionExtensions.cs` is a Divergent Change hub. Major.**
+**A2 · `Hosting/ServiceCollectionExtensions.cs` is a Divergent Change hub. Major — IMPLEMENTED 2026-09-02.**
 Highest-churn production file in the repo — **53 of the last 300 commits** touch it, nearly double the
 next file. Its co-change profile is the Shotgun Surgery signature for "add one dependency":
 
@@ -431,6 +437,36 @@ concentrate here.
 **Fix:** move each feature group's registrations next to the feature (e.g. a
 `PriceCatalogServiceCollectionExtensions` in `PriceCatalog/`), leaving `AddTotallyHotArcRouter` as a
 chain of `services.AddPriceCatalog().AddOrchestrator()…` calls. Pure move, no behavior change.
+
+#### What was implemented, 2026-09-02
+
+Five groups moved to the folders they register — `Proxy`, `PriceCatalog`, `Router`, `Transcripts`,
+`Judge` — leaving `Hosting/ServiceCollectionExtensions.cs` at 179 lines holding the composition root
+plus the three genuinely cross-cutting groups (`AddQualityAndObservability`, `AddUpdate`,
+`AddBackgroundServices`). The three cost-reconciliation helpers (`BuildCostReconcilers`,
+`TryResolveAdminApiKey`, `AdminApiKeySecretName`) moved to `PriceCatalog` with the code that uses them.
+
+**The proxy groups were moved first, and that ordering is the point.** The co-change evidence names
+`ProxyServer`, `ProxyMiddleware`, `ProxyServerDependencies` and `StartupHealthCheckHostedService` —
+not `PriceCatalog`. Moving the tidiest group instead of the churning one would have produced a
+satisfying diff that left the measured cost exactly where it was.
+
+**Pure move:** `AddTotallyHotArcRouter`'s call order is byte-for-byte unchanged and no registration was
+reordered relative to any other, which is what makes this safe — DI resolution order is independent of
+registration order, but *registration* order is load-bearing for the hosted services, and this
+preserves it.
+
+**Net lines (rule 3): +108** — 1002 across one file to 1110 across six. The addition is five file
+headers. Unused usings in all six files were stripped using the compiler as the oracle (`IDE0005`,
+enabled locally for the pass and reverted, not committed), which is what kept the overhead at 108
+rather than roughly 200.
+
+**Honest note on rule 1.** A2's observed cost is co-change frequency: 53 of the last 300 commits, with
+the pairings above. Searching history for something stronger turned up **nothing** — no bug traced to
+the DI structure, and no merge conflict (this repo rebases, so conflicts leave no trace in history
+either). Amendment 1 warns that "a determined reader can always construct one," so this is stated
+plainly rather than dressed up: the case rests on measured co-change alone, which is weaker than
+C3/C4's outright defect. If that is judged insufficient, this item is the one to revisit.
 
 **A3 · `Gui/Platforms/Windows/TrayWindowManager.cs` — God Object plus Inappropriate Intimacy. Major.**
 777 lines, **every member `static`**, mixing six responsibilities: Win32 P/Invoke interop (~12 `extern`
@@ -724,7 +760,7 @@ for the request-shaped half and `record UsageOutcome(int? PromptTokens, …, str
 for the extracted half. `PublishAsync(ServedRequest, ResponseCapture, CancellationToken)` — three
 parameters — and every private method takes one or both.
 
-**C3 · `ProxyMiddleware.Dispose()` leaks a self-owned `HttpClient`. Major.**
+**C3 · `ProxyMiddleware.Dispose()` leaks a self-owned `HttpClient`. Major — IMPLEMENTED 2026-09-02.**
 The class already solves this exact problem once, for the Bedrock factory, and does not apply the
 pattern to the client it also conditionally owns:
 
@@ -746,11 +782,30 @@ The asymmetry is also a latent trap: the next person to copy the Bedrock ownersh
 reasonably assume `_httpClient` is already covered.
 **Fix:** mirror the existing pattern — `_ownsHttpClient = httpClient is null;` and dispose in `Dispose()`.
 
-**C4 · GUI stores leak `HttpClient` — same smell, different assembly. Major.**
+**C4 · GUI stores leak `HttpClient` — same smell, different assembly. Major — IMPLEMENTED 2026-09-02.**
 `Gui/Services/UpdateStore.cs` does this correctly (implements `IDisposable`, disposes
 `_ownedHttpClient`). Its two siblings do not: `ProviderAdminStore.cs:58` and `UsageStore.cs:46` each
 construct an `HttpClient` and neither class implements `IDisposable`.
 **Fix:** copy `UpdateStore`'s ownership pattern verbatim into both.
+
+#### What was implemented for C3 and C4, 2026-09-02
+
+One commit. `ProxyMiddleware` gained `_ownsHttpClient`, mirroring its existing
+`_ownsBedrockClientFactory`; both GUI stores gained `_ownedHttpClient` and `IDisposable`, mirroring
+`UpdateStore`.
+
+**Copying the pattern verbatim would have introduced the opposite bug.** `HttpClient`'s single-argument
+constructor disposes its handler, so a store disposing its own client reaches *past* it and disposes a
+caller-supplied `HttpMessageHandler`. Both stores are registered as DI singletons, and bUnit's
+`TestContext` disposes them at the end of every test that registers one — so the naive fix would have
+started disposing test handlers mid-suite. Both now build over a supplied transport with
+`disposeHandler: false`: they own the client they built, never the transport they were handed.
+
+**Seven tests pin both directions**, because leaking and over-disposing pull opposite ways: a supplied
+client/transport survives disposal, a self-built one does not, `Dispose` is idempotent, and both stores
+still advertise `IDisposable` so the container keeps reclaiming them.
+
+Note that `CA2000` would have caught the original leak for free — see D1.
 
 **C5 · `ProxyServer` constructor — 351 lines. Major.** Second-longest method in the codebase. It is DI
 wiring for the inner Kestrel host, structured as one feature-group null-check per block. Same remedy
@@ -872,8 +927,10 @@ flowchart TD
 
 3. **C2** — `ServedRequest`/`UsageOutcome` records. Resolves C6 for free.
 4. **B2** — split `ProxyMiddlewareDependencies` into three cohesive groups.
-5. **C3 + C4** — `HttpClient` ownership, four sites, ~20 lines total.
-6. **A2** — relocate DI registrations to their features.
+5. ~~**C3 + C4** — `HttpClient` ownership, four sites.~~ **Implemented 2026-09-02**; see C3/C4 above.
+   Larger than the "~20 lines" estimate once the `disposeHandler: false` trap was accounted for.
+6. ~~**A2** — relocate DI registrations to their features.~~ **Implemented 2026-09-02**; see A2 above,
+   including the honest note that its rule-1 case rests on co-change frequency alone.
 7. **A3** — extract `TrayIconInterop` / `IRouterServiceStatusProbe` from `TrayWindowManager`.
 8. **C5** — `ProxyServer` constructor into per-group `Configure*` methods.
 
