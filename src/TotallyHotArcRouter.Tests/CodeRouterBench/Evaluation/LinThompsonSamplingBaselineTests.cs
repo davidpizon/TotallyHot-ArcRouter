@@ -10,7 +10,7 @@ public class LinThompsonSamplingBaselineTests
     [Fact]
     public void Replay_OneArmStrictlyBetter_ConvergesToPickingIt()
     {
-        var baseline = new LinThompsonSamplingBaseline(0.5, 1d, 42);
+        var baseline = new LinThompsonSamplingBaseline();
         var tasks = Enumerable.Range(0, 200)
             .Select(i => new RegretTaskOutcome(TaskId: $"t{i}", Dimension: "code_generation",
                 Cells: new Dictionary<string, RegretOutcomeCell>

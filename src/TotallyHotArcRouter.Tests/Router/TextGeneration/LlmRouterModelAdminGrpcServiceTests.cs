@@ -1,8 +1,8 @@
-using System.Net;
-using System.Text;
 using Grpc.Core;
 using Grpc.Core.Testing;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Net;
+using System.Text;
 using TotallyHot.ArcRouter.Checksums;
 using TotallyHot.ArcRouter.Router.TextGeneration;
 using TotallyHot.ArcRouter.Tests.CodeRouterBench;

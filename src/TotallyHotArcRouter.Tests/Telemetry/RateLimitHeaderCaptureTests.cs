@@ -1,5 +1,5 @@
-using System.Net.Http.Headers;
 using Microsoft.Extensions.Options;
+using System.Net.Http.Headers;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tests.PriceCatalog;

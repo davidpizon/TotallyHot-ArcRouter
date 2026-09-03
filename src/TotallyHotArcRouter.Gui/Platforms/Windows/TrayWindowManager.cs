@@ -1,9 +1,9 @@
+using Microsoft.UI.Dispatching;
+using Serilog;
 using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using System.ServiceProcess;
-using Microsoft.UI.Dispatching;
-using Serilog;
 using TotallyHot.ArcRouter.Gui.Services;
 using TotallyHot.ArcRouter.Gui.Telemetry;
 using WinRT.Interop;

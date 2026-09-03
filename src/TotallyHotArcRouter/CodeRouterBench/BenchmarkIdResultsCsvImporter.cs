@@ -1,5 +1,5 @@
-using System.Globalization;
 using Microsoft.Data.Sqlite;
+using System.Globalization;
 using TotallyHot.ArcRouter.Models;
 
 namespace TotallyHot.ArcRouter.CodeRouterBench;

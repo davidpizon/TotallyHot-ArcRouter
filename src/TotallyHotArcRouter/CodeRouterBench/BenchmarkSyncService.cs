@@ -1,7 +1,7 @@
+using Microsoft.Data.Sqlite;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
-using Microsoft.Data.Sqlite;
 using TotallyHot.ArcRouter.Checksums;
 
 namespace TotallyHot.ArcRouter.CodeRouterBench;

@@ -37,7 +37,7 @@ public class LogRegTrainerTests
             InsertResult(database: temp.Database, taskId: $"algo-{i}", model: "model-bug", false, 0.01);
         }
 
-        var artifact = LogRegTrainer.Train(database: temp.Database, 50, 200, 0.5);
+        var artifact = LogRegTrainer.Train(database: temp.Database, 50, 200);
 
         Assert.False(artifact.IsPlaceholder);
         Assert.Contains(expected: "model-bug", collection: artifact.ClassWeights.Keys);

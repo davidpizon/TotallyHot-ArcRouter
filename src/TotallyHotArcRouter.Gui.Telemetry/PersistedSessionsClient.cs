@@ -1,5 +1,5 @@
-using System.Globalization;
 using Grpc.Core;
+using System.Globalization;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Telemetry;

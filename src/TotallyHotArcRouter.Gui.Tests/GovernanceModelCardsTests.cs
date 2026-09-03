@@ -1,7 +1,7 @@
-using System.Net;
-using System.Text;
 using AwesomeAssertions;
 using Bunit;
+using System.Net;
+using System.Text;
 using TotallyHot.ArcRouter.Gui.Components;
 using TotallyHot.ArcRouter.Gui.Services;
 

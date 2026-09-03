@@ -1,7 +1,7 @@
+using Microsoft.Extensions.DependencyInjection;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
-using Microsoft.Extensions.DependencyInjection;
 using TotallyHot.ArcRouter.Proxy;
 
 namespace TotallyHot.ArcRouter.Tests.Integration;

@@ -99,7 +99,7 @@ public class ModelPriceTests
     public void EstimateCost_OutFlag_MissingCacheRatesWithNonzeroCacheTokens_ReportsFallback()
     {
         var price = new ModelPrice(3.00m, 15.00m);
-        var usage = new UsageInfo(0, 0, 1_000, 0);
+        var usage = new UsageInfo(0, 0, 1_000);
 
         price.EstimateCost(usage: usage, usedCacheRateFallback: out var usedFallback);
 
@@ -112,7 +112,7 @@ public class ModelPriceTests
         // No cache dimension was actually rated, so nothing "fell back" - a cache rate that's merely
         // unpublished must not taint an otherwise-exact price when the request used no cache at all.
         var price = new ModelPrice(3.00m, 15.00m);
-        var usage = new UsageInfo(1_000_000, 1_000_000, 0, 0);
+        var usage = new UsageInfo(1_000_000, 1_000_000);
 
         price.EstimateCost(usage: usage, usedCacheRateFallback: out var usedFallback);
 

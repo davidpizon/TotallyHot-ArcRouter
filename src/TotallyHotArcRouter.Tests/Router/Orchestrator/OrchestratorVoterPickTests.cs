@@ -20,9 +20,7 @@ public sealed class OrchestratorVoterPickTests
             rationale: "test",
             timestampUtc: DateTimeOffset.UtcNow,
             candidateScores: entries.ToDictionary(keySelector: e => e.Key, elementSelector: e => e.Score,
-                comparer: StringComparer.OrdinalIgnoreCase),
-            false,
-            1.0);
+                comparer: StringComparer.OrdinalIgnoreCase));
     }
 
     [Fact]

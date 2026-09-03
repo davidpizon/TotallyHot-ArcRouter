@@ -71,7 +71,7 @@ public class ConversationAggregatorTests
     [Fact]
     public void Aggregate_SingleEvent_ReturnsSingleOneTurnConversation()
     {
-        var events = new[] { CreateEvent(sessionId: "session-1", 1) };
+        var events = new[] { CreateEvent(sessionId: "session-1") };
 
         var result = ConversationAggregator.Aggregate(events);
 
@@ -86,7 +86,7 @@ public class ConversationAggregatorTests
     {
         var events = new[]
         {
-            CreateEvent(sessionId: "session-1", 1, promptTokens: 100, completionTokens: 20, estimatedCostUsd: 0.01m),
+            CreateEvent(sessionId: "session-1", promptTokens: 100, completionTokens: 20, estimatedCostUsd: 0.01m),
             CreateEvent(sessionId: "session-1", 2, promptTokens: 150, completionTokens: 30, estimatedCostUsd: 0.02m),
             CreateEvent(sessionId: "session-1", 3, promptTokens: 200, completionTokens: 40, estimatedCostUsd: 0.03m)
         };
@@ -107,9 +107,9 @@ public class ConversationAggregatorTests
     {
         var events = new[]
         {
-            CreateEvent(sessionId: "older", 1, timestampUtc: BaseTime),
-            CreateEvent(sessionId: "newer", 1, timestampUtc: BaseTime.AddHours(1)),
-            CreateEvent(sessionId: "middle", 1, timestampUtc: BaseTime.AddMinutes(30))
+            CreateEvent(sessionId: "older", timestampUtc: BaseTime),
+            CreateEvent(sessionId: "newer", timestampUtc: BaseTime.AddHours(1)),
+            CreateEvent(sessionId: "middle", timestampUtc: BaseTime.AddMinutes(30))
         };
 
         var result = ConversationAggregator.Aggregate(events);
@@ -123,7 +123,7 @@ public class ConversationAggregatorTests
         var events = new[]
         {
             CreateEvent(sessionId: "session-1", 3, timestampUtc: BaseTime.AddMinutes(3)),
-            CreateEvent(sessionId: "session-1", 1, timestampUtc: BaseTime.AddMinutes(1)),
+            CreateEvent(sessionId: "session-1", timestampUtc: BaseTime.AddMinutes(1)),
             CreateEvent(sessionId: "session-1", 2, timestampUtc: BaseTime.AddMinutes(2))
         };
 
@@ -140,7 +140,7 @@ public class ConversationAggregatorTests
     [InlineData(false)]
     public void Aggregate_IsSessionSynthesized_PropagatesFromFirstTurn(bool isSynthesized)
     {
-        var events = new[] { CreateEvent(sessionId: "session-1", 1, isSessionSynthesized: isSynthesized) };
+        var events = new[] { CreateEvent(sessionId: "session-1", isSessionSynthesized: isSynthesized) };
 
         var result = ConversationAggregator.Aggregate(events);
 
@@ -152,7 +152,7 @@ public class ConversationAggregatorTests
     {
         var events = new[]
         {
-            CreateEvent(sessionId: "session-1", 1, isFallback: false),
+            CreateEvent(sessionId: "session-1"),
             CreateEvent(sessionId: "session-1", 2, isFallback: false)
         };
 
@@ -166,7 +166,7 @@ public class ConversationAggregatorTests
     {
         var events = new[]
         {
-            CreateEvent(sessionId: "session-1", 1, isFallback: false),
+            CreateEvent(sessionId: "session-1"),
             CreateEvent(sessionId: "session-1", 2, isFallback: true)
         };
 
@@ -180,7 +180,7 @@ public class ConversationAggregatorTests
     {
         var events = new[]
         {
-            CreateEvent(sessionId: "session-1", 1, promptTokens: null, completionTokens: null, estimatedCostUsd: null)
+            CreateEvent(sessionId: "session-1", promptTokens: null, completionTokens: null, estimatedCostUsd: null)
         };
 
         var result = ConversationAggregator.Aggregate(events);
@@ -202,7 +202,6 @@ public class ConversationAggregatorTests
         {
             CreateEvent(
                 sessionId: "session-1",
-                1,
                 requestSummary: "What is the capital of France?",
                 responseSummary: "The capital of France is Paris.")
         };
@@ -217,7 +216,7 @@ public class ConversationAggregatorTests
     [Fact]
     public void Aggregate_NoRequestOrResponseSummary_TurnFieldsAreNull()
     {
-        var events = new[] { CreateEvent(sessionId: "session-1", 1) };
+        var events = new[] { CreateEvent(sessionId: "session-1") };
 
         var result = ConversationAggregator.Aggregate(events);
 
@@ -229,7 +228,7 @@ public class ConversationAggregatorTests
     [Fact]
     public void Aggregate_TurnAgentAndModel_BothSetToResolvedModel()
     {
-        var events = new[] { CreateEvent(sessionId: "session-1", 1, resolvedModel: "claude-sonnet-5") };
+        var events = new[] { CreateEvent(sessionId: "session-1", resolvedModel: "claude-sonnet-5") };
 
         var result = ConversationAggregator.Aggregate(events);
 
@@ -245,7 +244,6 @@ public class ConversationAggregatorTests
         {
             CreateEvent(
                 sessionId: "session-1",
-                1,
                 requestedModel: "auto",
                 routedModel: "claude-sonnet-5",
                 substitutionReason: "AutoSelect")
@@ -264,7 +262,7 @@ public class ConversationAggregatorTests
     {
         var events = new[]
         {
-            CreateEvent(sessionId: "session-1", 1, cacheCreationTokens: null, cacheReadTokens: null)
+            CreateEvent(sessionId: "session-1")
         };
 
         var result = ConversationAggregator.Aggregate(events);
@@ -282,7 +280,7 @@ public class ConversationAggregatorTests
     {
         var events = new[]
         {
-            CreateEvent(sessionId: "session-1", 1, cacheCreationTokens: 30, cacheReadTokens: 500),
+            CreateEvent(sessionId: "session-1", cacheCreationTokens: 30, cacheReadTokens: 500),
             CreateEvent(sessionId: "session-1", 2, cacheCreationTokens: 10, cacheReadTokens: 200)
         };
 
@@ -296,7 +294,7 @@ public class ConversationAggregatorTests
     [Fact]
     public void Aggregate_NoUnpricedTurns_UnpricedTurnsIsZero()
     {
-        var events = new[] { CreateEvent(sessionId: "session-1", 1, estimatedCostUsd: 0.01m) };
+        var events = new[] { CreateEvent(sessionId: "session-1") };
 
         var result = ConversationAggregator.Aggregate(events);
 
@@ -308,7 +306,7 @@ public class ConversationAggregatorTests
     {
         var events = new[]
         {
-            CreateEvent(sessionId: "session-1", 1, estimatedCostUsd: 0.01m),
+            CreateEvent(sessionId: "session-1"),
             CreateEvent(sessionId: "session-1", 2, estimatedCostUsd: null),
             CreateEvent(sessionId: "session-1", 3, estimatedCostUsd: null)
         };
@@ -323,7 +321,7 @@ public class ConversationAggregatorTests
     [Fact]
     public void Aggregate_CostConfidence_PassesThroughToTurn()
     {
-        var events = new[] { CreateEvent(sessionId: "session-1", 1, costConfidence: "CatalogApproximate") };
+        var events = new[] { CreateEvent(sessionId: "session-1", costConfidence: "CatalogApproximate") };
 
         var result = ConversationAggregator.Aggregate(events);
 

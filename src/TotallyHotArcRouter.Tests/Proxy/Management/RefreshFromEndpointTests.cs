@@ -1,5 +1,5 @@
-using System.Net;
 using Moq;
+using System.Net;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Management;

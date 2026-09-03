@@ -1,7 +1,7 @@
-using System.Net;
-using System.Text;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using System.Net;
+using System.Text;
 using TotallyHot.ArcRouter.Tests.CodeRouterBench;
 using TotallyHot.ArcRouter.Update;
 

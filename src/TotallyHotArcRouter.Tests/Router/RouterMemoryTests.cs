@@ -1,6 +1,6 @@
-using System.Collections.Concurrent;
 using Microsoft.Extensions.Options;
 using Moq;
+using System.Collections.Concurrent;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router;
 

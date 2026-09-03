@@ -1,6 +1,6 @@
+using AwesomeAssertions;
 using System.Net;
 using System.Text;
-using AwesomeAssertions;
 using TotallyHot.ArcRouter.Gui.Services;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;

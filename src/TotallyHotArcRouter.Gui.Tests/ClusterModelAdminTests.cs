@@ -1,6 +1,6 @@
-using System.Runtime.CompilerServices;
 using AwesomeAssertions;
 using Bunit;
+using System.Runtime.CompilerServices;
 using TotallyHot.ArcRouter.Gui.Components;
 using TotallyHot.ArcRouter.Gui.Services;
 using TotallyHot.ArcRouter.Gui.Telemetry;

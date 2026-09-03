@@ -1,6 +1,6 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using System.Text;
 using System.Text.Json.Nodes;
-using Microsoft.Extensions.Logging.Abstractions;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Translation;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;

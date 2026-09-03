@@ -193,7 +193,9 @@ public static class ProviderAdminEndpoints
             {
                 error = new
                 {
-                    message, type, code = statusCode.ToString(CultureInfo.InvariantCulture)
+                    message,
+                    type,
+                    code = statusCode.ToString(CultureInfo.InvariantCulture)
                 }
             },
             statusCode: statusCode);

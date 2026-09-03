@@ -1,8 +1,8 @@
-using System.Diagnostics.CodeAnalysis;
-using System.Reflection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Maui.LifecycleEvents;
 using Serilog;
+using System.Diagnostics.CodeAnalysis;
+using System.Reflection;
 using TotallyHot.ArcRouter.Gui.Platforms.Windows;
 using TotallyHot.ArcRouter.Gui.Services;
 
@@ -48,7 +48,7 @@ public static class MauiProgram
         // WebView2 host, whose "Failed to create WebView2 environment" error is what a blank dashboard
         // window actually looks like from the inside. dispose: false because Log.CloseAndFlush on
         // process exit already owns the logger's lifetime.
-        builder.Logging.AddSerilog(logger: Log.Logger, false);
+        builder.Logging.AddSerilog(logger: Log.Logger);
 
         builder.Services.AddMauiBlazorWebView();
         // Local, per-user GUI settings (currently just the telemetry server address) - see

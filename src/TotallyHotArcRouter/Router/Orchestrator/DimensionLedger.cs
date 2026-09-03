@@ -151,6 +151,6 @@ public sealed class DimensionLedger
     /// </returns>
     internal static double? LeaveOneOutMean(double mean, int count, double observedScore)
     {
-        return count <= 1 ? null : ((mean * count) - observedScore) / (count - 1);
+        return count <= 1 ? null : (mean * count - observedScore) / (count - 1);
     }
 }

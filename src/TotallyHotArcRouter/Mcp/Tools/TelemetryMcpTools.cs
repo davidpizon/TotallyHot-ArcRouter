@@ -1,5 +1,5 @@
-using System.ComponentModel;
 using ModelContextProtocol.Server;
+using System.ComponentModel;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Telemetry;
 

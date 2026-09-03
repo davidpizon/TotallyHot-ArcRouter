@@ -179,7 +179,7 @@ public class UsageLedgerTests
         using var temp = new TempDatabase();
         var ledger = temp.CreateUsageLedger();
 
-        await ledger.RecordAsync(entry: MakeEntry(sessionId: "sess-a", 1, requestId: "req-1"),
+        await ledger.RecordAsync(entry: MakeEntry(sessionId: "sess-a", requestId: "req-1"),
             cancellationToken: TestContext.Current.CancellationToken);
         await ledger.RecordAsync(entry: MakeEntry(sessionId: "sess-a", 2, requestId: "req-2"),
             cancellationToken: TestContext.Current.CancellationToken);

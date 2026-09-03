@@ -1,6 +1,6 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using System.Net;
 using System.Text;
-using Microsoft.Extensions.Logging.Abstractions;
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Tests.CodeRouterBench;

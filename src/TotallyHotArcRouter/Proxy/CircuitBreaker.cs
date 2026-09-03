@@ -1,5 +1,5 @@
-using System.Collections.Concurrent;
 using Microsoft.Extensions.Options;
+using System.Collections.Concurrent;
 using TotallyHot.ArcRouter.Models;
 
 namespace TotallyHot.ArcRouter.Proxy;

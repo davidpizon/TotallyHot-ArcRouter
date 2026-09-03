@@ -1,9 +1,9 @@
-using System.Net;
-using System.Text;
 using Grpc.Core;
 using Grpc.Core.Testing;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using System.Net;
+using System.Text;
 using TotallyHot.ArcRouter.Checksums;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;

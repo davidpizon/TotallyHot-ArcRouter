@@ -1,7 +1,7 @@
-using System.Globalization;
 using Acornima;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using System.Globalization;
 
 namespace TotallyHot.ArcRouter.Quality.Parsing;
 

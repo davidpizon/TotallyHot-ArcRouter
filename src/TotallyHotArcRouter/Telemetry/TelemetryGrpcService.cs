@@ -1,8 +1,8 @@
-using System.Globalization;
-using System.Threading.Channels;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Microsoft.Extensions.Options;
+using System.Globalization;
+using System.Threading.Channels;
 using TotallyHot.ArcRouter.Telemetry.Contract;
 using TotallyHot.ArcRouter.Transcripts;
 

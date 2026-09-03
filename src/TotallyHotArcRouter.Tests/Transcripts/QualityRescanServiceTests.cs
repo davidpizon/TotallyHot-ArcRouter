@@ -115,7 +115,7 @@ public class QualityRescanServiceTests
     {
         // Selected on `response_text IS NOT NULL`, so a null read means retention deleted the row between
         // the select and this read. Stamping an id that no longer exists would be a silent no-op write.
-        var store = new FakeStore(pending: [7], null);
+        var store = new FakeStore(pending: [7]);
         var grader = new RecordingGrader();
         var service = CreateService(store: store, grader: grader);
 

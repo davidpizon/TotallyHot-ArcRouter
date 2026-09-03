@@ -1,6 +1,6 @@
-using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using System.Diagnostics.CodeAnalysis;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
@@ -85,7 +85,7 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
         var harness = await BuildHarnessAsync(
         [
             new Sample(Embedding: [1f, 0f], Model: "model-a", 0.9, true),
-            new Sample(Embedding: [1f, 0f], Model: "model-a", 0.8, false)
+            new Sample(Embedding: [1f, 0f], Model: "model-a", 0.8)
         ]);
 
         await harness.Service.RunCycleAsync(TestContext.Current.CancellationToken);
@@ -430,8 +430,7 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
                     0,
                     null,
                     CreatedAtUtc: DateTimeOffset.UtcNow,
-                    IsExploratory: sample.IsExploratory,
-                    1.0),
+                    IsExploratory: sample.IsExploratory),
                 cancellationToken: token);
 
             var id = await transcriptStore.InsertAsync(

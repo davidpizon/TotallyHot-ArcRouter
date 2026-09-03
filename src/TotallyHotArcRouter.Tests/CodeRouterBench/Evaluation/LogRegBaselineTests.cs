@@ -29,7 +29,7 @@ public class LogRegBaselineTests
             InsertResult(database: temp.Database, taskId: $"algo-{i}", model: "model-bug", false);
         }
 
-        return LogRegTrainer.Train(database: temp.Database, 50, 200, 0.5);
+        return LogRegTrainer.Train(database: temp.Database, 50, 200);
     }
 
     [Fact]
@@ -47,7 +47,7 @@ public class LogRegBaselineTests
     {
         var baseline = new LogRegBaseline(TrainTwoClassArtifact());
         var context = new RegretReplayContext(TaskId: "t1", Dimension: "bug_fixing",
-            CandidateModelIds: ["model-bug", "model-algo"], null);
+            CandidateModelIds: ["model-bug", "model-algo"]);
 
         Assert.Null(baseline.Route(context));
     }

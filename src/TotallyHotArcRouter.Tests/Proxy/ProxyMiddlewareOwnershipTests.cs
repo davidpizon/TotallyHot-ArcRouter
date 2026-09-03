@@ -1,5 +1,5 @@
-using System.Reflection;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Reflection;
 using TotallyHot.ArcRouter.Proxy;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;

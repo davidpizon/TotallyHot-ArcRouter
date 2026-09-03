@@ -1,9 +1,9 @@
-using System.Net;
-using System.Net.Sockets;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using System.Net;
+using System.Net.Sockets;
 using TotallyHot.ArcRouter.Hosting;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Tests.Proxy;

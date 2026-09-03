@@ -10,7 +10,7 @@ public class LinUcbBaselineTests
     [Fact]
     public void Replay_OneArmStrictlyBetter_ConvergesToPickingIt()
     {
-        var baseline = new LinUcbBaseline(1d, 1d);
+        var baseline = new LinUcbBaseline();
         var tasks = Enumerable.Range(0, 200)
             .Select(i => new RegretTaskOutcome(TaskId: $"t{i}", Dimension: "code_generation",
                 Cells: new Dictionary<string, RegretOutcomeCell>
@@ -45,7 +45,7 @@ public class LinUcbBaselineTests
             })
         ];
 
-        var baseline = new LinUcbBaseline(1d, 1d);
+        var baseline = new LinUcbBaseline();
         baseline.WarmStart(probingTasks: probing, weights: Weights);
 
         var context = new RegretReplayContext(TaskId: "t1", Dimension: "code_generation",

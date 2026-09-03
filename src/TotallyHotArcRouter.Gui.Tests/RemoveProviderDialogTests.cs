@@ -135,7 +135,7 @@ public sealed class RemoveProviderDialogTests
     {
         using var ctx = new BunitContext();
 
-        var cut = Render(ctx: ctx, 0);
+        var cut = Render(ctx: ctx);
 
         cut.Markup.Should().NotContain("also remove");
         // The irreversibility warning and the metrics reassurance still stand on their own.

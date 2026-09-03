@@ -34,7 +34,7 @@ public sealed class ProviderEditDialogTests
 
     /// <summary>A stored header left unlocked - ordinary public configuration, returned in full.</summary>
     private static readonly ProviderHeaderView UnlockedHeader =
-        new(Name: "anthropic-version", Source: HeaderValueSource.Literal, null, Value: "2023-06-01", false);
+        new(Name: "anthropic-version", Source: HeaderValueSource.Literal, null, Value: "2023-06-01");
 
     [Fact]
     public void Renders_a_static_title_when_editing()

@@ -62,9 +62,6 @@ public interface IRoutingPolicy
             selectedModel: model,
             0,
             rationale: "Wrapped from SelectModelAsync by the IRoutingPolicy.DecideOutcomeAsync default implementation.",
-            timestampUtc: DateTimeOffset.UtcNow,
-            null,
-            false,
-            1.0);
+            timestampUtc: DateTimeOffset.UtcNow);
     }
 }

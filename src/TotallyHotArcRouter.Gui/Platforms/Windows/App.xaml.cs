@@ -1,5 +1,5 @@
-using System.Diagnostics.CodeAnalysis;
 using Serilog;
+using System.Diagnostics.CodeAnalysis;
 using UnhandledExceptionEventArgs = Microsoft.UI.Xaml.UnhandledExceptionEventArgs;
 
 namespace TotallyHot.ArcRouter.Gui.WinUI;

@@ -1,11 +1,11 @@
-using System.Text;
-using System.Text.Json;
 using Amazon.BedrockRuntime;
 using Amazon.BedrockRuntime.Model;
 using Amazon.Runtime;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Moq;
+using System.Text;
+using System.Text.Json;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Bedrock;
@@ -114,7 +114,8 @@ public class BedrockProviderTests
                                               """;
                 return new InvokeModelResponse
                 {
-                    Body = new MemoryStream(Encoding.UTF8.GetBytes(claudeResponse)), ContentType = "application/json"
+                    Body = new MemoryStream(Encoding.UTF8.GetBytes(claudeResponse)),
+                    ContentType = "application/json"
                 };
             });
 

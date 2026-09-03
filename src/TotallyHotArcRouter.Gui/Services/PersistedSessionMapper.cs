@@ -65,7 +65,6 @@ public static class PersistedSessionMapper
             RoutingSteps: [new RoutingStep(Status: StepStatus.Info, Message: $"Route Confirmed: {turn.RoutedModel}")],
             RequestSummary: turn.PromptText,
             ResponseSummary: turn.ResponseText,
-            false,
             TimestampUtc: turn.TimestampUtc,
             RequestedModel: turn.RequestedModel,
             RoutedModel: turn.RoutedModel);

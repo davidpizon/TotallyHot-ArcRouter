@@ -1,7 +1,7 @@
+using Microsoft.Extensions.Options;
 using System.Globalization;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
-using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Proxy;
 
 namespace TotallyHot.ArcRouter.Judge;

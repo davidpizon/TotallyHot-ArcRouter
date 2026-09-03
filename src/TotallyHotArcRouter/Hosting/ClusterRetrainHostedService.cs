@@ -1,5 +1,5 @@
-using System.Text.Json;
 using Microsoft.Extensions.Options;
+using System.Text.Json;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Router;
@@ -119,7 +119,7 @@ public sealed class ClusterRetrainHostedService : BackgroundService
             lastTrainedCount,
             Options.ClusterRetrainThreshold);
 
-        var outcome = await _trainingService.RetrainAsync(null, cancellationToken: cancellationToken)
+        var outcome = await _trainingService.RetrainAsync(cancellationToken: cancellationToken)
             .ConfigureAwait(false);
         _logger.LogInformation(
             message: "Automatic cluster model retrain finished with outcome {Kind}: {Message}", outcome.Kind,

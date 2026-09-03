@@ -1,5 +1,5 @@
-using System.Globalization;
 using Microsoft.Data.Sqlite;
+using System.Globalization;
 using TotallyHot.ArcRouter.PriceCatalog.Sources;
 using TotallyHot.ArcRouter.Telemetry;
 

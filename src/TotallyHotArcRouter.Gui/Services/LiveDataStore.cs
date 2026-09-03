@@ -1,7 +1,7 @@
-using System.Globalization;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
+using System.Globalization;
 using TotallyHot.ArcRouter.Gui.Console;
 using TotallyHot.ArcRouter.Gui.Models;
 using TotallyHot.ArcRouter.Gui.Telemetry;

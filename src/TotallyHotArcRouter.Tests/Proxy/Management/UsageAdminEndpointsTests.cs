@@ -1,7 +1,7 @@
-using System.Net;
-using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using System.Net;
+using System.Text.Json;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Telemetry;

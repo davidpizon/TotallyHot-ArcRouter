@@ -153,7 +153,9 @@ public class ClusterTrainingServiceTests
             voter: voter,
             routingOptions: Options.Create(new RoutingOptions
             {
-                ClusterLiveSampleWeight = 1.0, ClusterMinTrainingRows = minTrainingRows, ClusterCountMin = 2,
+                ClusterLiveSampleWeight = 1.0,
+                ClusterMinTrainingRows = minTrainingRows,
+                ClusterCountMin = 2,
                 ClusterCountMax = 3
             }),
             embeddingOptions: Options.Create(new EmbeddingOptions { EmbeddingDimension = 2 }),

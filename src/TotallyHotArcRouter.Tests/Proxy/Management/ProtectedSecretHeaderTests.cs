@@ -1,6 +1,6 @@
+using Moq;
 using System.Runtime.InteropServices;
 using System.Text.Json;
-using Moq;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Management;

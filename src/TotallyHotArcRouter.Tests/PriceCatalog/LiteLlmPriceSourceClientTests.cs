@@ -1,5 +1,5 @@
-using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Text.Json;
 using TotallyHot.ArcRouter.PriceCatalog.Sources;
 
 namespace TotallyHot.ArcRouter.Tests.PriceCatalog;

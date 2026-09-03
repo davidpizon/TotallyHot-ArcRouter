@@ -1,6 +1,6 @@
-using System.Net;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using System.Net;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router.TextGeneration;
 

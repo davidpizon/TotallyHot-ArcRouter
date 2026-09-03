@@ -1,8 +1,8 @@
-using System.Net.Security;
-using System.Security.Cryptography.X509Certificates;
 using Grpc.Core;
 using Grpc.Core.Interceptors;
 using Grpc.Net.Client;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
 
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
 

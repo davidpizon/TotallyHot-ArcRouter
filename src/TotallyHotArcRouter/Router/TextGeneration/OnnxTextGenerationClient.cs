@@ -1,7 +1,7 @@
-using System.Net;
-using System.Text;
 using Microsoft.Extensions.Options;
 using Microsoft.ML.OnnxRuntimeGenAI;
+using System.Net;
+using System.Text;
 using TotallyHot.ArcRouter.Models;
 
 namespace TotallyHot.ArcRouter.Router.TextGeneration;

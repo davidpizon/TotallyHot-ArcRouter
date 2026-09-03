@@ -118,7 +118,6 @@ public sealed record RoutingDecision
             selectedModel: selectedModel,
             0,
             rationale: RouterConstants.FallbackReason,
-            timestampUtc: DateTimeOffset.UtcNow,
-            null);
+            timestampUtc: DateTimeOffset.UtcNow);
     }
 }

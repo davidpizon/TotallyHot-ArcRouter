@@ -1,5 +1,5 @@
-using System.ComponentModel;
 using ModelContextProtocol.Server;
+using System.ComponentModel;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Telemetry;
 
@@ -74,7 +74,8 @@ public sealed class PriceSourceMcpTools
         if (!applied)
             return new
             {
-                error = "The name set does not match every existing price source exactly once.", type = "InvalidRequest"
+                error = "The name set does not match every existing price source exactly once.",
+                type = "InvalidRequest"
             };
 
         await _ingestionService.RecomputeWinnersAsync(cancellationToken).ConfigureAwait(false);

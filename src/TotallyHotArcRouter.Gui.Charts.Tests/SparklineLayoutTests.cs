@@ -57,7 +57,7 @@ public class SparklineLayoutTests
     {
         // SVG's Y axis grows downward, so the largest value (drawn at the top of the sparkline)
         // must have the smallest Y coordinate, and the smallest value the largest Y coordinate.
-        var result = SparklineLayout.Normalize(values: [10, 20, 30], 100, 24, 1);
+        var result = SparklineLayout.Normalize(values: [10, 20, 30], 100, 24);
 
         Assert.Equal(23, actual: result[0].Y); // smallest value (10) -> bottom (height - padding)
         Assert.Equal(1, actual: result[2].Y); // largest value (30) -> top (padding)

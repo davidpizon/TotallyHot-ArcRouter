@@ -1,5 +1,5 @@
-using System.Reflection;
 using AwesomeAssertions;
+using System.Reflection;
 using TotallyHot.ArcRouter.Gui.Services;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;

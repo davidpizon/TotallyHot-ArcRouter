@@ -1,7 +1,7 @@
-using System.Diagnostics;
 using Amazon.BedrockRuntime;
 using Amazon.BedrockRuntime.Model;
 using Amazon.Runtime;
+using System.Diagnostics;
 using TotallyHot.ArcRouter.Proxy.Bedrock;
 using TotallyHot.ArcRouter.Proxy.Translation;
 using TotallyHot.ArcRouter.Router.Classification;
@@ -241,7 +241,7 @@ internal sealed class BedrockInvocationHandler
                 rewrittenRequestBody: rewrittenBody, capturedResponseBytes: capturedResponseBytes, null,
                 isStreaming: isStreamingRequest, latencyToHeadersMs: latencyToHeadersMs,
                 totalDurationMs: totalDurationMs, statusCode: StatusCodes.Status200OK,
-                cancellationToken: context.RequestAborted, null, tailScanner: tailScanner, taskEmbedding: taskEmbedding,
+                cancellationToken: context.RequestAborted, tailScanner: tailScanner, taskEmbedding: taskEmbedding,
                 routerTokens: routerTokens, resolutionReason: resolutionReason, isExploratory: isExploratory,
                 propensity: propensity, classification: classification, taskText: taskText, dimBestModel: dimBestModel);
         }

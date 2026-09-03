@@ -1,7 +1,7 @@
+using Google.Protobuf.WellKnownTypes;
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Threading.Channels;
-using Google.Protobuf.WellKnownTypes;
 using TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Telemetry;

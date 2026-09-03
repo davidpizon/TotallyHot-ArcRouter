@@ -89,7 +89,8 @@ public sealed class ProviderAdminClient
     {
         using var request =
             new HttpRequestMessage(method: HttpMethod.Put,
-                requestUri: $"admin/providers/{Escape(key)}/models/{Escape(modelName)}") { Content = JsonBody(body) };
+                    requestUri: $"admin/providers/{Escape(key)}/models/{Escape(modelName)}")
+                { Content = JsonBody(body) };
         return await SendForProvidersAsync(request: request, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
     }

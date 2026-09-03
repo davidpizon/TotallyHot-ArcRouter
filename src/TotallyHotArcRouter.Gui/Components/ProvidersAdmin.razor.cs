@@ -346,7 +346,7 @@ public partial class ProvidersAdmin
     /// <summary>The in-progress budget draft for a provider, or the persisted cap when there is no unsaved edit.</summary>
     private static string GetBudgetDraft(Dictionary<string, string> drafts, string key, string? current)
     {
-        return drafts.TryGetValue(key: key, value: out var value) ? value : (current ?? string.Empty);
+        return drafts.TryGetValue(key: key, value: out var value) ? value : current ?? string.Empty;
     }
 
     // Percentage of a cap consumed, clamped to 0-100 for the bar height. A zero cap reads as 100% (fully

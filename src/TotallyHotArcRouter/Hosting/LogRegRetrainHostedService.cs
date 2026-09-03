@@ -1,5 +1,5 @@
-using System.Text.Json;
 using Microsoft.Extensions.Options;
+using System.Text.Json;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Router;
@@ -105,7 +105,7 @@ public sealed class LogRegRetrainHostedService : BackgroundService
             lastTrainedCount,
             _options.LogRegRetrainThreshold);
 
-        var outcome = await _trainingService.RetrainAsync(null, cancellationToken: cancellationToken)
+        var outcome = await _trainingService.RetrainAsync(cancellationToken: cancellationToken)
             .ConfigureAwait(false);
         _logger.LogInformation(
             message: "Automatic logreg retrain finished with outcome {Kind}: {Message}", outcome.Kind, outcome.Message);

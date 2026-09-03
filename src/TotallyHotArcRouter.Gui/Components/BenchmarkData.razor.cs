@@ -366,7 +366,7 @@ public partial class BenchmarkData
             // Otherwise Completed means this file finished this sync, even if the overall model status
             // (file.Synced) hasn't been refreshed yet - same as the at-rest (no progress) case below.
             { Stage: LlmRouterModelSyncStageInfo.Completed } => "Synced",
-            _ => file.Synced ? "Synced" : (file.IsOptional ? "Optional" : "Not synced")
+            _ => file.Synced ? "Synced" : file.IsOptional ? "Optional" : "Not synced"
         };
     }
 

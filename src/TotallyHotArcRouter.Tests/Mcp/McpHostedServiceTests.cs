@@ -1,10 +1,10 @@
-using System.Net;
-using System.Net.Sockets;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
+using System.Net;
+using System.Net.Sockets;
 using TotallyHot.ArcRouter.Hosting;
 using TotallyHot.ArcRouter.Mcp;
 using TotallyHot.ArcRouter.Models;

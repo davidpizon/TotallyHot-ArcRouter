@@ -56,13 +56,17 @@ public sealed class RoutingModeAdminGrpcService : Contract.RoutingModeAdminServi
             { Name = VoterNames.DimBest, Enabled = _options.EnableDimBestVoter, Weight = _options.DimBestVoterWeight });
         response.Voters.Add(new Contract.VoterMode
         {
-            Name = VoterNames.MemoryKnn, Enabled = _options.EnableMemoryKnnVoter, Weight = _options.MemoryKnnVoterWeight
+            Name = VoterNames.MemoryKnn,
+            Enabled = _options.EnableMemoryKnnVoter,
+            Weight = _options.MemoryKnnVoterWeight
         });
         response.Voters.Add(new Contract.VoterMode
             { Name = VoterNames.LogReg, Enabled = _options.EnableLogRegVoter, Weight = _options.LogRegVoterWeight });
         response.Voters.Add(new Contract.VoterMode
         {
-            Name = VoterNames.LlmRouter, Enabled = _options.EnableLlmRouterVoter, Weight = _options.LlmRouterVoterWeight
+            Name = VoterNames.LlmRouter,
+            Enabled = _options.EnableLlmRouterVoter,
+            Weight = _options.LlmRouterVoterWeight
         });
 
         // Reported like any other voter, deliberately un-gated on RoutingOptions.AdaptiveRoutingEnabled:
@@ -71,7 +75,8 @@ public sealed class RoutingModeAdminGrpcService : Contract.RoutingModeAdminServi
         // another - the panel's own contract is "what would apply if the Orchestrator were live".
         response.Voters.Add(new Contract.VoterMode
         {
-            Name = VoterNames.ClusterBest, Enabled = _options.EnableClusterBestVoter,
+            Name = VoterNames.ClusterBest,
+            Enabled = _options.EnableClusterBestVoter,
             Weight = _options.ClusterBestVoterWeight
         });
 

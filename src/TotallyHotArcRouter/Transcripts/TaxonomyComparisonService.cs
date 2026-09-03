@@ -613,7 +613,7 @@ public sealed class TaxonomyComparisonService : BackgroundService
         {
             ({ } dimension, { } cluster) when cluster < dimension => "cluster",
             ({ } dimension, { } cluster) when dimension < cluster => "dimension",
-            ({ }, { }) => "tie",
+            (not null, not null) => "tie",
             _ => "incomparable"
         };
     }

@@ -1,5 +1,5 @@
-using System.Globalization;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Globalization;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tests.PriceCatalog;

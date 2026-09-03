@@ -1,8 +1,8 @@
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using System.Net;
 using System.Text;
 using System.Text.Json;
-using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;

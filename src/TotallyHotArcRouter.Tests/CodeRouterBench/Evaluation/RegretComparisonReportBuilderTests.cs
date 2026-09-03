@@ -28,7 +28,7 @@ public class RegretComparisonReportBuilderTests
         var probingMatrix = DimensionModelScoreMatrix.FromDatabase(database: temp.Database, split: "probing");
         var probingOutcomes = IdSplitRegretTaskOutcomeLoader.Load(database: temp.Database, split: "probing");
         var oodOutcomes = OodRegretTaskOutcomeLoader.Load(temp.Database);
-        var logRegArtifact = LogRegTrainer.Train(database: temp.Database, 50, 50, 0.5);
+        var logRegArtifact = LogRegTrainer.Train(database: temp.Database, 50);
 
         var knnArtifact = new KnnRetrievalArtifact(
             2,

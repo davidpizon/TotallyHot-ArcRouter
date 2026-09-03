@@ -1,6 +1,6 @@
-using System.Runtime.CompilerServices;
 using AwesomeAssertions;
 using Bunit;
+using System.Runtime.CompilerServices;
 using TotallyHot.ArcRouter.Gui.Components;
 using TotallyHot.ArcRouter.Gui.Services;
 using TotallyHot.ArcRouter.Gui.Telemetry;
@@ -359,7 +359,7 @@ public sealed class BenchmarkDataTests
     {
         // Constructing a channel does not connect, so this stays offline; the panel reads this property to
         // name the address it actually failed to reach.
-        using var store = new BenchmarkDataStore(null, serverAddress: "https://localhost:65111");
+        using var store = new BenchmarkDataStore(serverAddress: "https://localhost:65111");
 
         store.ServerAddress.Should().Be("https://localhost:65111");
     }

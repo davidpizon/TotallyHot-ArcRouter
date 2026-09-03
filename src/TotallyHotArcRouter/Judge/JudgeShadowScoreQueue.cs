@@ -1,5 +1,5 @@
-using System.Threading.Channels;
 using Microsoft.Extensions.Options;
+using System.Threading.Channels;
 
 namespace TotallyHot.ArcRouter.Judge;
 

@@ -20,7 +20,7 @@ public class SpendTrackerTests
 
         var summary = tracker.GetSummary();
 
-        Assert.Equal(expected: default, actual: summary);
+        Assert.Equal(default, actual: summary);
     }
 
     [Fact]
@@ -89,8 +89,8 @@ public class SpendTrackerTests
         var summary = await tracker.RecordAsync(model: "claude-opus-4.6", 100, 20, 0.0015m,
             cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(expected: default, actual: summary);
-        Assert.Equal(expected: default, actual: tracker.GetSummary());
+        Assert.Equal(default, actual: summary);
+        Assert.Equal(default, actual: tracker.GetSummary());
     }
 
     [Fact]
@@ -114,7 +114,7 @@ public class SpendTrackerTests
         var summary = await tracker.RecordAsync(model: "claude-opus-4.6", 100, 20, 0.0015m,
             cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(expected: default, actual: summary);
-        Assert.Equal(expected: default, actual: tracker.GetSummary());
+        Assert.Equal(default, actual: summary);
+        Assert.Equal(default, actual: tracker.GetSummary());
     }
 }

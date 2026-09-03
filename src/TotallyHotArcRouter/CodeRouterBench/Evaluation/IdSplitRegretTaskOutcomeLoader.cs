@@ -88,7 +88,7 @@ public static class IdSplitRegretTaskOutcomeLoader
         {
             if (cells.Count == 0) continue;
 
-            outcomes.Add(new RegretTaskOutcome(TaskId: taskId, Dimension: taskDimension[taskId], Cells: cells, null));
+            outcomes.Add(new RegretTaskOutcome(TaskId: taskId, Dimension: taskDimension[taskId], Cells: cells));
         }
 
         return outcomes;

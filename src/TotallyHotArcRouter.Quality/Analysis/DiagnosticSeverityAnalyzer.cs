@@ -1,6 +1,6 @@
-using System.Globalization;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using System.Globalization;
 
 namespace TotallyHot.ArcRouter.Quality.Analysis;
 

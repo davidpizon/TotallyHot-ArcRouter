@@ -1,5 +1,5 @@
-using System.Text.Json;
 using Microsoft.Extensions.Options;
+using System.Text.Json;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 
@@ -695,7 +695,10 @@ internal sealed class ProviderManagementService
             await _store.UpsertModelAsync(
                 entry: new ModelRouteEntry
                 {
-                    ModelName = id, Provider = providerKey, ProviderModelId = id, Enabled = false,
+                    ModelName = id,
+                    Provider = providerKey,
+                    ProviderModelId = id,
+                    Enabled = false,
                     PresentUpstream = true
                 },
                 cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -840,8 +843,11 @@ internal sealed class ProviderManagementService
             if (locked && TryWriteSecret(providerKey: providerKey, headerName: name, value: request.Value))
                 return new ProviderHeader
                 {
-                    Name = name, Value = null, ValueEnvVar = null,
-                    ValueSecretRef = SecretRefName(providerKey: providerKey, headerName: name), Locked = true
+                    Name = name,
+                    Value = null,
+                    ValueEnvVar = null,
+                    ValueSecretRef = SecretRefName(providerKey: providerKey, headerName: name),
+                    Locked = true
                 };
 
             // Either unlocked (public configuration, stored verbatim) or the store is unavailable on this

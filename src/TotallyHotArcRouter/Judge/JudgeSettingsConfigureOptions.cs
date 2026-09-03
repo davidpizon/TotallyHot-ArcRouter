@@ -1,5 +1,5 @@
-using System.Reflection;
 using Microsoft.Extensions.Options;
+using System.Reflection;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Router;
 
