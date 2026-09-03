@@ -715,34 +715,34 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // AnthropicPayloadTranslator.TryExtractEmbeddedError's own doc comment.
             byte[]? preReadErrorBody = null;
             string? embeddedErrorMessage = null;
-            var isGeminiAuthFailure = false;
-            if (statusCode == StatusCodes.Status400BadRequest && translator is GeminiPayloadTranslator)
+            var isProviderAuthFailure = false;
+
+            // Which statuses carry a decodable error envelope is the *translator's* judgement, not this
+            // middleware's: asking IPayloadTranslator.HandlesEmbeddedErrorAt is what replaced a chain of
+            // `translator is GeminiPayloadTranslator` / `is AnthropicPayloadTranslator` type tests calling
+            // static extractors. That chain meant a newly registered translated provider was silently
+            // un-classified - its embedded errors mangled by TranslateResponse into a bogus empty
+            // completion - until someone remembered to extend this method. Now a provider that says
+            // nothing gets the interface's safe default (no pre-read, body forwarded untouched), and a
+            // provider that knows its own error shape opts in without this file changing at all.
+            //
+            // docs/adr/0004-surface-out-of-credits-provider-failures-on-the-providers-tab.md: an
+            // untranslated/passthrough provider (OpenAI-compatible, LM Studio, Ollama-native, etc.) has no
+            // translator to ask, so its 400/429 rule stays here. Its error body is otherwise forwarded
+            // byte-for-byte untouched, so reading it once for classification changes nothing about what the
+            // client eventually receives; see the preReadErrorBody-is-not-null forwarding branch below.
+            var shouldPreReadErrorBody = translator is not null
+                ? translator.HandlesEmbeddedErrorAt(statusCode)
+                : statusCode == StatusCodes.Status400BadRequest || statusCode == 429;
+
+            if (shouldPreReadErrorBody)
             {
                 preReadErrorBody = await responseMessage.Content.ReadAsByteArrayAsync(context.RequestAborted);
-                if (GeminiPayloadTranslator.TryExtractEmbeddedError(preReadErrorBody, out var embeddedStatus, out var embeddedMessage))
+                if (translator is not null && translator.TryExtractEmbeddedError(preReadErrorBody, out var embedded))
                 {
-                    embeddedErrorMessage = embeddedMessage;
-                    isGeminiAuthFailure = string.Equals(embeddedStatus, "UNAUTHENTICATED", StringComparison.Ordinal) ||
-                        embeddedMessage.Contains("API key not valid", StringComparison.OrdinalIgnoreCase);
+                    embeddedErrorMessage = embedded.Message;
+                    isProviderAuthFailure = embedded.IsAuthFailure;
                 }
-            }
-            else if (statusCode == StatusCodes.Status400BadRequest && translator is AnthropicPayloadTranslator)
-            {
-                preReadErrorBody = await responseMessage.Content.ReadAsByteArrayAsync(context.RequestAborted);
-                if (AnthropicPayloadTranslator.TryExtractEmbeddedError(preReadErrorBody, out _, out var embeddedMessage))
-                {
-                    embeddedErrorMessage = embeddedMessage;
-                }
-            }
-            else if ((statusCode == StatusCodes.Status400BadRequest || statusCode == 429) && translator is null)
-            {
-                // docs/adr/0004-surface-out-of-credits-provider-failures-on-the-providers-tab.md: an
-                // untranslated/passthrough provider (OpenAI-compatible, LM Studio, Ollama-native, etc.) has
-                // no provider-specific embedded-error extraction above - its error body is otherwise
-                // forwarded byte-for-byte untouched, so reading it here (once, for classification only)
-                // changes nothing about what the client eventually receives; see the preReadErrorBody-is-
-                // not-null forwarding branch below.
-                preReadErrorBody = await responseMessage.Content.ReadAsByteArrayAsync(context.RequestAborted);
             }
 
             // docs/adr/0004-surface-out-of-credits-provider-failures-on-the-providers-tab.md: additive to
@@ -781,10 +781,10 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                     LogRedaction.Sanitize(route.ModelName));
                 _circuitBreaker.RecordProviderFailure(route.Provider);
             }
-            else if (isGeminiAuthFailure)
+            else if (isProviderAuthFailure)
             {
                 _logger.LogError(
-                    "Upstream provider {Provider} returned 400 with an embedded UNAUTHENTICATED error for model {Model} (Gemini reports an invalid API key as 400, not 401); treating as a provider-wide outage and bypassing every model on this provider until it recovers.",
+                    "Upstream provider {Provider} returned an embedded credential error for model {Model} on a non-401 status (Gemini, for example, reports an invalid API key as a 400); treating as a provider-wide outage and bypassing every model on this provider until it recovers.",
                     LogRedaction.Sanitize(route.Provider),
                     LogRedaction.Sanitize(route.ModelName));
                 _circuitBreaker.RecordProviderFailure(route.Provider);
@@ -851,11 +851,13 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // retried - a backup would reject the same request identically. Only fail over while a backup
             // remains and nothing has been written to the client yet.
             //
-            // isGeminiAuthFailure is folded in here alongside the numeric-status check: it's Gemini's 400
-            // disguising what is, semantically, a 401 (see where it's computed above), so it gets the same
-            // different-provider-only retry treatment as the real 401/403/405 case.
+            // isProviderAuthFailure is folded in here alongside the numeric-status check: it's a non-401
+            // status disguising what is, semantically, a 401 - Gemini's 400-with-UNAUTHENTICATED is the case
+            // it exists for, though any translator may now report it via EmbeddedProviderError.IsAuthFailure
+            // (see where it's computed above) - so it gets the same different-provider-only retry treatment
+            // as the real 401/403/405 case.
             //
-            // docs/adr/0004-.../0005-...: for a *provider-wide*-trip status (401/403/405/isGeminiAuthFailure/
+            // docs/adr/0004-.../0005-...: for a *provider-wide*-trip status (401/403/405/isProviderAuthFailure/
             // out-of-credits), an explicit primary (never substituted so far, and this is its first attempt,
             // not an already-failed-over hop) does NOT retry across providers even when nextProviderDiffers -
             // it falls through to the commit block below and relays the real upstream error, exactly as ADR-
@@ -870,7 +872,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             var isProviderWideTripStatus = statusCode == StatusCodes.Status401Unauthorized
                 || statusCode == StatusCodes.Status403Forbidden
                 || statusCode == StatusCodes.Status405MethodNotAllowed
-                || isGeminiAuthFailure
+                || isProviderAuthFailure
                 || isOutOfCredits;
 
             var shouldRetryThisCandidate = isProviderWideTripStatus

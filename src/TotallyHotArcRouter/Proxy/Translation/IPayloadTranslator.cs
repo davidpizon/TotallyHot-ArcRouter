@@ -73,7 +73,66 @@ public interface IPayloadTranslator
     /// (buffered accumulation of fragmented chunks, tool-call index continuity across chunks).
     /// </summary>
     IStreamTranslator CreateStreamTranslator();
+
+    /// <summary>
+    /// Whether an upstream response with this status code carries a provider error envelope worth
+    /// decoding before anything is written to the client. Returning <see langword="true"/> makes
+    /// <see cref="ProxyMiddleware"/> buffer the (small) error body and hand it to
+    /// <see cref="TryExtractEmbeddedError"/>; the default <see langword="false"/> leaves the response
+    /// on the untouched forwarding path.
+    ///
+    /// <para>
+    /// This is a separate decision from <see cref="TryExtractEmbeddedError"/> because the buffering has
+    /// to happen <em>before</em> there are any bytes to parse, and buffering is observable: a pre-read
+    /// body is forwarded whole rather than streamed, and it is what ADR-0004's out-of-credits
+    /// classifier inspects. A translator must therefore opt in only for the statuses whose bodies it
+    /// genuinely knows how to read, rather than for every error status.
+    /// </para>
+    /// </summary>
+    /// <param name="statusCode">The upstream response's HTTP status code.</param>
+    bool HandlesEmbeddedErrorAt(int statusCode) => false;
+
+    /// <summary>
+    /// Extracts an error this provider embedded in a response body whose shape
+    /// <see cref="TranslateResponse"/> would otherwise mangle into a bogus empty completion (or, on the
+    /// SSE path, silently swallow). Called only when <see cref="HandlesEmbeddedErrorAt"/> returned
+    /// <see langword="true"/> for the same status code.
+    ///
+    /// <para>
+    /// This member is what keeps provider-specific error decoding out of <see cref="ProxyMiddleware"/>:
+    /// before it existed, the middleware type-tested each concrete translator class and called a
+    /// <see langword="static"/> extractor on it, so a newly added translated provider was silently
+    /// un-classified until someone remembered to extend that chain. The default returns
+    /// <see langword="false"/>, which is the correct behavior for a provider whose errors need no
+    /// special handling - its body is forwarded unchanged, exactly as before.
+    /// </para>
+    /// </summary>
+    /// <param name="body">The buffered upstream error body.</param>
+    /// <param name="error">The decoded error when this returns <see langword="true"/>; otherwise <see langword="default"/>.</param>
+    /// <returns><see langword="true"/> if <paramref name="body"/> parsed as this provider's error envelope.</returns>
+    bool TryExtractEmbeddedError(byte[] body, out EmbeddedProviderError error)
+    {
+        error = default;
+        return false;
+    }
 }
+
+/// <summary>
+/// One error a provider embedded in a response body, as decoded by
+/// <see cref="IPayloadTranslator.TryExtractEmbeddedError"/>. A struct rather than a tuple of
+/// <see langword="out"/> parameters so that <see cref="IsAuthFailure"/> - the one piece of this that is
+/// genuinely provider-specific judgement rather than transcription - travels with the data instead of
+/// being re-derived by every caller.
+/// </summary>
+/// <param name="Status">The provider's own error status/type token (Gemini's <c>error.status</c>, Anthropic's <c>error.type</c>), or empty when the envelope carried none.</param>
+/// <param name="Message">The human-readable error message. Never empty when extraction succeeded.</param>
+/// <param name="IsAuthFailure">
+/// Whether this provider considers the error a credential failure disguised as a non-401 status. Gemini
+/// is the case this exists for: it reports an invalid API key as a 400 carrying
+/// <c>UNAUTHENTICATED</c>, which the circuit breaker must treat as the provider-wide outage a real 401
+/// would be (see <c>docs/adr/0004</c>/<c>0005</c>) rather than as a per-request client fault.
+/// </param>
+public readonly record struct EmbeddedProviderError(string Status, string Message, bool IsAuthFailure);
 
 /// <summary>
 /// Per-request, stateful translator for one streaming response: consumes the upstream provider's

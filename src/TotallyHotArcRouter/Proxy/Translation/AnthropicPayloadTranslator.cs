@@ -634,5 +634,33 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
         message = errorObject["message"]?.GetValue<string>() ?? string.Empty;
         return message.Length > 0;
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// 400 only, matching <see cref="GeminiPayloadTranslator.HandlesEmbeddedErrorAt"/>. Anthropic's
+    /// 429s are ordinary rate-limit responses whose bodies are currently streamed rather than
+    /// buffered, and opting into them here would change that.
+    /// </remarks>
+    public bool HandlesEmbeddedErrorAt(int statusCode) => statusCode == StatusCodes.Status400BadRequest;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Always reports <see cref="EmbeddedProviderError.IsAuthFailure"/> as <see langword="false"/>:
+    /// Anthropic returns a real 401 for a bad credential, so it has none of the disguised-401 wrinkle
+    /// <see cref="GeminiPayloadTranslator"/> has to compensate for. The extracted
+    /// <see cref="EmbeddedProviderError.Status"/> is Anthropic's <c>error.type</c>
+    /// (e.g. <c>invalid_request_error</c>).
+    /// </remarks>
+    public bool TryExtractEmbeddedError(byte[] body, out EmbeddedProviderError error)
+    {
+        if (!TryExtractEmbeddedError(body, out var errorType, out var message))
+        {
+            error = default;
+            return false;
+        }
+
+        error = new EmbeddedProviderError(errorType, message, IsAuthFailure: false);
+        return true;
+    }
 }
 

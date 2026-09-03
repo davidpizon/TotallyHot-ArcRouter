@@ -4,6 +4,14 @@
 Phase 2 (all 5 steps) and Phase 3 steps 1-2 are implemented. The Phase 4 Razor `.razor.cs` code-behind
 split is also implemented (`ProvidersAdmin`, `SettingsModal`, `BenchmarkData`, `PriceSourcesAdmin`).
 
+**Phase 5 is open.** A third, blind dual-engine audit (2026-09-02) found 9 new items, 2 of them
+Critical — see [Deep code-smell audit](#deep-code-smell-audit--2026-09-02-dual-engine-blind-pass) and
+its [prioritized roadmap](#prioritized-roadmap-phase-5). **B1 (the translator dispatch collapse) is
+implemented**; its manual golden-path smoke is still outstanding. Most notably the audit found that Phase 2 measured
+`ProxyMiddleware`'s **class** size and stopped there: `InvokeCoreAsync` is still a single 715-line
+method. The paragraph below, written before that audit, should be read as "everything *this plan and
+the brutal-cozy-pascal audit* raised is closed" — not as "the codebase is clean."
+
 A second, independent audit (session "Codebase architectural audit," `~/.claude/plans/act-as-a-brutal-cozy-pascal.md`)
 re-surveyed the codebase blind to this document, confirmed both of this plan's still-open items below,
 and found 10 additional items this plan missed. Per that audit's own recommendation, its findings are
@@ -348,6 +356,466 @@ budget and API-key panels look like natural child components. **Risk: Low** for 
 **Low-Medium** for sub-component extraction, and any new dialog/modal split off from these must still
 satisfy AGENTS.md's "New GUI windows must match the System Settings window" shell contract
 (`docs/gui/DESIGN.md` §4.1) where applicable.
+
+---
+
+## Deep code-smell audit — 2026-09-02 (dual-engine, blind pass)
+
+**Method:** a blind five-phase survey (structural/architectural → OO/design → method-level →
+maintainability → roadmap) run without anchoring on the sections above, then reconciled against them.
+Engines per [ADR-0008](../adr/0008-codegraph-serena-dual-engine-code-smell-pipeline.md): **CodeGraph MCP**
+for call paths, blast radius, and the `ProxyMiddleware`/`RequestTelemetryPublisher`/`ProxyServer` hub
+source; **Serena MCP** (project activated, C# language server) for reference-aware verification of
+dead-code and single-implementation hypotheses; plus mechanical metrics (a method-length and
+parameter-count pass over all 7 production assemblies, and a `git log` co-change analysis over the
+last 200–300 commits) to make the size and churn claims measurable rather than impressionistic.
+Scope: production only (`TotallyHotArcRouter`, `.Quality`, `.Gui`, `.Gui.Admin`, `.Gui.Charts`,
+`.Gui.Console`, `.Gui.Telemetry` — ~75k lines); `Installer` and all `*.Tests` projects excluded, per
+ADR-0008's rule that tests are the regression net, not the catalog.
+
+**Headline:** the sections above are accurate about the *classes* they closed, but Phase 2's success
+metric was class size, and one method was never actually decomposed. `ProxyMiddleware.cs` did shrink
+2751 → 1484 lines; `InvokeCoreAsync` is **715 of those 1484 lines**, and 582 of them are a single
+`for`-loop body nested to depth 8. Everything else found below is Major or lower.
+
+### Metrics baseline (production only)
+
+| Metric | Count | Worst offender |
+|---|---|---|
+| Methods > 50 lines | 138 | `ProxyMiddleware.InvokeCoreAsync` — 715 |
+| Parameter lists > 4 | 124 (includes SQL-DDL false positives) | `RequestTelemetryPublisher.PublishTelemetryEventAsync` — 24 |
+| Files > 300 lines | 43 | `ProxyMiddleware.cs` — 1484 |
+| `async void` | **0** | — (clean) |
+| `Thread.Sleep` | **0** | — (clean) |
+| `TODO`/`FIXME`/`HACK` markers | **1** | `MsiUpdateApplier.cs:147`, a tracked signing TODO |
+
+### Phase 1 — Structural and architectural
+
+**A1 · Cross-project coupling is clean — verified, no action.** `TotallyHotArcRouter.Gui.csproj` has
+**zero** `ProjectReference` to `TotallyHotArcRouter`. The GUI reaches the router only through
+generated gRPC contracts (`.Gui.Telemetry`) and HTTP (`.Gui.Admin`), and the reference graph
+(`router → Quality`; `Gui → Admin/Charts/Console/Telemetry`, each a leaf) is acyclic. A genuine
+architectural strength; recorded so a future audit does not "fix" it.
+
+**A2 · `Hosting/ServiceCollectionExtensions.cs` is a Divergent Change hub. Major.**
+Highest-churn production file in the repo — **53 of the last 300 commits** touch it, nearly double the
+next file. Its co-change profile is the Shotgun Surgery signature for "add one dependency":
+
+| Co-changed with | Times (last 200 commits) |
+|---|---|
+| `ProxyServer.cs` | 6 |
+| `RoutingOptions.cs` | 5 |
+| `ProxyMiddleware.cs` | 4 |
+| `ProxyServerDependencies.cs` | 4 |
+| `StartupHealthCheckHostedService.cs` | 4 |
+
+1002 lines behind a single public entry point (`AddTotallyHotArcRouter`), with a 139-line
+`AddRouterCore`, a 149-line `AddPriceCatalog`, and a 118-line `AddProxyHost`.
+
+**Impact:** every feature addition edits this file plus 2–4 others in lockstep; merge conflicts
+concentrate here.
+**Fix:** move each feature group's registrations next to the feature (e.g. a
+`PriceCatalogServiceCollectionExtensions` in `PriceCatalog/`), leaving `AddTotallyHotArcRouter` as a
+chain of `services.AddPriceCatalog().AddOrchestrator()…` calls. Pure move, no behavior change.
+
+**A3 · `Gui/Platforms/Windows/TrayWindowManager.cs` — God Object plus Inappropriate Intimacy. Major.**
+777 lines, **every member `static`**, mixing six responsibilities: Win32 P/Invoke interop (~12 `extern`
+declarations), tray-icon lifecycle, popup-menu construction, Windows Service Control Manager status
+querying (`TryGetServiceStatus`), routing-gate toggling (`ToggleRoutingAsync` — a business action), and
+window geometry (`CenterOnWorkArea`). Seven pieces of mutable static state (`_hwnd`, `_isExiting`,
+`_trayIconHandle`, `_routingGateStore`, `_dispatcherQueue`, `_originalWndProc`, `_wndProcDelegate`).
+
+This is the GUI's exact analogue of the "logic fused to OS wrappers" smell — and the router side is
+clean while the GUI side is not.
+
+**Impact:** untestable by construction (static plus P/Invoke, no seam); the single-UI-thread invariant
+is documented but not enforced by any type.
+**Fix:** extract `TrayIconInterop` (P/Invoke only), `IRouterServiceStatusProbe` (the SCM query — the one
+piece with real logic worth testing), and `TrayMenuBuilder`; leave `TrayWindowManager` as the
+instance-scoped coordinator holding the window handle.
+
+**A4 · Blazor thread affinity and view/logic separation are correct — verified, no action.** All ten
+off-UI-thread store callbacks correctly marshal through `InvokeAsync(StateHasChanged)`; every bare
+`StateHasChanged()` is either inside a UI-thread event handler or already inside an `InvokeAsync`
+lambda. No "Fat View" either — business logic lives in `Gui/Services/*Store.cs`, not in components. No
+prop drilling: the deepest component takes 8 `[Parameter]`s (`SecretField`) and every other is ≤4.
+
+### Phase 2 — Object-oriented and design
+
+**B1 · Type-test chain on concrete translator classes. CRITICAL — IMPLEMENTED 2026-09-02.**
+`ProxyMiddleware.cs:719–746` branched on the *concrete type* of the translator to decide how to decode
+a provider's embedded error body:
+
+```csharp
+if (statusCode == 400 && translator is GeminiPayloadTranslator)
+{
+    preReadErrorBody = await responseMessage.Content.ReadAsByteArrayAsync(...);
+    if (GeminiPayloadTranslator.TryExtractEmbeddedError(preReadErrorBody, out var s, out var m)) { ... }
+}
+else if (statusCode == 400 && translator is AnthropicPayloadTranslator)
+{
+    preReadErrorBody = await responseMessage.Content.ReadAsByteArrayAsync(...);
+    if (AnthropicPayloadTranslator.TryExtractEmbeddedError(preReadErrorBody, out _, out var m)) { ... }
+}
+else if ((statusCode == 400 || statusCode == 429) && translator is null) { ... }
+```
+
+`IPayloadTranslator` is otherwise a textbook Strategy — `ShouldTranslate`, `BuildRequestUri`,
+`TranslateRequest`, `TranslateResponse`, and `CreateStreamTranslator` all dispatch polymorphically, and
+the interface already uses a C# default interface method for `ShouldTranslate`.
+`TryExtractEmbeddedError` is the one capability implemented as a **`static` method on each concrete
+class**, which is precisely what forces the middleware to type-test.
+
+**Impact:** every new translated provider (the Bedrock family is already growing) must edit
+`ProxyMiddleware`'s hot path to be error-classified at all — otherwise its embedded errors are silently
+misread. This is the same class of gap that `ProviderRegistration` was introduced to close for
+`UsageExtractor`/`ResponseTextExtractor`, where it turned out to be hiding a real Ollama bug.
+
+**Fix:** add a default interface method and delete the chain.
+
+```csharp
+// IPayloadTranslator.cs — default returns false, matching today's non-extracting providers.
+bool TryExtractEmbeddedError(ReadOnlySpan<byte> body, out string? status, out string? message)
+{
+    status = null; message = null; return false;
+}
+```
+
+```csharp
+// ProxyMiddleware.cs — the whole chain collapses to:
+if (statusCode is 400 or 429)
+{
+    preReadErrorBody = await responseMessage.Content.ReadAsByteArrayAsync(context.RequestAborted);
+    if (translator?.TryExtractEmbeddedError(preReadErrorBody, out var st, out var msg) == true)
+    {
+        embeddedErrorMessage = msg;
+        isGeminiAuthFailure = st is "UNAUTHENTICATED" ||
+            (msg?.Contains("API key not valid", StringComparison.OrdinalIgnoreCase) ?? false);
+    }
+}
+```
+
+#### What was actually implemented, and how it differs from the sketch above
+
+The sketch above is **not** behavior-preserving, and the shipped fix corrects it on two points. Both
+corrections are worth recording, because both are the kind of detail a "mechanical" collapse loses:
+
+1. **A single blanket `if (statusCode is 400 or 429)` gate changes behavior.** Today's pre-read is
+   gated per provider — Gemini@400, Anthropic@400, null-translator@400|429, and *nothing else*. A
+   blanket gate would newly buffer bodies for Gemini@429, Anthropic@429, and the Bedrock translators,
+   flipping those responses from streamed to buffered forwarding and feeding new bodies to ADR-0004's
+   out-of-credits classifier. So the seam needs **two** members, not one: `HandlesEmbeddedErrorAt(int)`
+   decides *when* to buffer (a decision that must be made before there are any bytes to parse, and one
+   that is externally observable), and `TryExtractEmbeddedError` decides *how* to parse.
+2. **`isGeminiAuthFailure` could not stay in the middleware.** Applying Gemini's
+   `message.Contains("API key not valid")` rule generically would let an Anthropic error message trip
+   a provider-wide circuit break it does not trip today. The verdict moved onto the translator, carried
+   by `EmbeddedProviderError.IsAuthFailure`, and the middleware's flag was renamed
+   `isProviderAuthFailure`.
+
+Shipped surface (`IPayloadTranslator.cs`), both with default implementations so no existing
+implementer — including `IBedrockPayloadTranslator`, `IClientPathTranslator`, and
+`IResponseOnlyTranslator` — is forced to change:
+
+```csharp
+bool HandlesEmbeddedErrorAt(int statusCode) => false;
+
+bool TryExtractEmbeddedError(byte[] body, out EmbeddedProviderError error)
+{
+    error = default;
+    return false;
+}
+
+public readonly record struct EmbeddedProviderError(string Status, string Message, bool IsAuthFailure);
+```
+
+`GeminiPayloadTranslator` and `AnthropicPayloadTranslator` implement both, each delegating to its
+existing `internal static` extractor — which is left in place, so the direct unit tests in
+`AnthropicProviderTests` keep passing unchanged. The middleware's three-branch chain became:
+
+```csharp
+var shouldPreReadErrorBody = translator is not null
+    ? translator.HandlesEmbeddedErrorAt(statusCode)
+    : statusCode == StatusCodes.Status400BadRequest || statusCode == 429;
+
+if (shouldPreReadErrorBody)
+{
+    preReadErrorBody = await responseMessage.Content.ReadAsByteArrayAsync(context.RequestAborted);
+    if (translator is not null && translator.TryExtractEmbeddedError(preReadErrorBody, out var embedded))
+    {
+        embeddedErrorMessage = embedded.Message;
+        isProviderAuthFailure = embedded.IsAuthFailure;
+    }
+}
+```
+
+The passthrough (`translator is null`) rule stays in the middleware deliberately: with no translator to
+ask, ADR-0004's 400/429 out-of-credits pre-read is the middleware's own concern, not a provider's.
+
+**Validation:** full solution builds with 0 warnings / 0 errors; router suite 2373 tests, 0 failures
+attributable to this change (5 pre-existing `LiteLlmParityTests` failures were confirmed identical on a
+stashed clean tree — a LiteLLM sidecar is reachable on `127.0.0.1:4000` but answering 400, so
+`Assert.SkipUnless` treats it as up). Two regression tests were added to
+`ProxyMiddlewareFallbackTests` covering both halves of the new seam: a third-party translator that opts
+in has its message surfaced (and would fail against the old type-test chain), and one that does not opt
+in keeps the untouched translated path, proving the defaults are inert.
+
+**Still outstanding:** the validation gate's item 6 — the manual golden-path smoke through a running
+proxy (streaming, buffered, Bedrock, local endpoints) — has **not** been run for this change. It
+touches the response-handling hot path, so that smoke is still required before this is considered
+closed.
+
+**B2 · `ProxyMiddlewareDependencies` — Parameter Object without cohesion. Major.**
+The 30-parameter constructor recorded in Summary row 5 was fixed by moving 29 of those parameters into
+an optional property bag, every member nullable with a documented inert default. The count is hidden,
+not reduced: **29 `init` properties**, and `ProxyMiddleware` still holds 24 fields and 33 methods.
+
+**Impact:** the compiler no longer checks that a caller supplied what a feature needs — a forgotten
+`SpendTracker` is a silent no-op at runtime instead of a build error. Every consumer null-checks.
+**Fix:** split the bag along cohesion lines that already exist in the code — `TelemetryDeps` (the 20 the
+constructor immediately forwards to `RequestTelemetryPublisher` and nowhere else), `FailoverDeps`
+(`CircuitBreaker`, `BudgetStore`, `RoutingGate`), and `TranslationDeps` (`Translators`,
+`ToolCallNormalizerFactory`, `CapabilityStore`, `ContextWindowStore`). Each group is genuinely
+all-or-nothing, which is the same argument `ProxyServerDependencies` already makes for itself in its
+own constructor remarks.
+
+**B3 · Single-implementation interfaces are *not* speculative generality — verified, no action.**
+Checked 30 `I*` interfaces with one production implementation. Nearly all have test doubles
+(`IEmbeddingClient`: 13, `IBudgetEnforcer`: 2) or are live DI seams registered in
+`ServiceCollectionExtensions` / `MauiProgram` (`ICircuitBreaker`, `IGuiSettingsStore`). Correctly
+factored — no Refused Bequest found either; the codebase favors composition over inheritance
+throughout.
+
+### Phase 3 — Implementation and method-level
+
+**C1 · `ProxyMiddleware.InvokeCoreAsync` — 715 lines, depth-8 nesting. CRITICAL.**
+The largest maintainability liability in the codebase, and the one item the sections above believe is
+closed. Lines 365–1080; the per-candidate `for` loop at line 460 accounts for **582 lines** in one
+block, carrying nine distinct responsibilities:
+
+```mermaid
+flowchart TD
+    A["InvokeCoreAsync - 715 lines"] --> B["Local-endpoint dispatch + routing gate (365-400)"]
+    A --> C["Route resolution + budget precheck (401-459)"]
+    A --> D["for candidates - 582 lines, depth 8 (460-1042)"]
+    A --> E["Terminal all-candidates-failed response (1052-1079)"]
+    D --> D1["Candidate gates (472-490)"]
+    D --> D2["Bedrock branch dispatch (542-556)"]
+    D --> D3["Request translation + URI build (557-628)"]
+    D --> D4["Request header copy (629-660)"]
+    D --> D5["Transport send + outage failover (661-718)"]
+    D --> D6["Provider-specific error decode - see B1 (719-775)"]
+    D --> D7["8-way status-code failover classification (776-889)"]
+    D --> D8["Response header copy + body streaming (890-1022)"]
+    D --> D9["Telemetry publish (1023-1042)"]
+```
+
+**Impact:** depth-8 nesting on the proxy's hot path means every failover-behavior change is reasoned
+about across ~600 lines of interleaved concerns; the 44 `await` points and 4 `using` scopes inside it
+make stream-lifetime bugs hard to see. It is also why B1 went unnoticed — the type-test chain is buried
+350 lines into a loop.
+
+**Fix (staged; each step behavior-preserving and independently shippable):**
+
+1. Extract D6 + D7 into an `UpstreamFailureClassifier` returning a
+   `record CandidateOutcome(bool ShouldFailover, bool TripsProvider, string? EmbeddedMessage, …)`.
+   A pure function of `(statusCode, translator, preReadErrorBody)` — fully unit-testable, zero I/O.
+2. Extract D3 + D4 into `UpstreamRequestBuilder.Build(route, translator, rewrittenBody, context)`
+   returning the `HttpRequestMessage`.
+3. Extract D8 into `UpstreamResponseWriter.WriteAsync(...)`.
+4. What remains is a ~120-line loop reading as: gate → build → send → classify → write → publish.
+
+Do **not** attempt this as one commit. Run the validation gate's item 6 (manual streaming, buffered,
+Bedrock, and local-endpoint smoke) after each step.
+
+**C2 · `RequestTelemetryPublisher` — Data Clump; Extract Method applied without Introduce Parameter
+Object. Major.** The notes above record this class as decomposed into 6 named private methods. It was —
+but the parameters travelled with the code:
+
+| Member | Params |
+|---|---|
+| `PublishTelemetryEventAsync` | 24 |
+| `PublishAsync` | 23 |
+| constructor | 20 |
+| `ExtractUsageAndCost` (private) | 19 |
+| `ExtractResponseTextAndCachePending` | 15 |
+| `PersistTranscriptAsync` | 12 |
+| `RecordSpendAndBudgetAsync` | 12 |
+
+`PublishAsync`'s body is 90 lines of nothing but forwarding these six argument lists, and
+`ExtractUsageAndCost` returns an 11-element tuple that is destructured and re-passed.
+
+**Impact:** adding one telemetry field is an 8-site edit; the tuple returns defeat naming and make
+argument-order mistakes type-compatible.
+**Fix:** introduce two records that already exist implicitly —
+`record ServedRequest(HttpContext Context, ResolvedModelRoute Route, string RequestedModelName, bool IsFallback, …)`
+for the request-shaped half and `record UsageOutcome(int? PromptTokens, …, string UsageShapeProvider)`
+for the extracted half. `PublishAsync(ServedRequest, ResponseCapture, CancellationToken)` — three
+parameters — and every private method takes one or both.
+
+**C3 · `ProxyMiddleware.Dispose()` leaks a self-owned `HttpClient`. Major.**
+The class already solves this exact problem once, for the Bedrock factory, and does not apply the
+pattern to the client it also conditionally owns:
+
+```csharp
+_httpClient = httpClient ?? new HttpClient(new HttpClientHandler { ... });  // line 284 - owned, untracked
+...
+if (dependencies?.BedrockClientFactory is null) { _bedrockClientFactory = new ...; _ownsBedrockClientFactory = true; }
+...
+public void Dispose()
+{
+    if (_ownsBedrockClientFactory && _bedrockClientFactory is IDisposable d) d.Dispose();
+    // _httpClient - never disposed, even when this instance created it
+}
+```
+
+**Impact:** low in production (`ProxyMiddleware` is a DI singleton, so the handler lives for the process
+anyway) but real in the 30+ tests that construct it directly — each leaks a socket handler until GC.
+The asymmetry is also a latent trap: the next person to copy the Bedrock ownership pattern will
+reasonably assume `_httpClient` is already covered.
+**Fix:** mirror the existing pattern — `_ownsHttpClient = httpClient is null;` and dispose in `Dispose()`.
+
+**C4 · GUI stores leak `HttpClient` — same smell, different assembly. Major.**
+`Gui/Services/UpdateStore.cs` does this correctly (implements `IDisposable`, disposes
+`_ownedHttpClient`). Its two siblings do not: `ProviderAdminStore.cs:58` and `UsageStore.cs:46` each
+construct an `HttpClient` and neither class implements `IDisposable`.
+**Fix:** copy `UpdateStore`'s ownership pattern verbatim into both.
+
+**C5 · `ProxyServer` constructor — 351 lines. Major.** Second-longest method in the codebase. It is DI
+wiring for the inner Kestrel host, structured as one feature-group null-check per block. Same remedy
+shape as A2: one `Configure<Group>` private method per feature group.
+
+**C6 · Long parameter lists on the failover path. Minor.**
+`BedrockInvocationHandler.InvokeAsync` takes **16** parameters and is called with 16 positional
+arguments at `ProxyMiddleware.cs:544` — a single-line call spanning ~380 characters, where any two
+adjacent same-typed arguments can be silently transposed. `StartupHealthCheckHostedService`'s
+constructor takes **20**, with a 209-line `StartAsync`. Both resolve for free once C2's `ServedRequest`
+record exists — the Bedrock call site is passing the same clump.
+
+**C7 · Sync-over-async. Minor (verified benign, but under-documented).**
+Nine `.GetAwaiter().GetResult()` / `.Wait()` sites. Eight are in gRPC admin progress-reporter callbacks
+(`BenchmarkDataAdminGrpcService`, `LlmRouterModelAdminGrpcService`, `ClusterModelAdminGrpcService`,
+`LogRegModelAdminGrpcService`) implementing a synchronous `IProgress`-style delegate; one is a startup
+migration (`ProviderConfigStore.cs:216`). None is on the request hot path and none runs under a
+`SynchronizationContext`, so there is no deadlock risk — but only two of the nine say so in a comment.
+**Fix:** either give the reporters an async delegate signature, or add the one-line "why this is safe"
+comment the codebase uses everywhere else. Documentation, not a rewrite.
+
+### Phase 4 — Clean code and maintainability
+
+**D1 · Analyzer configuration gap. Minor — highest value-per-minute item in this audit.**
+`src/Directory.Build.props` sets `TreatWarningsAsErrors` but sets **none** of `EnableNETAnalyzers`,
+`AnalysisLevel`, or `EnforceCodeStyleInBuild`. The repo's strict gate therefore enforces core compiler
+warnings and `CS1591` (missing XML docs) — genuinely valuable — but **not** the CA/IDE analyzers,
+including `IDE0005` (unused usings), `CA2000` (dispose objects before losing scope, which would have
+caught C3 and C4 automatically), and `CA1849` (sync-over-async, C7).
+
+**Impact:** three findings in this audit are things the toolchain could have reported for free.
+**Fix:** add to `Directory.Build.props`, then work the fallout in one mechanical pass:
+
+```xml
+<EnableNETAnalyzers>true</EnableNETAnalyzers>
+<AnalysisLevel>latest</AnalysisLevel>
+<EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+```
+
+Expect a non-trivial first-run backlog across 75k lines; stage it by escalating rule severity in
+`.editorconfig` rather than enabling everything at error level at once.
+
+*This audit deliberately reports **no** unused-import count. A heuristic scan produced 821 candidates
+that spot-checking proved were mostly false positives (it flagged `using Serilog;` in a file using
+`Log.`). The compiler is the only sound oracle here — which is exactly the point of this item.*
+
+**D2 · Duplicated chart palette hex codes. Minor.**
+`Gui.Charts/ChartPalette.cs` defines a 12-colour named palette. Three other files independently
+hardcode overlapping hex values: `ProvidersAdmin.razor.cs:418` (a 6-colour series array duplicating
+five of ChartPalette's), `ProvidersAdmin.razor.cs:354` (`#ef4444`/`#f59e0b`/`#10b981` budget
+thresholds), and `ModelDistribution.razor:182-183`. `Models/DashboardData.cs:226-231` embeds six more.
+**Impact:** a palette change to `ChartPalette` silently misses three call sites, and drifts from
+`docs/gui/DESIGN.md`'s token set.
+**Fix:** `ChartPalette.Series[n]` for the arrays, and named `ChartPalette.Danger`/`Warning`/`Ok` for the
+budget thresholds.
+
+**D3 · Hardcoded default endpoints. Minor, borderline.** Three literal defaults —
+`ProviderAdminStore.cs:21` (`http://localhost:5001`), `TelemetryChannelFactory.cs:30`
+(`https://localhost:5002`), `ProviderTemplates.cs:151` (`http://localhost:11434/v1`). All three are
+`const` and named, which is already most of the way correct. The residual smell is that the router's
+own port defaults live separately in `ProxyServer`'s signature (`port = 5001`,
+`grpcPort = DefaultGrpcPort`), so the two sides of the contract can drift without a compile error.
+**Fix:** a shared `DefaultEndpoints` constant class — or consciously accept and document the
+duplication, since the GUI assemblies deliberately do not reference the router.
+
+**D4 · Vestigial interception hooks. Minor — not dead code.**
+`RequestInterceptor.InterceptRequestAsync` logs and increments a counter; `InterceptResponseAsync` logs
+and returns `Task.CompletedTask`. Both are `Task`-returning with no async work. Serena confirms both
+are live (called at `ProxyMiddleware.cs:399` and `:1017`, asserted in three test files), so this is
+**not** dead code — but the names promise an extension seam that does not exist.
+**Fix:** none required. If touched for another reason, either make them real (an `IRequestObserver`
+seam) or rename to what they do (`RecordRequestObserved`).
+
+**D5 · `ConfigureAwait` inconsistency. Minor, behaviorally inert.**
+`ProxyMiddleware` uses it on 0 of 44 awaits; `RequestTelemetryPublisher` on 7 of 8. ASP.NET Core has no
+`SynchronizationContext`, so this changes nothing at runtime — it is purely a consistency question.
+Recorded for completeness; the recommendation is to pick one convention and state it in `AGENTS.md`,
+not to make a sweeping edit.
+
+### Reconciliation with the sections above
+
+| Finding | Status vs. existing plan |
+|---|---|
+| C1 `InvokeCoreAsync` 715 lines | **NEW** — Phase 2 measured class size (2751→1484) and stopped; the method was never decomposed |
+| B1 translator type-test chain | **NEW** — same smell class as the `ProviderRegistration` fix, missed on the translator seam |
+| B2 `ProxyMiddlewareDependencies` 29-property bag | **NEW** — introduced *by* the Phase 2 fix for Summary row 5 |
+| C2 `RequestTelemetryPublisher` data clump | **NEW** — the recorded 6-method split moved lines, not parameters |
+| C3 / C4 `HttpClient` disposal | **NEW** |
+| A2 `ServiceCollectionExtensions` churn hub | **PARTIAL** — Summary row 4 flagged its *size*; the churn/co-change evidence and the "move registrations to features" fix are new |
+| A3 `TrayWindowManager` God Object | **PARTIAL** — recorded above only as "single-UI-thread invariant is documented"; the testability finding is new |
+| C5 `ProxyServer` constructor 351 lines | **NEW** |
+| D1 analyzer configuration gap | **NEW** |
+| Cross-project coupling clean (A1) | **CONFIRMS** the existing "project reference graph … clean and acyclic" rejection |
+| Single-impl interfaces (B3) | **CONFIRMS** the existing voter/analyzer polymorphism rejection, extended to all 30 |
+| Razor `@code` block sizes | **CONFIRMS** Phase 4 item 10 — unchanged, still lowest priority |
+
+### Prioritized roadmap (Phase 5)
+
+```mermaid
+flowchart TD
+    P5A["Phase 5A - Critical: B1 translator dispatch, then C1 staged extraction"]
+    P5B["Phase 5B - Major: C2 param objects, B2 dep-bag split, C3/C4 disposal, A2/A3/C5"]
+    P5C["Phase 5C - Minor: D1 analyzers first, then D2-D5, C6, C7"]
+    P5C -->|do D1 before 5B| P5A
+    P5A --> P5B
+```
+
+**Critical / high impact — do first**
+
+1. ~~**B1** — the translator dispatch collapse.~~ **Implemented 2026-09-02**; see B1 above for the
+   shipped surface and the two ways it had to diverge from the original sketch. Manual golden-path
+   smoke still outstanding.
+2. **C1** — `InvokeCoreAsync`, in the four staged steps above. `ProxyMiddleware` has 95 callers and 19+
+   test files exercising `InvokeAsync`; the regression net is adequate, but the manual smoke in the
+   validation gate is mandatory per step.
+
+**Medium impact**
+
+3. **C2** — `ServedRequest`/`UsageOutcome` records. Resolves C6 for free.
+4. **B2** — split `ProxyMiddlewareDependencies` into three cohesive groups.
+5. **C3 + C4** — `HttpClient` ownership, four sites, ~20 lines total.
+6. **A2** — relocate DI registrations to their features.
+7. **A3** — extract `TrayIconInterop` / `IRouterServiceStatusProbe` from `TrayWindowManager`.
+8. **C5** — `ProxyServer` constructor into per-group `Configure*` methods.
+
+**Low impact**
+
+9. **D1** — enable the analyzers *before* items 3–8, so the mechanical work is checked as it lands.
+10. **D2, D3, D5, C7, D4** — palette consolidation, endpoint constants, `ConfigureAwait` convention,
+    sync-over-async comments, and the vestigial-hook rename (opportunistic only).
+
+**Constraints carried forward:** none of the above changes `ManagementFacade`'s public method set or
+registers its internal collaborators as independently injectable services (ADR-0006), and none alters
+transport (ADR-0007). B1 changes `IPayloadTranslator`'s surface by adding a **default** interface
+method — additive, so no implementer is forced to change — but if it is instead made abstract, that is
+a public-surface change and needs an ADR first.
 
 ---
 

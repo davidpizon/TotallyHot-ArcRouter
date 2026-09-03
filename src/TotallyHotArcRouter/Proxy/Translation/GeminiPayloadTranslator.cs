@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.AspNetCore.Http;
 
 namespace TotallyHot.ArcRouter.Proxy.Translation;
 
@@ -559,6 +560,38 @@ public sealed class GeminiPayloadTranslator : IPayloadTranslator
 
         status = errorObject["status"]?.GetValue<string>() ?? string.Empty;
         message = errorObject["message"]?.GetValue<string>() ?? string.Empty;
+        return true;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// 400 only. Gemini's 429s are ordinary rate-limit responses with no embedded envelope worth
+    /// decoding, and opting into them would buffer a body that is currently streamed - see
+    /// <see cref="IPayloadTranslator.HandlesEmbeddedErrorAt"/>'s remarks on why this is deliberately
+    /// narrower than "every error status".
+    /// </remarks>
+    public bool HandlesEmbeddedErrorAt(int statusCode) => statusCode == StatusCodes.Status400BadRequest;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Sets <see cref="EmbeddedProviderError.IsAuthFailure"/> for Gemini's disguised-401 case: an
+    /// invalid API key comes back as a 400 whose envelope carries <c>UNAUTHENTICATED</c> (or, on some
+    /// surfaces, only the message "API key not valid"), which must trip the provider-wide circuit
+    /// breaker the way a real 401 does rather than counting as a per-request client fault.
+    /// </remarks>
+    public bool TryExtractEmbeddedError(byte[] body, out EmbeddedProviderError error)
+    {
+        if (!TryExtractEmbeddedError(body, out var status, out var message))
+        {
+            error = default;
+            return false;
+        }
+
+        error = new EmbeddedProviderError(
+            status,
+            message,
+            IsAuthFailure: string.Equals(status, "UNAUTHENTICATED", StringComparison.Ordinal) ||
+                message.Contains("API key not valid", StringComparison.OrdinalIgnoreCase));
         return true;
     }
 

@@ -1554,7 +1554,137 @@ public class ProxyMiddlewareFallbackTests
         return context;
     }
 
+    [Fact]
+    public async Task InvokeAsync_CustomTranslatorOptsIntoEmbeddedErrorDecoding_SurfacesItsMessage_WithoutMiddlewareKnowingItsType()
+    {
+        // The reason IPayloadTranslator.HandlesEmbeddedErrorAt/TryExtractEmbeddedError exist: a translator
+        // ProxyMiddleware has never heard of gets its own error envelope decoded and surfaced. The
+        // middleware previously branched on `translator is GeminiPayloadTranslator` / `is
+        // AnthropicPayloadTranslator` and called a static extractor on each, so a provider like this one
+        // was silently un-classified - TranslateResponse would mangle its error into the bogus empty
+        // completion this test asserts the client does NOT receive. Nothing here touches ProxyMiddleware.
+        var resolver = ModelRouteResolverTestFactory.CreateWithModels(
+            ("primary", "prov-custom", "primary-upstream", $"https://{PrimaryHost}"));
+
+        var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["prov-custom"] = new FakeTranslator(handlesEmbeddedErrors: true),
+        };
+
+        var handler = new RoutingHandlerStub(_ => new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent(
+                """{"customError":{"detail":"tenant credential rejected"}}""",
+                Encoding.UTF8,
+                "application/json"),
+        });
+
+        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver);
+        var middleware = new ProxyMiddleware(
+            NullLogger<ProxyMiddleware>.Instance,
+            interceptor,
+            new HttpClient(handler),
+            dependencies: new ProxyMiddlewareDependencies { Translators = translators });
+
+        var context = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
+
+        Assert.Equal(400, context.Response.StatusCode);
+
+        var body = await ReadBodyAsync(context);
+        using var responseJson = JsonDocument.Parse(body);
+        Assert.Equal(
+            "tenant credential rejected",
+            responseJson.RootElement.GetProperty("error").GetProperty("message").GetString());
+        Assert.DoesNotContain(FakeTranslator.MangledResponseMarker, body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_TranslatorThatDoesNotOptIntoEmbeddedErrorDecoding_KeepsTheUntouchedTranslatedPath()
+    {
+        // The other half of the seam: the interface defaults must stay behaviorally inert. A translator
+        // that says nothing about embedded errors must not have its error body pre-read - pre-reading is
+        // observable (a buffered body is forwarded whole rather than streamed, and it is what ADR-0004's
+        // out-of-credits classifier inspects), so the default has to leave the response exactly where it
+        // was: routed through TranslateResponse like any other non-2xx from a translated provider.
+        var resolver = ModelRouteResolverTestFactory.CreateWithModels(
+            ("primary", "prov-custom", "primary-upstream", $"https://{PrimaryHost}"));
+
+        var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["prov-custom"] = new FakeTranslator(handlesEmbeddedErrors: false),
+        };
+
+        var handler = new RoutingHandlerStub(_ => new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent(
+                """{"customError":{"detail":"tenant credential rejected"}}""",
+                Encoding.UTF8,
+                "application/json"),
+        });
+
+        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver);
+        var middleware = new ProxyMiddleware(
+            NullLogger<ProxyMiddleware>.Instance,
+            interceptor,
+            new HttpClient(handler),
+            dependencies: new ProxyMiddlewareDependencies { Translators = translators });
+
+        var context = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
+
+        Assert.Equal(400, context.Response.StatusCode);
+        Assert.Contains(FakeTranslator.MangledResponseMarker, await ReadBodyAsync(context), StringComparison.Ordinal);
+    }
+
     // -- helpers -------------------------------------------------------------
+
+    /// <summary>
+    /// A minimal third-party <see cref="IPayloadTranslator"/> for a provider ProxyMiddleware has no
+    /// compile-time knowledge of. <paramref name="handlesEmbeddedErrors"/> flips only the two
+    /// embedded-error members, so the pair of tests above differ in exactly the thing under test.
+    /// <see cref="TranslateResponse"/> deliberately destroys the body it is handed (stamping
+    /// <see cref="MangledResponseMarker"/>) - that is what makes "did the pre-read happen?" observable
+    /// from the client's side, and it mirrors what a real translator does to an error envelope it was
+    /// never meant to see.
+    /// </summary>
+    private sealed class FakeTranslator(bool handlesEmbeddedErrors) : IPayloadTranslator
+    {
+        internal const string MangledResponseMarker = "mangled-by-translate-response";
+
+        public string Provider => "prov-custom";
+
+        public Uri BuildRequestUri(Uri baseUrl, string providerModelId, bool isStreaming) =>
+            new(baseUrl, "/v1/chat/completions");
+
+        public byte[] TranslateRequest(byte[] openAiShapedBody) => openAiShapedBody;
+
+        public byte[] TranslateResponse(byte[] nativeShapedBody) =>
+            Encoding.UTF8.GetBytes($$"""{"choices":[],"note":"{{MangledResponseMarker}}"}""");
+
+        public IStreamTranslator CreateStreamTranslator() =>
+            throw new NotSupportedException("These tests never take the streaming path.");
+
+        public bool HandlesEmbeddedErrorAt(int statusCode) =>
+            handlesEmbeddedErrors && statusCode == StatusCodes.Status400BadRequest;
+
+        public bool TryExtractEmbeddedError(byte[] body, out EmbeddedProviderError error)
+        {
+            error = default;
+            if (!handlesEmbeddedErrors)
+            {
+                return false;
+            }
+
+            var detail = JsonDocument.Parse(body).RootElement
+                .GetProperty("customError").GetProperty("detail").GetString();
+            if (string.IsNullOrEmpty(detail))
+            {
+                return false;
+            }
+
+            error = new EmbeddedProviderError("CREDENTIAL_REJECTED", detail, IsAuthFailure: true);
+            return true;
+        }
+    }
 
     private static HttpResponseMessage Ok(string body) =>
         new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "text/plain") };
