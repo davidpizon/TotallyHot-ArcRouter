@@ -66,7 +66,8 @@ Architectural surveys, coupling questions, and refactor planning use two MCP eng
 The method, severity matrix, live catalog, and safety protocol live in
 [ADR-0008](docs/adr/0008-codegraph-serena-dual-engine-code-smell-pipeline.md). Mechanical work stays in
 [`docs/router/code-smell-refactoring-plan.md`](docs/router/code-smell-refactoring-plan.md) — do not
-start a parallel smell tracker.
+start a parallel smell tracker. Surveys are triggered by observed pain, not by a schedule, and may
+correctly conclude that nothing needs filing — see step 3.
 
 1. **CodeGraph MCP (structural engine)** — namespace `user-codegraph`, tool `codegraph_explore`.
    Call it *first* for production `src/` symbols: call paths, type hierarchies, instantiations, and
@@ -79,10 +80,24 @@ start a parallel smell tracker.
    refactor that respects existing ADRs. If Serena fails tool discovery or auth, proceed
    CodeGraph-only, classify explicitly as the agent, and record **Serena skipped** so the catalog is
    not mistaken for a dual-engine result.
-3. **Fold, don't fork.** New mechanical items append to the existing refactoring plan. Security
+3. **Stop rules — a finding is not automatically work** ([ADR-0008 Amendment 1](docs/adr/0008-codegraph-serena-dual-engine-code-smell-pipeline.md#amendment-1-2026-09-02-stop-rules)).
+   An audit is a generator, not a checklist: it always returns findings. Before anything enters the
+   refactoring plan, it must cite an **observed cost** — a bug traced to the structure, a merge
+   conflict or review round-trip it caused, a feature it blocked or measurably slowed, or a real
+   comprehension failure. Blast radius and line count are evidence *about* an item, never the cost
+   itself. **"File nothing" is a valid outcome of a survey**, and so is answering an architectural
+   question with "nothing here is worth scheduling." An item with no observed cost is noted in
+   ADR-0008's catalog and left alone — not downgraded to Minor and scheduled anyway. Also: run a
+   survey when something hurts (a bug cluster, a hard-to-land feature, a regression of a
+   previously-fixed smell) and name that trigger — never on a cadence or at a phase boundary. A
+   refactor that adds more production lines than it removes, without deleting a behavior, fixing a
+   bug, or unblocking a named feature, justifies that in its PR description.
+4. **Fold, don't fork.** New mechanical items append to the existing refactoring plan. Security
    boundary, public surface, or transport changes get a new ADR first (see ADR-0006, ADR-0007).
-   Product work such as the Gemini cost reconciler stays in `docs/router/tracked-todos.md`.
-4. **Safety before edits.** Re-run CodeGraph on hubs (`RequestInterceptor`, `ManagementFacade`,
+   Product work such as the Gemini cost reconciler stays in `docs/router/tracked-todos.md`. That plan
+   closes once `ProxyMiddleware.InvokeCoreAsync` and its golden-path smoke are done; later findings
+   start a new document with a stated end condition rather than extending it indefinitely.
+5. **Safety before edits.** Re-run CodeGraph on hubs (`RequestInterceptor`, `ManagementFacade`,
    `ProxyMiddleware`) and list production callers. Do not change `ManagementFacade`'s public method
    set or register its internal collaborators as independently injectable services. Hot-path
    changes keep static Serilog templates and need the golden-path smoke in the existing plan's

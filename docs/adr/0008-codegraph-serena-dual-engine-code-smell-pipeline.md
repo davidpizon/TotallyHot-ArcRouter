@@ -3,6 +3,7 @@
 **Status:** proposed <!-- proposed | accepted | rejected | deprecated | superseded by ADR-NNNN -->
 **Date:** 2026-09-02
 **Deciders:** David Pizon
+**Amendments:** [Amendment 1 (2026-09-02) — stop rules](#amendment-1-2026-09-02-stop-rules)
 
 ## Context and Problem Statement
 
@@ -222,6 +223,99 @@ Apply the matrix to **this pass's catalog** (Serena skipped — agent judgment o
 - Bad, because documenting MCP tool names in `AGENTS.md` will drift if Cursor namespace ids change —
   mitigated by describing *roles* (structural vs cognitive) first and ids second.
 
+## Amendment 1 (2026-09-02): stop rules
+
+**Status:** proposed. Amends the Decision Outcome above; does not change the chosen option or
+re-open ADR-0006/0007.
+
+### Why
+
+The pipeline above defines how to *find* smells and says nothing about when to stop acting on them.
+Three audits have now run against this codebase: the original CodeGraph + Serena survey, the
+independent "brutal-cozy-pascal" pass, and the blind dual-engine pass catalogued above. Each found
+new items. The third opened Phase 5 with 9 items and 2 Criticals *after* Phases 1–4 were reported
+complete, and one of those items — `PersistedSessionsClient` re-diverging from
+`GrpcAdminClientBase<,>` — is a regression of a smell Phase 1 already fixed once.
+[`code-smell-refactoring-plan.md`](../router/code-smell-refactoring-plan.md) has reached 837 lines
+and now carries its own caveat that closing everything raised should be read as
+"not as 'the codebase is clean.'"
+
+A smell audit is a generator, not a checklist: run it against any codebase and it returns findings,
+because that is what it is for. Option B as written therefore has no terminating condition — Phase 6
+is guaranteed to exist. The severity matrix grades findings; it never rejects one for being *not
+worth fixing*.
+
+Measurement does not support treating this as code decay. Production `src/` only (excluding
+`*.Tests`, `obj`, `bin`), sampled on `main`'s first-parent history:
+
+| Date | Production files | Production lines | Avg lines/file |
+|---|---|---|---|
+| 2026-08-05 | 211 | 29,615 | **140** |
+| 2026-08-14 | 290 | 42,239 | **145** |
+| 2026-08-22 | 382 | 57,294 | **149** |
+| 2026-09-02 | 475 | 70,394 | **148** |
+
+Average file size is flat across a 2.4x growth in production lines. Had refactoring been shredding
+the codebase into ever-smaller fragments, that column would fall as the file count climbed. The file
+count roughly doubled because five projects (`Gui.Admin`, `Gui.Charts`, `Gui.Console`,
+`Gui.Telemetry`, `Sandbox`) were added in the same four weeks. The codebase is growing by feature,
+not fragmenting under refactoring. What this amendment constrains is the **process** — audit cadence
+and an unbounded plan — not measured decay in the code.
+
+### Stop rules
+
+These are gates on *entering* the mechanical plan. They apply after the classification matrix and
+can only remove items, never add them.
+
+1. **A finding needs an observed cost, not a name.** "God Object," "Feature Envy," and "wide
+   constructor" are descriptions, not defects. Before an item enters the mechanical plan it must
+   cite at least one observed cost: a bug traced to the structure, a merge conflict or review
+   round-trip it caused, a feature it blocked or measurably slowed, or a comprehension failure
+   someone actually hit. Blast radius and line count are evidence *about* an item; they are never
+   the cost itself. An item with no observed cost is recorded in this ADR's catalog as a known shape
+   of the code and left alone.
+2. **No scheduled audits.** A dual-engine pass runs when something hurts — a bug cluster in one
+   area, a feature that proved hard to land, a regression of a previously-fixed smell — and names
+   that trigger in its write-up. It does not run on a cadence, at a phase boundary, or because it
+   has been a while. "Standing" in this ADR's title means *the standing method for when an audit
+   happens*, not a standing obligation to audit.
+3. **Net-lines budget.** A refactor that adds more production lines than it removes, without
+   deleting a behavior, fixing a bug, or unblocking a named feature, states that justification in
+   its PR description. Splitting one 900-line file into six 200-line files is a net add plus five
+   new indirections; that is sometimes right, but it is a trade to argue, not a default.
+4. **The plan terminates.** `code-smell-refactoring-plan.md` closes once S1
+   (`ProxyMiddleware.InvokeCoreAsync`) and its outstanding golden-path smoke are done. The remaining
+   Phase 5 items are re-tested against rule 1 first and dropped if they cannot pass it. Anything
+   found afterwards starts a new document with a stated end condition — no single document absorbs a
+   fourth audit.
+
+### Effect on the classification matrix
+
+The three severities are unchanged. What changes is that **"no finding" is now a legal outcome**: an
+item that cannot show an observed cost under rule 1 is not downgraded to Minor, it is not filed at
+all. Minor continues to mean "real, but extract only when the file is touched for another reason."
+
+Re-graded against rule 1, S1 is the only catalogued item with a demonstrated cost — a 715-line method
+on the request hot path, which the plan's own history shows is where failover regressions land. S2–S8
+stay catalogued but unscheduled until one of them produces a cost.
+
+### Consequences of this amendment
+
+- Good, because the pipeline now has an exit. Phase 6 has to be *earned* by an observed cost rather
+  than produced automatically by running the tools again.
+- Good, because it protects against the failure the size table rules out today but that an unbounded
+  plan invites: refactoring that trades one large file for many small indirections and calls it
+  progress.
+- Good, because rule 1 gives an agent a defensible reason to answer an architectural survey with
+  "nothing here is worth scheduling," which the original matrix did not permit.
+- Bad, because "observed cost" is a judgment call and a determined reader can always construct one.
+  Mitigated by requiring the cost to be *cited* in the plan entry, so a thin justification is visible
+  in review.
+- Bad, because genuine structural problems may sit uncatalogued until they cause a bug — accepted
+  deliberately: this ADR's catalog still records them, so the evidence is on hand when one does.
+- Neutral, because the CodeGraph-first / Serena-second method, the safety protocols, and the locked
+  ADRs are all unchanged.
+
 ## Pros and Cons of the Options
 
 ### Option A
@@ -260,5 +354,8 @@ CI analyzers and line-count budgets only.
 - Related decisions: [ADR-0006](0006-split-managementfacade-along-crud-aggregate-boundaries.md),
   [ADR-0007](0007-provider-admin-client-stays-on-http.md)
 - Product TODO, not a smell: [`tracked-todos.md` #6](../router/tracked-todos.md#6-build-a-real-iprovidercostreconciler-for-gemini)
+- Amendment 1 measurements: `git ls-tree` line counts over `main`'s first-parent history, production
+  `src/` only. Reproduce by summing `.cs` line counts excluding `*.Tests`, `obj`, and `bin` at each
+  sampled commit.
 - This pass: CodeGraph MCP only; Serena MCP tool discovery failed (`plugin-serena-serena`).
   Re-run the cognitive half when that namespace is healthy.
