@@ -124,7 +124,7 @@ public class MemoryKnnVoterTests
     {
         return new EmbeddingMemory(store: new FakeMemoryEntryStore(),
             optionsMonitor: new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions
-                { EmbeddingSimilarityThreshold = 0.5 }), embeddingClient: new StubEmbeddingClient(),
+            { EmbeddingSimilarityThreshold = 0.5 }), embeddingClient: new StubEmbeddingClient(),
             logger: NullLogger<EmbeddingMemory>.Instance);
     }
 

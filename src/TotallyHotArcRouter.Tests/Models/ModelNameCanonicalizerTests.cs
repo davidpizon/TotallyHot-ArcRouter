@@ -185,7 +185,7 @@ public class ModelNameCanonicalizerTests
 
         // appsettings.json carries "//" comments explaining the routing entries, which strict JSON rejects.
         var options = new JsonDocumentOptions
-            { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
+        { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
         using var document = JsonDocument.Parse(json: File.ReadAllText(appSettingsPath), options: options);
 
         return

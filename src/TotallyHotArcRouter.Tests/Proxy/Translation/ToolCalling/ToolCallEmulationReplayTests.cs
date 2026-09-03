@@ -31,8 +31,8 @@ public class ToolCallEmulationReplayTests
     {
         var data = new TheoryData<string, string>();
         foreach (var transcript in RecordedModelTranscripts.All)
-        foreach (var scenario in ToolCallEmulationScenarios.All)
-            data.Add(p1: transcript.ModelName, p2: scenario.Name);
+            foreach (var scenario in ToolCallEmulationScenarios.All)
+                data.Add(p1: transcript.ModelName, p2: scenario.Name);
 
         return data;
     }
@@ -130,8 +130,8 @@ public class ToolCallEmulationReplayTests
         var known = ToolCallEmulationScenarios.All.Select(s => s.Name).ToHashSet(StringComparer.Ordinal);
 
         foreach (var transcript in RecordedModelTranscripts.All)
-        foreach (var name in transcript.EmulationFailures?.Keys ?? [])
-            Assert.Contains(expected: name, set: known);
+            foreach (var name in transcript.EmulationFailures?.Keys ?? [])
+                Assert.Contains(expected: name, set: known);
     }
 
     [Fact]

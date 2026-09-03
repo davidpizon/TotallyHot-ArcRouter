@@ -98,7 +98,7 @@ public class BenchmarkDataAdminClientTests
     public async Task GetStatusAsync_with_no_reason_maps_to_null()
     {
         var stub = new StubClient
-            { StatusResponse = new Contract.BenchmarkStatusResponse { State = Contract.BenchmarkDataState.Current } };
+        { StatusResponse = new Contract.BenchmarkStatusResponse { State = Contract.BenchmarkDataState.Current } };
         using var client = new BenchmarkDataAdminClient(stub);
 
         var status = await client.GetStatusAsync(TestContext.Current.CancellationToken);
@@ -110,7 +110,7 @@ public class BenchmarkDataAdminClientTests
     public async Task RecheckAsync_maps_the_recomputed_status()
     {
         var stub = new StubClient
-            { RecheckResponse = new Contract.BenchmarkStatusResponse { State = Contract.BenchmarkDataState.Current } };
+        { RecheckResponse = new Contract.BenchmarkStatusResponse { State = Contract.BenchmarkDataState.Current } };
         using var client = new BenchmarkDataAdminClient(stub);
 
         var status = await client.RecheckAsync(TestContext.Current.CancellationToken);
@@ -272,7 +272,7 @@ public class BenchmarkDataAdminClientTests
     public async Task SyncAsync_wraps_a_mid_stream_failure()
     {
         var stub = new StubClient
-            { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
+        { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new BenchmarkDataAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<BenchmarkDataAdminException>(async () =>
@@ -290,7 +290,7 @@ public class BenchmarkDataAdminClientTests
     public async Task Unavailable_becomes_a_plain_language_message()
     {
         var stub = new StubClient
-            { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
+        { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new BenchmarkDataAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<BenchmarkDataAdminException>(() =>
@@ -304,7 +304,7 @@ public class BenchmarkDataAdminClientTests
     public async Task A_server_rejection_keeps_the_servers_own_detail_and_is_not_flagged_unavailable()
     {
         var stub = new StubClient
-            { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
+        { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
         using var client = new BenchmarkDataAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<BenchmarkDataAdminException>(() =>

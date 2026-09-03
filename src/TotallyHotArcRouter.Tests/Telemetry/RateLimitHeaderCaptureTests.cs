@@ -106,7 +106,7 @@ public class RateLimitHeaderCaptureTests
         temp.Database.EnsureCreated();
         var brokenDatabase = new PriceCatalogDatabase(
             Options.Create(new StorageOptions
-                { DatabasePath = Path.Combine(path1: temp.Path_, path2: "does", path3: "not", path4: "exist.db") }));
+            { DatabasePath = Path.Combine(path1: temp.Path_, path2: "does", path3: "not", path4: "exist.db") }));
         var repository = new RateLimitRepository(brokenDatabase);
         using var capture = new RateLimitHeaderCapture(repository);
 

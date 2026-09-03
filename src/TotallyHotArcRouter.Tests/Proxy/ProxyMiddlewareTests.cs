@@ -1617,7 +1617,7 @@ public class ProxyMiddlewareTests
         var interceptor =
             new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Accepted)
-            { Content = new StringContent("forwarded") }));
+        { Content = new StringContent("forwarded") }));
 
         var telemetryPublisherMock = new Mock<ITelemetryPublisher>();
         telemetryPublisherMock

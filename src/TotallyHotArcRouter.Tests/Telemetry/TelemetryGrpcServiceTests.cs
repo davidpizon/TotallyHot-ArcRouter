@@ -27,7 +27,7 @@ public class TelemetryGrpcServiceTests
             broadcaster: broadcaster ?? new TelemetryBroadcaster(),
             transcriptStore: new FakeTranscriptStore(sessions ?? []),
             transcriptOptions: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions
-                { Enabled = transcriptCaptureEnabled }));
+            { Enabled = transcriptCaptureEnabled }));
     }
 
     private static ServerCallContext CreateContext(CancellationToken cancellationToken)

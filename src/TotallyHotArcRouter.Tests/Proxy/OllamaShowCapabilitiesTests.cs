@@ -129,7 +129,7 @@ public class OllamaShowCapabilitiesTests
             null,
             new ModelRouteEntry { ModelName = "small-local", Provider = "local", ProviderModelId = "small-local" },
             new ModelRouteEntry
-                { ModelName = "big-local", Provider = "local", ProviderModelId = "big-local", Enabled = false });
+            { ModelName = "big-local", Provider = "local", ProviderModelId = "big-local", Enabled = false });
 
         var store = new FakeToolCallCapabilityStore()
             .SeedContextWindow(providerKey: "local", modelName: "small-local", 8192, architecture: "qwen2")

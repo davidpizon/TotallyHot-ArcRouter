@@ -163,7 +163,7 @@ public class LogRegModelAdminClientTests
     public async Task RetrainAsync_wraps_a_mid_stream_failure()
     {
         var stub = new StubClient
-            { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
+        { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new LogRegModelAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<LogRegModelAdminException>(async () =>
@@ -181,7 +181,7 @@ public class LogRegModelAdminClientTests
     public async Task Unavailable_becomes_a_plain_language_message()
     {
         var stub = new StubClient
-            { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
+        { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new LogRegModelAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<LogRegModelAdminException>(() =>
@@ -195,7 +195,7 @@ public class LogRegModelAdminClientTests
     public async Task A_server_rejection_keeps_the_servers_own_detail_and_is_not_flagged_unavailable()
     {
         var stub = new StubClient
-            { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
+        { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
         using var client = new LogRegModelAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<LogRegModelAdminException>(() =>

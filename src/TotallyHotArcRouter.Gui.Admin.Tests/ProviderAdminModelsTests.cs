@@ -212,7 +212,7 @@ public sealed class ProviderAdminModelsTests
                     UnifiedStatus: "allowed",
                     null,
                     UnifiedWindows: new Dictionary<string, RateLimitWindowAdminView>
-                        { ["5h"] = new(Status: "allowed", null, null) },
+                    { ["5h"] = new(Status: "allowed", null, null) },
                     RepresentativeClaim: "org-123",
                     RawHeaders: new Dictionary<string, string> { ["anthropic-ratelimit-tokens-remaining"] = "158000" }),
                 ObservedAtUtc: DateTimeOffset.Parse(input: "2026-03-01T12:00:00Z",

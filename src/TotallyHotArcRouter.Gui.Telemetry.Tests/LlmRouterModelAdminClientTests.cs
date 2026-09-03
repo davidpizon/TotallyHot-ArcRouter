@@ -275,7 +275,7 @@ public class LlmRouterModelAdminClientTests
     public async Task SyncAsync_wraps_a_mid_stream_failure()
     {
         var stub = new StubClient
-            { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
+        { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new LlmRouterModelAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<LlmRouterModelAdminException>(async () =>
@@ -293,7 +293,7 @@ public class LlmRouterModelAdminClientTests
     public async Task Unavailable_becomes_a_plain_language_message()
     {
         var stub = new StubClient
-            { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
+        { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new LlmRouterModelAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<LlmRouterModelAdminException>(() =>
@@ -307,7 +307,7 @@ public class LlmRouterModelAdminClientTests
     public async Task A_server_rejection_keeps_the_servers_own_detail_and_is_not_flagged_unavailable()
     {
         var stub = new StubClient
-            { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
+        { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
         using var client = new LlmRouterModelAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<LlmRouterModelAdminException>(() =>

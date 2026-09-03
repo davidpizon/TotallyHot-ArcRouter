@@ -28,13 +28,13 @@ public sealed class GitHubReleaseCheckClientTests
     private static HttpResponseMessage Json(string body)
     {
         return new HttpResponseMessage(HttpStatusCode.OK)
-            { Content = new StringContent(content: body, encoding: Encoding.UTF8, mediaType: "application/json") };
+        { Content = new StringContent(content: body, encoding: Encoding.UTF8, mediaType: "application/json") };
     }
 
     private static HttpResponseMessage PlainText(string body)
     {
         return new HttpResponseMessage(HttpStatusCode.OK)
-            { Content = new StringContent(content: body, encoding: Encoding.UTF8, mediaType: "text/plain") };
+        { Content = new StringContent(content: body, encoding: Encoding.UTF8, mediaType: "text/plain") };
     }
 
     private static string Asset(string name)

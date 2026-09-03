@@ -21,7 +21,7 @@ public sealed class UsageQueryClientTests
     private static HttpResponseMessage Json(string body)
     {
         return new HttpResponseMessage(HttpStatusCode.OK)
-            { Content = new StringContent(content: body, encoding: Encoding.UTF8, mediaType: "application/json") };
+        { Content = new StringContent(content: body, encoding: Encoding.UTF8, mediaType: "application/json") };
     }
 
     // --- GetSummaryAsync ---

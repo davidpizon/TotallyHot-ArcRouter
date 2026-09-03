@@ -161,7 +161,7 @@ public class EmbeddingLogRegTrainingServiceTests
             embeddingClient: new StubEmbeddingClient(),
             voter: voter,
             routingOptions: Options.Create(new RoutingOptions
-                { LogRegLiveSampleWeight = 1.0, LogRegMinTrainingRows = 20, LogRegMinModelsRepresented = 2 }),
+            { LogRegLiveSampleWeight = 1.0, LogRegMinTrainingRows = 20, LogRegMinModelsRepresented = 2 }),
             embeddingOptions: Options.Create(new EmbeddingOptions { EmbeddingDimension = 2 }),
             storageOptions: Options.Create(new StorageOptions { LogRegModelPath = modelPath }),
             logger: NullLogger<EmbeddingLogRegTrainingService>.Instance);

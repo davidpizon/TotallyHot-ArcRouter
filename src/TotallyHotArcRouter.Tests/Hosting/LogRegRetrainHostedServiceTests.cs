@@ -62,7 +62,7 @@ public class LogRegRetrainHostedServiceTests
             trainingService: trainingService,
             memoryEntryStore: memoryStore,
             routingOptions: Options.Create(new RoutingOptions
-                { LogRegRetrainThreshold = threshold, EnableAutomaticLogRegRetrain = enabled }),
+            { LogRegRetrainThreshold = threshold, EnableAutomaticLogRegRetrain = enabled }),
             storageOptions: Options.Create(new StorageOptions { LogRegModelPath = modelPath }));
     }
 

@@ -82,7 +82,7 @@ public sealed class VoterEmbeddingModelGuardTests
             memoryEntryStore: new EmptyMemoryEntryStore(),
             embeddingClient: new StubEmbeddingClient("model-b"),
             routingOptions: Options.Create(new RoutingOptions
-                { ClusterAssignmentThreshold = 0.0, ClusterBestMinObservations = 1 }),
+            { ClusterAssignmentThreshold = 0.0, ClusterBestMinObservations = 1 }),
             storageOptions: Options.Create(new StorageOptions { ClusterModelPath = path }),
             logger: NullLogger<ClusterBestVoter>.Instance);
 

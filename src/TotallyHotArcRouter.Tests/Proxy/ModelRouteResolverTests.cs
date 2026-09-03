@@ -279,7 +279,7 @@ public class ModelRouteResolverTests
         await store.UpsertProviderAsync(
             key: "local",
             provider: new ProviderOptions
-                { BaseUrl = "http://192.168.1.50:11434/v1", AuthHeaderName = "Authorization" },
+            { BaseUrl = "http://192.168.1.50:11434/v1", AuthHeaderName = "Authorization" },
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(resolver.TryResolve(modelName: "llama3", route: out var after));
@@ -459,7 +459,7 @@ public class ModelRouteResolverTests
 
         await store.UpsertModelAsync(
             entry: new ModelRouteEntry
-                { ModelName = "llama3", Provider = "local", ProviderModelId = "llama3", Enabled = false },
+            { ModelName = "llama3", Provider = "local", ProviderModelId = "llama3", Enabled = false },
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(resolver.IsModelEnabled("llama3"));

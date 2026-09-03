@@ -80,7 +80,7 @@ public class EmbeddingMemoryScoreObserverTests
             logger: NullLogger<EmbeddingMemoryScoreObserver>.Instance);
 
         var result = new QualityResult
-            { RequestCorrelationId = string.Empty, Model = "claude-opus-4-6", UnifiedScore = 0.5 };
+        { RequestCorrelationId = string.Empty, Model = "claude-opus-4-6", UnifiedScore = 0.5 };
 
         await observer.ObserveAsync(result: result, cancellationToken: TestContext.Current.CancellationToken);
 
@@ -194,7 +194,7 @@ public class EmbeddingMemoryScoreObserverTests
         return new EmbeddingMemory(
             store: store,
             optionsMonitor: new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions
-                { EmbeddingSimilarityThreshold = 0.0, MaxNeighborCount = 10, EmbeddingMemoryCapacity = 100 }),
+            { EmbeddingSimilarityThreshold = 0.0, MaxNeighborCount = 10, EmbeddingMemoryCapacity = 100 }),
             embeddingClient: new StubEmbeddingClient(),
             logger: NullLogger<EmbeddingMemory>.Instance);
     }
@@ -202,19 +202,19 @@ public class EmbeddingMemoryScoreObserverTests
     private static PendingTaskEmbeddingCache CreatePendingCache()
     {
         return new PendingTaskEmbeddingCache(Options.Create(new RoutingOptions
-            { PendingEmbeddingCacheCapacity = 100, PendingEmbeddingCacheTtlSeconds = 300 }));
+        { PendingEmbeddingCacheCapacity = 100, PendingEmbeddingCacheTtlSeconds = 300 }));
     }
 
     private static PendingRequestCostCache CreatePendingCostCache()
     {
         return new PendingRequestCostCache(Options.Create(new RoutingOptions
-            { PendingEmbeddingCacheCapacity = 100, PendingEmbeddingCacheTtlSeconds = 300 }));
+        { PendingEmbeddingCacheCapacity = 100, PendingEmbeddingCacheTtlSeconds = 300 }));
     }
 
     private static PendingRequestProvenanceCache CreatePendingProvenanceCache()
     {
         return new PendingRequestProvenanceCache(Options.Create(new RoutingOptions
-            { PendingEmbeddingCacheCapacity = 100, PendingEmbeddingCacheTtlSeconds = 300 }));
+        { PendingEmbeddingCacheCapacity = 100, PendingEmbeddingCacheTtlSeconds = 300 }));
     }
 
     private sealed class FakeMemoryEntryStore : IMemoryEntryStore

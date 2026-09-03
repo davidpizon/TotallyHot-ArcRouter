@@ -67,7 +67,7 @@ public sealed class RouterSettingsAdminGrpcServiceTests
 
         var response = await service.UpdateRouterSettings(
             request: new Contract.UpdateRouterSettingsRequest
-                { AdaptiveRoutingEnabled = true, EmbeddingMemoryCapacity = 8_000 },
+            { AdaptiveRoutingEnabled = true, EmbeddingMemoryCapacity = 8_000 },
             context: CreateContext());
 
         store.TryGetBool(key: RouterSettingsStore.AdaptiveRoutingEnabledKey, value: out var storedEnabled).Should()
@@ -95,7 +95,7 @@ public sealed class RouterSettingsAdminGrpcServiceTests
 
         var act = () => service.UpdateRouterSettings(
             request: new Contract.UpdateRouterSettingsRequest
-                { AdaptiveRoutingEnabled = true, EmbeddingMemoryCapacity = outOfRangeCapacity },
+            { AdaptiveRoutingEnabled = true, EmbeddingMemoryCapacity = outOfRangeCapacity },
             context: CreateContext());
 
         var exception = await act.Should().ThrowAsync<RpcException>();
@@ -115,7 +115,7 @@ public sealed class RouterSettingsAdminGrpcServiceTests
 
         await service.UpdateRouterSettings(
             request: new Contract.UpdateRouterSettingsRequest
-                { AdaptiveRoutingEnabled = false, EmbeddingMemoryCapacity = boundaryCapacity },
+            { AdaptiveRoutingEnabled = false, EmbeddingMemoryCapacity = boundaryCapacity },
             context: CreateContext());
 
         store.TryGetInt(key: RouterSettingsStore.EmbeddingMemoryCapacityKey, value: out var storedCapacity).Should()
@@ -128,7 +128,7 @@ public sealed class RouterSettingsAdminGrpcServiceTests
     {
         var service = CreateService(
             judgeMonitor: new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions
-                { Enabled = true, ModelName = "free-judge" }));
+            { Enabled = true, ModelName = "free-judge" }));
 
         var response = await service.GetRouterSettings(request: new Contract.GetRouterSettingsRequest(),
             context: CreateContext());
@@ -172,7 +172,7 @@ public sealed class RouterSettingsAdminGrpcServiceTests
 
         await service.UpdateRouterSettings(
             request: new Contract.UpdateRouterSettingsRequest
-                { EmbeddingMemoryCapacity = 20_000, JudgeModelName = string.Empty },
+            { EmbeddingMemoryCapacity = 20_000, JudgeModelName = string.Empty },
             context: CreateContext());
 
         store.TryGetString(key: RouterSettingsStore.JudgeModelNameKey, value: out var modelName).Should().BeTrue();
@@ -191,7 +191,7 @@ public sealed class RouterSettingsAdminGrpcServiceTests
 
         var act = () => service.UpdateRouterSettings(
             request: new Contract.UpdateRouterSettingsRequest
-                { EmbeddingMemoryCapacity = 20_000, JudgeModelName = "not-a-free-model" },
+            { EmbeddingMemoryCapacity = 20_000, JudgeModelName = "not-a-free-model" },
             context: CreateContext());
 
         (await act.Should().ThrowAsync<RpcException>())
@@ -219,7 +219,7 @@ public sealed class RouterSettingsAdminGrpcServiceTests
 
         await service.UpdateRouterSettings(
             request: new Contract.UpdateRouterSettingsRequest
-                { EmbeddingMemoryCapacity = 20_000, TranscriptCaptureEnabled = true },
+            { EmbeddingMemoryCapacity = 20_000, TranscriptCaptureEnabled = true },
             context: CreateContext());
 
         store.TryGetBool(key: RouterSettingsStore.TranscriptCaptureEnabledKey, value: out var enabled).Should()

@@ -118,7 +118,7 @@ internal static class ModelRouteResolverTestFactory
             Providers = providers,
             ModelList = models
                 .Select(m => new ModelRouteEntry
-                    { ModelName = m.ModelName, Provider = m.Provider, ProviderModelId = m.ProviderModelId })
+                { ModelName = m.ModelName, Provider = m.Provider, ProviderModelId = m.ProviderModelId })
                 .ToList()
         };
 

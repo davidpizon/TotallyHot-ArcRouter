@@ -30,7 +30,7 @@ public sealed class AdminApiKeySecretTests
             environment: Mock.Of<IEnvironmentVariableProvider>(),
             httpClient: new HttpClient(),
             dependencies: new ManagementFacadeDependencies
-                { SecretWriter = secretWriter, SecretReader = secretReader });
+            { SecretWriter = secretWriter, SecretReader = secretReader });
     }
 
     [Fact]

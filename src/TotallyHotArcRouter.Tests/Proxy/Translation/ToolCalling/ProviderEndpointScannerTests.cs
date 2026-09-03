@@ -75,12 +75,12 @@ public sealed class ProviderEndpointScannerTests
             if (request.Method == HttpMethod.Get && request.RequestUri!.ToString()
                     .EndsWith(value: "/v1/models", comparisonType: StringComparison.OrdinalIgnoreCase))
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-                    { Content = new StringContent(modelsBody) });
+                { Content = new StringContent(modelsBody) });
 
             if (request.Method == HttpMethod.Post && request.RequestUri!.ToString()
                     .EndsWith(value: "/v1/messages", comparisonType: StringComparison.OrdinalIgnoreCase))
                 return Task.FromResult(new HttpResponseMessage(messagesStatus)
-                    { Content = new StringContent(messagesBody) });
+                { Content = new StringContent(messagesBody) });
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
         });
@@ -571,7 +571,7 @@ public sealed class ProviderEndpointScannerTests
         {
             captured ??= request;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-                { Content = new StringContent(OpenAiBody) });
+            { Content = new StringContent(OpenAiBody) });
         });
         var scanner = new ProviderEndpointScanner(httpClient: new HttpClient(handler),
             environment: Mock.Of<IEnvironmentVariableProvider>());

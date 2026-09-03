@@ -98,7 +98,7 @@ public sealed class ClusterModelAdminTests
     public void Renders_an_unreachable_state_when_the_router_cannot_be_reached()
     {
         using var ctx = NewContext(new FakeClient
-            { Error = new ClusterModelAdminException(message: "nope", isUnavailable: true) });
+        { Error = new ClusterModelAdminException(message: "nope", isUnavailable: true) });
 
         var cut = ctx.Render<ClusterModelAdmin>();
 

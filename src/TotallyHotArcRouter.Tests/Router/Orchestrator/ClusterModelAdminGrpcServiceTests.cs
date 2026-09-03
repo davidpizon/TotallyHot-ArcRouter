@@ -195,7 +195,7 @@ public class ClusterModelAdminGrpcServiceTests
             memoryEntryStore: new FakeMemoryEntryStore(entryCount),
             transcriptStore: new FakeTranscriptStore(rowCount),
             transcriptOptions: Options.Create(new TranscriptOptions
-                { Enabled = true, RetentionDays = retentionDays, MaxRows = maxRows }),
+            { Enabled = true, RetentionDays = retentionDays, MaxRows = maxRows }),
             storageOptions: Options.Create(new StorageOptions { ClusterModelPath = modelPath }),
             logger: NullLogger<ClusterModelAdminGrpcService>.Instance);
     }

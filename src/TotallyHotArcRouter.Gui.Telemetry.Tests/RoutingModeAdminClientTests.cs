@@ -58,7 +58,7 @@ public class RoutingModeAdminClientTests
     public async Task Unavailable_becomes_a_plain_language_message()
     {
         var stub = new StubClient
-            { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
+        { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new RoutingModeAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<RoutingModeAdminException>(() =>
@@ -73,7 +73,7 @@ public class RoutingModeAdminClientTests
     public async Task A_rejection_keeps_the_servers_own_detail_and_is_not_flagged_unavailable()
     {
         var stub = new StubClient
-            { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
+        { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
         using var client = new RoutingModeAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<RoutingModeAdminException>(() =>

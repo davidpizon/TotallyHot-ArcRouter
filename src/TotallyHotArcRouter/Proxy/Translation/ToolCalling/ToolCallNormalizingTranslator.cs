@@ -204,41 +204,41 @@ internal sealed class ToolCallNormalizingTranslator : IResponseOnlyTranslator
         if (content.IndexOfAny(Plan.OpenerFirstChars) < 0) return;
 
         foreach (var dialect in Plan.Candidates)
-        foreach (var delimiter in dialect.Delimiters)
-        {
-            var openIndex = content.IndexOf(value: delimiter.Open, comparisonType: StringComparison.Ordinal);
-            if (openIndex < 0) continue;
-
-            var bodyStart = openIndex + delimiter.Open.Length;
-
-            if (delimiter.Close is null)
+            foreach (var delimiter in dialect.Delimiters)
             {
-                // No payload was even attempted - keep looking, since another dialect may own a real
-                // region later in the same message.
-                if (content.IndexOf('{', startIndex: bodyStart) < 0) continue;
+                var openIndex = content.IndexOf(value: delimiter.Open, comparisonType: StringComparison.Ordinal);
+                if (openIndex < 0) continue;
 
-                _logger.LogWarning(
-                    message:
-                    "Tool-call normalization: the text after {OpenToken} did not contain a valid tool call; forwarding it as plain content.",
-                    delimiter.Open);
+                var bodyStart = openIndex + delimiter.Open.Length;
+
+                if (delimiter.Close is null)
+                {
+                    // No payload was even attempted - keep looking, since another dialect may own a real
+                    // region later in the same message.
+                    if (content.IndexOf('{', startIndex: bodyStart) < 0) continue;
+
+                    _logger.LogWarning(
+                        message:
+                        "Tool-call normalization: the text after {OpenToken} did not contain a valid tool call; forwarding it as plain content.",
+                        delimiter.Open);
+                    return;
+                }
+
+                var closeIndex = content.IndexOf(value: delimiter.Close, startIndex: bodyStart,
+                    comparisonType: StringComparison.Ordinal);
+                if (closeIndex < 0)
+                    _logger.LogWarning(
+                        message:
+                        "Tool-call normalization: the message ended with an unterminated {OpenToken} block; forwarding the raw text as plain content.",
+                        delimiter.Open);
+                else
+                    _logger.LogWarning(
+                        message:
+                        "Tool-call normalization: {OpenToken}...{CloseToken} did not contain a valid tool call; forwarding the raw text as plain content.",
+                        delimiter.Open,
+                        delimiter.Close);
+
                 return;
             }
-
-            var closeIndex = content.IndexOf(value: delimiter.Close, startIndex: bodyStart,
-                comparisonType: StringComparison.Ordinal);
-            if (closeIndex < 0)
-                _logger.LogWarning(
-                    message:
-                    "Tool-call normalization: the message ended with an unterminated {OpenToken} block; forwarding the raw text as plain content.",
-                    delimiter.Open);
-            else
-                _logger.LogWarning(
-                    message:
-                    "Tool-call normalization: {OpenToken}...{CloseToken} did not contain a valid tool call; forwarding the raw text as plain content.",
-                    delimiter.Open,
-                    delimiter.Close);
-
-            return;
-        }
     }
 }

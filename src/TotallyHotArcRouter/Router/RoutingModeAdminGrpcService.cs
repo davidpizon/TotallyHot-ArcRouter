@@ -53,7 +53,7 @@ public sealed class RoutingModeAdminGrpcService : Contract.RoutingModeAdminServi
         };
 
         response.Voters.Add(new Contract.VoterMode
-            { Name = VoterNames.DimBest, Enabled = _options.EnableDimBestVoter, Weight = _options.DimBestVoterWeight });
+        { Name = VoterNames.DimBest, Enabled = _options.EnableDimBestVoter, Weight = _options.DimBestVoterWeight });
         response.Voters.Add(new Contract.VoterMode
         {
             Name = VoterNames.MemoryKnn,
@@ -61,7 +61,7 @@ public sealed class RoutingModeAdminGrpcService : Contract.RoutingModeAdminServi
             Weight = _options.MemoryKnnVoterWeight
         });
         response.Voters.Add(new Contract.VoterMode
-            { Name = VoterNames.LogReg, Enabled = _options.EnableLogRegVoter, Weight = _options.LogRegVoterWeight });
+        { Name = VoterNames.LogReg, Enabled = _options.EnableLogRegVoter, Weight = _options.LogRegVoterWeight });
         response.Voters.Add(new Contract.VoterMode
         {
             Name = VoterNames.LlmRouter,

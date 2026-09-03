@@ -76,7 +76,7 @@ public sealed class RoutingModeAdminGrpcServiceTests
     public async Task GetRoutingMode_ReportsTheOrchestratorKillSwitchWhenDisabled()
     {
         var options = new RoutingOptions
-            { EnableOrchestratorPolicy = false, EnableExploration = false, ExplorationRate = 0 };
+        { EnableOrchestratorPolicy = false, EnableExploration = false, ExplorationRate = 0 };
         var service = new RoutingModeAdminGrpcService(Options.Create(options));
 
         var response =

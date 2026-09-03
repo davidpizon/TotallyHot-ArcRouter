@@ -1668,13 +1668,13 @@ public class ProxyMiddlewareFallbackTests
     private static HttpResponseMessage Ok(string body)
     {
         return new HttpResponseMessage(HttpStatusCode.OK)
-            { Content = new StringContent(content: body, encoding: Encoding.UTF8, mediaType: "text/plain") };
+        { Content = new StringContent(content: body, encoding: Encoding.UTF8, mediaType: "text/plain") };
     }
 
     private static HttpResponseMessage Status(HttpStatusCode status)
     {
         return new HttpResponseMessage(status)
-            { Content = new StringContent(content: "{}", encoding: Encoding.UTF8, mediaType: "application/json") };
+        { Content = new StringContent(content: "{}", encoding: Encoding.UTF8, mediaType: "application/json") };
     }
 
     private static HttpResponseMessage GeminiEmbeddedAuthErrorResponse()

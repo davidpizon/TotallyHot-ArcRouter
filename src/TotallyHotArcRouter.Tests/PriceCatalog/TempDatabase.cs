@@ -182,7 +182,7 @@ internal sealed class TempDatabase : IDisposable
         return new UsageRollupStore(
             database: Database,
             storageOptions: Options.Create(new StorageOptions
-                { DatabasePath = Path_, RollupTimezone = rollupTimezone }),
+            { DatabasePath = Path_, RollupTimezone = rollupTimezone }),
             logger: NullLogger<UsageRollupStore>.Instance);
     }
 

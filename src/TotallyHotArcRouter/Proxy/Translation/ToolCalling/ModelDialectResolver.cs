@@ -254,9 +254,9 @@ public sealed class ModelDialectResolver
     private static (ToolCallDialect Dialect, string Delimiter)? MatchTemplate(string template)
     {
         foreach (var dialect in ToolCallDialectRegistry.ScannableDialects)
-        foreach (var delimiter in dialect.Delimiters)
-            if (template.Contains(value: delimiter.Open, comparisonType: StringComparison.OrdinalIgnoreCase))
-                return (dialect, delimiter.Open);
+            foreach (var delimiter in dialect.Delimiters)
+                if (template.Contains(value: delimiter.Open, comparisonType: StringComparison.OrdinalIgnoreCase))
+                    return (dialect, delimiter.Open);
 
         return null;
     }

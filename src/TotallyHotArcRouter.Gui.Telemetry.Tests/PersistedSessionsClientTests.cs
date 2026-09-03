@@ -97,7 +97,7 @@ public class PersistedSessionsClientTests
     public async Task ListAsync_Unavailable_BecomesAPlainLanguageMessage()
     {
         var stub = new StubClient
-            { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
+        { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new PersistedSessionsClient(stub);
 
         var ex = await Assert.ThrowsAsync<PersistedSessionsClientException>(() =>
@@ -112,7 +112,7 @@ public class PersistedSessionsClientTests
     public async Task ListAsync_ARejection_KeepsTheServersOwnDetailAndIsNotFlaggedUnavailable()
     {
         var stub = new StubClient
-            { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
+        { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
         using var client = new PersistedSessionsClient(stub);
 
         var ex = await Assert.ThrowsAsync<PersistedSessionsClientException>(() =>

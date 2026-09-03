@@ -90,7 +90,7 @@ public class CompositeRoutingPolicyTests
         var generalPolicy = new AgentRouterPolicy(new AgentAsARouter(
             logger: NullLogger<AgentAsARouter>.Instance,
             options: Options.Create(new RoutingOptions
-                { EnableExploration = false, ExplorationRate = 0, DefaultModel = "model-a" }),
+            { EnableExploration = false, ExplorationRate = 0, DefaultModel = "model-a" }),
             memory: memory));
         // The kill switch (docs/router/orchestrator-live-path-plan.md M1.3) restores pre-Phase-M routing
         // exactly - this test is the "EnableOrchestratorPolicy = false" half of Phase M's exit criterion.
@@ -233,7 +233,7 @@ public class CompositeRoutingPolicyTests
         var orchestrator = new OrchestratorRoutingPolicy(
             voters: [orchestratorVoter],
             optionsMonitor: new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions
-                { EnableExploration = true, ExplorationRate = 1.0 }),
+            { EnableExploration = true, ExplorationRate = 1.0 }),
             logger: NullLogger<OrchestratorRoutingPolicy>.Instance);
         var composite = new CompositeRoutingPolicy(
             utilityPolicy: utilityPolicy,
@@ -262,7 +262,7 @@ public class CompositeRoutingPolicyTests
         return new OrchestratorRoutingPolicy(
             voters: voters,
             optionsMonitor: new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions
-                { EnableExploration = false, ExplorationRate = 0 }),
+            { EnableExploration = false, ExplorationRate = 0 }),
             logger: NullLogger<OrchestratorRoutingPolicy>.Instance);
     }
 

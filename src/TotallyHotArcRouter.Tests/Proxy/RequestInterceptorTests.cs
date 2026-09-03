@@ -507,7 +507,7 @@ public class RequestInterceptorTests
                 logger: Mock.Of<ILogger<RequestInterceptor>>(),
                 modelRouteResolver: resolver,
                 singleModelServingOptions: new SingleModelServingOptions
-                    { ForcedModelName = "not-a-configured-model" }));
+                { ForcedModelName = "not-a-configured-model" }));
 
         Assert.Contains(expectedSubstring: "not-a-configured-model", actualString: ex.Message,
             comparisonType: StringComparison.Ordinal);

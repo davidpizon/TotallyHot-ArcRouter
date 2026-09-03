@@ -20,7 +20,7 @@ public class OrchestratorArmBaselineTests
     {
         return new OrchestratorRoutingPolicy(voters: [voter],
             optionsMonitor: new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions
-                { EnableExploration = false, ExplorationRate = 0d }),
+            { EnableExploration = false, ExplorationRate = 0d }),
             logger: NullLogger<OrchestratorRoutingPolicy>.Instance);
     }
 

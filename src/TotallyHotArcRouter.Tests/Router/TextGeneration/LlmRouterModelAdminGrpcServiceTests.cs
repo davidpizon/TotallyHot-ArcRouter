@@ -86,7 +86,7 @@ public sealed class LlmRouterModelAdminGrpcServiceTests
 
         var ex = await Assert.ThrowsAsync<RpcException>(() => service.SetLlmRouterModelBaseUrl(
             request: new Contract.SetLlmRouterModelBaseUrlRequest
-                { BaseUrl = "https://huggingface.co/some-org/some-model/resolve/main" },
+            { BaseUrl = "https://huggingface.co/some-org/some-model/resolve/main" },
             context: CreateContext(TestContext.Current.CancellationToken)));
 
         Assert.Equal(expected: StatusCode.Internal, actual: ex.StatusCode);
@@ -156,7 +156,7 @@ public sealed class LlmRouterModelAdminGrpcServiceTests
     {
         var fileName = request.RequestUri!.Segments[^1];
         return new HttpResponseMessage(HttpStatusCode.OK)
-            { Content = new StringContent(content: fixtures[fileName], encoding: Encoding.UTF8) };
+        { Content = new StringContent(content: fixtures[fileName], encoding: Encoding.UTF8) };
     }
 
     private static HttpResponseMessage ServeTree(Dictionary<string, string> fixtures)
@@ -171,7 +171,7 @@ public sealed class LlmRouterModelAdminGrpcServiceTests
         });
         var json = $"[{string.Join(separator: ",", values: entries)}]";
         return new HttpResponseMessage(HttpStatusCode.OK)
-            { Content = new StringContent(content: json, encoding: Encoding.UTF8, mediaType: "application/json") };
+        { Content = new StringContent(content: json, encoding: Encoding.UTF8, mediaType: "application/json") };
     }
 
     private static LlmRouterModelAdminGrpcService CreateService(ILlmRouterModelOverrideStore overrideStore)

@@ -81,7 +81,7 @@ public class ProxyMiddlewareProviderEnabledTests
             Providers = providers,
             ModelList = models
                 .Select(m => new ModelRouteEntry
-                    { ModelName = m.ModelName, Provider = m.Provider, ProviderModelId = m.ProviderModelId })
+                { ModelName = m.ModelName, Provider = m.Provider, ProviderModelId = m.ProviderModelId })
                 .ToList()
         };
 
@@ -92,7 +92,7 @@ public class ProxyMiddlewareProviderEnabledTests
     private static HttpResponseMessage Ok(string body)
     {
         return new HttpResponseMessage(HttpStatusCode.OK)
-            { Content = new StringContent(content: body, encoding: Encoding.UTF8, mediaType: "text/plain") };
+        { Content = new StringContent(content: body, encoding: Encoding.UTF8, mediaType: "text/plain") };
     }
 
     private static async Task<string> ReadBodyAsync(HttpContext context)

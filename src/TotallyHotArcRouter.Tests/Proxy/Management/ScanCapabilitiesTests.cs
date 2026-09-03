@@ -55,7 +55,7 @@ public sealed class ScanCapabilitiesTests : IDisposable
     private static ProviderEndpointScanner AlwaysOk(string body)
     {
         return Scanner(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-            { Content = new StringContent(body) }));
+        { Content = new StringContent(body) }));
     }
 
     private static ProviderEndpointScanner AlwaysThrows()

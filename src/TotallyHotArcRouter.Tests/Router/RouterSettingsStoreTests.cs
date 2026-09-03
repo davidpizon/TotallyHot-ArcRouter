@@ -81,13 +81,13 @@ public sealed class RouterSettingsStoreTests
 
         var first = new RouterSettingsStore(
             database: new RouterMemoryDatabase(Options.Create(new RoutingOptions
-                { EmbeddingMemoryDatabasePath = dbPath })),
+            { EmbeddingMemoryDatabasePath = dbPath })),
             logger: NullLogger<RouterSettingsStore>.Instance);
         first.SetBool(key: RouterSettingsStore.AdaptiveRoutingEnabledKey, true);
 
         var second = new RouterSettingsStore(
             database: new RouterMemoryDatabase(Options.Create(new RoutingOptions
-                { EmbeddingMemoryDatabasePath = dbPath })),
+            { EmbeddingMemoryDatabasePath = dbPath })),
             logger: NullLogger<RouterSettingsStore>.Instance);
         var found = second.TryGetBool(key: RouterSettingsStore.AdaptiveRoutingEnabledKey, value: out var value);
 

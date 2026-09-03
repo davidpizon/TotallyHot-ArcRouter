@@ -998,9 +998,9 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         if (connectionHeaderValues is null) return names;
 
         foreach (var value in connectionHeaderValues)
-        foreach (var token in value.Split(',',
-                     options: StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
-            names.Add(token);
+            foreach (var token in value.Split(',',
+                         options: StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+                names.Add(token);
 
         return names;
     }

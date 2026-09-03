@@ -302,7 +302,7 @@ public class BenchmarkSyncServiceTests
             cancelDownloadsWith?.Cancel();
             return servedBodies.TryGetValue(key: fileName, value: out var body)
                 ? new HttpResponseMessage(HttpStatusCode.OK)
-                    { Content = new StringContent(content: body, encoding: Encoding.UTF8) }
+                { Content = new StringContent(content: body, encoding: Encoding.UTF8) }
                 : new HttpResponseMessage(HttpStatusCode.NotFound);
         });
 

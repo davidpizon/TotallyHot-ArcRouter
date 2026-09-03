@@ -202,7 +202,7 @@ public class ClusterBestVoterTests
             memoryEntryStore: store,
             embeddingClient: new StubEmbeddingClient(),
             routingOptions: Options.Create(new RoutingOptions
-                { ClusterAssignmentThreshold = assignmentThreshold, ClusterBestMinObservations = minObservations }),
+            { ClusterAssignmentThreshold = assignmentThreshold, ClusterBestMinObservations = minObservations }),
             storageOptions: Options.Create(new StorageOptions { ClusterModelPath = modelPath }),
             logger: NullLogger<ClusterBestVoter>.Instance);
     }

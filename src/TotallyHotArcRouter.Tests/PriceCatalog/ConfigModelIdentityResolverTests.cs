@@ -19,7 +19,7 @@ public class ConfigModelIdentityResolverTests
             providers[provider] = new ProviderOptions { BaseUrl = "https://example.com" };
 
         return new InMemoryProviderConfigStore(new ModelRoutingOptions
-            { Providers = providers, ModelList = [.. models] });
+        { Providers = providers, ModelList = [.. models] });
     }
 
     private static ModelRouteEntry Entry(string modelName, string provider, string providerModelId)

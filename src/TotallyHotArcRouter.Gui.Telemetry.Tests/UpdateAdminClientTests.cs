@@ -123,7 +123,7 @@ public class UpdateAdminClientTests
     public async Task GetStatusAsync_RouterUnavailable_ThrowsFlaggedException()
     {
         var stub = new StubClient
-            { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "down")) };
+        { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "down")) };
         using var client = new UpdateAdminClient(stub);
 
         var act = async () => await client.GetStatusAsync(TestContext.Current.CancellationToken);
@@ -136,7 +136,7 @@ public class UpdateAdminClientTests
     public async Task NotifyApplyStartingAsync_Rejected_ThrowsUnflaggedException()
     {
         var stub = new StubClient
-            { Failure = new RpcException(new Status(statusCode: StatusCode.FailedPrecondition, detail: "no update")) };
+        { Failure = new RpcException(new Status(statusCode: StatusCode.FailedPrecondition, detail: "no update")) };
         using var client = new UpdateAdminClient(stub);
 
         var act = async () =>
@@ -151,7 +151,7 @@ public class UpdateAdminClientTests
     public async Task CheckNowAsync_Rejected_ThrowsUnflaggedException()
     {
         var stub = new StubClient
-            { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
+        { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
         using var client = new UpdateAdminClient(stub);
 
         var act = async () => await client.CheckNowAsync(TestContext.Current.CancellationToken);

@@ -90,7 +90,7 @@ public sealed class RouterModelAdminTests
     public void Renders_an_unreachable_state_when_the_router_cannot_be_reached()
     {
         using var ctx = NewContext(new FakeClient
-            { Error = new LogRegModelAdminException(message: "nope", isUnavailable: true) });
+        { Error = new LogRegModelAdminException(message: "nope", isUnavailable: true) });
 
         var cut = ctx.Render<RouterModelAdmin>();
 

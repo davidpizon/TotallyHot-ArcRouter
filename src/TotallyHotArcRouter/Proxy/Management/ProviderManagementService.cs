@@ -862,7 +862,7 @@ internal sealed class ProviderManagementService
         {
             DeleteExistingSecret(providerKey: providerKey, existing: existing, headerName: name);
             return new ProviderHeader
-                { Name = name, Value = null, ValueEnvVar = request.ValueEnvVar.Trim(), Locked = false };
+            { Name = name, Value = null, ValueEnvVar = request.ValueEnvVar.Trim(), Locked = false };
         }
 
         if (request.Locked is false)

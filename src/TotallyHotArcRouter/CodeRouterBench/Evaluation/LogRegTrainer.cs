@@ -203,8 +203,8 @@ public static class LogRegTrainer
     {
         var documentFrequency = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var example in examples)
-        foreach (var token in LogRegTextTokenizer.Tokenize(example.Text).Distinct(StringComparer.Ordinal))
-            documentFrequency[token] = documentFrequency.GetValueOrDefault(token) + 1;
+            foreach (var token in LogRegTextTokenizer.Tokenize(example.Text).Distinct(StringComparer.Ordinal))
+                documentFrequency[token] = documentFrequency.GetValueOrDefault(token) + 1;
 
         var vocabulary = documentFrequency
             .OrderByDescending(kvp => kvp.Value)

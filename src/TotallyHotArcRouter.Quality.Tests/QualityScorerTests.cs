@@ -154,19 +154,19 @@ public class QualityScorerTests
         var scorer = CreateScorer();
 
         foreach (var syntaxValid in new[] { true, false })
-        foreach (var authoritative in new[] { true, false })
-        foreach (var analysis in new double?[] { null, 0.0, 0.5, 1.0 })
-        foreach (var judge in new double?[] { null, 0.0, 0.5, 1.0 })
-        {
-            var result = new QualityResult
-            {
-                SyntaxValid = syntaxValid,
-                SyntaxAuthoritative = authoritative,
-                AnalysisScore = analysis,
-                JudgeScore = judge
-            };
+            foreach (var authoritative in new[] { true, false })
+                foreach (var analysis in new double?[] { null, 0.0, 0.5, 1.0 })
+                    foreach (var judge in new double?[] { null, 0.0, 0.5, 1.0 })
+                    {
+                        var result = new QualityResult
+                        {
+                            SyntaxValid = syntaxValid,
+                            SyntaxAuthoritative = authoritative,
+                            AnalysisScore = analysis,
+                            JudgeScore = judge
+                        };
 
-            Assert.InRange(actual: scorer.Score(result: result, dimension: "code_generation"), 0.0, 1.0);
-        }
+                        Assert.InRange(actual: scorer.Score(result: result, dimension: "code_generation"), 0.0, 1.0);
+                    }
     }
 }

@@ -81,7 +81,7 @@ public class OodBootstrapSampleSourceTests
         var database = new BenchmarkDatabase(
             Options.Create(
                 new StorageOptions
-                    { BenchmarkDatabasePath = Path.Combine(path1: directory, path2: "coderouterbench.db") }));
+                { BenchmarkDatabasePath = Path.Combine(path1: directory, path2: "coderouterbench.db") }));
 
         var source = new OodBootstrapSampleSource(
             database: database, embeddingClient: new FakeEmbeddingClient(text => [1, 0, 0]),

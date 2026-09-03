@@ -125,7 +125,7 @@ public class JudgeShadowScoreDrainServiceTests
             judgeClient: judgeClient,
             store: store,
             options: options ?? new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions
-                { Enabled = true, PromptVersion = "g-eval-v1" }),
+            { Enabled = true, PromptVersion = "g-eval-v1" }),
             aggregator: aggregator ?? new RecordingAggregator(),
             logger: NullLogger<JudgeShadowScoreDrainService>.Instance);
     }

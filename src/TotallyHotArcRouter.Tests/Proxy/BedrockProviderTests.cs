@@ -238,9 +238,9 @@ public class BedrockProviderTests
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
                 [primaryProvider] = new()
-                    { BaseUrl = "https://bedrock-runtime.us-east-1.amazonaws.com", AwsRegion = AwsRegion },
+                { BaseUrl = "https://bedrock-runtime.us-east-1.amazonaws.com", AwsRegion = AwsRegion },
                 [backupProvider] = new()
-                    { BaseUrl = "https://bedrock-runtime.us-east-1.amazonaws.com", AwsRegion = AwsRegion }
+                { BaseUrl = "https://bedrock-runtime.us-east-1.amazonaws.com", AwsRegion = AwsRegion }
             },
             ModelList =
             [
@@ -272,7 +272,7 @@ public class BedrockProviderTests
 
         var translator = new AnthropicOnBedrockPayloadTranslator();
         var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
-            { [translator.Provider] = translator };
+        { [translator.Provider] = translator };
         var resolver = TwoCandidateResolver(
             primaryModel: "primary-claude", primaryProvider: translator.Provider,
             primaryProviderModelId: "primary-model-id",
@@ -373,7 +373,7 @@ public class BedrockProviderTests
 
         var translator = new AnthropicOnBedrockPayloadTranslator();
         var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
-            { [translator.Provider] = translator };
+        { [translator.Provider] = translator };
         var resolver = TwoCandidateResolver(
             primaryModel: "primary-claude", primaryProvider: translator.Provider,
             primaryProviderModelId: "primary-model-id",

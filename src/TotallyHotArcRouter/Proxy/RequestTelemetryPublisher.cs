@@ -446,7 +446,7 @@ internal sealed class RequestTelemetryPublisher
                 costConfidence = CostConfidence.Exact;
             }
             else if (_priceLookup?.TryGetPrice(new ModelKey(ModelName: route.ModelName, Provider: route.Provider)) is
-                     { } price)
+            { } price)
             {
                 estimatedCostUsd =
                     price.EstimateCost(usage: usage, usedCacheRateFallback: out var usedCacheRateFallback);

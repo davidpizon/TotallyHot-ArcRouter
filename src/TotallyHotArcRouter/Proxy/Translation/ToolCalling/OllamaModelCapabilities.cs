@@ -72,8 +72,8 @@ internal static class OllamaModelCapabilities
 
         var present = new HashSet<string>(StringComparer.Ordinal) { Completion };
         foreach (var set in sets)
-        foreach (var capability in set)
-            present.Add(capability);
+            foreach (var capability in set)
+                present.Add(capability);
 
         // Filtered through the canonical order rather than emitted from the set, so ordering is fixed and a
         // capability from a newer build that this one does not know how to order cannot appear in an

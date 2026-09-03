@@ -409,7 +409,7 @@ public sealed class LlmRouterModelSyncServiceTests
         var fileName = request.RequestUri!.Segments[^1];
         var content = (fixtures ?? Fixtures)[fileName];
         return new HttpResponseMessage(HttpStatusCode.OK)
-            { Content = new StringContent(content: content, encoding: Encoding.UTF8) };
+        { Content = new StringContent(content: content, encoding: Encoding.UTF8) };
     }
 
     private static HttpResponseMessage ServeTree(string? excludeFileName = null,
@@ -435,7 +435,7 @@ public sealed class LlmRouterModelSyncServiceTests
             });
         var json = $"[{string.Join(separator: ",", values: entries)}]";
         return new HttpResponseMessage(HttpStatusCode.OK)
-            { Content = new StringContent(content: json, encoding: Encoding.UTF8, mediaType: "application/json") };
+        { Content = new StringContent(content: json, encoding: Encoding.UTF8, mediaType: "application/json") };
     }
 
     private static LlmRouterModelSyncService CreateService(

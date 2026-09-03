@@ -52,7 +52,7 @@ public sealed class RefreshFromEndpointTests : IDisposable
     private static ProviderEndpointScanner AlwaysOk(string body)
     {
         return Scanner(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-            { Content = new StringContent(body) }));
+        { Content = new StringContent(body) }));
     }
 
     private static ProviderEndpointScanner AlwaysNotFound()
@@ -87,7 +87,7 @@ public sealed class RefreshFromEndpointTests : IDisposable
     private static DelegatingHandlerStub DiscoveryOk(string body)
     {
         return DiscoveryHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-            { Content = new StringContent(body) }));
+        { Content = new StringContent(body) }));
     }
 
     private static DelegatingHandlerStub DiscoveryUnsupported()

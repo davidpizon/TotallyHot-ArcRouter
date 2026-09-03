@@ -107,7 +107,7 @@ public class RequestTextExtractorTests
                     ["content"] = new JsonArray(
                         new JsonObject { ["type"] = "text", ["text"] = "Look at this:" },
                         new JsonObject
-                            { ["type"] = "image_url", ["image_url"] = new JsonObject { ["url"] = "data:..." } },
+                        { ["type"] = "image_url", ["image_url"] = new JsonObject { ["url"] = "data:..." } },
                         new JsonObject { ["type"] = "text", ["text"] = "what is it?" })
                 })
         };
@@ -127,7 +127,7 @@ public class RequestTextExtractorTests
                     ["role"] = "user",
                     ["content"] = new JsonArray(
                         new JsonObject
-                            { ["type"] = "image_url", ["image_url"] = new JsonObject { ["url"] = "data:..." } })
+                        { ["type"] = "image_url", ["image_url"] = new JsonObject { ["url"] = "data:..." } })
                 })
         };
 

@@ -58,7 +58,7 @@ public class JudgeShadowScoringExitCriteriaTests
         await memory.InitializeAsync(TestContext.Current.CancellationToken);
 
         var pendingCache = new PendingTaskEmbeddingCache(Options.Create(new RoutingOptions
-            { PendingEmbeddingCacheCapacity = 100, PendingEmbeddingCacheTtlSeconds = 300 }));
+        { PendingEmbeddingCacheCapacity = 100, PendingEmbeddingCacheTtlSeconds = 300 }));
         pendingCache.Set(correlationId: "corr-1", embedding: [1f, 0f, 0f]);
         var embeddingObserver = new EmbeddingMemoryScoreObserver(
             memory: memory,
@@ -96,7 +96,7 @@ public class JudgeShadowScoringExitCriteriaTests
         await memory.InitializeAsync(TestContext.Current.CancellationToken);
 
         var pendingCache = new PendingTaskEmbeddingCache(Options.Create(new RoutingOptions
-            { PendingEmbeddingCacheCapacity = 100, PendingEmbeddingCacheTtlSeconds = 300 }));
+        { PendingEmbeddingCacheCapacity = 100, PendingEmbeddingCacheTtlSeconds = 300 }));
         pendingCache.Set(correlationId: result.RequestCorrelationId, embedding: [1f, 0f, 0f]);
         var embeddingObserver = new EmbeddingMemoryScoreObserver(
             memory: memory,
@@ -128,7 +128,7 @@ public class JudgeShadowScoringExitCriteriaTests
         return new EmbeddingMemory(
             store: store,
             optionsMonitor: new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions
-                { EmbeddingSimilarityThreshold = 0.0, MaxNeighborCount = 10, EmbeddingMemoryCapacity = 100 }),
+            { EmbeddingSimilarityThreshold = 0.0, MaxNeighborCount = 10, EmbeddingMemoryCapacity = 100 }),
             embeddingClient: new StubEmbeddingClient(),
             logger: NullLogger<EmbeddingMemory>.Instance);
     }

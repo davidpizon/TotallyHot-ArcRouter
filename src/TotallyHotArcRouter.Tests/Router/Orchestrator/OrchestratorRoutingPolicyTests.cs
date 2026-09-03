@@ -577,7 +577,7 @@ public class OrchestratorRoutingPolicyTests
         var policy = new OrchestratorRoutingPolicy(
             voters: voters,
             optionsMonitor: new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions
-                { DefaultModel = "kimi-k2.5", DimBestVoterWeight = 0d }),
+            { DefaultModel = "kimi-k2.5", DimBestVoterWeight = 0d }),
             logger: NullLogger<OrchestratorRoutingPolicy>.Instance);
         var context = new RoutingContext(Dimension: "live:bug_fixing", false, Candidates: [Kimi]);
 

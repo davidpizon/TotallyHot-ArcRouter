@@ -275,18 +275,18 @@ public sealed class ProviderBudgetStore : IBudgetEnforcer, IDisposable
         var spend = new Dictionary<string, ProviderSpendRow>(StringComparer.OrdinalIgnoreCase);
         foreach (var period in periodByProvider.Values.Distinct(StringComparer.Ordinal)
                      .Append(defaultMonthlyPeriod))
-        foreach (var row in _spendRepository.GetProviderSpend(period))
-        {
-            // A budgeted provider's spend only counts if it matches that provider's own current period;
-            // an unbudgeted provider (no entry in periodByProvider) is assumed Monthly, the only window
-            // that ever existed before this feature, so its historical spend rows are always under
-            // defaultMonthlyPeriod.
-            var expectedPeriod = periodByProvider.TryGetValue(key: row.ProviderKey, value: out var p)
-                ? p
-                : defaultMonthlyPeriod;
-            if (string.Equals(a: expectedPeriod, b: period, comparisonType: StringComparison.Ordinal))
-                spend[row.ProviderKey] = row;
-        }
+            foreach (var row in _spendRepository.GetProviderSpend(period))
+            {
+                // A budgeted provider's spend only counts if it matches that provider's own current period;
+                // an unbudgeted provider (no entry in periodByProvider) is assumed Monthly, the only window
+                // that ever existed before this feature, so its historical spend rows are always under
+                // defaultMonthlyPeriod.
+                var expectedPeriod = periodByProvider.TryGetValue(key: row.ProviderKey, value: out var p)
+                    ? p
+                    : defaultMonthlyPeriod;
+                if (string.Equals(a: expectedPeriod, b: period, comparisonType: StringComparison.Ordinal))
+                    spend[row.ProviderKey] = row;
+            }
 
         var next = new Dictionary<string, ProviderBudgetState>(StringComparer.OrdinalIgnoreCase);
 

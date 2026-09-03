@@ -101,7 +101,7 @@ public class EmbeddingBackfillServiceTests
             embeddingClient: embeddingClient,
             memoryEntryStore: memoryStore,
             transcriptOptions: Options.Create(new TranscriptOptions
-                { EnableEmbeddingBackfill = backfillEnabled, Enabled = captureEnabled }),
+            { EnableEmbeddingBackfill = backfillEnabled, Enabled = captureEnabled }),
             routingOptions: Options.Create(new RoutingOptions { EmbeddingBudgetMs = 250 }));
     }
 
