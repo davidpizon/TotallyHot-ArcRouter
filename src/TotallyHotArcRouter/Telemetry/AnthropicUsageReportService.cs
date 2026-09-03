@@ -29,7 +29,7 @@ public sealed class AnthropicUsageReportService
     /// <param name="repository">Where fetched rows are upserted and later read back for the management API.</param>
     /// <param name="resolveAdminApiKey">
     /// Resolves the current Admin API key fresh on every call - stored secret first, then the configured
-    /// environment variable (the same order <c>ServiceCollectionExtensions.TryResolveAdminApiKey</c> uses
+    /// environment variable (the same order <c>PriceCatalogServiceCollectionExtensions.TryResolveAdminApiKey</c> uses
     /// for cost reconciliation) - or <see langword="null"/> when neither is configured. Called once per
     /// <see cref="RunCycleAsync"/> rather than resolved at construction, so a key saved from the GUI between
     /// cycles takes effect without a restart.

@@ -107,6 +107,6 @@ internal sealed class SecretManagementService
         return false;
     }
 
-    /// <summary>The protected-store name for a provider's reconciliation Admin API key (docs/router/secrets-at-rest-plan.md §3's naming convention), matching <c>Hosting.ServiceCollectionExtensions.AdminApiKeySecretName</c>.</summary>
+    /// <summary>The protected-store name for a provider's reconciliation Admin API key (docs/router/secrets-at-rest-plan.md §3's naming convention), matching <c>PriceCatalog.PriceCatalogServiceCollectionExtensions.AdminApiKeySecretName</c>.</summary>
     private static string AdminKeySecretName(string provider) => $"reconciliation:{provider}:admin-key";
 }

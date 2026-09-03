@@ -1,3 +1,4 @@
+using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Hosting;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Management;
@@ -9,8 +10,8 @@ using Moq;
 namespace TotallyHot.ArcRouter.Tests.Hosting;
 
 /// <summary>
-/// Covers <see cref="ServiceCollectionExtensions.TryResolveAdminApiKey"/> and
-/// <see cref="ServiceCollectionExtensions.BuildCostReconcilers"/>: the stored-secret-first, then-env-var
+/// Covers <see cref="PriceCatalogServiceCollectionExtensions.TryResolveAdminApiKey"/> and
+/// <see cref="PriceCatalogServiceCollectionExtensions.BuildCostReconcilers"/>: the stored-secret-first, then-env-var
 /// resolution order for a provider's reconciliation Admin API key (docs/router/secrets-at-rest-plan.md §7).
 /// </summary>
 public sealed class AdminApiKeyResolutionTests
@@ -30,7 +31,7 @@ public sealed class AdminApiKeyResolutionTests
         string stored = "sk-ant-admin-from-store";
         secretReader.Setup(r => r.TryRead("reconciliation:anthropic:admin-key", out stored)).Returns(true);
 
-        var resolved = ServiceCollectionExtensions.TryResolveAdminApiKey(
+        var resolved = PriceCatalogServiceCollectionExtensions.TryResolveAdminApiKey(
             options, environment.Object, secretReader.Object, "anthropic", out var adminApiKey);
 
         Assert.True(resolved);
@@ -55,7 +56,7 @@ public sealed class AdminApiKeyResolutionTests
         string empty = string.Empty;
         secretReader.Setup(r => r.TryRead("reconciliation:openai:admin-key", out empty)).Returns(false);
 
-        var resolved = ServiceCollectionExtensions.TryResolveAdminApiKey(
+        var resolved = PriceCatalogServiceCollectionExtensions.TryResolveAdminApiKey(
             options, environment.Object, secretReader.Object, "openai", out var adminApiKey);
 
         Assert.True(resolved);
@@ -75,7 +76,7 @@ public sealed class AdminApiKeyResolutionTests
         var environment = new Mock<IEnvironmentVariableProvider>();
         environment.Setup(e => e.GetVariable("OPENAI_ADMIN_KEY")).Returns("sk-openai-from-env");
 
-        var resolved = ServiceCollectionExtensions.TryResolveAdminApiKey(
+        var resolved = PriceCatalogServiceCollectionExtensions.TryResolveAdminApiKey(
             options, environment.Object, secretReader: null, "openai", out var adminApiKey);
 
         Assert.True(resolved);
@@ -91,7 +92,7 @@ public sealed class AdminApiKeyResolutionTests
         string empty = string.Empty;
         secretReader.Setup(r => r.TryRead("reconciliation:anthropic:admin-key", out empty)).Returns(false);
 
-        var resolved = ServiceCollectionExtensions.TryResolveAdminApiKey(
+        var resolved = PriceCatalogServiceCollectionExtensions.TryResolveAdminApiKey(
             options, environment.Object, secretReader.Object, "anthropic", out var adminApiKey);
 
         Assert.False(resolved);
@@ -101,7 +102,7 @@ public sealed class AdminApiKeyResolutionTests
     [Fact]
     public void BuildCostReconcilers_NoKeysResolvable_ReturnsEmpty()
     {
-        var reconcilers = ServiceCollectionExtensions.BuildCostReconcilers(BuildServiceProvider(
+        var reconcilers = PriceCatalogServiceCollectionExtensions.BuildCostReconcilers(BuildServiceProvider(
             new CostReconciliationOptions(), secretReader: null));
 
         Assert.Empty(reconcilers);
@@ -116,7 +117,7 @@ public sealed class AdminApiKeyResolutionTests
         string empty = string.Empty;
         secretReader.Setup(r => r.TryRead("reconciliation:openai:admin-key", out empty)).Returns(false);
 
-        var reconcilers = ServiceCollectionExtensions.BuildCostReconcilers(BuildServiceProvider(
+        var reconcilers = PriceCatalogServiceCollectionExtensions.BuildCostReconcilers(BuildServiceProvider(
             new CostReconciliationOptions(), secretReader.Object));
 
         var reconciler = Assert.Single(reconcilers);
