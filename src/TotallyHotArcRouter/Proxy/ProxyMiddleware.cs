@@ -745,139 +745,22 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 }
             }
 
-            // docs/adr/0004-surface-out-of-credits-provider-failures-on-the-providers-tab.md: additive to
-            // the embedded-error extraction above, not a replacement - embeddedErrorMessage/preReadErrorBody
-            // still drive the existing Gemini/Anthropic/passthrough forwarding behavior for a
-            // non-out-of-credits 400 exactly as before. Scoped to 400/429 (Anthropic's real case is a 400;
-            // OpenAI's insufficient_quota is typically a 429).
-            var outOfCreditsMessage = string.Empty;
-            var isOutOfCredits = (statusCode == StatusCodes.Status400BadRequest || statusCode == 429) &&
-                OutOfCreditsClassifier.IsOutOfCredits(preReadErrorBody ?? [], embeddedErrorMessage, out outOfCreditsMessage);
+            // "What does this response mean?" - the circuit-breaker signal it carries, and whether the
+            // request should fail over - belongs to UpstreamFailureClassifier, and is deliberately pure.
+            // The ADR-0004/0005 failover rules are where regressions on this path land, and they are only
+            // cheap to test exhaustively if evaluating them needs no HttpContext, no circuit breaker, and no
+            // upstream at all. ApplyHealthSignal below is the half that logs and mutates.
+            var verdict = UpstreamFailureClassifier.Classify(
+                statusCode,
+                preReadErrorBody,
+                embeddedErrorMessage,
+                isProviderAuthFailure,
+                nextProviderDiffers,
+                isExplicitPrimary: !isFallback && resolution.SubstitutionReason == RoutingSubstitutionReason.None);
 
-            // Circuit-breaker health signal. A 401, 403, or 405 is treated as a *provider-wide* outage: a 401
-            // is almost always an invalid/expired credential, a 403 is almost always a permission/API-key-scope
-            // problem (e.g. "API not enabled for this key", region lock, tier restriction) rather than
-            // something specific to the one model requested, and a 405 on a path this proxy itself constructs
-            // (the client never chooses the method) is almost always a provider-side gateway/WAF rejecting
-            // the request at the edge - all three would identically break every model on this provider, not
-            // just the one the client happened to ask for, so all three trip every model on the provider at
-            // once (RecordProviderFailure) rather than just this target (RecordFailure). (This is distinct
-            // from a *client*-authored 405 against ArcRouter's own listener, e.g. a GET to
-            // /v1/chat/completions, which never reaches this upstream-handling code at all - see
-            // LocalEndpointResponder.IsModelsListRequest/routing earlier in the pipeline.) Any 5xx, 429, or 404 still counts as a
-            // per-target failure regardless of whether a backup is actually attempted next (that's
-            // IsRetriableOutageStatus's separate concern, below) - a same-provider 429 that isn't worth
-            // failing over to a backup for is still proof this target itself is unhealthy right now, and a
-            // 404 is proof this target's configured model id is wrong/gone (unlike 401/403/405, that's a
-            // per-target misconfiguration, not a provider-wide problem, so it stays per-target rather than
-            // tripping RecordProviderFailure). Everything else - 2xx, and client-fault 4xx like 400/422 -
-            // means the target answered as configured, so it counts as a success (which also clears this
-            // target's provider-wide state - see ICircuitBreaker.RecordSuccess).
-            if (statusCode == StatusCodes.Status401Unauthorized)
-            {
-                _logger.LogError(
-                    "Upstream provider {Provider} returned 401 Unauthorized for model {Model}; treating as a provider-wide outage (likely an invalid or expired credential) and bypassing every model on this provider until it recovers.",
-                    LogRedaction.Sanitize(route.Provider),
-                    LogRedaction.Sanitize(route.ModelName));
-                _circuitBreaker.RecordProviderFailure(route.Provider);
-            }
-            else if (isProviderAuthFailure)
-            {
-                _logger.LogError(
-                    "Upstream provider {Provider} returned an embedded credential error for model {Model} on a non-401 status (Gemini, for example, reports an invalid API key as a 400); treating as a provider-wide outage and bypassing every model on this provider until it recovers.",
-                    LogRedaction.Sanitize(route.Provider),
-                    LogRedaction.Sanitize(route.ModelName));
-                _circuitBreaker.RecordProviderFailure(route.Provider);
-            }
-            else if (statusCode == StatusCodes.Status403Forbidden)
-            {
-                _logger.LogError(
-                    "Upstream provider {Provider} returned 403 Forbidden for model {Model}; treating as a provider-wide outage (likely a permission or API-key-scope problem) and bypassing every model on this provider until it recovers.",
-                    LogRedaction.Sanitize(route.Provider),
-                    LogRedaction.Sanitize(route.ModelName));
-                _circuitBreaker.RecordProviderFailure(route.Provider);
-            }
-            else if (statusCode == StatusCodes.Status405MethodNotAllowed)
-            {
-                // Seen in production as an Alibaba Cloud WAF block page (an HTML "access blocked" response,
-                // not a real API error) served instead of reaching the model API at all - a gateway-level
-                // rejection of this request, not evidence about the request's actual validity.
-                _logger.LogError(
-                    "Upstream provider {Provider} returned 405 Method Not Allowed for model {Model}; treating as a provider-wide gateway/WAF block and bypassing every model on this provider until it recovers.",
-                    LogRedaction.Sanitize(route.Provider),
-                    LogRedaction.Sanitize(route.ModelName));
-                _circuitBreaker.RecordProviderFailure(route.Provider);
-            }
-            else if (isOutOfCredits)
-            {
-                // docs/adr/0004-surface-out-of-credits-provider-failures-on-the-providers-tab.md: checked
-                // ahead of IsOutageStatus below, since a classified-out-of-credits 429 would otherwise fall
-                // into that branch's weaker per-target RecordFailure - out-of-credits is always
-                // provider-wide (the whole account is broken, not just this one target), like 401/403/405
-                // above.
-                _logger.LogError(
-                    "Upstream provider {Provider} is out of credits for model {Model}; treating as a provider-wide outage and bypassing every model on this provider until it recovers.",
-                    LogRedaction.Sanitize(route.Provider),
-                    LogRedaction.Sanitize(route.ModelName));
-                _circuitBreaker.RecordProviderFailure(route.Provider);
-                _interactionStatusStore?.RecordLiveTrafficFailure(route.Provider, ProviderInteractionKind.OutOfCredits, outOfCreditsMessage);
-            }
-            else if (IsOutageStatus(statusCode))
-            {
-                _circuitBreaker.RecordFailure(circuitTarget);
-            }
-            else
-            {
-                _circuitBreaker.RecordSuccess(circuitTarget);
+            ApplyHealthSignal(verdict, route, circuitTarget, statusCode);
 
-                // docs/adr/0004-...: gated strictly on an actual 2xx (not the broader "not an outage"
-                // bucket this branch otherwise covers, which also includes a plain non-out-of-credits
-                // 400/422) - a malformed request succeeding at the transport layer is not evidence the
-                // provider "works" in the billing sense LiveTraffic tracks, so it must not clear a live
-                // out-of-credits warning.
-                if (statusCode is >= 200 and < 300)
-                {
-                    _interactionStatusStore?.RecordLiveTrafficSuccess(route.Provider, "Live traffic");
-                }
-            }
-
-            // A retriable *outage* status: a 5xx (provider-side failure), a 404 (this target's configured
-            // model doesn't exist/is gone - says nothing about a *different*, already-configured candidate,
-            // so it's retried unconditionally, unlike 401/403/405/429 below), or a 401/403 (provider-wide
-            // credential or permission failure)/405 (provider-wide gateway/WAF block - see the
-            // circuit-breaker comment above)/429 (rate limit) - the latter four only when the next backup is
-            // a *separate* provider, since a same-provider backup shares the same broken credential,
-            // permission scope, gateway policy, or throttle. Other client-fault statuses (400/422) are never
-            // retried - a backup would reject the same request identically. Only fail over while a backup
-            // remains and nothing has been written to the client yet.
-            //
-            // isProviderAuthFailure is folded in here alongside the numeric-status check: it's a non-401
-            // status disguising what is, semantically, a 401 - Gemini's 400-with-UNAUTHENTICATED is the case
-            // it exists for, though any translator may now report it via EmbeddedProviderError.IsAuthFailure
-            // (see where it's computed above) - so it gets the same different-provider-only retry treatment
-            // as the real 401/403/405 case.
-            //
-            // docs/adr/0004-.../0005-...: for a *provider-wide*-trip status (401/403/405/isProviderAuthFailure/
-            // out-of-credits), an explicit primary (never substituted so far, and this is its first attempt,
-            // not an already-failed-over hop) does NOT retry across providers even when nextProviderDiffers -
-            // it falls through to the commit block below and relays the real upstream error, exactly as ADR-
-            // 0005 requires. This overrides today's *generic* 401/403/405/429 cross-provider carve-out
-            // specifically for these provider-wide statuses; a plain 429 (not out-of-credits) is target-level
-            // (RecordFailure, not RecordProviderFailure - see above) and keeps retrying unconditionally on
-            // explicit/auto alike, matching ADR-0005's explicit "target-level trips unaffected" boundary for
-            // *this* same-request live-discovery cascade (RequestInterceptor's separate already-open-before-
-            // this-request path is what protects target-level trips - see ExplicitCircuitTripBlockMessage
-            // above).
-            var isExplicitPrimary = !isFallback && resolution.SubstitutionReason == RoutingSubstitutionReason.None;
-            var isProviderWideTripStatus = statusCode == StatusCodes.Status401Unauthorized
-                || statusCode == StatusCodes.Status403Forbidden
-                || statusCode == StatusCodes.Status405MethodNotAllowed
-                || isProviderAuthFailure
-                || isOutOfCredits;
-
-            var shouldRetryThisCandidate = isProviderWideTripStatus
-                ? nextProviderDiffers && !isExplicitPrimary
-                : IsRetriableOutageStatus(statusCode, nextProviderDiffers);
+            var shouldRetryThisCandidate = verdict.ShouldRetry;
 
             if (hasNextCandidate && shouldRetryThisCandidate)
             {
@@ -1109,51 +992,123 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     internal static bool IsStreamAbort(Exception ex) => ex is OperationCanceledException or IOException or SocketException;
 
     /// <summary>
-    /// Determines whether an upstream HTTP <paramref name="statusCode"/> is a retriable outage: any 5xx
-    /// (a provider-side failure), a 404 (this target's configured model doesn't exist/is gone - a
-    /// per-candidate fact that says nothing about a different, already-configured candidate, so it is
-    /// retried unconditionally, regardless of <paramref name="nextBackupIsDifferentProvider"/>), or a 429
-    /// (rate limit / out of credits), 401 (invalid/expired credential), 403 (permission/API-key-scope
-    /// problem - e.g. API not enabled for this key, region lock, tier restriction), or 405 (provider-side
-    /// gateway/WAF block, e.g. an edge security page rejecting the request before it reaches the model API -
-    /// provider-wide, see <see cref="ICircuitBreaker.RecordProviderFailure"/>) when
-    /// <paramref name="nextBackupIsDifferentProvider"/> is <see langword="true"/>. A 429/401/403/405 whose
-    /// only remaining backup shares the same provider is <em>not</em> retried, because a shared quota pool,
-    /// credential, permission scope, or gateway/WAF policy would fail the backup identically - retrying it
-    /// would only delay surfacing the failure to the client. That same-fate reasoning does not apply to a
-    /// 404, which is specific to this one candidate. All other statuses - including client-fault 4xx such as
-    /// 400/422 - are never retried.
+    /// Applies an <see cref="UpstreamFailureClassifier"/> verdict: records the circuit-breaker signal, logs
+    /// the operator-actionable reason, and updates the Providers tab's live-traffic state. The effectful
+    /// half of what used to be one ~130-line if/else chain inside <see cref="InvokeCoreAsync"/> - the
+    /// decisions themselves are in <see cref="UpstreamFailureClassifier.Classify"/>, which is pure and
+    /// separately tested.
+    ///
+    /// <para>
+    /// A provider-wide cause trips every model on the provider at once
+    /// (<see cref="ICircuitBreaker.RecordProviderFailure"/>) rather than just this target, because a bad
+    /// credential, a permission-scope problem, an edge gateway block, or an empty account would break every
+    /// model on that provider identically. A per-target outage (5xx/429/404) trips only this target, since
+    /// it says nothing about the provider's other models.
+    /// </para>
     /// </summary>
-    private static bool IsRetriableOutageStatus(int statusCode, bool nextBackupIsDifferentProvider)
+    /// <param name="verdict">The classification of the upstream response.</param>
+    /// <param name="route">The candidate that produced the response - supplies the provider and model names for logging.</param>
+    /// <param name="circuitTarget">The per-target circuit-breaker key for <paramref name="route"/>.</param>
+    /// <param name="statusCode">The upstream status code, logged as-is on the failover path.</param>
+    private void ApplyHealthSignal(
+        UpstreamFailureVerdict verdict,
+        ResolvedModelRoute route,
+        CircuitBreakerTargetKey circuitTarget,
+        int statusCode)
     {
-        if (statusCode is >= 500 and <= 599)
+        switch (verdict.HealthSignal)
         {
-            return true;
-        }
+            case ProviderHealthSignal.ProviderWideOutage:
+                LogProviderWideOutage(verdict.ProviderWideCause, route, statusCode);
+                _circuitBreaker.RecordProviderFailure(route.Provider);
 
-        if (statusCode == StatusCodes.Status404NotFound)
-        {
-            return true;
-        }
+                if (verdict.ProviderWideCause is ProviderWideOutageCause.OutOfCredits)
+                {
+                    _interactionStatusStore?.RecordLiveTrafficFailure(
+                        route.Provider,
+                        ProviderInteractionKind.OutOfCredits,
+                        verdict.OutOfCreditsMessage);
+                }
 
-        return (statusCode == 429
-            || statusCode == StatusCodes.Status401Unauthorized
-            || statusCode == StatusCodes.Status403Forbidden
-            || statusCode == StatusCodes.Status405MethodNotAllowed)
-            && nextBackupIsDifferentProvider;
+                break;
+
+            case ProviderHealthSignal.TargetOutage:
+                _circuitBreaker.RecordFailure(circuitTarget);
+                break;
+
+            default:
+                _circuitBreaker.RecordSuccess(circuitTarget);
+
+                // docs/adr/0004-...: gated strictly on an actual 2xx, not the broader "not an outage" bucket
+                // this branch otherwise covers (which also includes a plain non-out-of-credits 400/422) - a
+                // malformed request succeeding at the transport layer is not evidence the provider "works"
+                // in the billing sense LiveTraffic tracks, so it must not clear a live out-of-credits warning.
+                if (verdict.IsSuccessStatus)
+                {
+                    _interactionStatusStore?.RecordLiveTrafficSuccess(route.Provider, "Live traffic");
+                }
+
+                break;
+        }
     }
 
     /// <summary>
-    /// Determines whether an upstream HTTP <paramref name="statusCode"/> counts as a per-target
-    /// circuit-breaker failure: any 5xx, a 429 (rate limit / out of credits), or a 404 (this target's
-    /// configured model doesn't exist/is gone - a per-target misconfiguration, unlike 401/403/405 which are
-    /// handled separately as provider-wide - see the caller). Unlike <see cref="IsRetriableOutageStatus"/>,
-    /// this does not depend on whether a backup exists or shares the same provider - each of these statuses
-    /// is proof <em>this</em> target is unhealthy right now regardless of what (if anything) the request
-    /// fails over to next.
+    /// Logs the specific reason a response was judged provider-wide. Split out so
+    /// <see cref="ApplyHealthSignal"/> reads as one decision rather than five, and so each cause keeps the
+    /// distinct, operator-actionable message it had when this was an if/else chain - the remedies differ
+    /// (rotate a key, widen a permission scope, take it up with the provider's gateway, top up credits), so
+    /// a single merged message would be worse than the five it replaces.
     /// </summary>
-    private static bool IsOutageStatus(int statusCode) =>
-        statusCode is >= 500 and <= 599 || statusCode == 429 || statusCode == StatusCodes.Status404NotFound;
+    /// <param name="cause">Why the response was judged provider-wide.</param>
+    /// <param name="route">The candidate that produced the response.</param>
+    /// <param name="statusCode">The upstream status code, used only by the out-of-credits message.</param>
+    private void LogProviderWideOutage(ProviderWideOutageCause cause, ResolvedModelRoute route, int statusCode)
+    {
+        var provider = LogRedaction.Sanitize(route.Provider);
+        var model = LogRedaction.Sanitize(route.ModelName);
+
+        switch (cause)
+        {
+            case ProviderWideOutageCause.Unauthorized:
+                _logger.LogError(
+                    "Upstream provider {Provider} returned 401 Unauthorized for model {Model}; treating as a provider-wide outage (likely an invalid or expired credential) and bypassing every model on this provider until it recovers.",
+                    provider,
+                    model);
+                break;
+
+            case ProviderWideOutageCause.EmbeddedCredentialError:
+                _logger.LogError(
+                    "Upstream provider {Provider} returned an embedded credential error for model {Model} on a non-401 status (Gemini, for example, reports an invalid API key as a 400); treating as a provider-wide outage and bypassing every model on this provider until it recovers.",
+                    provider,
+                    model);
+                break;
+
+            case ProviderWideOutageCause.Forbidden:
+                _logger.LogError(
+                    "Upstream provider {Provider} returned 403 Forbidden for model {Model}; treating as a provider-wide outage (likely a permission or API-key-scope problem) and bypassing every model on this provider until it recovers.",
+                    provider,
+                    model);
+                break;
+
+            case ProviderWideOutageCause.MethodNotAllowed:
+                // Seen in production as an Alibaba Cloud WAF block page (an HTML "access blocked" response,
+                // not a real API error) served instead of reaching the model API at all - a gateway-level
+                // rejection of this request, not evidence about the request's actual validity.
+                _logger.LogError(
+                    "Upstream provider {Provider} returned 405 Method Not Allowed for model {Model}; treating as a provider-wide gateway/WAF block and bypassing every model on this provider until it recovers.",
+                    provider,
+                    model);
+                break;
+
+            case ProviderWideOutageCause.OutOfCredits:
+                _logger.LogError(
+                    "Upstream provider {Provider} is out of credits for model {Model} (status {Status}); treating as a provider-wide outage and bypassing every model on this provider until it recovers.",
+                    provider,
+                    model,
+                    statusCode);
+                break;
+        }
+    }
 
     /// <summary>Gate (1) of <see cref="InvokeCoreAsync"/>'s candidate pre-flight sequence: <see langword="true"/> when <paramref name="route"/>'s provider is over its monthly budget.</summary>
     private bool IsBudgetGateBlocked(ResolvedModelRoute route) =>
