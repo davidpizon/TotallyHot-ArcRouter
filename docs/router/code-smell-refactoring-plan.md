@@ -4,13 +4,27 @@
 Phase 2 (all 5 steps) and Phase 3 steps 1-2 are implemented. The Phase 4 Razor `.razor.cs` code-behind
 split is also implemented (`ProvidersAdmin`, `SettingsModal`, `BenchmarkData`, `PriceSourcesAdmin`).
 
-**Phase 5 is open.** A third, blind dual-engine audit (2026-09-02) found 9 new items, 2 of them
-Critical — see [Deep code-smell audit](#deep-code-smell-audit--2026-09-02-dual-engine-blind-pass) and
-its [prioritized roadmap](#prioritized-roadmap-phase-5). **B1 (the translator dispatch collapse) is
-implemented**; its manual golden-path smoke is still outstanding. Most notably the audit found that Phase 2 measured
-`ProxyMiddleware`'s **class** size and stopped there: `InvokeCoreAsync` is still a single 715-line
-method. The paragraph below, written before that audit, should be read as "everything *this plan and
-the brutal-cozy-pascal audit* raised is closed" — not as "the codebase is clean."
+**Phase 5: both Criticals are implemented; the rest is paused pending ADR-0008 Amendment 1.**
+A third, blind dual-engine audit (2026-09-02) found 9 new items, 2 of them Critical — see
+[Deep code-smell audit](#deep-code-smell-audit--2026-09-02-dual-engine-blind-pass) and its
+[prioritized roadmap](#prioritized-roadmap-phase-5). Its headline finding was that Phase 2 measured
+`ProxyMiddleware`'s **class** size and stopped there, leaving `InvokeCoreAsync` a single 715-line
+method.
+
+Both Criticals are now done: **B1** (translator dispatch collapse) and **C1** (`InvokeCoreAsync`
+715 → 414 lines, across three extraction commits). The **manual golden-path smoke for both is still
+outstanding** — waived for the implementation work itself, but per
+[ADR-0008 Amendment 1](../adr/0008-codegraph-serena-dual-engine-code-smell-pipeline.md#amendment-1-2026-09-02-stop-rules)
+rule 4 this plan does not close until it is run.
+
+The **Medium and Low items (B2, A2, A3, C2–C7, D1–D5) are deliberately not started.** Amendment 1's
+rule 1 requires an observed cost — a traced bug, a merge conflict, a blocked feature — and states that
+line count and blast radius are evidence *about* an item, never the cost itself. Most of those items
+were argued on size, symmetry, or consistency, which that rule rejects. They are to be re-tested
+against it and dropped if they cannot pass, rather than scheduled by default.
+
+The paragraph below, written before that audit, should be read as "everything *this plan and the
+brutal-cozy-pascal audit* raised is closed" — not as "the codebase is clean."
 
 A second, independent audit (session "Codebase architectural audit," `~/.claude/plans/act-as-a-brutal-cozy-pascal.md`)
 re-surveyed the codebase blind to this document, confirmed both of this plan's still-open items below,
@@ -588,7 +602,8 @@ throughout.
 
 ### Phase 3 — Implementation and method-level
 
-**C1 · `ProxyMiddleware.InvokeCoreAsync` — 715 lines, depth-8 nesting. CRITICAL.**
+**C1 · `ProxyMiddleware.InvokeCoreAsync` — 715 lines, depth-8 nesting. CRITICAL — IMPLEMENTED 2026-09-02
+(golden-path smoke outstanding).**
 The largest maintainability liability in the codebase, and the one item the sections above believe is
 closed. Lines 365–1080; the per-candidate `for` loop at line 460 accounts for **582 lines** in one
 block, carrying nine distinct responsibilities:
@@ -627,6 +642,62 @@ make stream-lifetime bugs hard to see. It is also why B1 went unnoticed — the 
 
 Do **not** attempt this as one commit. Run the validation gate's item 6 (manual streaming, buffered,
 Bedrock, and local-endpoint smoke) after each step.
+
+#### What was implemented, 2026-09-02
+
+Three commits, one per extraction step, each building clean and leaving the suite at its pre-existing
+baseline.
+
+| | Step | `InvokeCoreAsync` | Notes |
+|---|---|---|---|
+| — | before | 715 | |
+| 1 | `UpstreamFailureClassifier` | 600 | +32 unit tests |
+| 2 | `UpstreamRequestBuilder` | 508 | |
+| 3 | `UpstreamResponseWriter` | 414 | `ProxyMiddleware.cs` 1441 → 994 |
+
+**Deviations from the sketch above, all deliberate:**
+
+- **Step 1 could not be a single pure function returning one record.** The block mixed classification
+  with side effects (circuit-breaker mutation, `LiveTraffic` updates, five distinct log messages), so it
+  split in two: `UpstreamFailureClassifier.Classify` is the pure, I/O-free decision
+  (`UpstreamFailureVerdict`), and `ProxyMiddleware.ApplyHealthSignal` is the effectful half. The pure
+  half is what the 32 new tests target — the ADR-0004 ordering guard that keeps an out-of-credits 429
+  out of the weaker per-target bucket, and ADR-0005's explicit-primary carve-out together with its
+  target-level boundary for a plain 429. The five provider-wide log messages were kept distinct rather
+  than merged: rotating a key, widening a permission scope, chasing a gateway block, and topping up
+  credits are different remedies.
+- **Step 3 moved the capture machinery too.** `CopyAndCaptureAsync`,
+  `TranslateAndCaptureStreamAsync`, `TranslateAndCaptureBufferedAsync`, `ResponseCaptureAccumulator`,
+  `CapturedResponse`, and `MaxCapturedResponseBytes` had no callers outside this concern. Leaving them
+  behind would have made the extraction cosmetic — `ProxyMiddleware` would still carry ~240 lines of
+  streaming code that is not part of its routing job.
+- **Step 4's "~120-line loop" was not reached, and the estimate was wrong rather than the work
+  incomplete.** The method is 414 lines: **219 code, 150 comment, 45 blank.** This file runs ~36%
+  comment by line, which is the house style and load-bearing here (ADR cross-references, the
+  same-fate reasoning behind each failover rule, the URL-combining bug `BuildPassthroughUrl` exists to
+  avoid). The estimate counted code lines against a file that does not. The loop does now read as the
+  step called for — gate → build → send → classify → write → publish — and max nesting inside it drops
+  from 8 to 4. The residual bulk is the pre-flight section (local endpoints, routing gate, resolution,
+  budget precheck) and the terminal all-candidates-exhausted block, neither of which was part of
+  D3–D8.
+
+**One regression was introduced and caught.** Step 3's first cut dropped
+`context.Response.StatusCode = statusCode;`, which sat inside the spliced range — every error response
+would have been forwarded to the client as a 200 with an error body. 24 tests failed immediately and
+named it; it is restored in `CopyStatusAndHeaders`. Recorded because it is the strongest available
+evidence about the smoke-test waiver below: the suite does cover this path, and it caught a
+whole-hot-path failure on the first run.
+
+**Validation:** full solution builds with 0 warnings / 0 errors. Suite 2405 tests (2373 + 32 new), with
+only the 5 pre-existing `LiteLlmParityTests` failures, confirmed identical on a stashed clean tree — a
+LiteLLM sidecar is reachable on `127.0.0.1:4000` but answering 400, so `Assert.SkipUnless` treats it as
+up and the tests run against a misconfigured sidecar. Worth fixing separately by making that check a
+health probe rather than a reachability probe.
+
+**Deviation from AGENTS.md, on instruction:** the validation gate's item 6 — the manual golden-path
+smoke through a running proxy — was **waived by the maintainer for this work**, on the basis that the
+unit suite is sufficient. It has **not** been run. Per ADR-0008 Amendment 1 rule 4, this plan does not
+close until that smoke is done.
 
 **C2 · `RequestTelemetryPublisher` — Data Clump; Extract Method applied without Introduce Parameter
 Object. Major.** The notes above record this class as decomposed into 6 named private methods. It was —
@@ -792,9 +863,10 @@ flowchart TD
 1. ~~**B1** — the translator dispatch collapse.~~ **Implemented 2026-09-02**; see B1 above for the
    shipped surface and the two ways it had to diverge from the original sketch. Manual golden-path
    smoke still outstanding.
-2. **C1** — `InvokeCoreAsync`, in the four staged steps above. `ProxyMiddleware` has 95 callers and 19+
-   test files exercising `InvokeAsync`; the regression net is adequate, but the manual smoke in the
-   validation gate is mandatory per step.
+2. ~~**C1** — `InvokeCoreAsync`, in the four staged steps above.~~ **Implemented 2026-09-02** in three
+   commits; see C1 above for what was built and where it diverged from the sketch. 715 → 414 lines
+   (219 of them code). **The manual golden-path smoke is outstanding** — waived for the implementation
+   itself, but still required before this plan closes.
 
 **Medium impact**
 
