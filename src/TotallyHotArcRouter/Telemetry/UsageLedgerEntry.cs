@@ -11,12 +11,30 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// <param name="Provider">The provider key that actually served the request.</param>
 /// <param name="RequestedModel">The client-facing model name from the request body.</param>
 /// <param name="ResolvedModel">The upstream provider's model id the request was actually forwarded as.</param>
-/// <param name="PromptTokens">Extracted prompt/input token count, or <see langword="null"/> if usage couldn't be determined.</param>
-/// <param name="CompletionTokens">Extracted completion/output token count, or <see langword="null"/> if usage couldn't be determined.</param>
-/// <param name="CacheCreationTokens">Input tokens written to a new prompt cache entry, or <see langword="null"/> if usage couldn't be determined.</param>
-/// <param name="CacheReadTokens">Input tokens served from an existing prompt cache entry, or <see langword="null"/> if usage couldn't be determined.</param>
-/// <param name="EstimatedCostUsd">Estimated USD cost, or <see langword="null"/> when unknown - never a silent zero (see <c>ModelPrice.EstimateCost</c>).</param>
-/// <param name="CostConfidence">How much to trust <paramref name="EstimatedCostUsd"/>; persisted as its enum member name (see <see cref="UsageLedger"/>).</param>
+/// <param name="PromptTokens">
+/// Extracted prompt/input token count, or <see langword="null"/> if usage couldn't be
+/// determined.
+/// </param>
+/// <param name="CompletionTokens">
+/// Extracted completion/output token count, or <see langword="null"/> if usage couldn't be
+/// determined.
+/// </param>
+/// <param name="CacheCreationTokens">
+/// Input tokens written to a new prompt cache entry, or <see langword="null"/> if usage
+/// couldn't be determined.
+/// </param>
+/// <param name="CacheReadTokens">
+/// Input tokens served from an existing prompt cache entry, or <see langword="null"/> if
+/// usage couldn't be determined.
+/// </param>
+/// <param name="EstimatedCostUsd">
+/// Estimated USD cost, or <see langword="null"/> when unknown - never a silent zero (see
+/// <c>ModelPrice.EstimateCost</c>).
+/// </param>
+/// <param name="CostConfidence">
+/// How much to trust <paramref name="EstimatedCostUsd"/>; persisted as its enum member name
+/// (see <see cref="UsageLedger"/>).
+/// </param>
 /// <param name="OccurredAtUtc">When the request completed (matches <see cref="RoutingTelemetryEvent.TimestampUtc"/>).</param>
 /// <param name="RequestId">
 /// The upstream provider's own request id (from a <c>request-id</c>/<c>x-request-id</c> response header),

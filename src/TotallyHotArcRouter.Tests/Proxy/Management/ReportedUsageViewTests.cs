@@ -7,22 +7,29 @@ using TotallyHot.ArcRouter.Tests.PriceCatalog;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy.Management;
 
-/// <summary>Covers <see cref="ManagementFacade"/>'s <see cref="ProviderView.ReportedUsage"/> projection (docs/router/secrets-at-rest-plan.md §8.1).</summary>
+/// <summary>
+/// Covers <see cref="ManagementFacade"/>'s <see cref="ProviderView.ReportedUsage"/> projection
+/// (docs/router/secrets-at-rest-plan.md §8.1).
+/// </summary>
 public sealed class ReportedUsageViewTests
 {
-    private static ModelRoutingOptions SeedOptions() => new()
+    private static ModelRoutingOptions SeedOptions()
     {
-        Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+        return new ModelRoutingOptions
         {
-            ["anthropic"] = new ProviderOptions { BaseUrl = "https://api.anthropic.com", AuthHeaderName = "x-api-key" }
-        }
-    };
+            Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["anthropic"] = new() { BaseUrl = "https://api.anthropic.com", AuthHeaderName = "x-api-key" }
+            }
+        };
+    }
 
     [Fact]
     public void ListProviders_NoPriceCatalogRepository_ReportedUsageIsNull()
     {
         var facade = new ManagementFacade(
-            new InMemoryProviderConfigStore(SeedOptions()), Mock.Of<IEnvironmentVariableProvider>(), new HttpClient());
+            store: new InMemoryProviderConfigStore(SeedOptions()), environment: Mock.Of<IEnvironmentVariableProvider>(),
+            httpClient: new HttpClient());
 
         var provider = Assert.Single(facade.ListProviders().Providers);
 
@@ -36,8 +43,9 @@ public sealed class ReportedUsageViewTests
         temp.Database.EnsureCreated();
         var repository = new ReportedUsageRepository(temp.Database);
         var facade = new ManagementFacade(
-            new InMemoryProviderConfigStore(SeedOptions()), Mock.Of<IEnvironmentVariableProvider>(), new HttpClient(),
-            new ManagementFacadeDependencies { ReportedUsageRepository = repository });
+            store: new InMemoryProviderConfigStore(SeedOptions()), environment: Mock.Of<IEnvironmentVariableProvider>(),
+            httpClient: new HttpClient(),
+            dependencies: new ManagementFacadeDependencies { ReportedUsageRepository = repository });
 
         var provider = Assert.Single(facade.ListProviders().Providers);
 
@@ -50,21 +58,22 @@ public sealed class ReportedUsageViewTests
         using var temp = new TempDatabase();
         temp.Database.EnsureCreated();
         var repository = new ReportedUsageRepository(temp.Database);
-        var fetchedAt = new DateTimeOffset(2026, 1, 16, 4, 0, 0, TimeSpan.Zero);
+        var fetchedAt = new DateTimeOffset(2026, 1, 16, 4, 0, 0, offset: TimeSpan.Zero);
         repository.UpsertReportedUsage(
-            "anthropic",
-            [new ReportedUsageRow(new DateOnly(2026, 1, 15), "claude-opus-4-1", 100, 50, 5, 10)],
-            fetchedAt);
+            providerKey: "anthropic",
+            rows: [new ReportedUsageRow(UsageDay: new DateOnly(2026, 1, 15), Model: "claude-opus-4-1", 100, 50, 5, 10)],
+            fetchedAtUtc: fetchedAt);
         var facade = new ManagementFacade(
-            new InMemoryProviderConfigStore(SeedOptions()), Mock.Of<IEnvironmentVariableProvider>(), new HttpClient(),
-            new ManagementFacadeDependencies { ReportedUsageRepository = repository });
+            store: new InMemoryProviderConfigStore(SeedOptions()), environment: Mock.Of<IEnvironmentVariableProvider>(),
+            httpClient: new HttpClient(),
+            dependencies: new ManagementFacadeDependencies { ReportedUsageRepository = repository });
 
         var provider = Assert.Single(facade.ListProviders().Providers);
 
         Assert.NotNull(provider.ReportedUsage);
-        Assert.Equal(fetchedAt, provider.ReportedUsage!.FetchedAtUtc);
+        Assert.Equal(expected: fetchedAt, actual: provider.ReportedUsage!.FetchedAtUtc);
         var row = Assert.Single(provider.ReportedUsage.Rows);
-        Assert.Equal("claude-opus-4-1", row.Model);
-        Assert.Equal(100, row.InputTokens);
+        Assert.Equal(expected: "claude-opus-4-1", actual: row.Model);
+        Assert.Equal(100, actual: row.InputTokens);
     }
 }

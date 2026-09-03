@@ -17,11 +17,11 @@ public class StorageOptionsTests
         var resolved = new StorageOptions().ResolveDatabasePath();
 
         Assert.True(Path.IsPathRooted(resolved));
-        Assert.DoesNotContain('%', resolved);
+        Assert.DoesNotContain('%', collection: resolved);
         // No doubled separator from an empty token substitution. (A leading separator on a POSIX absolute
         // path is expected and not checked here.)
-        var doubledSeparator = new string(Path.DirectorySeparatorChar, 2);
-        Assert.DoesNotContain(doubledSeparator, resolved);
+        var doubledSeparator = new string(c: Path.DirectorySeparatorChar, 2);
+        Assert.DoesNotContain(expectedSubstring: doubledSeparator, actualString: resolved);
     }
 
     [Fact]
@@ -40,10 +40,11 @@ public class StorageOptionsTests
             options.ResolveBenchmarkDatabasePath(),
             options.ResolveTranscriptDatabasePath(),
             options.ResolveLogRegModelPath(),
-            options.ResolveClusterModelPath(),
+            options.ResolveClusterModelPath()
         ];
 
-        Assert.All(resolved, path => Assert.Equal(expected, Path.GetDirectoryName(path)));
+        Assert.All(collection: resolved,
+            action: path => Assert.Equal(expected: expected, actual: Path.GetDirectoryName(path)));
     }
 
     [Fact]
@@ -51,10 +52,10 @@ public class StorageOptionsTests
     {
         var legacy = StorageOptions.ResolveLegacyDirectories();
 
-        Assert.Equal(2, legacy.Count);
-        Assert.Contains(legacy, path => Path.GetFileName(path) == "TotallyHot.ArcRouter");
-        Assert.Contains(legacy, path => Path.GetFileName(path) == "TotallyHotArcRouter");
-        Assert.All(legacy, path => Assert.True(Path.IsPathRooted(path)));
+        Assert.Equal(2, actual: legacy.Count);
+        Assert.Contains(collection: legacy, filter: path => Path.GetFileName(path) == "TotallyHot.ArcRouter");
+        Assert.Contains(collection: legacy, filter: path => Path.GetFileName(path) == "TotallyHotArcRouter");
+        Assert.All(collection: legacy, action: path => Assert.True(Path.IsPathRooted(path)));
     }
 
     [Fact]
@@ -66,8 +67,8 @@ public class StorageOptionsTests
         var resolved = new StorageOptions { DatabasePath = @"%LOCALAPPDATA%\Pinned\prices.db" }.ResolveDatabasePath();
 
         Assert.True(Path.IsPathRooted(resolved));
-        Assert.DoesNotContain('%', resolved);
-        Assert.EndsWith($"Pinned{Path.DirectorySeparatorChar}prices.db", resolved);
+        Assert.DoesNotContain('%', collection: resolved);
+        Assert.EndsWith(expectedEndString: $"Pinned{Path.DirectorySeparatorChar}prices.db", actualString: resolved);
     }
 
     [Fact]
@@ -76,17 +77,17 @@ public class StorageOptionsTests
         var resolved = new StorageOptions { DatabasePath = @"data\prices.db" }.ResolveDatabasePath();
 
         Assert.True(Path.IsPathRooted(resolved));
-        Assert.EndsWith($"data{Path.DirectorySeparatorChar}prices.db", resolved);
+        Assert.EndsWith(expectedEndString: $"data{Path.DirectorySeparatorChar}prices.db", actualString: resolved);
     }
 
     [Fact]
     public void ResolveDatabasePath_AbsolutePath_IsReturnedAsIs()
     {
-        var absolute = Path.Combine(Path.GetTempPath(), "explicit.db");
+        var absolute = Path.Combine(path1: Path.GetTempPath(), path2: "explicit.db");
 
         var resolved = new StorageOptions { DatabasePath = absolute }.ResolveDatabasePath();
 
-        Assert.Equal(absolute, resolved);
+        Assert.Equal(expected: absolute, actual: resolved);
     }
 
     [Fact]
@@ -95,28 +96,29 @@ public class StorageOptionsTests
         var resolved = new StorageOptions().ResolveBenchmarkDatabasePath();
 
         Assert.True(Path.IsPathRooted(resolved));
-        Assert.DoesNotContain('%', resolved);
-        var doubledSeparator = new string(Path.DirectorySeparatorChar, 2);
-        Assert.DoesNotContain(doubledSeparator, resolved);
+        Assert.DoesNotContain('%', collection: resolved);
+        var doubledSeparator = new string(c: Path.DirectorySeparatorChar, 2);
+        Assert.DoesNotContain(expectedSubstring: doubledSeparator, actualString: resolved);
     }
 
     [Fact]
     public void ResolveBenchmarkDatabasePath_BackslashRelativePath_NormalizesToPlatformSeparator()
     {
-        var resolved = new StorageOptions { BenchmarkDatabasePath = @"data\coderouterbench.db" }.ResolveBenchmarkDatabasePath();
+        var resolved = new StorageOptions { BenchmarkDatabasePath = @"data\coderouterbench.db" }
+            .ResolveBenchmarkDatabasePath();
 
         Assert.True(Path.IsPathRooted(resolved));
-        Assert.EndsWith($"data{Path.DirectorySeparatorChar}coderouterbench.db", resolved);
+        Assert.EndsWith(expectedEndString: $"data{Path.DirectorySeparatorChar}coderouterbench.db",
+            actualString: resolved);
     }
 
     [Fact]
     public void ResolveBenchmarkDatabasePath_AbsolutePath_IsReturnedAsIs()
     {
-        var absolute = Path.Combine(Path.GetTempPath(), "explicit-benchmark.db");
+        var absolute = Path.Combine(path1: Path.GetTempPath(), path2: "explicit-benchmark.db");
 
         var resolved = new StorageOptions { BenchmarkDatabasePath = absolute }.ResolveBenchmarkDatabasePath();
 
-        Assert.Equal(absolute, resolved);
+        Assert.Equal(expected: absolute, actual: resolved);
     }
 }
-

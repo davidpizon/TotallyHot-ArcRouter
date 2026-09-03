@@ -13,29 +13,32 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 /// </summary>
 public sealed class RoutingModeAdminTests
 {
-    private static Bunit.BunitContext NewContext(IRoutingModeAdminClient client)
+    private static BunitContext NewContext(IRoutingModeAdminClient client)
     {
-        var ctx = new Bunit.BunitContext();
+        var ctx = new BunitContext();
         ctx.Services.AddSingleton(new RoutingModeStore(client));
         return ctx;
     }
 
-    private static RoutingMode DefaultMode(bool orchestratorEnabled = true, bool explorationEnabled = true) => new(
-        OrchestratorEnabled: orchestratorEnabled,
-        ExplorationEnabled: explorationEnabled,
-        ExplorationRate: 0.05,
-        Voters:
-        [
-            new VoterMode("dim_best", true, 0.9),
-            new VoterMode("memory_kNN", true, 0.57),
-            new VoterMode("logreg", true, 0.43),
-            new VoterMode("llm_router", false, 0.64),
-            // The fifth voter, added by self-organizing-classification-plan.md Phase T3. Present in this
-            // fixture because the component under test renders whatever the service sends, and the
-            // service sends five - a four-voter fixture under a test named "every voter" is the same
-            // drift that let RoutingModeAdminGrpcService omit this voter in the first place.
-            new VoterMode("cluster_best", true, 0.5),
-        ]);
+    private static RoutingMode DefaultMode(bool orchestratorEnabled = true, bool explorationEnabled = true)
+    {
+        return new RoutingMode(
+            OrchestratorEnabled: orchestratorEnabled,
+            ExplorationEnabled: explorationEnabled,
+            0.05,
+            Voters:
+            [
+                new VoterMode(Name: "dim_best", true, 0.9),
+                new VoterMode(Name: "memory_kNN", true, 0.57),
+                new VoterMode(Name: "logreg", true, 0.43),
+                new VoterMode(Name: "llm_router", false, 0.64),
+                // The fifth voter, added by self-organizing-classification-plan.md Phase T3. Present in this
+                // fixture because the component under test renders whatever the service sends, and the
+                // service sends five - a four-voter fixture under a test named "every voter" is the same
+                // drift that let RoutingModeAdminGrpcService omit this voter in the first place.
+                new VoterMode(Name: "cluster_best", true, 0.5)
+            ]);
+    }
 
     [Fact]
     public void Renders_the_orchestrator_state_and_every_voter()
@@ -90,7 +93,8 @@ public sealed class RoutingModeAdminTests
     [Fact]
     public void Renders_an_unreachable_state_when_the_router_cannot_be_reached()
     {
-        using var ctx = NewContext(new FakeClient { Error = new RoutingModeAdminException("nope", isUnavailable: true) });
+        using var ctx = NewContext(new FakeClient
+            { Error = new RoutingModeAdminException(message: "nope", isUnavailable: true) });
 
         var cut = ctx.Render<RoutingModeAdmin>();
 
@@ -101,7 +105,7 @@ public sealed class RoutingModeAdminTests
     [Fact]
     public void Retry_reloads_after_the_router_becomes_reachable()
     {
-        var client = new FakeClient { Error = new RoutingModeAdminException("nope", isUnavailable: true) };
+        var client = new FakeClient { Error = new RoutingModeAdminException(message: "nope", isUnavailable: true) };
         using var ctx = NewContext(client);
         var cut = ctx.Render<RoutingModeAdmin>();
         cut.Markup.Should().Contain("Router unreachable");
@@ -119,9 +123,11 @@ public sealed class RoutingModeAdminTests
 
         public RoutingModeAdminException? Error { get; set; }
 
-        public Task<RoutingMode> GetAsync(CancellationToken cancellationToken = default) =>
-            Error is not null
+        public Task<RoutingMode> GetAsync(CancellationToken cancellationToken = default)
+        {
+            return Error is not null
                 ? Task.FromException<RoutingMode>(Error)
                 : Task.FromResult(Mode!);
+        }
     }
 }

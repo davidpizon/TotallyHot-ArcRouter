@@ -7,10 +7,10 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// </summary>
 public static class CostReconciliationRetryPolicy
 {
-    private static readonly HashSet<int> RetryableStatusCodes = [408, 429, 500, 502, 503, 504];
-
     /// <summary>The maximum number of attempts total (the first try plus up to <c>MaxAttempts - 1</c> retries).</summary>
     public const int MaxAttempts = 4;
+
+    private static readonly HashSet<int> RetryableStatusCodes = [408, 429, 500, 502, 503, 504];
 
     /// <summary>
     /// Sends the request built by <paramref name="requestFactory"/> (invoked fresh on every attempt,
@@ -26,7 +26,10 @@ public static class CostReconciliationRetryPolicy
     /// </param>
     /// <param name="logger">Optional logger for retry visibility.</param>
     /// <param name="cancellationToken">Cancels the whole retry loop, including any pending backoff delay.</param>
-    /// <returns>The final response - either the first success, or the last attempt's response/exception once attempts are exhausted.</returns>
+    /// <returns>
+    /// The final response - either the first success, or the last attempt's response/exception once attempts are
+    /// exhausted.
+    /// </returns>
     public static async Task<HttpResponseMessage> SendWithRetryAsync(
         HttpClient httpClient,
         Func<HttpRequestMessage> requestFactory,
@@ -37,7 +40,7 @@ public static class CostReconciliationRetryPolicy
         ArgumentNullException.ThrowIfNull(httpClient);
         ArgumentNullException.ThrowIfNull(requestFactory);
 
-        delayForAttempt ??= attempt => TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, attempt)));
+        delayForAttempt ??= attempt => TimeSpan.FromSeconds(Math.Min(30, val2: Math.Pow(2, y: attempt)));
 
         for (var attempt = 1; attempt <= MaxAttempts; attempt++)
         {
@@ -46,14 +49,13 @@ public static class CostReconciliationRetryPolicy
             try
             {
                 using var request = requestFactory();
-                response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                response = await httpClient.SendAsync(request: request, cancellationToken: cancellationToken)
+                    .ConfigureAwait(false);
 
-                if (isLastAttempt || !RetryableStatusCodes.Contains((int)response.StatusCode))
-                {
-                    return response;
-                }
+                if (isLastAttempt || !RetryableStatusCodes.Contains((int)response.StatusCode)) return response;
 
                 logger?.LogWarning(
+                    message:
                     "Cost reconciliation request returned {StatusCode}; retrying (attempt {Attempt}/{MaxAttempts}).",
                     (int)response.StatusCode,
                     attempt,
@@ -64,13 +66,14 @@ public static class CostReconciliationRetryPolicy
             {
                 response?.Dispose();
                 logger?.LogWarning(
-                    ex,
-                    "Cost reconciliation request failed; retrying (attempt {Attempt}/{MaxAttempts}).",
+                    exception: ex,
+                    message: "Cost reconciliation request failed; retrying (attempt {Attempt}/{MaxAttempts}).",
                     attempt,
                     MaxAttempts);
             }
 
-            await Task.Delay(delayForAttempt(attempt), cancellationToken).ConfigureAwait(false);
+            await Task.Delay(delay: delayForAttempt(attempt), cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
         }
 
         // Unreachable: the loop above always returns or retries until isLastAttempt, at which point either

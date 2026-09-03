@@ -22,7 +22,10 @@ public interface IJudgeShadowScoreStore
     /// <returns>The number of rows actually deleted.</returns>
     Task<int> DeleteOldestAsync(int count, CancellationToken cancellationToken = default);
 
-    /// <summary>Deletes all rows where <c>created_at_utc &lt; <paramref name="cutoff"/></c>, enforcing <see cref="JudgeOptions.RetentionDays"/>.</summary>
+    /// <summary>
+    /// Deletes all rows where <c>created_at_utc &lt; <paramref name="cutoff"/></c>, enforcing
+    /// <see cref="JudgeOptions.RetentionDays"/>.
+    /// </summary>
     /// <param name="cutoff">The exclusive UTC timestamp cutoff; rows older than this are deleted.</param>
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <returns>The number of rows actually deleted.</returns>

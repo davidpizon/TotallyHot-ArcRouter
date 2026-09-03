@@ -13,10 +13,16 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// rather than silently misindexing centroids. A change of embedding <em>model</em> at the same dimension
 /// is caught by <see cref="EmbeddingModel"/> instead - this field cannot see it.
 /// </param>
-/// <param name="Centroids">The unit-normalized cluster centroids, one per cluster, each of length <see cref="EmbeddingDimension"/>.</param>
+/// <param name="Centroids">
+/// The unit-normalized cluster centroids, one per cluster, each of length
+/// <see cref="EmbeddingDimension"/>.
+/// </param>
 /// <param name="ChosenK">The number of clusters <see cref="SphericalKMeansTrainer"/>'s sweep selected.</param>
 /// <param name="TrainedAtUtc">When this artifact was trained, in UTC.</param>
-/// <param name="ClusterSizes">The number of training samples assigned to each cluster, parallel to <see cref="Centroids"/>.</param>
+/// <param name="ClusterSizes">
+/// The number of training samples assigned to each cluster, parallel to <see cref="Centroids"/>
+/// .
+/// </param>
 /// <param name="ClusterDimensionHistograms">
 /// Per-cluster counts of the heuristic classifier's dimension label across that cluster's member samples
 /// (<see cref="ClusterTrainingSample.Dimension"/>), parallel to <see cref="Centroids"/>. Populated
@@ -34,8 +40,14 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// the k-selection sweep's outcome (<see cref="SphericalKMeansTrainer.TrainResult.KSelectionProvenance"/>),
 /// and the training date.
 /// </param>
-/// <param name="BootstrapTaskCount">The number of OOD bootstrap tasks (Phase T2d) that contributed to this artifact, or 0 if none.</param>
-/// <param name="MemoryEntryCount">The number of live <c>memory_entries</c> rows that contributed to this artifact, or 0 if none.</param>
+/// <param name="BootstrapTaskCount">
+/// The number of OOD bootstrap tasks (Phase T2d) that contributed to this artifact, or 0
+/// if none.
+/// </param>
+/// <param name="MemoryEntryCount">
+/// The number of live <c>memory_entries</c> rows that contributed to this artifact, or 0 if
+/// none.
+/// </param>
 /// <param name="EmbeddingModel">
 /// The identity of the embedding model whose vectors this artifact was fitted against
 /// (<see cref="Router.Embeddings.IEmbeddingClient.ModelIdentity"/>), or <see langword="null"/> for an
@@ -68,7 +80,7 @@ public sealed record ClusterModelArtifact(
     public string DescribeCluster(int clusterIndex)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(clusterIndex);
-        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(clusterIndex, Centroids.Count);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(value: clusterIndex, other: Centroids.Count);
 
         var dominantDimension = ClusterDimensionHistograms[clusterIndex].Count == 0
             ? null
@@ -76,14 +88,9 @@ public sealed record ClusterModelArtifact(
 
         var topTerms = ClusterTopTerms[clusterIndex];
         if (topTerms.Count > 0 && dominantDimension is not null)
-        {
-            return $"mostly {dominantDimension}: {string.Join(", ", topTerms)}";
-        }
+            return $"mostly {dominantDimension}: {string.Join(separator: ", ", values: topTerms)}";
 
-        if (dominantDimension is not null)
-        {
-            return $"mostly {dominantDimension}";
-        }
+        if (dominantDimension is not null) return $"mostly {dominantDimension}";
 
         return $"cluster {clusterIndex}";
     }

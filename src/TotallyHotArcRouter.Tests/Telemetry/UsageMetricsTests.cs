@@ -23,8 +23,10 @@ public class UsageMetricsTests
     /// A provider tag value unique to the calling test, so its measurements are distinguishable from any
     /// other test's on the same process-wide instrument.
     /// </summary>
-    private static string NewProviderTag([CallerMemberName] string caller = "") =>
-        $"{caller}-{Guid.NewGuid():N}";
+    private static string NewProviderTag([CallerMemberName] string caller = "")
+    {
+        return $"{caller}-{Guid.NewGuid():N}";
+    }
 
     /// <summary>
     /// Whether a measurement's tags carry the provider value <see cref="NewProviderTag"/> minted for this
@@ -33,12 +35,8 @@ public class UsageMetricsTests
     private static bool IsFromThisTest(ReadOnlySpan<KeyValuePair<string, object?>> tags, string provider)
     {
         foreach (var tag in tags)
-        {
-            if (tag.Key == "provider" && Equals(tag.Value, provider))
-            {
+            if (tag.Key == "provider" && Equals(objA: tag.Value, objB: provider))
                 return true;
-            }
-        }
 
         return false;
     }
@@ -51,23 +49,20 @@ public class UsageMetricsTests
         using var listener = new MeterListener();
         listener.InstrumentPublished = (instrument, meterListener) =>
         {
-            if (instrument.Meter.Name == UsageMetrics.MeterName && instrument.Name == "arcrouter.usage.extraction_failed")
-            {
+            if (instrument.Meter.Name == UsageMetrics.MeterName &&
+                instrument.Name == "arcrouter.usage.extraction_failed")
                 meterListener.EnableMeasurementEvents(instrument);
-            }
         };
         listener.SetMeasurementEventCallback<long>((_, measurement, tags, _) =>
         {
-            if (IsFromThisTest(tags, provider))
-            {
-                observed += measurement;
-            }
+            if (IsFromThisTest(tags: tags, provider: provider)) observed += measurement;
         });
         listener.Start();
 
-        UsageMetrics.ExtractionFailedTotal.Add(1, new KeyValuePair<string, object?>("provider", provider));
+        UsageMetrics.ExtractionFailedTotal.Add(1,
+            tag: new KeyValuePair<string, object?>(key: "provider", value: provider));
 
-        Assert.Equal(1, observed);
+        Assert.Equal(1, actual: observed);
     }
 
     [Fact]
@@ -79,26 +74,22 @@ public class UsageMetricsTests
         listener.InstrumentPublished = (instrument, meterListener) =>
         {
             if (instrument.Meter.Name == UsageMetrics.MeterName && instrument.Name == "arcrouter.usage.tokens")
-            {
                 meterListener.EnableMeasurementEvents(instrument);
-            }
         };
         listener.SetMeasurementEventCallback<long>((_, _, tags, _) =>
         {
-            if (IsFromThisTest(tags, provider))
-            {
-                observedTags.AddRange(tags.ToArray());
-            }
+            if (IsFromThisTest(tags: tags, provider: provider)) observedTags.AddRange(tags.ToArray());
         });
         listener.Start();
 
         UsageMetrics.TokensTotal.Add(
             100,
-            new KeyValuePair<string, object?>("provider", provider),
-            new KeyValuePair<string, object?>("model", "claude"),
-            new KeyValuePair<string, object?>("kind", "prompt"));
+            tag1: new KeyValuePair<string, object?>(key: "provider", value: provider),
+            tag2: new KeyValuePair<string, object?>(key: "model", value: "claude"),
+            tag3: new KeyValuePair<string, object?>(key: "kind", value: "prompt"));
 
-        Assert.Contains(observedTags, t => t.Key == "kind" && Equals(t.Value, "prompt"));
+        Assert.Contains(collection: observedTags,
+            filter: t => t.Key == "kind" && Equals(objA: t.Value, objB: "prompt"));
     }
 
     [Fact]
@@ -110,22 +101,18 @@ public class UsageMetricsTests
         listener.InstrumentPublished = (instrument, meterListener) =>
         {
             if (instrument.Meter.Name == UsageMetrics.MeterName && instrument.Name == "arcrouter.usage.cost_usd")
-            {
                 meterListener.EnableMeasurementEvents(instrument);
-            }
         };
         listener.SetMeasurementEventCallback<double>((_, measurement, tags, _) =>
         {
-            if (IsFromThisTest(tags, provider))
-            {
-                observed += measurement;
-            }
+            if (IsFromThisTest(tags: tags, provider: provider)) observed += measurement;
         });
         listener.Start();
 
-        UsageMetrics.CostUsdTotal.Add(1.5, new KeyValuePair<string, object?>("provider", provider), new KeyValuePair<string, object?>("model", "gpt"));
+        UsageMetrics.CostUsdTotal.Add(1.5, tag1: new KeyValuePair<string, object?>(key: "provider", value: provider),
+            tag2: new KeyValuePair<string, object?>(key: "model", value: "gpt"));
 
-        Assert.Equal(1.5, observed);
+        Assert.Equal(1.5, actual: observed);
     }
 
     [Fact]
@@ -136,22 +123,19 @@ public class UsageMetricsTests
         using var listener = new MeterListener();
         listener.InstrumentPublished = (instrument, meterListener) =>
         {
-            if (instrument.Meter.Name == UsageMetrics.MeterName && instrument.Name == "arcrouter.usage.unpriced_requests")
-            {
+            if (instrument.Meter.Name == UsageMetrics.MeterName &&
+                instrument.Name == "arcrouter.usage.unpriced_requests")
                 meterListener.EnableMeasurementEvents(instrument);
-            }
         };
         listener.SetMeasurementEventCallback<long>((_, measurement, tags, _) =>
         {
-            if (IsFromThisTest(tags, provider))
-            {
-                observed += measurement;
-            }
+            if (IsFromThisTest(tags: tags, provider: provider)) observed += measurement;
         });
         listener.Start();
 
-        UsageMetrics.UnpricedRequestsTotal.Add(1, new KeyValuePair<string, object?>("provider", provider));
+        UsageMetrics.UnpricedRequestsTotal.Add(1,
+            tag: new KeyValuePair<string, object?>(key: "provider", value: provider));
 
-        Assert.Equal(1, observed);
+        Assert.Equal(1, actual: observed);
     }
 }

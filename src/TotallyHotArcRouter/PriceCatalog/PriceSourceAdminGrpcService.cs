@@ -17,9 +17,9 @@ namespace TotallyHot.ArcRouter.PriceCatalog;
 /// </remarks>
 public sealed class PriceSourceAdminGrpcService : Contract.PriceSourceAdminService.PriceSourceAdminServiceBase
 {
-    private readonly PriceSourceToggleStore _toggleStore;
     private readonly PriceCatalogIngestionService _ingestionService;
     private readonly TimeSpan _pollInterval;
+    private readonly PriceSourceToggleStore _toggleStore;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PriceSourceAdminGrpcService"/> class.
@@ -38,13 +38,15 @@ public sealed class PriceSourceAdminGrpcService : Contract.PriceSourceAdminServi
         _pollInterval = TimeSpan.FromHours(options.Value.PollIntervalHours);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public override Task<Contract.ListPriceSourcesResponse> ListPriceSources(
         Contract.ListPriceSourcesRequest request,
-        ServerCallContext context) =>
-        Task.FromResult(BuildListResponse());
+        ServerCallContext context)
+    {
+        return Task.FromResult(BuildListResponse());
+    }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public override Task<Contract.ListPriceSourcesResponse> SetPriceSourceEnabled(
         Contract.SetPriceSourceEnabledRequest request,
         ServerCallContext context)
@@ -52,29 +54,28 @@ public sealed class PriceSourceAdminGrpcService : Contract.PriceSourceAdminServi
         ArgumentNullException.ThrowIfNull(request);
 
         if (string.IsNullOrWhiteSpace(request.Name))
-        {
-            throw new RpcException(new Status(StatusCode.InvalidArgument, "A source name is required."));
-        }
+            throw new RpcException(new Status(statusCode: StatusCode.InvalidArgument,
+                detail: "A source name is required."));
 
         // NotFound rather than a silent no-op: a toggle that reports success while changing nothing is the
         // failure this whole surface exists to avoid.
-        if (!_toggleStore.SetEnabled(request.Name, request.Enabled))
-        {
+        if (!_toggleStore.SetEnabled(sourceName: request.Name, enabled: request.Enabled))
             throw new RpcException(new Status(
-                StatusCode.NotFound,
-                $"No price source named '{request.Name}' exists."));
-        }
+                statusCode: StatusCode.NotFound,
+                detail: $"No price source named '{request.Name}' exists."));
 
         return Task.FromResult(BuildListResponse());
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public override async Task<Contract.RefreshPriceSourcesResponse> RefreshPriceSources(
         Contract.RefreshPriceSourcesRequest request,
-        ServerCallContext context) =>
-        await RunCycleAndBuildResponseAsync(context.CancellationToken).ConfigureAwait(false);
+        ServerCallContext context)
+    {
+        return await RunCycleAndBuildResponseAsync(context.CancellationToken).ConfigureAwait(false);
+    }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public override async Task<Contract.RefreshPriceSourcesResponse> ReorderPriceSources(
         Contract.ReorderPriceSourcesRequest request,
         ServerCallContext context)
@@ -84,11 +85,9 @@ public sealed class PriceSourceAdminGrpcService : Contract.PriceSourceAdminServi
         // Rejected outright rather than best-effort, per ReorderSources' contract: a partial reorder would
         // leave an unlisted source's rank stale relative to ranks that just moved.
         if (!_toggleStore.Reorder(request.SourceNamesInPriorityOrder))
-        {
             throw new RpcException(new Status(
-                StatusCode.InvalidArgument,
-                "The submitted order must name every existing price source exactly once."));
-        }
+                statusCode: StatusCode.InvalidArgument,
+                detail: "The submitted order must name every existing price source exactly once."));
 
         // Re-resolve contested cells under the new order immediately, from prices already in storage - no
         // live pull. This is the panel's only reorder side effect now: "Pull Now" is the sole action that
@@ -121,7 +120,7 @@ public sealed class PriceSourceAdminGrpcService : Contract.PriceSourceAdminServi
 
             // Built after the operation, so it carries whatever anchor is current: a live pull's own new
             // anchor, or - for a recompute, which never moves the anchor - the one already in place.
-            Schedule = BuildSchedule(),
+            Schedule = BuildSchedule()
         };
 
         foreach (var outcome in summary.Outcomes)
@@ -130,13 +129,10 @@ public sealed class PriceSourceAdminGrpcService : Contract.PriceSourceAdminServi
             {
                 Source = outcome.Source,
                 Succeeded = outcome.Succeeded,
-                PriceCount = outcome.PriceCount,
+                PriceCount = outcome.PriceCount
             };
 
-            if (outcome.Error is not null)
-            {
-                wire.Error = outcome.Error;
-            }
+            if (outcome.Error is not null) wire.Error = outcome.Error;
 
             response.Outcomes.Add(wire);
         }
@@ -157,20 +153,24 @@ public sealed class PriceSourceAdminGrpcService : Contract.PriceSourceAdminServi
     // The interval and its anchor, left for the client to add together. Two facts rather than a precomputed
     // next-pull instant: the panel counts down in the user's own clock, and shipping an absolute deadline
     // computed here would silently bake this machine's clock into it.
-    private Contract.PriceSchedule BuildSchedule() => new()
+    private Contract.PriceSchedule BuildSchedule()
     {
-        PollIntervalSeconds = (int)_pollInterval.TotalSeconds,
-        ScheduleAnchorUtc = Timestamp.FromDateTimeOffset(_ingestionService.ScheduleAnchorUtc),
-    };
+        return new Contract.PriceSchedule
+        {
+            PollIntervalSeconds = (int)_pollInterval.TotalSeconds,
+            ScheduleAnchorUtc = Timestamp.FromDateTimeOffset(_ingestionService.ScheduleAnchorUtc)
+        };
+    }
 
     /// <summary>Projects the toggle store's current source states into wire-format price sources.</summary>
-    private IEnumerable<Contract.PriceSource> BuildSources() =>
-        _toggleStore.List().Select(state => new Contract.PriceSource
+    private IEnumerable<Contract.PriceSource> BuildSources()
+    {
+        return _toggleStore.List().Select(state => new Contract.PriceSource
         {
             Name = state.Name,
             Enabled = state.Enabled,
             PriorityScore = state.PriorityScore,
-            PriceCount = state.PriceCount,
+            PriceCount = state.PriceCount
         });
+    }
 }
-

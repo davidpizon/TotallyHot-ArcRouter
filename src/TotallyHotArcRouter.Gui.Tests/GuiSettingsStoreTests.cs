@@ -10,7 +10,10 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 /// </summary>
 public sealed class GuiSettingsStoreTests
 {
-    private static string TempPath() => Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".json");
+    private static string TempPath()
+    {
+        return Path.Combine(path1: Path.GetTempPath(), path2: Guid.NewGuid() + ".json");
+    }
 
     [Fact]
     public void Load_WithNoFile_ReturnsDefault()
@@ -46,7 +49,7 @@ public sealed class GuiSettingsStoreTests
         var path = TempPath();
         try
         {
-            File.WriteAllText(path, "not json");
+            File.WriteAllText(path: path, contents: "not json");
             var store = new GuiSettingsStore(path);
 
             store.Load().TelemetryServerAddress.Should().Be(TelemetryChannelFactory.DefaultServerAddress);
@@ -60,8 +63,8 @@ public sealed class GuiSettingsStoreTests
     [Fact]
     public void Save_CreatesTheDirectoryIfMissing()
     {
-        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
-        var path = Path.Combine(directory, "gui-settings.json");
+        var directory = Path.Combine(path1: Path.GetTempPath(), path2: Guid.NewGuid().ToString());
+        var path = Path.Combine(path1: directory, path2: "gui-settings.json");
         try
         {
             var store = new GuiSettingsStore(path);
@@ -72,7 +75,7 @@ public sealed class GuiSettingsStoreTests
         }
         finally
         {
-            Directory.Delete(directory, recursive: true);
+            Directory.Delete(path: directory, true);
         }
     }
 }

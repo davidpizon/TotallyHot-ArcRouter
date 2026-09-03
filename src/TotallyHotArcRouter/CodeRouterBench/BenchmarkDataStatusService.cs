@@ -1,5 +1,5 @@
-using Microsoft.Extensions.Options;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.CodeRouterBench;
 
@@ -16,12 +16,15 @@ public enum BenchmarkDataState
     Update,
 
     /// <summary>The checksum probe could not reach Hugging Face; freshness is unknown.</summary>
-    CheckFailed,
+    CheckFailed
 }
 
 /// <summary>The corpus's freshness state, as last computed by <see cref="BenchmarkDataStatusService.RecheckAsync"/>.</summary>
 /// <param name="State">The computed state.</param>
-/// <param name="Reason">The probe failure reason, when <paramref name="State"/> is <see cref="BenchmarkDataState.CheckFailed"/>; otherwise <see langword="null"/>.</param>
+/// <param name="Reason">
+/// The probe failure reason, when <paramref name="State"/> is
+/// <see cref="BenchmarkDataState.CheckFailed"/>; otherwise <see langword="null"/>.
+/// </param>
 /// <param name="CheckedAtUtc">When this status was computed.</param>
 public sealed record BenchmarkDataStatus(BenchmarkDataState State, string? Reason, DateTimeOffset CheckedAtUtc);
 
@@ -34,11 +37,11 @@ public sealed record BenchmarkDataStatus(BenchmarkDataState State, string? Reaso
 /// </summary>
 public sealed class BenchmarkDataStatusService
 {
-    private readonly BenchmarkChecksumProbe _probe;
     private readonly BenchmarkFileLedger _ledger;
-    private readonly BenchmarkSyncOptions _options;
-    private readonly ILogger<BenchmarkDataStatusService> _logger;
     private readonly object _lock = new();
+    private readonly ILogger<BenchmarkDataStatusService> _logger;
+    private readonly BenchmarkSyncOptions _options;
+    private readonly BenchmarkChecksumProbe _probe;
     private BenchmarkDataStatus? _current;
 
     /// <summary>Initializes a new instance of the <see cref="BenchmarkDataStatusService"/> class.</summary>
@@ -66,7 +69,13 @@ public sealed class BenchmarkDataStatusService
     /// <summary>Gets the last computed status, or <see langword="null"/> if <see cref="RecheckAsync"/> has never run.</summary>
     public BenchmarkDataStatus? Current
     {
-        get { lock (_lock) { return _current; } }
+        get
+        {
+            lock (_lock)
+            {
+                return _current;
+            }
+        }
     }
 
     /// <summary>
@@ -85,25 +94,31 @@ public sealed class BenchmarkDataStatusService
         BenchmarkDataStatus status;
         try
         {
-            var probeResult = await _probe.FetchAsync(_options.DatasetRef, cancellationToken).ConfigureAwait(false);
-            var ledgerEntries = _ledger.GetAll().ToDictionary(entry => entry.FileName, StringComparer.Ordinal);
+            var probeResult = await _probe
+                .FetchAsync(datasetRef: _options.DatasetRef, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            var ledgerEntries = _ledger.GetAll()
+                .ToDictionary(keySelector: entry => entry.FileName, comparer: StringComparer.Ordinal);
 
             var isCurrent = BenchmarkFileSpec.All.All(spec =>
-                ledgerEntries.TryGetValue(spec.FileName, out var entry) &&
-                probeResult.Files.TryGetValue(spec.FileName, out var published) &&
-                string.Equals(entry.PublishedOid, published.PublishedOid, StringComparison.OrdinalIgnoreCase));
+                ledgerEntries.TryGetValue(key: spec.FileName, value: out var entry) &&
+                probeResult.Files.TryGetValue(key: spec.FileName, value: out var published) &&
+                string.Equals(a: entry.PublishedOid, b: published.PublishedOid,
+                    comparisonType: StringComparison.OrdinalIgnoreCase));
 
             status = new BenchmarkDataStatus(
-                isCurrent ? BenchmarkDataState.Current : BenchmarkDataState.Update,
-                Reason: null,
-                DateTimeOffset.UtcNow);
+                State: isCurrent ? BenchmarkDataState.Current : BenchmarkDataState.Update,
+                null,
+                CheckedAtUtc: DateTimeOffset.UtcNow);
         }
         catch (Exception ex) when (
-            (ex is HttpRequestException or JsonException or NotSupportedException) ||
+            ex is HttpRequestException or JsonException or NotSupportedException ||
             (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
         {
-            _logger.LogWarning(ex, "CodeRouterBench checksum probe could not reach Hugging Face; corpus freshness is unknown.");
-            status = new BenchmarkDataStatus(BenchmarkDataState.CheckFailed, ex.Message, DateTimeOffset.UtcNow);
+            _logger.LogWarning(exception: ex,
+                message: "CodeRouterBench checksum probe could not reach Hugging Face; corpus freshness is unknown.");
+            status = new BenchmarkDataStatus(State: BenchmarkDataState.CheckFailed, Reason: ex.Message,
+                CheckedAtUtc: DateTimeOffset.UtcNow);
         }
 
         lock (_lock)

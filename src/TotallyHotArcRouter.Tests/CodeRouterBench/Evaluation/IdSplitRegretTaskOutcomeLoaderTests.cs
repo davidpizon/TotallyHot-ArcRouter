@@ -17,16 +17,18 @@ public class IdSplitRegretTaskOutcomeLoaderTests
         using var temp = new TempBenchmarkDatabase();
         temp.Database.EnsureCreated();
 
-        InsertResult(temp.Database, "t1", "id_test", "bug_fixing", "model-a", score: 0.8, costUsd: 0.01, inTok: 10, outTok: 5, totalTokens: 15);
-        InsertResult(temp.Database, "p1", "probing", "bug_fixing", "model-a", score: 0.6, costUsd: 0.01, inTok: 10, outTok: 5, totalTokens: 15);
+        InsertResult(database: temp.Database, taskId: "t1", split: "id_test", dimension: "bug_fixing", model: "model-a",
+            0.8, 0.01, 10, 5, 15);
+        InsertResult(database: temp.Database, taskId: "p1", split: "probing", dimension: "bug_fixing", model: "model-a",
+            0.6, 0.01, 10, 5, 15);
 
-        var idTestOutcomes = IdSplitRegretTaskOutcomeLoader.Load(temp.Database, "id_test");
+        var idTestOutcomes = IdSplitRegretTaskOutcomeLoader.Load(database: temp.Database, split: "id_test");
 
         var outcome = Assert.Single(idTestOutcomes);
-        Assert.Equal("t1", outcome.TaskId);
+        Assert.Equal(expected: "t1", actual: outcome.TaskId);
         Assert.Null(outcome.TaskText);
-        Assert.Equal(0.8, outcome.Cells["model-a"].Score);
-        Assert.Equal(15, outcome.Cells["model-a"].TotalTokens);
+        Assert.Equal(0.8, actual: outcome.Cells["model-a"].Score);
+        Assert.Equal(15, actual: outcome.Cells["model-a"].TotalTokens);
     }
 
     [Fact]
@@ -35,13 +37,14 @@ public class IdSplitRegretTaskOutcomeLoaderTests
         using var temp = new TempBenchmarkDatabase();
         temp.Database.EnsureCreated();
 
-        InsertResultWithNullCost(temp.Database, "t1", "id_test", "bug_fixing", "model-a", score: 0.5, inTok: 1_000_000, outTok: 1_000_000);
-        InsertModelPricing(temp.Database, "model-a", inputPer1M: 2.0, outputPer1M: 4.0);
+        InsertResultWithNullCost(database: temp.Database, taskId: "t1", split: "id_test", dimension: "bug_fixing",
+            model: "model-a", 0.5, 1_000_000, 1_000_000);
+        InsertModelPricing(database: temp.Database, model: "model-a", 2.0, 4.0);
 
-        var outcomes = IdSplitRegretTaskOutcomeLoader.Load(temp.Database, "id_test");
+        var outcomes = IdSplitRegretTaskOutcomeLoader.Load(database: temp.Database, split: "id_test");
 
         var outcome = Assert.Single(outcomes);
-        Assert.Equal(6.0, outcome.Cells["model-a"].CostUsd, precision: 6);
+        Assert.Equal(6.0, actual: outcome.Cells["model-a"].CostUsd, 6);
     }
 
     [Fact]
@@ -50,9 +53,10 @@ public class IdSplitRegretTaskOutcomeLoaderTests
         using var temp = new TempBenchmarkDatabase();
         temp.Database.EnsureCreated();
 
-        InsertResultWithNullCost(temp.Database, "t1", "id_test", "bug_fixing", "model-a", score: 0.5, inTok: 10, outTok: 5);
+        InsertResultWithNullCost(database: temp.Database, taskId: "t1", split: "id_test", dimension: "bug_fixing",
+            model: "model-a", 0.5, 10, 5);
 
-        var outcomes = IdSplitRegretTaskOutcomeLoader.Load(temp.Database, "id_test");
+        var outcomes = IdSplitRegretTaskOutcomeLoader.Load(database: temp.Database, split: "id_test");
 
         Assert.Empty(outcomes);
     }
@@ -62,12 +66,16 @@ public class IdSplitRegretTaskOutcomeLoaderTests
     {
         using var temp = new TempBenchmarkDatabase();
 
-        Assert.Throws<InvalidOperationException>(() => IdSplitRegretTaskOutcomeLoader.Load(temp.Database, "id_test"));
+        Assert.Throws<InvalidOperationException>(() =>
+            IdSplitRegretTaskOutcomeLoader.Load(database: temp.Database, split: "id_test"));
     }
 
     [Fact]
-    public void Load_NullDatabase_Throws() =>
-        Assert.Throws<ArgumentNullException>(() => IdSplitRegretTaskOutcomeLoader.Load(null!, "id_test"));
+    public void Load_NullDatabase_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            IdSplitRegretTaskOutcomeLoader.Load(database: null!, split: "id_test"));
+    }
 
     [Fact]
     public void Load_NullSplit_Throws()
@@ -75,7 +83,8 @@ public class IdSplitRegretTaskOutcomeLoaderTests
         using var temp = new TempBenchmarkDatabase();
         temp.Database.EnsureCreated();
 
-        Assert.Throws<ArgumentNullException>(() => IdSplitRegretTaskOutcomeLoader.Load(temp.Database, null!));
+        Assert.Throws<ArgumentNullException>(() =>
+            IdSplitRegretTaskOutcomeLoader.Load(database: temp.Database, split: null!));
     }
 
     [Theory]
@@ -86,7 +95,8 @@ public class IdSplitRegretTaskOutcomeLoaderTests
         using var temp = new TempBenchmarkDatabase();
         temp.Database.EnsureCreated();
 
-        Assert.Throws<ArgumentException>(() => IdSplitRegretTaskOutcomeLoader.Load(temp.Database, split));
+        Assert.Throws<ArgumentException>(() =>
+            IdSplitRegretTaskOutcomeLoader.Load(database: temp.Database, split: split));
     }
 
     private static void InsertResult(
@@ -96,20 +106,20 @@ public class IdSplitRegretTaskOutcomeLoaderTests
         using var connection = database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO benchmark_id_results
-                (task_id, split, source_split, dimension, model, score, cost_usd, input_tokens, output_tokens, total_tokens)
-            VALUES
-                ($taskId, $split, $split, $dimension, $model, $score, $costUsd, $inTok, $outTok, $totalTokens);
-            """;
-        command.Parameters.AddWithValue("$taskId", taskId);
-        command.Parameters.AddWithValue("$split", split);
-        command.Parameters.AddWithValue("$dimension", dimension);
-        command.Parameters.AddWithValue("$model", model);
-        command.Parameters.AddWithValue("$score", score);
-        command.Parameters.AddWithValue("$costUsd", costUsd);
-        command.Parameters.AddWithValue("$inTok", inTok);
-        command.Parameters.AddWithValue("$outTok", outTok);
-        command.Parameters.AddWithValue("$totalTokens", totalTokens);
+                              INSERT INTO benchmark_id_results
+                                  (task_id, split, source_split, dimension, model, score, cost_usd, input_tokens, output_tokens, total_tokens)
+                              VALUES
+                                  ($taskId, $split, $split, $dimension, $model, $score, $costUsd, $inTok, $outTok, $totalTokens);
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$taskId", value: taskId);
+        command.Parameters.AddWithValue(parameterName: "$split", value: split);
+        command.Parameters.AddWithValue(parameterName: "$dimension", value: dimension);
+        command.Parameters.AddWithValue(parameterName: "$model", value: model);
+        command.Parameters.AddWithValue(parameterName: "$score", value: score);
+        command.Parameters.AddWithValue(parameterName: "$costUsd", value: costUsd);
+        command.Parameters.AddWithValue(parameterName: "$inTok", value: inTok);
+        command.Parameters.AddWithValue(parameterName: "$outTok", value: outTok);
+        command.Parameters.AddWithValue(parameterName: "$totalTokens", value: totalTokens);
         command.ExecuteNonQuery();
     }
 
@@ -120,32 +130,33 @@ public class IdSplitRegretTaskOutcomeLoaderTests
         using var connection = database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO benchmark_id_results
-                (task_id, split, source_split, dimension, model, score, cost_usd, input_tokens, output_tokens)
-            VALUES
-                ($taskId, $split, $split, $dimension, $model, $score, NULL, $inTok, $outTok);
-            """;
-        command.Parameters.AddWithValue("$taskId", taskId);
-        command.Parameters.AddWithValue("$split", split);
-        command.Parameters.AddWithValue("$dimension", dimension);
-        command.Parameters.AddWithValue("$model", model);
-        command.Parameters.AddWithValue("$score", score);
-        command.Parameters.AddWithValue("$inTok", inTok);
-        command.Parameters.AddWithValue("$outTok", outTok);
+                              INSERT INTO benchmark_id_results
+                                  (task_id, split, source_split, dimension, model, score, cost_usd, input_tokens, output_tokens)
+                              VALUES
+                                  ($taskId, $split, $split, $dimension, $model, $score, NULL, $inTok, $outTok);
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$taskId", value: taskId);
+        command.Parameters.AddWithValue(parameterName: "$split", value: split);
+        command.Parameters.AddWithValue(parameterName: "$dimension", value: dimension);
+        command.Parameters.AddWithValue(parameterName: "$model", value: model);
+        command.Parameters.AddWithValue(parameterName: "$score", value: score);
+        command.Parameters.AddWithValue(parameterName: "$inTok", value: inTok);
+        command.Parameters.AddWithValue(parameterName: "$outTok", value: outTok);
         command.ExecuteNonQuery();
     }
 
-    private static void InsertModelPricing(BenchmarkDatabase database, string model, double inputPer1M, double outputPer1M)
+    private static void InsertModelPricing(BenchmarkDatabase database, string model, double inputPer1M,
+        double outputPer1M)
     {
         using var connection = database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO benchmark_models (model, canonical_key, input_per_1m, output_per_1m, raw_json)
-            VALUES ($model, $model, $inputPer1M, $outputPer1M, '{}');
-            """;
-        command.Parameters.AddWithValue("$model", model);
-        command.Parameters.AddWithValue("$inputPer1M", inputPer1M);
-        command.Parameters.AddWithValue("$outputPer1M", outputPer1M);
+                              INSERT INTO benchmark_models (model, canonical_key, input_per_1m, output_per_1m, raw_json)
+                              VALUES ($model, $model, $inputPer1M, $outputPer1M, '{}');
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$model", value: model);
+        command.Parameters.AddWithValue(parameterName: "$inputPer1M", value: inputPer1M);
+        command.Parameters.AddWithValue(parameterName: "$outputPer1M", value: outputPer1M);
         command.ExecuteNonQuery();
     }
 }

@@ -62,4 +62,3 @@ public sealed class LiveDataStoreTests
         LiveDataStore.DefaultServerAddress.Should().Be("https://localhost:5002");
     }
 }
-

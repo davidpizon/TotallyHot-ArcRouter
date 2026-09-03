@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 
@@ -30,36 +31,30 @@ public sealed class DiagnosticSeverityAnalyzer : IStaticAnalyzer
     /// <summary>The most individual diagnostics quoted in the notes, so telemetry stays bounded.</summary>
     private const int MaxQuotedDiagnostics = 5;
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public string Name => "diagnostics";
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public StaticAnalysisFinding? Analyze(string code, CodeLanguage language)
     {
         ArgumentNullException.ThrowIfNull(code);
 
         // Roslyn is the only compiler front-end in this assembly, so C# is the only language with
         // diagnostics to mine. Every other language abstains rather than being scored on nothing.
-        if (language != CodeLanguage.CSharp || string.IsNullOrWhiteSpace(code))
-        {
-            return null;
-        }
+        if (language != CodeLanguage.CSharp || string.IsNullOrWhiteSpace(code)) return null;
 
         var tree = CSharpSyntaxTree.ParseText(code);
         var warnings = tree.GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Warning)
-            .Select(d => d.GetMessage(System.Globalization.CultureInfo.InvariantCulture))
+            .Select(d => d.GetMessage(CultureInfo.InvariantCulture))
             .ToList();
 
-        if (warnings.Count == 0)
-        {
-            return new StaticAnalysisFinding(Name, 1.0, []);
-        }
+        if (warnings.Count == 0) return new StaticAnalysisFinding(Analyzer: Name, 1.0, Notes: []);
 
         var notes = new List<string> { $"{warnings.Count} parse warning(s)" };
         notes.AddRange(warnings.Take(MaxQuotedDiagnostics));
 
-        var score = StaticAnalyzerScoring.ClampScore(Floor, PenaltyPerWarning * warnings.Count);
-        return new StaticAnalysisFinding(Name, score, notes);
+        var score = StaticAnalyzerScoring.ClampScore(floor: Floor, penalty: PenaltyPerWarning * warnings.Count);
+        return new StaticAnalysisFinding(Analyzer: Name, Score: score, Notes: notes);
     }
 }

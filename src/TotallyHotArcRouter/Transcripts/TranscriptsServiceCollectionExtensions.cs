@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Router;
 
 namespace TotallyHot.ArcRouter.Transcripts;
 
@@ -29,19 +30,20 @@ internal static class TranscriptsServiceCollectionExtensions
         // pattern configure delegates run in registration order, so this one runs second and wins,
         // giving "stored override > appsettings.json > coded default" precedence, exactly like
         // RouterSettingsConfigureOptions does for RoutingOptions above.
-        services.AddOptions<TotallyHot.ArcRouter.Transcripts.TranscriptOptions>()
+        services.AddOptions<TranscriptOptions>()
             .Configure<IConfiguration>((options, configuration) =>
-                configuration.GetSection(TotallyHot.ArcRouter.Transcripts.TranscriptOptions.SectionName).Bind(options));
-        services.AddSingleton<IConfigureOptions<TotallyHot.ArcRouter.Transcripts.TranscriptOptions>, TotallyHot.ArcRouter.Transcripts.TranscriptSettingsConfigureOptions>();
-        services.AddSingleton<IOptionsChangeTokenSource<TotallyHot.ArcRouter.Transcripts.TranscriptOptions>>(sp => sp.GetRequiredService<Router.RouterSettingsReloadToken>());
-        services.AddSingleton<TotallyHot.ArcRouter.Transcripts.TranscriptDatabase>();
-        services.AddSingleton<TotallyHot.ArcRouter.Transcripts.ITranscriptStore, TotallyHot.ArcRouter.Transcripts.SqliteTranscriptStore>();
-        services.AddSingleton<TotallyHot.ArcRouter.Transcripts.TranscriptScoreObserver>();
+                configuration.GetSection(TranscriptOptions.SectionName).Bind(options));
+        services.AddSingleton<IConfigureOptions<TranscriptOptions>, TranscriptSettingsConfigureOptions>();
+        services.AddSingleton<IOptionsChangeTokenSource<TranscriptOptions>>(sp =>
+            sp.GetRequiredService<RouterSettingsReloadToken>());
+        services.AddSingleton<TranscriptDatabase>();
+        services.AddSingleton<ITranscriptStore, SqliteTranscriptStore>();
+        services.AddSingleton<TranscriptScoreObserver>();
 
         // docs/router/self-organizing-classification-plan.md Phase T4: the taxonomy comparison's own
         // store, sharing TranscriptDatabase's file and its enabled gate - with no transcripts there is
         // nothing to compare, so this needs no separate switch.
-        services.AddSingleton<TotallyHot.ArcRouter.Transcripts.ITaxonomyComparisonStore, TotallyHot.ArcRouter.Transcripts.SqliteTaxonomyComparisonStore>();
+        services.AddSingleton<ITaxonomyComparisonStore, SqliteTaxonomyComparisonStore>();
 
         return services;
     }

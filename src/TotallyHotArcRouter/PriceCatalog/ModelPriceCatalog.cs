@@ -5,8 +5,12 @@ namespace TotallyHot.ArcRouter.PriceCatalog;
 
 /// <summary>
 /// <see cref="IModelPriceCatalog"/> backed by <see cref="PriceRepository"/> with a
-/// <see cref="ConcurrentDictionary{TKey,TValue}"/> in front of it. The cache is a <b>correctness enabler,
-/// not a performance tweak</b>: the routing read happens inline with a live request, so it has to be an
+/// <see cref="ConcurrentDictionary{TKey,TValue}"/> in front of it. The cache is a
+/// <b>
+/// correctness enabler,
+/// not a performance tweak
+/// </b>
+/// : the routing read happens inline with a live request, so it has to be an
 /// in-memory hit - no read path may await I/O, and refreshing rows is always the background ingestion
 /// service's job (see <c>docs/router/model-price-catalog.md</c> Phase 4).
 /// </summary>
@@ -19,8 +23,8 @@ namespace TotallyHot.ArcRouter.PriceCatalog;
 /// </remarks>
 public sealed class ModelPriceCatalog : IModelPriceCatalog
 {
-    private readonly PriceRepository _repository;
     private readonly ILogger<ModelPriceCatalog> _logger;
+    private readonly PriceRepository _repository;
 
     // Entries hold the raw row plus its fetch timestamp, never a tier-selected price: the same cached row
     // has to answer for every PriceContext a caller might ask about, and freshness is evaluated per read
@@ -40,26 +44,27 @@ public sealed class ModelPriceCatalog : IModelPriceCatalog
         _logger = logger;
     }
 
-    /// <inheritdoc />
-    public ModelPrice? GetBestPriceForModel(ModelKey key, PriceContext context) =>
-        GetEntry(key) is { } entry ? ApplyTier(entry.Price, context) : null;
+    /// <inheritdoc/>
+    public ModelPrice? GetBestPriceForModel(ModelKey key, PriceContext context)
+    {
+        return GetEntry(key) is { } entry ? ApplyTier(price: entry.Price, context: context) : null;
+    }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public ModelPrice? GetFreshPriceForRouting(ModelKey key, PriceContext context, TimeSpan maxAge)
     {
-        if (GetEntry(key) is not { } entry)
-        {
-            return null;
-        }
+        if (GetEntry(key) is not { } entry) return null;
 
         return DateTimeOffset.UtcNow - entry.LastUpdatedUtc > maxAge
             ? null
-            : ApplyTier(entry.Price, context);
+            : ApplyTier(price: entry.Price, context: context);
     }
 
-    /// <inheritdoc />
-    public void Invalidate() =>
-        Interlocked.Exchange(ref _cache, new ConcurrentDictionary<ModelKey, CatalogPriceEntry?>());
+    /// <inheritdoc/>
+    public void Invalidate()
+    {
+        Interlocked.Exchange(location1: ref _cache, value: new ConcurrentDictionary<ModelKey, CatalogPriceEntry?>());
+    }
 
     /// <summary>
     /// Returns the cached row for <paramref name="key"/>, reading through to the repository on a miss.
@@ -87,10 +92,7 @@ public sealed class ModelPriceCatalog : IModelPriceCatalog
     private CatalogPriceEntry? GetEntry(ModelKey key)
     {
         var cache = _cache;
-        if (cache.TryGetValue(key, out var cached))
-        {
-            return cached;
-        }
+        if (cache.TryGetValue(key: key, value: out var cached)) return cached;
 
         CatalogPriceEntry? entry;
         try
@@ -100,14 +102,14 @@ public sealed class ModelPriceCatalog : IModelPriceCatalog
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(
-                ex,
-                "Price catalog read failed for {ModelName}/{Provider}; treating this read as unpriced.",
+                exception: ex,
+                message: "Price catalog read failed for {ModelName}/{Provider}; treating this read as unpriced.",
                 key.ModelName,
                 key.Provider);
             return null;
         }
 
-        return cache.GetOrAdd(key, entry);
+        return cache.GetOrAdd(key: key, value: entry);
     }
 
     /// <summary>
@@ -131,10 +133,7 @@ public sealed class ModelPriceCatalog : IModelPriceCatalog
     /// </remarks>
     private static ModelPrice ApplyTier(ModelPrice price, PriceContext context)
     {
-        if (context == PriceContext.Standard)
-        {
-            return price;
-        }
+        if (context == PriceContext.Standard) return price;
 
         var input = price.InputPerMillionTokens;
         var output = price.OutputPerMillionTokens;
@@ -148,10 +147,7 @@ public sealed class ModelPriceCatalog : IModelPriceCatalog
         // Applied after the batch tier so a request that is both batched and cache-repeating is priced at
         // the cache rate on input: the two discounts are not additive, and the cached rate is the one that
         // actually describes those input tokens.
-        if (context.RepeatsCachedContext)
-        {
-            input = price.CacheReadPerMillionTokens ?? input;
-        }
+        if (context.RepeatsCachedContext) input = price.CacheReadPerMillionTokens ?? input;
 
         return price with
         {

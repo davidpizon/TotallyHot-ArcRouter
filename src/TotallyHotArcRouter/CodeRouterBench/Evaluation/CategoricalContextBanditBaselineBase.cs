@@ -22,12 +22,15 @@ public abstract class CategoricalContextBanditBaselineBase : IOnlineRegretBaseli
 
     /// <summary>Initializes the shared ridge prior.</summary>
     /// <param name="lambda">λ, the ridge prior weight added to every (arm, dimension) pair's pull count.</param>
-    protected CategoricalContextBanditBaselineBase(double lambda) => _lambda = lambda;
+    protected CategoricalContextBanditBaselineBase(double lambda)
+    {
+        _lambda = lambda;
+    }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public abstract string Name { get; }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     /// <remarks>
     /// Ties are broken by ordinal model-id order, the same convention as
     /// <see cref="DimensionBestBaseline"/> and <see cref="Router.Orchestrator.OrchestratorRoutingPolicy"/>.
@@ -41,12 +44,13 @@ public abstract class CategoricalContextBanditBaselineBase : IOnlineRegretBaseli
         string? best = null;
         var bestScore = double.NegativeInfinity;
 
-        foreach (var modelId in context.CandidateModelIds.OrderBy(id => id, StringComparer.Ordinal))
+        foreach (var modelId in context.CandidateModelIds.OrderBy(keySelector: id => id,
+                     comparer: StringComparer.Ordinal))
         {
-            var stat = GetOrAddStat(modelId, context.Dimension);
+            var stat = GetOrAddStat(modelId: modelId, dimension: context.Dimension);
             var denominator = _lambda + stat.Count;
             var mean = stat.Count == 0 ? 0d : stat.RewardSum / denominator;
-            var score = ScoreArm(mean, denominator);
+            var score = ScoreArm(mean: mean, denominator: denominator);
 
             if (score > bestScore)
             {
@@ -58,13 +62,13 @@ public abstract class CategoricalContextBanditBaselineBase : IOnlineRegretBaseli
         return best;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public void Update(RegretReplayContext context, string selectedModelId, double reward)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(selectedModelId);
 
-        var stat = GetOrAddStat(selectedModelId, context.Dimension);
+        var stat = GetOrAddStat(modelId: selectedModelId, dimension: context.Dimension);
         stat.Count++;
         stat.RewardSum += reward;
     }
@@ -86,13 +90,12 @@ public abstract class CategoricalContextBanditBaselineBase : IOnlineRegretBaseli
 
         foreach (var task in probingTasks)
         {
-            var context = new RegretReplayContext(task.TaskId, task.Dimension, [.. task.Cells.Keys]);
+            var context = new RegretReplayContext(TaskId: task.TaskId, Dimension: task.Dimension,
+                CandidateModelIds: [.. task.Cells.Keys]);
             var selected = Route(context);
 
-            if (selected is not null && task.Cells.TryGetValue(selected, out var cell))
-            {
-                Update(context, selected, weights.Reward(cell));
-            }
+            if (selected is not null && task.Cells.TryGetValue(key: selected, value: out var cell))
+                Update(context: context, selectedModelId: selected, reward: weights.Reward(cell));
         }
     }
 
@@ -106,13 +109,13 @@ public abstract class CategoricalContextBanditBaselineBase : IOnlineRegretBaseli
 
     private ArmDimensionStat GetOrAddStat(string modelId, string dimension)
     {
-        if (!_stats.TryGetValue(modelId, out var perDimension))
+        if (!_stats.TryGetValue(key: modelId, value: out var perDimension))
         {
             perDimension = new Dictionary<string, ArmDimensionStat>(StringComparer.Ordinal);
             _stats[modelId] = perDimension;
         }
 
-        if (!perDimension.TryGetValue(dimension, out var stat))
+        if (!perDimension.TryGetValue(key: dimension, value: out var stat))
         {
             stat = new ArmDimensionStat();
             perDimension[dimension] = stat;

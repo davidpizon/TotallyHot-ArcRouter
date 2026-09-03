@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.PriceCatalog;
@@ -14,21 +15,15 @@ internal sealed class TempBenchmarkDatabase : IDisposable
 {
     public TempBenchmarkDatabase()
     {
-        var directory = Path.Combine(Path.GetTempPath(), "arcrouter-tests", Guid.NewGuid().ToString("N"));
-        Path_ = Path.Combine(directory, "coderouterbench.db");
+        var directory = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
+            path3: Guid.NewGuid().ToString("N"));
+        Path_ = Path.Combine(path1: directory, path2: "coderouterbench.db");
         Database = new BenchmarkDatabase(Options.Create(new StorageOptions { BenchmarkDatabasePath = Path_ }));
     }
 
     public string Path_ { get; }
 
     public BenchmarkDatabase Database { get; }
-
-    /// <summary>Creates the schema and returns a ledger over it.</summary>
-    public BenchmarkFileLedger CreateLedger()
-    {
-        Database.EnsureCreated();
-        return new BenchmarkFileLedger(Database);
-    }
 
     public void Dispose()
     {
@@ -39,29 +34,31 @@ internal sealed class TempBenchmarkDatabase : IDisposable
         // EnsureCreated() never opened a pooled connection (and its directory may not even exist), so
         // there's nothing to clear.
         if (File.Exists(Path_))
-        {
             try
             {
                 using var connection = Database.OpenConnection();
-                Microsoft.Data.Sqlite.SqliteConnection.ClearPool(connection);
+                SqliteConnection.ClearPool(connection);
             }
-            catch (Microsoft.Data.Sqlite.SqliteException)
+            catch (SqliteException)
             {
                 // Best-effort cleanup; a database mid-teardown on a busy CI box is not a test failure.
             }
-        }
 
-        var directory = System.IO.Path.GetDirectoryName(Path_);
+        var directory = Path.GetDirectoryName(Path_);
         try
         {
-            if (directory is not null && Directory.Exists(directory))
-            {
-                Directory.Delete(directory, recursive: true);
-            }
+            if (directory is not null && Directory.Exists(directory)) Directory.Delete(path: directory, true);
         }
         catch (IOException)
         {
             // Best-effort cleanup; a locked file on a busy CI box is not a test failure.
         }
+    }
+
+    /// <summary>Creates the schema and returns a ledger over it.</summary>
+    public BenchmarkFileLedger CreateLedger()
+    {
+        Database.EnsureCreated();
+        return new BenchmarkFileLedger(Database);
     }
 }

@@ -1,10 +1,13 @@
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Judge;
+using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
+using TotallyHot.ArcRouter.Proxy.Bedrock;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Proxy.Translation;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Quality.Ingress;
+using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Embeddings;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Transcripts;
@@ -26,7 +29,10 @@ public sealed record ProxyMiddlewareDependencies
     /// <summary>Optional session-id resolver; defaults to <see cref="SessionIdResolver"/>.</summary>
     public ISessionIdResolver? SessionIdResolver { get; init; }
 
-    /// <summary>Optional continuity matcher, used when <see cref="SessionIdResolver"/> finds nothing; defaults to a fresh <see cref="MessageHistoryContinuityMatcher"/> private to the instance.</summary>
+    /// <summary>
+    /// Optional continuity matcher, used when <see cref="SessionIdResolver"/> finds nothing; defaults to a fresh
+    /// <see cref="MessageHistoryContinuityMatcher"/> private to the instance.
+    /// </summary>
     public IConversationContinuityMatcher? ContinuityMatcher { get; init; }
 
     /// <summary>Optional turn tracker; defaults to a fresh <see cref="ConversationTurnTracker"/> private to the instance.</summary>
@@ -38,16 +44,29 @@ public sealed record ProxyMiddlewareDependencies
     /// <summary>Optional response-text extractor; defaults to <see cref="ResponseTextExtractor"/>.</summary>
     public IResponseTextExtractor? ResponseTextExtractor { get; init; }
 
-    /// <summary>Optional telemetry publisher; defaults to a fresh <see cref="TelemetryPublisher"/> backed by a private, unshared <see cref="TelemetryBroadcaster"/> (a safe no-op, since nothing is ever registered to receive from it).</summary>
+    /// <summary>
+    /// Optional telemetry publisher; defaults to a fresh <see cref="TelemetryPublisher"/> backed by a private,
+    /// unshared <see cref="TelemetryBroadcaster"/> (a safe no-op, since nothing is ever registered to receive from it).
+    /// </summary>
     public ITelemetryPublisher? TelemetryPublisher { get; init; }
 
-    /// <summary>Optional quality-verifier ingress façade; when supplied, completed responses are enqueued for off-path grading. Best-effort and non-blocking; defaults to <see langword="null"/> (disabled).</summary>
+    /// <summary>
+    /// Optional quality-verifier ingress façade; when supplied, completed responses are enqueued for off-path
+    /// grading. Best-effort and non-blocking; defaults to <see langword="null"/> (disabled).
+    /// </summary>
     public IQualityIngress? QualityIngress { get; init; }
 
-    /// <summary>Optional running-spend tracker; defaults to <see cref="NullSpendTracker"/> (a safe no-op) so existing callers/tests that don't need it are unaffected.</summary>
+    /// <summary>
+    /// Optional running-spend tracker; defaults to <see cref="NullSpendTracker"/> (a safe no-op) so existing
+    /// callers/tests that don't need it are unaffected.
+    /// </summary>
     public ISpendTracker? SpendTracker { get; init; }
 
-    /// <summary>Optional catalog price lookup (docs/router/model-price-catalog.md); when supplied, a paid route's per-request cost is estimated from the auto-refreshed price catalog. Defaults to <see langword="null"/> (disabled), leaving paid-model cost unknown as before.</summary>
+    /// <summary>
+    /// Optional catalog price lookup (docs/router/model-price-catalog.md); when supplied, a paid route's per-request
+    /// cost is estimated from the auto-refreshed price catalog. Defaults to <see langword="null"/> (disabled), leaving
+    /// paid-model cost unknown as before.
+    /// </summary>
     public IModelPriceLookup? PriceLookup { get; init; }
 
     /// <summary>
@@ -69,12 +88,24 @@ public sealed record ProxyMiddlewareDependencies
     /// <see cref="ProxyMiddleware.Dispose"/>. Overridable for tests, which substitute a fake
     /// <c>IAmazonBedrockRuntime</c> so no live AWS call is made.
     /// </summary>
-    public Bedrock.IBedrockRuntimeClientFactory? BedrockClientFactory { get; init; }
+    public IBedrockRuntimeClientFactory? BedrockClientFactory { get; init; }
 
-    /// <summary>Optional per-provider monthly budget store (Governance &gt; Providers). When supplied, a provider whose cap is exhausted is skipped for the request, an all-breached request is rejected with 402, and each served request's usage is recorded against the serving provider. Defaults to <see langword="null"/> (no budgets enforced or recorded), so existing callers/tests are unaffected.</summary>
+    /// <summary>
+    /// Optional per-provider monthly budget store (Governance &gt; Providers). When supplied, a provider whose cap is
+    /// exhausted is skipped for the request, an all-breached request is rejected with 402, and each served request's usage is
+    /// recorded against the serving provider. Defaults to <see langword="null"/> (no budgets enforced or recorded), so
+    /// existing callers/tests are unaffected.
+    /// </summary>
     public IBudgetEnforcer? BudgetStore { get; init; }
 
-    /// <summary>Optional per-upstream-target circuit breaker (<c>docs/router/agent-resilience-strategies.md</c>). Must be the <em>same</em> instance given to the <see cref="RequestInterceptor"/> this middleware wraps (see <c>ServiceCollectionExtensions</c>'s DI wiring) - this class is what records the successes/failures <see cref="RequestInterceptor"/> reads back when ranking candidates. Defaults to a fresh, always-CLOSED instance when omitted, which is behaviorally inert (existing callers/tests unaffected) but decoupled from any interceptor-side instance, so circuit state recorded here would never be seen there.</summary>
+    /// <summary>
+    /// Optional per-upstream-target circuit breaker (<c>docs/router/agent-resilience-strategies.md</c>). Must be the
+    /// <em>same</em> instance given to the <see cref="RequestInterceptor"/> this middleware wraps (see
+    /// <c>ServiceCollectionExtensions</c>'s DI wiring) - this class is what records the successes/failures
+    /// <see cref="RequestInterceptor"/> reads back when ranking candidates. Defaults to a fresh, always-CLOSED instance when
+    /// omitted, which is behaviorally inert (existing callers/tests unaffected) but decoupled from any interceptor-side
+    /// instance, so circuit state recorded here would never be seen there.
+    /// </summary>
     public ICircuitBreaker? CircuitBreaker { get; init; }
 
     /// <summary>
@@ -90,10 +121,18 @@ public sealed record ProxyMiddlewareDependencies
     /// </summary>
     public ToolCallNormalizerFactory? ToolCallNormalizerFactory { get; init; }
 
-    /// <summary>Optional capture for upstream <c>anthropic-ratelimit-*</c> response headers (<c>docs/router/anthropic-reported-usage-plan.md</c> §5), invoked as soon as each attempt's response headers arrive. Defaults to a no-op, so existing callers/tests are unaffected.</summary>
+    /// <summary>
+    /// Optional capture for upstream <c>anthropic-ratelimit-*</c> response headers (
+    /// <c>docs/router/anthropic-reported-usage-plan.md</c> §5), invoked as soon as each attempt's response headers arrive.
+    /// Defaults to a no-op, so existing callers/tests are unaffected.
+    /// </summary>
     public IRateLimitHeaderCapture? RateLimitCapture { get; init; }
 
-    /// <summary>Optional durable usage ledger (<c>docs/router/token-tracking-implementation-plan.md</c> Phase 2), recorded to immediately after <see cref="BudgetStore"/> on the request path. When <see langword="null"/> (e.g. tests constructing this type directly), no ledger row is written - the rest of telemetry is unaffected.</summary>
+    /// <summary>
+    /// Optional durable usage ledger (<c>docs/router/token-tracking-implementation-plan.md</c> Phase 2), recorded to
+    /// immediately after <see cref="BudgetStore"/> on the request path. When <see langword="null"/> (e.g. tests constructing
+    /// this type directly), no ledger row is written - the rest of telemetry is unaffected.
+    /// </summary>
     public IUsageLedger? UsageLedger { get; init; }
 
     /// <summary>
@@ -114,7 +153,7 @@ public sealed record ProxyMiddlewareDependencies
     /// suppressed - unlike the optional collaborators above, there is no "unavailable" state for a static
     /// amortization rate.
     /// </summary>
-    public IOptions<Models.RoutingOptions>? RoutingOptions { get; init; }
+    public IOptions<RoutingOptions>? RoutingOptions { get; init; }
 
     /// <summary>
     /// Optional bridge (docs/router/self-organizing-classification-plan.md Phase T1c) between this
@@ -167,7 +206,7 @@ public sealed record ProxyMiddlewareDependencies
     /// treated as adaptive routing being disabled - matching
     /// <see cref="Models.RoutingOptions.EnableAdaptiveRouting"/>'s own off-by-default coded value.
     /// </summary>
-    public IOptionsMonitor<Models.RoutingOptions>? RoutingOptionsMonitor { get; init; }
+    public IOptionsMonitor<RoutingOptions>? RoutingOptionsMonitor { get; init; }
 
     /// <summary>
     /// Optional live shadow-judge options monitor, consulted at the response-text retention site so raw
@@ -177,7 +216,7 @@ public sealed record ProxyMiddlewareDependencies
     /// says so, not at the next restart. Defaults to <see langword="null"/>, treated as the judge being
     /// disabled, matching <see cref="Judge.JudgeOptions.Enabled"/>'s own off-by-default coded value.
     /// </summary>
-    public IOptionsMonitor<Judge.JudgeOptions>? JudgeOptionsMonitor { get; init; }
+    public IOptionsMonitor<JudgeOptions>? JudgeOptionsMonitor { get; init; }
 
     /// <summary>
     /// Optional runtime kill switch, toggled from the GUI system tray via
@@ -186,7 +225,7 @@ public sealed record ProxyMiddlewareDependencies
     /// attempted; <see langword="null"/> (the default) means routing is always accepted, matching the
     /// enabled-by-default coded value <see cref="Router.RoutingGateStore"/> itself falls back to.
     /// </summary>
-    public Router.IRoutingGate? RoutingGate { get; init; }
+    public IRoutingGate? RoutingGate { get; init; }
 
     /// <summary>
     /// Optional source of each model's detected tool-call dialect, used only to describe models on

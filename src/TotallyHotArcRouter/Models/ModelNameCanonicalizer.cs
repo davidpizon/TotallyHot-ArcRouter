@@ -49,16 +49,17 @@ namespace TotallyHot.ArcRouter.Models;
 public static class ModelNameCanonicalizer
 {
     // Strips a trailing 8-digit dated snapshot suffix, e.g. "-20250929" off "claude-sonnet-4-5-20250929".
-    private static readonly Regex SnapshotSuffix = new(@"-\d{8}$", RegexOptions.Compiled);
+    private static readonly Regex SnapshotSuffix = new(pattern: @"-\d{8}$", options: RegexOptions.Compiled);
 
     // A small, fixed set of version/tier suffixes aggregators commonly append that a router's own
     // ModelList entry never carries. Not exhaustive by design - an unrecognized suffix simply falls through
     // to the next rung rather than being guessed at.
-    private static readonly Regex VersionSuffix = new(@"(-latest|-preview|-exp|-beta|:free)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex VersionSuffix = new(pattern: @"(-latest|-preview|-exp|-beta|:free)$",
+        options: RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     // Matches only a dot sitting between two digits, so a version separator is unified without touching
     // a vendor-prefixed id such as "anthropic.claude-3-5-sonnet-20241022-v2:0".
-    private static readonly Regex VersionSeparator = new(@"(?<=\d)\.(?=\d)", RegexOptions.Compiled);
+    private static readonly Regex VersionSeparator = new(pattern: @"(?<=\d)\.(?=\d)", options: RegexOptions.Compiled);
 
     /// <summary>
     /// Normalizes a model id into the form every other stage assumes: trimmed, stripped of a leading
@@ -79,18 +80,13 @@ public static class ModelNameCanonicalizer
         if (provider is not null)
         {
             var prefix = provider.Trim() + "/";
-            if (trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            {
+            if (trimmed.StartsWith(value: prefix, comparisonType: StringComparison.OrdinalIgnoreCase))
                 trimmed = trimmed[prefix.Length..];
-            }
         }
         else
         {
             var separator = trimmed.IndexOf('/');
-            if (separator >= 0)
-            {
-                trimmed = trimmed[(separator + 1)..];
-            }
+            if (separator >= 0) trimmed = trimmed[(separator + 1)..];
         }
 
         return trimmed.ToLowerInvariant();
@@ -114,7 +110,7 @@ public static class ModelNameCanonicalizer
     public static string StripSnapshotSuffix(string modelId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
-        return SnapshotSuffix.Replace(modelId, string.Empty);
+        return SnapshotSuffix.Replace(input: modelId, replacement: string.Empty);
     }
 
     /// <summary>
@@ -125,7 +121,7 @@ public static class ModelNameCanonicalizer
     public static string StripVersionSuffix(string modelId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
-        return VersionSuffix.Replace(modelId, string.Empty);
+        return VersionSuffix.Replace(input: modelId, replacement: string.Empty);
     }
 
     /// <summary>
@@ -137,7 +133,7 @@ public static class ModelNameCanonicalizer
     public static string UnifyVersionSeparators(string modelId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
-        return VersionSeparator.Replace(modelId, "-");
+        return VersionSeparator.Replace(input: modelId, replacement: "-");
     }
 
     /// <summary>
@@ -166,6 +162,6 @@ public static class ModelNameCanonicalizer
     public static string Canonicalize(string modelId, string? provider = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
-        return UnifyVersionSeparators(NormalizeBase(modelId, provider));
+        return UnifyVersionSeparators(NormalizeBase(modelId: modelId, provider: provider));
     }
 }

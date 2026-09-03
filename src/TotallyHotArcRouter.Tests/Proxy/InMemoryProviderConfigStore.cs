@@ -17,7 +17,7 @@ internal sealed class InMemoryProviderConfigStore : IProviderConfigStore
     {
         var normalized = Normalize(options);
         normalized.EnsureValid();
-        _snapshot = new ProviderConfigSnapshot(normalized, 0);
+        _snapshot = new ProviderConfigSnapshot(Options: normalized, 0);
     }
 
     public ProviderConfigSnapshot Snapshot => _snapshot;
@@ -29,7 +29,7 @@ internal sealed class InMemoryProviderConfigStore : IProviderConfigStore
         ArgumentNullException.ThrowIfNull(next);
         var normalized = Normalize(next);
         normalized.EnsureValid();
-        _snapshot = new ProviderConfigSnapshot(normalized, _snapshot.Version + 1);
+        _snapshot = new ProviderConfigSnapshot(Options: normalized, Version: _snapshot.Version + 1);
         Changed?.Invoke();
         return Task.CompletedTask;
     }
@@ -40,24 +40,29 @@ internal sealed class InMemoryProviderConfigStore : IProviderConfigStore
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         ArgumentNullException.ThrowIfNull(provider);
         var current = _snapshot.Options;
-        var providers = new Dictionary<string, ProviderOptions>(current.Providers, StringComparer.OrdinalIgnoreCase)
-        {
-            [key] = provider
-        };
-        return ReplaceAsync(new ModelRoutingOptions { Providers = providers, ModelList = [.. current.ModelList] }, cancellationToken);
+        var providers =
+            new Dictionary<string, ProviderOptions>(dictionary: current.Providers,
+                comparer: StringComparer.OrdinalIgnoreCase)
+            {
+                [key] = provider
+            };
+        return ReplaceAsync(next: new ModelRoutingOptions { Providers = providers, ModelList = [.. current.ModelList] },
+            cancellationToken: cancellationToken);
     }
 
     public Task RemoveProviderAsync(string key, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         var current = _snapshot.Options;
-        var providers = new Dictionary<string, ProviderOptions>(current.Providers, StringComparer.OrdinalIgnoreCase);
+        var providers = new Dictionary<string, ProviderOptions>(dictionary: current.Providers,
+            comparer: StringComparer.OrdinalIgnoreCase);
         providers.Remove(key);
         // Mirror ProviderConfigStore's cascade: the provider's models go with it, in the same edit.
         var models = current.ModelList
-            .Where(m => !string.Equals(m.Provider, key, StringComparison.OrdinalIgnoreCase))
+            .Where(m => !string.Equals(a: m.Provider, b: key, comparisonType: StringComparison.OrdinalIgnoreCase))
             .ToList();
-        return ReplaceAsync(new ModelRoutingOptions { Providers = providers, ModelList = models }, cancellationToken);
+        return ReplaceAsync(next: new ModelRoutingOptions { Providers = providers, ModelList = models },
+            cancellationToken: cancellationToken);
     }
 
     public Task UpsertModelAsync(ModelRouteEntry entry, CancellationToken cancellationToken = default)
@@ -68,7 +73,8 @@ internal sealed class InMemoryProviderConfigStore : IProviderConfigStore
         var models = current.ModelList
             .Select(m =>
             {
-                if (string.Equals(m.ModelName, entry.ModelName, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(a: m.ModelName, b: entry.ModelName,
+                        comparisonType: StringComparison.OrdinalIgnoreCase))
                 {
                     replaced = true;
                     return entry;
@@ -78,18 +84,16 @@ internal sealed class InMemoryProviderConfigStore : IProviderConfigStore
             })
             .ToList();
 
-        if (!replaced)
-        {
-            models.Add(entry);
-        }
+        if (!replaced) models.Add(entry);
 
         return ReplaceAsync(
-            new ModelRoutingOptions
+            next: new ModelRoutingOptions
             {
-                Providers = new Dictionary<string, ProviderOptions>(current.Providers, StringComparer.OrdinalIgnoreCase),
+                Providers = new Dictionary<string, ProviderOptions>(dictionary: current.Providers,
+                    comparer: StringComparer.OrdinalIgnoreCase),
                 ModelList = models
             },
-            cancellationToken);
+            cancellationToken: cancellationToken);
     }
 
     public Task RemoveModelAsync(string modelName, CancellationToken cancellationToken = default)
@@ -97,24 +101,29 @@ internal sealed class InMemoryProviderConfigStore : IProviderConfigStore
         ArgumentException.ThrowIfNullOrWhiteSpace(modelName);
         var current = _snapshot.Options;
         var models = current.ModelList
-            .Where(m => !string.Equals(m.ModelName, modelName, StringComparison.OrdinalIgnoreCase))
+            .Where(m => !string.Equals(a: m.ModelName, b: modelName,
+                comparisonType: StringComparison.OrdinalIgnoreCase))
             .ToList();
 
         return ReplaceAsync(
-            new ModelRoutingOptions
+            next: new ModelRoutingOptions
             {
-                Providers = new Dictionary<string, ProviderOptions>(current.Providers, StringComparer.OrdinalIgnoreCase),
+                Providers = new Dictionary<string, ProviderOptions>(dictionary: current.Providers,
+                    comparer: StringComparer.OrdinalIgnoreCase),
                 ModelList = models
             },
-            cancellationToken);
+            cancellationToken: cancellationToken);
     }
 
-    private static ModelRoutingOptions Normalize(ModelRoutingOptions options) => new()
+    private static ModelRoutingOptions Normalize(ModelRoutingOptions options)
     {
-        Providers = options.Providers is null
-            ? new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
-            : new Dictionary<string, ProviderOptions>(options.Providers, StringComparer.OrdinalIgnoreCase),
-        ModelList = options.ModelList is null ? [] : [.. options.ModelList]
-    };
+        return new ModelRoutingOptions
+        {
+            Providers = options.Providers is null
+                ? new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, ProviderOptions>(dictionary: options.Providers,
+                    comparer: StringComparer.OrdinalIgnoreCase),
+            ModelList = options.ModelList is null ? [] : [.. options.ModelList]
+        };
+    }
 }
-

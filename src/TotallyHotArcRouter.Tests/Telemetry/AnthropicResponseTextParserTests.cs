@@ -10,21 +10,22 @@ public class AnthropicResponseTextParserTests
     {
         const string json = """{"id":"msg_1","content":[{"type":"text","text":"Hi there!"}]}""";
 
-        var result = AnthropicResponseTextParser.TryExtractFromNonStreamingBody(json, out var text);
+        var result = AnthropicResponseTextParser.TryExtractFromNonStreamingBody(json: json, text: out var text);
 
         Assert.True(result);
-        Assert.Equal("Hi there!", text);
+        Assert.Equal(expected: "Hi there!", actual: text);
     }
 
     [Fact]
     public void TryExtractFromNonStreamingBody_MultipleTextBlocks_ConcatenatesWithSpace()
     {
-        const string json = """{"id":"msg_1","content":[{"type":"text","text":"Hello,"},{"type":"text","text":"world."}]}""";
+        const string json =
+            """{"id":"msg_1","content":[{"type":"text","text":"Hello,"},{"type":"text","text":"world."}]}""";
 
-        var result = AnthropicResponseTextParser.TryExtractFromNonStreamingBody(json, out var text);
+        var result = AnthropicResponseTextParser.TryExtractFromNonStreamingBody(json: json, text: out var text);
 
         Assert.True(result);
-        Assert.Equal("Hello, world.", text);
+        Assert.Equal(expected: "Hello, world.", actual: text);
     }
 
     [Fact]
@@ -32,7 +33,7 @@ public class AnthropicResponseTextParserTests
     {
         const string json = """{"id":"msg_1","content":[{"type":"tool_use","id":"t1","name":"search"}]}""";
 
-        var result = AnthropicResponseTextParser.TryExtractFromNonStreamingBody(json, out _);
+        var result = AnthropicResponseTextParser.TryExtractFromNonStreamingBody(json: json, text: out _);
 
         Assert.False(result);
     }
@@ -40,7 +41,7 @@ public class AnthropicResponseTextParserTests
     [Fact]
     public void TryExtractFromNonStreamingBody_MalformedJson_ReturnsFalse()
     {
-        var result = AnthropicResponseTextParser.TryExtractFromNonStreamingBody("{ not json", out _);
+        var result = AnthropicResponseTextParser.TryExtractFromNonStreamingBody(json: "{ not json", text: out _);
 
         Assert.False(result);
     }
@@ -56,10 +57,10 @@ public class AnthropicResponseTextParserTests
             "data: {\"type\":\"content_block_stop\"}\n\n" +
             "data: {\"type\":\"message_stop\"}\n\n";
 
-        var result = AnthropicResponseTextParser.TryExtractFromStreamingBuffer(sse, out var text);
+        var result = AnthropicResponseTextParser.TryExtractFromStreamingBuffer(sseText: sse, text: out var text);
 
         Assert.True(result);
-        Assert.Equal("Hi there", text);
+        Assert.Equal(expected: "Hi there", actual: text);
     }
 
     [Fact]
@@ -70,10 +71,10 @@ public class AnthropicResponseTextParserTests
             "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"x\\\":\"}}\n\n" +
             "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"actual reply\"}}\n\n";
 
-        var result = AnthropicResponseTextParser.TryExtractFromStreamingBuffer(sse, out var text);
+        var result = AnthropicResponseTextParser.TryExtractFromStreamingBuffer(sseText: sse, text: out var text);
 
         Assert.True(result);
-        Assert.Equal("actual reply", text);
+        Assert.Equal(expected: "actual reply", actual: text);
     }
 
     [Fact]
@@ -81,7 +82,7 @@ public class AnthropicResponseTextParserTests
     {
         var sse = "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10}}}\n\n";
 
-        var result = AnthropicResponseTextParser.TryExtractFromStreamingBuffer(sse, out _);
+        var result = AnthropicResponseTextParser.TryExtractFromStreamingBuffer(sseText: sse, text: out _);
 
         Assert.False(result);
     }
@@ -89,9 +90,8 @@ public class AnthropicResponseTextParserTests
     [Fact]
     public void TryExtractFromStreamingBuffer_EmptyBuffer_ReturnsFalse()
     {
-        var result = AnthropicResponseTextParser.TryExtractFromStreamingBuffer(string.Empty, out _);
+        var result = AnthropicResponseTextParser.TryExtractFromStreamingBuffer(sseText: string.Empty, text: out _);
 
         Assert.False(result);
     }
 }
-

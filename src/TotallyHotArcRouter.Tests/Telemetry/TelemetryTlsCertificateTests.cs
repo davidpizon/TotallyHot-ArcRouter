@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Security.Cryptography.X509Certificates;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Telemetry;
 
@@ -12,81 +13,75 @@ namespace TotallyHot.ArcRouter.Tests.Telemetry;
 /// </summary>
 public sealed class TelemetryTlsCertificateTests : IDisposable
 {
-    private readonly string _directory = Path.Combine(Path.GetTempPath(), "arcrouter-tests", Guid.NewGuid().ToString("N"));
+    private readonly string _directory = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
+        path3: Guid.NewGuid().ToString("N"));
 
-    private string CertificatePath => Path.Combine(_directory, "telemetry-cert.pfx");
-    private string PasswordPath => Path.Combine(_directory, "telemetry-cert-pwd.txt");
-    private string SecretStorePath => Path.Combine(_directory, "secrets.dat");
+    private string CertificatePath => Path.Combine(path1: _directory, path2: "telemetry-cert.pfx");
+    private string PasswordPath => Path.Combine(path1: _directory, path2: "telemetry-cert-pwd.txt");
+    private string SecretStorePath => Path.Combine(path1: _directory, path2: "secrets.dat");
 
     private static bool IsWindows => RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_directory)) Directory.Delete(path: _directory, true);
+    }
 
     [Fact]
     public void GetOrCreate_NoExistingCertificate_GeneratesOne_AndStoresThePasswordInTheProtectedStore()
     {
-        if (!IsWindows)
-        {
-            return;
-        }
+        if (!IsWindows) return;
 
         var secretStore = new ProtectedSecretStore(SecretStorePath);
 
-        using var certificate = TelemetryTlsCertificate.GetOrCreate(CertificatePath, PasswordPath, secretStore);
+        using var certificate = TelemetryTlsCertificate.GetOrCreate(certificatePath: CertificatePath,
+            passwordPath: PasswordPath, secretStore: secretStore);
 
         Assert.True(File.Exists(CertificatePath));
         Assert.False(File.Exists(PasswordPath));
-        Assert.True(secretStore.TryRead("telemetry:cert-password", out var password));
+        Assert.True(secretStore.TryRead(name: "telemetry:cert-password", value: out var password));
         Assert.False(string.IsNullOrWhiteSpace(password));
-        Assert.Equal("localhost", certificate.GetNameInfo(System.Security.Cryptography.X509Certificates.X509NameType.SimpleName, forIssuer: false));
+        Assert.Equal(expected: "localhost", actual: certificate.GetNameInfo(nameType: X509NameType.SimpleName, false));
     }
 
     [Fact]
     public void GetOrCreate_CalledTwice_ReturnsTheSamePersistedCertificate()
     {
-        if (!IsWindows)
-        {
-            return;
-        }
+        if (!IsWindows) return;
 
         var secretStore = new ProtectedSecretStore(SecretStorePath);
 
-        using var first = TelemetryTlsCertificate.GetOrCreate(CertificatePath, PasswordPath, secretStore);
-        using var second = TelemetryTlsCertificate.GetOrCreate(CertificatePath, PasswordPath, secretStore);
+        using var first = TelemetryTlsCertificate.GetOrCreate(certificatePath: CertificatePath,
+            passwordPath: PasswordPath, secretStore: secretStore);
+        using var second = TelemetryTlsCertificate.GetOrCreate(certificatePath: CertificatePath,
+            passwordPath: PasswordPath, secretStore: secretStore);
 
-        Assert.Equal(first.Thumbprint, second.Thumbprint);
+        Assert.Equal(expected: first.Thumbprint, actual: second.Thumbprint);
     }
 
     [Fact]
     public void GetOrCreate_LegacyPasswordFile_MigratesItIntoTheStore_AndDeletesTheFile()
     {
-        if (!IsWindows)
-        {
-            return;
-        }
+        if (!IsWindows) return;
 
         // Seed a certificate + password via a throwaway store, then reconstruct the pre-Phase-3 world: the
         // password moved onto a plaintext file and removed from the store.
-        var seedStore = new ProtectedSecretStore(Path.Combine(_directory, "seed-secrets.dat"));
-        using (TelemetryTlsCertificate.GetOrCreate(CertificatePath, PasswordPath, seedStore))
+        var seedStore = new ProtectedSecretStore(Path.Combine(path1: _directory, path2: "seed-secrets.dat"));
+        using (TelemetryTlsCertificate.GetOrCreate(certificatePath: CertificatePath, passwordPath: PasswordPath,
+                   secretStore: seedStore))
         {
         }
 
-        Assert.True(seedStore.TryRead("telemetry:cert-password", out var seededPassword));
+        Assert.True(seedStore.TryRead(name: "telemetry:cert-password", value: out var seededPassword));
         seedStore.Delete("telemetry:cert-password");
-        File.WriteAllText(PasswordPath, seededPassword);
+        File.WriteAllText(path: PasswordPath, contents: seededPassword);
 
         var freshStore = new ProtectedSecretStore(SecretStorePath);
-        using var certificate = TelemetryTlsCertificate.GetOrCreate(CertificatePath, PasswordPath, freshStore);
+        using var certificate = TelemetryTlsCertificate.GetOrCreate(certificatePath: CertificatePath,
+            passwordPath: PasswordPath, secretStore: freshStore);
 
         Assert.False(File.Exists(PasswordPath));
-        Assert.True(freshStore.TryRead("telemetry:cert-password", out var migratedPassword));
-        Assert.Equal(seededPassword, migratedPassword);
-    }
-
-    public void Dispose()
-    {
-        if (Directory.Exists(_directory))
-        {
-            Directory.Delete(_directory, recursive: true);
-        }
+        Assert.True(freshStore.TryRead(name: "telemetry:cert-password", value: out var migratedPassword));
+        Assert.Equal(expected: seededPassword, actual: migratedPassword);
     }
 }

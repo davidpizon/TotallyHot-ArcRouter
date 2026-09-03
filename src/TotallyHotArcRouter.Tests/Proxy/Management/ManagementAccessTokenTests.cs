@@ -18,7 +18,8 @@ public sealed class ManagementAccessTokenTests
 
             Assert.False(string.IsNullOrWhiteSpace(token));
             // 32 random bytes, base64url-encoded without padding, is at least 42 characters.
-            Assert.True(token.Length >= 40, $"Expected a long random token; got '{token}' ({token.Length} chars).");
+            Assert.True(condition: token.Length >= 40,
+                userMessage: $"Expected a long random token; got '{token}' ({token.Length} chars).");
             Assert.True(File.Exists(path));
         }
         finally
@@ -36,7 +37,7 @@ public sealed class ManagementAccessTokenTests
             var first = ManagementAccessToken.GetOrCreate(path);
             var second = ManagementAccessToken.GetOrCreate(path);
 
-            Assert.Equal(first, second);
+            Assert.Equal(expected: first, actual: second);
         }
         finally
         {
@@ -70,32 +71,32 @@ public sealed class ManagementAccessTokenTests
     [Fact]
     public void Verify_MatchingToken_ReturnsTrue()
     {
-        Assert.True(ManagementAccessToken.Verify("abc123", "abc123"));
+        Assert.True(ManagementAccessToken.Verify(presented: "abc123", expected: "abc123"));
     }
 
     [Fact]
     public void Verify_WrongToken_ReturnsFalse()
     {
-        Assert.False(ManagementAccessToken.Verify("wrong", "abc123"));
+        Assert.False(ManagementAccessToken.Verify(presented: "wrong", expected: "abc123"));
     }
 
     [Fact]
     public void Verify_TruncatedToken_ReturnsFalse()
     {
-        Assert.False(ManagementAccessToken.Verify("abc", "abc123"));
+        Assert.False(ManagementAccessToken.Verify(presented: "abc", expected: "abc123"));
     }
 
     [Fact]
     public void Verify_NullOrEmptyPresented_ReturnsFalse()
     {
-        Assert.False(ManagementAccessToken.Verify(null, "abc123"));
-        Assert.False(ManagementAccessToken.Verify(string.Empty, "abc123"));
+        Assert.False(ManagementAccessToken.Verify(null, expected: "abc123"));
+        Assert.False(ManagementAccessToken.Verify(presented: string.Empty, expected: "abc123"));
     }
 
     [Fact]
     public void Verify_EmptyExpected_Throws()
     {
-        Assert.Throws<ArgumentException>(() => ManagementAccessToken.Verify("abc", string.Empty));
+        Assert.Throws<ArgumentException>(() => ManagementAccessToken.Verify(presented: "abc", expected: string.Empty));
     }
 
     /// <summary>
@@ -107,10 +108,7 @@ public sealed class ManagementAccessTokenTests
     [Fact]
     public void GetOrCreate_OnWindows_GrantsSystemWriteAndUsersReadOnly()
     {
-        if (!OperatingSystem.IsWindows())
-        {
-            return;
-        }
+        if (!OperatingSystem.IsWindows()) return;
 
         var path = TempTokenPath();
         try
@@ -135,7 +133,7 @@ public sealed class ManagementAccessTokenTests
     {
         var security = new FileInfo(path).GetAccessControl();
         var rules = security
-            .GetAccessRules(includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier))
+            .GetAccessRules(true, true, targetType: typeof(SecurityIdentifier))
             .Cast<FileSystemAccessRule>()
             .ToList();
 
@@ -143,10 +141,10 @@ public sealed class ManagementAccessTokenTests
         // whatever ACL the parent (or its parent, up to the drive root) happens to carry still applies.
         Assert.True(security.AreAccessRulesProtected);
 
-        var system = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
-        var users = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
+        var system = new SecurityIdentifier(sidType: WellKnownSidType.LocalSystemSid, null);
+        var users = new SecurityIdentifier(sidType: WellKnownSidType.BuiltinUsersSid, null);
 
-        Assert.Contains(rules, rule =>
+        Assert.Contains(collection: rules, filter: rule =>
             rule.IdentityReference.Equals(system) &&
             rule.AccessControlType == AccessControlType.Allow &&
             rule.FileSystemRights.HasFlag(FileSystemRights.FullControl));
@@ -156,9 +154,9 @@ public sealed class ManagementAccessTokenTests
 
         // Read, never write: the interactive user presents this credential but must not be able to
         // replace the one the service trusts.
-        Assert.All(usersRules, rule =>
+        Assert.All(collection: usersRules, action: rule =>
         {
-            Assert.Equal(AccessControlType.Allow, rule.AccessControlType);
+            Assert.Equal(expected: AccessControlType.Allow, actual: rule.AccessControlType);
             Assert.False(rule.FileSystemRights.HasFlag(FileSystemRights.Write));
             Assert.False(rule.FileSystemRights.HasFlag(FileSystemRights.FullControl));
         });
@@ -173,23 +171,22 @@ public sealed class ManagementAccessTokenTests
     public void DefaultPath_IsMachineWideNotPerUser()
     {
         var expected = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-            "TotallyHotArcRouter",
-            "management-token.txt");
+            path1: Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            path2: "TotallyHotArcRouter",
+            path3: "management-token.txt");
 
-        Assert.Equal(expected, ManagementAccessToken.DefaultPath());
+        Assert.Equal(expected: expected, actual: ManagementAccessToken.DefaultPath());
     }
 
-    private static string TempTokenPath() =>
-        Path.Combine(Path.GetTempPath(), "arcrouter-tests", Guid.NewGuid().ToString("N"), "management-token.txt");
+    private static string TempTokenPath()
+    {
+        return Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests", path3: Guid.NewGuid().ToString("N"),
+            path4: "management-token.txt");
+    }
 
     private static void CleanUp(string path)
     {
         var directory = Path.GetDirectoryName(path);
-        if (directory is not null && Directory.Exists(directory))
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        if (directory is not null && Directory.Exists(directory)) Directory.Delete(path: directory, true);
     }
 }
-

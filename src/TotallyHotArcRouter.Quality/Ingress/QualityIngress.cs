@@ -11,9 +11,9 @@ namespace TotallyHot.ArcRouter.Quality.Ingress;
 public sealed class QualityIngress : IQualityIngress
 {
     private readonly ISignalExtractor _extractor;
-    private readonly IQualityQueue _queue;
-    private readonly QualityOptions _options;
     private readonly ILogger<QualityIngress> _logger;
+    private readonly QualityOptions _options;
+    private readonly IQualityQueue _queue;
 
     /// <summary>Initializes a new instance of the <see cref="QualityIngress"/> class.</summary>
     /// <param name="extractor">The signal extractor.</param>
@@ -37,20 +37,14 @@ public sealed class QualityIngress : IQualityIngress
         _logger = logger;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public void TryIngest(QualityIngestContext context)
     {
         try
         {
-            if (context is null || !_options.Enabled)
-            {
-                return;
-            }
+            if (context is null || !_options.Enabled) return;
 
-            if (_options.SamplingRate < 1.0 && Random.Shared.NextDouble() >= _options.SamplingRate)
-            {
-                return;
-            }
+            if (_options.SamplingRate < 1.0 && Random.Shared.NextDouble() >= _options.SamplingRate) return;
 
             var request = _extractor.Extract(new SignalExtractionContext(
                 ResponseText: context.ResponseText,
@@ -59,24 +53,18 @@ public sealed class QualityIngress : IQualityIngress
                 CorrelationId: context.CorrelationId,
                 SessionId: context.SessionId));
 
-            if (request is null)
-            {
-                return;
-            }
+            if (request is null) return;
 
             if (!_queue.TryEnqueue(request))
-            {
                 _logger.LogDebug(
-                    "Grading queue full; dropped {Language} request (correlation {CorrelationId}).",
+                    message: "Grading queue full; dropped {Language} request (correlation {CorrelationId}).",
                     request.Language,
                     request.CorrelationId);
-            }
         }
         catch (Exception ex)
         {
             // Best-effort by contract: swallow everything so the proxy forward is never affected.
-            _logger.LogDebug(ex, "Quality ingress failed; the forwarded response was unaffected.");
+            _logger.LogDebug(exception: ex, message: "Quality ingress failed; the forwarded response was unaffected.");
         }
     }
 }
-

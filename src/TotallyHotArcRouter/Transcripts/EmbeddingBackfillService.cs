@@ -13,15 +13,15 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// </summary>
 public sealed class EmbeddingBackfillService : BackgroundService
 {
-    private static readonly TimeSpan CheckInterval = TimeSpan.FromMinutes(5);
     private const int BackfillBatchSize = 100;
+    private static readonly TimeSpan CheckInterval = TimeSpan.FromMinutes(5);
+    private readonly IEmbeddingClient _embeddingClient;
 
     private readonly ILogger<EmbeddingBackfillService> _logger;
-    private readonly ITranscriptStore _transcriptStore;
-    private readonly IEmbeddingClient _embeddingClient;
     private readonly IMemoryEntryStore _memoryEntryStore;
-    private readonly TranscriptOptions _transcriptOptions;
     private readonly RoutingOptions _routingOptions;
+    private readonly TranscriptOptions _transcriptOptions;
+    private readonly ITranscriptStore _transcriptStore;
 
     /// <summary>Initializes a new instance of the <see cref="EmbeddingBackfillService"/> class.</summary>
     /// <param name="logger">The logger.</param>
@@ -53,7 +53,7 @@ public sealed class EmbeddingBackfillService : BackgroundService
         _routingOptions = routingOptions.Value;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         if (!_transcriptOptions.EnableEmbeddingBackfill || !_transcriptOptions.Enabled)
@@ -73,10 +73,10 @@ public sealed class EmbeddingBackfillService : BackgroundService
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    _logger.LogError(ex, "Embedding backfill check threw unexpectedly; continuing.");
+                    _logger.LogError(exception: ex,
+                        message: "Embedding backfill check threw unexpectedly; continuing.");
                 }
-            }
-            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
+            } while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
         }
         catch (OperationCanceledException)
         {
@@ -93,35 +93,30 @@ public sealed class EmbeddingBackfillService : BackgroundService
     /// <param name="cancellationToken">A cancellation token.</param>
     internal async Task CheckAndBackfillAsync(CancellationToken cancellationToken)
     {
-        if (!_transcriptOptions.EnableEmbeddingBackfill || !_transcriptOptions.Enabled)
-        {
-            return;
-        }
+        if (!_transcriptOptions.EnableEmbeddingBackfill || !_transcriptOptions.Enabled) return;
 
         // Load up to BackfillBatchSize unembedded scored transcript ids
-        var unembeddedIds = await _transcriptStore.LoadUnembeddedScoredAsync(BackfillBatchSize, cancellationToken)
+        var unembeddedIds = await _transcriptStore
+            .LoadUnembeddedScoredAsync(limit: BackfillBatchSize, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
-        if (unembeddedIds.Count == 0)
-        {
-            return;
-        }
+        if (unembeddedIds.Count == 0) return;
 
         var successCount = 0;
         var failureCount = 0;
 
         foreach (var transcriptId in unembeddedIds)
-        {
             try
             {
                 // Retrieve the full transcript row to get the prompt text
-                var transcript = await _transcriptStore.GetTranscriptAsync(transcriptId, cancellationToken)
+                var transcript = await _transcriptStore
+                    .GetTranscriptAsync(id: transcriptId, cancellationToken: cancellationToken)
                     .ConfigureAwait(false);
 
                 if (transcript is null)
                 {
                     _logger.LogWarning(
-                        "Unembedded transcript row {TranscriptId} not found during backfill; skipping.",
+                        message: "Unembedded transcript row {TranscriptId} not found during backfill; skipping.",
                         transcriptId);
                     continue;
                 }
@@ -130,7 +125,7 @@ public sealed class EmbeddingBackfillService : BackgroundService
                 if (string.IsNullOrWhiteSpace(transcript.PromptText))
                 {
                     _logger.LogDebug(
-                        "Transcript row {TranscriptId} has no prompt text; skipping embedding backfill.",
+                        message: "Transcript row {TranscriptId} has no prompt text; skipping embedding backfill.",
                         transcriptId);
                     continue;
                 }
@@ -139,14 +134,15 @@ public sealed class EmbeddingBackfillService : BackgroundService
                 EmbeddingResult embedding;
                 try
                 {
-                    embedding = await _embeddingClient.EmbedAsync(transcript.PromptText, cancellationToken)
+                    embedding = await _embeddingClient
+                        .EmbedAsync(text: transcript.PromptText, cancellationToken: cancellationToken)
                         .ConfigureAwait(false);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     _logger.LogWarning(
-                        ex,
-                        "Failed to compute embedding for transcript {TranscriptId} during backfill; skipping.",
+                        exception: ex,
+                        message: "Failed to compute embedding for transcript {TranscriptId} during backfill; skipping.",
                         transcriptId);
                     failureCount++;
                     continue;
@@ -154,12 +150,12 @@ public sealed class EmbeddingBackfillService : BackgroundService
 
                 // Create the memory entry with the computed embedding
                 var memoryEntry = new MemoryEntry(
-                    Id: 0,
+                    0,
                     TaskEmbedding: embedding.Vector,
                     ChosenModel: transcript.RoutedModel,
                     Score: transcript.Score ?? 0.0,
                     Cost: (double)(transcript.Cost ?? 0.0m),
-                    VerifierTrace: null,
+                    null,
                     CreatedAtUtc: transcript.CreatedAtUtc,
                     IsExploratory: transcript.IsExploratory,
                     Propensity: transcript.Propensity,
@@ -169,14 +165,17 @@ public sealed class EmbeddingBackfillService : BackgroundService
                     // was configured when the underlying transcript row was originally captured.
                     EmbeddingModel: _embeddingClient.ModelIdentity);
 
-                var persistedEntry = await _memoryEntryStore.AppendAsync(memoryEntry, cancellationToken)
+                var persistedEntry = await _memoryEntryStore
+                    .AppendAsync(entry: memoryEntry, cancellationToken: cancellationToken)
                     .ConfigureAwait(false);
 
                 // Link the transcript row back to the memory entry
-                await _transcriptStore.LinkMemoryEntryAsync(transcriptId, persistedEntry.Id, cancellationToken)
+                await _transcriptStore.LinkMemoryEntryAsync(transcriptId: transcriptId,
+                        memoryEntryId: persistedEntry.Id, cancellationToken: cancellationToken)
                     .ConfigureAwait(false);
 
                 _logger.LogInformation(
+                    message:
                     "Backfilled embedding for transcript {TranscriptId} (correlation {CorrelationId}); linked to memory entry {MemoryEntryId}.",
                     transcriptId,
                     transcript.CorrelationId,
@@ -191,20 +190,18 @@ public sealed class EmbeddingBackfillService : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogError(
-                    ex,
-                    "Unexpected error during embedding backfill for transcript {TranscriptId}; skipping.",
+                    exception: ex,
+                    message: "Unexpected error during embedding backfill for transcript {TranscriptId}; skipping.",
                     transcriptId);
                 failureCount++;
             }
-        }
 
         if (successCount > 0 || failureCount > 0)
-        {
             _logger.LogInformation(
+                message:
                 "Embedding backfill batch complete: {SuccessCount} succeeded, {FailureCount} failed, {BatchSize} processed.",
                 successCount,
                 failureCount,
                 unembeddedIds.Count);
-        }
     }
 }

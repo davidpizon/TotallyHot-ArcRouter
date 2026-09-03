@@ -35,19 +35,14 @@ public sealed record RoutingDecision
         double propensity = 1.0)
     {
         if (string.IsNullOrWhiteSpace(selectedModel))
-        {
-            throw new ArgumentException("A selected model is required.", nameof(selectedModel));
-        }
+            throw new ArgumentException(message: "A selected model is required.", paramName: nameof(selectedModel));
 
         if (confidence is < 0 or > 1)
-        {
-            throw new ArgumentOutOfRangeException(nameof(confidence), "Confidence must be between 0 and 1.");
-        }
+            throw new ArgumentOutOfRangeException(paramName: nameof(confidence),
+                message: "Confidence must be between 0 and 1.");
 
         if (string.IsNullOrWhiteSpace(rationale))
-        {
-            throw new ArgumentException("A rationale is required.", nameof(rationale));
-        }
+            throw new ArgumentException(message: "A rationale is required.", paramName: nameof(rationale));
 
         SelectedModel = selectedModel;
         Confidence = confidence;
@@ -58,7 +53,7 @@ public sealed record RoutingDecision
 
         var copiedScores = candidateScores is null
             ? new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            : new Dictionary<string, double>(candidateScores, StringComparer.OrdinalIgnoreCase);
+            : new Dictionary<string, double>(collection: candidateScores, comparer: StringComparer.OrdinalIgnoreCase);
 
         CandidateScores = new ReadOnlyDictionary<string, double>(copiedScores);
     }
@@ -120,11 +115,10 @@ public sealed record RoutingDecision
     public static RoutingDecision CreateFallback(string selectedModel)
     {
         return new RoutingDecision(
-            selectedModel,
-            confidence: 0,
+            selectedModel: selectedModel,
+            0,
             rationale: RouterConstants.FallbackReason,
             timestampUtc: DateTimeOffset.UtcNow,
-            candidateScores: null);
+            null);
     }
 }
-

@@ -46,17 +46,14 @@ public static class ManagementAccessToken
         var tokenPath = string.IsNullOrWhiteSpace(path) ? DefaultPath() : path;
 
         var directory = Path.GetDirectoryName(tokenPath);
-        if (!string.IsNullOrWhiteSpace(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
+        if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
 
         // A named, per-path mutex serializes the whole check-read-generate-write sequence across
         // processes - e.g. two router instances (or the router and something else calling GetOrCreate)
         // starting at the same moment. Without it, one process could observe the other's file mid-write
         // (empty or partial), conclude no valid token exists, and generate a competing one - split-brain
         // auth between whichever surfaces ended up trusting each token.
-        using var mutex = new Mutex(initiallyOwned: false, MutexName(tokenPath));
+        using var mutex = new Mutex(false, name: MutexName(tokenPath));
         try
         {
             mutex.WaitOne();
@@ -75,14 +72,11 @@ public static class ManagementAccessToken
             if (File.Exists(tokenPath))
             {
                 var existing = File.ReadAllText(tokenPath).Trim();
-                if (!string.IsNullOrEmpty(existing))
-                {
-                    return existing;
-                }
+                if (!string.IsNullOrEmpty(existing)) return existing;
             }
 
             var token = GenerateToken();
-            WriteRestricted(tokenPath, token);
+            WriteRestricted(path: tokenPath, token: token);
             return token;
         }
         finally
@@ -91,9 +85,15 @@ public static class ManagementAccessToken
         }
     }
 
-    /// <summary>Derives a stable, path-scoped mutex name so concurrent callers targeting different token paths (e.g. in tests) don't contend on each other.</summary>
-    private static string MutexName(string tokenPath) =>
-        "TotallyHot.ArcRouter.ManagementAccessToken." + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(tokenPath)))[..32];
+    /// <summary>
+    /// Derives a stable, path-scoped mutex name so concurrent callers targeting different token paths (e.g. in tests)
+    /// don't contend on each other.
+    /// </summary>
+    private static string MutexName(string tokenPath)
+    {
+        return "TotallyHot.ArcRouter.ManagementAccessToken." +
+               Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(tokenPath)))[..32];
+    }
 
     /// <summary>
     /// Gets the default token file path (<c>%ProgramData%\TotallyHotArcRouter\management-token.txt</c>), the
@@ -101,8 +101,11 @@ public static class ManagementAccessToken
     /// Machine-wide rather than per-user because the router and the GUI do not run as the same OS account in
     /// the installed configuration - see this type's remarks.
     /// </summary>
-    public static string DefaultPath() =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "TotallyHotArcRouter", TokenFileName);
+    public static string DefaultPath()
+    {
+        return Path.Combine(path1: Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            path2: "TotallyHotArcRouter", path3: TokenFileName);
+    }
 
     /// <summary>
     /// Compares <paramref name="presented"/> against <paramref name="expected"/> in constant time (so a
@@ -114,24 +117,23 @@ public static class ManagementAccessToken
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(expected);
 
-        if (string.IsNullOrEmpty(presented))
-        {
-            return false;
-        }
+        if (string.IsNullOrEmpty(presented)) return false;
 
         var presentedBytes = Encoding.UTF8.GetBytes(presented);
         var expectedBytes = Encoding.UTF8.GetBytes(expected);
 
         return presentedBytes.Length == expectedBytes.Length
-            && CryptographicOperations.FixedTimeEquals(presentedBytes, expectedBytes);
+               && CryptographicOperations.FixedTimeEquals(left: presentedBytes, right: expectedBytes);
     }
 
     /// <summary>Generates a fresh 32-byte cryptographically random token, base64url-encoded (no padding).</summary>
-    private static string GenerateToken() =>
-        Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
+    private static string GenerateToken()
+    {
+        return Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
             .Replace('+', '-')
             .Replace('/', '_')
             .TrimEnd('=');
+    }
 
     /// <summary>
     /// Restricts <paramref name="path"/> to this machine's system/administrator accounts (write) and
@@ -140,7 +142,8 @@ public static class ManagementAccessToken
     /// <see cref="SecureFile.WriteRestricted(string, byte[])"/>: the GUI reads this file from a different OS
     /// account than the service that writes it - see this type's remarks.
     /// </summary>
-    private static void WriteRestricted(string path, string token) =>
-        SecureFile.WriteMachineShared(path, Encoding.UTF8.GetBytes(token));
+    private static void WriteRestricted(string path, string token)
+    {
+        SecureFile.WriteMachineShared(path: path, content: Encoding.UTF8.GetBytes(token));
+    }
 }
-

@@ -14,17 +14,53 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
 /// </remarks>
 internal sealed class FakeToolCallCapabilityStore : IToolCallCapabilityStore, IModelContextWindowStore
 {
-    private readonly Dictionary<ModelCapabilityKey, ModelToolCapability> _rows = new();
-    private readonly Dictionary<string, ProviderEndpointCapabilities> _providers = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<ModelCapabilityKey, ModelContextWindow> _contextWindows = new();
+
+    private readonly Dictionary<string, ProviderEndpointCapabilities>
+        _providers = new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly Dictionary<ModelCapabilityKey, ModelToolCapability> _rows = new();
 
     /// <summary>Gets every capability written through <see cref="TryRecordModelCapability"/>, in order.</summary>
     public List<ModelToolCapability> Recorded { get; } = [];
 
+    /// <inheritdoc/>
+    public ModelContextWindow? GetModelContextWindow(string providerKey, string modelName)
+    {
+        return _contextWindows.TryGetValue(key: new ModelCapabilityKey(providerKey: providerKey, modelName: modelName),
+            value: out var window)
+            ? window
+            : null;
+    }
+
+    /// <inheritdoc/>
+    public ModelToolCapability? GetModelCapability(string providerKey, string modelName)
+    {
+        return _rows.TryGetValue(key: new ModelCapabilityKey(providerKey: providerKey, modelName: modelName),
+            value: out var capability)
+            ? capability
+            : null;
+    }
+
+    /// <inheritdoc/>
+    public ProviderEndpointCapabilities? GetProviderCapabilities(string providerKey)
+    {
+        return _providers.TryGetValue(key: providerKey, value: out var capabilities) ? capabilities : null;
+    }
+
+    /// <inheritdoc/>
+    public bool TryRecordModelCapability(ModelToolCapability capability)
+    {
+        Recorded.Add(capability);
+        Seed(capability);
+        return true;
+    }
+
     /// <summary>Pre-populates a classification, as a prior scan or an operator pin would have.</summary>
     public FakeToolCallCapabilityStore Seed(ModelToolCapability capability)
     {
-        _rows[new ModelCapabilityKey(capability.ProviderKey, capability.ModelName)] = capability;
+        _rows[new ModelCapabilityKey(providerKey: capability.ProviderKey, modelName: capability.ModelName)] =
+            capability;
         return this;
     }
 
@@ -35,11 +71,11 @@ internal sealed class FakeToolCallCapabilityStore : IToolCallCapabilityStore, IM
     public FakeToolCallCapabilityStore SeedProvider(string providerKey, bool jsonSchemaResponseFormat)
     {
         _providers[providerKey] = new ProviderEndpointCapabilities(
-            providerKey,
-            OpenAiCompatible: true,
+            ProviderKey: providerKey,
+            true,
             LmStudioNative: jsonSchemaResponseFormat,
-            OllamaNative: false,
-            AnthropicCompatible: false,
+            false,
+            false,
             JsonSchemaResponseFormat: jsonSchemaResponseFormat,
             ScannedAtUtc: DateTimeOffset.UtcNow);
         return this;
@@ -53,29 +89,9 @@ internal sealed class FakeToolCallCapabilityStore : IToolCallCapabilityStore, IM
     public FakeToolCallCapabilityStore SeedContextWindow(
         string providerKey, string modelName, int contextLength, string? architecture = null)
     {
-        _contextWindows[new ModelCapabilityKey(providerKey, modelName)] =
-            new ModelContextWindow(providerKey, modelName, contextLength, architecture, "seeded by test", DateTimeOffset.UtcNow);
+        _contextWindows[new ModelCapabilityKey(providerKey: providerKey, modelName: modelName)] =
+            new ModelContextWindow(ProviderKey: providerKey, ModelName: modelName, ContextLength: contextLength,
+                Architecture: architecture, Evidence: "seeded by test", DetectedAtUtc: DateTimeOffset.UtcNow);
         return this;
     }
-
-    /// <inheritdoc />
-    public ModelContextWindow? GetModelContextWindow(string providerKey, string modelName) =>
-        _contextWindows.TryGetValue(new ModelCapabilityKey(providerKey, modelName), out var window) ? window : null;
-
-    /// <inheritdoc />
-    public ModelToolCapability? GetModelCapability(string providerKey, string modelName) =>
-        _rows.TryGetValue(new ModelCapabilityKey(providerKey, modelName), out var capability) ? capability : null;
-
-    /// <inheritdoc />
-    public ProviderEndpointCapabilities? GetProviderCapabilities(string providerKey) =>
-        _providers.TryGetValue(providerKey, out var capabilities) ? capabilities : null;
-
-    /// <inheritdoc />
-    public bool TryRecordModelCapability(ModelToolCapability capability)
-    {
-        Recorded.Add(capability);
-        Seed(capability);
-        return true;
-    }
 }
-

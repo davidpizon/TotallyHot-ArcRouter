@@ -48,19 +48,12 @@ public sealed class GuiSettingsStore : IGuiSettingsStore
         _path = string.IsNullOrWhiteSpace(path) ? DefaultPath() : path;
     }
 
-    /// <summary>Gets the default settings file path: <c>%LOCALAPPDATA%\TotallyHotArcRouter\gui-settings.json</c>.</summary>
-    public static string DefaultPath() =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TotallyHotArcRouter", SettingsFileName);
-
     /// <inheritdoc/>
     public GuiSettings Load()
     {
         try
         {
-            if (!File.Exists(_path))
-            {
-                return GuiSettings.Default;
-            }
+            if (!File.Exists(_path)) return GuiSettings.Default;
 
             var json = File.ReadAllText(_path);
             var settings = JsonSerializer.Deserialize<GuiSettings>(json);
@@ -86,11 +79,15 @@ public sealed class GuiSettingsStore : IGuiSettingsStore
         ArgumentNullException.ThrowIfNull(settings);
 
         var directory = Path.GetDirectoryName(_path);
-        if (!string.IsNullOrWhiteSpace(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
+        if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
 
-        File.WriteAllText(_path, JsonSerializer.Serialize(settings));
+        File.WriteAllText(path: _path, contents: JsonSerializer.Serialize(settings));
+    }
+
+    /// <summary>Gets the default settings file path: <c>%LOCALAPPDATA%\TotallyHotArcRouter\gui-settings.json</c>.</summary>
+    public static string DefaultPath()
+    {
+        return Path.Combine(path1: Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            path2: "TotallyHotArcRouter", path3: SettingsFileName);
     }
 }

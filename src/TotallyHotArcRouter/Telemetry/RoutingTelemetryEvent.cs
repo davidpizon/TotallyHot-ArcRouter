@@ -26,9 +26,20 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// <param name="ResolvedModel">The upstream provider's model id the request was actually forwarded as.</param>
 /// <param name="Provider">The provider key the request was routed to.</param>
 /// <param name="IsFallback">Whether this request was served by fallback routing.</param>
-/// <param name="PromptTokens">Extracted prompt/input token count, or <see langword="null"/> if usage couldn't be determined.</param>
-/// <param name="CompletionTokens">Extracted completion/output token count, or <see langword="null"/> if usage couldn't be determined.</param>
-/// <param name="EstimatedCostUsd">Estimated USD cost - <c>0</c> when the route's provider is free (<see cref="TotallyHot.ArcRouter.Models.ProviderOptions.IsFree"/>), otherwise <see langword="null"/>: no price data source exists until the price catalog lands (see <c>docs/router/model-price-catalog.md</c>). Also <see langword="null"/> when usage couldn't be extracted.</param>
+/// <param name="PromptTokens">
+/// Extracted prompt/input token count, or <see langword="null"/> if usage couldn't be
+/// determined.
+/// </param>
+/// <param name="CompletionTokens">
+/// Extracted completion/output token count, or <see langword="null"/> if usage couldn't be
+/// determined.
+/// </param>
+/// <param name="EstimatedCostUsd">
+/// Estimated USD cost - <c>0</c> when the route's provider is free (
+/// <see cref="TotallyHot.ArcRouter.Models.ProviderOptions.IsFree"/>), otherwise <see langword="null"/>: no price data
+/// source exists until the price catalog lands (see <c>docs/router/model-price-catalog.md</c>). Also
+/// <see langword="null"/> when usage couldn't be extracted.
+/// </param>
 /// <param name="IsStreaming">Whether the response was a streaming (SSE) response.</param>
 /// <param name="LatencyToHeadersMs">Milliseconds from sending the upstream request to receiving its response headers.</param>
 /// <param name="TotalDurationMs">Milliseconds from sending the upstream request to the response body finishing.</param>
@@ -42,7 +53,10 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// Input tokens served from an existing prompt cache entry (<see cref="UsageInfo.CacheReadTokens"/>), or
 /// <see langword="null"/> if usage couldn't be determined.
 /// </param>
-/// <param name="CostConfidence">How <paramref name="EstimatedCostUsd"/> was arrived at; see <see cref="Telemetry.CostConfidence"/> (§5.6).</param>
+/// <param name="CostConfidence">
+/// How <paramref name="EstimatedCostUsd"/> was arrived at; see
+/// <see cref="Telemetry.CostConfidence"/> (§5.6).
+/// </param>
 /// <param name="RequestSummary">
 /// The newest user message's text (see <see cref="RequestTextExtractor"/>), truncated to
 /// <see cref="TextTruncator.DefaultMaxLength"/> characters, or <see langword="null"/> if there was no
@@ -110,4 +124,3 @@ public sealed record RoutingTelemetryEvent(
     int RouterTokens = 0,
     decimal RouterCostUsd = 0m,
     RoutingSubstitutionReason SubstitutionReason = RoutingSubstitutionReason.None);
-

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
@@ -22,10 +23,10 @@ public sealed class LogRegRetrainHostedService : BackgroundService
     private static readonly TimeSpan CheckInterval = TimeSpan.FromMinutes(5);
 
     private readonly ILogger<LogRegRetrainHostedService> _logger;
-    private readonly IEmbeddingLogRegTrainingService _trainingService;
     private readonly IMemoryEntryStore _memoryEntryStore;
-    private readonly RoutingOptions _options;
     private readonly string _modelPath;
+    private readonly RoutingOptions _options;
+    private readonly IEmbeddingLogRegTrainingService _trainingService;
 
     /// <summary>Initializes a new instance of the <see cref="LogRegRetrainHostedService"/> class.</summary>
     /// <param name="logger">The logger.</param>
@@ -53,13 +54,11 @@ public sealed class LogRegRetrainHostedService : BackgroundService
         _modelPath = storageOptions.Value.ResolveLogRegModelPath();
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         if (!_options.EnableAutomaticLogRegRetrain)
-        {
             _logger.LogInformation("Automatic logreg retrain is disabled; this loop will not fire.");
-        }
 
         using var timer = new PeriodicTimer(CheckInterval);
         try
@@ -72,10 +71,10 @@ public sealed class LogRegRetrainHostedService : BackgroundService
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    _logger.LogError(ex, "Automatic logreg retrain check threw unexpectedly; continuing.");
+                    _logger.LogError(exception: ex,
+                        message: "Automatic logreg retrain check threw unexpectedly; continuing.");
                 }
-            }
-            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
+            } while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
         }
         catch (OperationCanceledException)
         {
@@ -92,28 +91,24 @@ public sealed class LogRegRetrainHostedService : BackgroundService
     /// <param name="cancellationToken">A cancellation token.</param>
     internal async Task CheckAndRetrainAsync(CancellationToken cancellationToken)
     {
-        if (!_options.EnableAutomaticLogRegRetrain)
-        {
-            return;
-        }
+        if (!_options.EnableAutomaticLogRegRetrain) return;
 
         var lastTrainedCount = TryReadLastTrainedMemoryEntryCount();
         var currentCount = (await _memoryEntryStore.LoadAllAsync(cancellationToken).ConfigureAwait(false)).Count;
 
-        if (currentCount - lastTrainedCount < _options.LogRegRetrainThreshold)
-        {
-            return;
-        }
+        if (currentCount - lastTrainedCount < _options.LogRegRetrainThreshold) return;
 
         _logger.LogInformation(
+            message:
             "Automatic logreg retrain threshold crossed ({CurrentCount} entries, {LastTrainedCount} at last train, threshold {Threshold}); retraining.",
             currentCount,
             lastTrainedCount,
             _options.LogRegRetrainThreshold);
 
-        var outcome = await _trainingService.RetrainAsync(bootstrapProgress: null, cancellationToken).ConfigureAwait(false);
+        var outcome = await _trainingService.RetrainAsync(null, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
         _logger.LogInformation(
-            "Automatic logreg retrain finished with outcome {Kind}: {Message}", outcome.Kind, outcome.Message);
+            message: "Automatic logreg retrain finished with outcome {Kind}: {Message}", outcome.Kind, outcome.Message);
     }
 
     /// <summary>
@@ -123,19 +118,18 @@ public sealed class LogRegRetrainHostedService : BackgroundService
     /// </summary>
     private int TryReadLastTrainedMemoryEntryCount()
     {
-        if (!File.Exists(_modelPath))
-        {
-            return 0;
-        }
+        if (!File.Exists(_modelPath)) return 0;
 
         try
         {
             var json = File.ReadAllText(_modelPath);
             return EmbeddingLogRegModelArtifactSerializer.Deserialize(json).MemoryEntryCount;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException or System.Text.Json.JsonException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException or JsonException)
         {
-            _logger.LogWarning(ex, "Failed to read the current logreg artifact's memory entry count from {Path}; assuming 0.", _modelPath);
+            _logger.LogWarning(exception: ex,
+                message: "Failed to read the current logreg artifact's memory entry count from {Path}; assuming 0.",
+                _modelPath);
             return 0;
         }
     }

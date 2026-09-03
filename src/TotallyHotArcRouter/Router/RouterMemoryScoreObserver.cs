@@ -12,16 +12,19 @@ namespace TotallyHot.ArcRouter.Router;
 /// </summary>
 public sealed class RouterMemoryScoreObserver : IQualityScoreObserver
 {
+    /// <summary>The logger.</summary>
+    private readonly ILogger<RouterMemoryScoreObserver> _logger;
+
     /// <summary>The router memory this observer writes live scores into.</summary>
     private readonly RouterMemory _memory;
 
     /// <summary>The quality options, carrying the live-memory dimension prefix.</summary>
     private readonly QualityOptions _options;
 
-    /// <summary>The logger.</summary>
-    private readonly ILogger<RouterMemoryScoreObserver> _logger;
-
-    /// <summary>The optional dashboard telemetry publisher; <see langword="null"/> when telemetry publishing is not configured.</summary>
+    /// <summary>
+    /// The optional dashboard telemetry publisher; <see langword="null"/> when telemetry publishing is not
+    /// configured.
+    /// </summary>
     private readonly ITelemetryPublisher? _telemetryPublisher;
 
     /// <summary>Initializes a new instance of the <see cref="RouterMemoryScoreObserver"/> class.</summary>
@@ -45,7 +48,7 @@ public sealed class RouterMemoryScoreObserver : IQualityScoreObserver
         _telemetryPublisher = telemetryPublisher;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task ObserveAsync(QualityResult result, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(result);
@@ -56,21 +59,21 @@ public sealed class RouterMemoryScoreObserver : IQualityScoreObserver
             return;
         }
 
-        var score = Math.Clamp(result.UnifiedScore, 0.0, 1.0);
-        var dimension = RouterDimension.ToLiveKey(_options.LiveMemoryPrefix, result.Dimension);
+        var score = Math.Clamp(value: result.UnifiedScore, 0.0, 1.0);
+        var dimension =
+            RouterDimension.ToLiveKey(liveMemoryPrefix: _options.LiveMemoryPrefix, dimension: result.Dimension);
 
-        await _memory.AddScoreAsync(dimension, result.Model, score).ConfigureAwait(false);
+        await _memory.AddScoreAsync(dimension: dimension, model: result.Model, score: score).ConfigureAwait(false);
 
         if (_logger.IsEnabled(LogLevel.Information))
-        {
             _logger.LogInformation(
+                message:
                 "Quality observed {Language} dim {Dimension} model {Model} -> u={Score:F3} (correlation {CorrelationId}).",
                 result.Language,
                 dimension,
                 result.Model,
                 score,
                 result.RequestCorrelationId);
-        }
 
         if (_telemetryPublisher is not null && !string.IsNullOrEmpty(result.RequestCorrelationId))
         {
@@ -88,8 +91,8 @@ public sealed class RouterMemoryScoreObserver : IQualityScoreObserver
                 DegradedReason: result.DegradedReason,
                 TimestampUtc: DateTimeOffset.UtcNow);
 
-            await _telemetryPublisher.PublishQualitySignalAsync(signal, cancellationToken).ConfigureAwait(false);
+            await _telemetryPublisher.PublishQualitySignalAsync(signal: signal, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
         }
     }
 }
-

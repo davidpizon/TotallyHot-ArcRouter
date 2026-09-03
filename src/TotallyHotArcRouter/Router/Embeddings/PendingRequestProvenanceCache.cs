@@ -17,27 +17,20 @@ namespace TotallyHot.ArcRouter.Router.Embeddings;
 /// </summary>
 public sealed class PendingRequestProvenanceCache
 {
-    /// <summary>A single cached provenance record awaiting its verifier score, with the absolute time it expires.</summary>
-    /// <param name="IsExploratory">Whether the request's routing decision was an epsilon-greedy exploratory pick.</param>
-    /// <param name="Propensity">The propensity of the arm actually chosen.</param>
-    /// <param name="Dimension">
-    /// The heuristic classifier's dimension label for this request
-    /// (docs/router/self-organizing-classification-plan.md Phase T2e), or <see langword="null"/> when
-    /// unavailable.
-    /// </param>
-    /// <param name="ExpiresAtUtc">The UTC instant after which this entry is treated as evicted.</param>
-    private sealed record Entry(bool IsExploratory, double Propensity, string? Dimension, DateTimeOffset ExpiresAtUtc);
+    private readonly int _capacity;
 
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
     private readonly Queue<string> _insertionOrder = new();
     private readonly object _lock = new();
     private readonly TimeProvider _timeProvider;
     private readonly TimeSpan _ttl;
-    private readonly int _capacity;
 
     /// <summary>Initializes a new instance of the <see cref="PendingRequestProvenanceCache"/> class.</summary>
     /// <param name="options">Supplies the capacity and TTL bounds (shared with <see cref="PendingTaskEmbeddingCache"/>).</param>
-    /// <param name="timeProvider">Clock used for TTL expiry; defaults to <see cref="TimeProvider.System"/>. Overridable for deterministic tests.</param>
+    /// <param name="timeProvider">
+    /// Clock used for TTL expiry; defaults to <see cref="TimeProvider.System"/>. Overridable for
+    /// deterministic tests.
+    /// </param>
     public PendingRequestProvenanceCache(IOptions<RoutingOptions> options, TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -72,12 +65,10 @@ public sealed class PendingRequestProvenanceCache
         {
             EvictExpiredAndStale();
 
-            if (!_entries.ContainsKey(correlationId))
-            {
-                _insertionOrder.Enqueue(correlationId);
-            }
+            if (!_entries.ContainsKey(correlationId)) _insertionOrder.Enqueue(correlationId);
 
-            _entries[correlationId] = new Entry(isExploratory, propensity, dimension, _timeProvider.GetUtcNow() + _ttl);
+            _entries[correlationId] = new Entry(IsExploratory: isExploratory, Propensity: propensity,
+                Dimension: dimension, ExpiresAtUtc: _timeProvider.GetUtcNow() + _ttl);
 
             while (_entries.Count > _capacity && _insertionOrder.Count > 0)
             {
@@ -101,7 +92,7 @@ public sealed class PendingRequestProvenanceCache
             // EvictExpiredAndStale performs a full sweep, so no remaining entry is expired afterward.
             EvictExpiredAndStale();
 
-            if (_entries.Remove(correlationId, out var entry))
+            if (_entries.Remove(key: correlationId, value: out var entry))
             {
                 isExploratory = entry.IsExploratory;
                 propensity = entry.Propensity;
@@ -121,11 +112,15 @@ public sealed class PendingRequestProvenanceCache
     /// need the dimension label.
     /// </summary>
     /// <returns><see langword="true"/> if an unexpired entry was found and removed.</returns>
-    public bool TryTake(string correlationId, out bool isExploratory, out double propensity) =>
-        TryTake(correlationId, out isExploratory, out propensity, out _);
+    public bool TryTake(string correlationId, out bool isExploratory, out double propensity)
+    {
+        return TryTake(correlationId: correlationId, isExploratory: out isExploratory, propensity: out propensity,
+            dimension: out _);
+    }
 
     /// <summary>
-    /// Drops expired entries and any stale queue entries left behind by a prior <see cref="TryTake(string, out bool, out double)"/> or
+    /// Drops expired entries and any stale queue entries left behind by a prior
+    /// <see cref="TryTake(string, out bool, out double)"/> or
     /// capacity eviction. Must be called under <see cref="_lock"/>. A re-<see cref="Set"/> on an existing
     /// key refreshes that entry's expiry without moving its queue position, so insertion order can no
     /// longer be trusted as TTL order - this is a full bounded sweep (each queued key visited once, live
@@ -138,10 +133,7 @@ public sealed class PendingRequestProvenanceCache
         for (var i = 0; i < remaining; i++)
         {
             var key = _insertionOrder.Dequeue();
-            if (!_entries.TryGetValue(key, out var entry))
-            {
-                continue;
-            }
+            if (!_entries.TryGetValue(key: key, value: out var entry)) continue;
 
             if (entry.ExpiresAtUtc > now)
             {
@@ -152,4 +144,15 @@ public sealed class PendingRequestProvenanceCache
             _entries.Remove(key);
         }
     }
+
+    /// <summary>A single cached provenance record awaiting its verifier score, with the absolute time it expires.</summary>
+    /// <param name="IsExploratory">Whether the request's routing decision was an epsilon-greedy exploratory pick.</param>
+    /// <param name="Propensity">The propensity of the arm actually chosen.</param>
+    /// <param name="Dimension">
+    /// The heuristic classifier's dimension label for this request
+    /// (docs/router/self-organizing-classification-plan.md Phase T2e), or <see langword="null"/> when
+    /// unavailable.
+    /// </param>
+    /// <param name="ExpiresAtUtc">The UTC instant after which this entry is treated as evicted.</param>
+    private sealed record Entry(bool IsExploratory, double Propensity, string? Dimension, DateTimeOffset ExpiresAtUtc);
 }

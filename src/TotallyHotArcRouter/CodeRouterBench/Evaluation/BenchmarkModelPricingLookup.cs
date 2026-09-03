@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using TotallyHot.ArcRouter.Models;
 
 namespace TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
@@ -12,7 +13,7 @@ public static class BenchmarkModelPricingLookup
 {
     /// <summary>Loads every model's per-million-token input/output pricing, keyed by canonicalized model id.</summary>
     /// <param name="connection">An open connection to a <see cref="BenchmarkDatabase"/>.</param>
-    public static IReadOnlyDictionary<string, (double InputPer1M, double OutputPer1M)> Load(Microsoft.Data.Sqlite.SqliteConnection connection)
+    public static IReadOnlyDictionary<string, (double InputPer1M, double OutputPer1M)> Load(SqliteConnection connection)
     {
         ArgumentNullException.ThrowIfNull(connection);
 
@@ -22,10 +23,7 @@ public static class BenchmarkModelPricingLookup
         using var reader = command.ExecuteReader();
         while (reader.Read())
         {
-            if (reader.IsDBNull(1) || reader.IsDBNull(2))
-            {
-                continue;
-            }
+            if (reader.IsDBNull(1) || reader.IsDBNull(2)) continue;
 
             var model = ModelNameCanonicalizer.Canonicalize(reader.GetString(0));
             pricing[model] = (reader.GetDouble(1), reader.GetDouble(2));
@@ -41,7 +39,10 @@ public static class BenchmarkModelPricingLookup
     /// <param name="model">The canonicalized model id.</param>
     /// <param name="inputTokens">The row's input token count, or <see langword="null"/> when unpublished.</param>
     /// <param name="outputTokens">The row's output token count, or <see langword="null"/> when unpublished.</param>
-    /// <param name="pricing">Per-model input/output per-million-token pricing, keyed by canonicalized model id, e.g. from <see cref="Load"/>.</param>
+    /// <param name="pricing">
+    /// Per-model input/output per-million-token pricing, keyed by canonicalized model id, e.g. from
+    /// <see cref="Load"/>.
+    /// </param>
     /// <returns>The resolved cost in USD, or <see langword="null"/> when no pricing or token counts are available.</returns>
     public static double? ResolveFallbackCostUsd(
         string model,
@@ -51,16 +52,11 @@ public static class BenchmarkModelPricingLookup
     {
         ArgumentNullException.ThrowIfNull(pricing);
 
-        if (inputTokens is null && outputTokens is null)
-        {
-            return null;
-        }
+        if (inputTokens is null && outputTokens is null) return null;
 
-        if (!pricing.TryGetValue(model, out var price))
-        {
-            return null;
-        }
+        if (!pricing.TryGetValue(key: model, value: out var price)) return null;
 
-        return ((inputTokens ?? 0) * price.InputPer1M / 1_000_000.0) + ((outputTokens ?? 0) * price.OutputPer1M / 1_000_000.0);
+        return (inputTokens ?? 0) * price.InputPer1M / 1_000_000.0 +
+               (outputTokens ?? 0) * price.OutputPer1M / 1_000_000.0;
     }
 }

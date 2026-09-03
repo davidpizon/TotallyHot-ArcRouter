@@ -10,7 +10,7 @@ public enum ClusterTrainingResultKind
     Declined,
 
     /// <summary>A retrain was already in progress; this call was skipped rather than queued.</summary>
-    AlreadyRunning,
+    AlreadyRunning
 }
 
 /// <summary>
@@ -22,7 +22,10 @@ public enum ClusterTrainingResultKind
 /// <param name="Message">A human-readable explanation, suitable for a log line or an admin surface.</param>
 /// <param name="BootstrapTaskCount">The number of OOD bootstrap tasks gathered, regardless of outcome.</param>
 /// <param name="MemoryEntryCount">The number of live memory entries gathered, regardless of outcome.</param>
-/// <param name="SampleCount">The total number of training samples gathered (bootstrap tasks plus live memory entries), regardless of outcome.</param>
+/// <param name="SampleCount">
+/// The total number of training samples gathered (bootstrap tasks plus live memory entries),
+/// regardless of outcome.
+/// </param>
 /// <param name="ChosenK">The number of clusters the k-sweep selected, or 0 if the retrain declined.</param>
 public sealed record ClusterTrainingOutcome(
     ClusterTrainingResultKind Kind,

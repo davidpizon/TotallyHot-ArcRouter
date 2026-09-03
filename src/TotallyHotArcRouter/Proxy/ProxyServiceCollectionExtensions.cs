@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.Hosting;
+using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Mcp;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
@@ -8,9 +9,14 @@ using TotallyHot.ArcRouter.Proxy.Bedrock;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Proxy.Translation;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
+using TotallyHot.ArcRouter.Quality.Ingress;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Classification;
+using TotallyHot.ArcRouter.Router.Embeddings;
+using TotallyHot.ArcRouter.Router.Orchestrator;
+using TotallyHot.ArcRouter.Router.TextGeneration;
 using TotallyHot.ArcRouter.Telemetry;
+using TotallyHot.ArcRouter.Transcripts;
 using TotallyHot.ArcRouter.Update;
 
 namespace TotallyHot.ArcRouter.Proxy;
@@ -114,7 +120,8 @@ internal static class ProxyServiceCollectionExtensions
         // constructors' optional providerRegistrations parameter - mirroring the IPayloadTranslator
         // dictionary pattern just below, but keyed on parser shape rather than translation logic since
         // that's the only thing that varies between providers for these two extractors.
-        services.AddSingleton<IReadOnlyDictionary<string, Proxy.ProviderRegistration>>(_ => Proxy.ProviderRegistrations.BuildDefault());
+        services.AddSingleton<IReadOnlyDictionary<string, ProviderRegistration>>(_ =>
+            ProviderRegistrations.BuildDefault());
         services.AddSingleton<IUsageExtractor, UsageExtractor>();
         services.AddSingleton<IResponseTextExtractor, ResponseTextExtractor>();
 
@@ -135,7 +142,8 @@ internal static class ProxyServiceCollectionExtensions
         services.AddSingleton<IPayloadTranslator, TitanPayloadTranslator>();
         services.AddSingleton<IPayloadTranslator, LlamaPayloadTranslator>();
         services.AddSingleton<IReadOnlyDictionary<string, IPayloadTranslator>>(sp =>
-            sp.GetServices<IPayloadTranslator>().ToDictionary(t => t.Provider, StringComparer.OrdinalIgnoreCase));
+            sp.GetServices<IPayloadTranslator>()
+                .ToDictionary(keySelector: t => t.Provider, comparer: StringComparer.OrdinalIgnoreCase));
 
         // Tool-call normalization (docs/router/tool-call-normalization.md Phase 4) is registered as
         // itself, deliberately NOT also as IPayloadTranslator - it must never join the provider-keyed
@@ -192,7 +200,7 @@ internal static class ProxyServiceCollectionExtensions
             UsageExtractor = sp.GetService<IUsageExtractor>(),
             ResponseTextExtractor = sp.GetService<IResponseTextExtractor>(),
             TelemetryPublisher = sp.GetService<ITelemetryPublisher>(),
-            QualityIngress = sp.GetService<TotallyHot.ArcRouter.Quality.Ingress.IQualityIngress>(),
+            QualityIngress = sp.GetService<IQualityIngress>(),
             SpendTracker = sp.GetService<ISpendTracker>(),
             PriceLookup = sp.GetService<IModelPriceLookup>(),
             Translators = sp.GetService<IReadOnlyDictionary<string, IPayloadTranslator>>(),
@@ -202,15 +210,15 @@ internal static class ProxyServiceCollectionExtensions
             ToolCallNormalizerFactory = sp.GetService<ToolCallNormalizerFactory>(),
             RateLimitCapture = sp.GetService<IRateLimitHeaderCapture>(),
             UsageLedger = sp.GetService<IUsageLedger>(),
-            PendingTaskEmbeddingCache = sp.GetService<Router.Embeddings.PendingTaskEmbeddingCache>(),
-            RoutingOptions = sp.GetService<IOptions<Models.RoutingOptions>>(),
-            PendingRequestCostCache = sp.GetService<Router.Embeddings.PendingRequestCostCache>(),
-            PendingRequestProvenanceCache = sp.GetService<Router.Embeddings.PendingRequestProvenanceCache>(),
-            PendingResponseTextCache = sp.GetService<TotallyHot.ArcRouter.Judge.PendingResponseTextCache>(),
-            TranscriptStore = sp.GetService<TotallyHot.ArcRouter.Transcripts.ITranscriptStore>(),
+            PendingTaskEmbeddingCache = sp.GetService<PendingTaskEmbeddingCache>(),
+            RoutingOptions = sp.GetService<IOptions<RoutingOptions>>(),
+            PendingRequestCostCache = sp.GetService<PendingRequestCostCache>(),
+            PendingRequestProvenanceCache = sp.GetService<PendingRequestProvenanceCache>(),
+            PendingResponseTextCache = sp.GetService<PendingResponseTextCache>(),
+            TranscriptStore = sp.GetService<ITranscriptStore>(),
             InFlightGauge = sp.GetService<InFlightRequestGauge>(),
-            RoutingOptionsMonitor = sp.GetService<IOptionsMonitor<Models.RoutingOptions>>(),
-            JudgeOptionsMonitor = sp.GetService<IOptionsMonitor<TotallyHot.ArcRouter.Judge.JudgeOptions>>(),
+            RoutingOptionsMonitor = sp.GetService<IOptionsMonitor<RoutingOptions>>(),
+            JudgeOptionsMonitor = sp.GetService<IOptionsMonitor<JudgeOptions>>(),
             RoutingGate = sp.GetService<IRoutingGate>(),
             CapabilityStore = sp.GetService<IToolCallCapabilityStore>(),
             ContextWindowStore = sp.GetService<IModelContextWindowStore>(),
@@ -276,12 +284,12 @@ internal static class ProxyServiceCollectionExtensions
             // across for the same reason as the broadcaster: the inner host has its own container and
             // cannot resolve them from this one. They back the Governance > Price Sources panel's gRPC API.
             return new ProxyHostedService(
-                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ProxyHostedService>>(),
-                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ProxyServer>>(),
-                sp.GetRequiredService<ProxyMiddleware>(),
+                logger: sp.GetRequiredService<ILogger<ProxyHostedService>>(),
+                proxyLogger: sp.GetRequiredService<ILogger<ProxyServer>>(),
+                proxyMiddleware: sp.GetRequiredService<ProxyMiddleware>(),
                 // Lets a port clash stop the host in an orderly way instead of throwing out of
                 // StartAsync - see ProxyHostedService.StartAsync.
-                sp.GetRequiredService<IHostApplicationLifetime>(),
+                hostLifetime: sp.GetRequiredService<IHostApplicationLifetime>(),
                 dependencies: new ProxyServerDependencies
                 {
                     Telemetry = sp.GetRequiredService<TelemetryBroadcaster>(),
@@ -310,70 +318,70 @@ internal static class ProxyServiceCollectionExtensions
                         SecretWriter = sp.GetRequiredService<ISecretWriter>(),
                         SecretReader = sp.GetRequiredService<ISecretReader>(),
                         // Backs Cost Analytics' "Routing ROI" feed (docs/router/self-organizing-classification-plan.md Phase T4).
-                        TaxonomyComparisonStore = sp.GetRequiredService<TotallyHot.ArcRouter.Transcripts.ITaxonomyComparisonStore>(),
+                        TaxonomyComparisonStore = sp.GetRequiredService<ITaxonomyComparisonStore>(),
                         // The same singleton registered above and given to RequestInterceptor/ProxyMiddleware,
                         // so the Providers tab's AdminAction/LiveTraffic warnings reflect real hot-path state.
-                        InteractionStatusStore = sp.GetRequiredService<IProviderInteractionStatusStore>(),
+                        InteractionStatusStore = sp.GetRequiredService<IProviderInteractionStatusStore>()
                     },
 
                     // Backs the Governance > Price Sources panel's gRPC API.
                     PriceSourceAdmin = new PriceSourceAdminDependencies(
-                        sp.GetRequiredService<PriceSourceToggleStore>(),
-                        sp.GetRequiredService<PriceCatalogIngestionService>())
+                        ToggleStore: sp.GetRequiredService<PriceSourceToggleStore>(),
+                        IngestionService: sp.GetRequiredService<PriceCatalogIngestionService>())
                     {
-                        Options = sp.GetRequiredService<IOptions<PriceCatalogOptions>>().Value,
+                        Options = sp.GetRequiredService<IOptions<PriceCatalogOptions>>().Value
                     },
 
                     // Backs the Governance > Benchmark Data panel's gRPC API (Phase 4).
                     BenchmarkDataAdmin = new BenchmarkDataAdminDependencies(
-                        sp.GetRequiredService<BenchmarkDataStatusService>(),
-                        sp.GetRequiredService<BenchmarkFileLedger>(),
-                        sp.GetRequiredService<BenchmarkSyncService>())
+                        StatusService: sp.GetRequiredService<BenchmarkDataStatusService>(),
+                        FileLedger: sp.GetRequiredService<BenchmarkFileLedger>(),
+                        SyncService: sp.GetRequiredService<BenchmarkSyncService>())
                     {
-                        Options = sp.GetRequiredService<IOptions<BenchmarkSyncOptions>>().Value,
+                        Options = sp.GetRequiredService<IOptions<BenchmarkSyncOptions>>().Value
                     },
 
                     // Backs the Governance > Benchmark Data panel's "Local Voter Model" gRPC API.
                     LlmRouterModelAdmin = new LlmRouterModelAdminDependencies(
-                        sp.GetRequiredService<Router.TextGeneration.ILlmRouterModelOverrideStore>(),
-                        sp.GetRequiredService<Router.TextGeneration.LlmRouterModelSyncService>()),
+                        OverrideStore: sp.GetRequiredService<ILlmRouterModelOverrideStore>(),
+                        SyncService: sp.GetRequiredService<LlmRouterModelSyncService>()),
 
                     // Backs the Governance > Cluster Model panel's gRPC API (Phase T5).
                     ClusterModelAdmin = new ClusterModelAdminDependencies(
-                        sp.GetRequiredService<Router.Orchestrator.IClusterTrainingService>(),
-                        sp.GetRequiredService<Router.IMemoryEntryStore>(),
-                        sp.GetRequiredService<TotallyHot.ArcRouter.Transcripts.ITranscriptStore>(),
-                        sp.GetRequiredService<IOptions<TotallyHot.ArcRouter.Transcripts.TranscriptOptions>>(),
-                        sp.GetRequiredService<IOptions<StorageOptions>>()),
+                        TrainingService: sp.GetRequiredService<IClusterTrainingService>(),
+                        MemoryEntryStore: sp.GetRequiredService<IMemoryEntryStore>(),
+                        TranscriptStore: sp.GetRequiredService<ITranscriptStore>(),
+                        TranscriptOptions: sp.GetRequiredService<IOptions<TranscriptOptions>>(),
+                        StorageOptions: sp.GetRequiredService<IOptions<StorageOptions>>()),
 
                     // Backs the Governance > Router Model panel's gRPC API (live-feedback-learning-plan.md Phase 5).
                     LogRegModelAdmin = new LogRegModelAdminDependencies(
-                        sp.GetRequiredService<Router.Orchestrator.IEmbeddingLogRegTrainingService>(),
-                        sp.GetRequiredService<Router.IMemoryEntryStore>(),
-                        sp.GetRequiredService<IOptions<StorageOptions>>()),
+                        TrainingService: sp.GetRequiredService<IEmbeddingLogRegTrainingService>(),
+                        MemoryEntryStore: sp.GetRequiredService<IMemoryEntryStore>(),
+                        StorageOptions: sp.GetRequiredService<IOptions<StorageOptions>>()),
 
                     // Backs the Governance UI's System Settings window gRPC API (Phase T6).
                     RouterSettingsAdmin = new RouterSettingsAdminDependencies(
-                        sp.GetRequiredService<Router.RouterSettingsStore>(),
-                        sp.GetRequiredService<Router.RouterSettingsReloadToken>(),
-                        sp.GetRequiredService<IOptionsMonitor<RoutingOptions>>(),
-                        sp.GetRequiredService<IOptionsMonitor<TotallyHot.ArcRouter.Judge.JudgeOptions>>(),
-                        sp.GetRequiredService<TotallyHot.ArcRouter.Judge.JudgeModelSelector>(),
-                        sp.GetRequiredService<IOptionsMonitor<TotallyHot.ArcRouter.Transcripts.TranscriptOptions>>(),
-                        sp.GetRequiredService<TotallyHot.ArcRouter.Transcripts.ITranscriptStore>())
+                        Store: sp.GetRequiredService<RouterSettingsStore>(),
+                        ReloadToken: sp.GetRequiredService<RouterSettingsReloadToken>(),
+                        OptionsMonitor: sp.GetRequiredService<IOptionsMonitor<RoutingOptions>>(),
+                        JudgeOptionsMonitor: sp.GetRequiredService<IOptionsMonitor<JudgeOptions>>(),
+                        JudgeModelSelector: sp.GetRequiredService<JudgeModelSelector>(),
+                        TranscriptOptionsMonitor: sp.GetRequiredService<IOptionsMonitor<TranscriptOptions>>(),
+                        TranscriptStore: sp.GetRequiredService<ITranscriptStore>())
                     {
-                        EmbeddingMemory = sp.GetRequiredService<EmbeddingMemory>(),
+                        EmbeddingMemory = sp.GetRequiredService<EmbeddingMemory>()
                     },
 
                     // Backs the Governance UI's System Settings window's "Software Update" section gRPC
                     // API (docs/router/auto-update-plan.md Phase 2).
                     UpdateAdmin = new UpdateAdminDependencies(
-                        sp.GetRequiredService<IUpdateStateStore>(),
-                        sp.GetRequiredService<IReleaseCheckClient>()),
+                        StateStore: sp.GetRequiredService<IUpdateStateStore>(),
+                        ReleaseCheckClient: sp.GetRequiredService<IReleaseCheckClient>()),
 
                     // Backs the GUI system tray's "Enable Routing"/"Disable Routing" gRPC API. The same
                     // singleton ProxyMiddleware checks, so a toggle from the tray takes effect immediately.
-                    RoutingGateAdmin = new RoutingGateAdminDependencies(sp.GetRequiredService<IRoutingGate>()),
+                    RoutingGateAdmin = new RoutingGateAdminDependencies(sp.GetRequiredService<IRoutingGate>())
                 });
         });
 

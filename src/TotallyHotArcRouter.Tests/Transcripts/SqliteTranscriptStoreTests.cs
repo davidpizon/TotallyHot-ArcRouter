@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Tests.TestSupport;
@@ -14,13 +15,26 @@ namespace TotallyHot.ArcRouter.Tests.Transcripts;
 /// </summary>
 public class SqliteTranscriptStoreTests : IDisposable
 {
-    private readonly string _tempDirectory;
     private readonly string _dbPath;
+    private readonly string _tempDirectory;
 
     public SqliteTranscriptStoreTests()
     {
-        _tempDirectory = Path.Combine(Path.GetTempPath(), "arcrouter-tests", Guid.NewGuid().ToString("N"));
-        _dbPath = Path.Combine(_tempDirectory, "transcripts.db");
+        _tempDirectory = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
+            path3: Guid.NewGuid().ToString("N"));
+        _dbPath = Path.Combine(path1: _tempDirectory, path2: "transcripts.db");
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            if (Directory.Exists(_tempDirectory)) Directory.Delete(path: _tempDirectory, true);
+        }
+        catch (IOException)
+        {
+            // Best-effort cleanup; a locked file on a busy CI box is not a test failure.
+        }
     }
 
     [Fact]
@@ -28,21 +42,23 @@ public class SqliteTranscriptStoreTests : IDisposable
     {
         var database = CreateDatabase();
         database.EnsureCreated();
-        var store = new SqliteTranscriptStore(database, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
+        var store = new SqliteTranscriptStore(database: database,
+            options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
 
         var record = MakeRecord("corr-1");
-        var id = await store.InsertAsync(record, TestContext.Current.CancellationToken);
+        var id = await store.InsertAsync(record: record, cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(id);
 
-        await store.UpdateOutcomeAsync("corr-1", 0.83, TestContext.Current.CancellationToken);
+        await store.UpdateOutcomeAsync(correlationId: "corr-1", 0.83,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        var row = ReadRow(database, "corr-1");
-        Assert.Equal("gpt-5.4", row.RequestedModel);
-        Assert.Equal("kimi-k2.5", row.RoutedModel);
-        Assert.Equal(0.83, row.Score!.Value, 6);
-        Assert.Equal(0.0042, (double)row.Cost!.Value, 6);
+        var row = ReadRow(database: database, correlationId: "corr-1");
+        Assert.Equal(expected: "gpt-5.4", actual: row.RequestedModel);
+        Assert.Equal(expected: "kimi-k2.5", actual: row.RoutedModel);
+        Assert.Equal(0.83, actual: row.Score!.Value, 6);
+        Assert.Equal(0.0042, actual: (double)row.Cost!.Value, 6);
         Assert.True(row.IsExploratory);
-        Assert.Equal(0.05, row.Propensity, 6);
+        Assert.Equal(0.05, actual: row.Propensity, 6);
     }
 
     [Fact]
@@ -50,11 +66,12 @@ public class SqliteTranscriptStoreTests : IDisposable
     {
         var database = CreateDatabase();
         database.EnsureCreated();
-        var store = new SqliteTranscriptStore(database, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
+        var store = new SqliteTranscriptStore(database: database,
+            options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
 
-        await store.InsertAsync(MakeRecord("corr-2"), TestContext.Current.CancellationToken);
+        await store.InsertAsync(record: MakeRecord("corr-2"), cancellationToken: TestContext.Current.CancellationToken);
 
-        var row = ReadRow(database, "corr-2");
+        var row = ReadRow(database: database, correlationId: "corr-2");
         Assert.Null(row.Score);
     }
 
@@ -64,9 +81,11 @@ public class SqliteTranscriptStoreTests : IDisposable
         var database = CreateDatabase();
         // Capture disabled: EnsureCreated deliberately not called here, mirroring how the real startup
         // path skips schema creation when TranscriptOptions.Enabled is false.
-        var store = new SqliteTranscriptStore(database, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = false }));
+        var store = new SqliteTranscriptStore(database: database,
+            options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = false }));
 
-        var id = await store.InsertAsync(MakeRecord("corr-3"), TestContext.Current.CancellationToken);
+        var id = await store.InsertAsync(record: MakeRecord("corr-3"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Null(id);
         Assert.False(File.Exists(_dbPath));
@@ -76,9 +95,11 @@ public class SqliteTranscriptStoreTests : IDisposable
     public async Task UpdateOutcomeAsync_CaptureDisabled_IsANoOp()
     {
         var database = CreateDatabase();
-        var store = new SqliteTranscriptStore(database, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = false }));
+        var store = new SqliteTranscriptStore(database: database,
+            options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = false }));
 
-        await store.UpdateOutcomeAsync("corr-4", 0.5, TestContext.Current.CancellationToken);
+        await store.UpdateOutcomeAsync(correlationId: "corr-4", 0.5,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(File.Exists(_dbPath));
     }
@@ -96,13 +117,16 @@ public class SqliteTranscriptStoreTests : IDisposable
     {
         var database = CreateDatabase();
         database.EnsureCreated();
-        var store = new SqliteTranscriptStore(database, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
+        var store = new SqliteTranscriptStore(database: database,
+            options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
 
         var id = await store.InsertAsync(
-            MakeRecord("corr-dimbest") with { DimBestModel = "glm-5" }, TestContext.Current.CancellationToken);
+            record: MakeRecord("corr-dimbest") with { DimBestModel = "glm-5" },
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        var row = await store.GetTranscriptAsync(id!.Value, TestContext.Current.CancellationToken);
-        Assert.Equal("glm-5", row!.DimBestModel);
+        var row = await store.GetTranscriptAsync(id: id!.Value,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(expected: "glm-5", actual: row!.DimBestModel);
     }
 
     [Fact]
@@ -110,13 +134,16 @@ public class SqliteTranscriptStoreTests : IDisposable
     {
         var database = CreateDatabase();
         database.EnsureCreated();
-        var store = new SqliteTranscriptStore(database, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
+        var store = new SqliteTranscriptStore(database: database,
+            options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
 
         // An abstention means the frozen baseline expressed no preference. Defaulting it to the served
         // model would fabricate a zero-savings counterfactual out of a decision nobody made.
-        var id = await store.InsertAsync(MakeRecord("corr-abstain"), TestContext.Current.CancellationToken);
+        var id = await store.InsertAsync(record: MakeRecord("corr-abstain"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        var row = await store.GetTranscriptAsync(id!.Value, TestContext.Current.CancellationToken);
+        var row = await store.GetTranscriptAsync(id: id!.Value,
+            cancellationToken: TestContext.Current.CancellationToken);
         Assert.Null(row!.DimBestModel);
     }
 
@@ -127,31 +154,34 @@ public class SqliteTranscriptStoreTests : IDisposable
         // CREATE TABLE IF NOT EXISTS is blind to it - without the explicit PRAGMA migration every read
         // would fail with "no such column".
         Directory.CreateDirectory(_tempDirectory);
-        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_dbPath}"))
+        using (var connection = new SqliteConnection($"Data Source={_dbPath}"))
         {
             connection.Open();
             using var create = connection.CreateCommand();
             create.CommandText = """
-                CREATE TABLE request_transcripts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT, correlation_id TEXT NOT NULL,
-                    created_at_utc TEXT NOT NULL, requested_model TEXT NOT NULL, routed_model TEXT NOT NULL,
-                    dimension TEXT NULL, difficulty TEXT NULL, language TEXT NULL, is_utility INTEGER NOT NULL,
-                    prompt_text TEXT NULL, response_text TEXT NULL, score REAL NULL, cost REAL NULL,
-                    is_exploratory INTEGER NOT NULL, propensity REAL NOT NULL, input_tokens INTEGER NULL,
-                    output_tokens INTEGER NULL, memory_entry_id INTEGER NULL);
-                """;
+                                 CREATE TABLE request_transcripts (
+                                     id INTEGER PRIMARY KEY AUTOINCREMENT, correlation_id TEXT NOT NULL,
+                                     created_at_utc TEXT NOT NULL, requested_model TEXT NOT NULL, routed_model TEXT NOT NULL,
+                                     dimension TEXT NULL, difficulty TEXT NULL, language TEXT NULL, is_utility INTEGER NOT NULL,
+                                     prompt_text TEXT NULL, response_text TEXT NULL, score REAL NULL, cost REAL NULL,
+                                     is_exploratory INTEGER NOT NULL, propensity REAL NOT NULL, input_tokens INTEGER NULL,
+                                     output_tokens INTEGER NULL, memory_entry_id INTEGER NULL);
+                                 """;
             create.ExecuteNonQuery();
         }
 
         var database = CreateDatabase();
         database.EnsureCreated();
-        var store = new SqliteTranscriptStore(database, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
+        var store = new SqliteTranscriptStore(database: database,
+            options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
 
         var id = await store.InsertAsync(
-            MakeRecord("corr-migrated") with { DimBestModel = "glm-5" }, TestContext.Current.CancellationToken);
+            record: MakeRecord("corr-migrated") with { DimBestModel = "glm-5" },
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        var row = await store.GetTranscriptAsync(id!.Value, TestContext.Current.CancellationToken);
-        Assert.Equal("glm-5", row!.DimBestModel);
+        var row = await store.GetTranscriptAsync(id: id!.Value,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(expected: "glm-5", actual: row!.DimBestModel);
     }
 
     [Fact]
@@ -172,22 +202,27 @@ public class SqliteTranscriptStoreTests : IDisposable
         // `NULL <> 'v2'` to NULL rather than true, so a plain inequality would silently exclude every
         // never-scanned row - which is the entire population the first sweep exists to grade.
         var (database, store) = CreateEnabledStore();
-        await store.InsertAsync(MakeRecord("corr-never"), TestContext.Current.CancellationToken);
+        await store.InsertAsync(record: MakeRecord("corr-never"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        var pending = await store.LoadPendingQualityRescanAsync("v2", 10, TestContext.Current.CancellationToken);
+        var pending = await store.LoadPendingQualityRescanAsync(scorerVersion: "v2", 10,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Single(pending);
-        Assert.Null(ReadScorerVersion(database, "corr-never"));
+        Assert.Null(ReadScorerVersion(database: database, correlationId: "corr-never"));
     }
 
     [Fact]
     public async Task LoadPendingQualityRescanAsync_ExcludesRowsAlreadyAtTheCurrentVersion()
     {
         var (_, store) = CreateEnabledStore();
-        var id = await store.InsertAsync(MakeRecord("corr-current"), TestContext.Current.CancellationToken);
-        await store.MarkQualityRescannedAsync(id!.Value, "v2", 0.7, TestContext.Current.CancellationToken);
+        var id = await store.InsertAsync(record: MakeRecord("corr-current"),
+            cancellationToken: TestContext.Current.CancellationToken);
+        await store.MarkQualityRescannedAsync(transcriptId: id!.Value, scorerVersion: "v2", 0.7,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        var pending = await store.LoadPendingQualityRescanAsync("v2", 10, TestContext.Current.CancellationToken);
+        var pending = await store.LoadPendingQualityRescanAsync(scorerVersion: "v2", 10,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Empty(pending);
     }
@@ -196,12 +231,15 @@ public class SqliteTranscriptStoreTests : IDisposable
     public async Task LoadPendingQualityRescanAsync_ReturnsRowsStampedByAnOlderScorer()
     {
         var (_, store) = CreateEnabledStore();
-        var id = await store.InsertAsync(MakeRecord("corr-stale"), TestContext.Current.CancellationToken);
-        await store.MarkQualityRescannedAsync(id!.Value, "v1", 0.7, TestContext.Current.CancellationToken);
+        var id = await store.InsertAsync(record: MakeRecord("corr-stale"),
+            cancellationToken: TestContext.Current.CancellationToken);
+        await store.MarkQualityRescannedAsync(transcriptId: id!.Value, scorerVersion: "v1", 0.7,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        var pending = await store.LoadPendingQualityRescanAsync("v2", 10, TestContext.Current.CancellationToken);
+        var pending = await store.LoadPendingQualityRescanAsync(scorerVersion: "v2", 10,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal([id.Value], pending);
+        Assert.Equal(expected: [id.Value], actual: pending);
     }
 
     [Fact]
@@ -211,10 +249,11 @@ public class SqliteTranscriptStoreTests : IDisposable
         // bounded batch and starve the sweep of rows it could actually score.
         var (_, store) = CreateEnabledStore();
         await store.InsertAsync(
-            MakeRecord("corr-no-text") with { ResponseText = null },
-            TestContext.Current.CancellationToken);
+            record: MakeRecord("corr-no-text") with { ResponseText = null },
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        var pending = await store.LoadPendingQualityRescanAsync("v2", 10, TestContext.Current.CancellationToken);
+        var pending = await store.LoadPendingQualityRescanAsync(scorerVersion: "v2", 10,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Empty(pending);
     }
@@ -223,12 +262,14 @@ public class SqliteTranscriptStoreTests : IDisposable
     public async Task MarkQualityRescannedAsync_WritesBothTheScoreAndTheVersionStamp()
     {
         var (database, store) = CreateEnabledStore();
-        var id = await store.InsertAsync(MakeRecord("corr-mark"), TestContext.Current.CancellationToken);
+        var id = await store.InsertAsync(record: MakeRecord("corr-mark"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        await store.MarkQualityRescannedAsync(id!.Value, "v2", 0.61, TestContext.Current.CancellationToken);
+        await store.MarkQualityRescannedAsync(transcriptId: id!.Value, scorerVersion: "v2", 0.61,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(0.61, ReadRow(database, "corr-mark").Score!.Value, 6);
-        Assert.Equal("v2", ReadScorerVersion(database, "corr-mark"));
+        Assert.Equal(0.61, actual: ReadRow(database: database, correlationId: "corr-mark").Score!.Value, 6);
+        Assert.Equal(expected: "v2", actual: ReadScorerVersion(database: database, correlationId: "corr-mark"));
     }
 
     [Fact]
@@ -237,20 +278,25 @@ public class SqliteTranscriptStoreTests : IDisposable
         // A row whose text carries no code block is ungradable, but must still be stamped - otherwise the
         // oldest-first sweep returns it again on every tick, forever.
         var (_, store) = CreateEnabledStore();
-        var id = await store.InsertAsync(MakeRecord("corr-ungradable"), TestContext.Current.CancellationToken);
+        var id = await store.InsertAsync(record: MakeRecord("corr-ungradable"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        await store.MarkQualityRescannedAsync(id!.Value, "v2", score: null, TestContext.Current.CancellationToken);
+        await store.MarkQualityRescannedAsync(transcriptId: id!.Value, scorerVersion: "v2", null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Empty(await store.LoadPendingQualityRescanAsync("v2", 10, TestContext.Current.CancellationToken));
+        Assert.Empty(await store.LoadPendingQualityRescanAsync(scorerVersion: "v2", 10,
+            cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
     public async Task LoadPendingQualityRescanAsync_CaptureDisabled_ReturnsEmptyAndWritesNothing()
     {
         var database = CreateDatabase();
-        var store = new SqliteTranscriptStore(database, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = false }));
+        var store = new SqliteTranscriptStore(database: database,
+            options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = false }));
 
-        var pending = await store.LoadPendingQualityRescanAsync("v2", 10, TestContext.Current.CancellationToken);
+        var pending = await store.LoadPendingQualityRescanAsync(scorerVersion: "v2", 10,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Empty(pending);
         Assert.False(File.Exists(_dbPath));
@@ -261,14 +307,16 @@ public class SqliteTranscriptStoreTests : IDisposable
     {
         var database = CreateDatabase();
         var options = new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = false });
-        var store = new SqliteTranscriptStore(database, options);
+        var store = new SqliteTranscriptStore(database: database, options: options);
 
-        var firstAttempt = await store.InsertAsync(MakeRecord("corr-live-off"), TestContext.Current.CancellationToken);
+        var firstAttempt = await store.InsertAsync(record: MakeRecord("corr-live-off"),
+            cancellationToken: TestContext.Current.CancellationToken);
         Assert.Null(firstAttempt);
         Assert.False(File.Exists(_dbPath));
 
         options.Set(new TranscriptOptions { Enabled = true });
-        var secondAttempt = await store.InsertAsync(MakeRecord("corr-live-on"), TestContext.Current.CancellationToken);
+        var secondAttempt = await store.InsertAsync(record: MakeRecord("corr-live-on"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.NotNull(secondAttempt);
         Assert.True(File.Exists(_dbPath));
@@ -278,27 +326,31 @@ public class SqliteTranscriptStoreTests : IDisposable
     public async Task InsertAsync_WritesSessionIdParsedFromCorrelationId()
     {
         var (database, store) = CreateEnabledStore();
-        await store.InsertAsync(MakeRecord("sess-A:2"), TestContext.Current.CancellationToken);
+        await store.InsertAsync(record: MakeRecord("sess-A:2"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("sess-A", ReadSessionId(database, "sess-A:2"));
+        Assert.Equal(expected: "sess-A", actual: ReadSessionId(database: database, correlationId: "sess-A:2"));
     }
 
     [Fact]
     public async Task InsertAsync_CorrelationIdWithNoTurnSuffix_SessionIdIsTheWholeCorrelationId()
     {
         var (database, store) = CreateEnabledStore();
-        await store.InsertAsync(MakeRecord("standalone-corr"), TestContext.Current.CancellationToken);
+        await store.InsertAsync(record: MakeRecord("standalone-corr"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("standalone-corr", ReadSessionId(database, "standalone-corr"));
+        Assert.Equal(expected: "standalone-corr",
+            actual: ReadSessionId(database: database, correlationId: "standalone-corr"));
     }
 
     [Fact]
     public async Task ListSessionsAsync_CaptureDisabled_ReturnsEmpty()
     {
         var database = CreateDatabase();
-        var store = new SqliteTranscriptStore(database, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = false }));
+        var store = new SqliteTranscriptStore(database: database,
+            options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = false }));
 
-        var rows = await store.ListSessionsAsync(10, TestContext.Current.CancellationToken);
+        var rows = await store.ListSessionsAsync(10, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Empty(rows);
     }
@@ -307,17 +359,19 @@ public class SqliteTranscriptStoreTests : IDisposable
     public async Task ListSessionsAsync_ReturnsRowsNewestFirstWithSessionIdAndTrainingLinkage()
     {
         var (_, store) = CreateEnabledStore();
-        await store.InsertAsync(MakeRecord("sess-B:1") with { MemoryEntryId = null }, TestContext.Current.CancellationToken);
-        var secondId = await store.InsertAsync(MakeRecord("sess-B:2") with { MemoryEntryId = 42 }, TestContext.Current.CancellationToken);
+        await store.InsertAsync(record: MakeRecord("sess-B:1") with { MemoryEntryId = null },
+            cancellationToken: TestContext.Current.CancellationToken);
+        var secondId = await store.InsertAsync(record: MakeRecord("sess-B:2") with { MemoryEntryId = 42 },
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        var rows = await store.ListSessionsAsync(10, TestContext.Current.CancellationToken);
+        var rows = await store.ListSessionsAsync(10, cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(2, rows.Count);
+        Assert.Equal(2, actual: rows.Count);
         // Newest first: the second insert (id == secondId) comes back before the first.
-        Assert.Equal(secondId, rows[0].Id);
-        Assert.Equal("sess-B", rows[0].SessionId);
-        Assert.Equal("sess-B:2", rows[0].CorrelationId);
-        Assert.Equal(42, rows[0].MemoryEntryId);
+        Assert.Equal(expected: secondId, actual: rows[0].Id);
+        Assert.Equal(expected: "sess-B", actual: rows[0].SessionId);
+        Assert.Equal(expected: "sess-B:2", actual: rows[0].CorrelationId);
+        Assert.Equal(42, actual: rows[0].MemoryEntryId);
         Assert.Null(rows[1].MemoryEntryId);
     }
 
@@ -325,13 +379,16 @@ public class SqliteTranscriptStoreTests : IDisposable
     public async Task ListSessionsAsync_RespectsLimit()
     {
         var (_, store) = CreateEnabledStore();
-        await store.InsertAsync(MakeRecord("sess-C:1"), TestContext.Current.CancellationToken);
-        await store.InsertAsync(MakeRecord("sess-C:2"), TestContext.Current.CancellationToken);
-        await store.InsertAsync(MakeRecord("sess-C:3"), TestContext.Current.CancellationToken);
+        await store.InsertAsync(record: MakeRecord("sess-C:1"),
+            cancellationToken: TestContext.Current.CancellationToken);
+        await store.InsertAsync(record: MakeRecord("sess-C:2"),
+            cancellationToken: TestContext.Current.CancellationToken);
+        await store.InsertAsync(record: MakeRecord("sess-C:3"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        var rows = await store.ListSessionsAsync(2, TestContext.Current.CancellationToken);
+        var rows = await store.ListSessionsAsync(2, cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(2, rows.Count);
+        Assert.Equal(2, actual: rows.Count);
     }
 
     [Fact]
@@ -342,48 +399,49 @@ public class SqliteTranscriptStoreTests : IDisposable
 
         // Simulate a database created by a pre-Phase-1 build: request_transcripts exists but has no
         // session_id column at all, and already carries rows with turn-suffixed correlation ids.
-        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_dbPath}"))
+        using (var connection = new SqliteConnection($"Data Source={_dbPath}"))
         {
             connection.Open();
             using var create = connection.CreateCommand();
             create.CommandText = """
-                CREATE TABLE request_transcripts (
-                    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-                    correlation_id     TEXT    NOT NULL,
-                    created_at_utc     TEXT    NOT NULL,
-                    requested_model    TEXT    NOT NULL,
-                    routed_model       TEXT    NOT NULL,
-                    dimension          TEXT    NULL,
-                    difficulty         TEXT    NULL,
-                    language           TEXT    NULL,
-                    is_utility         INTEGER NOT NULL,
-                    prompt_text        TEXT    NULL,
-                    response_text      TEXT    NULL,
-                    score              REAL    NULL,
-                    cost               REAL    NULL,
-                    is_exploratory     INTEGER NOT NULL,
-                    propensity         REAL    NOT NULL,
-                    input_tokens       INTEGER NULL,
-                    output_tokens      INTEGER NULL,
-                    memory_entry_id    INTEGER NULL,
-                    dim_best_model     TEXT    NULL
-                );
-                """;
+                                 CREATE TABLE request_transcripts (
+                                     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                                     correlation_id     TEXT    NOT NULL,
+                                     created_at_utc     TEXT    NOT NULL,
+                                     requested_model    TEXT    NOT NULL,
+                                     routed_model       TEXT    NOT NULL,
+                                     dimension          TEXT    NULL,
+                                     difficulty         TEXT    NULL,
+                                     language           TEXT    NULL,
+                                     is_utility         INTEGER NOT NULL,
+                                     prompt_text        TEXT    NULL,
+                                     response_text      TEXT    NULL,
+                                     score              REAL    NULL,
+                                     cost               REAL    NULL,
+                                     is_exploratory     INTEGER NOT NULL,
+                                     propensity         REAL    NOT NULL,
+                                     input_tokens       INTEGER NULL,
+                                     output_tokens      INTEGER NULL,
+                                     memory_entry_id    INTEGER NULL,
+                                     dim_best_model     TEXT    NULL
+                                 );
+                                 """;
             create.ExecuteNonQuery();
 
             using var insert = connection.CreateCommand();
             insert.CommandText = """
-                INSERT INTO request_transcripts (
-                    correlation_id, created_at_utc, requested_model, routed_model, is_utility,
-                    is_exploratory, propensity)
-                VALUES ('pre-migration-sess:3', '2026-01-01T00:00:00Z', 'gpt-5.4', 'kimi-k2.5', 0, 0, 0.1);
-                """;
+                                 INSERT INTO request_transcripts (
+                                     correlation_id, created_at_utc, requested_model, routed_model, is_utility,
+                                     is_exploratory, propensity)
+                                 VALUES ('pre-migration-sess:3', '2026-01-01T00:00:00Z', 'gpt-5.4', 'kimi-k2.5', 0, 0, 0.1);
+                                 """;
             insert.ExecuteNonQuery();
         }
 
         database.EnsureCreated();
 
-        Assert.Equal("pre-migration-sess", ReadSessionId(database, "pre-migration-sess:3"));
+        Assert.Equal(expected: "pre-migration-sess",
+            actual: ReadSessionId(database: database, correlationId: "pre-migration-sess:3"));
     }
 
     private static string ReadSessionId(TranscriptDatabase database, string correlationId)
@@ -391,7 +449,7 @@ public class SqliteTranscriptStoreTests : IDisposable
         using var connection = database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT session_id FROM request_transcripts WHERE correlation_id = $correlationId;";
-        command.Parameters.AddWithValue("$correlationId", correlationId);
+        command.Parameters.AddWithValue(parameterName: "$correlationId", value: correlationId);
         return (string)command.ExecuteScalar()!;
     }
 
@@ -399,13 +457,15 @@ public class SqliteTranscriptStoreTests : IDisposable
     public async Task DeleteAllAsync_RemovesEveryRow()
     {
         var (_, store) = CreateEnabledStore();
-        await store.InsertAsync(MakeRecord("corr-clear-1"), TestContext.Current.CancellationToken);
-        await store.InsertAsync(MakeRecord("corr-clear-2"), TestContext.Current.CancellationToken);
+        await store.InsertAsync(record: MakeRecord("corr-clear-1"),
+            cancellationToken: TestContext.Current.CancellationToken);
+        await store.InsertAsync(record: MakeRecord("corr-clear-2"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var deleted = await store.DeleteAllAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(2, deleted);
-        Assert.Equal(0, await store.GetRowCountAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(2, actual: deleted);
+        Assert.Equal(0, actual: await store.GetRowCountAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -413,32 +473,36 @@ public class SqliteTranscriptStoreTests : IDisposable
     {
         var database = CreateDatabase();
         var options = new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true });
-        var store = new SqliteTranscriptStore(database, options);
-        await store.InsertAsync(MakeRecord("corr-clear-disabled"), TestContext.Current.CancellationToken);
+        var store = new SqliteTranscriptStore(database: database, options: options);
+        await store.InsertAsync(record: MakeRecord("corr-clear-disabled"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         // The operator switched capture off after collecting this row, but still wants to flush it.
         options.Set(new TranscriptOptions { Enabled = false });
         var deleted = await store.DeleteAllAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(1, deleted);
+        Assert.Equal(1, actual: deleted);
     }
 
     [Fact]
     public async Task DeleteAllAsync_NoDatabaseEverCreated_ReturnsZeroWithoutThrowing()
     {
         var database = CreateDatabase();
-        var store = new SqliteTranscriptStore(database, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = false }));
+        var store = new SqliteTranscriptStore(database: database,
+            options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = false }));
 
         var deleted = await store.DeleteAllAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(0, deleted);
+        Assert.Equal(0, actual: deleted);
     }
 
     private (TranscriptDatabase Database, SqliteTranscriptStore Store) CreateEnabledStore()
     {
         var database = CreateDatabase();
         database.EnsureCreated();
-        return (database, new SqliteTranscriptStore(database, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true })));
+        return (database,
+            new SqliteTranscriptStore(database: database,
+                options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true })));
     }
 
     private static string? ReadScorerVersion(TranscriptDatabase database, string correlationId)
@@ -446,17 +510,20 @@ public class SqliteTranscriptStoreTests : IDisposable
         using var connection = database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT scorer_version FROM request_transcripts WHERE correlation_id = $correlationId;";
-        command.Parameters.AddWithValue("$correlationId", correlationId);
+        command.Parameters.AddWithValue(parameterName: "$correlationId", value: correlationId);
         var value = command.ExecuteScalar();
         return value is null or DBNull ? null : (string)value;
     }
 
-    private TranscriptDatabase CreateDatabase() =>
-        new(Options.Create(new StorageOptions { TranscriptDatabasePath = _dbPath }));
+    private TranscriptDatabase CreateDatabase()
+    {
+        return new TranscriptDatabase(Options.Create(new StorageOptions { TranscriptDatabasePath = _dbPath }));
+    }
 
-    private static TranscriptRecord MakeRecord(string correlationId) =>
-        new(
-            Id: 0,
+    private static TranscriptRecord MakeRecord(string correlationId)
+    {
+        return new TranscriptRecord(
+            0,
             CorrelationId: correlationId,
             CreatedAtUtc: DateTimeOffset.UtcNow,
             RequestedModel: "gpt-5.4",
@@ -464,28 +531,30 @@ public class SqliteTranscriptStoreTests : IDisposable
             Dimension: "bug_fixing",
             Difficulty: "medium",
             Language: "python",
-            IsUtility: false,
+            false,
             PromptText: "fix this bug",
             ResponseText: "here is the fix",
-            Score: null,
-            Cost: 0.0042m,
-            IsExploratory: true,
-            Propensity: 0.05,
-            InputTokens: 100,
-            OutputTokens: 50,
-            MemoryEntryId: null);
+            null,
+            0.0042m,
+            true,
+            0.05,
+            100,
+            50,
+            null);
+    }
 
-    private static (string RequestedModel, string RoutedModel, double? Score, decimal? Cost, bool IsExploratory, double Propensity) ReadRow(
-        TranscriptDatabase database, string correlationId)
+    private static (string RequestedModel, string RoutedModel, double? Score, decimal? Cost, bool IsExploratory, double
+        Propensity) ReadRow(
+            TranscriptDatabase database, string correlationId)
     {
         using var connection = database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT requested_model, routed_model, score, cost, is_exploratory, propensity
-            FROM request_transcripts
-            WHERE correlation_id = $correlationId;
-            """;
-        command.Parameters.AddWithValue("$correlationId", correlationId);
+                              SELECT requested_model, routed_model, score, cost, is_exploratory, propensity
+                              FROM request_transcripts
+                              WHERE correlation_id = $correlationId;
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$correlationId", value: correlationId);
         using var reader = command.ExecuteReader();
         Assert.True(reader.Read());
 
@@ -497,20 +566,5 @@ public class SqliteTranscriptStoreTests : IDisposable
         var propensity = reader.GetDouble(5);
 
         return (requestedModel, routedModel, score, cost, isExploratory, propensity);
-    }
-
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_tempDirectory))
-            {
-                Directory.Delete(_tempDirectory, recursive: true);
-            }
-        }
-        catch (IOException)
-        {
-            // Best-effort cleanup; a locked file on a busy CI box is not a test failure.
-        }
     }
 }

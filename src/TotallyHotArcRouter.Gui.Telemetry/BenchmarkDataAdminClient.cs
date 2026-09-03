@@ -1,5 +1,5 @@
-using Grpc.Core;
 using System.Runtime.CompilerServices;
+using Grpc.Core;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
@@ -13,7 +13,7 @@ public sealed class BenchmarkDataAdminException : GrpcAdminException
 {
     /// <summary>Initializes a new instance of the <see cref="BenchmarkDataAdminException"/> class.</summary>
     public BenchmarkDataAdminException(string message, Exception? innerException = null, bool isUnavailable = false)
-        : base(message, innerException, isUnavailable)
+        : base(message: message, innerException: innerException, isUnavailable: isUnavailable)
     {
     }
 }
@@ -28,7 +28,7 @@ public enum BenchmarkDataAdminState
     Update,
 
     /// <summary>The checksum probe could not reach Hugging Face; freshness is unknown.</summary>
-    CheckFailed,
+    CheckFailed
 }
 
 /// <summary>One corpus file's last-recorded sync, as rendered by the Governance → Benchmark Data panel.</summary>
@@ -46,7 +46,10 @@ public sealed record BenchmarkFileStatusInfo(
 
 /// <summary>The corpus's freshness state and every file's ledger status.</summary>
 /// <param name="State">The computed freshness state.</param>
-/// <param name="Reason">The probe failure reason, when <paramref name="State"/> is <see cref="BenchmarkDataAdminState.CheckFailed"/>; otherwise <see langword="null"/>.</param>
+/// <param name="Reason">
+/// The probe failure reason, when <paramref name="State"/> is
+/// <see cref="BenchmarkDataAdminState.CheckFailed"/>; otherwise <see langword="null"/>.
+/// </param>
 /// <param name="CheckedAtUtc">When this status was computed.</param>
 /// <param name="Files">Every corpus file's ledger status, whether synced or not.</param>
 public sealed record BenchmarkDataStatusInfo(
@@ -71,7 +74,7 @@ public enum BenchmarkSyncStageInfo
     Completed,
 
     /// <summary>The file's sync failed; its prior table rows and ledger entry are untouched.</summary>
-    Failed,
+    Failed
 }
 
 /// <summary>One file's progress update during a sync.</summary>
@@ -122,15 +125,18 @@ public sealed record BenchmarkSyncEvent(
 /// so CI can unit-test it, exactly like <see cref="PriceSourceAdminClient"/>.
 /// </summary>
 public sealed class BenchmarkDataAdminClient
-    : GrpcAdminClientBase<Contract.BenchmarkDataAdminService.BenchmarkDataAdminServiceClient, BenchmarkDataAdminException>,
-      IBenchmarkDataAdminClient
+    : GrpcAdminClientBase<Contract.BenchmarkDataAdminService.BenchmarkDataAdminServiceClient,
+            BenchmarkDataAdminException>,
+        IBenchmarkDataAdminClient
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="BenchmarkDataAdminClient"/> class, creating and
     /// owning a channel to <paramref name="serverAddress"/>.
     /// </summary>
     public BenchmarkDataAdminClient(string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
-        : base(serverAddress, callInvoker => new Contract.BenchmarkDataAdminService.BenchmarkDataAdminServiceClient(callInvoker))
+        : base(serverAddress: serverAddress,
+            createClient: callInvoker =>
+                new Contract.BenchmarkDataAdminService.BenchmarkDataAdminServiceClient(callInvoker))
     {
     }
 
@@ -144,43 +150,46 @@ public sealed class BenchmarkDataAdminClient
     {
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<BenchmarkDataStatusInfo> GetStatusAsync(CancellationToken cancellationToken = default)
     {
         try
         {
             var response = await Client
-                .GetBenchmarkStatusAsync(new Contract.GetBenchmarkStatusRequest(), cancellationToken: cancellationToken)
+                .GetBenchmarkStatusAsync(request: new Contract.GetBenchmarkStatusRequest(),
+                    cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             return MapStatus(response);
         }
         catch (RpcException ex)
         {
-            throw Wrap(ex, "Could not read the benchmark data status");
+            throw Wrap(ex: ex, action: "Could not read the benchmark data status");
         }
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<BenchmarkDataStatusInfo> RecheckAsync(CancellationToken cancellationToken = default)
     {
         try
         {
             var response = await Client
-                .RecheckBenchmarkDataAsync(new Contract.RecheckBenchmarkDataRequest(), cancellationToken: cancellationToken)
+                .RecheckBenchmarkDataAsync(request: new Contract.RecheckBenchmarkDataRequest(),
+                    cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             return MapStatus(response);
         }
         catch (RpcException ex)
         {
-            throw Wrap(ex, "Could not recheck the benchmark data");
+            throw Wrap(ex: ex, action: "Could not recheck the benchmark data");
         }
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async IAsyncEnumerable<BenchmarkSyncEvent> SyncAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        using var call = Client.SyncBenchmarkData(new Contract.SyncBenchmarkDataRequest(), cancellationToken: cancellationToken);
+        using var call = Client.SyncBenchmarkData(request: new Contract.SyncBenchmarkDataRequest(),
+            cancellationToken: cancellationToken);
         var stream = call.ResponseStream;
 
         while (true)
@@ -194,32 +203,35 @@ public sealed class BenchmarkDataAdminClient
             {
                 // Not caught inside a try that also yields: an iterator cannot yield from within a catch
                 // block, so MoveNext's outcome is captured here and acted on outside the try.
-                throw Wrap(ex, "Benchmark data sync failed");
+                throw Wrap(ex: ex, action: "Benchmark data sync failed");
             }
 
-            if (!hasNext)
-            {
-                yield break;
-            }
+            if (!hasNext) yield break;
 
             yield return MapEvent(stream.Current);
         }
     }
 
     /// <summary>Converts a gRPC-contract status response into the client's <see cref="BenchmarkDataStatusInfo"/>.</summary>
-    private static BenchmarkDataStatusInfo MapStatus(Contract.BenchmarkStatusResponse response) => new(
-        MapState(response.State),
-        response.HasReason ? response.Reason : null,
-        response.CheckedAtUtc?.ToDateTimeOffset() ?? default,
-        [.. response.Files.Select(MapFile)]);
+    private static BenchmarkDataStatusInfo MapStatus(Contract.BenchmarkStatusResponse response)
+    {
+        return new BenchmarkDataStatusInfo(
+            State: MapState(response.State),
+            Reason: response.HasReason ? response.Reason : null,
+            CheckedAtUtc: response.CheckedAtUtc?.ToDateTimeOffset() ?? default,
+            Files: [.. response.Files.Select(MapFile)]);
+    }
 
     /// <summary>Converts a gRPC-contract file status into the client's <see cref="BenchmarkFileStatusInfo"/>.</summary>
-    private static BenchmarkFileStatusInfo MapFile(Contract.BenchmarkFile file) => new(
-        file.FileName,
-        file.Synced,
-        file.SizeBytes,
-        file.RowCount,
-        file.SyncedAtUtc?.ToDateTimeOffset());
+    private static BenchmarkFileStatusInfo MapFile(Contract.BenchmarkFile file)
+    {
+        return new BenchmarkFileStatusInfo(
+            FileName: file.FileName,
+            Synced: file.Synced,
+            SizeBytes: file.SizeBytes,
+            RowCount: file.RowCount,
+            SyncedAtUtc: file.SyncedAtUtc?.ToDateTimeOffset());
+    }
 
     /// <summary>
     /// Converts a gRPC-contract sync stream message into the client's <see cref="BenchmarkSyncEvent"/>.
@@ -227,30 +239,40 @@ public sealed class BenchmarkDataAdminClient
     /// including <c>None</c> - an empty oneof (e.g. a stream implementation that sends a bare keepalive
     /// message) must not be misread as a progress event and dereference an unset <c>Progress</c> field.
     /// </summary>
-    private static BenchmarkSyncEvent MapEvent(Contract.BenchmarkSyncStreamEvent wire) => wire.EventCase switch
+    private static BenchmarkSyncEvent MapEvent(Contract.BenchmarkSyncStreamEvent wire)
     {
-        Contract.BenchmarkSyncStreamEvent.EventOneofCase.Plan =>
-            new BenchmarkSyncEvent(Plan: MapPlan(wire.Plan), Progress: null, FinalStatus: null),
-        Contract.BenchmarkSyncStreamEvent.EventOneofCase.Progress =>
-            new BenchmarkSyncEvent(
-                Plan: null,
-                Progress: new BenchmarkSyncProgressInfo(
-                    wire.Progress.FileName,
-                    MapStage(wire.Progress.Stage),
-                    wire.Progress.HasBytesTransferred ? wire.Progress.BytesTransferred : null,
-                    wire.Progress.HasRowsImported ? wire.Progress.RowsImported : null,
-                    wire.Progress.HasError ? wire.Progress.Error : null,
-                    wire.Progress.HasTotalBytes ? wire.Progress.TotalBytes : null),
-                FinalStatus: null),
-        Contract.BenchmarkSyncStreamEvent.EventOneofCase.FinalStatus =>
-            new BenchmarkSyncEvent(Plan: null, Progress: null, FinalStatus: MapStatus(wire.FinalStatus)),
-        _ => new BenchmarkSyncEvent(Plan: null, Progress: null, FinalStatus: null),
-    };
+        return wire.EventCase switch
+        {
+            Contract.BenchmarkSyncStreamEvent.EventOneofCase.Plan =>
+                new BenchmarkSyncEvent(Plan: MapPlan(wire.Plan), null, null),
+            Contract.BenchmarkSyncStreamEvent.EventOneofCase.Progress =>
+                new BenchmarkSyncEvent(
+                    null,
+                    Progress: new BenchmarkSyncProgressInfo(
+                        FileName: wire.Progress.FileName,
+                        Stage: MapStage(wire.Progress.Stage),
+                        BytesTransferred: wire.Progress.HasBytesTransferred ? wire.Progress.BytesTransferred : null,
+                        RowsImported: wire.Progress.HasRowsImported ? wire.Progress.RowsImported : null,
+                        Error: wire.Progress.HasError ? wire.Progress.Error : null,
+                        TotalBytes: wire.Progress.HasTotalBytes ? wire.Progress.TotalBytes : null),
+                    null),
+            Contract.BenchmarkSyncStreamEvent.EventOneofCase.FinalStatus =>
+                new BenchmarkSyncEvent(null, null, FinalStatus: MapStatus(wire.FinalStatus)),
+            _ => new BenchmarkSyncEvent(null, null, null)
+        };
+    }
 
     /// <summary>Converts a gRPC-contract plan event into the client's <see cref="BenchmarkSyncPlanInfo"/>.</summary>
-    private static BenchmarkSyncPlanInfo MapPlan(Contract.BenchmarkSyncPlanEvent plan) => new(
-        [.. plan.Files.Select(file => new BenchmarkSyncPlanFileInfo(file.FileName, file.SizeBytes))],
-        plan.TotalBytes);
+    private static BenchmarkSyncPlanInfo MapPlan(Contract.BenchmarkSyncPlanEvent plan)
+    {
+        return new BenchmarkSyncPlanInfo(
+            Files:
+            [
+                .. plan.Files.Select(file =>
+                    new BenchmarkSyncPlanFileInfo(FileName: file.FileName, SizeBytes: file.SizeBytes))
+            ],
+            TotalBytes: plan.TotalBytes);
+    }
 
     /// <summary>
     /// Maps the wire freshness state onto the client's enum. Every defined value is mapped explicitly and
@@ -260,25 +282,35 @@ public sealed class BenchmarkDataAdminClient
     /// recheck, whereas defaulting to <see cref="BenchmarkDataAdminState.Update"/> would let the operator
     /// start a blind multi-hundred-megabyte sync off a state nobody actually asserted.
     /// </summary>
-    private static BenchmarkDataAdminState MapState(Contract.BenchmarkDataState state) => state switch
+    private static BenchmarkDataAdminState MapState(Contract.BenchmarkDataState state)
     {
-        Contract.BenchmarkDataState.Current => BenchmarkDataAdminState.Current,
-        Contract.BenchmarkDataState.Update => BenchmarkDataAdminState.Update,
-        Contract.BenchmarkDataState.CheckFailed => BenchmarkDataAdminState.CheckFailed,
-        _ => BenchmarkDataAdminState.CheckFailed,
-    };
+        return state switch
+        {
+            Contract.BenchmarkDataState.Current => BenchmarkDataAdminState.Current,
+            Contract.BenchmarkDataState.Update => BenchmarkDataAdminState.Update,
+            Contract.BenchmarkDataState.CheckFailed => BenchmarkDataAdminState.CheckFailed,
+            _ => BenchmarkDataAdminState.CheckFailed
+        };
+    }
 
     /// <summary>Maps the wire sync stage onto the client's enum.</summary>
-    private static BenchmarkSyncStageInfo MapStage(Contract.BenchmarkSyncStage stage) => stage switch
+    private static BenchmarkSyncStageInfo MapStage(Contract.BenchmarkSyncStage stage)
     {
-        Contract.BenchmarkSyncStage.Downloading => BenchmarkSyncStageInfo.Downloading,
-        Contract.BenchmarkSyncStage.Verifying => BenchmarkSyncStageInfo.Verifying,
-        Contract.BenchmarkSyncStage.Importing => BenchmarkSyncStageInfo.Importing,
-        Contract.BenchmarkSyncStage.Completed => BenchmarkSyncStageInfo.Completed,
-        _ => BenchmarkSyncStageInfo.Failed,
-    };
+        return stage switch
+        {
+            Contract.BenchmarkSyncStage.Downloading => BenchmarkSyncStageInfo.Downloading,
+            Contract.BenchmarkSyncStage.Verifying => BenchmarkSyncStageInfo.Verifying,
+            Contract.BenchmarkSyncStage.Importing => BenchmarkSyncStageInfo.Importing,
+            Contract.BenchmarkSyncStage.Completed => BenchmarkSyncStageInfo.Completed,
+            _ => BenchmarkSyncStageInfo.Failed
+        };
+    }
 
-    /// <inheritdoc />
-    protected override BenchmarkDataAdminException CreateException(string message, Exception? innerException, bool isUnavailable) =>
-        new(message, innerException, isUnavailable);
+    /// <inheritdoc/>
+    protected override BenchmarkDataAdminException CreateException(string message, Exception? innerException,
+        bool isUnavailable)
+    {
+        return new BenchmarkDataAdminException(message: message, innerException: innerException,
+            isUnavailable: isUnavailable);
+    }
 }

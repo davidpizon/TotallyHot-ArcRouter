@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Text.Json;
 
 namespace TotallyHot.ArcRouter.Gui.Admin;
@@ -12,9 +13,9 @@ namespace TotallyHot.ArcRouter.Gui.Admin;
 public sealed class UsageQueryClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private readonly string? _adminToken;
 
     private readonly HttpClient _httpClient;
-    private readonly string? _adminToken;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="UsageQueryClient"/> class.
@@ -39,8 +40,10 @@ public sealed class UsageQueryClient
     /// <exception cref="ProviderAdminException">Usage rollups are unavailable or the request failed.</exception>
     public async Task<UsageSummaryView> GetSummaryAsync(string window, CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"admin/usage/summary?window={Uri.EscapeDataString(window)}");
-        using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+        using var request = new HttpRequestMessage(method: HttpMethod.Get,
+            requestUri: $"admin/usage/summary?window={Uri.EscapeDataString(window)}");
+        using var response =
+            await SendAsync(request: request, cancellationToken: cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         return Deserialize<UsageSummaryView>(body);
     }
@@ -51,16 +54,21 @@ public sealed class UsageQueryClient
     /// <param name="width">Bucket width: <c>"hour"</c> or <c>"day"</c>.</param>
     /// <param name="groupBy"><c>"model"</c>, <c>"provider"</c>, or <c>"day"</c>.</param>
     /// <param name="cancellationToken">A token to cancel the request.</param>
-    /// <exception cref="ProviderAdminException">Usage rollups are unavailable, the range/parameters were rejected, or the request failed.</exception>
+    /// <exception cref="ProviderAdminException">
+    /// Usage rollups are unavailable, the range/parameters were rejected, or the
+    /// request failed.
+    /// </exception>
     public async Task<IReadOnlyList<UsageRollupBucketView>> GetRollupAsync(
-        DateTimeOffset from, DateTimeOffset to, string width, string groupBy, CancellationToken cancellationToken = default)
+        DateTimeOffset from, DateTimeOffset to, string width, string groupBy,
+        CancellationToken cancellationToken = default)
     {
         var url = "admin/usage/rollup" +
-            $"?from={Uri.EscapeDataString(from.ToString("O", CultureInfo.InvariantCulture))}" +
-            $"&to={Uri.EscapeDataString(to.ToString("O", CultureInfo.InvariantCulture))}" +
-            $"&width={Uri.EscapeDataString(width)}&groupBy={Uri.EscapeDataString(groupBy)}";
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+                  $"?from={Uri.EscapeDataString(from.ToString(format: "O", formatProvider: CultureInfo.InvariantCulture))}" +
+                  $"&to={Uri.EscapeDataString(to.ToString(format: "O", formatProvider: CultureInfo.InvariantCulture))}" +
+                  $"&width={Uri.EscapeDataString(width)}&groupBy={Uri.EscapeDataString(groupBy)}";
+        using var request = new HttpRequestMessage(method: HttpMethod.Get, requestUri: url);
+        using var response =
+            await SendAsync(request: request, cancellationToken: cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         return Deserialize<List<UsageRollupBucketView>>(body);
     }
@@ -78,15 +86,13 @@ public sealed class UsageQueryClient
         DateTimeOffset from, DateTimeOffset to, string? sessionId = null, CancellationToken cancellationToken = default)
     {
         var url = "admin/usage/routing-roi" +
-            $"?from={Uri.EscapeDataString(from.ToString("O", CultureInfo.InvariantCulture))}" +
-            $"&to={Uri.EscapeDataString(to.ToString("O", CultureInfo.InvariantCulture))}";
-        if (!string.IsNullOrEmpty(sessionId))
-        {
-            url += $"&session={Uri.EscapeDataString(sessionId)}";
-        }
+                  $"?from={Uri.EscapeDataString(from.ToString(format: "O", formatProvider: CultureInfo.InvariantCulture))}" +
+                  $"&to={Uri.EscapeDataString(to.ToString(format: "O", formatProvider: CultureInfo.InvariantCulture))}";
+        if (!string.IsNullOrEmpty(sessionId)) url += $"&session={Uri.EscapeDataString(sessionId)}";
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+        using var request = new HttpRequestMessage(method: HttpMethod.Get, requestUri: url);
+        using var response =
+            await SendAsync(request: request, cancellationToken: cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         return Deserialize<List<RoutingRoiPointView>>(body);
     }
@@ -99,18 +105,18 @@ public sealed class UsageQueryClient
     private async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         if (!string.IsNullOrEmpty(_adminToken))
-        {
-            request.Headers.TryAddWithoutValidation("X-Admin-Token", _adminToken);
-        }
+            request.Headers.TryAddWithoutValidation(name: "X-Admin-Token", value: _adminToken);
 
         HttpResponseMessage response;
         try
         {
-            response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            response = await _httpClient.SendAsync(request: request, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (HttpRequestException ex)
         {
-            throw new ProviderAdminException($"Could not reach the proxy management API: {ex.Message}", ex);
+            throw new ProviderAdminException(message: $"Could not reach the proxy management API: {ex.Message}",
+                innerException: ex);
         }
 
         if (!response.IsSuccessStatusCode)
@@ -118,23 +124,28 @@ public sealed class UsageQueryClient
             var statusCode = response.StatusCode;
             var errorBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             response.Dispose();
-            throw new ProviderAdminException(ExtractErrorMessage(errorBody, statusCode));
+            throw new ProviderAdminException(ExtractErrorMessage(body: errorBody, statusCode: statusCode));
         }
 
         return response;
     }
 
-    /// <summary>Deserializes a response body, translating an empty body or malformed JSON into a <see cref="ProviderAdminException"/> rather than letting a null-reference or raw <see cref="JsonException"/> surface to the caller.</summary>
+    /// <summary>
+    /// Deserializes a response body, translating an empty body or malformed JSON into a
+    /// <see cref="ProviderAdminException"/> rather than letting a null-reference or raw <see cref="JsonException"/> surface to
+    /// the caller.
+    /// </summary>
     private static T Deserialize<T>(string body)
     {
         try
         {
-            return JsonSerializer.Deserialize<T>(body, JsonOptions)
-                ?? throw new ProviderAdminException("The proxy management API returned an empty response.");
+            return JsonSerializer.Deserialize<T>(json: body, options: JsonOptions)
+                   ?? throw new ProviderAdminException("The proxy management API returned an empty response.");
         }
         catch (JsonException ex)
         {
-            throw new ProviderAdminException($"The proxy management API returned an unreadable response: {ex.Message}", ex);
+            throw new ProviderAdminException(
+                message: $"The proxy management API returned an unreadable response: {ex.Message}", innerException: ex);
         }
     }
 
@@ -142,22 +153,19 @@ public sealed class UsageQueryClient
     /// Pulls the <c>error.message</c> out of the proxy's error envelope
     /// (<c>{ "error": { "message": "..." } }</c>), falling back to the raw body or status code.
     /// </summary>
-    private static string ExtractErrorMessage(string body, System.Net.HttpStatusCode statusCode)
+    private static string ExtractErrorMessage(string body, HttpStatusCode statusCode)
     {
         if (!string.IsNullOrWhiteSpace(body))
         {
             try
             {
                 using var document = JsonDocument.Parse(body);
-                if (document.RootElement.TryGetProperty("error", out var error)
-                    && error.TryGetProperty("message", out var message)
+                if (document.RootElement.TryGetProperty(propertyName: "error", value: out var error)
+                    && error.TryGetProperty(propertyName: "message", value: out var message)
                     && message.ValueKind == JsonValueKind.String)
                 {
                     var text = message.GetString();
-                    if (!string.IsNullOrWhiteSpace(text))
-                    {
-                        return text;
-                    }
+                    if (!string.IsNullOrWhiteSpace(text)) return text;
                 }
             }
             catch (JsonException)

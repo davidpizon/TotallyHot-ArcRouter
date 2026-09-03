@@ -14,7 +14,9 @@ public static class RouterDifficulty
     /// <summary>The default tier for a task with no strong signal either way.</summary>
     public const string Medium = "medium";
 
-    /// <summary>A long or structurally complex task, or one whose prompt names a known hard signal
-    /// (concurrency, distributed systems, performance-critical code, and the like).</summary>
+    /// <summary>
+    /// A long or structurally complex task, or one whose prompt names a known hard signal
+    /// (concurrency, distributed systems, performance-critical code, and the like).
+    /// </summary>
     public const string Hard = "hard";
 }

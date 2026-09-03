@@ -7,4 +7,3 @@ namespace TotallyHot.ArcRouter.Tests.Proxy;
 public sealed class ProxyLifecycleCollection
 {
 }
-

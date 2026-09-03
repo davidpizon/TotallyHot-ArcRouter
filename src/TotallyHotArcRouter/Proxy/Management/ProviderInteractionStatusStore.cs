@@ -13,7 +13,7 @@ public enum ProviderInteractionKind
     None = 0,
 
     /// <summary>The provider's account is out of credits/quota/billing.</summary>
-    OutOfCredits,
+    OutOfCredits
 }
 
 /// <summary>
@@ -24,7 +24,10 @@ public enum ProviderInteractionKind
 /// remarks for which track each comes from.
 /// </summary>
 /// <param name="Ok">Whether the interaction succeeded.</param>
-/// <param name="Operation">A short label for the interaction (e.g. <c>"Refresh from endpoint"</c> or <c>"Live traffic"</c>).</param>
+/// <param name="Operation">
+/// A short label for the interaction (e.g. <c>"Refresh from endpoint"</c> or <c>"Live traffic"</c>
+/// ).
+/// </param>
 /// <param name="Message">A human-readable failure reason, or <see langword="null"/> when <paramref name="Ok"/> is set.</param>
 /// <param name="AtUtc">When the interaction completed.</param>
 /// <param name="Kind">
@@ -65,7 +68,10 @@ public sealed record ProviderInteractionStatus(
 /// </summary>
 public interface IProviderInteractionStatusStore
 {
-    /// <summary>Records that an admin-triggered interaction with <paramref name="providerKey"/> succeeded, clearing any prior AdminAction failure.</summary>
+    /// <summary>
+    /// Records that an admin-triggered interaction with <paramref name="providerKey"/> succeeded, clearing any prior
+    /// AdminAction failure.
+    /// </summary>
     /// <param name="providerKey">The provider key.</param>
     /// <param name="operation">A short label for the interaction that succeeded.</param>
     void RecordSuccess(string providerKey, string operation);
@@ -76,7 +82,10 @@ public interface IProviderInteractionStatusStore
     /// <param name="message">A human-readable reason.</param>
     void RecordFailure(string providerKey, string operation, string message);
 
-    /// <summary>Reads back the most recent AdminAction outcome for <paramref name="providerKey"/>, or <see langword="null"/> if none has been recorded.</summary>
+    /// <summary>
+    /// Reads back the most recent AdminAction outcome for <paramref name="providerKey"/>, or <see langword="null"/>
+    /// if none has been recorded.
+    /// </summary>
     /// <param name="providerKey">The provider key.</param>
     ProviderInteractionStatus? Get(string providerKey);
 
@@ -86,25 +95,38 @@ public interface IProviderInteractionStatusStore
     /// <param name="message">A human-readable reason, drawn from the upstream response.</param>
     void RecordLiveTrafficFailure(string providerKey, ProviderInteractionKind kind, string message);
 
-    /// <summary>Records a live-traffic success, clearing any prior LiveTraffic failure - the provider-wide self-clearing signal.</summary>
+    /// <summary>
+    /// Records a live-traffic success, clearing any prior LiveTraffic failure - the provider-wide self-clearing
+    /// signal.
+    /// </summary>
     /// <param name="providerKey">The provider key.</param>
     /// <param name="operation">A short label for the successful interaction (e.g. <c>"Live traffic"</c>).</param>
     void RecordLiveTrafficSuccess(string providerKey, string operation);
 
-    /// <summary>Reads back the most recent LiveTraffic outcome for <paramref name="providerKey"/>, or <see langword="null"/> if none has been recorded.</summary>
+    /// <summary>
+    /// Reads back the most recent LiveTraffic outcome for <paramref name="providerKey"/>, or <see langword="null"/>
+    /// if none has been recorded.
+    /// </summary>
     /// <param name="providerKey">The provider key.</param>
     ProviderInteractionStatus? GetLiveTraffic(string providerKey);
 
-    /// <summary>Clears any recorded outcome - both tracks - for <paramref name="providerKey"/> - called when the provider is removed, so a later re-added provider of the same key starts clean.</summary>
+    /// <summary>
+    /// Clears any recorded outcome - both tracks - for <paramref name="providerKey"/> - called when the provider is
+    /// removed, so a later re-added provider of the same key starts clean.
+    /// </summary>
     /// <param name="providerKey">The provider key.</param>
     void Remove(string providerKey);
 }
 
-/// <inheritdoc cref="IProviderInteractionStatusStore" />
+/// <inheritdoc cref="IProviderInteractionStatusStore"/>
 public sealed class ProviderInteractionStatusStore : IProviderInteractionStatusStore
 {
-    private readonly ConcurrentDictionary<string, ProviderInteractionStatus> _adminActionStatuses = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, ProviderInteractionStatus> _liveTrafficStatuses = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ProviderInteractionStatus> _adminActionStatuses =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly ConcurrentDictionary<string, ProviderInteractionStatus> _liveTrafficStatuses =
+        new(StringComparer.OrdinalIgnoreCase);
+
     private readonly TimeProvider _timeProvider;
 
     /// <summary>Initializes a new instance of the <see cref="ProviderInteractionStatusStore"/> class.</summary>
@@ -114,34 +136,51 @@ public sealed class ProviderInteractionStatusStore : IProviderInteractionStatusS
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
-    /// <inheritdoc />
-    public void RecordSuccess(string providerKey, string operation) =>
-        _adminActionStatuses[providerKey] = new ProviderInteractionStatus(true, operation, null, _timeProvider.GetUtcNow());
+    /// <inheritdoc/>
+    public void RecordSuccess(string providerKey, string operation)
+    {
+        _adminActionStatuses[providerKey] =
+            new ProviderInteractionStatus(true, Operation: operation, null, AtUtc: _timeProvider.GetUtcNow());
+    }
 
-    /// <inheritdoc />
-    public void RecordFailure(string providerKey, string operation, string message) =>
-        _adminActionStatuses[providerKey] = new ProviderInteractionStatus(false, operation, message, _timeProvider.GetUtcNow());
+    /// <inheritdoc/>
+    public void RecordFailure(string providerKey, string operation, string message)
+    {
+        _adminActionStatuses[providerKey] = new ProviderInteractionStatus(false, Operation: operation, Message: message,
+            AtUtc: _timeProvider.GetUtcNow());
+    }
 
-    /// <inheritdoc />
-    public ProviderInteractionStatus? Get(string providerKey) =>
-        _adminActionStatuses.TryGetValue(providerKey, out var status) ? status : null;
+    /// <inheritdoc/>
+    public ProviderInteractionStatus? Get(string providerKey)
+    {
+        return _adminActionStatuses.TryGetValue(key: providerKey, value: out var status) ? status : null;
+    }
 
-    /// <inheritdoc />
-    public void RecordLiveTrafficFailure(string providerKey, ProviderInteractionKind kind, string message) =>
-        _liveTrafficStatuses[providerKey] = new ProviderInteractionStatus(false, "Live traffic", message, _timeProvider.GetUtcNow(), kind);
+    /// <inheritdoc/>
+    public void RecordLiveTrafficFailure(string providerKey, ProviderInteractionKind kind, string message)
+    {
+        _liveTrafficStatuses[providerKey] = new ProviderInteractionStatus(false, Operation: "Live traffic",
+            Message: message,
+            AtUtc: _timeProvider.GetUtcNow(), Kind: kind);
+    }
 
-    /// <inheritdoc />
-    public void RecordLiveTrafficSuccess(string providerKey, string operation) =>
-        _liveTrafficStatuses[providerKey] = new ProviderInteractionStatus(true, operation, null, _timeProvider.GetUtcNow());
+    /// <inheritdoc/>
+    public void RecordLiveTrafficSuccess(string providerKey, string operation)
+    {
+        _liveTrafficStatuses[providerKey] =
+            new ProviderInteractionStatus(true, Operation: operation, null, AtUtc: _timeProvider.GetUtcNow());
+    }
 
-    /// <inheritdoc />
-    public ProviderInteractionStatus? GetLiveTraffic(string providerKey) =>
-        _liveTrafficStatuses.TryGetValue(providerKey, out var status) ? status : null;
+    /// <inheritdoc/>
+    public ProviderInteractionStatus? GetLiveTraffic(string providerKey)
+    {
+        return _liveTrafficStatuses.TryGetValue(key: providerKey, value: out var status) ? status : null;
+    }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public void Remove(string providerKey)
     {
-        _adminActionStatuses.TryRemove(providerKey, out _);
-        _liveTrafficStatuses.TryRemove(providerKey, out _);
+        _adminActionStatuses.TryRemove(key: providerKey, value: out _);
+        _liveTrafficStatuses.TryRemove(key: providerKey, value: out _);
     }
 }

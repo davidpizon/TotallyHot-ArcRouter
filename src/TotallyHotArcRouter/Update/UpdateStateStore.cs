@@ -8,9 +8,9 @@ namespace TotallyHot.ArcRouter.Update;
 public sealed class UpdateStateStore : IUpdateStateStore
 {
     private readonly Lock _gate = new();
-    private UpdateStateSnapshot _current = new(Result: null, CheckedAtUtc: null);
+    private UpdateStateSnapshot _current = new(null, null);
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public UpdateStateSnapshot Current
     {
         get
@@ -22,14 +22,14 @@ public sealed class UpdateStateStore : IUpdateStateStore
         }
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public void Record(ReleaseCheckResult result)
     {
         ArgumentNullException.ThrowIfNull(result);
 
         lock (_gate)
         {
-            _current = new UpdateStateSnapshot(result, DateTimeOffset.UtcNow);
+            _current = new UpdateStateSnapshot(Result: result, CheckedAtUtc: DateTimeOffset.UtcNow);
         }
     }
 }

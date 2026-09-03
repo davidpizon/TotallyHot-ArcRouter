@@ -10,7 +10,6 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Management;
 /// <summary>
 /// Covers the operator override for a model's tool-call dialect - TotallyHot.ArcRouter's equivalent of LiteLLM's
 /// <c>register_model(..., supports_function_calling=…)</c>.
-///
 /// <para>
 /// The reason it exists is a failure mode automatic detection cannot escape on its own. A model that emits
 /// a real <c>tool_calls</c> field on only some replies is recorded <c>openai-native</c> at
@@ -27,19 +26,25 @@ public sealed class ModelToolDialectOverrideTests : IDisposable
 
     private readonly TempDatabase _temp = new();
 
+    public void Dispose()
+    {
+        _temp.Dispose();
+    }
+
     [Fact]
     public void SettingADialect_PinsItAtOperatorConfidence()
     {
         var capabilities = _temp.CreateToolCallCapabilityStore();
         var facade = Facade(capabilities);
 
-        var result = facade.SetModelToolDialect(Provider, Model, new ModelToolDialectWriteRequest("constrained"));
+        var result = facade.SetModelToolDialect(key: Provider, modelName: Model,
+            request: new ModelToolDialectWriteRequest("constrained"));
 
         Assert.True(result.Success);
 
-        var stored = capabilities.GetModelCapability(Provider, Model);
-        Assert.Equal("constrained", stored!.Dialect);
-        Assert.Equal(DetectionConfidence.Operator, stored.Confidence);
+        var stored = capabilities.GetModelCapability(providerKey: Provider, modelName: Model);
+        Assert.Equal(expected: "constrained", actual: stored!.Dialect);
+        Assert.Equal(expected: DetectionConfidence.Operator, actual: stored.Confidence);
     }
 
     [Fact]
@@ -48,11 +53,14 @@ public sealed class ModelToolDialectOverrideTests : IDisposable
         // The self-sealing misclassification this whole surface exists to undo.
         var capabilities = _temp.CreateToolCallCapabilityStore();
         capabilities.TryRecordModelCapability(new ModelToolCapability(
-            Provider, Model, "openai-native", DetectionConfidence.Observed, "Response carried native tool_calls."));
+            ProviderKey: Provider, ModelName: Model, Dialect: "openai-native", Confidence: DetectionConfidence.Observed,
+            Evidence: "Response carried native tool_calls."));
 
-        Facade(capabilities).SetModelToolDialect(Provider, Model, new ModelToolDialectWriteRequest("constrained"));
+        Facade(capabilities).SetModelToolDialect(key: Provider, modelName: Model,
+            request: new ModelToolDialectWriteRequest("constrained"));
 
-        Assert.Equal("constrained", capabilities.GetModelCapability(Provider, Model)!.Dialect);
+        Assert.Equal(expected: "constrained",
+            actual: capabilities.GetModelCapability(providerKey: Provider, modelName: Model)!.Dialect);
     }
 
     [Fact]
@@ -61,13 +69,16 @@ public sealed class ModelToolDialectOverrideTests : IDisposable
         // The point of Operator confidence: the same lucky native reply that caused the problem must not be
         // able to undo the operator's correction of it.
         var capabilities = _temp.CreateToolCallCapabilityStore();
-        Facade(capabilities).SetModelToolDialect(Provider, Model, new ModelToolDialectWriteRequest("constrained"));
+        Facade(capabilities).SetModelToolDialect(key: Provider, modelName: Model,
+            request: new ModelToolDialectWriteRequest("constrained"));
 
         var accepted = capabilities.TryRecordModelCapability(new ModelToolCapability(
-            Provider, Model, "openai-native", DetectionConfidence.Observed, "Response carried native tool_calls."));
+            ProviderKey: Provider, ModelName: Model, Dialect: "openai-native", Confidence: DetectionConfidence.Observed,
+            Evidence: "Response carried native tool_calls."));
 
         Assert.False(accepted);
-        Assert.Equal("constrained", capabilities.GetModelCapability(Provider, Model)!.Dialect);
+        Assert.Equal(expected: "constrained",
+            actual: capabilities.GetModelCapability(providerKey: Provider, modelName: Model)!.Dialect);
     }
 
     [Theory]
@@ -81,12 +92,14 @@ public sealed class ModelToolDialectOverrideTests : IDisposable
         // for. A low-confidence row would still be a row.
         var capabilities = _temp.CreateToolCallCapabilityStore();
         var facade = Facade(capabilities);
-        facade.SetModelToolDialect(Provider, Model, new ModelToolDialectWriteRequest("constrained"));
+        facade.SetModelToolDialect(key: Provider, modelName: Model,
+            request: new ModelToolDialectWriteRequest("constrained"));
 
-        var result = facade.SetModelToolDialect(Provider, Model, new ModelToolDialectWriteRequest(dialect));
+        var result = facade.SetModelToolDialect(key: Provider, modelName: Model,
+            request: new ModelToolDialectWriteRequest(dialect));
 
         Assert.True(result.Success);
-        Assert.Null(capabilities.GetModelCapability(Provider, Model));
+        Assert.Null(capabilities.GetModelCapability(providerKey: Provider, modelName: Model));
     }
 
     [Fact]
@@ -97,11 +110,12 @@ public sealed class ModelToolDialectOverrideTests : IDisposable
         // right for a row a newer build wrote.
         var capabilities = _temp.CreateToolCallCapabilityStore();
 
-        var result = Facade(capabilities).SetModelToolDialect(Provider, Model, new ModelToolDialectWriteRequest("hermes-ish"));
+        var result = Facade(capabilities).SetModelToolDialect(key: Provider, modelName: Model,
+            request: new ModelToolDialectWriteRequest("hermes-ish"));
 
         Assert.False(result.Success);
-        Assert.Equal(ManagementErrorType.InvalidRequest, result.ErrorType);
-        Assert.Null(capabilities.GetModelCapability(Provider, Model));
+        Assert.Equal(expected: ManagementErrorType.InvalidRequest, actual: result.ErrorType);
+        Assert.Null(capabilities.GetModelCapability(providerKey: Provider, modelName: Model));
     }
 
     [Fact]
@@ -111,21 +125,24 @@ public sealed class ModelToolDialectOverrideTests : IDisposable
         var facade = Facade(capabilities);
 
         Assert.Equal(
-            ManagementErrorType.NotFound,
-            facade.SetModelToolDialect("nope", Model, new ModelToolDialectWriteRequest("constrained")).ErrorType);
+            expected: ManagementErrorType.NotFound,
+            actual: facade.SetModelToolDialect(key: "nope", modelName: Model,
+                request: new ModelToolDialectWriteRequest("constrained")).ErrorType);
 
         Assert.Equal(
-            ManagementErrorType.NotFound,
-            facade.SetModelToolDialect(Provider, "no-such-model", new ModelToolDialectWriteRequest("constrained")).ErrorType);
+            expected: ManagementErrorType.NotFound,
+            actual: facade.SetModelToolDialect(key: Provider, modelName: "no-such-model",
+                request: new ModelToolDialectWriteRequest("constrained")).ErrorType);
     }
 
     [Fact]
     public void WithNoCapabilityStore_TheOverrideReportsItselfUnavailable()
     {
         var result = Facade(capabilityStore: null)
-            .SetModelToolDialect(Provider, Model, new ModelToolDialectWriteRequest("constrained"));
+            .SetModelToolDialect(key: Provider, modelName: Model,
+                request: new ModelToolDialectWriteRequest("constrained"));
 
-        Assert.Equal(ManagementErrorType.Unavailable, result.ErrorType);
+        Assert.Equal(expected: ManagementErrorType.Unavailable, actual: result.ErrorType);
     }
 
     [Fact]
@@ -136,11 +153,12 @@ public sealed class ModelToolDialectOverrideTests : IDisposable
         var capabilities = _temp.CreateToolCallCapabilityStore();
         var facade = Facade(capabilities);
 
-        facade.SetModelToolDialect(Provider, Model, new ModelToolDialectWriteRequest("constrained"));
+        facade.SetModelToolDialect(key: Provider, modelName: Model,
+            request: new ModelToolDialectWriteRequest("constrained"));
 
         var model = Assert.Single(Assert.Single(facade.ListProviders().Providers).Models);
-        Assert.Equal("constrained", model.Dialect);
-        Assert.Equal(nameof(DetectionConfidence.Operator), model.Confidence, ignoreCase: true);
+        Assert.Equal(expected: "constrained", actual: model.Dialect);
+        Assert.Equal(expected: nameof(DetectionConfidence.Operator), actual: model.Confidence, true);
     }
 
     private ManagementFacade Facade(ToolCallCapabilityStore? capabilityStore)
@@ -149,16 +167,13 @@ public sealed class ModelToolDialectOverrideTests : IDisposable
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                [Provider] = new ProviderOptions { BaseUrl = "http://localhost:1234/v1" },
+                [Provider] = new() { BaseUrl = "http://localhost:1234/v1" }
             },
-            ModelList = [new ModelRouteEntry { ModelName = Model, Provider = Provider, ProviderModelId = Model }],
+            ModelList = [new ModelRouteEntry { ModelName = Model, Provider = Provider, ProviderModelId = Model }]
         });
 
         return new ManagementFacade(
-            store, Mock.Of<IEnvironmentVariableProvider>(), new HttpClient(),
-            new ManagementFacadeDependencies { CapabilityStore = capabilityStore });
+            store: store, environment: Mock.Of<IEnvironmentVariableProvider>(), httpClient: new HttpClient(),
+            dependencies: new ManagementFacadeDependencies { CapabilityStore = capabilityStore });
     }
-
-    public void Dispose() => _temp.Dispose();
 }
-

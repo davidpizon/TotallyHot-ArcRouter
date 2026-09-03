@@ -16,37 +16,46 @@ namespace TotallyHot.ArcRouter.Tests.CodeRouterBench.Evaluation;
 /// </summary>
 public class OrchestratorArmBaselineTests
 {
-    private static OrchestratorRoutingPolicy BuildPolicy(RecordingVoter voter) =>
-        new([voter], new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions { EnableExploration = false, ExplorationRate = 0d }),
-            NullLogger<OrchestratorRoutingPolicy>.Instance);
+    private static OrchestratorRoutingPolicy BuildPolicy(RecordingVoter voter)
+    {
+        return new OrchestratorRoutingPolicy(voters: [voter],
+            optionsMonitor: new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions
+                { EnableExploration = false, ExplorationRate = 0d }),
+            logger: NullLogger<OrchestratorRoutingPolicy>.Instance);
+    }
 
     [Fact]
     public void Route_KnownTaskId_PassesItsPrecomputedEmbeddingAndTaskText()
     {
-        var embedding = new float[] { 1f, 0f };
-        var voter = new RecordingVoter("dim_best", _ => new VoterVote("dim_best", "model-a", 0.9));
+        var embedding = new[] { 1f, 0f };
+        var voter = new RecordingVoter(name: "dim_best",
+            vote: _ => new VoterVote(VoterName: "dim_best", ModelName: "model-a", 0.9));
         var baseline = new OrchestratorArmBaseline(
-            BuildPolicy(voter),
-            new Dictionary<string, float[]> { ["t1"] = embedding });
+            policy: BuildPolicy(voter),
+            embeddingsByTaskId: new Dictionary<string, float[]> { ["t1"] = embedding });
 
-        var context = new RegretReplayContext("t1", "bug_fixing", ["model-a", "model-b"], "fix the bug");
+        var context = new RegretReplayContext(TaskId: "t1", Dimension: "bug_fixing",
+            CandidateModelIds: ["model-a", "model-b"], TaskText: "fix the bug");
         var result = baseline.Route(context);
 
-        Assert.Equal("model-a", result);
+        Assert.Equal(expected: "model-a", actual: result);
         Assert.NotNull(voter.LastContext);
-        Assert.Same(embedding, voter.LastContext!.TaskEmbedding);
-        Assert.Equal("fix the bug", voter.LastContext.TaskText);
-        Assert.Equal("bug_fixing", voter.LastContext.Dimension);
-        Assert.Equal(["model-a", "model-b"], voter.LastContext.Candidates.Select(c => c.ModelName));
+        Assert.Same(expected: embedding, actual: voter.LastContext!.TaskEmbedding);
+        Assert.Equal(expected: "fix the bug", actual: voter.LastContext.TaskText);
+        Assert.Equal(expected: "bug_fixing", actual: voter.LastContext.Dimension);
+        Assert.Equal(expected: ["model-a", "model-b"], actual: voter.LastContext.Candidates.Select(c => c.ModelName));
     }
 
     [Fact]
     public void Route_TaskIdWithNoPrecomputedEmbedding_PassesNullEmbedding()
     {
-        var voter = new RecordingVoter("dim_best", _ => new VoterVote("dim_best", "model-a", 0.9));
-        var baseline = new OrchestratorArmBaseline(BuildPolicy(voter), new Dictionary<string, float[]>());
+        var voter = new RecordingVoter(name: "dim_best",
+            vote: _ => new VoterVote(VoterName: "dim_best", ModelName: "model-a", 0.9));
+        var baseline = new OrchestratorArmBaseline(policy: BuildPolicy(voter),
+            embeddingsByTaskId: new Dictionary<string, float[]>());
 
-        baseline.Route(new RegretReplayContext("id-test-task", "bug_fixing", ["model-a"]));
+        baseline.Route(new RegretReplayContext(TaskId: "id-test-task", Dimension: "bug_fixing",
+            CandidateModelIds: ["model-a"]));
 
         Assert.Null(voter.LastContext!.TaskEmbedding);
     }
@@ -54,30 +63,40 @@ public class OrchestratorArmBaselineTests
     [Fact]
     public void Route_EveryVoterAbstains_FallsBackToDefaultModel_ReturnsNullAsNotComputable()
     {
-        var voter = new RecordingVoter("dim_best", _ => VoterVote.Abstain("dim_best"));
-        var baseline = new OrchestratorArmBaseline(BuildPolicy(voter), new Dictionary<string, float[]>());
+        var voter = new RecordingVoter(name: "dim_best", vote: _ => VoterVote.Abstain("dim_best"));
+        var baseline = new OrchestratorArmBaseline(policy: BuildPolicy(voter),
+            embeddingsByTaskId: new Dictionary<string, float[]>());
 
-        var result = baseline.Route(new RegretReplayContext("t1", "bug_fixing", ["model-a", "model-b"]));
+        var result = baseline.Route(new RegretReplayContext(TaskId: "t1", Dimension: "bug_fixing",
+            CandidateModelIds: ["model-a", "model-b"]));
 
         Assert.Null(result);
     }
 
     [Fact]
-    public void Name_IsOrchestrator() =>
+    public void Name_IsOrchestrator()
+    {
         Assert.Equal(
-            "orchestrator",
-            new OrchestratorArmBaseline(
-                BuildPolicy(new RecordingVoter("dim_best", _ => VoterVote.Abstain("dim_best"))),
-                new Dictionary<string, float[]>()).Name);
+            expected: "orchestrator",
+            actual: new OrchestratorArmBaseline(
+                policy: BuildPolicy(new RecordingVoter(name: "dim_best", vote: _ => VoterVote.Abstain("dim_best"))),
+                embeddingsByTaskId: new Dictionary<string, float[]>()).Name);
+    }
 
     [Fact]
-    public void Constructor_NullPolicy_Throws() =>
-        Assert.Throws<ArgumentNullException>(() => new OrchestratorArmBaseline(null!, new Dictionary<string, float[]>()));
+    public void Constructor_NullPolicy_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            new OrchestratorArmBaseline(policy: null!, embeddingsByTaskId: new Dictionary<string, float[]>()));
+    }
 
     [Fact]
-    public void Constructor_NullEmbeddings_Throws() =>
+    public void Constructor_NullEmbeddings_Throws()
+    {
         Assert.Throws<ArgumentNullException>(() => new OrchestratorArmBaseline(
-            BuildPolicy(new RecordingVoter("dim_best", _ => VoterVote.Abstain("dim_best"))), null!));
+            policy: BuildPolicy(new RecordingVoter(name: "dim_best", vote: _ => VoterVote.Abstain("dim_best"))),
+            embeddingsByTaskId: null!));
+    }
 
     private sealed class RecordingVoter(string name, Func<VotingContext, VoterVote> vote) : IRoutingVoter
     {

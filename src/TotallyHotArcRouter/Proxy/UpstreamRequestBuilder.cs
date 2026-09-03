@@ -7,7 +7,6 @@ namespace TotallyHot.ArcRouter.Proxy;
 /// upstream: the target URL, the (possibly translated) body, and the forwarded header set. Extracted
 /// from <see cref="ProxyMiddleware.InvokeCoreAsync"/>'s candidate loop, where it was ~95 lines
 /// interleaved with failover and response handling.
-///
 /// <para>
 /// Every candidate attempt builds a fresh message - an <see cref="HttpRequestMessage"/> cannot be sent
 /// twice - so this runs once per candidate, not once per request. It performs no I/O: the body is
@@ -19,7 +18,6 @@ internal static class UpstreamRequestBuilder
     /// <summary>
     /// Client request headers never forwarded upstream. <c>Host</c>, <c>Content-Type</c> and
     /// <c>Content-Length</c> are simply re-derived for the new message; the other two are load-bearing:
-    ///
     /// <para>
     /// <c>Authorization</c> carries the client's inbound credential to the proxy itself (e.g. a
     /// placeholder token an IDE/BYOK client requires but never validates), not a credential for the
@@ -28,7 +26,6 @@ internal static class UpstreamRequestBuilder
     /// upstream alongside the real injected credential, and some providers reject the request outright
     /// when both are present.
     /// </para>
-    ///
     /// <para>
     /// <c>Accept-Encoding</c> is skipped because the shared <see cref="System.Net.Http.HttpClient"/> never
     /// configures <c>AutomaticDecompression</c>: if the client's own <c>Accept-Encoding: gzip</c> were
@@ -47,7 +44,10 @@ internal static class UpstreamRequestBuilder
     /// Builds the upstream request for one candidate.
     /// </summary>
     /// <param name="context">The inbound client request, source of the method, path, query, and headers.</param>
-    /// <param name="route">The candidate being attempted - supplies the base URL, upstream model id, auth-header configuration, and any provider-configured extra headers.</param>
+    /// <param name="route">
+    /// The candidate being attempted - supplies the base URL, upstream model id, auth-header
+    /// configuration, and any provider-configured extra headers.
+    /// </param>
     /// <param name="translator">The provider's translator, or <see langword="null"/> for a passthrough provider.</param>
     /// <param name="rewrittenBody">The request body after <c>RequestInterceptor</c>'s model rewrite, in OpenAI shape.</param>
     /// <returns>A fresh <see cref="HttpRequestMessage"/>. The caller owns it and must dispose it.</returns>
@@ -57,18 +57,19 @@ internal static class UpstreamRequestBuilder
         IPayloadTranslator? translator,
         byte[] rewrittenBody)
     {
-        var (targetUri, forwardBody) = ResolveTargetAndBody(context, route, translator, rewrittenBody);
+        var (targetUri, forwardBody) = ResolveTargetAndBody(context: context, route: route, translator: translator,
+            rewrittenBody: rewrittenBody);
 
         var requestMessage = new HttpRequestMessage
         {
             RequestUri = targetUri,
-            Method = new HttpMethod(context.Request.Method),
+            Method = new HttpMethod(context.Request.Method)
         };
 
-        CopyClientHeaders(context, route, requestMessage);
+        CopyClientHeaders(context: context, route: route, requestMessage: requestMessage);
 
         requestMessage.Content = new ByteArrayContent(forwardBody);
-        requestMessage.Content.Headers.TryAddWithoutValidation("Content-Type", "application/json");
+        requestMessage.Content.Headers.TryAddWithoutValidation(name: "Content-Type", value: "application/json");
 
         // Provider-configured custom headers (e.g. anthropic-version, and whichever header carries
         // authentication). Added only when the client didn't already send that header, so a client
@@ -78,12 +79,8 @@ internal static class UpstreamRequestBuilder
         // auth header configured, the client's own header of that name was left in place and nothing here
         // touches it.
         foreach (var (headerName, headerValue) in route.ExtraHeaders)
-        {
             if (!requestMessage.Headers.Contains(headerName))
-            {
-                requestMessage.Headers.TryAddWithoutValidation(headerName, headerValue);
-            }
-        }
+                requestMessage.Headers.TryAddWithoutValidation(name: headerName, value: headerValue);
 
         return requestMessage;
     }
@@ -112,7 +109,8 @@ internal static class UpstreamRequestBuilder
         {
             var requestIsStreaming = ProxyMiddleware.IsStreamingRequest(rewrittenBody);
             return (
-                translator!.BuildRequestUri(route.UpstreamBaseUrl, route.ProviderModelId, requestIsStreaming),
+                translator!.BuildRequestUri(baseUrl: route.UpstreamBaseUrl, providerModelId: route.ProviderModelId,
+                    isStreaming: requestIsStreaming),
                 translator.TranslateRequest(rewrittenBody));
         }
 
@@ -131,9 +129,9 @@ internal static class UpstreamRequestBuilder
         // non-null here and make the null handling on the other side look like dead defensive code the
         // next reader deletes.
         var passthroughUri = new Uri(ProviderUrlBuilder.BuildPassthroughUrl(
-            route.UpstreamBaseUrl,
-            context.Request.Path.Value,
-            context.Request.QueryString.Value));
+            baseUrl: route.UpstreamBaseUrl,
+            requestPath: context.Request.Path.Value,
+            queryString: context.Request.QueryString.Value));
 
         // Still consulted for the body, so a client-path translator gets its rewrite. A response-only
         // translator's TranslateRequest is the identity by contract, which keeps this the byte-for-byte
@@ -148,10 +146,13 @@ internal static class UpstreamRequestBuilder
     /// relayed (<see cref="AlwaysSkippedRequestHeaders"/>), the hop-by-hop set nominated by this request's
     /// <c>Connection</c> header, and - conditionally - the provider's configured auth header.
     /// </summary>
-    private static void CopyClientHeaders(HttpContext context, ResolvedModelRoute route, HttpRequestMessage requestMessage)
+    private static void CopyClientHeaders(HttpContext context, ResolvedModelRoute route,
+        HttpRequestMessage requestMessage)
     {
         var requestHopByHopHeaders = ProxyMiddleware.GetHopByHopHeaderNames(
-            context.Request.Headers.TryGetValue("Connection", out var requestConnectionValues) ? requestConnectionValues : default);
+            context.Request.Headers.TryGetValue(key: "Connection", value: out var requestConnectionValues)
+                ? requestConnectionValues
+                : default);
 
         // A client header matching the provider's configured auth header name is only skipped when the
         // provider's configuration actually declares one - otherwise an unauthenticated provider (e.g. a
@@ -165,14 +166,13 @@ internal static class UpstreamRequestBuilder
 
         foreach (var header in context.Request.Headers)
         {
-            if (AlwaysSkippedRequestHeaders.Contains(header.Key, StringComparer.OrdinalIgnoreCase) ||
+            if (AlwaysSkippedRequestHeaders.Contains(value: header.Key, comparer: StringComparer.OrdinalIgnoreCase) ||
                 requestHopByHopHeaders.Contains(header.Key) ||
-                (providerSuppliesAuthHeader && string.Equals(header.Key, route.AuthHeaderName, StringComparison.OrdinalIgnoreCase)))
-            {
+                (providerSuppliesAuthHeader && string.Equals(a: header.Key, b: route.AuthHeaderName,
+                    comparisonType: StringComparison.OrdinalIgnoreCase)))
                 continue;
-            }
 
-            requestMessage.Headers.TryAddWithoutValidation(header.Key, header.Value.ToArray());
+            requestMessage.Headers.TryAddWithoutValidation(name: header.Key, values: header.Value.ToArray());
         }
     }
 }

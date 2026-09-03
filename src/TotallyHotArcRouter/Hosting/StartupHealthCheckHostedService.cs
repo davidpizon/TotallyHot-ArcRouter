@@ -1,7 +1,11 @@
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
+using TotallyHot.ArcRouter.Router;
+using TotallyHot.ArcRouter.Router.Embeddings;
 using TotallyHot.ArcRouter.Telemetry;
+using TotallyHot.ArcRouter.Transcripts;
 
 namespace TotallyHot.ArcRouter.Hosting;
 
@@ -18,34 +22,33 @@ namespace TotallyHot.ArcRouter.Hosting;
 /// </remarks>
 public sealed class StartupHealthCheckHostedService : IHostedService
 {
-    // D1's routing floor, reused here only to describe the check-4 condition in the log message.
-    private static readonly TimeSpan FreshnessFloor = TimeSpan.FromHours(24);
-
-    private readonly ILogger<StartupHealthCheckHostedService> _logger;
-    private readonly PriceCatalogDatabase _database;
-    private readonly PriceSourceRepository _repository;
-    private readonly PriceCatalogIngestionService _ingestionService;
-    private readonly PriceSourceToggleStore _toggleStore;
-    private readonly ProviderBudgetStore _budgetStore;
-    private readonly ToolCallCapabilityStore _toolCallCapabilityStore;
-    private readonly IUsageLedger _usageLedger;
-    private readonly IUsageRollupStore _rollupStore;
-    private readonly StorageOptions _storageOptions;
-    private readonly Router.RouterMemoryDatabase _routerMemoryDatabase;
-    private readonly Router.RouterMemory _routerMemory;
-    private readonly Router.EmbeddingMemory _embeddingMemory;
-    private readonly CodeRouterBench.BenchmarkDatabase _benchmarkDatabase;
-    private readonly CodeRouterBench.BenchmarkDataStatusService _benchmarkStatusService;
-    private readonly Transcripts.TranscriptDatabase _transcriptDatabase;
-    private readonly Transcripts.ITranscriptStore _transcriptStore;
-    private readonly Transcripts.TranscriptOptions _transcriptOptions;
-    private readonly Router.Embeddings.IEmbeddingClient? _embeddingClient;
-    private readonly Router.Embeddings.EmbeddingWarmupState? _embeddingWarmupState;
-    private Task? _embeddingWarmupTask;
-
     // A short, fixed string is enough to force the one-time artifact download and model load; its content
     // is never read back or stored, only its side effect (warming _session/_tokenizer) matters.
     private const string EmbeddingWarmupText = "embedding warm-up";
+
+    // D1's routing floor, reused here only to describe the check-4 condition in the log message.
+    private static readonly TimeSpan FreshnessFloor = TimeSpan.FromHours(24);
+    private readonly BenchmarkDatabase _benchmarkDatabase;
+    private readonly BenchmarkDataStatusService _benchmarkStatusService;
+    private readonly ProviderBudgetStore _budgetStore;
+    private readonly PriceCatalogDatabase _database;
+    private readonly IEmbeddingClient? _embeddingClient;
+    private readonly EmbeddingMemory _embeddingMemory;
+    private readonly EmbeddingWarmupState? _embeddingWarmupState;
+    private readonly PriceCatalogIngestionService _ingestionService;
+
+    private readonly ILogger<StartupHealthCheckHostedService> _logger;
+    private readonly PriceSourceRepository _repository;
+    private readonly IUsageRollupStore _rollupStore;
+    private readonly RouterMemory _routerMemory;
+    private readonly RouterMemoryDatabase _routerMemoryDatabase;
+    private readonly StorageOptions _storageOptions;
+    private readonly PriceSourceToggleStore _toggleStore;
+    private readonly ToolCallCapabilityStore _toolCallCapabilityStore;
+    private readonly TranscriptDatabase _transcriptDatabase;
+    private readonly TranscriptOptions _transcriptOptions;
+    private readonly ITranscriptStore _transcriptStore;
+    private readonly IUsageLedger _usageLedger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="StartupHealthCheckHostedService"/> class.
@@ -61,16 +64,16 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         IUsageLedger usageLedger,
         IUsageRollupStore rollupStore,
         IOptions<StorageOptions> storageOptions,
-        Router.RouterMemoryDatabase routerMemoryDatabase,
-        Router.RouterMemory routerMemory,
-        Router.EmbeddingMemory embeddingMemory,
-        CodeRouterBench.BenchmarkDatabase benchmarkDatabase,
-        CodeRouterBench.BenchmarkDataStatusService benchmarkStatusService,
-        Transcripts.TranscriptDatabase transcriptDatabase,
-        Transcripts.ITranscriptStore transcriptStore,
-        IOptions<Transcripts.TranscriptOptions> transcriptOptions,
-        Router.Embeddings.IEmbeddingClient? embeddingClient = null,
-        Router.Embeddings.EmbeddingWarmupState? embeddingWarmupState = null)
+        RouterMemoryDatabase routerMemoryDatabase,
+        RouterMemory routerMemory,
+        EmbeddingMemory embeddingMemory,
+        BenchmarkDatabase benchmarkDatabase,
+        BenchmarkDataStatusService benchmarkStatusService,
+        TranscriptDatabase transcriptDatabase,
+        ITranscriptStore transcriptStore,
+        IOptions<TranscriptOptions> transcriptOptions,
+        IEmbeddingClient? embeddingClient = null,
+        EmbeddingWarmupState? embeddingWarmupState = null)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(database);
@@ -113,7 +116,15 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         _embeddingWarmupState = embeddingWarmupState;
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// The background embedding client warm-up task started by <see cref="StartAsync"/>, or
+    /// <see langword="null"/> if no embedding client was configured. <see cref="StartAsync"/> does not
+    /// await this task itself (see the comment at its call site); exposed internally so tests can await it
+    /// deterministically instead of racing the fire-and-forget warm-up.
+    /// </summary>
+    internal Task? EmbeddingWarmupTask { get; private set; }
+
+    /// <inheritdoc/>
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("Startup pricing health checks are running.");
@@ -121,20 +132,16 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         // Check 0: adopt any pre-%ProgramData% per-user copy of the storage files before anything opens
         // them. Must precede every EnsureCreated below - those create an empty file at the destination,
         // and the migration deliberately refuses to overwrite a destination that already exists.
-        LegacyStorageMigration.Run(_storageOptions, _logger);
+        LegacyStorageMigration.Run(options: _storageOptions, logger: _logger);
 
         // Check 1: ensure the SQLite database exists, creating it (and its directory) if absent. This also
         // applies additive column migrations and seeds a row for every source that has a client, so it must
         // precede the toggle store's first read below.
         var alreadyExisted = _database.EnsureCreated();
         if (alreadyExisted)
-        {
-            _logger.LogInformation("Found existing pricing database at {Path}.", _database.DatabasePath);
-        }
+            _logger.LogInformation(message: "Found existing pricing database at {Path}.", _database.DatabasePath);
         else
-        {
-            _logger.LogInformation("Created new pricing database at {Path}.", _database.DatabasePath);
-        }
+            _logger.LogInformation(message: "Created new pricing database at {Path}.", _database.DatabasePath);
 
         // The toggle store starts empty by design (its schema may not exist at construction time), so this
         // is what puts it into service. Every source reads as disabled until this runs.
@@ -156,10 +163,8 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         // panel in a previous run (D6).
         var hasEnabledSource = _toggleStore.List().Any(source => source.Enabled);
         if (!hasEnabledSource)
-        {
             _logger.LogWarning(
                 "No pricing data sources are enabled; cost estimates will be unavailable for all paid models.");
-        }
 
         // Check 3: if at least one source is enabled, attempt a fresh pull. RunCycleAsync itself logs the
         // zero-fresh-prices Error (D4) when a cycle that ran ends with nothing fresh, so check 4 below
@@ -176,13 +181,12 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         // the fetched-freshness check. A future manual-override feature must update this to consult it.
         const bool noManualPricesConfigured = true;
         if (!ranCycle && noManualPricesConfigured && _repository.CountFreshPrices(FreshnessFloor) == 0)
-        {
             // Only reached when no source ran (check 2 found none enabled); a cycle that ran already
             // logged this via RunCycleAsync.
             _logger.LogError(
+                message:
                 "No pricing data is available: no manual prices are configured and all fetched price data is missing or older than {FreshnessHours} hours.",
                 FreshnessFloor.TotalHours);
-        }
 
         // Usage-ledger retention sweep (docs/router/token-tracking-implementation-plan.md Phase 2):
         // deletes rows older than Storage:UsageLedgerRetentionDays, keyed on occurred_at_utc. Best-effort
@@ -195,6 +199,7 @@ public sealed class StartupHealthCheckHostedService : IHostedService
             if (_storageOptions.UsageLedgerRetentionDays <= 0)
             {
                 _logger.LogWarning(
+                    message:
                     "Skipping the usage-ledger retention sweep: Storage:UsageLedgerRetentionDays is {RetentionDays}, must be positive.",
                     _storageOptions.UsageLedgerRetentionDays);
             }
@@ -203,17 +208,16 @@ public sealed class StartupHealthCheckHostedService : IHostedService
                 var cutoff = DateTimeOffset.UtcNow - TimeSpan.FromDays(_storageOptions.UsageLedgerRetentionDays);
                 var deleted = _usageLedger.DeleteOlderThan(cutoff);
                 if (deleted > 0)
-                {
                     _logger.LogInformation(
+                        message:
                         "Usage-ledger retention sweep deleted {DeletedRows} row(s) older than {RetentionDays} days.",
                         deleted,
                         _storageOptions.UsageLedgerRetentionDays);
-                }
             }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Usage-ledger retention sweep failed; continuing startup.");
+            _logger.LogWarning(exception: ex, message: "Usage-ledger retention sweep failed; continuing startup.");
         }
 
         // Usage-rollup bucket timezone + backfill (docs/router/token-tracking-implementation-plan.md
@@ -226,13 +230,12 @@ public sealed class StartupHealthCheckHostedService : IHostedService
             _rollupStore.EnsureBucketTimezone();
             var rolledUp = await _rollupStore.RollForwardAsync(cancellationToken).ConfigureAwait(false);
             if (rolledUp > 0)
-            {
-                _logger.LogInformation("Usage-rollup backfill applied {EntryCount} ledger entry/entries.", rolledUp);
-            }
+                _logger.LogInformation(message: "Usage-rollup backfill applied {EntryCount} ledger entry/entries.",
+                    rolledUp);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Usage-rollup backfill failed; continuing startup.");
+            _logger.LogWarning(exception: ex, message: "Usage-rollup backfill failed; continuing startup.");
         }
 
         // Router memory: ensure the shared SQLite schema exists, then load both working sets - the
@@ -252,7 +255,7 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Router memory initialization failed; continuing startup.");
+            _logger.LogWarning(exception: ex, message: "Router memory initialization failed; continuing startup.");
         }
 
         // docs/router/self-organizing-classification-plan.md Phase T1a: the transcript store's schema is
@@ -260,35 +263,37 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         // and nothing is written" is the plan's stated exit criterion, so this deliberately does not follow
         // every other database above in creating its schema unconditionally.
         if (_transcriptOptions.Enabled)
-        {
             try
             {
                 _transcriptDatabase.EnsureCreated();
-                _logger.LogInformation("Transcript capture is enabled; ensured transcript database at {Path}.", _transcriptDatabase.DatabasePath);
+                _logger.LogInformation(message: "Transcript capture is enabled; ensured transcript database at {Path}.",
+                    _transcriptDatabase.DatabasePath);
 
                 // Phase T1e: run one purge at startup to clean any retention-expired rows from before this restart.
                 try
                 {
                     var cutoff = DateTimeOffset.UtcNow - TimeSpan.FromDays(_transcriptOptions.RetentionDays);
-                    var deleted = await _transcriptStore.DeleteBeforeAsync(cutoff, cancellationToken).ConfigureAwait(false);
+                    var deleted = await _transcriptStore
+                        .DeleteBeforeAsync(cutoff: cutoff, cancellationToken: cancellationToken).ConfigureAwait(false);
                     if (deleted > 0)
-                    {
                         _logger.LogInformation(
+                            message:
                             "Transcript retention startup purge deleted {DeletedRows} row(s) older than {RetentionDays} days.",
                             deleted,
                             _transcriptOptions.RetentionDays);
-                    }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Transcript retention purge failed at startup; continuing.");
+                    _logger.LogWarning(exception: ex,
+                        message: "Transcript retention purge failed at startup; continuing.");
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Transcript database initialization failed; continuing startup with capture effectively disabled.");
+                _logger.LogWarning(exception: ex,
+                    message:
+                    "Transcript database initialization failed; continuing startup with capture effectively disabled.");
             }
-        }
 
         // Embedding client warm-up (docs/router/live-feedback-learning-plan.md Phase 2b): forces the
         // one-time ~1.3 GB model/tokenizer download and load, off the request path, rather than on a
@@ -299,9 +304,8 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         // disk full) leaves EmbeddingWarmupState.IsWarm false, which RequestInterceptor reads to skip
         // embedding entirely rather than block a request on a cold download.
         if (_embeddingClient is not null && _embeddingWarmupState is not null)
-        {
-            _embeddingWarmupTask = WarmUpEmbeddingClientAsync(_embeddingClient, _embeddingWarmupState);
-        }
+            EmbeddingWarmupTask = WarmUpEmbeddingClientAsync(embeddingClient: _embeddingClient,
+                embeddingWarmupState: _embeddingWarmupState);
 
         // CodeRouterBench corpus freshness (docs/router/coderouterbench-sqlite-migration-plan.md, Phase
         // 3): ensure its own SQLite schema exists and probe Hugging Face for the corpus's
@@ -318,22 +322,18 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "CodeRouterBench corpus initialization failed; continuing startup.");
+            _logger.LogWarning(exception: ex,
+                message: "CodeRouterBench corpus initialization failed; continuing startup.");
         }
 
         _logger.LogInformation("Startup pricing health checks complete.");
     }
 
-    /// <inheritdoc />
-    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-
-    /// <summary>
-    /// The background embedding client warm-up task started by <see cref="StartAsync"/>, or
-    /// <see langword="null"/> if no embedding client was configured. <see cref="StartAsync"/> does not
-    /// await this task itself (see the comment at its call site); exposed internally so tests can await it
-    /// deterministically instead of racing the fire-and-forget warm-up.
-    /// </summary>
-    internal Task? EmbeddingWarmupTask => _embeddingWarmupTask;
+    /// <inheritdoc/>
+    public Task StopAsync(CancellationToken cancellationToken)
+    {
+        return Task.CompletedTask;
+    }
 
     /// <summary>
     /// Runs one embedding call against <paramref name="embeddingClient"/> to force the one-time model
@@ -344,8 +344,8 @@ public sealed class StartupHealthCheckHostedService : IHostedService
     /// <param name="embeddingClient">The embedding client to warm up.</param>
     /// <param name="embeddingWarmupState">The shared state flipped to warm on a successful embed call.</param>
     private async Task WarmUpEmbeddingClientAsync(
-        Router.Embeddings.IEmbeddingClient embeddingClient,
-        Router.Embeddings.EmbeddingWarmupState embeddingWarmupState)
+        IEmbeddingClient embeddingClient,
+        EmbeddingWarmupState embeddingWarmupState)
     {
         try
         {
@@ -355,8 +355,9 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "Embedding client warm-up failed; embedding-dependent routing signals will be unavailable for the rest of this process's lifetime (warm-up is not retried).");
+            _logger.LogWarning(exception: ex,
+                message:
+                "Embedding client warm-up failed; embedding-dependent routing signals will be unavailable for the rest of this process's lifetime (warm-up is not retried).");
         }
     }
 }
-

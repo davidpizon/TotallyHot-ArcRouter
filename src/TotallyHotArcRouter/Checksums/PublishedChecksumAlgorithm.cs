@@ -19,5 +19,5 @@ public enum PublishedChecksumAlgorithm
     /// hash of the downloaded (LFS-resolved) bytes - doing so fails every LFS-tracked file's checksum on
     /// every sync, regardless of whether the download is actually intact. See <see cref="ContentSha256Hash"/>.
     /// </summary>
-    LfsSha256,
+    LfsSha256
 }

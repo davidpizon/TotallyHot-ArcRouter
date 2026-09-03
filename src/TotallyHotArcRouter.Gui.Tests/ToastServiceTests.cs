@@ -18,7 +18,7 @@ public sealed class ToastServiceTests
         var raised = false;
         toasts.Changed += () => raised = true;
 
-        toasts.ShowError("Providers unreachable", "connection refused");
+        toasts.ShowError(title: "Providers unreachable", message: "connection refused");
 
         toasts.Toasts.Should().ContainSingle();
         toasts.Toasts[0].Title.Should().Be("Providers unreachable");
@@ -31,8 +31,8 @@ public sealed class ToastServiceTests
     {
         var toasts = new ToastService();
 
-        toasts.ShowError("First", "a");
-        toasts.ShowError("Second", "b");
+        toasts.ShowError(title: "First", message: "a");
+        toasts.ShowError(title: "Second", message: "b");
 
         toasts.Toasts.Should().HaveCount(2);
     }
@@ -41,7 +41,7 @@ public sealed class ToastServiceTests
     public void Dismiss_removesTheToastAndRaisesChanged()
     {
         var toasts = new ToastService();
-        toasts.ShowError("title", "message");
+        toasts.ShowError(title: "title", message: "message");
         var id = toasts.Toasts[0].Id;
         var raised = false;
         toasts.Changed += () => raised = true;
@@ -56,7 +56,7 @@ public sealed class ToastServiceTests
     public void Dismiss_ofAnUnknownId_doesNotRaiseChanged()
     {
         var toasts = new ToastService();
-        toasts.ShowError("title", "message");
+        toasts.ShowError(title: "title", message: "message");
         var raised = false;
         toasts.Changed += () => raised = true;
 
@@ -71,7 +71,7 @@ public sealed class ToastServiceTests
     {
         var toasts = new ToastService(autoDismissAfter: TimeSpan.FromMilliseconds(20));
 
-        toasts.ShowError("title", "message");
+        toasts.ShowError(title: "title", message: "message");
         toasts.Toasts.Should().ContainSingle();
 
         await WaitUntilAsync(() => toasts.Toasts.Count == 0);
@@ -83,24 +83,26 @@ public sealed class ToastServiceTests
     public async Task AManuallyDismissedToast_doesNotDoubleFireOnAutoDismiss()
     {
         var toasts = new ToastService(autoDismissAfter: TimeSpan.FromMilliseconds(20));
-        toasts.ShowError("title", "message");
+        toasts.ShowError(title: "title", message: "message");
         var id = toasts.Toasts[0].Id;
 
         toasts.Dismiss(id);
         var changedCount = 0;
         toasts.Changed += () => changedCount++;
-        await Task.Delay(TimeSpan.FromMilliseconds(60), TestContext.Current.CancellationToken);
+        await Task.Delay(delay: TimeSpan.FromMilliseconds(60),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         changedCount.Should().Be(0);
     }
 
-    /// <summary>Polls until <paramref name="condition"/> is true or a short timeout elapses, for asserting on the auto-dismiss background continuation without a fixed sleep.</summary>
+    /// <summary>
+    /// Polls until <paramref name="condition"/> is true or a short timeout elapses, for asserting on the auto-dismiss
+    /// background continuation without a fixed sleep.
+    /// </summary>
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
         var deadline = DateTime.UtcNow.AddSeconds(2);
         while (!condition() && DateTime.UtcNow < deadline)
-        {
-            await Task.Delay(10, TestContext.Current.CancellationToken);
-        }
+            await Task.Delay(10, cancellationToken: TestContext.Current.CancellationToken);
     }
 }

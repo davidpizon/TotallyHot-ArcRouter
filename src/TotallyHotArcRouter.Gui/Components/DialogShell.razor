@@ -15,7 +15,7 @@
             <button @onclick="OnClose"
                     aria-label="@CloseAriaLabel"
                     class="text-slate-400 hover:text-slate-200 transition-colors">
-                <Icon Name="x" Size="20" />
+                <Icon Name="x" Size="20"/>
             </button>
         </div>
 
@@ -26,42 +26,57 @@
 </div>
 
 @code {
+
     /// <summary>The uppercase header title, e.g. "System Settings" or "Remove Provider".</summary>
-    [Parameter, EditorRequired]
+    [Parameter]
+    [EditorRequired]
     public string Title { get; set; } = string.Empty;
 
-    /// <summary>The close button's accessible name. The button's only content is an <see cref="Icon"/>
+    /// <summary>
+    /// The close button's accessible name. The button's only content is an <see cref="Icon"/>
     /// SVG, so per docs/gui/DESIGN.md §4.1 it must carry an <c>aria-label</c> or a screen reader
-    /// announces an unnamed button.</summary>
-    [Parameter, EditorRequired]
+    /// announces an unnamed button.
+    /// </summary>
+    [Parameter]
+    [EditorRequired]
     public string CloseAriaLabel { get; set; } = string.Empty;
 
-    /// <summary>Invoked when the dialog should close: the backdrop, the close glyph, and - when
+    /// <summary>
+    /// Invoked when the dialog should close: the backdrop, the close glyph, and - when
     /// <see cref="EnableEscapeToClose"/> is set - the Escape key. The shell never closes itself; the
-    /// caller decides what closing means (dismiss an edit, cancel a confirmation, etc.).</summary>
-    [Parameter, EditorRequired]
+    /// caller decides what closing means (dismiss an edit, cancel a confirmation, etc.).
+    /// </summary>
+    [Parameter]
+    [EditorRequired]
     public EventCallback OnClose { get; set; }
 
     /// <summary>The dialog's body, rendered inside the scrollable <c>.overlay-content</c> wrapper.</summary>
-    [Parameter, EditorRequired]
+    [Parameter]
+    [EditorRequired]
     public RenderFragment? ChildContent { get; set; }
 
-    /// <summary>The CSS classes on the <c>.overlay-content</c> body wrapper - callers vary the
+    /// <summary>
+    /// The CSS classes on the <c>.overlay-content</c> body wrapper - callers vary the
     /// <c>space-y-*</c> gap between blocks (e.g. <c>space-y-3</c> for <c>ProviderEditDialog</c>'s denser
-    /// header-row layout) while keeping the <c>overlay-content p-5</c> base identical.</summary>
+    /// header-row layout) while keeping the <c>overlay-content p-5</c> base identical.
+    /// </summary>
     [Parameter]
     public string ContentClass { get; set; } = "overlay-content p-5 space-y-4";
 
-    /// <summary>Whether Escape closes the dialog, bound on the panel (not the body) so it fires
+    /// <summary>
+    /// Whether Escape closes the dialog, bound on the panel (not the body) so it fires
     /// regardless of which descendant control currently has focus. Off by default: only dialogs that
     /// confirmed this behavior before the shell existed (<c>RemoveProviderDialog</c>,
     /// <c>UnlockSecretFieldDialog</c>) opt in - adding it elsewhere would be an observable behavior
-    /// change, not a pure refactor.</summary>
+    /// change, not a pure refactor.
+    /// </summary>
     [Parameter]
     public bool EnableEscapeToClose { get; set; }
 
-    /// <summary>Closes the dialog when Escape is pressed anywhere within the panel, but only when
-    /// <see cref="EnableEscapeToClose"/> opts in.</summary>
+    /// <summary>
+    /// Closes the dialog when Escape is pressed anywhere within the panel, but only when
+    /// <see cref="EnableEscapeToClose"/> opts in.
+    /// </summary>
     private async Task HandlePanelKeyDown(KeyboardEventArgs args)
     {
         if (EnableEscapeToClose && args.Key == "Escape")
@@ -69,4 +84,5 @@
             await OnClose.InvokeAsync();
         }
     }
+
 }

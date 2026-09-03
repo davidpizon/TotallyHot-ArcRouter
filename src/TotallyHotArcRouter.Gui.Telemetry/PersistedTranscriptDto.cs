@@ -7,8 +7,14 @@ namespace TotallyHot.ArcRouter.Gui.Telemetry;
 /// the same "generated type stays at the gRPC boundary" convention <see cref="RoutingTelemetryEventDto"/>
 /// follows for the live stream.
 /// </summary>
-/// <param name="SessionId">The session portion of <paramref name="CorrelationId"/>, computed router-side by <c>CorrelationIdParser.SessionIdOf</c>.</param>
-/// <param name="CorrelationId">The full per-request correlation id, <c>"{SessionId}:{turnNumber}"</c> - the turn number is parsed from this by <see cref="PersistedSessionAggregator"/>.</param>
+/// <param name="SessionId">
+/// The session portion of <paramref name="CorrelationId"/>, computed router-side by
+/// <c>CorrelationIdParser.SessionIdOf</c>.
+/// </param>
+/// <param name="CorrelationId">
+/// The full per-request correlation id, <c>"{SessionId}:{turnNumber}"</c> - the turn number is
+/// parsed from this by <see cref="PersistedSessionAggregator"/>.
+/// </param>
 /// <param name="CreatedAtUtc">When this row was written, in UTC.</param>
 /// <param name="RequestedModel">The client's literal requested model name.</param>
 /// <param name="RoutedModel">The model that actually served the request.</param>

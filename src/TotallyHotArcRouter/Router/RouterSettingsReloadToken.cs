@@ -1,5 +1,8 @@
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
+using TotallyHot.ArcRouter.Judge;
+using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.Transcripts;
 
 namespace TotallyHot.ArcRouter.Router;
 
@@ -23,13 +26,13 @@ namespace TotallyHot.ArcRouter.Router;
 /// with only a public, documented primitive.
 /// </remarks>
 public sealed class RouterSettingsReloadToken
-    : IOptionsChangeTokenSource<Models.RoutingOptions>,
-      IOptionsChangeTokenSource<Judge.JudgeOptions>,
-      IOptionsChangeTokenSource<Transcripts.TranscriptOptions>
+    : IOptionsChangeTokenSource<RoutingOptions>,
+        IOptionsChangeTokenSource<JudgeOptions>,
+        IOptionsChangeTokenSource<TranscriptOptions>
 {
     private CancellationTokenSource _cts = new();
 
-    /// <inheritdoc cref="IOptionsChangeTokenSource{TOptions}.Name" />
+    /// <inheritdoc cref="IOptionsChangeTokenSource{TOptions}.Name"/>
     /// <remarks>
     /// <see langword="null"/>: this source applies to the default (unnamed) instance only. One
     /// implementation satisfies all three interfaces - their members are identical in signature - so a
@@ -41,8 +44,11 @@ public sealed class RouterSettingsReloadToken
     /// </remarks>
     public string? Name => null;
 
-    /// <inheritdoc cref="IOptionsChangeTokenSource{TOptions}.GetChangeToken" />
-    public IChangeToken GetChangeToken() => new CancellationChangeToken(_cts.Token);
+    /// <inheritdoc cref="IOptionsChangeTokenSource{TOptions}.GetChangeToken"/>
+    public IChangeToken GetChangeToken()
+    {
+        return new CancellationChangeToken(_cts.Token);
+    }
 
     /// <summary>
     /// Signals every current <see cref="IChangeToken"/> handed out by <see cref="GetChangeToken"/>, then
@@ -51,7 +57,7 @@ public sealed class RouterSettingsReloadToken
     /// </summary>
     public void Trigger()
     {
-        var previous = Interlocked.Exchange(ref _cts, new CancellationTokenSource());
+        var previous = Interlocked.Exchange(location1: ref _cts, value: new CancellationTokenSource());
         previous.Cancel();
         previous.Dispose();
     }

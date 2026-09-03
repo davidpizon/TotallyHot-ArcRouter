@@ -23,7 +23,9 @@ public sealed class PriceCatalogModelPriceLookup : IModelPriceLookup
         _repository = repository;
     }
 
-    /// <inheritdoc />
-    public ModelPrice? TryGetPrice(ModelKey key) => _repository.GetFreshPrice(key, FreshnessFloor);
+    /// <inheritdoc/>
+    public ModelPrice? TryGetPrice(ModelKey key)
+    {
+        return _repository.GetFreshPrice(key: key, maxAge: FreshnessFloor);
+    }
 }
-

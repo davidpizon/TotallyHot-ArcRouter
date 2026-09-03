@@ -51,7 +51,7 @@
             <div class="flex items-center gap-2">
                 <button @onclick="() => _showSettings = true"
                         class="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium border border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200 transition-colors">
-                    <Icon Name="settings" Size="20" />
+                    <Icon Name="settings" Size="20"/>
                     Settings
                 </button>
             </div>
@@ -89,7 +89,7 @@
             var isActive = _activeTab == tab;
             <button @onclick="() => _activeTab = tab"
                     class="tab-indicator tab-button @(isActive ? "active" : "inactive")">
-                <Icon Name="@icon" Size="20" />
+                <Icon Name="@icon" Size="20"/>
                 @label
             </button>
         }
@@ -101,45 +101,46 @@
        from). h-full min-h-0 keeps the height chain intact — every tab root is h-full. *@
     <main class="flex-1 overflow-hidden p-3 min-h-0">
         <div @key="_activeTab" class="panel-enter h-full min-h-0">
-        @switch (_activeTab)
-        {
-            case Tab.Live:
-                <LiveStream Conversations="MergedSessionConversations()" SelectedId="@_selectedConversationId" OnSelect="id => _selectedConversationId = id" />
-                break;
-            case Tab.Analytics:
-                <CostAnalytics Conversations="LiveDataStore.Conversations" InitialSessionId="@_selectedConversationId" />
-                break;
-            case Tab.Distribution:
-                <ModelDistribution />
-                break;
-            case Tab.Governance:
-                <Governance />
-                break;
-            case Tab.Console:
-                <ConsoleTab />
-                break;
-        }
+            @switch (_activeTab)
+            {
+                case Tab.Live:
+                    <LiveStream Conversations="MergedSessionConversations()" SelectedId="@_selectedConversationId" OnSelect="id => _selectedConversationId = id"/>
+                    break;
+                case Tab.Analytics:
+                    <CostAnalytics Conversations="LiveDataStore.Conversations" InitialSessionId="@_selectedConversationId"/>
+                    break;
+                case Tab.Distribution:
+                    <ModelDistribution/>
+                    break;
+                case Tab.Governance:
+                    <Governance/>
+                    break;
+                case Tab.Console:
+                    <ConsoleTab/>
+                    break;
+            }
         </div>
     </main>
 
     @* ── TOASTS ── *@
-    <ToastHost />
+    <ToastHost/>
 
     @* ── SETTINGS MODAL ── *@
     @if (_showSettings)
     {
-        <SettingsModal OnClose="() => _showSettings = false" />
+        <SettingsModal OnClose="() => _showSettings = false"/>
     }
 </div>
 
 @code {
+
     private enum Tab
     {
         Live,
         Analytics,
         Distribution,
         Governance,
-        Console,
+        Console
     }
 
     private static readonly (Tab Tab, string Icon, string Label)[] Tabs =
@@ -148,10 +149,11 @@
         (Tab.Analytics, "bar-chart", "Cost Analytics"),
         (Tab.Distribution, "trending-up", "Model Distribution"),
         (Tab.Governance, "shield-check", "Governance"),
-        (Tab.Console, "terminal", "Console"),
+        (Tab.Console, "terminal", "Console")
     ];
 
     private Tab _activeTab = Tab.Live;
+
     // Sessions tab starts empty (no telemetry received yet); the Sessions page shows no cards
     // until a conversation arrives, so an empty starting id is correct rather than a mock fallback.
     private string _selectedConversationId = string.Empty;
@@ -193,22 +195,31 @@
     }
 
     /// <summary>Abbreviates a token count for the ticker tile: "12.4M", "830.0K", or the bare number under 1,000.</summary>
-    private static string FormatTokenCount(long tokens) => tokens switch
+    private static string FormatTokenCount(long tokens)
     {
-        >= 1_000_000 => FormattableString.Invariant($"{tokens / 1_000_000d:0.0}M"),
-        >= 1_000 => FormattableString.Invariant($"{tokens / 1_000d:0.0}K"),
-        _ => tokens.ToString(System.Globalization.CultureInfo.InvariantCulture),
-    };
+        return tokens switch
+        {
+            >= 1_000_000 => FormattableString.Invariant($"{tokens / 1_000_000d:0.0}M"),
+            >= 1_000 => FormattableString.Invariant($"{tokens / 1_000d:0.0}K"),
+            _ => tokens.ToString(CultureInfo.InvariantCulture)
+        };
+    }
 
     // LiveDataStore raises Changed from whatever thread the gRPC stream delivered the event on;
     // InvokeAsync marshals back to this component's render context before calling StateHasChanged.
     /// <summary>Re-renders when live telemetry changes.</summary>
-    private void HandleLiveDataChanged() => InvokeAsync(StateHasChanged);
+    private void HandleLiveDataChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
 
     // PersistedSessionStore raises Changed from whatever thread the gRPC call completed on, same as
     // LiveDataStore.Changed above.
     /// <summary>Re-renders when the Sessions tab's persisted history changes.</summary>
-    private void HandlePersistedSessionsChanged() => InvokeAsync(StateHasChanged);
+    private void HandlePersistedSessionsChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
 
     /// <summary>
     /// The Sessions tab's full conversation list: every live session plus every persisted session not
@@ -228,18 +239,21 @@
             return live;
         }
 
-        var liveIds = new HashSet<string>(live.Select(c => c.Id), StringComparer.Ordinal);
+        var liveIds = new HashSet<string>(collection: live.Select(c => c.Id), comparer: StringComparer.Ordinal);
         var merged = new List<Conversation>(live);
         merged.AddRange(PersistedSessionStore.Sessions.Where(c => !liveIds.Contains(c.Id)));
         return merged;
     }
 
     /// <summary>Recomputes the budget-alert banner and re-renders when the provider list changes.</summary>
-    private void HandleProvidersChanged() => InvokeAsync(() =>
+    private void HandleProvidersChanged()
     {
-        RecomputeBudgetAlerts();
-        StateHasChanged();
-    });
+        InvokeAsync(() =>
+        {
+            RecomputeBudgetAlerts();
+            StateHasChanged();
+        });
+    }
 
     // A provider counts as breached when a set cap is met/exceeded, and approaching when its highest
     // dimension utilization is in [80%, 100%). Providers with no caps are ignored.
@@ -267,15 +281,15 @@
     {
         // A zero cap is treated as 100% (immediately breached), matching the backend's spend >= cap rule, so
         // the banner never reads "OK" for a provider that enforcement is actually rejecting.
-        double worst = -1d;
+        var worst = -1d;
         if (p.DollarCap is { } dollarCap)
         {
-            worst = Math.Max(worst, dollarCap <= 0m ? 100d : (double)(p.DollarSpent / dollarCap * 100m));
+            worst = Math.Max(val1: worst, val2: dollarCap <= 0m ? 100d : (double)(p.DollarSpent / dollarCap * 100m));
         }
 
         if (p.TokenCap is { } tokenCap)
         {
-            worst = Math.Max(worst, tokenCap <= 0 ? 100d : (double)p.TokensUsed / tokenCap * 100d);
+            worst = Math.Max(val1: worst, val2: tokenCap <= 0 ? 100d : (double)p.TokensUsed / tokenCap * 100d);
         }
 
         return worst;
@@ -291,5 +305,9 @@
     // Clicking the alert banner jumps to the Governance tab's Providers view, where each over-budget
     // provider's card shows its caps, spend, and utilization bars.
     /// <summary>Switches the active tab to Governance in response to the header alert banner being clicked.</summary>
-    private void HandleAlertClick() => _activeTab = Tab.Governance;
+    private void HandleAlertClick()
+    {
+        _activeTab = Tab.Governance;
+    }
+
 }

@@ -14,7 +14,10 @@ public sealed record RateLimitObservation(DateTimeOffset ObservedAtUtc, long? Re
 /// remaining budget.
 /// </summary>
 /// <param name="TimeToExhaustion">How long until the dimension would hit zero at the observed burn rate.</param>
-/// <param name="BurnRatePerMinute">The observed consumption rate, in the dimension's own unit (tokens or requests) per minute.</param>
+/// <param name="BurnRatePerMinute">
+/// The observed consumption rate, in the dimension's own unit (tokens or requests) per
+/// minute.
+/// </param>
 public sealed record RateLimitExhaustionProjection(TimeSpan TimeToExhaustion, double BurnRatePerMinute);
 
 /// <summary>
@@ -42,35 +45,26 @@ public static class RateLimitProjection
         ArgumentNullException.ThrowIfNull(earlier);
         ArgumentNullException.ThrowIfNull(later);
 
-        if (earlier.Remaining is not { } earlierRemaining || later.Remaining is not { } laterRemaining)
-        {
-            return null;
-        }
+        if (earlier.Remaining is not { } earlierRemaining || later.Remaining is not { } laterRemaining) return null;
 
         var elapsedMinutes = (later.ObservedAtUtc - earlier.ObservedAtUtc).TotalMinutes;
-        if (elapsedMinutes <= 0)
-        {
-            return null;
-        }
+        if (elapsedMinutes <= 0) return null;
 
         var consumed = earlierRemaining - laterRemaining;
         if (consumed <= 0)
-        {
             // Flat (no traffic since the earlier observation) or refilled (a reset landed between the two
             // observations) - either way, the current gap can't be trusted as a burn rate.
             return null;
-        }
 
         var ratePerMinute = consumed / elapsedMinutes;
         var minutesToExhaustion = laterRemaining / ratePerMinute;
         var exhaustionAt = later.ObservedAtUtc.AddMinutes(minutesToExhaustion);
 
         if (later.ResetAt is { } resetAt && resetAt <= exhaustionAt)
-        {
             // Reset-before-empty: the dimension refills before it would run out at this rate.
             return null;
-        }
 
-        return new RateLimitExhaustionProjection(TimeSpan.FromMinutes(minutesToExhaustion), ratePerMinute);
+        return new RateLimitExhaustionProjection(TimeToExhaustion: TimeSpan.FromMinutes(minutesToExhaustion),
+            BurnRatePerMinute: ratePerMinute);
     }
 }

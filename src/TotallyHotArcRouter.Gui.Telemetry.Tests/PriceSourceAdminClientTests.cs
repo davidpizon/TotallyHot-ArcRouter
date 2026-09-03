@@ -22,7 +22,7 @@ public class PriceSourceAdminClientTests
     {
         var stub = new StubClient
         {
-            ListResponse = Response(Source("litellm", enabled: true, rank: 3, prices: 2505)),
+            ListResponse = Response(Source(name: "litellm", true, 3, 2505))
         };
         using var client = new PriceSourceAdminClient(stub);
 
@@ -41,7 +41,7 @@ public class PriceSourceAdminClientTests
         // source the operator cannot see is one they cannot switch back on.
         var stub = new StubClient
         {
-            ListResponse = Response(Source("litellm", enabled: true, rank: 0, prices: 0)),
+            ListResponse = Response(Source(name: "litellm", true, 0, 0))
         };
         using var client = new PriceSourceAdminClient(stub);
 
@@ -51,12 +51,12 @@ public class PriceSourceAdminClientTests
     [Fact]
     public async Task ListAsync_maps_the_schedule_and_derives_the_next_pull()
     {
-        var anchor = new DateTimeOffset(2026, 7, 16, 12, 0, 0, TimeSpan.Zero);
-        var response = Response(Source("litellm", enabled: true, rank: 0, prices: 10));
+        var anchor = new DateTimeOffset(2026, 7, 16, 12, 0, 0, offset: TimeSpan.Zero);
+        var response = Response(Source(name: "litellm", true, 0, 10));
         response.Schedule = new Contract.PriceSchedule
         {
             PollIntervalSeconds = (int)TimeSpan.FromHours(6).TotalSeconds,
-            ScheduleAnchorUtc = Timestamp.FromDateTimeOffset(anchor),
+            ScheduleAnchorUtc = Timestamp.FromDateTimeOffset(anchor)
         };
         var stub = new StubClient { ListResponse = response };
         using var client = new PriceSourceAdminClient(stub);
@@ -76,7 +76,7 @@ public class PriceSourceAdminClientTests
         // source list is the part that matters and must still render; only the countdown is approximated.
         var stub = new StubClient
         {
-            ListResponse = Response(Source("litellm", enabled: true, rank: 0, prices: 10)),
+            ListResponse = Response(Source(name: "litellm", true, 0, 10))
         };
         using var client = new PriceSourceAdminClient(stub);
 
@@ -100,16 +100,17 @@ public class PriceSourceAdminClientTests
                 Schedule = new Contract.PriceSchedule
                 {
                     PollIntervalSeconds = (int)TimeSpan.FromHours(4).TotalSeconds,
-                    ScheduleAnchorUtc = Timestamp.FromDateTimeOffset(anchor),
-                },
-            },
+                    ScheduleAnchorUtc = Timestamp.FromDateTimeOffset(anchor)
+                }
+            }
         };
         using var client = new PriceSourceAdminClient(stub);
 
         var result = await client.RefreshAsync(TestContext.Current.CancellationToken);
 
         result.Schedule.PollInterval.Should().Be(TimeSpan.FromHours(4));
-        result.Schedule.NextPullUtc.Should().BeCloseTo(anchor.AddHours(4), TimeSpan.FromSeconds(1));
+        result.Schedule.NextPullUtc.Should()
+            .BeCloseTo(nearbyTime: anchor.AddHours(4), precision: TimeSpan.FromSeconds(1));
     }
 
     [Fact]
@@ -117,11 +118,12 @@ public class PriceSourceAdminClientTests
     {
         var stub = new StubClient
         {
-            SetEnabledResponse = Response(Source("litellm", enabled: false, rank: 0, prices: 10)),
+            SetEnabledResponse = Response(Source(name: "litellm", false, 0, 10))
         };
         using var client = new PriceSourceAdminClient(stub);
 
-        var list = await client.SetEnabledAsync("litellm", enabled: false, TestContext.Current.CancellationToken);
+        var list = await client.SetEnabledAsync(name: "litellm", false,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         stub.LastSetEnabledRequest!.Name.Should().Be("litellm");
         stub.LastSetEnabledRequest!.Enabled.Should().BeFalse();
@@ -137,7 +139,8 @@ public class PriceSourceAdminClientTests
         var stub = new StubClient();
         using var client = new PriceSourceAdminClient(stub);
 
-        await Assert.ThrowsAsync<ArgumentException>(() => client.SetEnabledAsync(name, enabled: true, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            client.SetEnabledAsync(name: name, true, cancellationToken: TestContext.Current.CancellationToken));
         stub.LastSetEnabledRequest.Should().BeNull();
     }
 
@@ -149,9 +152,12 @@ public class PriceSourceAdminClientTests
             RefreshResponse = new Contract.RefreshPriceSourcesResponse
             {
                 FreshPriceCount = 2505,
-                Outcomes = { new Contract.PriceSourceOutcome { Source = "litellm", Succeeded = true, PriceCount = 2505 } },
-                Sources = { Source("litellm", enabled: true, rank: 0, prices: 2505) },
-            },
+                Outcomes =
+                {
+                    new Contract.PriceSourceOutcome { Source = "litellm", Succeeded = true, PriceCount = 2505 }
+                },
+                Sources = { Source(name: "litellm", true, 0, 2505) }
+            }
         };
         using var client = new PriceSourceAdminClient(stub);
 
@@ -174,8 +180,12 @@ public class PriceSourceAdminClientTests
             RefreshResponse = new Contract.RefreshPriceSourcesResponse
             {
                 FreshPriceCount = 0,
-                Outcomes = { new Contract.PriceSourceOutcome { Source = "litellm", Succeeded = false, PriceCount = 0, Error = "disabled during fetch" } },
-            },
+                Outcomes =
+                {
+                    new Contract.PriceSourceOutcome
+                        { Source = "litellm", Succeeded = false, PriceCount = 0, Error = "disabled during fetch" }
+                }
+            }
         };
         using var client = new PriceSourceAdminClient(stub);
 
@@ -190,10 +200,12 @@ public class PriceSourceAdminClientTests
     {
         // The proxy not running is an ordinary state for a GUI that outlives it - the user gets a sentence,
         // not a gRPC status dump.
-        var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.Unavailable, "failed to connect")) };
+        var stub = new StubClient
+            { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new PriceSourceAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<PriceSourceAdminException>(() => client.ListAsync(TestContext.Current.CancellationToken));
+        var ex = await Assert.ThrowsAsync<PriceSourceAdminException>(() =>
+            client.ListAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read the price sources: the router is not reachable.");
         ex.InnerException.Should().BeOfType<RpcException>();
@@ -207,11 +219,15 @@ public class PriceSourceAdminClientTests
         // The router answered - it just said no. Callers key off this to decide whether the failure is about
         // the whole connection or about one request, so conflating them would let a bad argument masquerade
         // as the router being down.
-        var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.NotFound, "No price source named 'nope' exists.")) };
+        var stub = new StubClient
+        {
+            Failure = new RpcException(new Status(statusCode: StatusCode.NotFound,
+                detail: "No price source named 'nope' exists."))
+        };
         using var client = new PriceSourceAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<PriceSourceAdminException>(() =>
-            client.SetEnabledAsync("nope", enabled: true, TestContext.Current.CancellationToken));
+            client.SetEnabledAsync(name: "nope", true, cancellationToken: TestContext.Current.CancellationToken));
 
         ex.IsUnavailable.Should().BeFalse();
     }
@@ -221,10 +237,15 @@ public class PriceSourceAdminClientTests
     {
         // NotFound's "no price source named X" text is written on the server; discarding it here would leave
         // the panel unable to say what actually went wrong.
-        var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.NotFound, "No price source named 'nope' exists.")) };
+        var stub = new StubClient
+        {
+            Failure = new RpcException(new Status(statusCode: StatusCode.NotFound,
+                detail: "No price source named 'nope' exists."))
+        };
         using var client = new PriceSourceAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<PriceSourceAdminException>(() => client.SetEnabledAsync("nope", enabled: true, TestContext.Current.CancellationToken));
+        var ex = await Assert.ThrowsAsync<PriceSourceAdminException>(() =>
+            client.SetEnabledAsync(name: "nope", true, cancellationToken: TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not enable 'nope': No price source named 'nope' exists.");
     }
@@ -232,10 +253,12 @@ public class PriceSourceAdminClientTests
     [Fact]
     public async Task The_disable_failure_message_names_the_action_attempted()
     {
-        var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.Internal, "boom")) };
+        var stub = new StubClient
+            { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
         using var client = new PriceSourceAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<PriceSourceAdminException>(() => client.SetEnabledAsync("litellm", enabled: false, TestContext.Current.CancellationToken));
+        var ex = await Assert.ThrowsAsync<PriceSourceAdminException>(() =>
+            client.SetEnabledAsync(name: "litellm", false, cancellationToken: TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not disable 'litellm': boom");
     }
@@ -243,10 +266,12 @@ public class PriceSourceAdminClientTests
     [Fact]
     public async Task A_failed_refresh_is_wrapped_too()
     {
-        var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.Unavailable, "failed to connect")) };
+        var stub = new StubClient
+            { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new PriceSourceAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<PriceSourceAdminException>(() => client.RefreshAsync(TestContext.Current.CancellationToken));
+        var ex = await Assert.ThrowsAsync<PriceSourceAdminException>(() =>
+            client.RefreshAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not refresh the price sources: the router is not reachable.");
     }
@@ -259,17 +284,21 @@ public class PriceSourceAdminClientTests
             ReorderResponse = new Contract.RefreshPriceSourcesResponse
             {
                 FreshPriceCount = 2505,
-                Outcomes = { new Contract.PriceSourceOutcome { Source = "litellm", Succeeded = true, PriceCount = 2505 } },
+                Outcomes =
+                {
+                    new Contract.PriceSourceOutcome { Source = "litellm", Succeeded = true, PriceCount = 2505 }
+                },
                 Sources =
                 {
-                    Source("openrouter", enabled: true, rank: 1, prices: 300),
-                    Source("litellm", enabled: true, rank: 0, prices: 2505),
-                },
-            },
+                    Source(name: "openrouter", true, 1, 300),
+                    Source(name: "litellm", true, 0, 2505)
+                }
+            }
         };
         using var client = new PriceSourceAdminClient(stub);
 
-        var result = await client.ReorderAsync(["openrouter", "litellm"], TestContext.Current.CancellationToken);
+        var result = await client.ReorderAsync(namesInPriorityOrder: ["openrouter", "litellm"],
+            cancellationToken: TestContext.Current.CancellationToken);
 
         stub.LastReorderRequest!.SourceNamesInPriorityOrder.Should().Equal("openrouter", "litellm");
         result.FreshPriceCount.Should().Be(2505);
@@ -286,12 +315,13 @@ public class PriceSourceAdminClientTests
             ReorderResponse = new Contract.RefreshPriceSourcesResponse
             {
                 FreshPriceCount = 2505,
-                Sources = { Source("litellm", enabled: true, rank: 1, prices: 2505) },
-            },
+                Sources = { Source(name: "litellm", true, 1, 2505) }
+            }
         };
         using var client = new PriceSourceAdminClient(stub);
 
-        var result = await client.ReorderAsync(["litellm", "openrouter"], TestContext.Current.CancellationToken);
+        var result = await client.ReorderAsync(namesInPriorityOrder: ["litellm", "openrouter"],
+            cancellationToken: TestContext.Current.CancellationToken);
 
         result.Outcomes.Should().BeEmpty();
         result.FreshPriceCount.Should().Be(2505);
@@ -303,15 +333,18 @@ public class PriceSourceAdminClientTests
         var stub = new StubClient
         {
             Failure = new RpcException(new Status(
-                StatusCode.InvalidArgument,
-                "The submitted order must name every existing price source exactly once.")),
+                statusCode: StatusCode.InvalidArgument,
+                detail: "The submitted order must name every existing price source exactly once."))
         };
         using var client = new PriceSourceAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<PriceSourceAdminException>(() =>
-            client.ReorderAsync(["litellm"], TestContext.Current.CancellationToken));
+            client.ReorderAsync(namesInPriorityOrder: ["litellm"],
+                cancellationToken: TestContext.Current.CancellationToken));
 
-        ex.Message.Should().Be("Could not reorder the price sources: The submitted order must name every existing price source exactly once.");
+        ex.Message.Should()
+            .Be(
+                "Could not reorder the price sources: The submitted order must name every existing price source exactly once.");
         ex.IsUnavailable.Should().BeFalse();
     }
 
@@ -358,14 +391,16 @@ public class PriceSourceAdminClientTests
         return response;
     }
 
-    private static Contract.PriceSource Source(string name, bool enabled, int rank, int prices) =>
-        new()
+    private static Contract.PriceSource Source(string name, bool enabled, int rank, int prices)
+    {
+        return new Contract.PriceSource
         {
             Name = name,
             Enabled = enabled,
             PriorityScore = rank,
-            PriceCount = prices,
+            PriceCount = prices
         };
+    }
 
     /// <summary>
     /// A generated-client test double. Overrides only the <c>CallOptions</c> overloads: the generated
@@ -389,8 +424,10 @@ public class PriceSourceAdminClientTests
 
         public override AsyncUnaryCall<Contract.ListPriceSourcesResponse> ListPriceSourcesAsync(
             Contract.ListPriceSourcesRequest request,
-            CallOptions options) =>
-            Call(ListResponse);
+            CallOptions options)
+        {
+            return Call(ListResponse);
+        }
 
         public override AsyncUnaryCall<Contract.ListPriceSourcesResponse> SetPriceSourceEnabledAsync(
             Contract.SetPriceSourceEnabledRequest request,
@@ -402,8 +439,10 @@ public class PriceSourceAdminClientTests
 
         public override AsyncUnaryCall<Contract.RefreshPriceSourcesResponse> RefreshPriceSourcesAsync(
             Contract.RefreshPriceSourcesRequest request,
-            CallOptions options) =>
-            Call(RefreshResponse);
+            CallOptions options)
+        {
+            return Call(RefreshResponse);
+        }
 
         public override AsyncUnaryCall<Contract.RefreshPriceSourcesResponse> ReorderPriceSourcesAsync(
             Contract.ReorderPriceSourcesRequest request,
@@ -413,13 +452,14 @@ public class PriceSourceAdminClientTests
             return Call(ReorderResponse);
         }
 
-        private AsyncUnaryCall<T> Call<T>(T response) =>
-            new(
-                Failure is null ? Task.FromResult(response) : Task.FromException<T>(Failure),
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => [],
-                () => { });
+        private AsyncUnaryCall<T> Call<T>(T response)
+        {
+            return new AsyncUnaryCall<T>(
+                responseAsync: Failure is null ? Task.FromResult(response) : Task.FromException<T>(Failure),
+                responseHeadersAsync: Task.FromResult(new Metadata()),
+                getStatusFunc: () => Status.DefaultSuccess,
+                getTrailersFunc: () => [],
+                disposeAction: () => { });
+        }
     }
 }
-

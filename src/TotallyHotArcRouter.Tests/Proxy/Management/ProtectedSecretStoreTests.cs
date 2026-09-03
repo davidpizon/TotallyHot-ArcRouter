@@ -10,19 +10,19 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Management;
 /// </summary>
 public sealed class ProtectedSecretStoreTests
 {
-    private static string TempStorePath() =>
-        Path.Combine(Path.GetTempPath(), "arcrouter-tests", Guid.NewGuid().ToString("N"), "secrets.dat");
+    private static bool IsWindows => RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+
+    private static string TempStorePath()
+    {
+        return Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests", path3: Guid.NewGuid().ToString("N"),
+            path4: "secrets.dat");
+    }
 
     private static void CleanUp(string path)
     {
         var directory = Path.GetDirectoryName(path);
-        if (directory is not null && Directory.Exists(directory))
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        if (directory is not null && Directory.Exists(directory)) Directory.Delete(path: directory, true);
     }
-
-    private static bool IsWindows => RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
 
     [Fact]
     public void TryRead_RoundTripsAWrittenValue()
@@ -34,14 +34,14 @@ public sealed class ProtectedSecretStoreTests
 
             if (!IsWindows)
             {
-                Assert.Throws<PlatformNotSupportedException>(() => store.Write("name", "value"));
+                Assert.Throws<PlatformNotSupportedException>(() => store.Write(name: "name", value: "value"));
                 return;
             }
 
-            store.Write("provider:anthropic:header:x-api-key", "sk-ant-secret");
+            store.Write(name: "provider:anthropic:header:x-api-key", value: "sk-ant-secret");
 
-            Assert.True(store.TryRead("provider:anthropic:header:x-api-key", out var value));
-            Assert.Equal("sk-ant-secret", value);
+            Assert.True(store.TryRead(name: "provider:anthropic:header:x-api-key", value: out var value));
+            Assert.Equal(expected: "sk-ant-secret", actual: value);
         }
         finally
         {
@@ -52,21 +52,18 @@ public sealed class ProtectedSecretStoreTests
     [Fact]
     public void Write_Overwrite_ReplacesTheValue()
     {
-        if (!IsWindows)
-        {
-            return;
-        }
+        if (!IsWindows) return;
 
         var path = TempStorePath();
         try
         {
             var store = new ProtectedSecretStore(path);
 
-            store.Write("name", "first");
-            store.Write("name", "second");
+            store.Write(name: "name", value: "first");
+            store.Write(name: "name", value: "second");
 
-            Assert.True(store.TryRead("name", out var value));
-            Assert.Equal("second", value);
+            Assert.True(store.TryRead(name: "name", value: out var value));
+            Assert.Equal(expected: "second", actual: value);
         }
         finally
         {
@@ -77,19 +74,16 @@ public sealed class ProtectedSecretStoreTests
     [Fact]
     public void Delete_RemovesTheEntry_AndReportsWhetherOneExisted()
     {
-        if (!IsWindows)
-        {
-            return;
-        }
+        if (!IsWindows) return;
 
         var path = TempStorePath();
         try
         {
             var store = new ProtectedSecretStore(path);
-            store.Write("name", "value");
+            store.Write(name: "name", value: "value");
 
             Assert.True(store.Delete("name"));
-            Assert.False(store.TryRead("name", out _));
+            Assert.False(store.TryRead(name: "name", value: out _));
             Assert.False(store.Delete("name"));
         }
         finally
@@ -101,22 +95,19 @@ public sealed class ProtectedSecretStoreTests
     [Fact]
     public void DeleteByPrefix_RemovesOnlyMatchingEntries()
     {
-        if (!IsWindows)
-        {
-            return;
-        }
+        if (!IsWindows) return;
 
         var path = TempStorePath();
         try
         {
             var store = new ProtectedSecretStore(path);
-            store.Write("provider:anthropic:header:x-api-key", "a");
-            store.Write("provider:anthropic:header:anthropic-version", "b");
-            store.Write("provider:openai:header:authorization", "c");
+            store.Write(name: "provider:anthropic:header:x-api-key", value: "a");
+            store.Write(name: "provider:anthropic:header:anthropic-version", value: "b");
+            store.Write(name: "provider:openai:header:authorization", value: "c");
 
             var removed = store.DeleteByPrefix("provider:anthropic:");
 
-            Assert.Equal(2, removed);
+            Assert.Equal(2, actual: removed);
             Assert.False(store.Exists("provider:anthropic:header:x-api-key"));
             Assert.False(store.Exists("provider:anthropic:header:anthropic-version"));
             Assert.True(store.Exists("provider:openai:header:authorization"));
@@ -130,19 +121,16 @@ public sealed class ProtectedSecretStoreTests
     [Fact]
     public void TryRead_MissingName_ReturnsFalse()
     {
-        if (!IsWindows)
-        {
-            return;
-        }
+        if (!IsWindows) return;
 
         var path = TempStorePath();
         try
         {
             var store = new ProtectedSecretStore(path);
-            store.Write("other", "value");
+            store.Write(name: "other", value: "value");
 
-            Assert.False(store.TryRead("missing", out var value));
-            Assert.Equal(string.Empty, value);
+            Assert.False(store.TryRead(name: "missing", value: out var value));
+            Assert.Equal(expected: string.Empty, actual: value);
         }
         finally
         {
@@ -153,23 +141,23 @@ public sealed class ProtectedSecretStoreTests
     [Fact]
     public void OnDiskBytes_ContainNeitherThePlaintextValueNorTheName()
     {
-        if (!IsWindows)
-        {
-            return;
-        }
+        if (!IsWindows) return;
 
         var path = TempStorePath();
         try
         {
             var store = new ProtectedSecretStore(path);
-            store.Write("provider:anthropic:header:x-api-key", "sk-ant-super-secret-value");
+            store.Write(name: "provider:anthropic:header:x-api-key", value: "sk-ant-super-secret-value");
 
             var bytes = File.ReadAllBytes(path);
             var asText = Encoding.UTF8.GetString(bytes);
 
-            Assert.DoesNotContain("sk-ant-super-secret-value", asText, StringComparison.Ordinal);
-            Assert.DoesNotContain("x-api-key", asText, StringComparison.Ordinal);
-            Assert.DoesNotContain("anthropic", asText, StringComparison.Ordinal);
+            Assert.DoesNotContain(expectedSubstring: "sk-ant-super-secret-value", actualString: asText,
+                comparisonType: StringComparison.Ordinal);
+            Assert.DoesNotContain(expectedSubstring: "x-api-key", actualString: asText,
+                comparisonType: StringComparison.Ordinal);
+            Assert.DoesNotContain(expectedSubstring: "anthropic", actualString: asText,
+                comparisonType: StringComparison.Ordinal);
         }
         finally
         {
@@ -180,10 +168,7 @@ public sealed class ProtectedSecretStoreTests
     [Fact]
     public async Task ConcurrentWrites_FromTwoStoreInstances_LoseNoEntries()
     {
-        if (!IsWindows)
-        {
-            return;
-        }
+        if (!IsWindows) return;
 
         var path = TempStorePath();
         try
@@ -192,7 +177,7 @@ public sealed class ProtectedSecretStoreTests
                 .Select(i => Task.Run(() =>
                 {
                     var store = new ProtectedSecretStore(path);
-                    store.Write($"name-{i}", $"value-{i}");
+                    store.Write(name: $"name-{i}", value: $"value-{i}");
                 }))
                 .ToArray();
 
@@ -201,8 +186,9 @@ public sealed class ProtectedSecretStoreTests
             var reader = new ProtectedSecretStore(path);
             for (var i = 0; i < 16; i++)
             {
-                Assert.True(reader.TryRead($"name-{i}", out var value), $"Expected name-{i} to survive concurrent writes.");
-                Assert.Equal($"value-{i}", value);
+                Assert.True(condition: reader.TryRead(name: $"name-{i}", value: out var value),
+                    userMessage: $"Expected name-{i} to survive concurrent writes.");
+                Assert.Equal(expected: $"value-{i}", actual: value);
             }
         }
         finally
@@ -214,21 +200,18 @@ public sealed class ProtectedSecretStoreTests
     [Fact]
     public void OnNonWindows_WriteThrows_AndReadsReportAbsent()
     {
-        if (IsWindows)
-        {
-            return;
-        }
+        if (IsWindows) return;
 
         var path = TempStorePath();
         try
         {
             var store = new ProtectedSecretStore(path);
 
-            Assert.Throws<PlatformNotSupportedException>(() => store.Write("name", "value"));
-            Assert.False(store.TryRead("name", out _));
+            Assert.Throws<PlatformNotSupportedException>(() => store.Write(name: "name", value: "value"));
+            Assert.False(store.TryRead(name: "name", value: out _));
             Assert.False(store.Exists("name"));
             Assert.False(store.Delete("name"));
-            Assert.Equal(0, store.DeleteByPrefix("name"));
+            Assert.Equal(0, actual: store.DeleteByPrefix("name"));
         }
         finally
         {

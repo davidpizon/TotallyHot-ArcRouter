@@ -18,7 +18,8 @@ internal sealed class QueuedResponsesHandler(IReadOnlyList<string> jsonBodies) :
 
     public string? LastRequestAuthParameter { get; private set; }
 
-    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+        CancellationToken cancellationToken)
     {
         RequestUris.Add(request.RequestUri!.ToString());
         LastRequestAuthScheme = request.Headers.Authorization?.Scheme;
@@ -29,7 +30,7 @@ internal sealed class QueuedResponsesHandler(IReadOnlyList<string> jsonBodies) :
 
         return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StringContent(body, Encoding.UTF8, "application/json"),
+            Content = new StringContent(content: body, encoding: Encoding.UTF8, mediaType: "application/json")
         });
     }
 }

@@ -13,22 +13,23 @@ public class RoutingDecisionTests
     [Fact]
     public void Constructor_SetsExpectedValues()
     {
-        var timestamp = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var timestamp = new DateTimeOffset(2026, 1, 1, 0, 0, 0, offset: TimeSpan.Zero);
         var scores = new Dictionary<string, double>
         {
             ["kimi-k2.5"] = 0.8,
             ["gpt-5.4"] = 0.6
         };
 
-        var decision = new RoutingDecision("kimi-k2.5", 0.8, "dimension-best prior", timestamp, scores);
+        var decision = new RoutingDecision(selectedModel: "kimi-k2.5", 0.8, rationale: "dimension-best prior",
+            timestampUtc: timestamp, candidateScores: scores);
 
-        Assert.Equal("kimi-k2.5", decision.SelectedModel);
-        Assert.Equal(0.8, decision.Confidence, 3);
-        Assert.Equal("dimension-best prior", decision.Rationale);
-        Assert.Equal(timestamp, decision.TimestampUtc);
-        Assert.Equal(2, decision.CandidateScores.Count);
+        Assert.Equal(expected: "kimi-k2.5", actual: decision.SelectedModel);
+        Assert.Equal(0.8, actual: decision.Confidence, 3);
+        Assert.Equal(expected: "dimension-best prior", actual: decision.Rationale);
+        Assert.Equal(expected: timestamp, actual: decision.TimestampUtc);
+        Assert.Equal(2, actual: decision.CandidateScores.Count);
         Assert.False(decision.IsExploratory);
-        Assert.Equal(1.0, decision.Propensity, precision: 6);
+        Assert.Equal(1.0, actual: decision.Propensity, 6);
     }
 
     /// <summary>
@@ -38,12 +39,12 @@ public class RoutingDecisionTests
     [Fact]
     public void Constructor_PropensityGiven_IsReflectedOnTheDecision()
     {
-        var timestamp = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var timestamp = new DateTimeOffset(2026, 1, 1, 0, 0, 0, offset: TimeSpan.Zero);
 
         var decision = new RoutingDecision(
-            "kimi-k2.5", 0.5, "exploration", timestamp, candidateScores: null, isExploratory: true, propensity: 0.0167);
+            selectedModel: "kimi-k2.5", 0.5, rationale: "exploration", timestampUtc: timestamp, null, true, 0.0167);
 
-        Assert.Equal(0.0167, decision.Propensity, precision: 6);
+        Assert.Equal(0.0167, actual: decision.Propensity, 6);
     }
 
     /// <summary>
@@ -52,10 +53,10 @@ public class RoutingDecisionTests
     [Fact]
     public void Constructor_IsExploratoryTrue_IsReflectedOnTheDecision()
     {
-        var timestamp = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var timestamp = new DateTimeOffset(2026, 1, 1, 0, 0, 0, offset: TimeSpan.Zero);
 
         var decision = new RoutingDecision(
-            "kimi-k2.5", 0.5, "exploration", timestamp, candidateScores: null, isExploratory: true);
+            selectedModel: "kimi-k2.5", 0.5, rationale: "exploration", timestampUtc: timestamp, null, true);
 
         Assert.True(decision.IsExploratory);
     }
@@ -69,7 +70,8 @@ public class RoutingDecisionTests
         var timestamp = DateTimeOffset.UtcNow;
 
         Assert.Throws<ArgumentOutOfRangeException>(() =>
-            new RoutingDecision("kimi-k2.5", 1.1, "invalid confidence", timestamp));
+            new RoutingDecision(selectedModel: "kimi-k2.5", 1.1, rationale: "invalid confidence",
+                timestampUtc: timestamp));
     }
 
     /// <summary>
@@ -80,12 +82,11 @@ public class RoutingDecisionTests
     {
         var decision = RoutingDecision.CreateFallback("gpt-5.4");
 
-        Assert.Equal("gpt-5.4", decision.SelectedModel);
-        Assert.Equal(0, decision.Confidence);
-        Assert.Equal(RouterConstants.FallbackReason, decision.Rationale);
+        Assert.Equal(expected: "gpt-5.4", actual: decision.SelectedModel);
+        Assert.Equal(0, actual: decision.Confidence);
+        Assert.Equal(expected: RouterConstants.FallbackReason, actual: decision.Rationale);
         Assert.Empty(decision.CandidateScores);
         Assert.False(decision.IsExploratory);
-        Assert.Equal(1.0, decision.Propensity, precision: 6);
+        Assert.Equal(1.0, actual: decision.Propensity, 6);
     }
 }
-

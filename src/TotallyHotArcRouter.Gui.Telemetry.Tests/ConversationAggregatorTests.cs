@@ -3,7 +3,7 @@ namespace TotallyHot.ArcRouter.Gui.Telemetry.Tests;
 /// <summary>Covers <see cref="ConversationAggregator.Aggregate"/>: grouping, ordering, and totals.</summary>
 public class ConversationAggregatorTests
 {
-    private static readonly DateTimeOffset BaseTime = new(2026, 7, 8, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset BaseTime = new(2026, 7, 8, 12, 0, 0, offset: TimeSpan.Zero);
 
     private static RoutingTelemetryEventDto CreateEvent(
         string sessionId = "session-1",
@@ -71,14 +71,14 @@ public class ConversationAggregatorTests
     [Fact]
     public void Aggregate_SingleEvent_ReturnsSingleOneTurnConversation()
     {
-        var events = new[] { CreateEvent(sessionId: "session-1", turnNumber: 1) };
+        var events = new[] { CreateEvent(sessionId: "session-1", 1) };
 
         var result = ConversationAggregator.Aggregate(events);
 
         var conversation = Assert.Single(result);
-        Assert.Equal("session-1", conversation.SessionId);
+        Assert.Equal(expected: "session-1", actual: conversation.SessionId);
         var turn = Assert.Single(conversation.Turns);
-        Assert.Equal(1, turn.TurnNumber);
+        Assert.Equal(1, actual: turn.TurnNumber);
     }
 
     [Fact]
@@ -86,20 +86,20 @@ public class ConversationAggregatorTests
     {
         var events = new[]
         {
-            CreateEvent(sessionId: "session-1", turnNumber: 1, promptTokens: 100, completionTokens: 20, estimatedCostUsd: 0.01m),
-            CreateEvent(sessionId: "session-1", turnNumber: 2, promptTokens: 150, completionTokens: 30, estimatedCostUsd: 0.02m),
-            CreateEvent(sessionId: "session-1", turnNumber: 3, promptTokens: 200, completionTokens: 40, estimatedCostUsd: 0.03m),
+            CreateEvent(sessionId: "session-1", 1, promptTokens: 100, completionTokens: 20, estimatedCostUsd: 0.01m),
+            CreateEvent(sessionId: "session-1", 2, promptTokens: 150, completionTokens: 30, estimatedCostUsd: 0.02m),
+            CreateEvent(sessionId: "session-1", 3, promptTokens: 200, completionTokens: 40, estimatedCostUsd: 0.03m)
         };
 
         var result = ConversationAggregator.Aggregate(events);
 
         var conversation = Assert.Single(result);
-        Assert.Equal("session-1", conversation.SessionId);
-        Assert.Equal(3, conversation.Turns.Count);
-        Assert.Equal([1, 2, 3], conversation.Turns.Select(t => t.TurnNumber));
-        Assert.Equal(450, conversation.TotalPromptTokens);
-        Assert.Equal(90, conversation.TotalCompletionTokens);
-        Assert.Equal(0.06m, conversation.TotalCost);
+        Assert.Equal(expected: "session-1", actual: conversation.SessionId);
+        Assert.Equal(3, actual: conversation.Turns.Count);
+        Assert.Equal(expected: [1, 2, 3], actual: conversation.Turns.Select(t => t.TurnNumber));
+        Assert.Equal(450, actual: conversation.TotalPromptTokens);
+        Assert.Equal(90, actual: conversation.TotalCompletionTokens);
+        Assert.Equal(0.06m, actual: conversation.TotalCost);
     }
 
     [Fact]
@@ -107,14 +107,14 @@ public class ConversationAggregatorTests
     {
         var events = new[]
         {
-            CreateEvent(sessionId: "older", turnNumber: 1, timestampUtc: BaseTime),
-            CreateEvent(sessionId: "newer", turnNumber: 1, timestampUtc: BaseTime.AddHours(1)),
-            CreateEvent(sessionId: "middle", turnNumber: 1, timestampUtc: BaseTime.AddMinutes(30)),
+            CreateEvent(sessionId: "older", 1, timestampUtc: BaseTime),
+            CreateEvent(sessionId: "newer", 1, timestampUtc: BaseTime.AddHours(1)),
+            CreateEvent(sessionId: "middle", 1, timestampUtc: BaseTime.AddMinutes(30))
         };
 
         var result = ConversationAggregator.Aggregate(events);
 
-        Assert.Equal(["newer", "middle", "older"], result.Select(c => c.SessionId));
+        Assert.Equal(expected: ["newer", "middle", "older"], actual: result.Select(c => c.SessionId));
     }
 
     [Fact]
@@ -122,17 +122,17 @@ public class ConversationAggregatorTests
     {
         var events = new[]
         {
-            CreateEvent(sessionId: "session-1", turnNumber: 3, timestampUtc: BaseTime.AddMinutes(3)),
-            CreateEvent(sessionId: "session-1", turnNumber: 1, timestampUtc: BaseTime.AddMinutes(1)),
-            CreateEvent(sessionId: "session-1", turnNumber: 2, timestampUtc: BaseTime.AddMinutes(2)),
+            CreateEvent(sessionId: "session-1", 3, timestampUtc: BaseTime.AddMinutes(3)),
+            CreateEvent(sessionId: "session-1", 1, timestampUtc: BaseTime.AddMinutes(1)),
+            CreateEvent(sessionId: "session-1", 2, timestampUtc: BaseTime.AddMinutes(2))
         };
 
         var result = ConversationAggregator.Aggregate(events);
 
         var conversation = Assert.Single(result);
-        Assert.Equal([1, 2, 3], conversation.Turns.Select(t => t.TurnNumber));
-        Assert.Equal(BaseTime.AddMinutes(1), conversation.FirstTimestampUtc);
-        Assert.Equal(BaseTime.AddMinutes(3), conversation.LastTimestampUtc);
+        Assert.Equal(expected: [1, 2, 3], actual: conversation.Turns.Select(t => t.TurnNumber));
+        Assert.Equal(expected: BaseTime.AddMinutes(1), actual: conversation.FirstTimestampUtc);
+        Assert.Equal(expected: BaseTime.AddMinutes(3), actual: conversation.LastTimestampUtc);
     }
 
     [Theory]
@@ -140,11 +140,11 @@ public class ConversationAggregatorTests
     [InlineData(false)]
     public void Aggregate_IsSessionSynthesized_PropagatesFromFirstTurn(bool isSynthesized)
     {
-        var events = new[] { CreateEvent(sessionId: "session-1", turnNumber: 1, isSessionSynthesized: isSynthesized) };
+        var events = new[] { CreateEvent(sessionId: "session-1", 1, isSessionSynthesized: isSynthesized) };
 
         var result = ConversationAggregator.Aggregate(events);
 
-        Assert.Equal(isSynthesized, result[0].IsSessionSynthesized);
+        Assert.Equal(expected: isSynthesized, actual: result[0].IsSessionSynthesized);
     }
 
     [Fact]
@@ -152,8 +152,8 @@ public class ConversationAggregatorTests
     {
         var events = new[]
         {
-            CreateEvent(sessionId: "session-1", turnNumber: 1, isFallback: false),
-            CreateEvent(sessionId: "session-1", turnNumber: 2, isFallback: false),
+            CreateEvent(sessionId: "session-1", 1, isFallback: false),
+            CreateEvent(sessionId: "session-1", 2, isFallback: false)
         };
 
         var result = ConversationAggregator.Aggregate(events);
@@ -166,8 +166,8 @@ public class ConversationAggregatorTests
     {
         var events = new[]
         {
-            CreateEvent(sessionId: "session-1", turnNumber: 1, isFallback: false),
-            CreateEvent(sessionId: "session-1", turnNumber: 2, isFallback: true),
+            CreateEvent(sessionId: "session-1", 1, isFallback: false),
+            CreateEvent(sessionId: "session-1", 2, isFallback: true)
         };
 
         var result = ConversationAggregator.Aggregate(events);
@@ -180,19 +180,19 @@ public class ConversationAggregatorTests
     {
         var events = new[]
         {
-            CreateEvent(sessionId: "session-1", turnNumber: 1, promptTokens: null, completionTokens: null, estimatedCostUsd: null),
+            CreateEvent(sessionId: "session-1", 1, promptTokens: null, completionTokens: null, estimatedCostUsd: null)
         };
 
         var result = ConversationAggregator.Aggregate(events);
 
         var conversation = Assert.Single(result);
-        Assert.Equal(0, conversation.TotalPromptTokens);
-        Assert.Equal(0, conversation.TotalCompletionTokens);
-        Assert.Equal(0m, conversation.TotalCost);
+        Assert.Equal(0, actual: conversation.TotalPromptTokens);
+        Assert.Equal(0, actual: conversation.TotalCompletionTokens);
+        Assert.Equal(0m, actual: conversation.TotalCost);
         var turn = Assert.Single(conversation.Turns);
-        Assert.Equal(0, turn.PromptTokens);
-        Assert.Equal(0, turn.CompletionTokens);
-        Assert.Equal(0m, turn.EstimatedCostUsd);
+        Assert.Equal(0, actual: turn.PromptTokens);
+        Assert.Equal(0, actual: turn.CompletionTokens);
+        Assert.Equal(0m, actual: turn.EstimatedCostUsd);
     }
 
     [Fact]
@@ -202,22 +202,22 @@ public class ConversationAggregatorTests
         {
             CreateEvent(
                 sessionId: "session-1",
-                turnNumber: 1,
+                1,
                 requestSummary: "What is the capital of France?",
-                responseSummary: "The capital of France is Paris."),
+                responseSummary: "The capital of France is Paris.")
         };
 
         var result = ConversationAggregator.Aggregate(events);
 
         var turn = Assert.Single(result[0].Turns);
-        Assert.Equal("What is the capital of France?", turn.RequestSummary);
-        Assert.Equal("The capital of France is Paris.", turn.ResponseSummary);
+        Assert.Equal(expected: "What is the capital of France?", actual: turn.RequestSummary);
+        Assert.Equal(expected: "The capital of France is Paris.", actual: turn.ResponseSummary);
     }
 
     [Fact]
     public void Aggregate_NoRequestOrResponseSummary_TurnFieldsAreNull()
     {
-        var events = new[] { CreateEvent(sessionId: "session-1", turnNumber: 1) };
+        var events = new[] { CreateEvent(sessionId: "session-1", 1) };
 
         var result = ConversationAggregator.Aggregate(events);
 
@@ -229,13 +229,13 @@ public class ConversationAggregatorTests
     [Fact]
     public void Aggregate_TurnAgentAndModel_BothSetToResolvedModel()
     {
-        var events = new[] { CreateEvent(sessionId: "session-1", turnNumber: 1, resolvedModel: "claude-sonnet-5") };
+        var events = new[] { CreateEvent(sessionId: "session-1", 1, resolvedModel: "claude-sonnet-5") };
 
         var result = ConversationAggregator.Aggregate(events);
 
         var turn = Assert.Single(result[0].Turns);
-        Assert.Equal("claude-sonnet-5", turn.Agent);
-        Assert.Equal("claude-sonnet-5", turn.Model);
+        Assert.Equal(expected: "claude-sonnet-5", actual: turn.Agent);
+        Assert.Equal(expected: "claude-sonnet-5", actual: turn.Model);
     }
 
     [Fact]
@@ -245,18 +245,18 @@ public class ConversationAggregatorTests
         {
             CreateEvent(
                 sessionId: "session-1",
-                turnNumber: 1,
+                1,
                 requestedModel: "auto",
                 routedModel: "claude-sonnet-5",
-                substitutionReason: "AutoSelect"),
+                substitutionReason: "AutoSelect")
         };
 
         var result = ConversationAggregator.Aggregate(events);
 
         var turn = Assert.Single(result[0].Turns);
-        Assert.Equal("auto", turn.RequestedModel);
-        Assert.Equal("claude-sonnet-5", turn.RoutedModel);
-        Assert.Equal("AutoSelect", turn.SubstitutionReason);
+        Assert.Equal(expected: "auto", actual: turn.RequestedModel);
+        Assert.Equal(expected: "claude-sonnet-5", actual: turn.RoutedModel);
+        Assert.Equal(expected: "AutoSelect", actual: turn.SubstitutionReason);
     }
 
     [Fact]
@@ -264,17 +264,17 @@ public class ConversationAggregatorTests
     {
         var events = new[]
         {
-            CreateEvent(sessionId: "session-1", turnNumber: 1, cacheCreationTokens: null, cacheReadTokens: null),
+            CreateEvent(sessionId: "session-1", 1, cacheCreationTokens: null, cacheReadTokens: null)
         };
 
         var result = ConversationAggregator.Aggregate(events);
 
         var conversation = Assert.Single(result);
-        Assert.Equal(0, conversation.TotalCacheCreationTokens);
-        Assert.Equal(0, conversation.TotalCacheReadTokens);
+        Assert.Equal(0, actual: conversation.TotalCacheCreationTokens);
+        Assert.Equal(0, actual: conversation.TotalCacheReadTokens);
         var turn = Assert.Single(conversation.Turns);
-        Assert.Equal(0, turn.CacheCreationTokens);
-        Assert.Equal(0, turn.CacheReadTokens);
+        Assert.Equal(0, actual: turn.CacheCreationTokens);
+        Assert.Equal(0, actual: turn.CacheReadTokens);
     }
 
     [Fact]
@@ -282,25 +282,25 @@ public class ConversationAggregatorTests
     {
         var events = new[]
         {
-            CreateEvent(sessionId: "session-1", turnNumber: 1, cacheCreationTokens: 30, cacheReadTokens: 500),
-            CreateEvent(sessionId: "session-1", turnNumber: 2, cacheCreationTokens: 10, cacheReadTokens: 200),
+            CreateEvent(sessionId: "session-1", 1, cacheCreationTokens: 30, cacheReadTokens: 500),
+            CreateEvent(sessionId: "session-1", 2, cacheCreationTokens: 10, cacheReadTokens: 200)
         };
 
         var result = ConversationAggregator.Aggregate(events);
 
         var conversation = Assert.Single(result);
-        Assert.Equal(40, conversation.TotalCacheCreationTokens);
-        Assert.Equal(700, conversation.TotalCacheReadTokens);
+        Assert.Equal(40, actual: conversation.TotalCacheCreationTokens);
+        Assert.Equal(700, actual: conversation.TotalCacheReadTokens);
     }
 
     [Fact]
     public void Aggregate_NoUnpricedTurns_UnpricedTurnsIsZero()
     {
-        var events = new[] { CreateEvent(sessionId: "session-1", turnNumber: 1, estimatedCostUsd: 0.01m) };
+        var events = new[] { CreateEvent(sessionId: "session-1", 1, estimatedCostUsd: 0.01m) };
 
         var result = ConversationAggregator.Aggregate(events);
 
-        Assert.Equal(0, result[0].UnpricedTurns);
+        Assert.Equal(0, actual: result[0].UnpricedTurns);
     }
 
     [Fact]
@@ -308,27 +308,26 @@ public class ConversationAggregatorTests
     {
         var events = new[]
         {
-            CreateEvent(sessionId: "session-1", turnNumber: 1, estimatedCostUsd: 0.01m),
-            CreateEvent(sessionId: "session-1", turnNumber: 2, estimatedCostUsd: null),
-            CreateEvent(sessionId: "session-1", turnNumber: 3, estimatedCostUsd: null),
+            CreateEvent(sessionId: "session-1", 1, estimatedCostUsd: 0.01m),
+            CreateEvent(sessionId: "session-1", 2, estimatedCostUsd: null),
+            CreateEvent(sessionId: "session-1", 3, estimatedCostUsd: null)
         };
 
         var result = ConversationAggregator.Aggregate(events);
 
         var conversation = Assert.Single(result);
-        Assert.Equal(2, conversation.UnpricedTurns);
-        Assert.Equal(0.01m, conversation.TotalCost);
+        Assert.Equal(2, actual: conversation.UnpricedTurns);
+        Assert.Equal(0.01m, actual: conversation.TotalCost);
     }
 
     [Fact]
     public void Aggregate_CostConfidence_PassesThroughToTurn()
     {
-        var events = new[] { CreateEvent(sessionId: "session-1", turnNumber: 1, costConfidence: "CatalogApproximate") };
+        var events = new[] { CreateEvent(sessionId: "session-1", 1, costConfidence: "CatalogApproximate") };
 
         var result = ConversationAggregator.Aggregate(events);
 
         var turn = Assert.Single(result[0].Turns);
-        Assert.Equal("CatalogApproximate", turn.CostConfidence);
+        Assert.Equal(expected: "CatalogApproximate", actual: turn.CostConfidence);
     }
 }
-

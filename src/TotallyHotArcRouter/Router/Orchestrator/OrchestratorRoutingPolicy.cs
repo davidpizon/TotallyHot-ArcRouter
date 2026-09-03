@@ -66,20 +66,16 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// </remarks>
 public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
 {
-    /// <summary>Prefix for a per-voter breakdown key in <see cref="RoutingDecision.CandidateScores"/> (<c>"voter:{voterName}:{modelName}"</c>), distinguishing it from a plain candidate aggregate-score key.</summary>
+    /// <summary>
+    /// Prefix for a per-voter breakdown key in <see cref="RoutingDecision.CandidateScores"/> (
+    /// <c>"voter:{voterName}:{modelName}"</c>), distinguishing it from a plain candidate aggregate-score key.
+    /// </summary>
     private const string VoterKeyPrefix = "voter:";
 
-    private readonly IReadOnlyList<IRoutingVoter> _voters;
-    private readonly IOptionsMonitor<RoutingOptions> _optionsMonitor;
     private readonly ILogger<OrchestratorRoutingPolicy> _logger;
+    private readonly IOptionsMonitor<RoutingOptions> _optionsMonitor;
 
-    /// <summary>
-    /// The current routing options, read live on every access rather than captured once - so a
-    /// <see cref="RoutingOptions.EnableAdaptiveRouting"/> toggle
-    /// (docs/router/self-organizing-classification-plan.md Phase T6) takes effect on the very next decision
-    /// this policy makes, without a restart.
-    /// </summary>
-    private RoutingOptions Options => _optionsMonitor.CurrentValue;
+    private readonly IReadOnlyList<IRoutingVoter> _voters;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="OrchestratorRoutingPolicy"/> class.
@@ -101,7 +97,15 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
         _logger = logger;
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// The current routing options, read live on every access rather than captured once - so a
+    /// <see cref="RoutingOptions.EnableAdaptiveRouting"/> toggle
+    /// (docs/router/self-organizing-classification-plan.md Phase T6) takes effect on the very next decision
+    /// this policy makes, without a restart.
+    /// </summary>
+    private RoutingOptions Options => _optionsMonitor.CurrentValue;
+
+    /// <inheritdoc/>
     /// <remarks>
     /// Delegates to the <see cref="RoutingSignals"/> overload of this method with no signals, which in
     /// turn calls <see cref="DecideAsync"/> with no task embedding/text. Callers who have a task embedding
@@ -110,21 +114,39 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
     /// directly, so <see cref="MemoryKnnVoter"/> and <see cref="LogRegVoter"/> can participate instead of
     /// abstaining.
     /// </remarks>
-    public Task<string> SelectModelAsync(RoutingContext context, CancellationToken cancellationToken = default) =>
-        SelectModelAsync(context, signals: null, cancellationToken);
+    public Task<string> SelectModelAsync(RoutingContext context, CancellationToken cancellationToken = default)
+    {
+        return SelectModelAsync(context: context, null, cancellationToken: cancellationToken);
+    }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     /// <remarks>
     /// Forwards <paramref name="signals"/>' <see cref="RoutingSignals.TaskEmbedding"/> and
     /// <see cref="RoutingSignals.TaskText"/> to <see cref="DecideAsync"/> in place of the hardcoded nulls
     /// the no-signals overload passes, so <see cref="MemoryKnnVoter"/> and <see cref="LogRegVoter"/> can
     /// participate in a live routing decision (docs/router/live-feedback-learning-plan.md Phase 2a).
     /// </remarks>
-    public async Task<string> SelectModelAsync(RoutingContext context, RoutingSignals? signals, CancellationToken cancellationToken = default)
+    public async Task<string> SelectModelAsync(RoutingContext context, RoutingSignals? signals,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
-        var decision = await DecideAsync(context, signals?.TaskEmbedding, signals?.TaskText, cancellationToken).ConfigureAwait(false);
+        var decision = await DecideAsync(context: context, taskEmbedding: signals?.TaskEmbedding,
+            taskText: signals?.TaskText, cancellationToken: cancellationToken).ConfigureAwait(false);
         return decision.SelectedModel;
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Delegates directly to <see cref="DecideAsync"/>, which already builds the full decision
+    /// (including the real <see cref="RoutingDecision.IsExploratory"/> and
+    /// <see cref="RoutingDecision.Propensity"/>) from <paramref name="signals"/> - no need for the
+    /// interface's default wrap-a-string-in-a-decision implementation here.
+    /// </remarks>
+    public Task<RoutingDecision> DecideOutcomeAsync(RoutingContext context, RoutingSignals? signals,
+        CancellationToken cancellationToken = default)
+    {
+        return DecideAsync(context: context, taskEmbedding: signals?.TaskEmbedding, taskText: signals?.TaskText,
+            cancellationToken: cancellationToken);
     }
 
     /// <summary>
@@ -145,11 +167,11 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
     {
         ArgumentNullException.ThrowIfNull(context);
         if (context.Candidates.Count == 0)
-        {
-            throw new ArgumentException("The routing context has no candidates to vote over.", nameof(context));
-        }
+            throw new ArgumentException(message: "The routing context has no candidates to vote over.",
+                paramName: nameof(context));
 
-        var votingContext = new VotingContext(context.Dimension, context.Candidates, taskEmbedding, taskText);
+        var votingContext = new VotingContext(Dimension: context.Dimension, Candidates: context.Candidates,
+            TaskEmbedding: taskEmbedding, TaskText: taskText);
 
         // Kept in separate dictionaries - not one dictionary shared between aggregate scores (keyed by
         // candidate.ModelName) and per-voter contributions (keyed "voter:{voterName}:{modelName}") - because
@@ -162,15 +184,14 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
 
         foreach (var voter in _voters)
         {
-            if (!IsVoterEnabled(voter.Name))
-            {
-                continue;
-            }
+            if (!IsVoterEnabled(voter.Name)) continue;
 
-            var vote = await CastVoteAsync(voter, votingContext, cancellationToken).ConfigureAwait(false);
+            var vote = await CastVoteAsync(voter: voter, votingContext: votingContext,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
             if (vote.IsAbstain)
             {
-                _logger.LogInformation("[ORCHESTRATOR] Voter {Voter} abstained for dimension {Dimension}.", voter.Name, context.Dimension);
+                _logger.LogInformation(message: "[ORCHESTRATOR] Voter {Voter} abstained for dimension {Dimension}.",
+                    voter.Name, context.Dimension);
                 continue;
             }
 
@@ -180,6 +201,7 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
                 // on whitespace - a misbehaving voter must degrade to an abstention here, not hard-fail
                 // the whole decision.
                 _logger.LogWarning(
+                    message:
                     "[ORCHESTRATOR] Voter {Voter} returned a blank model name for dimension {Dimension}; treating as an abstention.",
                     voter.Name,
                     context.Dimension);
@@ -193,12 +215,13 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
             // slashed model id (e.g. "meta-llama/llama-3.1") is never mistaken for an unprefixed one.
             var candidateMatch = context.Candidates.FirstOrDefault(candidate =>
                 string.Equals(
-                    ModelNameCanonicalizer.Canonicalize(candidate.ModelName, candidate.Provider),
-                    ModelNameCanonicalizer.Canonicalize(vote.ModelName!, candidate.Provider),
-                    StringComparison.Ordinal));
+                    a: ModelNameCanonicalizer.Canonicalize(modelId: candidate.ModelName, provider: candidate.Provider),
+                    b: ModelNameCanonicalizer.Canonicalize(modelId: vote.ModelName!, provider: candidate.Provider),
+                    comparisonType: StringComparison.Ordinal));
             if (candidateMatch is null)
             {
                 _logger.LogWarning(
+                    message:
                     "[ORCHESTRATOR] Voter {Voter} picked {Model}, which is not among the current candidates for dimension {Dimension}; treating as an abstention.",
                     voter.Name,
                     vote.ModelName,
@@ -216,6 +239,7 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
                 // Math.Clamp does not sanitize NaN/±Infinity - a non-finite confidence would otherwise
                 // poison contribution (and everything summed from it) with NaN.
                 _logger.LogWarning(
+                    message:
                     "[ORCHESTRATOR] Voter {Voter} returned a non-finite confidence ({Confidence}) for dimension {Dimension}; treating as an abstention.",
                     voter.Name,
                     vote.Confidence,
@@ -231,13 +255,14 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
                 // via the tie-break with no effective ensemble weight behind it. Degrade to an abstention
                 // instead so that configuration falls back to the default model like a fully-abstained one.
                 _logger.LogInformation(
+                    message:
                     "[ORCHESTRATOR] Voter {Voter} has a non-positive weight ({Weight}); treating as an abstention.",
                     voter.Name,
                     weight);
                 continue;
             }
 
-            var contribution = weight * Math.Clamp(vote.Confidence, 0d, 1d);
+            var contribution = weight * Math.Clamp(value: vote.Confidence, 0d, 1d);
 
             voterBreakdown[$"{VoterKeyPrefix}{voter.Name}:{canonicalModelName}"] = contribution;
             aggregateScores[canonicalModelName] = aggregateScores.GetValueOrDefault(canonicalModelName) + contribution;
@@ -245,6 +270,7 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
             participatingVoters++;
 
             _logger.LogInformation(
+                message:
                 "[ORCHESTRATOR] Voter {Voter} picked {Model} with confidence {Confidence} and weight {Weight} (contribution {Contribution}).",
                 voter.Name,
                 canonicalModelName,
@@ -261,15 +287,18 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
         var best = context.Candidates
             .Select(candidate => (
                 Model: candidate.ModelName,
-                Score: aggregateScores.TryGetValue(candidate.ModelName, out var score) ? (double?)score : null))
+                Score: aggregateScores.TryGetValue(key: candidate.ModelName, value: out var score)
+                    ? (double?)score
+                    : null))
             .Where(entry => entry.Score is not null)
             .OrderByDescending(entry => entry.Score!.Value)
-            .ThenBy(entry => entry.Model, StringComparer.Ordinal)
+            .ThenBy(keySelector: entry => entry.Model, comparer: StringComparer.Ordinal)
             .FirstOrDefault();
 
         if (participatingVoters == 0 || best.Model is null)
         {
             _logger.LogWarning(
+                message:
                 "[ORCHESTRATOR] Every voter abstained for dimension {Dimension}; falling back to the default model.",
                 context.Dimension);
             return RoutingDecision.CreateFallback(Options.DefaultModel);
@@ -279,17 +308,15 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
         // priority - a per-voter breakdown key that happens to collide with a real candidate's aggregate key
         // (e.g. a candidate literally named "voter:dim_best:kimi-k2.5") is dropped rather than allowed to
         // overwrite that candidate's real aggregate score.
-        var candidateScores = new Dictionary<string, double>(aggregateScores, StringComparer.OrdinalIgnoreCase);
+        var candidateScores =
+            new Dictionary<string, double>(dictionary: aggregateScores, comparer: StringComparer.OrdinalIgnoreCase);
         foreach (var (key, value) in voterBreakdown)
-        {
-            if (!candidateScores.TryAdd(key, value))
-            {
+            if (!candidateScores.TryAdd(key: key, value: value))
                 _logger.LogWarning(
+                    message:
                     "[ORCHESTRATOR] Per-voter breakdown key {Key} collides with a candidate's aggregate score for dimension {Dimension}; dropping the breakdown entry.",
                     key,
                     context.Dimension);
-            }
-        }
 
         // docs/router/orchestrator-live-path-plan.md M1.2: epsilon-greedy exploration, lifted from
         // AgentAsARouter (the policy this ensemble replaces on the general path per Phase M) so
@@ -309,35 +336,37 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
         // exploration itself is disabled, so a non-exploring policy always reports certain selection.
         var eps = Options.EnableExploration ? Options.ExplorationRate : 0d;
         var k = context.Candidates.Count;
-        var propensity = isExploratory ? eps / k : (1d - eps) + (eps / k);
+        var propensity = isExploratory ? eps / k : 1d - eps + eps / k;
 
         if (isExploratory)
-        {
             _logger.LogInformation(
+                message:
                 "[ORCHESTRATOR] Exploring: selected {Model} at random instead of the argmax pick {ArgmaxModel} (rate {Rate}).",
                 selectedModel,
                 best.Model,
                 Options.ExplorationRate);
-        }
 
         // aggregateScores (not the merged candidateScores below) is the source of truth for a real
         // candidate's weighted score - an exploratory pick that no voter chose simply has no entry and
         // is correctly scored 0, same as any other un-voted-for candidate.
-        var selectedScore = aggregateScores.TryGetValue(selectedModel, out var scoreForSelected) ? scoreForSelected : 0d;
-        var confidence = effectiveWeight > 0 ? Math.Clamp(selectedScore / effectiveWeight, 0d, 1d) : 0d;
+        var selectedScore = aggregateScores.TryGetValue(key: selectedModel, value: out var scoreForSelected)
+            ? scoreForSelected
+            : 0d;
+        var confidence = effectiveWeight > 0 ? Math.Clamp(value: selectedScore / effectiveWeight, 0d, 1d) : 0d;
         var rationale = isExploratory
             ? $"Orchestrator exploration selected '{selectedModel}' at random (rate {Options.ExplorationRate:F2}); argmax pick was '{best.Model}' with weighted score {best.Score:F2} across {participatingVoters} voting voter(s)."
             : $"Orchestrator ensemble selected '{best.Model}' with weighted score {best.Score:F2} across {participatingVoters} voting voter(s).";
         var decision = new RoutingDecision(
-            selectedModel,
-            confidence,
-            rationale,
-            DateTimeOffset.UtcNow,
-            candidateScores,
-            isExploratory,
-            propensity);
+            selectedModel: selectedModel,
+            confidence: confidence,
+            rationale: rationale,
+            timestampUtc: DateTimeOffset.UtcNow,
+            candidateScores: candidateScores,
+            isExploratory: isExploratory,
+            propensity: propensity);
 
         _logger.LogInformation(
+            message:
             "[ORCHESTRATOR] Selected {Model} for dimension {Dimension} with weighted score {Score} (confidence {Confidence}, {VoterCount} voters participated, exploratory {IsExploratory}, propensity {Propensity}).",
             decision.SelectedModel,
             context.Dimension,
@@ -349,16 +378,6 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
 
         return decision;
     }
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// Delegates directly to <see cref="DecideAsync"/>, which already builds the full decision
-    /// (including the real <see cref="RoutingDecision.IsExploratory"/> and
-    /// <see cref="RoutingDecision.Propensity"/>) from <paramref name="signals"/> - no need for the
-    /// interface's default wrap-a-string-in-a-decision implementation here.
-    /// </remarks>
-    public Task<RoutingDecision> DecideOutcomeAsync(RoutingContext context, RoutingSignals? signals, CancellationToken cancellationToken = default) =>
-        DecideAsync(context, signals?.TaskEmbedding, signals?.TaskText, cancellationToken);
 
     /// <summary>
     /// Recovers which model a single voter picked from a decision's
@@ -390,25 +409,17 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
         var bestScore = double.NegativeInfinity;
         foreach (var (key, score) in decision.CandidateScores)
         {
-            if (!key.StartsWith(VoterKeyPrefix, StringComparison.Ordinal))
-            {
-                continue;
-            }
+            if (!key.StartsWith(value: VoterKeyPrefix, comparisonType: StringComparison.Ordinal)) continue;
 
             var remainder = key[VoterKeyPrefix.Length..];
-            var separator = remainder.IndexOf(':', StringComparison.Ordinal);
-            if (separator <= 0 || !remainder.AsSpan(0, separator).Equals(voterName, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
+            var separator = remainder.IndexOf(':', comparisonType: StringComparison.Ordinal);
+            if (separator <= 0 || !remainder.AsSpan(0, length: separator)
+                    .Equals(other: voterName, comparisonType: StringComparison.OrdinalIgnoreCase)) continue;
 
             var model = remainder[(separator + 1)..];
-            if (model.Length == 0)
-            {
-                continue;
-            }
+            if (model.Length == 0) continue;
 
-            if (score > bestScore || (score == bestScore && string.CompareOrdinal(model, best) < 0))
+            if (score > bestScore || (score == bestScore && string.CompareOrdinal(strA: model, strB: best) < 0))
             {
                 bestScore = score;
                 best = model;
@@ -419,44 +430,59 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
     }
 
     /// <summary>Casts one voter's vote, degrading a thrown exception to an abstention rather than failing the whole decision.</summary>
-    private async Task<VoterVote> CastVoteAsync(IRoutingVoter voter, VotingContext votingContext, CancellationToken cancellationToken)
+    private async Task<VoterVote> CastVoteAsync(IRoutingVoter voter, VotingContext votingContext,
+        CancellationToken cancellationToken)
     {
         try
         {
-            return await voter.VoteAsync(votingContext, cancellationToken).ConfigureAwait(false);
+            return await voter.VoteAsync(context: votingContext, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "[ORCHESTRATOR] Voter {Voter} threw while voting; treating as an abstention.", voter.Name);
+            _logger.LogWarning(exception: ex,
+                message: "[ORCHESTRATOR] Voter {Voter} threw while voting; treating as an abstention.", voter.Name);
             return VoterVote.Abstain(voter.Name);
         }
     }
 
-    /// <summary>Looks up the configured ensemble weight for a voter by name, defaulting to 1 for an unrecognized name so a custom voter still participates.</summary>
+    /// <summary>
+    /// Looks up the configured ensemble weight for a voter by name, defaulting to 1 for an unrecognized name so a
+    /// custom voter still participates.
+    /// </summary>
     /// <param name="voterName">The voter's <see cref="IRoutingVoter.Name"/>.</param>
     /// <returns>The voter's configured weight.</returns>
-    private double GetVoterWeight(string voterName) => voterName switch
+    private double GetVoterWeight(string voterName)
     {
-        VoterNames.DimBest => Options.DimBestVoterWeight,
-        VoterNames.MemoryKnn => Options.MemoryKnnVoterWeight,
-        VoterNames.LogReg => Options.LogRegVoterWeight,
-        VoterNames.LlmRouter => Options.LlmRouterVoterWeight,
-        VoterNames.ClusterBest => Options.ClusterBestVoterWeight,
-        _ => 1d,
-    };
+        return voterName switch
+        {
+            VoterNames.DimBest => Options.DimBestVoterWeight,
+            VoterNames.MemoryKnn => Options.MemoryKnnVoterWeight,
+            VoterNames.LogReg => Options.LogRegVoterWeight,
+            VoterNames.LlmRouter => Options.LlmRouterVoterWeight,
+            VoterNames.ClusterBest => Options.ClusterBestVoterWeight,
+            _ => 1d
+        };
+    }
 
-    /// <summary>Looks up whether a voter is enabled by name, defaulting to enabled for an unrecognized name so a custom voter is not silently excluded.</summary>
+    /// <summary>
+    /// Looks up whether a voter is enabled by name, defaulting to enabled for an unrecognized name so a custom voter
+    /// is not silently excluded.
+    /// </summary>
     /// <param name="voterName">The voter's <see cref="IRoutingVoter.Name"/>.</param>
     /// <returns><see langword="true"/> if the voter should participate; otherwise <see langword="false"/>.</returns>
-    private bool IsVoterEnabled(string voterName) => voterName switch
+    private bool IsVoterEnabled(string voterName)
     {
-        VoterNames.DimBest => Options.EnableDimBestVoter,
-        VoterNames.MemoryKnn => Options.EnableMemoryKnnVoter,
-        VoterNames.LogReg => Options.EnableLogRegVoter,
-        VoterNames.LlmRouter => Options.EnableLlmRouterVoter,
-        // docs/router/self-organizing-classification-plan.md Phase T6: cluster_best is additionally
-        // gated on the adaptive-routing master switch, on top of its own EnableClusterBestVoter flag.
-        VoterNames.ClusterBest => Options.EnableClusterBestVoter && Options.EnableAdaptiveRouting,
-        _ => true,
-    };
+        return voterName switch
+        {
+            VoterNames.DimBest => Options.EnableDimBestVoter,
+            VoterNames.MemoryKnn => Options.EnableMemoryKnnVoter,
+            VoterNames.LogReg => Options.EnableLogRegVoter,
+            VoterNames.LlmRouter => Options.EnableLlmRouterVoter,
+            // docs/router/self-organizing-classification-plan.md Phase T6: cluster_best is additionally
+            // gated on the adaptive-routing master switch, on top of its own EnableClusterBestVoter flag.
+            VoterNames.ClusterBest => Options.EnableClusterBestVoter && Options.EnableAdaptiveRouting,
+            _ => true
+        };
+    }
 }

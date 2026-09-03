@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.PriceCatalog;
@@ -17,58 +18,58 @@ public sealed class TranscriptDatabase
 {
     /// <summary>DDL creating the <c>request_transcripts</c> table if it does not already exist.</summary>
     private const string SchemaSql = """
-        CREATE TABLE IF NOT EXISTS request_transcripts (
-            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-            correlation_id     TEXT    NOT NULL,
-            created_at_utc     TEXT    NOT NULL,
-            requested_model    TEXT    NOT NULL,
-            routed_model       TEXT    NOT NULL,
-            dimension          TEXT    NULL,
-            difficulty         TEXT    NULL,
-            language           TEXT    NULL,
-            is_utility         INTEGER NOT NULL,
-            prompt_text        TEXT    NULL,
-            response_text      TEXT    NULL,
-            score              REAL    NULL,
-            cost               REAL    NULL,
-            is_exploratory     INTEGER NOT NULL,
-            propensity         REAL    NOT NULL,
-            input_tokens       INTEGER NULL,
-            output_tokens      INTEGER NULL,
-            memory_entry_id    INTEGER NULL,
-            dim_best_model     TEXT    NULL,
-            scorer_version     TEXT    NULL
-        );
+                                     CREATE TABLE IF NOT EXISTS request_transcripts (
+                                         id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                                         correlation_id     TEXT    NOT NULL,
+                                         created_at_utc     TEXT    NOT NULL,
+                                         requested_model    TEXT    NOT NULL,
+                                         routed_model       TEXT    NOT NULL,
+                                         dimension          TEXT    NULL,
+                                         difficulty         TEXT    NULL,
+                                         language           TEXT    NULL,
+                                         is_utility         INTEGER NOT NULL,
+                                         prompt_text        TEXT    NULL,
+                                         response_text      TEXT    NULL,
+                                         score              REAL    NULL,
+                                         cost               REAL    NULL,
+                                         is_exploratory     INTEGER NOT NULL,
+                                         propensity         REAL    NOT NULL,
+                                         input_tokens       INTEGER NULL,
+                                         output_tokens      INTEGER NULL,
+                                         memory_entry_id    INTEGER NULL,
+                                         dim_best_model     TEXT    NULL,
+                                         scorer_version     TEXT    NULL
+                                     );
 
-        CREATE INDEX IF NOT EXISTS ix_request_transcripts_correlation_id
-            ON request_transcripts (correlation_id);
+                                     CREATE INDEX IF NOT EXISTS ix_request_transcripts_correlation_id
+                                         ON request_transcripts (correlation_id);
 
-        CREATE TABLE IF NOT EXISTS taxonomy_comparisons (
-            transcript_id             INTEGER PRIMARY KEY,
-            compared_at_utc           TEXT    NOT NULL,
-            session_id                TEXT    NOT NULL,
-            observed_score            REAL    NOT NULL,
-            dimension_predicted_score REAL    NULL,
-            cluster_predicted_score   REAL    NULL,
-            dimension_abs_error       REAL    NULL,
-            cluster_abs_error         REAL    NULL,
-            is_clustered              INTEGER NOT NULL,
-            is_exploratory            INTEGER NOT NULL,
-            routed_model              TEXT    NOT NULL,
-            baseline_model            TEXT    NULL,
-            actual_cost_usd           REAL    NULL,
-            baseline_estimated_cost_usd REAL  NULL,
-            estimated_net_savings_usd REAL    NULL,
-            baseline_predicted_score  REAL    NULL,
-            estimated_regret          REAL    NULL
-        );
+                                     CREATE TABLE IF NOT EXISTS taxonomy_comparisons (
+                                         transcript_id             INTEGER PRIMARY KEY,
+                                         compared_at_utc           TEXT    NOT NULL,
+                                         session_id                TEXT    NOT NULL,
+                                         observed_score            REAL    NOT NULL,
+                                         dimension_predicted_score REAL    NULL,
+                                         cluster_predicted_score   REAL    NULL,
+                                         dimension_abs_error       REAL    NULL,
+                                         cluster_abs_error         REAL    NULL,
+                                         is_clustered              INTEGER NOT NULL,
+                                         is_exploratory            INTEGER NOT NULL,
+                                         routed_model              TEXT    NOT NULL,
+                                         baseline_model            TEXT    NULL,
+                                         actual_cost_usd           REAL    NULL,
+                                         baseline_estimated_cost_usd REAL  NULL,
+                                         estimated_net_savings_usd REAL    NULL,
+                                         baseline_predicted_score  REAL    NULL,
+                                         estimated_regret          REAL    NULL
+                                     );
 
-        CREATE INDEX IF NOT EXISTS ix_taxonomy_comparisons_session
-            ON taxonomy_comparisons (session_id);
+                                     CREATE INDEX IF NOT EXISTS ix_taxonomy_comparisons_session
+                                         ON taxonomy_comparisons (session_id);
 
-        CREATE INDEX IF NOT EXISTS ix_taxonomy_comparisons_compared_at
-            ON taxonomy_comparisons (compared_at_utc);
-        """;
+                                     CREATE INDEX IF NOT EXISTS ix_taxonomy_comparisons_compared_at
+                                         ON taxonomy_comparisons (compared_at_utc);
+                                     """;
 
     /// <summary>The resolved absolute path of the database file.</summary>
     private readonly string _databasePath;
@@ -109,10 +110,7 @@ public sealed class TranscriptDatabase
     public void EnsureCreated()
     {
         var directory = Path.GetDirectoryName(_databasePath);
-        if (!string.IsNullOrWhiteSpace(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
+        if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
 
         using var connection = OpenConnection();
 
@@ -157,8 +155,10 @@ public sealed class TranscriptDatabase
         bool columnJustAdded;
         using (var pragma = connection.CreateCommand())
         {
-            pragma.CommandText = "SELECT COUNT(*) FROM pragma_table_info('request_transcripts') WHERE name = 'session_id';";
-            columnJustAdded = Convert.ToInt64(pragma.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) == 0;
+            pragma.CommandText =
+                "SELECT COUNT(*) FROM pragma_table_info('request_transcripts') WHERE name = 'session_id';";
+            columnJustAdded = Convert.ToInt64(value: pragma.ExecuteScalar(), provider: CultureInfo.InvariantCulture) ==
+                              0;
         }
 
         if (columnJustAdded)
@@ -172,9 +172,9 @@ public sealed class TranscriptDatabase
 
         using var index = connection.CreateCommand();
         index.CommandText = """
-            CREATE INDEX IF NOT EXISTS ix_request_transcripts_session_id
-                ON request_transcripts (session_id);
-            """;
+                            CREATE INDEX IF NOT EXISTS ix_request_transcripts_session_id
+                                ON request_transcripts (session_id);
+                            """;
         index.ExecuteNonQuery();
     }
 
@@ -191,23 +191,17 @@ public sealed class TranscriptDatabase
         {
             select.CommandText = "SELECT id, correlation_id FROM request_transcripts WHERE session_id = '';";
             using var reader = select.ExecuteReader();
-            while (reader.Read())
-            {
-                rows.Add((reader.GetInt64(0), reader.GetString(1)));
-            }
+            while (reader.Read()) rows.Add((reader.GetInt64(0), reader.GetString(1)));
         }
 
-        if (rows.Count == 0)
-        {
-            return;
-        }
+        if (rows.Count == 0) return;
 
         using var transaction = connection.BeginTransaction();
         using var update = connection.CreateCommand();
         update.Transaction = transaction;
         update.CommandText = "UPDATE request_transcripts SET session_id = $sessionId WHERE id = $id;";
-        var sessionIdParam = update.Parameters.Add("$sessionId", SqliteType.Text);
-        var idParam = update.Parameters.Add("$id", SqliteType.Integer);
+        var sessionIdParam = update.Parameters.Add(parameterName: "$sessionId", type: SqliteType.Text);
+        var idParam = update.Parameters.Add(parameterName: "$id", type: SqliteType.Integer);
 
         foreach (var (id, correlationId) in rows)
         {
@@ -241,8 +235,9 @@ public sealed class TranscriptDatabase
     {
         using (var pragma = connection.CreateCommand())
         {
-            pragma.CommandText = "SELECT COUNT(*) FROM pragma_table_info('request_transcripts') WHERE name = 'scorer_version';";
-            if (Convert.ToInt64(pragma.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) == 0)
+            pragma.CommandText =
+                "SELECT COUNT(*) FROM pragma_table_info('request_transcripts') WHERE name = 'scorer_version';";
+            if (Convert.ToInt64(value: pragma.ExecuteScalar(), provider: CultureInfo.InvariantCulture) == 0)
             {
                 using var alter = connection.CreateCommand();
                 alter.CommandText = "ALTER TABLE request_transcripts ADD COLUMN scorer_version TEXT NULL;";
@@ -252,9 +247,9 @@ public sealed class TranscriptDatabase
 
         using var index = connection.CreateCommand();
         index.CommandText = """
-            CREATE INDEX IF NOT EXISTS ix_request_transcripts_scorer_version
-                ON request_transcripts (scorer_version);
-            """;
+                            CREATE INDEX IF NOT EXISTS ix_request_transcripts_scorer_version
+                                ON request_transcripts (scorer_version);
+                            """;
         index.ExecuteNonQuery();
     }
 
@@ -276,11 +271,9 @@ public sealed class TranscriptDatabase
     {
         using (var pragma = connection.CreateCommand())
         {
-            pragma.CommandText = "SELECT COUNT(*) FROM pragma_table_info('request_transcripts') WHERE name = 'dim_best_model';";
-            if (Convert.ToInt64(pragma.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) > 0)
-            {
-                return;
-            }
+            pragma.CommandText =
+                "SELECT COUNT(*) FROM pragma_table_info('request_transcripts') WHERE name = 'dim_best_model';";
+            if (Convert.ToInt64(value: pragma.ExecuteScalar(), provider: CultureInfo.InvariantCulture) > 0) return;
         }
 
         using var alter = connection.CreateCommand();
@@ -306,18 +299,16 @@ public sealed class TranscriptDatabase
     {
         using (var pragma = connection.CreateCommand())
         {
-            pragma.CommandText = "SELECT COUNT(*) FROM pragma_table_info('taxonomy_comparisons') WHERE name = 'estimated_regret';";
-            if (Convert.ToInt64(pragma.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) > 0)
-            {
-                return;
-            }
+            pragma.CommandText =
+                "SELECT COUNT(*) FROM pragma_table_info('taxonomy_comparisons') WHERE name = 'estimated_regret';";
+            if (Convert.ToInt64(value: pragma.ExecuteScalar(), provider: CultureInfo.InvariantCulture) > 0) return;
         }
 
         using var alter = connection.CreateCommand();
         alter.CommandText = """
-            ALTER TABLE taxonomy_comparisons ADD COLUMN baseline_predicted_score REAL NULL;
-            ALTER TABLE taxonomy_comparisons ADD COLUMN estimated_regret REAL NULL;
-            """;
+                            ALTER TABLE taxonomy_comparisons ADD COLUMN baseline_predicted_score REAL NULL;
+                            ALTER TABLE taxonomy_comparisons ADD COLUMN estimated_regret REAL NULL;
+                            """;
         alter.ExecuteNonQuery();
     }
 }

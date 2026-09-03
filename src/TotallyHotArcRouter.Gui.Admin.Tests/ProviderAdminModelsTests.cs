@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Text.Json;
+
 namespace TotallyHot.ArcRouter.Gui.Admin.Tests;
 
 /// <summary>
@@ -10,60 +13,75 @@ public sealed class ProviderAdminModelsTests
     [Fact]
     public void ProviderAdminView_RecordEquality_ComparesAllFields()
     {
-        var models = new List<ModelAdminView> { new("gpt-5.4", "gpt-5.4") };
-        var headers = new List<ProviderHeaderView> { new("Authorization", HeaderValueSource.Literal, null) };
+        var models = new List<ModelAdminView> { new(ModelName: "gpt-5.4", ProviderModelId: "gpt-5.4") };
+        var headers = new List<ProviderHeaderView>
+            { new(Name: "Authorization", Source: HeaderValueSource.Literal, null) };
 
-        var a = new ProviderAdminView("openai", "OpenAI API", "https://api.openai.com", "Authorization", models, headers);
-        var b = new ProviderAdminView("openai", "OpenAI API", "https://api.openai.com", "Authorization", models, headers);
+        var a = new ProviderAdminView(Key: "openai", Name: "OpenAI API", BaseUrl: "https://api.openai.com",
+            AuthHeaderName: "Authorization", Models: models, Headers: headers);
+        var b = new ProviderAdminView(Key: "openai", Name: "OpenAI API", BaseUrl: "https://api.openai.com",
+            AuthHeaderName: "Authorization", Models: models, Headers: headers);
         var differentName = a with { Name = "Something Else" };
 
-        Assert.Equal(a, b);
-        Assert.NotEqual(a, differentName);
-        Assert.Contains("openai", a.ToString(), StringComparison.Ordinal);
+        Assert.Equal(expected: a, actual: b);
+        Assert.NotEqual(expected: a, actual: differentName);
+        Assert.Contains(expectedSubstring: "openai", actualString: a.ToString(),
+            comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
     public void ModelAdminView_RecordEquality_ComparesAllFields()
     {
-        var a = new ModelAdminView("gpt-5.4", "gpt-5.4", "hermes", "Observed", true, true);
-        var b = new ModelAdminView("gpt-5.4", "gpt-5.4", "hermes", "Observed", true, true);
+        var a = new ModelAdminView(ModelName: "gpt-5.4", ProviderModelId: "gpt-5.4", Dialect: "hermes",
+            Confidence: "Observed");
+        var b = new ModelAdminView(ModelName: "gpt-5.4", ProviderModelId: "gpt-5.4", Dialect: "hermes",
+            Confidence: "Observed");
         var differentDialect = a with { Dialect = "emulated" };
 
-        Assert.Equal(a, b);
-        Assert.NotEqual(a, differentDialect);
-        Assert.Contains("gpt-5.4", a.ToString(), StringComparison.Ordinal);
+        Assert.Equal(expected: a, actual: b);
+        Assert.NotEqual(expected: a, actual: differentDialect);
+        Assert.Contains(expectedSubstring: "gpt-5.4", actualString: a.ToString(),
+            comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
     public void ProviderEndpointCapabilitiesView_RecordEquality_ComparesAllFields()
     {
-        var scannedAt = DateTimeOffset.Parse("2026-07-31T00:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
-        var a = new ProviderEndpointCapabilitiesView("lmstudio", true, true, false, false, scannedAt, null);
-        var b = new ProviderEndpointCapabilitiesView("lmstudio", true, true, false, false, scannedAt, null);
+        var scannedAt =
+            DateTimeOffset.Parse(input: "2026-07-31T00:00:00Z", formatProvider: CultureInfo.InvariantCulture);
+        var a = new ProviderEndpointCapabilitiesView(ProviderKey: "lmstudio", true, true, false, false,
+            ScannedAtUtc: scannedAt);
+        var b = new ProviderEndpointCapabilitiesView(ProviderKey: "lmstudio", true, true, false, false,
+            ScannedAtUtc: scannedAt);
         var withError = a with { ScanError = "timed out" };
 
-        Assert.Equal(a, b);
-        Assert.NotEqual(a, withError);
-        Assert.Contains("lmstudio", a.ToString(), StringComparison.Ordinal);
+        Assert.Equal(expected: a, actual: b);
+        Assert.NotEqual(expected: a, actual: withError);
+        Assert.Contains(expectedSubstring: "lmstudio", actualString: a.ToString(),
+            comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
     public void ProviderInteractionStatusAdminView_RecordEquality_ComparesAllFields()
     {
-        var at = DateTimeOffset.Parse("2026-07-31T00:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
-        var a = new ProviderInteractionStatusAdminView(false, "Refresh from endpoint", "Provider returned 401.", at);
-        var b = new ProviderInteractionStatusAdminView(false, "Refresh from endpoint", "Provider returned 401.", at);
+        var at = DateTimeOffset.Parse(input: "2026-07-31T00:00:00Z", formatProvider: CultureInfo.InvariantCulture);
+        var a = new ProviderInteractionStatusAdminView(false, Operation: "Refresh from endpoint",
+            Message: "Provider returned 401.", AtUtc: at);
+        var b = new ProviderInteractionStatusAdminView(false, Operation: "Refresh from endpoint",
+            Message: "Provider returned 401.", AtUtc: at);
         var nowOk = a with { Ok = true, Message = null };
 
-        Assert.Equal(a, b);
-        Assert.NotEqual(a, nowOk);
-        Assert.Contains("Refresh from endpoint", a.ToString(), StringComparison.Ordinal);
+        Assert.Equal(expected: a, actual: b);
+        Assert.NotEqual(expected: a, actual: nowOk);
+        Assert.Contains(expectedSubstring: "Refresh from endpoint", actualString: a.ToString(),
+            comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
     public void ProviderAdminView_AdminActionAndLiveTraffic_DefaultToNull()
     {
-        var view = new ProviderAdminView("openai", "OpenAI API", "https://api.openai.com", "Authorization", [], []);
+        var view = new ProviderAdminView(Key: "openai", Name: "OpenAI API", BaseUrl: "https://api.openai.com",
+            AuthHeaderName: "Authorization", Models: [], Headers: []);
 
         Assert.Null(view.AdminAction);
         Assert.Null(view.LiveTraffic);
@@ -72,82 +90,84 @@ public sealed class ProviderAdminModelsTests
     [Fact]
     public void ProviderAdminView_RoundTripsAdminAction()
     {
-        var options = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
-        var at = DateTimeOffset.Parse("2026-08-24T09:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var at = DateTimeOffset.Parse(input: "2026-08-24T09:00:00Z", formatProvider: CultureInfo.InvariantCulture);
         var view = new ProviderAdminView(
-            "openai",
-            "OpenAI API",
-            "https://api.openai.com",
-            "Authorization",
-            [],
-            [],
-            AdminAction: new ProviderInteractionStatusAdminView(false, "Refresh from endpoint", "Provider returned 401 for https://api.openai.com/v1/models.", at));
+            Key: "openai",
+            Name: "OpenAI API",
+            BaseUrl: "https://api.openai.com",
+            AuthHeaderName: "Authorization",
+            Models: [],
+            Headers: [],
+            AdminAction: new ProviderInteractionStatusAdminView(false, Operation: "Refresh from endpoint",
+                Message: "Provider returned 401 for https://api.openai.com/v1/models.", AtUtc: at));
 
-        var json = System.Text.Json.JsonSerializer.Serialize(view, options);
-        var roundTripped = System.Text.Json.JsonSerializer.Deserialize<ProviderAdminView>(json, options)!;
+        var json = JsonSerializer.Serialize(value: view, options: options);
+        var roundTripped = JsonSerializer.Deserialize<ProviderAdminView>(json: json, options: options)!;
 
         Assert.NotNull(roundTripped.AdminAction);
         Assert.False(roundTripped.AdminAction!.Ok);
-        Assert.Equal("Refresh from endpoint", roundTripped.AdminAction.Operation);
-        Assert.Equal(view.AdminAction!.Message, roundTripped.AdminAction.Message);
-        Assert.Equal(view.AdminAction!.AtUtc, roundTripped.AdminAction.AtUtc);
+        Assert.Equal(expected: "Refresh from endpoint", actual: roundTripped.AdminAction.Operation);
+        Assert.Equal(expected: view.AdminAction!.Message, actual: roundTripped.AdminAction.Message);
+        Assert.Equal(expected: view.AdminAction!.AtUtc, actual: roundTripped.AdminAction.AtUtc);
     }
 
     [Fact]
     public void ProviderAdminView_RoundTripsLiveTraffic()
     {
-        var options = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
-        var at = DateTimeOffset.Parse("2026-08-24T09:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var at = DateTimeOffset.Parse(input: "2026-08-24T09:00:00Z", formatProvider: CultureInfo.InvariantCulture);
         var view = new ProviderAdminView(
-            "openai",
-            "OpenAI API",
-            "https://api.openai.com",
-            "Authorization",
-            [],
-            [],
+            Key: "openai",
+            Name: "OpenAI API",
+            BaseUrl: "https://api.openai.com",
+            AuthHeaderName: "Authorization",
+            Models: [],
+            Headers: [],
             LiveTraffic: new ProviderInteractionStatusAdminView(
                 false,
-                "Live traffic",
-                "Your credit balance is too low.",
-                at,
-                ProviderInteractionKindAdminView.OutOfCredits));
+                Operation: "Live traffic",
+                Message: "Your credit balance is too low.",
+                AtUtc: at,
+                Kind: ProviderInteractionKindAdminView.OutOfCredits));
 
-        var json = System.Text.Json.JsonSerializer.Serialize(view, options);
-        var roundTripped = System.Text.Json.JsonSerializer.Deserialize<ProviderAdminView>(json, options)!;
+        var json = JsonSerializer.Serialize(value: view, options: options);
+        var roundTripped = JsonSerializer.Deserialize<ProviderAdminView>(json: json, options: options)!;
 
         Assert.NotNull(roundTripped.LiveTraffic);
         Assert.False(roundTripped.LiveTraffic!.Ok);
-        Assert.Equal(ProviderInteractionKindAdminView.OutOfCredits, roundTripped.LiveTraffic.Kind);
-        Assert.Equal(view.LiveTraffic!.Message, roundTripped.LiveTraffic.Message);
+        Assert.Equal(expected: ProviderInteractionKindAdminView.OutOfCredits, actual: roundTripped.LiveTraffic.Kind);
+        Assert.Equal(expected: view.LiveTraffic!.Message, actual: roundTripped.LiveTraffic.Message);
     }
 
     [Fact]
     public void ProviderHeaderWriteModel_RecordEquality_ComparesAllFields()
     {
-        var a = new ProviderHeaderWriteModel("anthropic-version", "2023-06-01", null);
-        var b = new ProviderHeaderWriteModel("anthropic-version", "2023-06-01", null);
+        var a = new ProviderHeaderWriteModel(Name: "anthropic-version", Value: "2023-06-01", null);
+        var b = new ProviderHeaderWriteModel(Name: "anthropic-version", Value: "2023-06-01", null);
         var differentValue = a with { Value = "2024-01-01" };
         var locked = a with { Locked = true };
 
-        Assert.Equal(a, b);
-        Assert.NotEqual(a, differentValue);
-        Assert.NotEqual(a, locked);
-        Assert.Contains("anthropic-version", a.ToString(), StringComparison.Ordinal);
+        Assert.Equal(expected: a, actual: b);
+        Assert.NotEqual(expected: a, actual: differentValue);
+        Assert.NotEqual(expected: a, actual: locked);
+        Assert.Contains(expectedSubstring: "anthropic-version", actualString: a.ToString(),
+            comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
     public void ProviderHeaderView_RoundTripsTheSecretFieldMembers()
     {
-        var options = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
 
-        var unlocked = System.Text.Json.JsonSerializer.Deserialize<ProviderHeaderView>(
+        var unlocked = JsonSerializer.Deserialize<ProviderHeaderView>(
             """{"name":"anthropic-version","source":"literal","valueEnvVar":null,"value":"2023-06-01","locked":false}""",
-            options)!;
-        var locked = System.Text.Json.JsonSerializer.Deserialize<ProviderHeaderView>(
+            options: options)!;
+        var locked = JsonSerializer.Deserialize<ProviderHeaderView>(
             """{"name":"X-Subscription-Key","source":"literal","valueEnvVar":null,"value":null,"locked":true}""",
-            options)!;
+            options: options)!;
 
-        Assert.Equal("2023-06-01", unlocked.Value);
+        Assert.Equal(expected: "2023-06-01", actual: unlocked.Value);
         Assert.False(unlocked.Locked);
         // The router drops a locked value before it reaches the wire, so the view carries the flag alone.
         Assert.Null(locked.Value);
@@ -157,57 +177,65 @@ public sealed class ProviderAdminModelsTests
     [Fact]
     public void ProviderHeaderWriteModel_OmitsTheLockFlagWhenItIsNull()
     {
-        var options = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
 
-        var json = System.Text.Json.JsonSerializer.Serialize(
-            new ProviderHeaderWriteModel("X-Test", "hello", null, Locked: false), options);
+        var json = JsonSerializer.Serialize(
+            value: new ProviderHeaderWriteModel(Name: "X-Test", Value: "hello", null, false), options: options);
 
         // An explicit false is what tells the server a blank value means "clear", so it must survive
         // serialization rather than being treated as an absent default.
-        Assert.Contains("\"locked\":false", json, StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "\"locked\":false", actualString: json,
+            comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
     public void ProviderAdminView_RoundTripsUsageLastRecordedAtUtcAndRateLimit()
     {
-        var options = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
         var view = new ProviderAdminView(
-            "anthropic",
-            "Anthropic Prod",
-            "https://api.anthropic.com",
-            "x-api-key",
-            [],
-            [],
-            UsageLastRecordedAtUtc: DateTimeOffset.Parse("2026-03-01T08:00:00Z", System.Globalization.CultureInfo.InvariantCulture),
+            Key: "anthropic",
+            Name: "Anthropic Prod",
+            BaseUrl: "https://api.anthropic.com",
+            AuthHeaderName: "x-api-key",
+            Models: [],
+            Headers: [],
+            UsageLastRecordedAtUtc: DateTimeOffset.Parse(input: "2026-03-01T08:00:00Z",
+                formatProvider: CultureInfo.InvariantCulture),
             RateLimit: new ProviderRateLimitAdminView(
-                new RateLimitSnapshotAdminView(
-                    new Dictionary<string, RateLimitDimensionAdminView>
+                Snapshot: new RateLimitSnapshotAdminView(
+                    StandardDimensions: new Dictionary<string, RateLimitDimensionAdminView>
                     {
-                        ["tokens"] = new(200000, 158000, DateTimeOffset.Parse("2026-03-01T13:00:00Z", System.Globalization.CultureInfo.InvariantCulture)),
+                        ["tokens"] = new(200000, 158000,
+                            ResetAt: DateTimeOffset.Parse(input: "2026-03-01T13:00:00Z",
+                                formatProvider: CultureInfo.InvariantCulture))
                     },
-                    "allowed",
+                    UnifiedStatus: "allowed",
                     null,
-                    new Dictionary<string, RateLimitWindowAdminView> { ["5h"] = new("allowed", null, null) },
-                    "org-123",
-                    new Dictionary<string, string> { ["anthropic-ratelimit-tokens-remaining"] = "158000" }),
-                DateTimeOffset.Parse("2026-03-01T12:00:00Z", System.Globalization.CultureInfo.InvariantCulture)));
+                    UnifiedWindows: new Dictionary<string, RateLimitWindowAdminView>
+                        { ["5h"] = new(Status: "allowed", null, null) },
+                    RepresentativeClaim: "org-123",
+                    RawHeaders: new Dictionary<string, string> { ["anthropic-ratelimit-tokens-remaining"] = "158000" }),
+                ObservedAtUtc: DateTimeOffset.Parse(input: "2026-03-01T12:00:00Z",
+                    formatProvider: CultureInfo.InvariantCulture)));
 
-        var json = System.Text.Json.JsonSerializer.Serialize(view, options);
-        var roundTripped = System.Text.Json.JsonSerializer.Deserialize<ProviderAdminView>(json, options)!;
+        var json = JsonSerializer.Serialize(value: view, options: options);
+        var roundTripped = JsonSerializer.Deserialize<ProviderAdminView>(json: json, options: options)!;
 
-        Assert.Equal(view.UsageLastRecordedAtUtc, roundTripped.UsageLastRecordedAtUtc);
+        Assert.Equal(expected: view.UsageLastRecordedAtUtc, actual: roundTripped.UsageLastRecordedAtUtc);
         Assert.NotNull(roundTripped.RateLimit);
-        Assert.Equal(view.RateLimit!.ObservedAtUtc, roundTripped.RateLimit!.ObservedAtUtc);
-        Assert.Equal(200000, roundTripped.RateLimit.Snapshot.StandardDimensions["tokens"].Limit);
-        Assert.Equal("allowed", roundTripped.RateLimit.Snapshot.UnifiedWindows["5h"].Status);
-        Assert.Equal("org-123", roundTripped.RateLimit.Snapshot.RepresentativeClaim);
-        Assert.Equal("158000", roundTripped.RateLimit.Snapshot.RawHeaders["anthropic-ratelimit-tokens-remaining"]);
+        Assert.Equal(expected: view.RateLimit!.ObservedAtUtc, actual: roundTripped.RateLimit!.ObservedAtUtc);
+        Assert.Equal(200000, actual: roundTripped.RateLimit.Snapshot.StandardDimensions["tokens"].Limit);
+        Assert.Equal(expected: "allowed", actual: roundTripped.RateLimit.Snapshot.UnifiedWindows["5h"].Status);
+        Assert.Equal(expected: "org-123", actual: roundTripped.RateLimit.Snapshot.RepresentativeClaim);
+        Assert.Equal(expected: "158000",
+            actual: roundTripped.RateLimit.Snapshot.RawHeaders["anthropic-ratelimit-tokens-remaining"]);
     }
 
     [Fact]
     public void ProviderAdminView_UsageLastRecordedAtUtcAndRateLimit_DefaultToNull()
     {
-        var view = new ProviderAdminView("openai", "OpenAI API", "https://api.openai.com", "Authorization", [], []);
+        var view = new ProviderAdminView(Key: "openai", Name: "OpenAI API", BaseUrl: "https://api.openai.com",
+            AuthHeaderName: "Authorization", Models: [], Headers: []);
 
         Assert.Null(view.UsageLastRecordedAtUtc);
         Assert.Null(view.RateLimit);
@@ -216,7 +244,8 @@ public sealed class ProviderAdminModelsTests
     [Fact]
     public void ProviderAdminView_HasStoredAdminKey_DefaultsToFalse()
     {
-        var view = new ProviderAdminView("anthropic", "Anthropic", "https://api.anthropic.com", "x-api-key", [], []);
+        var view = new ProviderAdminView(Key: "anthropic", Name: "Anthropic", BaseUrl: "https://api.anthropic.com",
+            AuthHeaderName: "x-api-key", Models: [], Headers: []);
 
         Assert.False(view.HasStoredAdminKey);
     }
@@ -224,41 +253,44 @@ public sealed class ProviderAdminModelsTests
     [Fact]
     public void ProviderAdminView_RoundTripsHasStoredAdminKeyAndReportedUsage()
     {
-        var options = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
         var view = new ProviderAdminView(
-            "anthropic",
-            "Anthropic Prod",
-            "https://api.anthropic.com",
-            "x-api-key",
-            [],
-            [],
+            Key: "anthropic",
+            Name: "Anthropic Prod",
+            BaseUrl: "https://api.anthropic.com",
+            AuthHeaderName: "x-api-key",
+            Models: [],
+            Headers: [],
             HasStoredAdminKey: true,
             ReportedUsage: new ProviderReportedUsageAdminView(
-                [new ReportedUsageRowAdminView(new DateOnly(2026, 3, 1), "claude-opus-4-1", 100, 50, 5, 10)],
-                DateTimeOffset.Parse("2026-03-02T04:00:00Z", System.Globalization.CultureInfo.InvariantCulture)));
+                Rows:
+                [
+                    new ReportedUsageRowAdminView(UsageDay: new DateOnly(2026, 3, 1), Model: "claude-opus-4-1", 100, 50,
+                        5, 10)
+                ],
+                FetchedAtUtc: DateTimeOffset.Parse(input: "2026-03-02T04:00:00Z",
+                    formatProvider: CultureInfo.InvariantCulture)));
 
-        var json = System.Text.Json.JsonSerializer.Serialize(view, options);
-        var roundTripped = System.Text.Json.JsonSerializer.Deserialize<ProviderAdminView>(json, options)!;
+        var json = JsonSerializer.Serialize(value: view, options: options);
+        var roundTripped = JsonSerializer.Deserialize<ProviderAdminView>(json: json, options: options)!;
 
         Assert.True(roundTripped.HasStoredAdminKey);
         Assert.NotNull(roundTripped.ReportedUsage);
-        Assert.Equal(view.ReportedUsage!.FetchedAtUtc, roundTripped.ReportedUsage!.FetchedAtUtc);
+        Assert.Equal(expected: view.ReportedUsage!.FetchedAtUtc, actual: roundTripped.ReportedUsage!.FetchedAtUtc);
         var row = Assert.Single(roundTripped.ReportedUsage.Rows);
-        Assert.Equal(new DateOnly(2026, 3, 1), row.UsageDay);
-        Assert.Equal("claude-opus-4-1", row.Model);
-        Assert.Equal(100, row.InputTokens);
-        Assert.Equal(5, row.CacheCreationTokens);
+        Assert.Equal(expected: new DateOnly(2026, 3, 1), actual: row.UsageDay);
+        Assert.Equal(expected: "claude-opus-4-1", actual: row.Model);
+        Assert.Equal(100, actual: row.InputTokens);
+        Assert.Equal(5, actual: row.CacheCreationTokens);
     }
 
     [Fact]
     public void ProviderTemplates_HasATemplateForEveryProviderType()
     {
         foreach (var providerType in Enum.GetValues<ProviderType>())
-        {
             Assert.True(
-                ProviderTemplates.Templates.ContainsKey(providerType),
-                $"No template registered for {providerType}.");
-        }
+                condition: ProviderTemplates.Templates.ContainsKey(providerType),
+                userMessage: $"No template registered for {providerType}.");
     }
 
     [Fact]
@@ -267,23 +299,24 @@ public sealed class ProviderAdminModelsTests
         // The editor renders its dropdown from Ordered, so a type missing here is a type the operator can
         // never select - and one listed twice is a duplicated option.
         Assert.Equal(
-            Enum.GetValues<ProviderType>().OrderBy(t => t).ToList(),
-            ProviderTemplates.Ordered.OrderBy(t => t).ToList());
-        Assert.Equal(ProviderTemplates.Ordered.Count, ProviderTemplates.Ordered.Distinct().Count());
+            expected: Enum.GetValues<ProviderType>().OrderBy(t => t).ToList(),
+            actual: ProviderTemplates.Ordered.OrderBy(t => t).ToList());
+        Assert.Equal(expected: ProviderTemplates.Ordered.Count, actual: ProviderTemplates.Ordered.Distinct().Count());
     }
 
     [Fact]
     public void ProviderTemplates_Ordered_PutsOtherLast()
     {
-        Assert.Equal(ProviderType.Other, ProviderTemplates.Ordered[^1]);
+        Assert.Equal(expected: ProviderType.Other, actual: ProviderTemplates.Ordered[^1]);
     }
 
     [Fact]
     public void ProviderTemplates_DisplayName_LabelsFamiliesRatherThanEnumNames()
     {
-        Assert.Equal("OpenAI / Groq / DeepSeek", ProviderTemplates.DisplayName(ProviderType.OpenAI));
-        Assert.Equal("Ollama / LM Studio / llama.cpp", ProviderTemplates.DisplayName(ProviderType.LocalRuntime));
-        Assert.Equal("Anthropic", ProviderTemplates.DisplayName(ProviderType.Anthropic));
+        Assert.Equal(expected: "OpenAI / Groq / DeepSeek", actual: ProviderTemplates.DisplayName(ProviderType.OpenAI));
+        Assert.Equal(expected: "Ollama / LM Studio / llama.cpp",
+            actual: ProviderTemplates.DisplayName(ProviderType.LocalRuntime));
+        Assert.Equal(expected: "Anthropic", actual: ProviderTemplates.DisplayName(ProviderType.Anthropic));
     }
 
     [Fact]
@@ -291,15 +324,15 @@ public sealed class ProviderAdminModelsTests
     {
         var template = ProviderTemplates.Templates[ProviderType.Anthropic];
 
-        Assert.Equal("https://api.anthropic.com", template.BaseUrl);
+        Assert.Equal(expected: "https://api.anthropic.com", actual: template.BaseUrl);
         Assert.True(template.RequiresAuth);
-        Assert.Equal("x-api-key", template.AuthHeaderName);
+        Assert.Equal(expected: "x-api-key", actual: template.AuthHeaderName);
         // A raw key, no scheme prefix - so the suggestion is a bare variable name.
-        Assert.Equal("ANTHROPIC_API_KEY", template.SuggestedEnvValue);
+        Assert.Equal(expected: "ANTHROPIC_API_KEY", actual: template.SuggestedEnvValue);
         // Without anthropic-version every request 400s, which used to be the operator's problem to discover.
         var header = Assert.Single(template.DefaultHeaders);
-        Assert.Equal("anthropic-version", header.Name);
-        Assert.Equal("2023-06-01", header.Value);
+        Assert.Equal(expected: "anthropic-version", actual: header.Name);
+        Assert.Equal(expected: "2023-06-01", actual: header.Value);
     }
 
     [Fact]
@@ -307,10 +340,10 @@ public sealed class ProviderAdminModelsTests
     {
         var template = ProviderTemplates.Templates[ProviderType.OpenAI];
 
-        Assert.Equal("https://api.openai.com/v1", template.BaseUrl);
+        Assert.Equal(expected: "https://api.openai.com/v1", actual: template.BaseUrl);
         Assert.True(template.RequiresAuth);
-        Assert.Equal("Authorization", template.AuthHeaderName);
-        Assert.Equal("Bearer {env:OPENAI_API_KEY}", template.SuggestedEnvValue);
+        Assert.Equal(expected: "Authorization", actual: template.AuthHeaderName);
+        Assert.Equal(expected: "Bearer {env:OPENAI_API_KEY}", actual: template.SuggestedEnvValue);
         Assert.Empty(template.DefaultHeaders);
     }
 
@@ -319,10 +352,10 @@ public sealed class ProviderAdminModelsTests
     {
         var template = ProviderTemplates.Templates[ProviderType.Other];
 
-        Assert.Equal(string.Empty, template.BaseUrl);
+        Assert.Equal(expected: string.Empty, actual: template.BaseUrl);
         // "Other" now means an unknown *remote* API: every unauthenticated case has its own type.
         Assert.True(template.RequiresAuth);
-        Assert.Equal("Authorization", template.AuthHeaderName);
+        Assert.Equal(expected: "Authorization", actual: template.AuthHeaderName);
         Assert.Empty(template.SuggestedEnvValue);
     }
 
@@ -360,16 +393,17 @@ public sealed class ProviderAdminModelsTests
         Assert.False(string.IsNullOrWhiteSpace(template.AuthHeaderName));
         // A suggestion the editor's own parser rejects would be a placeholder the operator cannot copy.
         Assert.True(
-            AuthValueTemplate.TryParse(template.SuggestedEnvValue, out _, out _, out var error),
-            $"{providerType}'s suggested value does not parse: {error}");
+            condition: AuthValueTemplate.TryParse(template: template.SuggestedEnvValue, scheme: out _,
+                envVarName: out _, error: out var error),
+            userMessage: $"{providerType}'s suggested value does not parse: {error}");
     }
 
     [Fact]
     public void ToolCallDialectNames_All_ListsEveryKnownDialect()
     {
         Assert.Equal(
-            ["openai-native", "constrained", "emulated", "hermes", "mistral", "llama3-json", "function-call"],
-            ToolCallDialectNames.All);
+            expected: ["openai-native", "constrained", "emulated", "hermes", "mistral", "llama3-json", "function-call"],
+            actual: ToolCallDialectNames.All);
     }
 
     [Fact]
@@ -377,7 +411,7 @@ public sealed class ProviderAdminModelsTests
     {
         var ex = new ProviderAdminException("boom");
 
-        Assert.Equal("boom", ex.Message);
+        Assert.Equal(expected: "boom", actual: ex.Message);
         Assert.Null(ex.InnerException);
     }
 
@@ -386,9 +420,9 @@ public sealed class ProviderAdminModelsTests
     {
         var inner = new InvalidOperationException("transport failed");
 
-        var ex = new ProviderAdminException("boom", inner);
+        var ex = new ProviderAdminException(message: "boom", innerException: inner);
 
-        Assert.Equal("boom", ex.Message);
-        Assert.Same(inner, ex.InnerException);
+        Assert.Equal(expected: "boom", actual: ex.Message);
+        Assert.Same(expected: inner, actual: ex.InnerException);
     }
 }

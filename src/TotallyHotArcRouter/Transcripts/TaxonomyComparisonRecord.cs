@@ -18,7 +18,10 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// The frozen taxonomy's held-out predicted score for the served model, or <see langword="null"/> when no
 /// honest leave-one-out prediction existed.
 /// </param>
-/// <param name="ClusterPredictedScore">The learned taxonomy's held-out predicted score, or <see langword="null"/> on the same terms.</param>
+/// <param name="ClusterPredictedScore">
+/// The learned taxonomy's held-out predicted score, or <see langword="null"/> on the
+/// same terms.
+/// </param>
 /// <param name="DimensionAbsoluteError">
 /// <c>|observed - dimension predicted|</c>, or <see langword="null"/> when the prediction was unavailable.
 /// Stored rather than derived so a reader aggregating a window never has to re-decide how a missing

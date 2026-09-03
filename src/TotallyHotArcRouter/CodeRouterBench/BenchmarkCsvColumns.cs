@@ -13,7 +13,7 @@ internal static class BenchmarkCsvColumns
     /// <summary>Finds a required column by name (case-insensitive), throwing when absent.</summary>
     public static int RequireColumn(IReadOnlyList<string> columns, string name)
     {
-        var index = FindColumn(columns, name);
+        var index = FindColumn(columns: columns, name: name);
         return index >= 0 ? index : throw new FormatException($"The CSV is missing the required '{name}' column.");
     }
 
@@ -21,12 +21,8 @@ internal static class BenchmarkCsvColumns
     public static int FindColumn(IReadOnlyList<string> columns, string name)
     {
         for (var i = 0; i < columns.Count; i++)
-        {
-            if (string.Equals(columns[i], name, StringComparison.OrdinalIgnoreCase))
-            {
+            if (string.Equals(a: columns[i], b: name, comparisonType: StringComparison.OrdinalIgnoreCase))
                 return i;
-            }
-        }
 
         return -1;
     }
@@ -35,22 +31,30 @@ internal static class BenchmarkCsvColumns
     /// Reads a field as a string, returning <see langword="null"/> when the column is absent from the
     /// header or the field is blank - absent stays absent rather than becoming an empty-string row.
     /// </summary>
-    public static string? ReadOptionalString(IReadOnlyList<string> fields, int index) =>
-        index >= 0 && index < fields.Count && !string.IsNullOrWhiteSpace(fields[index]) ? fields[index] : null;
+    public static string? ReadOptionalString(IReadOnlyList<string> fields, int index)
+    {
+        return index >= 0 && index < fields.Count && !string.IsNullOrWhiteSpace(fields[index]) ? fields[index] : null;
+    }
 
     /// <summary>Reads a field as a decimal, returning <see langword="null"/> when absent or unparsable.</summary>
-    public static decimal? ReadOptionalDecimal(IReadOnlyList<string> fields, int index) =>
-        index >= 0 && index < fields.Count &&
-        decimal.TryParse(fields[index], NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
+    public static decimal? ReadOptionalDecimal(IReadOnlyList<string> fields, int index)
+    {
+        return index >= 0 && index < fields.Count &&
+               decimal.TryParse(s: fields[index], style: NumberStyles.Float, provider: CultureInfo.InvariantCulture,
+                   result: out var value)
             ? value
             : null;
+    }
 
     /// <summary>Reads a field as an integer, returning <see langword="null"/> when absent or unparsable.</summary>
-    public static long? ReadOptionalInt(IReadOnlyList<string> fields, int index) =>
-        index >= 0 && index < fields.Count &&
-        long.TryParse(fields[index], NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)
+    public static long? ReadOptionalInt(IReadOnlyList<string> fields, int index)
+    {
+        return index >= 0 && index < fields.Count &&
+               long.TryParse(s: fields[index], style: NumberStyles.Integer, provider: CultureInfo.InvariantCulture,
+                   result: out var value)
             ? value
             : null;
+    }
 
     /// <summary>
     /// Reads a field as a 0/1 boolean flag (the OOD table's <c>resolved</c>/<c>apply_ok</c>/<c>graded</c>
@@ -59,21 +63,13 @@ internal static class BenchmarkCsvColumns
     /// </summary>
     public static long? ReadOptionalBoolAsInt(IReadOnlyList<string> fields, int index)
     {
-        var raw = ReadOptionalString(fields, index);
-        if (raw is null)
-        {
-            return null;
-        }
+        var raw = ReadOptionalString(fields: fields, index: index);
+        if (raw is null) return null;
 
-        if (long.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var numeric))
-        {
-            return numeric;
-        }
+        if (long.TryParse(s: raw, style: NumberStyles.Integer, provider: CultureInfo.InvariantCulture,
+                result: out var numeric)) return numeric;
 
-        if (bool.TryParse(raw, out var boolean))
-        {
-            return boolean ? 1 : 0;
-        }
+        if (bool.TryParse(value: raw, result: out var boolean)) return boolean ? 1 : 0;
 
         return null;
     }

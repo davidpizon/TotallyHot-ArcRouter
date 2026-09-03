@@ -31,16 +31,17 @@ public static class Program
             // (docs/router/coderouterbench-sqlite-migration-plan.md Phase 6): stripped before
             // CreateHostBuilder for the same reason --model is, so it never reaches the command-line
             // configuration provider as a stray "sync-benchmark-data" key.
-            var (runBenchmarkDataSync, afterBenchmarkFlag) = ExtractFlag(args, "--sync-benchmark-data");
+            var (runBenchmarkDataSync, afterBenchmarkFlag) = ExtractFlag(args: args, flagName: "--sync-benchmark-data");
 
             // docs/router/live-feedback-learning-plan.md Phase 4c: headless retrain trigger, stripped for
             // the same reason --sync-benchmark-data is - it must never reach the command-line configuration
             // provider as a stray "retrain-logreg" key.
-            var (runLogRegRetrain, afterLogRegFlag) = ExtractFlag(afterBenchmarkFlag, "--retrain-logreg");
+            var (runLogRegRetrain, afterLogRegFlag) =
+                ExtractFlag(args: afterBenchmarkFlag, flagName: "--retrain-logreg");
 
             // docs/router/self-organizing-classification-plan.md Phase T2g: the cluster model's own
             // headless retrain trigger, stripped for the same reason.
-            var (runClusterRetrain, remainingArgs) = ExtractFlag(afterLogRegFlag, "--retrain-clusters");
+            var (runClusterRetrain, remainingArgs) = ExtractFlag(args: afterLogRegFlag, flagName: "--retrain-clusters");
 
             // `using` (not a bare local) so the sync/retrain paths below, which return without ever calling
             // RunAsync, still dispose the container and everything singleton-scoped in it - SQLite
@@ -70,7 +71,7 @@ public static class Program
         }
         catch (Exception ex)
         {
-            Log.Fatal(ex, "TotallyHot.ArcRouter host terminated unexpectedly.");
+            Log.Fatal(exception: ex, messageTemplate: "TotallyHot.ArcRouter host terminated unexpectedly.");
 
             // Without this the process exits 0 after a fatal error, reporting success to whatever launched
             // it. That matters most on the --sync-benchmark-data path, whose own partial-failure branch
@@ -138,25 +139,21 @@ public static class Program
         {
             var arg = args[i];
 
-            if (arg.StartsWith("--model=", StringComparison.OrdinalIgnoreCase))
+            if (arg.StartsWith(value: "--model=", comparisonType: StringComparison.OrdinalIgnoreCase))
             {
                 var forcedModelName = arg["--model=".Length..];
                 if (string.IsNullOrWhiteSpace(forcedModelName))
-                {
-                    throw new ArgumentException(errorMessage, nameof(args));
-                }
+                    throw new ArgumentException(message: errorMessage, paramName: nameof(args));
 
-                return (forcedModelName, RemoveAt(args, i));
+                return (forcedModelName, RemoveAt(args: args, index: i));
             }
 
-            if (string.Equals(arg, "--model", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(a: arg, b: "--model", comparisonType: StringComparison.OrdinalIgnoreCase))
             {
                 if (i + 1 >= args.Length || string.IsNullOrWhiteSpace(args[i + 1]))
-                {
-                    throw new ArgumentException(errorMessage, nameof(args));
-                }
+                    throw new ArgumentException(message: errorMessage, paramName: nameof(args));
 
-                return (args[i + 1], RemoveAt(RemoveAt(args, i), i));
+                return (args[i + 1], RemoveAt(args: RemoveAt(args: args, index: i), index: i));
             }
         }
 
@@ -166,8 +163,10 @@ public static class Program
     /// <summary>
     /// Returns a copy of <paramref name="args"/> with the element at <paramref name="index"/> removed.
     /// </summary>
-    private static string[] RemoveAt(string[] args, int index) =>
-        args.Where((_, i) => i != index).ToArray();
+    private static string[] RemoveAt(string[] args, int index)
+    {
+        return args.Where((_, i) => i != index).ToArray();
+    }
 
     /// <summary>
     /// Extracts a bare boolean flag (no value) from <paramref name="args"/>, returning whether it was
@@ -182,13 +181,12 @@ public static class Program
     /// </summary>
     internal static (bool Present, string[] RemainingArgs) ExtractFlag(string[] args, string flagName)
     {
-        var present = args.Any(arg => string.Equals(arg, flagName, StringComparison.OrdinalIgnoreCase));
-        if (!present)
-        {
-            return (false, args);
-        }
+        var present = args.Any(arg =>
+            string.Equals(a: arg, b: flagName, comparisonType: StringComparison.OrdinalIgnoreCase));
+        if (!present) return (false, args);
 
-        var remaining = args.Where(arg => !string.Equals(arg, flagName, StringComparison.OrdinalIgnoreCase)).ToArray();
+        var remaining = args.Where(arg =>
+            !string.Equals(a: arg, b: flagName, comparisonType: StringComparison.OrdinalIgnoreCase)).ToArray();
         return (true, remaining);
     }
 
@@ -209,24 +207,20 @@ public static class Program
         var syncService = services.GetRequiredService<BenchmarkSyncService>();
         var datasetRef = services.GetRequiredService<IOptions<BenchmarkSyncOptions>>().Value.DatasetRef;
 
-        var result = await syncService.SyncAsync(datasetRef, progress: null, CancellationToken.None);
+        var result =
+            await syncService.SyncAsync(datasetRef: datasetRef, null, cancellationToken: CancellationToken.None);
 
         var failed = result.Files.Where(file => !file.Succeeded).ToList();
         foreach (var file in result.Files)
-        {
             if (file.Succeeded)
-            {
-                logger.LogInformation("Synced {FileName}: {RowCount} row(s).", file.FileName, file.RowCount);
-            }
+                logger.LogInformation(message: "Synced {FileName}: {RowCount} row(s).", file.FileName, file.RowCount);
             else
-            {
-                logger.LogError("Failed to sync {FileName}: {Reason}", file.FileName, file.ErrorMessage);
-            }
-        }
+                logger.LogError(message: "Failed to sync {FileName}: {Reason}", file.FileName, file.ErrorMessage);
 
         if (failed.Count > 0)
         {
             logger.LogError(
+                message:
                 "CodeRouterBench sync completed with {FailedCount} of {TotalCount} file(s) failed at commit {RepoCommit}.",
                 failed.Count, result.Files.Count, result.RepoCommit);
             Environment.ExitCode = 1;
@@ -234,7 +228,7 @@ public static class Program
         else
         {
             logger.LogInformation(
-                "CodeRouterBench sync completed: {FileCount} file(s) synced at commit {RepoCommit}.",
+                message: "CodeRouterBench sync completed: {FileCount} file(s) synced at commit {RepoCommit}.",
                 result.Files.Count, result.RepoCommit);
         }
     }
@@ -252,16 +246,16 @@ public static class Program
         var trainingService = services.GetRequiredService<IEmbeddingLogRegTrainingService>();
 
         var progress = new Progress<int>(taskCount =>
-            logger.LogInformation("logreg retrain: embedded {TaskCount} OOD bootstrap task(s) so far.", taskCount));
+            logger.LogInformation(message: "logreg retrain: embedded {TaskCount} OOD bootstrap task(s) so far.",
+                taskCount));
 
-        var outcome = await trainingService.RetrainAsync(progress, CancellationToken.None);
+        var outcome =
+            await trainingService.RetrainAsync(bootstrapProgress: progress, cancellationToken: CancellationToken.None);
 
-        logger.LogInformation("logreg retrain finished with outcome {Kind}: {Message}", outcome.Kind, outcome.Message);
+        logger.LogInformation(message: "logreg retrain finished with outcome {Kind}: {Message}", outcome.Kind,
+            outcome.Message);
 
-        if (outcome.Kind != LogRegTrainingResultKind.Trained)
-        {
-            Environment.ExitCode = 1;
-        }
+        if (outcome.Kind != LogRegTrainingResultKind.Trained) Environment.ExitCode = 1;
     }
 
     /// <summary>
@@ -277,17 +271,15 @@ public static class Program
         var trainingService = services.GetRequiredService<IClusterTrainingService>();
 
         var progress = new Progress<int>(taskCount =>
-            logger.LogInformation("Cluster model retrain: embedded {TaskCount} OOD bootstrap task(s) so far.", taskCount));
+            logger.LogInformation(message: "Cluster model retrain: embedded {TaskCount} OOD bootstrap task(s) so far.",
+                taskCount));
 
-        var outcome = await trainingService.RetrainAsync(progress, CancellationToken.None);
+        var outcome =
+            await trainingService.RetrainAsync(bootstrapProgress: progress, cancellationToken: CancellationToken.None);
 
-        logger.LogInformation("Cluster model retrain finished with outcome {Kind}: {Message}", outcome.Kind, outcome.Message);
+        logger.LogInformation(message: "Cluster model retrain finished with outcome {Kind}: {Message}", outcome.Kind,
+            outcome.Message);
 
-        if (outcome.Kind != ClusterTrainingResultKind.Trained)
-        {
-            Environment.ExitCode = 1;
-        }
+        if (outcome.Kind != ClusterTrainingResultKind.Trained) Environment.ExitCode = 1;
     }
 }
-
-

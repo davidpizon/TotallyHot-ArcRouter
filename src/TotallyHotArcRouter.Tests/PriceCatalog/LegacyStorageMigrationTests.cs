@@ -23,21 +23,21 @@ public class LegacyStorageMigrationTests
         {
             var options = new StorageOptions
             {
-                DatabasePath = Path.Combine(directory, "agent_telemetry.db"),
-                BenchmarkDatabasePath = Path.Combine(directory, "coderouterbench.db"),
-                TranscriptDatabasePath = Path.Combine(directory, "transcripts.db"),
-                LogRegModelPath = Path.Combine(directory, "logreg_voter_model.json"),
-                ClusterModelPath = Path.Combine(directory, "cluster_model.json"),
+                DatabasePath = Path.Combine(path1: directory, path2: "agent_telemetry.db"),
+                BenchmarkDatabasePath = Path.Combine(path1: directory, path2: "coderouterbench.db"),
+                TranscriptDatabasePath = Path.Combine(path1: directory, path2: "transcripts.db"),
+                LogRegModelPath = Path.Combine(path1: directory, path2: "logreg_voter_model.json"),
+                ClusterModelPath = Path.Combine(path1: directory, path2: "cluster_model.json")
             };
 
-            var migrated = LegacyStorageMigration.Run(options, NullLogger.Instance);
+            var migrated = LegacyStorageMigration.Run(options: options, logger: NullLogger.Instance);
 
-            Assert.Equal(0, migrated);
+            Assert.Equal(0, actual: migrated);
             Assert.Empty(Directory.GetFiles(directory));
         }
         finally
         {
-            Directory.Delete(directory, recursive: true);
+            Directory.Delete(path: directory, true);
         }
     }
 
@@ -50,8 +50,8 @@ public class LegacyStorageMigrationTests
         var directory = Directory.CreateTempSubdirectory().FullName;
         try
         {
-            var source = Path.Combine(directory, "source.db");
-            var destination = Path.Combine(directory, "destination.db");
+            var source = Path.Combine(path1: directory, path2: "source.db");
+            var destination = Path.Combine(path1: directory, path2: "destination.db");
 
             using (var connection = new SqliteConnection($"Data Source={source}"))
             {
@@ -68,7 +68,7 @@ public class LegacyStorageMigrationTests
 
                 // Deliberately no checkpoint and no dispose before copying: the row is in the -wal file,
                 // exactly the state a running router's database is in at any given moment.
-                LegacyStorageMigration.CopyDatabase(source, destination);
+                LegacyStorageMigration.CopyDatabase(legacyPath: source, destinationPath: destination);
             }
 
             using var copied = new SqliteConnection($"Data Source={destination};Mode=ReadOnly");
@@ -77,12 +77,12 @@ public class LegacyStorageMigrationTests
             using var read = copied.CreateCommand();
             read.CommandText = "SELECT note FROM usage;";
 
-            Assert.Equal("uncheckpointed", read.ExecuteScalar() as string);
+            Assert.Equal(expected: "uncheckpointed", actual: read.ExecuteScalar() as string);
         }
         finally
         {
             SqliteConnection.ClearAllPools();
-            Directory.Delete(directory, recursive: true);
+            Directory.Delete(path: directory, true);
         }
     }
 }

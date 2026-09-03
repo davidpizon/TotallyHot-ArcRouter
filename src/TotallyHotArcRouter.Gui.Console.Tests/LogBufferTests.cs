@@ -3,8 +3,10 @@ namespace TotallyHot.ArcRouter.Gui.Console.Tests;
 /// <summary>Covers <see cref="LogBuffer"/>: the bounded FIFO buffer backing the Console viewport.</summary>
 public class LogBufferTests
 {
-    private static LogLineDto Line(string message, string level = "INFO") =>
-        new(DateTimeOffset.UtcNow, level, message);
+    private static LogLineDto Line(string message, string level = "INFO")
+    {
+        return new LogLineDto(TimestampUtc: DateTimeOffset.UtcNow, Level: level, Message: message);
+    }
 
     [Theory]
     [InlineData(0)]
@@ -40,7 +42,7 @@ public class LogBufferTests
 
         var snapshot = buffer.Snapshot();
 
-        Assert.Equal(["first", "second", "third"], snapshot.Select(l => l.Message));
+        Assert.Equal(expected: ["first", "second", "third"], actual: snapshot.Select(l => l.Message));
     }
 
     [Fact]
@@ -53,7 +55,7 @@ public class LogBufferTests
 
         var snapshot = buffer.Snapshot();
 
-        Assert.Equal(["second", "third"], snapshot.Select(l => l.Message));
+        Assert.Equal(expected: ["second", "third"], actual: snapshot.Select(l => l.Message));
     }
 
     [Fact]
@@ -80,7 +82,7 @@ public class LogBufferTests
 
         var snapshot = buffer.Snapshot();
 
-        Assert.Equal(["third", "fourth"], snapshot.Select(l => l.Message));
+        Assert.Equal(expected: ["third", "fourth"], actual: snapshot.Select(l => l.Message));
     }
 
     [Fact]
@@ -88,7 +90,6 @@ public class LogBufferTests
     {
         var buffer = new LogBuffer(capacity: 42);
 
-        Assert.Equal(42, buffer.Capacity);
+        Assert.Equal(42, actual: buffer.Capacity);
     }
 }
-

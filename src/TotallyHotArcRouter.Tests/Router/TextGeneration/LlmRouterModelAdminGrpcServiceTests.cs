@@ -1,7 +1,8 @@
+using System.Net;
+using System.Text;
 using Grpc.Core;
 using Grpc.Core.Testing;
 using Microsoft.Extensions.Logging.Abstractions;
-using System.Net;
 using TotallyHot.ArcRouter.Checksums;
 using TotallyHot.ArcRouter.Router.TextGeneration;
 using TotallyHot.ArcRouter.Tests.CodeRouterBench;
@@ -17,8 +18,9 @@ namespace TotallyHot.ArcRouter.Tests.Router.TextGeneration;
 /// </summary>
 public sealed class LlmRouterModelAdminGrpcServiceTests
 {
-    private static ServerCallContext CreateContext(CancellationToken cancellationToken) =>
-        TestServerCallContext.Create(
+    private static ServerCallContext CreateContext(CancellationToken cancellationToken)
+    {
+        return TestServerCallContext.Create(
             method: "Test",
             host: "localhost",
             deadline: DateTime.UtcNow.AddMinutes(1),
@@ -26,10 +28,11 @@ public sealed class LlmRouterModelAdminGrpcServiceTests
             cancellationToken: cancellationToken,
             peer: "test-peer",
             authContext: null!,
-            contextPropagationToken: null,
+            null,
             writeHeadersFunc: _ => Task.CompletedTask,
             writeOptionsGetter: () => null,
             writeOptionsSetter: _ => { });
+    }
 
     [Fact]
     public async Task GetLlmRouterModelStatus_NoFilesCached_OnlyModelOnnxDataIsOptional()
@@ -38,13 +41,14 @@ public sealed class LlmRouterModelAdminGrpcServiceTests
         var service = CreateService(scope.OverrideStore);
 
         var response = await service.GetLlmRouterModelStatus(
-            new Contract.GetLlmRouterModelStatusRequest(), CreateContext(TestContext.Current.CancellationToken));
+            request: new Contract.GetLlmRouterModelStatusRequest(),
+            context: CreateContext(TestContext.Current.CancellationToken));
 
-        Assert.Equal(LlmRouterModelFiles.All.Count, response.Files.Count);
+        Assert.Equal(expected: LlmRouterModelFiles.All.Count, actual: response.Files.Count);
         foreach (var file in response.Files)
         {
             Assert.False(file.Synced);
-            Assert.Equal(file.FileName == LlmRouterModelFiles.ModelOnnxDataFileName, file.IsOptional);
+            Assert.Equal(expected: file.FileName == LlmRouterModelFiles.ModelOnnxDataFileName, actual: file.IsOptional);
         }
     }
 
@@ -55,20 +59,22 @@ public sealed class LlmRouterModelAdminGrpcServiceTests
         var cacheDirectory = scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory();
         Directory.CreateDirectory(cacheDirectory);
         await File.WriteAllTextAsync(
-            Path.Combine(cacheDirectory, LlmRouterModelFiles.ModelOnnxDataFileName),
-            "weights",
-            TestContext.Current.CancellationToken);
+            path: Path.Combine(path1: cacheDirectory, path2: LlmRouterModelFiles.ModelOnnxDataFileName),
+            contents: "weights",
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var service = CreateService(scope.OverrideStore);
 
         var response = await service.GetLlmRouterModelStatus(
-            new Contract.GetLlmRouterModelStatusRequest(), CreateContext(TestContext.Current.CancellationToken));
+            request: new Contract.GetLlmRouterModelStatusRequest(),
+            context: CreateContext(TestContext.Current.CancellationToken));
 
-        var modelOnnxData = Assert.Single(response.Files, f => f.FileName == LlmRouterModelFiles.ModelOnnxDataFileName);
+        var modelOnnxData = Assert.Single(collection: response.Files,
+            predicate: f => f.FileName == LlmRouterModelFiles.ModelOnnxDataFileName);
         Assert.True(modelOnnxData.Synced);
         Assert.True(modelOnnxData.IsOptional);
 
-        var required = Assert.Single(response.Files, f => f.FileName == "model.onnx");
+        var required = Assert.Single(collection: response.Files, predicate: f => f.FileName == "model.onnx");
         Assert.False(required.IsOptional);
     }
 
@@ -79,29 +85,33 @@ public sealed class LlmRouterModelAdminGrpcServiceTests
         var service = CreateService(overrideStore);
 
         var ex = await Assert.ThrowsAsync<RpcException>(() => service.SetLlmRouterModelBaseUrl(
-            new Contract.SetLlmRouterModelBaseUrlRequest { BaseUrl = "https://huggingface.co/some-org/some-model/resolve/main" },
-            CreateContext(TestContext.Current.CancellationToken)));
+            request: new Contract.SetLlmRouterModelBaseUrlRequest
+                { BaseUrl = "https://huggingface.co/some-org/some-model/resolve/main" },
+            context: CreateContext(TestContext.Current.CancellationToken)));
 
-        Assert.Equal(StatusCode.Internal, ex.StatusCode);
+        Assert.Equal(expected: StatusCode.Internal, actual: ex.StatusCode);
     }
 
     [Fact]
     public async Task SyncLlmRouterModel_StreamsThePlanFirstListingEveryFile_WhenNoneAreCachedYet()
     {
         using var scope = new TempOverrideScope();
-        var fixtures = LlmRouterModelFiles.All.ToDictionary(f => f, f => $"content-of-{f}");
-        var service = CreateService(scope.OverrideStore, request =>
-            request.RequestUri!.AbsolutePath.Contains("/api/models/", StringComparison.Ordinal)
+        var fixtures =
+            LlmRouterModelFiles.All.ToDictionary(keySelector: f => f, elementSelector: f => $"content-of-{f}");
+        var service = CreateService(overrideStore: scope.OverrideStore, respond: request =>
+            request.RequestUri!.AbsolutePath.Contains(value: "/api/models/", comparisonType: StringComparison.Ordinal)
                 ? ServeTree(fixtures)
-                : ServeFixture(request, fixtures));
+                : ServeFixture(request: request, fixtures: fixtures));
         var writer = new FakeServerStreamWriter<Contract.LlmRouterModelSyncStreamEvent>();
 
-        await service.SyncLlmRouterModel(new Contract.SyncLlmRouterModelRequest(), writer, CreateContext(TestContext.Current.CancellationToken));
+        await service.SyncLlmRouterModel(request: new Contract.SyncLlmRouterModelRequest(), responseStream: writer,
+            context: CreateContext(TestContext.Current.CancellationToken));
 
-        var firstEvent = Assert.Single(writer.Written, e => e.EventCase == Contract.LlmRouterModelSyncStreamEvent.EventOneofCase.Plan);
-        Assert.Same(writer.Written[0], firstEvent);
-        Assert.Equal(LlmRouterModelFiles.All.Count, firstEvent.Plan.Files.Count);
-        Assert.Equal(firstEvent.Plan.Files.Sum(f => f.SizeBytes), firstEvent.Plan.TotalBytes);
+        var firstEvent = Assert.Single(collection: writer.Written,
+            predicate: e => e.EventCase == Contract.LlmRouterModelSyncStreamEvent.EventOneofCase.Plan);
+        Assert.Same(expected: writer.Written[0], actual: firstEvent);
+        Assert.Equal(expected: LlmRouterModelFiles.All.Count, actual: firstEvent.Plan.Files.Count);
+        Assert.Equal(expected: firstEvent.Plan.Files.Sum(f => f.SizeBytes), actual: firstEvent.Plan.TotalBytes);
         Assert.True(firstEvent.Plan.TotalBytes > 0);
     }
 
@@ -111,36 +121,42 @@ public sealed class LlmRouterModelAdminGrpcServiceTests
         using var scope = new TempOverrideScope();
         var cacheDirectory = scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory();
         Directory.CreateDirectory(cacheDirectory);
-        var fixtures = LlmRouterModelFiles.All.ToDictionary(f => f, f => $"content-of-{f}");
+        var fixtures =
+            LlmRouterModelFiles.All.ToDictionary(keySelector: f => f, elementSelector: f => $"content-of-{f}");
         await File.WriteAllTextAsync(
-            Path.Combine(cacheDirectory, "genai_config.json"), fixtures["genai_config.json"], TestContext.Current.CancellationToken);
+            path: Path.Combine(path1: cacheDirectory, path2: "genai_config.json"),
+            contents: fixtures["genai_config.json"], cancellationToken: TestContext.Current.CancellationToken);
 
-        var service = CreateService(scope.OverrideStore, request =>
-            request.RequestUri!.AbsolutePath.Contains("/api/models/", StringComparison.Ordinal)
+        var service = CreateService(overrideStore: scope.OverrideStore, respond: request =>
+            request.RequestUri!.AbsolutePath.Contains(value: "/api/models/", comparisonType: StringComparison.Ordinal)
                 ? ServeTree(fixtures)
-                : ServeFixture(request, fixtures));
+                : ServeFixture(request: request, fixtures: fixtures));
         var writer = new FakeServerStreamWriter<Contract.LlmRouterModelSyncStreamEvent>();
 
-        await service.SyncLlmRouterModel(new Contract.SyncLlmRouterModelRequest(), writer, CreateContext(TestContext.Current.CancellationToken));
+        await service.SyncLlmRouterModel(request: new Contract.SyncLlmRouterModelRequest(), responseStream: writer,
+            context: CreateContext(TestContext.Current.CancellationToken));
 
-        var plan = Assert.Single(writer.Written, e => e.EventCase == Contract.LlmRouterModelSyncStreamEvent.EventOneofCase.Plan).Plan;
-        Assert.DoesNotContain(plan.Files, f => f.FileName == "genai_config.json");
-        Assert.Equal(LlmRouterModelFiles.All.Count - 1, plan.Files.Count);
+        var plan = Assert.Single(collection: writer.Written,
+            predicate: e => e.EventCase == Contract.LlmRouterModelSyncStreamEvent.EventOneofCase.Plan).Plan;
+        Assert.DoesNotContain(collection: plan.Files, filter: f => f.FileName == "genai_config.json");
+        Assert.Equal(expected: LlmRouterModelFiles.All.Count - 1, actual: plan.Files.Count);
 
         Assert.DoesNotContain(
-            writer.Written,
-            e => e.EventCase == Contract.LlmRouterModelSyncStreamEvent.EventOneofCase.Progress &&
-                 e.Progress.FileName == "genai_config.json" &&
-                 e.Progress.Stage == Contract.LlmRouterModelSyncStage.Failed);
+            collection: writer.Written,
+            filter: e => e.EventCase == Contract.LlmRouterModelSyncStreamEvent.EventOneofCase.Progress &&
+                         e.Progress.FileName == "genai_config.json" &&
+                         e.Progress.Stage == Contract.LlmRouterModelSyncStage.Failed);
 
-        var finalEvent = Assert.Single(writer.Written, e => e.EventCase == Contract.LlmRouterModelSyncStreamEvent.EventOneofCase.FinalStatus);
+        var finalEvent = Assert.Single(collection: writer.Written,
+            predicate: e => e.EventCase == Contract.LlmRouterModelSyncStreamEvent.EventOneofCase.FinalStatus);
         Assert.True(finalEvent.FinalStatus.Current);
     }
 
     private static HttpResponseMessage ServeFixture(HttpRequestMessage request, Dictionary<string, string> fixtures)
     {
         var fileName = request.RequestUri!.Segments[^1];
-        return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(fixtures[fileName], System.Text.Encoding.UTF8) };
+        return new HttpResponseMessage(HttpStatusCode.OK)
+            { Content = new StringContent(content: fixtures[fileName], encoding: Encoding.UTF8) };
     }
 
     private static HttpResponseMessage ServeTree(Dictionary<string, string> fixtures)
@@ -149,11 +165,32 @@ public sealed class LlmRouterModelAdminGrpcServiceTests
         // pathPrefix is empty and each entry's path is just the bare file name.
         var entries = fixtures.Select(kvp =>
         {
-            var oid = GitBlobHash.Compute(System.Text.Encoding.UTF8.GetBytes(kvp.Value));
-            return $$"""{ "type": "file", "path": "{{kvp.Key}}", "oid": "{{oid}}", "size": {{System.Text.Encoding.UTF8.GetByteCount(kvp.Value)}} }""";
+            var oid = GitBlobHash.Compute(Encoding.UTF8.GetBytes(kvp.Value));
+            return
+                $$"""{ "type": "file", "path": "{{kvp.Key}}", "oid": "{{oid}}", "size": {{Encoding.UTF8.GetByteCount(kvp.Value)}} }""";
         });
-        var json = $"[{string.Join(",", entries)}]";
-        return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json") };
+        var json = $"[{string.Join(separator: ",", values: entries)}]";
+        return new HttpResponseMessage(HttpStatusCode.OK)
+            { Content = new StringContent(content: json, encoding: Encoding.UTF8, mediaType: "application/json") };
+    }
+
+    private static LlmRouterModelAdminGrpcService CreateService(ILlmRouterModelOverrideStore overrideStore)
+    {
+        return CreateService(overrideStore: overrideStore,
+            respond: _ => new HttpResponseMessage(HttpStatusCode.NotFound));
+    }
+
+    private static LlmRouterModelAdminGrpcService CreateService(
+        ILlmRouterModelOverrideStore overrideStore,
+        Func<HttpRequestMessage, HttpResponseMessage> respond)
+    {
+        var factory = new FakeHttpClientFactory(new FakeHttpMessageHandler(respond));
+        var probe = new LlmRouterModelChecksumProbe(httpClientFactory: factory,
+            logger: NullLogger<LlmRouterModelChecksumProbe>.Instance);
+        var syncService = new LlmRouterModelSyncService(httpClientFactory: factory, probe: probe,
+            overrideStore: overrideStore, logger: NullLogger<LlmRouterModelSyncService>.Instance);
+        return new LlmRouterModelAdminGrpcService(overrideStore: overrideStore, syncService: syncService,
+            logger: NullLogger<LlmRouterModelAdminGrpcService>.Instance);
     }
 
     private sealed class FakeServerStreamWriter<T> : IServerStreamWriter<T>
@@ -173,42 +210,34 @@ public sealed class LlmRouterModelAdminGrpcServiceTests
     {
         public LlmRouterModelSnapshot Snapshot => throw exception;
 
-        public event Action? Changed { add { } remove { } }
+        public event Action? Changed
+        {
+            add { }
+            remove { }
+        }
 
-        public Task SetBaseUrlAsync(string baseUrl, CancellationToken cancellationToken = default) => throw exception;
-    }
-
-    private static LlmRouterModelAdminGrpcService CreateService(ILlmRouterModelOverrideStore overrideStore) =>
-        CreateService(overrideStore, _ => new HttpResponseMessage(HttpStatusCode.NotFound));
-
-    private static LlmRouterModelAdminGrpcService CreateService(
-        ILlmRouterModelOverrideStore overrideStore,
-        Func<HttpRequestMessage, HttpResponseMessage> respond)
-    {
-        var factory = new FakeHttpClientFactory(new FakeHttpMessageHandler(respond));
-        var probe = new LlmRouterModelChecksumProbe(factory, NullLogger<LlmRouterModelChecksumProbe>.Instance);
-        var syncService = new LlmRouterModelSyncService(factory, probe, overrideStore, NullLogger<LlmRouterModelSyncService>.Instance);
-        return new LlmRouterModelAdminGrpcService(overrideStore, syncService, NullLogger<LlmRouterModelAdminGrpcService>.Instance);
+        public Task SetBaseUrlAsync(string baseUrl, CancellationToken cancellationToken = default)
+        {
+            throw exception;
+        }
     }
 
     private sealed class TempOverrideScope : IDisposable
     {
-        public FakeLlmRouterModelOverrideStore OverrideStore { get; }
-
         public TempOverrideScope()
         {
             var overrideValue = new LlmRouterModelOverride(
-                "https://huggingface.co/some-org/some-model/resolve/main", $"test-{Guid.NewGuid():N}");
+                BaseUrl: "https://huggingface.co/some-org/some-model/resolve/main",
+                CacheDirectorySlug: $"test-{Guid.NewGuid():N}");
             OverrideStore = new FakeLlmRouterModelOverrideStore(overrideValue);
         }
+
+        public FakeLlmRouterModelOverrideStore OverrideStore { get; }
 
         public void Dispose()
         {
             var cacheDirectory = OverrideStore.Snapshot.Override.ResolveCacheDirectory();
-            if (Directory.Exists(cacheDirectory))
-            {
-                Directory.Delete(cacheDirectory, recursive: true);
-            }
+            if (Directory.Exists(cacheDirectory)) Directory.Delete(path: cacheDirectory, true);
         }
     }
 }

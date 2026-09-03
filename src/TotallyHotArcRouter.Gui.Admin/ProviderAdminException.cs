@@ -19,8 +19,7 @@ public sealed class ProviderAdminException : Exception
     /// <param name="message">The error message.</param>
     /// <param name="innerException">The underlying exception.</param>
     public ProviderAdminException(string message, Exception innerException)
-        : base(message, innerException)
+        : base(message: message, innerException: innerException)
     {
     }
 }
-

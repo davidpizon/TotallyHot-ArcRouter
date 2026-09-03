@@ -36,15 +36,17 @@ public abstract record BudgetWindow
     /// <summary>Calendar month in UTC, e.g. <c>"2026-08"</c>. The default and today's only behavior.</summary>
     public sealed record Monthly : BudgetWindow
     {
-        /// <inheritdoc />
-        public override string PeriodKey(DateTimeOffset instant) =>
-            instant.UtcDateTime.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+        /// <inheritdoc/>
+        public override string PeriodKey(DateTimeOffset instant)
+        {
+            return instant.UtcDateTime.ToString(format: "yyyy-MM", provider: CultureInfo.InvariantCulture);
+        }
 
-        /// <inheritdoc />
+        /// <inheritdoc/>
         public override DateTimeOffset NextResetUtc(DateTimeOffset instant)
         {
             var utc = instant.UtcDateTime;
-            var startOfMonth = new DateTime(utc.Year, utc.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+            var startOfMonth = new DateTime(year: utc.Year, month: utc.Month, 1, 0, 0, 0, kind: DateTimeKind.Utc);
             return new DateTimeOffset(startOfMonth.AddMonths(1));
         }
     }
@@ -52,22 +54,25 @@ public abstract record BudgetWindow
     /// <summary>ISO-8601 week in UTC, e.g. <c>"2026-W32"</c>.</summary>
     public sealed record Weekly : BudgetWindow
     {
-        /// <inheritdoc />
+        /// <inheritdoc/>
         public override string PeriodKey(DateTimeOffset instant)
         {
             var utc = instant.UtcDateTime;
             var isoYear = ISOWeek.GetYear(utc);
             var isoWeek = ISOWeek.GetWeekOfYear(utc);
-            return string.Create(CultureInfo.InvariantCulture, $"{isoYear:D4}-W{isoWeek:D2}");
+            return string.Create(provider: CultureInfo.InvariantCulture, handler: $"{isoYear:D4}-W{isoWeek:D2}");
         }
 
-        /// <inheritdoc />
+        /// <inheritdoc/>
         public override DateTimeOffset NextResetUtc(DateTimeOffset instant)
         {
             var utc = instant.UtcDateTime;
             var isoYear = ISOWeek.GetYear(utc);
             var isoWeek = ISOWeek.GetWeekOfYear(utc);
-            var startOfWeek = DateTime.SpecifyKind(ISOWeek.ToDateTime(isoYear, isoWeek, DayOfWeek.Monday), DateTimeKind.Utc);
+            var startOfWeek =
+                DateTime.SpecifyKind(
+                    value: ISOWeek.ToDateTime(year: isoYear, week: isoWeek, dayOfWeek: DayOfWeek.Monday),
+                    kind: DateTimeKind.Utc);
             return new DateTimeOffset(startOfWeek.AddDays(7));
         }
     }
@@ -82,16 +87,17 @@ public abstract record BudgetWindow
         /// <summary>Block length in hours. Must be positive.</summary>
         public int Hours { get; } = Hours > 0
             ? Hours
-            : throw new ArgumentOutOfRangeException(nameof(Hours), Hours, "Block length must be positive.");
+            : throw new ArgumentOutOfRangeException(paramName: nameof(Hours), actualValue: Hours,
+                message: "Block length must be positive.");
 
-        /// <inheritdoc />
+        /// <inheritdoc/>
         public override string PeriodKey(DateTimeOffset instant)
         {
             var index = BlockIndex(instant);
-            return string.Create(CultureInfo.InvariantCulture, $"R{Hours}H-{index:D10}");
+            return string.Create(provider: CultureInfo.InvariantCulture, handler: $"R{Hours}H-{index:D10}");
         }
 
-        /// <inheritdoc />
+        /// <inheritdoc/>
         public override DateTimeOffset NextResetUtc(DateTimeOffset instant)
         {
             var index = BlockIndex(instant);
@@ -104,8 +110,10 @@ public abstract record BudgetWindow
         /// <summary>Computes the zero-based index of the rolling block that <paramref name="instant"/> falls in.</summary>
         /// <param name="instant">The instant to bucket.</param>
         /// <returns>The block index, which may be negative for instants before the Unix epoch.</returns>
-        private long BlockIndex(DateTimeOffset instant) =>
-            (long)Math.Floor((instant - DateTimeOffset.UnixEpoch).TotalHours / Hours);
+        private long BlockIndex(DateTimeOffset instant)
+        {
+            return (long)Math.Floor((instant - DateTimeOffset.UnixEpoch).TotalHours / Hours);
+        }
     }
 }
 
@@ -117,23 +125,30 @@ public abstract record BudgetWindow
 public static class BudgetWindowCodec
 {
     /// <summary>Encodes a <see cref="BudgetWindow"/> into its persisted (kind, hours) representation.</summary>
-    public static (string Kind, int? Hours) Encode(BudgetWindow window) => window switch
+    public static (string Kind, int? Hours) Encode(BudgetWindow window)
     {
-        BudgetWindow.Monthly => ("Monthly", null),
-        BudgetWindow.Weekly => ("Weekly", null),
-        BudgetWindow.RollingHours rolling => ("RollingHours", rolling.Hours),
-        _ => throw new ArgumentOutOfRangeException(nameof(window), window, "Unknown budget window kind."),
-    };
+        return window switch
+        {
+            BudgetWindow.Monthly => ("Monthly", null),
+            BudgetWindow.Weekly => ("Weekly", null),
+            BudgetWindow.RollingHours rolling => ("RollingHours", rolling.Hours),
+            _ => throw new ArgumentOutOfRangeException(paramName: nameof(window), actualValue: window,
+                message: "Unknown budget window kind.")
+        };
+    }
 
     /// <summary>
     /// Decodes a persisted (kind, hours) pair back into a <see cref="BudgetWindow"/>. An unrecognized or
     /// missing kind decodes as <see cref="BudgetWindow.Monthly"/> - the safe default that matches every
     /// row written before this column existed.
     /// </summary>
-    public static BudgetWindow Decode(string? kind, int? hours) => kind switch
+    public static BudgetWindow Decode(string? kind, int? hours)
     {
-        "Weekly" => new BudgetWindow.Weekly(),
-        "RollingHours" when hours is > 0 => new BudgetWindow.RollingHours(hours.Value),
-        _ => new BudgetWindow.Monthly(),
-    };
+        return kind switch
+        {
+            "Weekly" => new BudgetWindow.Weekly(),
+            "RollingHours" when hours is > 0 => new BudgetWindow.RollingHours(hours.Value),
+            _ => new BudgetWindow.Monthly()
+        };
+    }
 }

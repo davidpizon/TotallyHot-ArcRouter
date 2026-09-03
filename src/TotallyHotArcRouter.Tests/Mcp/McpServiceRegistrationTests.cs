@@ -27,7 +27,8 @@ public sealed class McpServiceRegistrationTests
 
         services.AddTotallyHotArcRouter();
 
-        Assert.Contains(services, d => d.ServiceType == typeof(ManagementFacade) && d.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(collection: services,
+            filter: d => d.ServiceType == typeof(ManagementFacade) && d.Lifetime == ServiceLifetime.Singleton);
     }
 
     [Fact]
@@ -37,7 +38,8 @@ public sealed class McpServiceRegistrationTests
 
         services.AddTotallyHotArcRouter();
 
-        Assert.Contains(services, d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(McpHostedService));
+        Assert.Contains(collection: services,
+            filter: d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(McpHostedService));
     }
 
     [Fact]
@@ -55,7 +57,7 @@ public sealed class McpServiceRegistrationTests
         var options = provider.GetRequiredService<IOptions<McpOptions>>().Value;
 
         Assert.True(options.Enabled);
-        Assert.Equal(5003, options.Port);
+        Assert.Equal(5003, actual: options.Port);
     }
 
     [Fact]
@@ -74,4 +76,3 @@ public sealed class McpServiceRegistrationTests
         Assert.NotNull(provider.GetRequiredService<ManagementFacade>());
     }
 }
-

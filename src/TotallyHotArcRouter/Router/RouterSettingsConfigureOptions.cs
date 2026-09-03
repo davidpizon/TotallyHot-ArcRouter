@@ -1,5 +1,5 @@
-using Microsoft.Extensions.Options;
 using System.Reflection;
+using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Models;
 
 namespace TotallyHot.ArcRouter.Router;
@@ -8,8 +8,12 @@ namespace TotallyHot.ArcRouter.Router;
 /// Layers <see cref="RouterSettingsStore"/>'s stored overrides onto <see cref="RoutingOptions"/>
 /// (docs/router/self-organizing-classification-plan.md Phase T6): the last
 /// <c>IConfigureOptions&lt;RoutingOptions&gt;</c> step registered, so it runs after the
-/// <c>appsettings.json</c>-binding step and wins - <b>stored override &gt; appsettings.json &gt; coded
-/// default</b>. Only ever overwrites <see cref="RoutingOptions.EnableAdaptiveRouting"/> and
+/// <c>appsettings.json</c>-binding step and wins -
+/// <b>
+/// stored override &gt; appsettings.json &gt; coded
+/// default
+/// </b>
+/// . Only ever overwrites <see cref="RoutingOptions.EnableAdaptiveRouting"/> and
 /// <see cref="RoutingOptions.EmbeddingMemoryCapacity"/>, and only when a row actually exists for the
 /// corresponding key - a missing row means "no override", leaving whatever the earlier steps already
 /// produced untouched rather than re-asserting the coded default a second time.
@@ -40,19 +44,17 @@ public sealed class RouterSettingsConfigureOptions : IConfigureOptions<RoutingOp
         _store = store;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public void Configure(RoutingOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        if (_store.TryGetBool(RouterSettingsStore.AdaptiveRoutingEnabledKey, out var adaptiveRoutingEnabled))
-        {
-            EnableAdaptiveRoutingProperty.SetValue(options, adaptiveRoutingEnabled);
-        }
+        if (_store.TryGetBool(key: RouterSettingsStore.AdaptiveRoutingEnabledKey,
+                value: out var adaptiveRoutingEnabled))
+            EnableAdaptiveRoutingProperty.SetValue(obj: options, value: adaptiveRoutingEnabled);
 
-        if (_store.TryGetInt(RouterSettingsStore.EmbeddingMemoryCapacityKey, out var embeddingMemoryCapacity))
-        {
-            EmbeddingMemoryCapacityProperty.SetValue(options, embeddingMemoryCapacity);
-        }
+        if (_store.TryGetInt(key: RouterSettingsStore.EmbeddingMemoryCapacityKey,
+                value: out var embeddingMemoryCapacity))
+            EmbeddingMemoryCapacityProperty.SetValue(obj: options, value: embeddingMemoryCapacity);
     }
 }

@@ -22,14 +22,16 @@ public class UpstreamFailureClassifierTests
         bool nextProviderDiffers = false,
         bool isExplicitPrimary = false,
         string? embeddedErrorMessage = null,
-        byte[]? preReadErrorBody = null) =>
-        UpstreamFailureClassifier.Classify(
-            statusCode,
-            preReadErrorBody,
-            embeddedErrorMessage,
-            isProviderAuthFailure,
-            nextProviderDiffers,
-            isExplicitPrimary);
+        byte[]? preReadErrorBody = null)
+    {
+        return UpstreamFailureClassifier.Classify(
+            statusCode: statusCode,
+            preReadErrorBody: preReadErrorBody,
+            embeddedErrorMessage: embeddedErrorMessage,
+            isProviderAuthFailure: isProviderAuthFailure,
+            nextProviderDiffers: nextProviderDiffers,
+            isExplicitPrimary: isExplicitPrimary);
+    }
 
     // -- health signal --------------------------------------------------------
 
@@ -37,12 +39,13 @@ public class UpstreamFailureClassifierTests
     [InlineData(401, ProviderWideOutageCause.Unauthorized)]
     [InlineData(403, ProviderWideOutageCause.Forbidden)]
     [InlineData(405, ProviderWideOutageCause.MethodNotAllowed)]
-    public void Classify_ProviderWideStatus_TripsWholeProviderWithItsOwnCause(int statusCode, ProviderWideOutageCause expected)
+    public void Classify_ProviderWideStatus_TripsWholeProviderWithItsOwnCause(int statusCode,
+        ProviderWideOutageCause expected)
     {
         var verdict = Classify(statusCode);
 
-        Assert.Equal(ProviderHealthSignal.ProviderWideOutage, verdict.HealthSignal);
-        Assert.Equal(expected, verdict.ProviderWideCause);
+        Assert.Equal(expected: ProviderHealthSignal.ProviderWideOutage, actual: verdict.HealthSignal);
+        Assert.Equal(expected: expected, actual: verdict.ProviderWideCause);
     }
 
     [Fact]
@@ -51,10 +54,10 @@ public class UpstreamFailureClassifierTests
         // Gemini's disguised 401: a 400 whose envelope says UNAUTHENTICATED. The status code alone cannot
         // tell this apart from a genuinely malformed request, which is why the translator's verdict is an
         // input here rather than something this method re-derives.
-        var verdict = Classify(400, isProviderAuthFailure: true);
+        var verdict = Classify(400, true);
 
-        Assert.Equal(ProviderHealthSignal.ProviderWideOutage, verdict.HealthSignal);
-        Assert.Equal(ProviderWideOutageCause.EmbeddedCredentialError, verdict.ProviderWideCause);
+        Assert.Equal(expected: ProviderHealthSignal.ProviderWideOutage, actual: verdict.HealthSignal);
+        Assert.Equal(expected: ProviderWideOutageCause.EmbeddedCredentialError, actual: verdict.ProviderWideCause);
     }
 
     [Fact]
@@ -62,9 +65,9 @@ public class UpstreamFailureClassifierTests
     {
         // Both conditions hold; the original if/else chain checked 401 first and the cause must not drift,
         // since the two log different operator-facing messages.
-        var verdict = Classify(401, isProviderAuthFailure: true);
+        var verdict = Classify(401, true);
 
-        Assert.Equal(ProviderWideOutageCause.Unauthorized, verdict.ProviderWideCause);
+        Assert.Equal(expected: ProviderWideOutageCause.Unauthorized, actual: verdict.ProviderWideCause);
     }
 
     [Theory]
@@ -75,12 +78,12 @@ public class UpstreamFailureClassifierTests
         // The 429 case is the ordering guard: out-of-credits must be checked ahead of the generic outage
         // bucket, or a classified-out-of-credits 429 falls into the weaker per-target failure. The whole
         // account is broken, not just this target.
-        var verdict = Classify(statusCode, embeddedErrorMessage: OutOfCreditsMessage);
+        var verdict = Classify(statusCode: statusCode, embeddedErrorMessage: OutOfCreditsMessage);
 
-        Assert.Equal(ProviderHealthSignal.ProviderWideOutage, verdict.HealthSignal);
-        Assert.Equal(ProviderWideOutageCause.OutOfCredits, verdict.ProviderWideCause);
+        Assert.Equal(expected: ProviderHealthSignal.ProviderWideOutage, actual: verdict.HealthSignal);
+        Assert.Equal(expected: ProviderWideOutageCause.OutOfCredits, actual: verdict.ProviderWideCause);
         Assert.True(verdict.IsOutOfCredits);
-        Assert.Equal(OutOfCreditsMessage, verdict.OutOfCreditsMessage);
+        Assert.Equal(expected: OutOfCreditsMessage, actual: verdict.OutOfCreditsMessage);
     }
 
     [Fact]
@@ -92,7 +95,7 @@ public class UpstreamFailureClassifierTests
         var verdict = Classify(429, preReadErrorBody: body);
 
         Assert.True(verdict.IsOutOfCredits);
-        Assert.Equal(ProviderWideOutageCause.OutOfCredits, verdict.ProviderWideCause);
+        Assert.Equal(expected: ProviderWideOutageCause.OutOfCredits, actual: verdict.ProviderWideCause);
     }
 
     [Theory]
@@ -104,8 +107,8 @@ public class UpstreamFailureClassifierTests
     {
         var verdict = Classify(statusCode);
 
-        Assert.Equal(ProviderHealthSignal.TargetOutage, verdict.HealthSignal);
-        Assert.Equal(ProviderWideOutageCause.None, verdict.ProviderWideCause);
+        Assert.Equal(expected: ProviderHealthSignal.TargetOutage, actual: verdict.HealthSignal);
+        Assert.Equal(expected: ProviderWideOutageCause.None, actual: verdict.ProviderWideCause);
     }
 
     [Theory]
@@ -117,7 +120,7 @@ public class UpstreamFailureClassifierTests
         // A client-fault 4xx counts as healthy: the target answered as configured, the request was bad.
         var verdict = Classify(statusCode);
 
-        Assert.Equal(ProviderHealthSignal.TargetHealthy, verdict.HealthSignal);
+        Assert.Equal(expected: ProviderHealthSignal.TargetHealthy, actual: verdict.HealthSignal);
     }
 
     [Theory]
@@ -130,7 +133,7 @@ public class UpstreamFailureClassifierTests
         // ADR-0004: only a literal 2xx clears a live out-of-credits warning. A non-out-of-credits 400 is
         // "healthy" for circuit-breaker purposes but is not evidence the provider works in the billing
         // sense, so the two must not be conflated.
-        Assert.Equal(expected, Classify(statusCode).IsSuccessStatus);
+        Assert.Equal(expected: expected, actual: Classify(statusCode).IsSuccessStatus);
     }
 
     // -- failover -------------------------------------------------------------
@@ -142,7 +145,7 @@ public class UpstreamFailureClassifierTests
     {
         // A 5xx is a provider-side failure and a 404 means this target's model id is wrong or gone -
         // neither says anything about a different, already-configured candidate.
-        Assert.True(Classify(statusCode, nextProviderDiffers: false).ShouldRetry);
+        Assert.True(Classify(statusCode: statusCode, nextProviderDiffers: false).ShouldRetry);
     }
 
     [Theory]
@@ -154,7 +157,8 @@ public class UpstreamFailureClassifierTests
         bool expected)
     {
         // A same-provider backup shares the throttle, so retrying it only delays surfacing the failure.
-        Assert.Equal(expected, Classify(statusCode, nextProviderDiffers: nextProviderDiffers).ShouldRetry);
+        Assert.Equal(expected: expected,
+            actual: Classify(statusCode: statusCode, nextProviderDiffers: nextProviderDiffers).ShouldRetry);
     }
 
     [Theory]
@@ -163,7 +167,7 @@ public class UpstreamFailureClassifierTests
     public void Classify_ClientFaultStatus_IsNeverRetried(int statusCode)
     {
         // A backup would reject the same request identically.
-        Assert.False(Classify(statusCode, nextProviderDiffers: true).ShouldRetry);
+        Assert.False(Classify(statusCode: statusCode, nextProviderDiffers: true).ShouldRetry);
     }
 
     [Fact]
@@ -220,7 +224,7 @@ public class UpstreamFailureClassifierTests
         var verdict = Classify(400, preReadErrorBody: Encoding.UTF8.GetBytes("not json at all"));
 
         Assert.False(verdict.IsOutOfCredits);
-        Assert.Equal(ProviderHealthSignal.TargetHealthy, verdict.HealthSignal);
+        Assert.Equal(expected: ProviderHealthSignal.TargetHealthy, actual: verdict.HealthSignal);
         Assert.Empty(verdict.OutOfCreditsMessage);
     }
 

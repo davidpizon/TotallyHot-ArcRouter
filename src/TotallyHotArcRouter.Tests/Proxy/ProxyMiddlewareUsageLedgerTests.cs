@@ -1,7 +1,7 @@
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging.Abstractions;
 using System.Net;
 using System.Text;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging.Abstractions;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tests.PriceCatalog;
@@ -29,9 +29,9 @@ public class ProxyMiddlewareUsageLedgerTests
 
         var handler = new RoutingHandlerStub(_ => OpenAiUsageResponse());
 
-        await RunAsync(resolver, handler, ledger);
+        await RunAsync(resolver: resolver, handler: handler, usageLedger: ledger);
 
-        Assert.Equal(1, CountRows(temp));
+        Assert.Equal(1, actual: CountRows(temp));
     }
 
     [Fact]
@@ -45,10 +45,10 @@ public class ProxyMiddlewareUsageLedgerTests
 
         var handler = new RoutingHandlerStub(_ => OpenAiUsageResponse("req-fixed-123"));
 
-        await RunAsync(resolver, handler, ledger);
-        await RunAsync(resolver, handler, ledger);
+        await RunAsync(resolver: resolver, handler: handler, usageLedger: ledger);
+        await RunAsync(resolver: resolver, handler: handler, usageLedger: ledger);
 
-        Assert.Equal(1, CountRows(temp));
+        Assert.Equal(1, actual: CountRows(temp));
     }
 
     [Fact]
@@ -63,10 +63,10 @@ public class ProxyMiddlewareUsageLedgerTests
         var callIndex = 0;
         var handler = new RoutingHandlerStub(_ => OpenAiUsageResponse($"req-{callIndex++}"));
 
-        await RunAsync(resolver, handler, ledger);
-        await RunAsync(resolver, handler, ledger);
+        await RunAsync(resolver: resolver, handler: handler, usageLedger: ledger);
+        await RunAsync(resolver: resolver, handler: handler, usageLedger: ledger);
 
-        Assert.Equal(2, CountRows(temp));
+        Assert.Equal(2, actual: CountRows(temp));
     }
 
     [Fact]
@@ -88,12 +88,12 @@ public class ProxyMiddlewareUsageLedgerTests
             ? throw new HttpRequestException("connection refused")
             : OpenAiUsageResponse());
 
-        await RunAsync(resolver, handler, ledger);
+        await RunAsync(resolver: resolver, handler: handler, usageLedger: ledger);
 
-        Assert.Equal(1, CountRows(temp));
+        Assert.Equal(1, actual: CountRows(temp));
         // M2.3: the ledger's requested_model column holds the model that served ("backup"), not the one
         // lined up first ("primary") - a value fix, not a schema change (docs/router/agent-cost-tracking.md).
-        Assert.Equal("backup", ReadRequestedModel(temp));
+        Assert.Equal(expected: "backup", actual: ReadRequestedModel(temp));
     }
 
     [Fact]
@@ -107,12 +107,12 @@ public class ProxyMiddlewareUsageLedgerTests
 
         var handler = new RoutingHandlerStub(_ => new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StringContent("""{"choices":[]}""", Encoding.UTF8, "application/json"),
+            Content = new StringContent("""{"choices":[]}""", encoding: Encoding.UTF8, mediaType: "application/json")
         });
 
-        await RunAsync(resolver, handler, ledger);
+        await RunAsync(resolver: resolver, handler: handler, usageLedger: ledger);
 
-        Assert.Equal(0, CountRows(temp));
+        Assert.Equal(0, actual: CountRows(temp));
     }
 
     // -- helpers -------------------------------------------------------------
@@ -123,14 +123,11 @@ public class ProxyMiddlewareUsageLedgerTests
         {
             Content = new StringContent(
                 """{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5}}""",
-                Encoding.UTF8,
-                "application/json"),
+                encoding: Encoding.UTF8,
+                mediaType: "application/json")
         };
 
-        if (requestId is not null)
-        {
-            response.Headers.Add("request-id", requestId);
-        }
+        if (requestId is not null) response.Headers.Add(name: "request-id", value: requestId);
 
         return response;
     }
@@ -157,11 +154,12 @@ public class ProxyMiddlewareUsageLedgerTests
         IUsageLedger usageLedger,
         string requestedModel = "primary")
     {
-        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver);
+        var interceptor =
+            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
         var middleware = new ProxyMiddleware(
-            NullLogger<ProxyMiddleware>.Instance,
-            interceptor,
-            new HttpClient(handler),
+            logger: NullLogger<ProxyMiddleware>.Instance,
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 UsageLedger = usageLedger
@@ -179,7 +177,7 @@ public class ProxyMiddlewareUsageLedgerTests
         context.Response.Body = new MemoryStream();
         context.RequestAborted = TestContext.Current.CancellationToken;
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
         // PublishTelemetryAsync (and the ledger write inside it) runs after the response is fully written,
         // inside its own try/catch so a failure there never surfaces to InvokeAsync's caller - awaited by
@@ -189,7 +187,10 @@ public class ProxyMiddlewareUsageLedgerTests
 
     private sealed class RoutingHandlerStub(Func<HttpRequestMessage, HttpResponseMessage> handler) : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => Task.FromResult(handler(request));
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(handler(request));
+        }
     }
 }

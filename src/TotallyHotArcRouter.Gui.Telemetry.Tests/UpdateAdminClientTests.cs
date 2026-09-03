@@ -14,7 +14,7 @@ public class UpdateAdminClientTests
     [Fact]
     public async Task GetStatusAsync_MapsEveryField()
     {
-        var checkedAt = new DateTimeOffset(2026, 8, 1, 12, 0, 0, TimeSpan.Zero);
+        var checkedAt = new DateTimeOffset(2026, 8, 1, 12, 0, 0, offset: TimeSpan.Zero);
         var stub = new StubClient
         {
             StatusResponse = new Contract.UpdateStatusResponse
@@ -25,8 +25,8 @@ public class UpdateAdminClientTests
                 CheckedAtUtc = Timestamp.FromDateTimeOffset(checkedAt),
                 UnavailableReason = Contract.UpdateUnavailableReason.None,
                 AssetDownloadUrl = "https://example.test/a.msi",
-                AssetSha256 = "abc123",
-            },
+                AssetSha256 = "abc123"
+            }
         };
         using var client = new UpdateAdminClient(stub);
 
@@ -67,18 +67,20 @@ public class UpdateAdminClientTests
     [Theory]
     [InlineData(Contract.UpdateUnavailableReason.NoReleasesPublished, UpdateUnavailableReasonInfo.NoReleasesPublished)]
     [InlineData(Contract.UpdateUnavailableReason.MalformedTag, UpdateUnavailableReasonInfo.MalformedTag)]
-    [InlineData(Contract.UpdateUnavailableReason.AssetOrChecksumMissing, UpdateUnavailableReasonInfo.AssetOrChecksumMissing)]
+    [InlineData(Contract.UpdateUnavailableReason.AssetOrChecksumMissing,
+        UpdateUnavailableReasonInfo.AssetOrChecksumMissing)]
     [InlineData(Contract.UpdateUnavailableReason.NetworkOrApiFailure, UpdateUnavailableReasonInfo.NetworkOrApiFailure)]
     [InlineData(Contract.UpdateUnavailableReason.Unspecified, UpdateUnavailableReasonInfo.None)]
-    public async Task GetStatusAsync_MapsEveryUnavailableReason(Contract.UpdateUnavailableReason wire, UpdateUnavailableReasonInfo expected)
+    public async Task GetStatusAsync_MapsEveryUnavailableReason(Contract.UpdateUnavailableReason wire,
+        UpdateUnavailableReasonInfo expected)
     {
         var stub = new StubClient
         {
             StatusResponse = new Contract.UpdateStatusResponse
             {
                 UnavailableReason = wire,
-                UnavailableDetail = "some detail",
-            },
+                UnavailableDetail = "some detail"
+            }
         };
         using var client = new UpdateAdminClient(stub);
 
@@ -93,7 +95,7 @@ public class UpdateAdminClientTests
     {
         var stub = new StubClient
         {
-            CheckNowResponse = new Contract.UpdateStatusResponse { CurrentVersion = "1.0.0", LatestVersion = "1.0.0" },
+            CheckNowResponse = new Contract.UpdateStatusResponse { CurrentVersion = "1.0.0", LatestVersion = "1.0.0" }
         };
         using var client = new UpdateAdminClient(stub);
 
@@ -107,11 +109,12 @@ public class UpdateAdminClientTests
     {
         var stub = new StubClient
         {
-            NotifyResponse = new Contract.NotifyApplyStartingResponse { Acknowledged = true },
+            NotifyResponse = new Contract.NotifyApplyStartingResponse { Acknowledged = true }
         };
         using var client = new UpdateAdminClient(stub);
 
-        var outcome = await client.NotifyApplyStartingAsync("2.0.0", TestContext.Current.CancellationToken);
+        var outcome = await client.NotifyApplyStartingAsync(version: "2.0.0",
+            cancellationToken: TestContext.Current.CancellationToken);
 
         outcome.Acknowledged.Should().BeTrue();
     }
@@ -119,7 +122,8 @@ public class UpdateAdminClientTests
     [Fact]
     public async Task GetStatusAsync_RouterUnavailable_ThrowsFlaggedException()
     {
-        var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.Unavailable, "down")) };
+        var stub = new StubClient
+            { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "down")) };
         using var client = new UpdateAdminClient(stub);
 
         var act = async () => await client.GetStatusAsync(TestContext.Current.CancellationToken);
@@ -131,10 +135,13 @@ public class UpdateAdminClientTests
     [Fact]
     public async Task NotifyApplyStartingAsync_Rejected_ThrowsUnflaggedException()
     {
-        var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.FailedPrecondition, "no update")) };
+        var stub = new StubClient
+            { Failure = new RpcException(new Status(statusCode: StatusCode.FailedPrecondition, detail: "no update")) };
         using var client = new UpdateAdminClient(stub);
 
-        var act = async () => await client.NotifyApplyStartingAsync("2.0.0", TestContext.Current.CancellationToken);
+        var act = async () =>
+            await client.NotifyApplyStartingAsync(version: "2.0.0",
+                cancellationToken: TestContext.Current.CancellationToken);
 
         var ex = await act.Should().ThrowAsync<UpdateAdminException>();
         ex.Which.IsUnavailable.Should().BeFalse();
@@ -143,7 +150,8 @@ public class UpdateAdminClientTests
     [Fact]
     public async Task CheckNowAsync_Rejected_ThrowsUnflaggedException()
     {
-        var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.Internal, "boom")) };
+        var stub = new StubClient
+            { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
         using var client = new UpdateAdminClient(stub);
 
         var act = async () => await client.CheckNowAsync(TestContext.Current.CancellationToken);
@@ -167,23 +175,31 @@ public class UpdateAdminClientTests
         public RpcException? Failure { get; init; }
 
         public override AsyncUnaryCall<Contract.UpdateStatusResponse> GetUpdateStatusAsync(
-            Contract.GetUpdateStatusRequest request, CallOptions options) =>
-            Call(StatusResponse);
+            Contract.GetUpdateStatusRequest request, CallOptions options)
+        {
+            return Call(StatusResponse);
+        }
 
         public override AsyncUnaryCall<Contract.UpdateStatusResponse> CheckForUpdatesNowAsync(
-            Contract.CheckForUpdatesNowRequest request, CallOptions options) =>
-            Call(CheckNowResponse);
+            Contract.CheckForUpdatesNowRequest request, CallOptions options)
+        {
+            return Call(CheckNowResponse);
+        }
 
         public override AsyncUnaryCall<Contract.NotifyApplyStartingResponse> NotifyApplyStartingAsync(
-            Contract.NotifyApplyStartingRequest request, CallOptions options) =>
-            Call(NotifyResponse);
+            Contract.NotifyApplyStartingRequest request, CallOptions options)
+        {
+            return Call(NotifyResponse);
+        }
 
-        private AsyncUnaryCall<T> Call<T>(T response) =>
-            new(
-                Failure is null ? Task.FromResult(response) : Task.FromException<T>(Failure),
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => [],
-                () => { });
+        private AsyncUnaryCall<T> Call<T>(T response)
+        {
+            return new AsyncUnaryCall<T>(
+                responseAsync: Failure is null ? Task.FromResult(response) : Task.FromException<T>(Failure),
+                responseHeadersAsync: Task.FromResult(new Metadata()),
+                getStatusFunc: () => Status.DefaultSuccess,
+                getTrailersFunc: () => [],
+                disposeAction: () => { });
+        }
     }
 }

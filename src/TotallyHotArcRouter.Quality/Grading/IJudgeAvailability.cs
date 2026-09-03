@@ -29,6 +29,9 @@ public interface IJudgeAvailability
 /// </summary>
 public sealed class NoJudgeAvailability : IJudgeAvailability
 {
-    /// <inheritdoc />
-    public bool WillJudge(QualityResult result) => false;
+    /// <inheritdoc/>
+    public bool WillJudge(QualityResult result)
+    {
+        return false;
+    }
 }

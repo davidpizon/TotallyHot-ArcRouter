@@ -31,7 +31,7 @@ public class RoutingGateAdminClientTests
         var stub = new StubClient { Response = new Contract.RoutingGateResponse { Enabled = true } };
         using var client = new RoutingGateAdminClient(stub);
 
-        var enabled = await client.SetAsync(true, TestContext.Current.CancellationToken);
+        var enabled = await client.SetAsync(true, cancellationToken: TestContext.Current.CancellationToken);
 
         enabled.Should().BeTrue();
         stub.LastSetRequest.Should().NotBeNull();
@@ -41,10 +41,12 @@ public class RoutingGateAdminClientTests
     [Fact]
     public async Task Unavailable_becomes_a_plain_language_message()
     {
-        var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.Unavailable, "failed to connect")) };
+        var stub = new StubClient
+            { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new RoutingGateAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<RoutingGateAdminException>(() => client.GetAsync(TestContext.Current.CancellationToken));
+        var ex = await Assert.ThrowsAsync<RoutingGateAdminException>(() =>
+            client.GetAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not reach the router: the router is not reachable.");
         ex.InnerException.Should().BeOfType<RpcException>();
@@ -54,10 +56,12 @@ public class RoutingGateAdminClientTests
     [Fact]
     public async Task A_rejection_keeps_the_servers_own_detail_and_is_not_flagged_unavailable()
     {
-        var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.Internal, "boom")) };
+        var stub = new StubClient
+            { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
         using var client = new RoutingGateAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<RoutingGateAdminException>(() => client.SetAsync(false, TestContext.Current.CancellationToken));
+        var ex = await Assert.ThrowsAsync<RoutingGateAdminException>(() =>
+            client.SetAsync(false, cancellationToken: TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not update the routing gate: boom");
         ex.IsUnavailable.Should().BeFalse();
@@ -66,10 +70,12 @@ public class RoutingGateAdminClientTests
     [Fact]
     public async Task A_rejected_read_names_the_read_not_the_update()
     {
-        var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.Internal, "boom")) };
+        var stub = new StubClient
+            { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
         using var client = new RoutingGateAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<RoutingGateAdminException>(() => client.GetAsync(TestContext.Current.CancellationToken));
+        var ex = await Assert.ThrowsAsync<RoutingGateAdminException>(() =>
+            client.GetAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read the routing gate: boom");
         ex.IsUnavailable.Should().BeFalse();
@@ -121,8 +127,10 @@ public class RoutingGateAdminClientTests
 
         public override AsyncUnaryCall<Contract.RoutingGateResponse> GetRoutingGateAsync(
             Contract.GetRoutingGateRequest request,
-            CallOptions options) =>
-            Respond();
+            CallOptions options)
+        {
+            return Respond();
+        }
 
         public override AsyncUnaryCall<Contract.RoutingGateResponse> SetRoutingGateAsync(
             Contract.SetRoutingGateRequest request,
@@ -132,12 +140,16 @@ public class RoutingGateAdminClientTests
             return Respond();
         }
 
-        private AsyncUnaryCall<Contract.RoutingGateResponse> Respond() =>
-            new(
-                Failure is null ? Task.FromResult(Response) : Task.FromException<Contract.RoutingGateResponse>(Failure),
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => [],
-                () => { });
+        private AsyncUnaryCall<Contract.RoutingGateResponse> Respond()
+        {
+            return new AsyncUnaryCall<Contract.RoutingGateResponse>(
+                responseAsync: Failure is null
+                    ? Task.FromResult(Response)
+                    : Task.FromException<Contract.RoutingGateResponse>(Failure),
+                responseHeadersAsync: Task.FromResult(new Metadata()),
+                getStatusFunc: () => Status.DefaultSuccess,
+                getTrailersFunc: () => [],
+                disposeAction: () => { });
+        }
     }
 }

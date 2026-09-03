@@ -8,7 +8,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// Rewrites an OpenAI-shaped chat request into one a model with no native tool calling can actually
 /// answer: the <c>tools</c> array becomes instructions in the system prompt, and any tool-calling history
 /// becomes plain text (<c>docs/router/tool-call-normalization.md</c> Phase 5).
-///
 /// <para>
 /// Pure and static by design - no I/O, no per-request state - so every branch below is testable against a
 /// JSON string with no proxy, no HTTP, and no capability store. The stateful half of emulation is the
@@ -16,7 +15,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// <see cref="ToolCallNormalizingTranslator"/>'s existing job: emulation teaches the dialect the scanner
 /// already reads, so there is no second parser.
 /// </para>
-///
 /// <para>
 /// <b>Multi-turn is the part that is easy to get wrong.</b> Rewriting only the first request works exactly
 /// once. The turn after a tool runs, the client sends back an assistant message carrying
@@ -36,13 +34,17 @@ internal static class ToolCallEmulationRewriter
     /// is not a JSON object this can safely touch.
     /// </summary>
     /// <param name="openAiShapedBody">The request body as the client sent it (with <c>model</c> already rewritten).</param>
-    /// <param name="dialect">The dialect being taught - supplies both the delimiters and the instruction preamble, so teaching and re-rendering cannot drift apart.</param>
+    /// <param name="dialect">
+    /// The dialect being taught - supplies both the delimiters and the instruction preamble, so teaching
+    /// and re-rendering cannot drift apart.
+    /// </param>
     /// <param name="logger">Logger for the bounded-overhead warning.</param>
     /// <param name="contextWindow">
     /// The model's probed context window, if known, forwarded to <see cref="ToolCallInstructionInjector.Inject"/>
     /// so the schema budget scales to it instead of the fixed fallback.
     /// </param>
-    public static byte[] Rewrite(byte[] openAiShapedBody, ToolCallDialect dialect, ILogger logger, ModelContextWindow? contextWindow = null)
+    public static byte[] Rewrite(byte[] openAiShapedBody, ToolCallDialect dialect, ILogger logger,
+        ModelContextWindow? contextWindow = null)
     {
         ArgumentNullException.ThrowIfNull(openAiShapedBody);
         ArgumentNullException.ThrowIfNull(dialect);
@@ -51,7 +53,8 @@ internal static class ToolCallEmulationRewriter
         JsonObject root;
         try
         {
-            root = JsonNode.Parse(openAiShapedBody) as JsonObject ?? throw new JsonException("Request body was not a JSON object.");
+            root = JsonNode.Parse(openAiShapedBody) as JsonObject ??
+                   throw new JsonException("Request body was not a JSON object.");
         }
         catch (JsonException)
         {
@@ -62,14 +65,12 @@ internal static class ToolCallEmulationRewriter
         }
 
         if (root["messages"] is not JsonArray messages)
-        {
             // Not a chat-completions body, so there is nowhere to put the instructions. Checked *before*
             // anything is removed, because stripping without injecting is the one outcome worse than not
             // rewriting at all: the request would lose tool calling and gain nothing in its place, which
             // is exactly the silent-drop failure this whole workstream exists to prevent. Everything this
             // type knows how to do lives in `messages`; without it the only safe rewrite is none.
             return openAiShapedBody;
-        }
 
         var tools = root["tools"] as JsonArray;
 
@@ -85,19 +86,17 @@ internal static class ToolCallEmulationRewriter
         // Swapped in wholesale rather than emptied and refilled. A JsonNode has exactly one parent, so
         // copying the rendered nodes back into the original array would mean cloning every one of them a
         // second time purely to re-parent it; replacing the array moves the whole list for free.
-        var rendered = ToolCallHistoryRenderer.Render(messages, dialect, ToolCallHistoryStyle.Delimited);
+        var rendered = ToolCallHistoryRenderer.Render(messages: messages, dialect: dialect,
+            style: ToolCallHistoryStyle.Delimited);
         root["messages"] = rendered;
 
         // Only teach when there is something to teach. A follow-up turn that carries history but no tools
         // still needs its history re-rendered above - the model must be able to read its own prior turn
         // either way.
         if (tools is { Count: > 0 })
-        {
-            ToolCallInstructionInjector.Inject(rendered, tools, dialect, logger, contextWindow);
-        }
+            ToolCallInstructionInjector.Inject(messages: rendered, tools: tools, dialect: dialect, logger: logger,
+                contextWindow: contextWindow);
 
         return Encoding.UTF8.GetBytes(root.ToJsonString(SerializerOptions));
     }
-
 }
-

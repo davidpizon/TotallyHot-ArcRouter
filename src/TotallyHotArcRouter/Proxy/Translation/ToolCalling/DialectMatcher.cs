@@ -7,8 +7,14 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// <summary>
 /// The result of scanning one complete assistant message for tool calls in a given dialect.
 /// </summary>
-/// <param name="Dialect">The dialect the scan ran under - carried so <see cref="DialectMatcher.MatchAny"/>'s caller learns *which* dialect matched, which is what Phase 4 persists as the model's detected capability.</param>
-/// <param name="ToolCalls">Every well-shaped call found, in the order they appear. Empty when the dialect's delimiters never matched, or matched but framed nothing parseable.</param>
+/// <param name="Dialect">
+/// The dialect the scan ran under - carried so <see cref="DialectMatcher.MatchAny"/>'s caller learns
+/// *which* dialect matched, which is what Phase 4 persists as the model's detected capability.
+/// </param>
+/// <param name="ToolCalls">
+/// Every well-shaped call found, in the order they appear. Empty when the dialect's delimiters
+/// never matched, or matched but framed nothing parseable.
+/// </param>
 /// <param name="ResidualContent">
 /// Everything outside a successfully-rewritten region, concatenated in order - what the client should
 /// still receive as ordinary assistant content. A region that failed to parse contributes its **raw
@@ -22,7 +28,6 @@ internal sealed record DialectMatchResult(
 /// <summary>
 /// Finds dialect-framed tool calls in a complete assistant message (see
 /// <c>docs/router/tool-call-normalization.md</c> §3.1).
-///
 /// <para>
 /// This operates on a **whole message**, deliberately. The hard part of the shipping echo guard is
 /// that a slow local model streams one token per SSE event, so a delimiter can be split across
@@ -31,7 +36,6 @@ internal sealed record DialectMatchResult(
 /// with no streaming harness, and Phase 4's stateful stream translator has one job (deciding when a
 /// complete region has arrived) rather than two.
 /// </para>
-///
 /// <para>
 /// Fail-open is the invariant, matching <c>unified-api-translation.md</c> §4.5: anything that does not
 /// parse into a real call is forwarded as ordinary text, never dropped and never thrown on. A
@@ -56,9 +60,7 @@ internal static class DialectMatcher
         ArgumentNullException.ThrowIfNull(dialect);
 
         if (!dialect.IsScannable || content.Length == 0)
-        {
-            return new DialectMatchResult(dialect, [], content);
-        }
+            return new DialectMatchResult(Dialect: dialect, ToolCalls: [], ResidualContent: content);
 
         var calls = new List<ExtractedToolCall>();
         var residual = new StringBuilder();
@@ -66,13 +68,14 @@ internal static class DialectMatcher
 
         while (position < content.Length)
         {
-            if (!TryFindNextOpener(content, position, dialect, out var openIndex, out var delimiter))
+            if (!TryFindNextOpener(content: content, startIndex: position, dialect: dialect,
+                    openIndex: out var openIndex, delimiter: out var delimiter))
             {
-                residual.Append(content, position, content.Length - position);
+                residual.Append(value: content, startIndex: position, count: content.Length - position);
                 break;
             }
 
-            residual.Append(content, position, openIndex - position);
+            residual.Append(value: content, startIndex: position, count: openIndex - position);
 
             var bodyStart = openIndex + delimiter.Open.Length;
             int bodyEnd;
@@ -86,13 +89,14 @@ internal static class DialectMatcher
             }
             else
             {
-                var closeIndex = content.IndexOf(delimiter.Close, bodyStart, StringComparison.Ordinal);
+                var closeIndex = content.IndexOf(value: delimiter.Close, startIndex: bodyStart,
+                    comparisonType: StringComparison.Ordinal);
                 if (closeIndex < 0)
                 {
                     // An unterminated region - the model was cut off mid-call, or the "delimiter" was
                     // really prose. Forward everything from the opener onward verbatim and stop: there
                     // is no trustworthy place to resume scanning inside text we could not frame.
-                    residual.Append(content, openIndex, content.Length - openIndex);
+                    residual.Append(value: content, startIndex: openIndex, count: content.Length - openIndex);
                     break;
                 }
 
@@ -100,29 +104,24 @@ internal static class DialectMatcher
                 regionEnd = closeIndex + delimiter.Close.Length;
             }
 
-            var extracted = ExtractFromRegionBody(content[bodyStart..bodyEnd], dialect);
+            var extracted = ExtractFromRegionBody(body: content[bodyStart..bodyEnd], dialect: dialect);
             if (extracted.Count == 0)
-            {
                 // Framed, but not a call - most often the *schema* documentation echoed back (which has
                 // no top-level name/arguments), or malformed JSON. Fail open with the raw region,
                 // delimiters included, exactly as the shipping guard does.
-                residual.Append(content, openIndex, regionEnd - openIndex);
-            }
+                residual.Append(value: content, startIndex: openIndex, count: regionEnd - openIndex);
             else
-            {
                 calls.AddRange(extracted);
-            }
 
             position = regionEnd;
         }
 
-        return new DialectMatchResult(dialect, calls, residual.ToString());
+        return new DialectMatchResult(Dialect: dialect, ToolCalls: calls, ResidualContent: residual.ToString());
     }
 
     /// <summary>
     /// Scans <paramref name="content"/> against several dialects and returns the first that yields at
     /// least one well-shaped call, or <see langword="null"/> when none do.
-    ///
     /// <para>
     /// This is the union scan Phase 4 arms for a model whose dialect is not yet known: the first live
     /// request carrying <c>tools</c> is forwarded natively and its response classified here, so
@@ -139,11 +138,8 @@ internal static class DialectMatcher
 
         foreach (var candidate in candidates)
         {
-            var result = ExtractToolCalls(content, candidate);
-            if (result.ToolCalls.Count > 0)
-            {
-                return result;
-            }
+            var result = ExtractToolCalls(content: content, dialect: candidate);
+            if (result.ToolCalls.Count > 0) return result;
         }
 
         return null;
@@ -166,11 +162,9 @@ internal static class DialectMatcher
 
         foreach (var candidate in dialect.Delimiters)
         {
-            var index = content.IndexOf(candidate.Open, startIndex, StringComparison.Ordinal);
-            if (index < 0)
-            {
-                continue;
-            }
+            var index = content.IndexOf(value: candidate.Open, startIndex: startIndex,
+                comparisonType: StringComparison.Ordinal);
+            if (index < 0) continue;
 
             if (openIndex < 0 || index < openIndex ||
                 (index == openIndex && candidate.Open.Length > delimiter.Open.Length))
@@ -186,14 +180,12 @@ internal static class DialectMatcher
     /// <summary>
     /// Pulls every well-shaped call out of one framed region's body: a JSON object carrying a non-empty
     /// string under the dialect's name key plus any value under its arguments key.
-    ///
     /// <para>
     /// Reuses <see cref="JsonObjectScanner.FindTopLevelJsonObjects"/> rather than reimplementing it -
     /// that scan's brace balancing correctly ignores braces inside quoted strings and escape sequences,
     /// and is entirely dialect-independent. It also means a JSON *array* payload needs no special
     /// handling: <c>[{a},{b}]</c> yields both objects exactly as two sequential objects would.
     /// </para>
-    ///
     /// <para>
     /// Internal rather than private so <see cref="ToolCallNormalizingStreamTranslator"/> can call it
     /// directly. That translator owns delimiter framing itself, because a delimiter can be split across
@@ -219,22 +211,14 @@ internal static class DialectMatcher
                 continue;
             }
 
-            if (node is not JsonObject obj)
-            {
-                continue;
-            }
+            if (node is not JsonObject obj) continue;
 
             if (obj[dialect.NameKey] is not JsonValue nameValue ||
                 !nameValue.TryGetValue<string>(out var name) ||
                 string.IsNullOrEmpty(name))
-            {
                 continue;
-            }
 
-            if (obj[dialect.ArgumentsKey] is not { } argumentsNode)
-            {
-                continue;
-            }
+            if (obj[dialect.ArgumentsKey] is not { } argumentsNode) continue;
 
             // OpenAI's tool_calls delta always carries function.arguments as an already-serialized JSON
             // string, never a nested object - so an object-shaped payload is serialized here, while a
@@ -243,10 +227,9 @@ internal static class DialectMatcher
                 ? raw
                 : argumentsNode.ToJsonString(SerializerOptions);
 
-            results.Add(new ExtractedToolCall(name, argumentsJson));
+            results.Add(new ExtractedToolCall(Name: name, ArgumentsJson: argumentsJson));
         }
 
         return results;
     }
 }
-

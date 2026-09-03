@@ -13,12 +13,17 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 public sealed class BenchmarkDataStore : IDisposable
 {
     private readonly IBenchmarkDataAdminClient _client;
-    private readonly IDisposable? _ownedClient;
     private readonly ILogger<BenchmarkDataStore>? _logger;
+    private readonly IDisposable? _ownedClient;
+
+    private Dictionary<string, BenchmarkSyncProgressInfo> _syncProgress = [];
 
     /// <summary>Initializes a new instance of the <see cref="BenchmarkDataStore"/> class.</summary>
     /// <param name="logger">Optional logger.</param>
-    /// <param name="serverAddress">The proxy's TLS gRPC endpoint; defaults to <see cref="TelemetryChannelFactory.DefaultServerAddress"/>.</param>
+    /// <param name="serverAddress">
+    /// The proxy's TLS gRPC endpoint; defaults to
+    /// <see cref="TelemetryChannelFactory.DefaultServerAddress"/>.
+    /// </param>
     public BenchmarkDataStore(
         ILogger<BenchmarkDataStore>? logger = null,
         string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
@@ -73,8 +78,6 @@ public sealed class BenchmarkDataStore : IDisposable
     /// </summary>
     public IReadOnlyDictionary<string, BenchmarkSyncProgressInfo> SyncProgress => _syncProgress;
 
-    private Dictionary<string, BenchmarkSyncProgressInfo> _syncProgress = [];
-
     /// <summary>
     /// The current sync's up-front plan - the stale files it will download and their combined size -
     /// published as the first event on the stream. <see langword="null"/> before that first event
@@ -99,21 +102,24 @@ public sealed class BenchmarkDataStore : IDisposable
         ? 0
         : SyncPlan.Files.Sum(file =>
         {
-            if (!_syncProgress.TryGetValue(file.FileName, out var progress))
-            {
-                return 0L;
-            }
+            if (!_syncProgress.TryGetValue(key: file.FileName, value: out var progress)) return 0L;
 
             return progress.Stage switch
             {
                 BenchmarkSyncStageInfo.Verifying or BenchmarkSyncStageInfo.Importing or BenchmarkSyncStageInfo.Completed
                     => file.SizeBytes,
-                _ => Math.Min(progress.BytesTransferred ?? 0, file.SizeBytes),
+                _ => Math.Min(val1: progress.BytesTransferred ?? 0, val2: file.SizeBytes)
             };
         });
 
     /// <summary>The combined planned size of every file in <see cref="SyncPlan"/>, or 0 before the plan arrives.</summary>
     public long CumulativeTotalBytes => SyncPlan?.TotalBytes ?? 0;
+
+    /// <inheritdoc/>
+    public void Dispose()
+    {
+        _ownedClient?.Dispose();
+    }
 
     /// <summary>Raised after any of the above change.</summary>
     public event Action? Changed;
@@ -141,7 +147,7 @@ public sealed class BenchmarkDataStore : IDisposable
         {
             IsReachable = !ex.IsUnavailable;
             LastError = ex.Message;
-            _logger?.LogWarning(ex, "Failed to load the benchmark data status from the router.");
+            _logger?.LogWarning(exception: ex, message: "Failed to load the benchmark data status from the router.");
         }
         finally
         {
@@ -201,14 +207,12 @@ public sealed class BenchmarkDataStore : IDisposable
                     // Certain stages (Failed, Verifying) often omit BytesTransferred/TotalBytes; carry the
                     // prior non-null values forward so a file's cumulative progress cannot regress to 0
                     // just because the latest event didn't repeat them.
-                    if (_syncProgress.TryGetValue(progress.FileName, out var previous))
-                    {
+                    if (_syncProgress.TryGetValue(key: progress.FileName, value: out var previous))
                         progress = progress with
                         {
                             BytesTransferred = progress.BytesTransferred ?? previous.BytesTransferred,
-                            TotalBytes = progress.TotalBytes ?? previous.TotalBytes,
+                            TotalBytes = progress.TotalBytes ?? previous.TotalBytes
                         };
-                    }
 
                     _syncProgress[progress.FileName] = progress;
                     CurrentFileName = progress.FileName;
@@ -250,17 +254,11 @@ public sealed class BenchmarkDataStore : IDisposable
     /// </remarks>
     private void RecordFailure(BenchmarkDataAdminException ex)
     {
-        if (!ex.IsUnavailable)
-        {
-            return;
-        }
+        if (!ex.IsUnavailable) return;
 
         IsReachable = false;
         LastError = ex.Message;
-        _logger?.LogWarning(ex, "The router became unreachable during a benchmark-data operation.");
+        _logger?.LogWarning(exception: ex, message: "The router became unreachable during a benchmark-data operation.");
         Changed?.Invoke();
     }
-
-    /// <inheritdoc />
-    public void Dispose() => _ownedClient?.Dispose();
 }

@@ -13,63 +13,64 @@ public class ChartJsonTests
     public void Serialize_CostChartModel_UsesRendererFieldNames()
     {
         var model = new CostChartModel(
-            CostChartKind.SegmentedStepBars,
-            "Tool Execution Steps",
-            "steps",
-            "8",
+            Kind: CostChartKind.SegmentedStepBars,
+            Title: "Tool Execution Steps",
+            Unit: "steps",
+            Headline: "8",
             null,
-            [new CostModelColor("a", "#111111")],
+            Models: [new CostModelColor(Model: "a", Color: "#111111")],
+            Points:
             [
                 new CostChartPoint(
-                    T: 1_720_000_000_000,
+                    1_720_000_000_000,
                     Label: "Turn #1",
                     Model: "a",
                     Color: "#111111",
-                    Value: 8m,
-                    Secondary: 0m,
-                    Flag: false,
+                    8m,
+                    0m,
+                    false,
                     Tip: ["a: 8 steps"],
-                    Segments: [new CostChartSegment("a", "#111111", 8)]),
+                    Segments: [new CostChartSegment(Model: "a", Color: "#111111", 8)])
             ]);
 
         using var doc = JsonDocument.Parse(ChartJson.Serialize(model));
         var root = doc.RootElement;
 
-        Assert.Equal("SegmentedStepBars", root.GetProperty("kind").GetString());
-        Assert.Equal("steps", root.GetProperty("unit").GetString());
+        Assert.Equal(expected: "SegmentedStepBars", actual: root.GetProperty("kind").GetString());
+        Assert.Equal(expected: "steps", actual: root.GetProperty("unit").GetString());
         var point = root.GetProperty("points")[0];
-        Assert.Equal(1_720_000_000_000, point.GetProperty("t").GetInt64());
-        Assert.Equal("Turn #1", point.GetProperty("label").GetString());
+        Assert.Equal(1_720_000_000_000, actual: point.GetProperty("t").GetInt64());
+        Assert.Equal(expected: "Turn #1", actual: point.GetProperty("label").GetString());
         Assert.False(point.GetProperty("flag").GetBoolean());
-        Assert.Equal("a: 8 steps", point.GetProperty("tip")[0].GetString());
-        Assert.Equal(8, point.GetProperty("segments")[0].GetProperty("steps").GetInt32());
+        Assert.Equal(expected: "a: 8 steps", actual: point.GetProperty("tip")[0].GetString());
+        Assert.Equal(8, actual: point.GetProperty("segments")[0].GetProperty("steps").GetInt32());
     }
 
     [Fact]
     public void Serialize_NullThreshold_IsOmitted()
     {
-        var model = new CostChartModel(CostChartKind.CacheGradientLine, "Cache", "%", "0%", null, [], []);
+        var model = new CostChartModel(Kind: CostChartKind.CacheGradientLine, Title: "Cache", Unit: "%", Headline: "0%",
+            null, Models: [], Points: []);
 
         using var doc = JsonDocument.Parse(ChartJson.Serialize(model));
 
-        Assert.False(doc.RootElement.TryGetProperty("threshold", out _));
+        Assert.False(doc.RootElement.TryGetProperty(propertyName: "threshold", value: out _));
     }
 
     [Fact]
     public void Serialize_GroupedBarsModel_UsesRendererFieldNames()
     {
         var model = new GroupedBarsModel(
-            "Token Volume Histogram",
-            ["Mon", "Tue"],
+            title: "Token Volume Histogram",
+            categories: ["Mon", "Tue"],
             6_000_000m,
-            [new DistributionSeries("Prompt", "#38bdf8", [2_840_000m, 3_120_000m])]);
+            series: [new DistributionSeries(Name: "Prompt", Color: "#38bdf8", Data: [2_840_000m, 3_120_000m])]);
 
         using var doc = JsonDocument.Parse(ChartJson.Serialize(model));
         var root = doc.RootElement;
 
-        Assert.Equal("GroupedBars", root.GetProperty("kind").GetString());
-        Assert.Equal(6_000_000, root.GetProperty("yMax").GetDecimal());
-        Assert.Equal("Prompt", root.GetProperty("series")[0].GetProperty("name").GetString());
+        Assert.Equal(expected: "GroupedBars", actual: root.GetProperty("kind").GetString());
+        Assert.Equal(6_000_000, actual: root.GetProperty("yMax").GetDecimal());
+        Assert.Equal(expected: "Prompt", actual: root.GetProperty("series")[0].GetProperty("name").GetString());
     }
 }
-

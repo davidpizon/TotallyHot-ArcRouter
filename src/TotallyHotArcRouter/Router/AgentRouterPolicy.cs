@@ -16,31 +16,29 @@ public sealed class AgentRouterPolicy : IRoutingPolicy
         _router = router;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<string> SelectModelAsync(RoutingContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
 
         if (context.Candidates.Count == 0)
-        {
             throw new InvalidOperationException("AgentRouterPolicy requires at least one candidate.");
-        }
 
-        var decision = await _router.SelectModelAsync(context.Dimension, cancellationToken);
+        var decision =
+            await _router.SelectModelAsync(dimension: context.Dimension, cancellationToken: cancellationToken);
 
         // Ensure the selected model is in the candidates list to satisfy IRoutingPolicy contract.
         // Use case-insensitive comparison to match ModelRouteResolver resolution behavior.
         var selectedModel = decision.SelectedModel;
-        if (context.Candidates.Any(c => c.ModelName.Equals(selectedModel, StringComparison.OrdinalIgnoreCase)))
-        {
+        if (context.Candidates.Any(c =>
+                c.ModelName.Equals(value: selectedModel, comparisonType: StringComparison.OrdinalIgnoreCase)))
             return selectedModel;
-        }
 
         // Fallback when the selection is not eligible: pick deterministically by name so the outcome
         // never depends on RoutingContext.Candidates' caller-supplied ordering.
         return context.Candidates
             .Select(c => c.ModelName)
-            .OrderBy(name => name, StringComparer.Ordinal)
+            .OrderBy(keySelector: name => name, comparer: StringComparer.Ordinal)
             .First();
     }
 }

@@ -25,8 +25,8 @@ public class LlmRouterModelAdminClientTests
             StatusResponse = new Contract.LlmRouterModelStatusResponse
             {
                 BaseUrl = "https://huggingface.co/org/model/resolve/main",
-                Current = true,
-            },
+                Current = true
+            }
         };
         using var client = new LlmRouterModelAdminClient(stub);
 
@@ -39,7 +39,7 @@ public class LlmRouterModelAdminClientTests
     [Fact]
     public async Task GetStatusAsync_maps_every_file_including_unsynced_and_optional_ones()
     {
-        var syncedAt = new DateTimeOffset(2026, 7, 16, 12, 0, 0, TimeSpan.Zero);
+        var syncedAt = new DateTimeOffset(2026, 7, 16, 12, 0, 0, offset: TimeSpan.Zero);
         var stub = new StubClient
         {
             StatusResponse = new Contract.LlmRouterModelStatusResponse
@@ -52,16 +52,16 @@ public class LlmRouterModelAdminClientTests
                         Synced = true,
                         SizeBytes = 42,
                         SyncedAtUtc = Timestamp.FromDateTimeOffset(syncedAt),
-                        ChecksumVerified = true,
+                        ChecksumVerified = true
                     },
                     new Contract.LlmRouterModelFile
                     {
                         FileName = "model.onnx.data",
                         Synced = false,
-                        IsOptional = true,
-                    },
-                },
-            },
+                        IsOptional = true
+                    }
+                }
+            }
         };
         using var client = new LlmRouterModelAdminClient(stub);
 
@@ -88,14 +88,14 @@ public class LlmRouterModelAdminClientTests
             SetBaseUrlResponse = new Contract.LlmRouterModelStatusResponse
             {
                 BaseUrl = "https://huggingface.co/org/other-model/resolve/main",
-                Current = false,
-            },
+                Current = false
+            }
         };
         using var client = new LlmRouterModelAdminClient(stub);
 
         var status = await client.SetBaseUrlAsync(
-            "https://huggingface.co/org/other-model/resolve/main",
-            TestContext.Current.CancellationToken);
+            baseUrl: "https://huggingface.co/org/other-model/resolve/main",
+            cancellationToken: TestContext.Current.CancellationToken);
 
         stub.LastSetBaseUrlRequest!.BaseUrl.Should().Be("https://huggingface.co/org/other-model/resolve/main");
         status.BaseUrl.Should().Be("https://huggingface.co/org/other-model/resolve/main");
@@ -109,8 +109,8 @@ public class LlmRouterModelAdminClientTests
     {
         using var client = new LlmRouterModelAdminClient(new StubClient());
 
-        await Assert.ThrowsAsync<ArgumentException>(
-            () => client.SetBaseUrlAsync(baseUrl, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            client.SetBaseUrlAsync(baseUrl: baseUrl, cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -118,8 +118,8 @@ public class LlmRouterModelAdminClientTests
     {
         using var client = new LlmRouterModelAdminClient(new StubClient());
 
-        await Assert.ThrowsAsync<ArgumentNullException>(
-            () => client.SetBaseUrlAsync(null!, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            client.SetBaseUrlAsync(baseUrl: null!, cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -135,30 +135,27 @@ public class LlmRouterModelAdminClientTests
                     {
                         FileName = "model.onnx",
                         Stage = Contract.LlmRouterModelSyncStage.Downloading,
-                        BytesTransferred = 100,
-                    },
+                        BytesTransferred = 100
+                    }
                 },
                 new Contract.LlmRouterModelSyncStreamEvent
                 {
                     Progress = new Contract.LlmRouterModelSyncProgressEvent
                     {
                         FileName = "model.onnx",
-                        Stage = Contract.LlmRouterModelSyncStage.Completed,
-                    },
+                        Stage = Contract.LlmRouterModelSyncStage.Completed
+                    }
                 },
                 new Contract.LlmRouterModelSyncStreamEvent
                 {
-                    FinalStatus = new Contract.LlmRouterModelStatusResponse { Current = true },
-                },
-            ],
+                    FinalStatus = new Contract.LlmRouterModelStatusResponse { Current = true }
+                }
+            ]
         };
         using var client = new LlmRouterModelAdminClient(stub);
 
         var events = new List<LlmRouterModelSyncEvent>();
-        await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken))
-        {
-            events.Add(e);
-        }
+        await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken)) events.Add(e);
 
         events.Should().HaveCount(3);
         events[0].Progress!.Stage.Should().Be(LlmRouterModelSyncStageInfo.Downloading);
@@ -185,20 +182,17 @@ public class LlmRouterModelAdminClientTests
                         Files =
                         {
                             new Contract.LlmRouterModelSyncPlanFile { FileName = "model.onnx", SizeBytes = 42 },
-                            new Contract.LlmRouterModelSyncPlanFile { FileName = "tokenizer.json", SizeBytes = 8 },
+                            new Contract.LlmRouterModelSyncPlanFile { FileName = "tokenizer.json", SizeBytes = 8 }
                         },
-                        TotalBytes = 50,
-                    },
-                },
-            ],
+                        TotalBytes = 50
+                    }
+                }
+            ]
         };
         using var client = new LlmRouterModelAdminClient(stub);
 
         var events = new List<LlmRouterModelSyncEvent>();
-        await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken))
-        {
-            events.Add(e);
-        }
+        await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken)) events.Add(e);
 
         var plan = events.Single().Plan;
         plan.Should().NotBeNull();
@@ -222,18 +216,15 @@ public class LlmRouterModelAdminClientTests
                         FileName = "model.onnx",
                         Stage = Contract.LlmRouterModelSyncStage.Downloading,
                         BytesTransferred = 10,
-                        TotalBytes = 42,
-                    },
-                },
-            ],
+                        TotalBytes = 42
+                    }
+                }
+            ]
         };
         using var client = new LlmRouterModelAdminClient(stub);
 
         var events = new List<LlmRouterModelSyncEvent>();
-        await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken))
-        {
-            events.Add(e);
-        }
+        await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken)) events.Add(e);
 
         events.Single().Progress!.TotalBytes.Should().Be(42);
     }
@@ -251,18 +242,15 @@ public class LlmRouterModelAdminClientTests
                     {
                         FileName = "model.onnx",
                         Stage = Contract.LlmRouterModelSyncStage.Failed,
-                        Error = "checksum mismatch",
-                    },
-                },
-            ],
+                        Error = "checksum mismatch"
+                    }
+                }
+            ]
         };
         using var client = new LlmRouterModelAdminClient(stub);
 
         var events = new List<LlmRouterModelSyncEvent>();
-        await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken))
-        {
-            events.Add(e);
-        }
+        await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken)) events.Add(e);
 
         events.Single().Progress!.Error.Should().Be("checksum mismatch");
     }
@@ -286,7 +274,8 @@ public class LlmRouterModelAdminClientTests
     [Fact]
     public async Task SyncAsync_wraps_a_mid_stream_failure()
     {
-        var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.Unavailable, "failed to connect")) };
+        var stub = new StubClient
+            { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new LlmRouterModelAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<LlmRouterModelAdminException>(async () =>
@@ -303,10 +292,12 @@ public class LlmRouterModelAdminClientTests
     [Fact]
     public async Task Unavailable_becomes_a_plain_language_message()
     {
-        var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.Unavailable, "failed to connect")) };
+        var stub = new StubClient
+            { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new LlmRouterModelAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<LlmRouterModelAdminException>(() => client.GetStatusAsync(TestContext.Current.CancellationToken));
+        var ex = await Assert.ThrowsAsync<LlmRouterModelAdminException>(() =>
+            client.GetStatusAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read the llm_router model status: the router is not reachable.");
         ex.IsUnavailable.Should().BeTrue();
@@ -315,11 +306,13 @@ public class LlmRouterModelAdminClientTests
     [Fact]
     public async Task A_server_rejection_keeps_the_servers_own_detail_and_is_not_flagged_unavailable()
     {
-        var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.Internal, "boom")) };
+        var stub = new StubClient
+            { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
         using var client = new LlmRouterModelAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<LlmRouterModelAdminException>(
-            () => client.SetBaseUrlAsync("https://huggingface.co/org/model/resolve/main", TestContext.Current.CancellationToken));
+        var ex = await Assert.ThrowsAsync<LlmRouterModelAdminException>(() =>
+            client.SetBaseUrlAsync(baseUrl: "https://huggingface.co/org/model/resolve/main",
+                cancellationToken: TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not switch the llm_router model: boom");
         ex.IsUnavailable.Should().BeFalse();
@@ -359,10 +352,7 @@ public class LlmRouterModelAdminClientTests
         public Task<bool> MoveNext(CancellationToken cancellationToken)
         {
             _index++;
-            if (_index >= messages.Count)
-            {
-                return Task.FromResult(false);
-            }
+            if (_index >= messages.Count) return Task.FromResult(false);
 
             Current = messages[_index];
             return Task.FromResult(true);
@@ -387,8 +377,10 @@ public class LlmRouterModelAdminClientTests
 
         public override AsyncUnaryCall<Contract.LlmRouterModelStatusResponse> GetLlmRouterModelStatusAsync(
             Contract.GetLlmRouterModelStatusRequest request,
-            CallOptions options) =>
-            Call(StatusResponse);
+            CallOptions options)
+        {
+            return Call(StatusResponse);
+        }
 
         public override AsyncUnaryCall<Contract.LlmRouterModelStatusResponse> SetLlmRouterModelBaseUrlAsync(
             Contract.SetLlmRouterModelBaseUrlRequest request,
@@ -407,26 +399,32 @@ public class LlmRouterModelAdminClientTests
                 : new ThrowingStreamReader(Failure);
 
             return new AsyncServerStreamingCall<Contract.LlmRouterModelSyncStreamEvent>(
-                reader,
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => [],
-                () => { });
+                responseStream: reader,
+                responseHeadersAsync: Task.FromResult(new Metadata()),
+                getStatusFunc: () => Status.DefaultSuccess,
+                getTrailersFunc: () => [],
+                disposeAction: () => { });
         }
 
-        private AsyncUnaryCall<T> Call<T>(T response) =>
-            new(
-                Failure is null ? Task.FromResult(response) : Task.FromException<T>(Failure),
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => [],
-                () => { });
+        private AsyncUnaryCall<T> Call<T>(T response)
+        {
+            return new AsyncUnaryCall<T>(
+                responseAsync: Failure is null ? Task.FromResult(response) : Task.FromException<T>(Failure),
+                responseHeadersAsync: Task.FromResult(new Metadata()),
+                getStatusFunc: () => Status.DefaultSuccess,
+                getTrailersFunc: () => [],
+                disposeAction: () => { });
+        }
 
-        private sealed class ThrowingStreamReader(RpcException failure) : IAsyncStreamReader<Contract.LlmRouterModelSyncStreamEvent>
+        private sealed class ThrowingStreamReader(RpcException failure)
+            : IAsyncStreamReader<Contract.LlmRouterModelSyncStreamEvent>
         {
             public Contract.LlmRouterModelSyncStreamEvent Current => throw failure;
 
-            public Task<bool> MoveNext(CancellationToken cancellationToken) => Task.FromException<bool>(failure);
+            public Task<bool> MoveNext(CancellationToken cancellationToken)
+            {
+                return Task.FromException<bool>(failure);
+            }
         }
     }
 }

@@ -11,7 +11,10 @@ public sealed class DimensionModelScoreMatrix
 {
     private readonly IReadOnlyDictionary<(string Dimension, string Model), double> _averages;
 
-    /// <summary>Initializes a new instance of the <see cref="DimensionModelScoreMatrix"/> class from already-aggregated averages.</summary>
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DimensionModelScoreMatrix"/> class from already-aggregated
+    /// averages.
+    /// </summary>
     /// <param name="averages">The per (dimension, model) average scores, keyed with an already-canonicalized model id.</param>
     private DimensionModelScoreMatrix(IReadOnlyDictionary<(string Dimension, string Model), double> averages)
     {
@@ -38,11 +41,12 @@ public sealed class DimensionModelScoreMatrix
         foreach (var row in rows)
         {
             var key = (row.Dimension, ModelNameCanonicalizer.Canonicalize(row.Model));
-            var (sum, count) = accumulators.TryGetValue(key, out var existing) ? existing : (0.0, 0);
+            var (sum, count) = accumulators.TryGetValue(key: key, value: out var existing) ? existing : (0.0, 0);
             accumulators[key] = (sum + row.Score, count + 1);
         }
 
-        var averages = accumulators.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.Sum / kvp.Value.Count);
+        var averages = accumulators.ToDictionary(keySelector: kvp => kvp.Key,
+            elementSelector: kvp => kvp.Value.Sum / kvp.Value.Count);
         return new DimensionModelScoreMatrix(averages);
     }
 
@@ -69,7 +73,7 @@ public sealed class DimensionModelScoreMatrix
         using var connection = database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT dimension, model, score FROM benchmark_id_results WHERE split = $split;";
-        command.Parameters.AddWithValue("$split", split);
+        command.Parameters.AddWithValue(parameterName: "$split", value: split);
 
         Dictionary<(string, string), (double Sum, int Count)> accumulators = [];
         using var reader = command.ExecuteReader();
@@ -77,11 +81,12 @@ public sealed class DimensionModelScoreMatrix
         {
             var key = (reader.GetString(0), ModelNameCanonicalizer.Canonicalize(reader.GetString(1)));
             var score = reader.GetDouble(2);
-            var (sum, count) = accumulators.TryGetValue(key, out var existing) ? existing : (0.0, 0);
+            var (sum, count) = accumulators.TryGetValue(key: key, value: out var existing) ? existing : (0.0, 0);
             accumulators[key] = (sum + score, count + 1);
         }
 
-        var averages = accumulators.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.Sum / kvp.Value.Count);
+        var averages = accumulators.ToDictionary(keySelector: kvp => kvp.Key,
+            elementSelector: kvp => kvp.Value.Sum / kvp.Value.Count);
         return new DimensionModelScoreMatrix(averages);
     }
 
@@ -94,6 +99,11 @@ public sealed class DimensionModelScoreMatrix
     /// Any spelling of a model id - a configured <c>ModelName</c> or the dataset's own - matched through
     /// <see cref="ModelNameCanonicalizer.Canonicalize"/>.
     /// </param>
-    public double? AverageScore(string dimension, string model) =>
-        _averages.TryGetValue((dimension, ModelNameCanonicalizer.Canonicalize(model)), out var average) ? average : null;
+    public double? AverageScore(string dimension, string model)
+    {
+        return _averages.TryGetValue(key: (dimension, ModelNameCanonicalizer.Canonicalize(model)),
+            value: out var average)
+            ? average
+            : null;
+    }
 }

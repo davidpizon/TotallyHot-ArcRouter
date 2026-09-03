@@ -11,11 +11,11 @@ namespace TotallyHot.ArcRouter.Quality.Grading;
 /// </summary>
 public sealed class QualityGradingService : BackgroundService
 {
-    private readonly IQualityQueue _queue;
-    private readonly IQualityGrader _grader;
     private readonly IQualityScoreAggregator _aggregator;
-    private readonly QualityOptions _options;
+    private readonly IQualityGrader _grader;
     private readonly ILogger<QualityGradingService> _logger;
+    private readonly QualityOptions _options;
+    private readonly IQualityQueue _queue;
 
     /// <summary>Initializes a new instance of the <see cref="QualityGradingService"/> class.</summary>
     /// <param name="queue">The work queue to drain.</param>
@@ -43,7 +43,7 @@ public sealed class QualityGradingService : BackgroundService
         _logger = logger;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         if (!_options.Enabled)
@@ -52,14 +52,11 @@ public sealed class QualityGradingService : BackgroundService
             return;
         }
 
-        var workerCount = Math.Max(1, _options.WorkerConcurrency);
-        _logger.LogInformation("Starting {WorkerCount} quality grading worker(s).", workerCount);
+        var workerCount = Math.Max(1, val2: _options.WorkerConcurrency);
+        _logger.LogInformation(message: "Starting {WorkerCount} quality grading worker(s).", workerCount);
 
         var workers = new Task[workerCount];
-        for (var i = 0; i < workerCount; i++)
-        {
-            workers[i] = RunWorkerAsync(stoppingToken);
-        }
+        for (var i = 0; i < workerCount; i++) workers[i] = RunWorkerAsync(stoppingToken);
 
         await Task.WhenAll(workers).ConfigureAwait(false);
     }
@@ -70,9 +67,7 @@ public sealed class QualityGradingService : BackgroundService
         try
         {
             await foreach (var request in _queue.DequeueAllAsync(stoppingToken).ConfigureAwait(false))
-            {
-                await ProcessAsync(request, stoppingToken).ConfigureAwait(false);
-            }
+                await ProcessAsync(request: request, stoppingToken: stoppingToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -80,13 +75,17 @@ public sealed class QualityGradingService : BackgroundService
         }
     }
 
-    /// <summary>Grades a single request and submits its result, swallowing any failure so one bad request cannot stop the worker.</summary>
+    /// <summary>
+    /// Grades a single request and submits its result, swallowing any failure so one bad request cannot stop the
+    /// worker.
+    /// </summary>
     private async Task ProcessAsync(QualityRequest request, CancellationToken stoppingToken)
     {
         try
         {
-            var result = await _grader.GradeAsync(request, stoppingToken).ConfigureAwait(false);
-            await _aggregator.SubmitAsync(result, stoppingToken).ConfigureAwait(false);
+            var result = await _grader.GradeAsync(request: request, cancellationToken: stoppingToken)
+                .ConfigureAwait(false);
+            await _aggregator.SubmitAsync(result: result, cancellationToken: stoppingToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -95,11 +94,10 @@ public sealed class QualityGradingService : BackgroundService
         catch (Exception ex)
         {
             _logger.LogWarning(
-                ex,
-                "Quality grading failed for {Language} (correlation {CorrelationId}); dropping.",
+                exception: ex,
+                message: "Quality grading failed for {Language} (correlation {CorrelationId}); dropping.",
                 request.Language,
                 request.CorrelationId);
         }
     }
 }
-

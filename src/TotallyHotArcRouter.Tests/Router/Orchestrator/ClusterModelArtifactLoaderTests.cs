@@ -14,73 +14,74 @@ public sealed class ClusterModelArtifactLoaderTests : IDisposable
 
     public ClusterModelArtifactLoaderTests()
     {
-        _tempDirectory = Path.Combine(Path.GetTempPath(), "arcrouter-tests", Guid.NewGuid().ToString("N"));
+        _tempDirectory = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
+            path3: Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_tempDirectory);
-    }
-
-    [Fact]
-    public void TryLoad_MissingFile_ReturnsNull()
-    {
-        // The honest state of a fresh install: the artifact is per-installation and never checked in.
-        var path = Path.Combine(_tempDirectory, "absent.json");
-
-        Assert.Null(ClusterModelArtifactLoader.TryLoad(path, NullLogger.Instance, "test"));
-    }
-
-    [Fact]
-    public void TryLoad_UnparseableFile_ReturnsNullRatherThanThrowing()
-    {
-        var path = Path.Combine(_tempDirectory, "corrupt.json");
-        File.WriteAllText(path, "{ this is not the artifact you are looking for");
-
-        Assert.Null(ClusterModelArtifactLoader.TryLoad(path, NullLogger.Instance, "test"));
-    }
-
-    [Fact]
-    public void TryLoad_ValidArtifact_RoundTripsThroughTheSerializer()
-    {
-        var path = Path.Combine(_tempDirectory, "model.json");
-        var artifact = new ClusterModelArtifact(
-            EmbeddingDimension: 2,
-            Centroids: [[1f, 0f], [0f, 1f]],
-            ChosenK: 2,
-            TrainedAtUtc: DateTimeOffset.UtcNow,
-            ClusterSizes: [3, 4],
-            ClusterDimensionHistograms: [new Dictionary<string, int>(), new Dictionary<string, int>()],
-            ClusterTopTerms: [[], []],
-            TrainedFrom: "live",
-            BootstrapTaskCount: 0,
-            MemoryEntryCount: 7);
-        File.WriteAllText(path, ClusterModelArtifactSerializer.Serialize(artifact));
-
-        var loaded = ClusterModelArtifactLoader.TryLoad(path, NullLogger.Instance, "test");
-
-        Assert.NotNull(loaded);
-        Assert.Equal(2, loaded.ChosenK);
-        Assert.Equal("live", loaded.TrainedFrom);
-        Assert.Equal(2, loaded.EmbeddingDimension);
-    }
-
-    [Fact]
-    public void TryLoad_BlankArguments_Throw()
-    {
-        Assert.Throws<ArgumentException>(() => ClusterModelArtifactLoader.TryLoad(" ", NullLogger.Instance, "test"));
-        Assert.Throws<ArgumentException>(() => ClusterModelArtifactLoader.TryLoad("x.json", NullLogger.Instance, " "));
-        Assert.Throws<ArgumentNullException>(() => ClusterModelArtifactLoader.TryLoad("x.json", null!, "test"));
     }
 
     public void Dispose()
     {
         try
         {
-            if (Directory.Exists(_tempDirectory))
-            {
-                Directory.Delete(_tempDirectory, recursive: true);
-            }
+            if (Directory.Exists(_tempDirectory)) Directory.Delete(path: _tempDirectory, true);
         }
         catch (IOException)
         {
             // Best-effort cleanup; a locked file on a busy CI box is not a test failure.
         }
+    }
+
+    [Fact]
+    public void TryLoad_MissingFile_ReturnsNull()
+    {
+        // The honest state of a fresh install: the artifact is per-installation and never checked in.
+        var path = Path.Combine(path1: _tempDirectory, path2: "absent.json");
+
+        Assert.Null(ClusterModelArtifactLoader.TryLoad(path: path, logger: NullLogger.Instance, consumer: "test"));
+    }
+
+    [Fact]
+    public void TryLoad_UnparseableFile_ReturnsNullRatherThanThrowing()
+    {
+        var path = Path.Combine(path1: _tempDirectory, path2: "corrupt.json");
+        File.WriteAllText(path: path, contents: "{ this is not the artifact you are looking for");
+
+        Assert.Null(ClusterModelArtifactLoader.TryLoad(path: path, logger: NullLogger.Instance, consumer: "test"));
+    }
+
+    [Fact]
+    public void TryLoad_ValidArtifact_RoundTripsThroughTheSerializer()
+    {
+        var path = Path.Combine(path1: _tempDirectory, path2: "model.json");
+        var artifact = new ClusterModelArtifact(
+            2,
+            Centroids: [[1f, 0f], [0f, 1f]],
+            2,
+            TrainedAtUtc: DateTimeOffset.UtcNow,
+            ClusterSizes: [3, 4],
+            ClusterDimensionHistograms: [new Dictionary<string, int>(), new Dictionary<string, int>()],
+            ClusterTopTerms: [[], []],
+            TrainedFrom: "live",
+            0,
+            7);
+        File.WriteAllText(path: path, contents: ClusterModelArtifactSerializer.Serialize(artifact));
+
+        var loaded = ClusterModelArtifactLoader.TryLoad(path: path, logger: NullLogger.Instance, consumer: "test");
+
+        Assert.NotNull(loaded);
+        Assert.Equal(2, actual: loaded.ChosenK);
+        Assert.Equal(expected: "live", actual: loaded.TrainedFrom);
+        Assert.Equal(2, actual: loaded.EmbeddingDimension);
+    }
+
+    [Fact]
+    public void TryLoad_BlankArguments_Throw()
+    {
+        Assert.Throws<ArgumentException>(() =>
+            ClusterModelArtifactLoader.TryLoad(path: " ", logger: NullLogger.Instance, consumer: "test"));
+        Assert.Throws<ArgumentException>(() =>
+            ClusterModelArtifactLoader.TryLoad(path: "x.json", logger: NullLogger.Instance, consumer: " "));
+        Assert.Throws<ArgumentNullException>(() =>
+            ClusterModelArtifactLoader.TryLoad(path: "x.json", logger: null!, consumer: "test"));
     }
 }

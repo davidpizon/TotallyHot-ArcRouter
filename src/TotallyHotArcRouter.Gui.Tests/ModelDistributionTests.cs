@@ -39,11 +39,11 @@ public sealed class ModelDistributionTests
         // ModelDistribution awaits two concurrent UsageStore.LoadRollupAsync calls (groupBy=day and
         // groupBy=model) before falling back to mock data; a connection attempt against the unreachable
         // loopback port above takes ~2s to fail on this host (not an instant refusal).
-        cut.WaitForAssertion(() =>
+        cut.WaitForAssertion(assertion: () =>
         {
             cut.Markup.Should().Contain("gpt-4o-mini");
             cut.Markup.Should().Contain("claude-3-haiku");
-        }, TimeSpan.FromSeconds(6));
+        }, timeout: TimeSpan.FromSeconds(6));
     }
 
     [Fact]
@@ -68,7 +68,8 @@ public sealed class ModelDistributionTests
         // Active state flips the button's background to the highlight color via the .active class; the
         // year button should now carry it instead of month. Re-query after the click since the render
         // replaces the node.
-        cut.FindAll("button").First(b => b.TextContent.Trim() == "Year").GetAttribute("class").Should().Contain("active");
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Year").GetAttribute("class").Should()
+            .Contain("active");
     }
 
     [Fact]

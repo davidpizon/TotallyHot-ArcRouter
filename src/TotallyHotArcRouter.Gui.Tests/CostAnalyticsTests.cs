@@ -22,22 +22,25 @@ public sealed class CostAnalyticsTests
     private const string UnreachableAddress = "http://127.0.0.1:59990";
     private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(6);
 
-    private static Conversation MakeLiveConversation() => new(
-        Id: "live-1",
-        Title: "Live Session",
-        FirstTimestamp: "10:00:00",
-        LastTimestamp: "10:05:00",
-        TotalCost: 0.02m,
-        TotalPromptTokens: 500,
-        TotalCompletionTokens: 100,
-        HasFallbackTurns: false,
-        Turns:
-        [
-            new(Id: "live-1-t1", Agent: "A", Model: "gpt-4o-mini", TurnNumber: 1, PromptTokens: 500,
-                CompletionTokens: 100, RoutingRoi: 80m, TotalCost: 0.02m, ToolExecutionSteps: 1,
-                CacheHitRate: 0m, TimeToFirstTokenMs: 200, ContextBufferPercent: 10m, Timestamp: "10:00:00",
-                RoutingSteps: [], TimestampUtc: DateTimeOffset.UtcNow),
-        ]);
+    private static Conversation MakeLiveConversation()
+    {
+        return new Conversation(
+            Id: "live-1",
+            Title: "Live Session",
+            FirstTimestamp: "10:00:00",
+            LastTimestamp: "10:05:00",
+            0.02m,
+            500,
+            100,
+            false,
+            Turns:
+            [
+                new ConversationTurn(Id: "live-1-t1", Agent: "A", Model: "gpt-4o-mini", 1, 500,
+                    100, 80m, 0.02m, 1,
+                    0m, 200, 10m, Timestamp: "10:00:00",
+                    RoutingSteps: [], TimestampUtc: DateTimeOffset.UtcNow)
+            ]);
+    }
 
     private static BunitContext CreateContext()
     {
@@ -52,9 +55,10 @@ public sealed class CostAnalyticsTests
     {
         using var ctx = CreateContext();
 
-        var cut = ctx.Render<CostAnalytics>(p => p.Add(c => c.Conversations, Array.Empty<Conversation>()));
+        var cut = ctx.Render<CostAnalytics>(p =>
+            p.Add(parameterSelector: c => c.Conversations, value: Array.Empty<Conversation>()));
 
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Routing ROI"), WaitTimeout);
+        cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("Routing ROI"), timeout: WaitTimeout);
     }
 
     [Fact]
@@ -62,10 +66,12 @@ public sealed class CostAnalyticsTests
     {
         using var ctx = CreateContext();
 
-        var cut = ctx.Render<CostAnalytics>(p => p.Add(c => c.Conversations, Array.Empty<Conversation>()));
+        var cut = ctx.Render<CostAnalytics>(p =>
+            p.Add(parameterSelector: c => c.Conversations, value: Array.Empty<Conversation>()));
         cut.FindAll("button").First(b => b.TextContent.Trim() == "Turn Cost").Click();
 
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Stepped cumulative cost"), WaitTimeout);
+        cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("Stepped cumulative cost"),
+            timeout: WaitTimeout);
     }
 
     [Fact]
@@ -73,10 +79,11 @@ public sealed class CostAnalyticsTests
     {
         using var ctx = CreateContext();
 
-        var cut = ctx.Render<CostAnalytics>(p => p.Add(c => c.Conversations, Array.Empty<Conversation>()));
+        var cut = ctx.Render<CostAnalytics>(p =>
+            p.Add(parameterSelector: c => c.Conversations, value: Array.Empty<Conversation>()));
         cut.FindAll("button").First(b => b.TextContent.Trim() == "Day").Click();
 
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Past 24 hours"), WaitTimeout);
+        cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("Past 24 hours"), timeout: WaitTimeout);
     }
 
     [Fact]
@@ -86,10 +93,11 @@ public sealed class CostAnalyticsTests
 
         var conversations = new[] { MakeLiveConversation() };
         var cut = ctx.Render<CostAnalytics>(p => p
-            .Add(c => c.Conversations, conversations)
-            .Add(c => c.InitialSessionId, "live-1"));
+            .Add(parameterSelector: c => c.Conversations, value: conversations)
+            .Add(parameterSelector: c => c.InitialSessionId, value: "live-1"));
 
-        cut.WaitForAssertion(() => cut.Find("select").GetAttribute("value").Should().Be("live-1"), WaitTimeout);
+        cut.WaitForAssertion(assertion: () => cut.Find("select").GetAttribute("value").Should().Be("live-1"),
+            timeout: WaitTimeout);
     }
 
     [Fact]
@@ -98,9 +106,9 @@ public sealed class CostAnalyticsTests
         using var ctx = CreateContext();
 
         var conversations = new[] { MakeLiveConversation() };
-        var cut = ctx.Render<CostAnalytics>(p => p.Add(c => c.Conversations, conversations));
+        var cut = ctx.Render<CostAnalytics>(p => p.Add(parameterSelector: c => c.Conversations, value: conversations));
 
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Live Session"), WaitTimeout);
+        cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("Live Session"), timeout: WaitTimeout);
     }
 
     [Fact]
@@ -109,8 +117,8 @@ public sealed class CostAnalyticsTests
         using var ctx = CreateContext();
 
         var conversations = new[] { MakeLiveConversation() };
-        var cut = ctx.Render<CostAnalytics>(p => p.Add(c => c.Conversations, conversations));
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Live Session"), WaitTimeout);
+        var cut = ctx.Render<CostAnalytics>(p => p.Add(parameterSelector: c => c.Conversations, value: conversations));
+        cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("Live Session"), timeout: WaitTimeout);
 
         cut.Find("select").Change("live-1");
 
@@ -122,10 +130,12 @@ public sealed class CostAnalyticsTests
     {
         using var ctx = CreateContext();
 
-        var cut = ctx.Render<CostAnalytics>(p => p.Add(c => c.Conversations, Array.Empty<Conversation>()));
+        var cut = ctx.Render<CostAnalytics>(p =>
+            p.Add(parameterSelector: c => c.Conversations, value: Array.Empty<Conversation>()));
 
         // MockData.BuildMetricHistory always fills the Week range (the default) once the (failed) rollup
         // load falls back to it, so a chart eventually renders.
-        cut.WaitForAssertion(() => cut.FindAll("div[id^='echart-']").Should().NotBeEmpty(), WaitTimeout);
+        cut.WaitForAssertion(assertion: () => cut.FindAll("div[id^='echart-']").Should().NotBeEmpty(),
+            timeout: WaitTimeout);
     }
 }

@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router;
@@ -13,13 +14,17 @@ public sealed class MemoryEntryEmbeddingModelTests
 {
     /// <summary>An entry stamped with the current model's identity is comparable.</summary>
     [Fact]
-    public void MatchesEmbeddingModel_SameIdentity_IsTrue() =>
+    public void MatchesEmbeddingModel_SameIdentity_IsTrue()
+    {
         Assert.True(Entry("model-a").MatchesEmbeddingModel("model-a"));
+    }
 
     /// <summary>An entry from a different model is not comparable, whatever its vector length.</summary>
     [Fact]
-    public void MatchesEmbeddingModel_DifferentIdentity_IsFalse() =>
+    public void MatchesEmbeddingModel_DifferentIdentity_IsFalse()
+    {
         Assert.False(Entry("model-a").MatchesEmbeddingModel("model-b"));
+    }
 
     /// <summary>
     /// The deliberate optimistic reading of a pre-provenance row, documented at length on the method
@@ -27,13 +32,17 @@ public sealed class MemoryEntryEmbeddingModelTests
     /// corpus on the first startup after upgrading.
     /// </summary>
     [Fact]
-    public void MatchesEmbeddingModel_NullIdentity_IsTreatedAsMatching() =>
+    public void MatchesEmbeddingModel_NullIdentity_IsTreatedAsMatching()
+    {
         Assert.True(Entry(null).MatchesEmbeddingModel("model-a"));
+    }
 
     /// <summary>Identity comparison is ordinal - a case difference is a different model, not the same one.</summary>
     [Fact]
-    public void MatchesEmbeddingModel_DifferingOnlyByCase_IsFalse() =>
+    public void MatchesEmbeddingModel_DifferingOnlyByCase_IsFalse()
+    {
         Assert.False(Entry("Model-A").MatchesEmbeddingModel("model-a"));
+    }
 
     /// <summary>The column round-trips through the store rather than being dropped on write or read.</summary>
     [Fact]
@@ -42,10 +51,10 @@ public sealed class MemoryEntryEmbeddingModelTests
         using var temp = new TempRouterMemoryDatabase();
         var store = new SqliteMemoryEntryStore(temp.Database);
 
-        await store.AppendAsync(Entry("model-a"), TestContext.Current.CancellationToken);
+        await store.AppendAsync(entry: Entry("model-a"), cancellationToken: TestContext.Current.CancellationToken);
 
         var loaded = Assert.Single(await store.LoadAllAsync(TestContext.Current.CancellationToken));
-        Assert.Equal("model-a", loaded.EmbeddingModel);
+        Assert.Equal(expected: "model-a", actual: loaded.EmbeddingModel);
     }
 
     /// <summary>A null identity is stored as SQL NULL and read back as null, not as an empty string.</summary>
@@ -55,7 +64,7 @@ public sealed class MemoryEntryEmbeddingModelTests
         using var temp = new TempRouterMemoryDatabase();
         var store = new SqliteMemoryEntryStore(temp.Database);
 
-        await store.AppendAsync(Entry(null), TestContext.Current.CancellationToken);
+        await store.AppendAsync(entry: Entry(null), cancellationToken: TestContext.Current.CancellationToken);
 
         var loaded = Assert.Single(await store.LoadAllAsync(TestContext.Current.CancellationToken));
         Assert.Null(loaded.EmbeddingModel);
@@ -71,7 +80,7 @@ public sealed class MemoryEntryEmbeddingModelTests
     {
         using var temp = new TempRouterMemoryDatabase();
         var store = new SqliteMemoryEntryStore(temp.Database);
-        await store.AppendAsync(Entry("model-a"), TestContext.Current.CancellationToken);
+        await store.AppendAsync(entry: Entry("model-a"), cancellationToken: TestContext.Current.CancellationToken);
 
         // Drop the column to simulate a database created before this provenance existed, then re-run the
         // schema/migration path exactly as startup would.
@@ -89,15 +98,18 @@ public sealed class MemoryEntryEmbeddingModelTests
         Assert.True(loaded.MatchesEmbeddingModel("any-model"));
     }
 
-    private static MemoryEntry Entry(string? embeddingModel) => new(
-        Id: 0,
-        TaskEmbedding: [1f, 0f],
-        ChosenModel: "chosen-model",
-        Score: 0.5,
-        Cost: 0.0,
-        VerifierTrace: null,
-        CreatedAtUtc: DateTimeOffset.UtcNow,
-        EmbeddingModel: embeddingModel);
+    private static MemoryEntry Entry(string? embeddingModel)
+    {
+        return new MemoryEntry(
+            0,
+            TaskEmbedding: [1f, 0f],
+            ChosenModel: "chosen-model",
+            0.5,
+            0.0,
+            null,
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            EmbeddingModel: embeddingModel);
+    }
 
     /// <summary>A <see cref="RouterMemoryDatabase"/> over a temp file, deleted on dispose.</summary>
     private sealed class TempRouterMemoryDatabase : IDisposable
@@ -106,11 +118,12 @@ public sealed class MemoryEntryEmbeddingModelTests
 
         public TempRouterMemoryDatabase()
         {
-            _directory = Path.Combine(Path.GetTempPath(), "arcrouter-tests", Guid.NewGuid().ToString("N"));
+            _directory = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
+                path3: Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(_directory);
             Database = new RouterMemoryDatabase(Options.Create(new RoutingOptions
             {
-                EmbeddingMemoryDatabasePath = Path.Combine(_directory, "router_memory.db"),
+                EmbeddingMemoryDatabasePath = Path.Combine(path1: _directory, path2: "router_memory.db")
             }));
             Database.EnsureCreated();
         }
@@ -119,10 +132,10 @@ public sealed class MemoryEntryEmbeddingModelTests
 
         public void Dispose()
         {
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            SqliteConnection.ClearAllPools();
             try
             {
-                Directory.Delete(_directory, recursive: true);
+                Directory.Delete(path: _directory, true);
             }
             catch (IOException)
             {

@@ -13,15 +13,24 @@ public interface IResponseTextExtractor
     /// <summary>
     /// Attempts to extract the assistant's reply text for a completed request.
     /// </summary>
-    /// <param name="provider">The provider key the request was routed to (e.g. <c>"openai"</c>, <c>"anthropic"</c>), case-insensitive.</param>
+    /// <param name="provider">
+    /// The provider key the request was routed to (e.g. <c>"openai"</c>, <c>"anthropic"</c>),
+    /// case-insensitive.
+    /// </param>
     /// <param name="isStreaming">Whether the response was a streaming (SSE) response.</param>
-    /// <param name="bufferedResponseBody">The captured response bytes (may be truncated for very large responses - see the capture-cap note on the caller).</param>
+    /// <param name="bufferedResponseBody">
+    /// The captured response bytes (may be truncated for very large responses - see the
+    /// capture-cap note on the caller).
+    /// </param>
     /// <param name="text">The extracted text, when this method returns <see langword="true"/>.</param>
-    /// <returns><see langword="true"/> if text could be determined; otherwise <see langword="false"/> (unknown provider, malformed/truncated body, or no text content in the response).</returns>
+    /// <returns>
+    /// <see langword="true"/> if text could be determined; otherwise <see langword="false"/> (unknown provider,
+    /// malformed/truncated body, or no text content in the response).
+    /// </returns>
     bool TryExtractText(string provider, bool isStreaming, ReadOnlyMemory<byte> bufferedResponseBody, out string text);
 }
 
-/// <inheritdoc cref="IResponseTextExtractor" />
+/// <inheritdoc cref="IResponseTextExtractor"/>
 public sealed class ResponseTextExtractor : IResponseTextExtractor
 {
     private readonly IReadOnlyDictionary<string, ProviderRegistration> _providerRegistrations;
@@ -46,26 +55,23 @@ public sealed class ResponseTextExtractor : IResponseTextExtractor
     {
         _providerRegistrations = providerRegistrations is null
             ? ProviderRegistrations.BuildDefault()
-            : new Dictionary<string, ProviderRegistration>(providerRegistrations, StringComparer.OrdinalIgnoreCase);
+            : new Dictionary<string, ProviderRegistration>(collection: providerRegistrations,
+                comparer: StringComparer.OrdinalIgnoreCase);
     }
 
-    /// <inheritdoc />
-    public bool TryExtractText(string provider, bool isStreaming, ReadOnlyMemory<byte> bufferedResponseBody, out string text)
+    /// <inheritdoc/>
+    public bool TryExtractText(string provider, bool isStreaming, ReadOnlyMemory<byte> bufferedResponseBody,
+        out string text)
     {
         text = string.Empty;
 
-        if (bufferedResponseBody.IsEmpty)
-        {
-            return false;
-        }
+        if (bufferedResponseBody.IsEmpty) return false;
 
         // Unknown/unsupported provider (e.g. alibaba, zhipu, moonshot, minimax), or a null/blank key: no
         // registration, so no parser shape to dispatch on. Fail gracefully rather than guessing at an
         // unverified response shape, or throwing on a Dictionary null-key lookup for a public method.
-        if (string.IsNullOrEmpty(provider) || !_providerRegistrations.TryGetValue(provider, out var registration))
-        {
-            return false;
-        }
+        if (string.IsNullOrEmpty(provider) ||
+            !_providerRegistrations.TryGetValue(key: provider, value: out var registration)) return false;
 
         string body;
         try
@@ -80,12 +86,12 @@ public sealed class ResponseTextExtractor : IResponseTextExtractor
         return registration.UsageParserShape switch
         {
             UsageParserShape.OpenAiCompatible => isStreaming
-                ? OpenAiResponseTextParser.TryExtractFromStreamingBuffer(body, out text)
-                : OpenAiResponseTextParser.TryExtractFromNonStreamingBody(body, out text),
+                ? OpenAiResponseTextParser.TryExtractFromStreamingBuffer(sseText: body, text: out text)
+                : OpenAiResponseTextParser.TryExtractFromNonStreamingBody(json: body, text: out text),
             UsageParserShape.Native => isStreaming
-                ? AnthropicResponseTextParser.TryExtractFromStreamingBuffer(body, out text)
-                : AnthropicResponseTextParser.TryExtractFromNonStreamingBody(body, out text),
-            _ => false,
+                ? AnthropicResponseTextParser.TryExtractFromStreamingBuffer(sseText: body, text: out text)
+                : AnthropicResponseTextParser.TryExtractFromNonStreamingBody(json: body, text: out text),
+            _ => false
         };
     }
 }

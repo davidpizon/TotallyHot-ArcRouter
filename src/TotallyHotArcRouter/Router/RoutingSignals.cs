@@ -14,5 +14,8 @@ namespace TotallyHot.ArcRouter.Router;
 /// default interface implementation.
 /// </summary>
 /// <param name="TaskText">The request's newest user-turn text, or <see langword="null"/> if it could not be extracted.</param>
-/// <param name="TaskEmbedding">The request's task embedding, or <see langword="null"/> if it was not computed (budget exceeded, client unavailable, or still warming up).</param>
+/// <param name="TaskEmbedding">
+/// The request's task embedding, or <see langword="null"/> if it was not computed (budget
+/// exceeded, client unavailable, or still warming up).
+/// </param>
 public sealed record RoutingSignals(string? TaskText, float[]? TaskEmbedding);

@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 
 namespace TotallyHot.ArcRouter.Router;
@@ -20,7 +21,7 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         _database = database;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public Task<IReadOnlyList<MemoryEntry>> LoadAllAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -28,22 +29,19 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT id, embedding, chosen_model, score, cost, verifier_trace, created_at_utc, is_exploratory, propensity, dimension, is_judge_scored, embedding_model
-            FROM memory_entries
-            ORDER BY id ASC;
-            """;
+                              SELECT id, embedding, chosen_model, score, cost, verifier_trace, created_at_utc, is_exploratory, propensity, dimension, is_judge_scored, embedding_model
+                              FROM memory_entries
+                              ORDER BY id ASC;
+                              """;
 
         var entries = new List<MemoryEntry>();
         using var reader = command.ExecuteReader();
-        while (reader.Read())
-        {
-            entries.Add(ReadEntry(reader));
-        }
+        while (reader.Read()) entries.Add(ReadEntry(reader));
 
         return Task.FromResult<IReadOnlyList<MemoryEntry>>(entries);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public Task<MemoryEntry> AppendAsync(MemoryEntry entry, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entry);
@@ -52,27 +50,29 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO memory_entries (embedding, chosen_model, score, cost, verifier_trace, created_at_utc, is_exploratory, propensity, dimension, is_judge_scored, embedding_model)
-            VALUES ($embedding, $chosenModel, $score, $cost, $verifierTrace, $createdAtUtc, $isExploratory, $propensity, $dimension, $isJudgeScored, $embeddingModel);
-            SELECT last_insert_rowid();
-            """;
-        command.Parameters.AddWithValue("$embedding", ToBytes(entry.TaskEmbedding));
-        command.Parameters.AddWithValue("$chosenModel", entry.ChosenModel);
-        command.Parameters.AddWithValue("$score", entry.Score);
-        command.Parameters.AddWithValue("$cost", entry.Cost);
-        command.Parameters.AddWithValue("$verifierTrace", (object?)entry.VerifierTrace ?? DBNull.Value);
-        command.Parameters.AddWithValue("$createdAtUtc", entry.CreatedAtUtc.ToString("O"));
-        command.Parameters.AddWithValue("$isExploratory", entry.IsExploratory ? 1 : 0);
-        command.Parameters.AddWithValue("$propensity", entry.Propensity);
-        command.Parameters.AddWithValue("$dimension", (object?)entry.Dimension ?? DBNull.Value);
-        command.Parameters.AddWithValue("$isJudgeScored", entry.IsJudgeScored ? 1 : 0);
-        command.Parameters.AddWithValue("$embeddingModel", (object?)entry.EmbeddingModel ?? DBNull.Value);
+                              INSERT INTO memory_entries (embedding, chosen_model, score, cost, verifier_trace, created_at_utc, is_exploratory, propensity, dimension, is_judge_scored, embedding_model)
+                              VALUES ($embedding, $chosenModel, $score, $cost, $verifierTrace, $createdAtUtc, $isExploratory, $propensity, $dimension, $isJudgeScored, $embeddingModel);
+                              SELECT last_insert_rowid();
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$embedding", value: ToBytes(entry.TaskEmbedding));
+        command.Parameters.AddWithValue(parameterName: "$chosenModel", value: entry.ChosenModel);
+        command.Parameters.AddWithValue(parameterName: "$score", value: entry.Score);
+        command.Parameters.AddWithValue(parameterName: "$cost", value: entry.Cost);
+        command.Parameters.AddWithValue(parameterName: "$verifierTrace",
+            value: (object?)entry.VerifierTrace ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$createdAtUtc", value: entry.CreatedAtUtc.ToString("O"));
+        command.Parameters.AddWithValue(parameterName: "$isExploratory", value: entry.IsExploratory ? 1 : 0);
+        command.Parameters.AddWithValue(parameterName: "$propensity", value: entry.Propensity);
+        command.Parameters.AddWithValue(parameterName: "$dimension", value: (object?)entry.Dimension ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$isJudgeScored", value: entry.IsJudgeScored ? 1 : 0);
+        command.Parameters.AddWithValue(parameterName: "$embeddingModel",
+            value: (object?)entry.EmbeddingModel ?? DBNull.Value);
 
         var id = (long)command.ExecuteScalar()!;
         return Task.FromResult(entry with { Id = id });
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public Task DeleteAsync(long id, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -80,13 +80,13 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = "DELETE FROM memory_entries WHERE id = $id;";
-        command.Parameters.AddWithValue("$id", id);
+        command.Parameters.AddWithValue(parameterName: "$id", value: id);
         command.ExecuteNonQuery();
 
         return Task.CompletedTask;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public Task<long> GetMaxIdAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -98,7 +98,10 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
     }
 
     /// <summary>Materializes a <see cref="MemoryEntry"/> from the current row of a <c>memory_entries</c> reader.</summary>
-    /// <param name="reader">A reader positioned on a row selected with the columns in <see cref="LoadAllAsync"/>'s query order.</param>
+    /// <param name="reader">
+    /// A reader positioned on a row selected with the columns in <see cref="LoadAllAsync"/>'s query
+    /// order.
+    /// </param>
     /// <returns>The row's data as a <see cref="MemoryEntry"/>.</returns>
     private static MemoryEntry ReadEntry(SqliteDataReader reader)
     {
@@ -108,23 +111,28 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         var score = reader.GetDouble(3);
         var cost = reader.GetDouble(4);
         var verifierTrace = reader.IsDBNull(5) ? null : reader.GetString(5);
-        var createdAtUtc = DateTimeOffset.Parse(reader.GetString(6), null, System.Globalization.DateTimeStyles.RoundtripKind);
+        var createdAtUtc = DateTimeOffset.Parse(input: reader.GetString(6), null, styles: DateTimeStyles.RoundtripKind);
         var isExploratory = reader.GetInt64(7) != 0;
         var propensity = reader.GetDouble(8);
         var dimension = reader.IsDBNull(9) ? null : reader.GetString(9);
         var isJudgeScored = reader.GetInt64(10) != 0;
         var embeddingModel = reader.IsDBNull(11) ? null : reader.GetString(11);
 
-        return new MemoryEntry(id, embedding, chosenModel, score, cost, verifierTrace, createdAtUtc, isExploratory, propensity, dimension, isJudgeScored, embeddingModel);
+        return new MemoryEntry(Id: id, TaskEmbedding: embedding, ChosenModel: chosenModel, Score: score, Cost: cost,
+            VerifierTrace: verifierTrace, CreatedAtUtc: createdAtUtc, IsExploratory: isExploratory,
+            Propensity: propensity, Dimension: dimension, IsJudgeScored: isJudgeScored, EmbeddingModel: embeddingModel);
     }
 
-    /// <summary>Encodes an embedding vector as a raw little-endian <c>float32</c> byte array for storage in the <c>embedding</c> BLOB column.</summary>
+    /// <summary>
+    /// Encodes an embedding vector as a raw little-endian <c>float32</c> byte array for storage in the
+    /// <c>embedding</c> BLOB column.
+    /// </summary>
     /// <param name="embedding">The vector to encode.</param>
     /// <returns>The encoded bytes.</returns>
     private static byte[] ToBytes(float[] embedding)
     {
         var bytes = new byte[embedding.Length * sizeof(float)];
-        Buffer.BlockCopy(embedding, 0, bytes, 0, bytes.Length);
+        Buffer.BlockCopy(src: embedding, 0, dst: bytes, 0, count: bytes.Length);
         return bytes;
     }
 
@@ -134,7 +142,7 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
     private static float[] FromBytes(byte[] bytes)
     {
         var embedding = new float[bytes.Length / sizeof(float)];
-        Buffer.BlockCopy(bytes, 0, embedding, 0, bytes.Length);
+        Buffer.BlockCopy(src: bytes, 0, dst: embedding, 0, count: bytes.Length);
         return embedding;
     }
 }

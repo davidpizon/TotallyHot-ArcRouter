@@ -19,7 +19,10 @@ namespace TotallyHot.ArcRouter.Proxy.Management;
 /// </summary>
 public interface ISecretReader
 {
-    /// <summary>Reads the secret named <paramref name="name"/>. Returns <see langword="false"/> when it is not stored, or on a platform that cannot decrypt the store.</summary>
+    /// <summary>
+    /// Reads the secret named <paramref name="name"/>. Returns <see langword="false"/> when it is not stored, or on a
+    /// platform that cannot decrypt the store.
+    /// </summary>
     bool TryRead(string name, out string value);
 }
 
@@ -34,13 +37,22 @@ public interface ISecretWriter
     /// <summary>Stores <paramref name="value"/> under <paramref name="name"/>, replacing any existing entry.</summary>
     void Write(string name, string value);
 
-    /// <summary>Removes the secret named <paramref name="name"/>. Returns <see langword="false"/> when nothing was stored under it.</summary>
+    /// <summary>
+    /// Removes the secret named <paramref name="name"/>. Returns <see langword="false"/> when nothing was stored
+    /// under it.
+    /// </summary>
     bool Delete(string name);
 
-    /// <summary>Reports whether a secret is stored under <paramref name="name"/> - the value itself is never returned by this surface.</summary>
+    /// <summary>
+    /// Reports whether a secret is stored under <paramref name="name"/> - the value itself is never returned by this
+    /// surface.
+    /// </summary>
     bool Exists(string name);
 
-    /// <summary>Removes every secret whose name starts with <paramref name="prefix"/>. Returns the number removed - the cascade cleanup for a removed provider/header.</summary>
+    /// <summary>
+    /// Removes every secret whose name starts with <paramref name="prefix"/>. Returns the number removed - the
+    /// cascade cleanup for a removed provider/header.
+    /// </summary>
     int DeleteByPrefix(string prefix);
 }
 
@@ -82,12 +94,18 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
 
     private readonly string _path;
 
-    /// <summary>Initializes a new instance of the <see cref="ProtectedSecretStore"/> class over the default per-user store file.</summary>
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ProtectedSecretStore"/> class over the default per-user store
+    /// file.
+    /// </summary>
     public ProtectedSecretStore() : this(DefaultPath())
     {
     }
 
-    /// <summary>Initializes a new instance of the <see cref="ProtectedSecretStore"/> class over an explicit file path (for tests).</summary>
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ProtectedSecretStore"/> class over an explicit file path (for
+    /// tests).
+    /// </summary>
     /// <param name="path">The store file path.</param>
     public ProtectedSecretStore(string path)
     {
@@ -95,11 +113,7 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
         _path = path;
     }
 
-    /// <summary>Gets the default store file path (<c>%LOCALAPPDATA%\TotallyHotArcRouter\secrets.dat</c>), the same per-user directory the management token and telemetry certificate use.</summary>
-    public static string DefaultPath() =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TotallyHotArcRouter", FileName);
-
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public bool TryRead(string name, out string value)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -114,7 +128,7 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
         using var guard = new MutexGuard(mutex);
 
         var map = LoadMapWindows();
-        if (map.TryGetValue(name, out var stored))
+        if (map.TryGetValue(key: name, value: out var stored))
         {
             value = stored;
             return true;
@@ -124,53 +138,42 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
         return false;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public void Write(string name, string value)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(value);
 
         if (!OperatingSystem.IsWindows())
-        {
             throw new PlatformNotSupportedException(
                 "The protected secret store requires Windows DPAPI and is unavailable on this platform.");
-        }
 
-        WriteWindows(name, value);
+        WriteWindows(name: name, value: value);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public bool Delete(string name)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
-        if (!OperatingSystem.IsWindows())
-        {
-            return false;
-        }
+        if (!OperatingSystem.IsWindows()) return false;
 
         using var mutex = OpenMutex();
         using var guard = new MutexGuard(mutex);
 
         var map = LoadMapWindows();
-        if (!map.Remove(name))
-        {
-            return false;
-        }
+        if (!map.Remove(name)) return false;
 
         SaveMapWindows(map);
         return true;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public bool Exists(string name)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
-        if (!OperatingSystem.IsWindows())
-        {
-            return false;
-        }
+        if (!OperatingSystem.IsWindows()) return false;
 
         using var mutex = OpenMutex();
         using var guard = new MutexGuard(mutex);
@@ -178,35 +181,40 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
         return LoadMapWindows().ContainsKey(name);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public int DeleteByPrefix(string prefix)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
 
-        if (!OperatingSystem.IsWindows())
-        {
-            return 0;
-        }
+        if (!OperatingSystem.IsWindows()) return 0;
 
         using var mutex = OpenMutex();
         using var guard = new MutexGuard(mutex);
 
         var map = LoadMapWindows();
-        var toRemove = map.Keys.Where(k => k.StartsWith(prefix, StringComparison.Ordinal)).ToList();
-        foreach (var key in toRemove)
-        {
-            map.Remove(key);
-        }
+        var toRemove = map.Keys.Where(k => k.StartsWith(value: prefix, comparisonType: StringComparison.Ordinal))
+            .ToList();
+        foreach (var key in toRemove) map.Remove(key);
 
-        if (toRemove.Count > 0)
-        {
-            SaveMapWindows(map);
-        }
+        if (toRemove.Count > 0) SaveMapWindows(map);
 
         return toRemove.Count;
     }
 
-    /// <summary>Loads the current map, upserts <paramref name="name"/>, and persists the result - the shared read-modify-write sequence behind <see cref="Write"/>.</summary>
+    /// <summary>
+    /// Gets the default store file path (<c>%LOCALAPPDATA%\TotallyHotArcRouter\secrets.dat</c>), the same per-user
+    /// directory the management token and telemetry certificate use.
+    /// </summary>
+    public static string DefaultPath()
+    {
+        return Path.Combine(path1: Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            path2: "TotallyHotArcRouter", path3: FileName);
+    }
+
+    /// <summary>
+    /// Loads the current map, upserts <paramref name="name"/>, and persists the result - the shared read-modify-write
+    /// sequence behind <see cref="Write"/>.
+    /// </summary>
     [SupportedOSPlatform("windows")]
     private void WriteWindows(string name, string value)
     {
@@ -226,15 +234,13 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
     [SupportedOSPlatform("windows")]
     private Dictionary<string, string> LoadMapWindows()
     {
-        if (!File.Exists(_path))
-        {
-            return new Dictionary<string, string>(StringComparer.Ordinal);
-        }
+        if (!File.Exists(_path)) return new Dictionary<string, string>(StringComparer.Ordinal);
 
         var encrypted = File.ReadAllBytes(_path);
-        var json = ProtectedData.Unprotect(encrypted, Entropy, DataProtectionScope.CurrentUser);
+        var json = ProtectedData.Unprotect(encryptedData: encrypted, optionalEntropy: Entropy,
+            scope: DataProtectionScope.CurrentUser);
         return JsonSerializer.Deserialize<Dictionary<string, string>>(json)
-            ?? new Dictionary<string, string>(StringComparer.Ordinal);
+               ?? new Dictionary<string, string>(StringComparer.Ordinal);
     }
 
     /// <summary>
@@ -247,28 +253,35 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
     private void SaveMapWindows(Dictionary<string, string> map)
     {
         var directory = Path.GetDirectoryName(_path);
-        if (!string.IsNullOrWhiteSpace(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
+        if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
 
-        var json = JsonSerializer.SerializeToUtf8Bytes(map, SerializerOptions);
-        var encrypted = ProtectedData.Protect(json, Entropy, DataProtectionScope.CurrentUser);
+        var json = JsonSerializer.SerializeToUtf8Bytes(value: map, options: SerializerOptions);
+        var encrypted = ProtectedData.Protect(userData: json, optionalEntropy: Entropy,
+            scope: DataProtectionScope.CurrentUser);
 
         // Atomic overwrite: write to a temp file in the same directory, then File.Move over the real
         // path. A crash mid-write leaves the temp file orphaned rather than truncating secrets.dat, which
         // would otherwise read back as "every secret is gone".
         var tempPath = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        SecureFile.WriteRestricted(tempPath, encrypted);
-        File.Move(tempPath, _path, overwrite: true);
+        SecureFile.WriteRestricted(path: tempPath, content: encrypted);
+        File.Move(sourceFileName: tempPath, destFileName: _path, true);
     }
 
-    /// <summary>Creates the path-scoped named mutex serializing every read-modify-write cycle against this store's file across processes.</summary>
-    private Mutex OpenMutex() =>
-        new(initiallyOwned: false, "TotallyHot.ArcRouter.ProtectedSecretStore." +
-            Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(_path)))[..32]);
+    /// <summary>
+    /// Creates the path-scoped named mutex serializing every read-modify-write cycle against this store's file across
+    /// processes.
+    /// </summary>
+    private Mutex OpenMutex()
+    {
+        return new Mutex(false, name: "TotallyHot.ArcRouter.ProtectedSecretStore." +
+                                      Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(_path)))[
+                                          ..32]);
+    }
 
-    /// <summary>Waits on and releases a <see cref="Mutex"/> across a scope, tolerating <see cref="AbandonedMutexException"/> the same way <see cref="ManagementAccessToken.GetOrCreate"/> does.</summary>
+    /// <summary>
+    /// Waits on and releases a <see cref="Mutex"/> across a scope, tolerating <see cref="AbandonedMutexException"/>
+    /// the same way <see cref="ManagementAccessToken.GetOrCreate"/> does.
+    /// </summary>
     private readonly struct MutexGuard : IDisposable
     {
         private readonly Mutex _mutex;
@@ -292,6 +305,9 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
         }
 
         /// <summary>Releases the mutex acquired by the constructor.</summary>
-        public void Dispose() => _mutex.ReleaseMutex();
+        public void Dispose()
+        {
+            _mutex.ReleaseMutex();
+        }
     }
 }

@@ -15,8 +15,12 @@ public interface IEmbeddingLogRegTrainingService
     /// progress returns immediately with <see cref="LogRegTrainingResultKind.AlreadyRunning"/> rather than
     /// queuing or blocking.
     /// </summary>
-    /// <param name="bootstrapProgress">Reports OOD bootstrap embedding progress (tasks embedded so far), or <see langword="null"/> to skip reporting.</param>
+    /// <param name="bootstrapProgress">
+    /// Reports OOD bootstrap embedding progress (tasks embedded so far), or
+    /// <see langword="null"/> to skip reporting.
+    /// </param>
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <returns>The outcome: what was gathered, and whether an artifact was written.</returns>
-    Task<LogRegTrainingOutcome> RetrainAsync(IProgress<int>? bootstrapProgress = null, CancellationToken cancellationToken = default);
+    Task<LogRegTrainingOutcome> RetrainAsync(IProgress<int>? bootstrapProgress = null,
+        CancellationToken cancellationToken = default);
 }

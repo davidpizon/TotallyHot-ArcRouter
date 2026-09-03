@@ -3,7 +3,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// <summary>
 /// How a model's tool-call dialect came to be known, ordered weakest to strongest (see
 /// <c>docs/router/tool-call-normalization.md</c> §3.2).
-///
 /// <para>
 /// The numeric order is load-bearing, not decorative: a capability write is accepted only when its
 /// confidence is greater than or equal to the stored row's, so a cheap startup guess can never clobber
@@ -37,6 +36,5 @@ public enum DetectionConfidence
     /// Set deliberately by an operator. No scan may overwrite it - the escape hatch for a model whose
     /// automatic detection misfires, which is worthless if the next request silently undoes it.
     /// </summary>
-    Operator = 3,
+    Operator = 3
 }
-

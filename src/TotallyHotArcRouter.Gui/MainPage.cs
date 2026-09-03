@@ -1,7 +1,8 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.AspNetCore.Components.WebView;
 using Microsoft.AspNetCore.Components.WebView.Maui;
 using Serilog;
-using System.Diagnostics.CodeAnalysis;
+using TotallyHot.ArcRouter.Gui.Components;
 using WebView2Control = Microsoft.UI.Xaml.Controls.WebView2;
 
 namespace TotallyHot.ArcRouter.Gui;
@@ -36,9 +37,9 @@ public sealed class MainPage : ContentPage
                 new RootComponent
                 {
                     Selector = "#root",
-                    ComponentType = typeof(Components.Dashboard),
-                },
-            },
+                    ComponentType = typeof(Dashboard)
+                }
+            }
         };
 
         webView.BlazorWebViewInitializing += OnBlazorWebViewInitializing;
@@ -56,10 +57,12 @@ public sealed class MainPage : ContentPage
     /// </summary>
     /// <param name="sender">The BlazorWebView raising the event; unused.</param>
     /// <param name="e">Carries the WebView2 environment options and user-data folder MAUI will use.</param>
-    private static void OnBlazorWebViewInitializing(object? sender, BlazorWebViewInitializingEventArgs e) =>
+    private static void OnBlazorWebViewInitializing(object? sender, BlazorWebViewInitializingEventArgs e)
+    {
         Log.Information(
-            "BlazorWebView initializing with WebView2 user-data folder {UserDataFolder}.",
-            string.IsNullOrWhiteSpace(e.UserDataFolder) ? "<WebView2 default>" : e.UserDataFolder);
+            messageTemplate: "BlazorWebView initializing with WebView2 user-data folder {UserDataFolder}.",
+            propertyValue: string.IsNullOrWhiteSpace(e.UserDataFolder) ? "<WebView2 default>" : e.UserDataFolder);
+    }
 
     /// <summary>
     /// Logs that the WebView2 control came up, with the runtime version that answered. The absence of
@@ -67,10 +70,12 @@ public sealed class MainPage : ContentPage
     /// </summary>
     /// <param name="sender">The BlazorWebView raising the event; unused.</param>
     /// <param name="e">Carries the initialized platform WebView2 control.</param>
-    private static void OnBlazorWebViewInitialized(object? sender, BlazorWebViewInitializedEventArgs e) =>
+    private static void OnBlazorWebViewInitialized(object? sender, BlazorWebViewInitializedEventArgs e)
+    {
         Log.Information(
-            "BlazorWebView initialized. WebView2 runtime version {BrowserVersion}.",
-            e.WebView.CoreWebView2?.Environment.BrowserVersionString ?? "unknown");
+            messageTemplate: "BlazorWebView initialized. WebView2 runtime version {BrowserVersion}.",
+            propertyValue: e.WebView.CoreWebView2?.Environment.BrowserVersionString ?? "unknown");
+    }
 
     /// <summary>
     /// Subscribes to the platform control's process-failure event as soon as MAUI creates its handler.
@@ -93,8 +98,9 @@ public sealed class MainPage : ContentPage
                 Log.Debug("The platform WebView2 control obtained its CoreWebView2.");
 
             platformView.CoreProcessFailed += (_, args) => Log.Error(
+                messageTemplate:
                 "The WebView2 browser process failed ({ProcessFailedKind}); the dashboard will stop rendering.",
-                args.ProcessFailedKind);
+                propertyValue: args.ProcessFailedKind);
         }
     }
 }

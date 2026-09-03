@@ -46,15 +46,15 @@ public sealed class PriceSourceRepository : PriceCatalogRepositoryBase
         using var connection = OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT COUNT(*)
-            FROM model_prices mp
-            JOIN aggregator_sources s ON s.source_id = mp.aggregator_source_id
-            WHERE mp.last_updated_utc >= $cutoff
-              AND s.enabled = 1;
-            """;
-        command.Parameters.AddWithValue("$cutoff", cutoff);
+                              SELECT COUNT(*)
+                              FROM model_prices mp
+                              JOIN aggregator_sources s ON s.source_id = mp.aggregator_source_id
+                              WHERE mp.last_updated_utc >= $cutoff
+                                AND s.enabled = 1;
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$cutoff", value: cutoff);
 
-        return Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+        return Convert.ToInt32(value: command.ExecuteScalar(), provider: CultureInfo.InvariantCulture);
     }
 
     /// <summary>
@@ -78,24 +78,22 @@ public sealed class PriceSourceRepository : PriceCatalogRepositoryBase
         // LEFT JOIN, not JOIN: a seeded source that has never polled owns no price rows, and it must still
         // appear (with a count of 0) so the operator can see it exists and toggle it.
         command.CommandText = """
-            SELECT s.source_name, s.enabled, s.priority_score,
-                   COUNT(mp.price_id)
-            FROM aggregator_sources s
-            LEFT JOIN model_prices mp ON mp.aggregator_source_id = s.source_id
-            GROUP BY s.source_id, s.source_name, s.enabled, s.priority_score
-            ORDER BY s.priority_score DESC, s.source_name;
-            """;
+                              SELECT s.source_name, s.enabled, s.priority_score,
+                                     COUNT(mp.price_id)
+                              FROM aggregator_sources s
+                              LEFT JOIN model_prices mp ON mp.aggregator_source_id = s.source_id
+                              GROUP BY s.source_id, s.source_name, s.enabled, s.priority_score
+                              ORDER BY s.priority_score DESC, s.source_name;
+                              """;
 
         var states = new List<PriceSourceState>();
         using var reader = command.ExecuteReader();
         while (reader.Read())
-        {
             states.Add(new PriceSourceState(
                 Name: reader.GetString(0),
                 Enabled: reader.GetInt32(1) != 0,
                 PriorityScore: reader.GetInt32(2),
                 PriceCount: reader.GetInt32(3)));
-        }
 
         return states;
     }
@@ -117,8 +115,8 @@ public sealed class PriceSourceRepository : PriceCatalogRepositoryBase
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = "UPDATE aggregator_sources SET enabled = $enabled WHERE source_name = $name;";
-        command.Parameters.AddWithValue("$enabled", enabled ? 1 : 0);
-        command.Parameters.AddWithValue("$name", sourceName);
+        command.Parameters.AddWithValue(parameterName: "$enabled", value: enabled ? 1 : 0);
+        command.Parameters.AddWithValue(parameterName: "$name", value: sourceName);
 
         var rowsAffected = command.ExecuteNonQuery();
         if (rowsAffected > 0)
@@ -155,13 +153,11 @@ public sealed class PriceSourceRepository : PriceCatalogRepositoryBase
             var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             using (var reader = existingCommand.ExecuteReader())
             {
-                while (reader.Read())
-                {
-                    existing.Add(reader.GetString(0));
-                }
+                while (reader.Read()) existing.Add(reader.GetString(0));
             }
 
-            var requested = new HashSet<string>(namesInPriorityOrder, StringComparer.OrdinalIgnoreCase);
+            var requested = new HashSet<string>(collection: namesInPriorityOrder,
+                comparer: StringComparer.OrdinalIgnoreCase);
             if (requested.Count != namesInPriorityOrder.Count || !requested.SetEquals(existing))
             {
                 // Rolling back an otherwise-empty transaction is a no-op; explicit for readability at the
@@ -179,8 +175,8 @@ public sealed class PriceSourceRepository : PriceCatalogRepositoryBase
             using var update = connection.CreateCommand();
             update.Transaction = transaction;
             update.CommandText = "UPDATE aggregator_sources SET priority_score = $priority WHERE source_name = $name;";
-            update.Parameters.AddWithValue("$priority", namesInPriorityOrder.Count - index - 1);
-            update.Parameters.AddWithValue("$name", namesInPriorityOrder[index]);
+            update.Parameters.AddWithValue(parameterName: "$priority", value: namesInPriorityOrder.Count - index - 1);
+            update.Parameters.AddWithValue(parameterName: "$name", value: namesInPriorityOrder[index]);
             update.ExecuteNonQuery();
         }
 

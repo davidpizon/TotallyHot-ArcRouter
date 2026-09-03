@@ -1,12 +1,15 @@
-using Moq;
 using System.Globalization;
 using System.Threading.Channels;
+using Moq;
 using TotallyHot.ArcRouter.Telemetry;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Tests.Telemetry;
 
-/// <summary>Covers <see cref="TelemetryBroadcaster"/>: the gRPC-era fan-out registry replacing SignalR's <c>IHubContext.Clients.All</c>.</summary>
+/// <summary>
+/// Covers <see cref="TelemetryBroadcaster"/>: the gRPC-era fan-out registry replacing SignalR's
+/// <c>IHubContext.Clients.All</c>.
+/// </summary>
 public class TelemetryBroadcasterTests
 {
     private static RoutingTelemetryEvent SampleEvent(
@@ -18,44 +21,50 @@ public class TelemetryBroadcasterTests
         int? cacheCreationTokens = 30,
         int? cacheReadTokens = 500,
         int routerTokens = 64,
-        decimal routerCostUsd = 0.000003456m) => new(
-        SessionId: "sess-1",
-        TurnNumber: 3,
-        IsSessionSynthesized: false,
-        RequestedModel: "gpt-5.4",
-        ResolvedModel: "gpt-5.4-mini",
-        Provider: "openai",
-        IsFallback: true,
-        PromptTokens: promptTokens,
-        CompletionTokens: completionTokens,
-        EstimatedCostUsd: estimatedCostUsd,
-        IsStreaming: true,
-        LatencyToHeadersMs: 250,
-        TotalDurationMs: 800,
-        StatusCode: 200,
-        TimestampUtc: new DateTimeOffset(2026, 7, 9, 15, 0, 0, TimeSpan.Zero),
-        RoutedModel: "gpt-5.4-mini",
-        CacheCreationTokens: cacheCreationTokens,
-        CacheReadTokens: cacheReadTokens,
-        RequestSummary: requestSummary,
-        ResponseSummary: responseSummary,
-        RouterTokens: routerTokens,
-        RouterCostUsd: routerCostUsd,
-        SubstitutionReason: RoutingSubstitutionReason.Failover);
+        decimal routerCostUsd = 0.000003456m)
+    {
+        return new RoutingTelemetryEvent(
+            SessionId: "sess-1",
+            3,
+            false,
+            RequestedModel: "gpt-5.4",
+            ResolvedModel: "gpt-5.4-mini",
+            Provider: "openai",
+            true,
+            PromptTokens: promptTokens,
+            CompletionTokens: completionTokens,
+            EstimatedCostUsd: estimatedCostUsd,
+            true,
+            250,
+            800,
+            200,
+            TimestampUtc: new DateTimeOffset(2026, 7, 9, 15, 0, 0, offset: TimeSpan.Zero),
+            RoutedModel: "gpt-5.4-mini",
+            CacheCreationTokens: cacheCreationTokens,
+            CacheReadTokens: cacheReadTokens,
+            RequestSummary: requestSummary,
+            ResponseSummary: responseSummary,
+            RouterTokens: routerTokens,
+            RouterCostUsd: routerCostUsd,
+            SubstitutionReason: RoutingSubstitutionReason.Failover);
+    }
 
-    private static QualitySignalEvent SampleSignal(double? judgeScore = 0.8) => new(
-        CorrelationId: "corr-1",
-        SessionId: "sess-1",
-        Dimension: "live:code_generation",
-        Model: "gpt-5.4",
-        Language: "CSharp",
-        SyntaxValid: true,
-        SyntaxAuthoritative: true,
-        AnalysisScore: 0.9,
-        JudgeScore: judgeScore,
-        UnifiedScore: 0.87,
-        DegradedReason: null,
-        TimestampUtc: new DateTimeOffset(2026, 7, 9, 15, 0, 0, TimeSpan.Zero));
+    private static QualitySignalEvent SampleSignal(double? judgeScore = 0.8)
+    {
+        return new QualitySignalEvent(
+            CorrelationId: "corr-1",
+            SessionId: "sess-1",
+            Dimension: "live:code_generation",
+            Model: "gpt-5.4",
+            Language: "CSharp",
+            true,
+            true,
+            0.9,
+            JudgeScore: judgeScore,
+            0.87,
+            null,
+            TimestampUtc: new DateTimeOffset(2026, 7, 9, 15, 0, 0, offset: TimeSpan.Zero));
+    }
 
     private static async Task<Contract.TelemetryEvent> ReadOneAsync(ChannelReader<Contract.TelemetryEvent> reader)
     {
@@ -78,7 +87,7 @@ public class TelemetryBroadcasterTests
     {
         var broadcaster = new TelemetryBroadcaster();
 
-        broadcaster.PublishLogLine(new LogLineEvent(DateTimeOffset.UtcNow, "INFO", "hi"));
+        broadcaster.PublishLogLine(new LogLineEvent(TimestampUtc: DateTimeOffset.UtcNow, Level: "INFO", Message: "hi"));
     }
 
     [Fact]
@@ -92,43 +101,45 @@ public class TelemetryBroadcasterTests
         broadcaster.Publish(telemetryEvent);
 
         var envelope = await ReadOneAsync(channel.Reader);
-        Assert.Equal(Contract.TelemetryEvent.EventOneofCase.RoutingTelemetry, envelope.EventCase);
+        Assert.Equal(expected: Contract.TelemetryEvent.EventOneofCase.RoutingTelemetry, actual: envelope.EventCase);
 
         var wire = envelope.RoutingTelemetry;
-        Assert.Equal(telemetryEvent.SessionId, wire.SessionId);
-        Assert.Equal(telemetryEvent.TurnNumber, wire.TurnNumber);
-        Assert.Equal(telemetryEvent.IsSessionSynthesized, wire.IsSessionSynthesized);
-        Assert.Equal(telemetryEvent.RequestedModel, wire.RequestedModel);
-        Assert.Equal(telemetryEvent.ResolvedModel, wire.ResolvedModel);
-        Assert.Equal(telemetryEvent.Provider, wire.Provider);
-        Assert.Equal(telemetryEvent.IsFallback, wire.IsFallback);
+        Assert.Equal(expected: telemetryEvent.SessionId, actual: wire.SessionId);
+        Assert.Equal(expected: telemetryEvent.TurnNumber, actual: wire.TurnNumber);
+        Assert.Equal(expected: telemetryEvent.IsSessionSynthesized, actual: wire.IsSessionSynthesized);
+        Assert.Equal(expected: telemetryEvent.RequestedModel, actual: wire.RequestedModel);
+        Assert.Equal(expected: telemetryEvent.ResolvedModel, actual: wire.ResolvedModel);
+        Assert.Equal(expected: telemetryEvent.Provider, actual: wire.Provider);
+        Assert.Equal(expected: telemetryEvent.IsFallback, actual: wire.IsFallback);
         Assert.True(wire.HasPromptTokens);
-        Assert.Equal(telemetryEvent.PromptTokens, wire.PromptTokens);
+        Assert.Equal(expected: telemetryEvent.PromptTokens, actual: wire.PromptTokens);
         Assert.True(wire.HasCompletionTokens);
-        Assert.Equal(telemetryEvent.CompletionTokens, wire.CompletionTokens);
+        Assert.Equal(expected: telemetryEvent.CompletionTokens, actual: wire.CompletionTokens);
         Assert.True(wire.HasCacheCreationTokens);
-        Assert.Equal(telemetryEvent.CacheCreationTokens, wire.CacheCreationTokens);
+        Assert.Equal(expected: telemetryEvent.CacheCreationTokens, actual: wire.CacheCreationTokens);
         Assert.True(wire.HasCacheReadTokens);
-        Assert.Equal(telemetryEvent.CacheReadTokens, wire.CacheReadTokens);
+        Assert.Equal(expected: telemetryEvent.CacheReadTokens, actual: wire.CacheReadTokens);
         Assert.True(wire.HasEstimatedCostUsd);
-        Assert.Equal(telemetryEvent.EstimatedCostUsd, decimal.Parse(wire.EstimatedCostUsd, CultureInfo.InvariantCulture));
-        Assert.Equal(telemetryEvent.IsStreaming, wire.IsStreaming);
-        Assert.Equal(telemetryEvent.LatencyToHeadersMs, wire.LatencyToHeadersMs);
-        Assert.Equal(telemetryEvent.TotalDurationMs, wire.TotalDurationMs);
-        Assert.Equal(telemetryEvent.StatusCode, wire.StatusCode);
-        Assert.Equal(telemetryEvent.TimestampUtc, wire.TimestampUtc.ToDateTimeOffset());
+        Assert.Equal(expected: telemetryEvent.EstimatedCostUsd,
+            actual: decimal.Parse(s: wire.EstimatedCostUsd, provider: CultureInfo.InvariantCulture));
+        Assert.Equal(expected: telemetryEvent.IsStreaming, actual: wire.IsStreaming);
+        Assert.Equal(expected: telemetryEvent.LatencyToHeadersMs, actual: wire.LatencyToHeadersMs);
+        Assert.Equal(expected: telemetryEvent.TotalDurationMs, actual: wire.TotalDurationMs);
+        Assert.Equal(expected: telemetryEvent.StatusCode, actual: wire.StatusCode);
+        Assert.Equal(expected: telemetryEvent.TimestampUtc, actual: wire.TimestampUtc.ToDateTimeOffset());
         Assert.True(wire.HasRequestSummary);
-        Assert.Equal(telemetryEvent.RequestSummary, wire.RequestSummary);
+        Assert.Equal(expected: telemetryEvent.RequestSummary, actual: wire.RequestSummary);
         Assert.True(wire.HasResponseSummary);
-        Assert.Equal(telemetryEvent.ResponseSummary, wire.ResponseSummary);
+        Assert.Equal(expected: telemetryEvent.ResponseSummary, actual: wire.ResponseSummary);
         Assert.True(wire.HasCostConfidence);
-        Assert.Equal(telemetryEvent.CostConfidence.ToString(), wire.CostConfidence);
+        Assert.Equal(expected: telemetryEvent.CostConfidence.ToString(), actual: wire.CostConfidence);
         Assert.True(wire.HasRouterTokens);
-        Assert.Equal(telemetryEvent.RouterTokens, wire.RouterTokens);
+        Assert.Equal(expected: telemetryEvent.RouterTokens, actual: wire.RouterTokens);
         Assert.True(wire.HasRouterCostUsd);
-        Assert.Equal(telemetryEvent.RouterCostUsd, decimal.Parse(wire.RouterCostUsd, CultureInfo.InvariantCulture));
-        Assert.Equal(telemetryEvent.RoutedModel, wire.RoutedModel);
-        Assert.Equal(telemetryEvent.SubstitutionReason.ToString(), wire.SubstitutionReason);
+        Assert.Equal(expected: telemetryEvent.RouterCostUsd,
+            actual: decimal.Parse(s: wire.RouterCostUsd, provider: CultureInfo.InvariantCulture));
+        Assert.Equal(expected: telemetryEvent.RoutedModel, actual: wire.RoutedModel);
+        Assert.Equal(expected: telemetryEvent.SubstitutionReason.ToString(), actual: wire.SubstitutionReason);
     }
 
     [Fact]
@@ -146,9 +157,9 @@ public class TelemetryBroadcasterTests
 
         var wire = (await ReadOneAsync(channel.Reader)).RoutingTelemetry;
         Assert.True(wire.HasRouterTokens);
-        Assert.Equal(0, wire.RouterTokens);
+        Assert.Equal(0, actual: wire.RouterTokens);
         Assert.True(wire.HasRouterCostUsd);
-        Assert.Equal(0m, decimal.Parse(wire.RouterCostUsd, CultureInfo.InvariantCulture));
+        Assert.Equal(0m, actual: decimal.Parse(s: wire.RouterCostUsd, provider: CultureInfo.InvariantCulture));
     }
 
     [Fact]
@@ -159,13 +170,13 @@ public class TelemetryBroadcasterTests
         broadcaster.Register(channel.Writer);
 
         broadcaster.Publish(SampleEvent(
-            promptTokens: null,
-            completionTokens: null,
-            estimatedCostUsd: null,
-            requestSummary: null,
-            responseSummary: null,
-            cacheCreationTokens: null,
-            cacheReadTokens: null));
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null));
 
         var envelope = await ReadOneAsync(channel.Reader);
         var wire = envelope.RoutingTelemetry;
@@ -182,7 +193,7 @@ public class TelemetryBroadcasterTests
         // TelemetryBroadcaster.ToWire always sets it - unlike the fields above, its absence here isn't
         // a "not set" case to assert.
         Assert.True(wire.HasCostConfidence);
-        Assert.Equal(CostConfidence.Unknown.ToString(), wire.CostConfidence);
+        Assert.Equal(expected: CostConfidence.Unknown.ToString(), actual: wire.CostConfidence);
     }
 
     [Fact]
@@ -192,14 +203,15 @@ public class TelemetryBroadcasterTests
         var channel = Channel.CreateUnbounded<Contract.TelemetryEvent>();
         broadcaster.Register(channel.Writer);
 
-        var timestamp = new DateTimeOffset(2026, 7, 9, 15, 0, 0, TimeSpan.Zero);
-        broadcaster.PublishLogLine(new LogLineEvent(timestamp, "ERROR", "Failed to write payload."));
+        var timestamp = new DateTimeOffset(2026, 7, 9, 15, 0, 0, offset: TimeSpan.Zero);
+        broadcaster.PublishLogLine(new LogLineEvent(TimestampUtc: timestamp, Level: "ERROR",
+            Message: "Failed to write payload."));
 
         var envelope = await ReadOneAsync(channel.Reader);
-        Assert.Equal(Contract.TelemetryEvent.EventOneofCase.LogLine, envelope.EventCase);
-        Assert.Equal("ERROR", envelope.LogLine.Level);
-        Assert.Equal("Failed to write payload.", envelope.LogLine.Message);
-        Assert.Equal(timestamp, envelope.LogLine.TimestampUtc.ToDateTimeOffset());
+        Assert.Equal(expected: Contract.TelemetryEvent.EventOneofCase.LogLine, actual: envelope.EventCase);
+        Assert.Equal(expected: "ERROR", actual: envelope.LogLine.Level);
+        Assert.Equal(expected: "Failed to write payload.", actual: envelope.LogLine.Message);
+        Assert.Equal(expected: timestamp, actual: envelope.LogLine.TimestampUtc.ToDateTimeOffset());
     }
 
     [Fact]
@@ -215,8 +227,8 @@ public class TelemetryBroadcasterTests
 
         var first = await ReadOneAsync(firstChannel.Reader);
         var second = await ReadOneAsync(secondChannel.Reader);
-        Assert.Equal(Contract.TelemetryEvent.EventOneofCase.RoutingTelemetry, first.EventCase);
-        Assert.Equal(Contract.TelemetryEvent.EventOneofCase.RoutingTelemetry, second.EventCase);
+        Assert.Equal(expected: Contract.TelemetryEvent.EventOneofCase.RoutingTelemetry, actual: first.EventCase);
+        Assert.Equal(expected: Contract.TelemetryEvent.EventOneofCase.RoutingTelemetry, actual: second.EventCase);
     }
 
     [Fact]
@@ -238,7 +250,8 @@ public class TelemetryBroadcasterTests
     {
         var broadcaster = new TelemetryBroadcaster();
         var writerMock = new Mock<ChannelWriter<Contract.TelemetryEvent>>();
-        writerMock.Setup(w => w.TryWrite(It.IsAny<Contract.TelemetryEvent>())).Throws(new InvalidOperationException("boom"));
+        writerMock.Setup(w => w.TryWrite(It.IsAny<Contract.TelemetryEvent>()))
+            .Throws(new InvalidOperationException("boom"));
         broadcaster.Register(writerMock.Object);
 
         broadcaster.Publish(SampleEvent());
@@ -249,7 +262,8 @@ public class TelemetryBroadcasterTests
     {
         var broadcaster = new TelemetryBroadcaster();
         var writerMock = new Mock<ChannelWriter<Contract.TelemetryEvent>>();
-        writerMock.Setup(w => w.TryWrite(It.IsAny<Contract.TelemetryEvent>())).Throws(new InvalidOperationException("boom"));
+        writerMock.Setup(w => w.TryWrite(It.IsAny<Contract.TelemetryEvent>()))
+            .Throws(new InvalidOperationException("boom"));
         broadcaster.Register(writerMock.Object);
 
         var healthyChannel = Channel.CreateUnbounded<Contract.TelemetryEvent>();
@@ -258,7 +272,7 @@ public class TelemetryBroadcasterTests
         broadcaster.Publish(SampleEvent());
 
         var envelope = await ReadOneAsync(healthyChannel.Reader);
-        Assert.Equal(Contract.TelemetryEvent.EventOneofCase.RoutingTelemetry, envelope.EventCase);
+        Assert.Equal(expected: Contract.TelemetryEvent.EventOneofCase.RoutingTelemetry, actual: envelope.EventCase);
     }
 
     [Fact]
@@ -306,22 +320,22 @@ public class TelemetryBroadcasterTests
         broadcaster.Publish(signal);
 
         var envelope = await ReadOneAsync(channel.Reader);
-        Assert.Equal(Contract.TelemetryEvent.EventOneofCase.QualitySignal, envelope.EventCase);
+        Assert.Equal(expected: Contract.TelemetryEvent.EventOneofCase.QualitySignal, actual: envelope.EventCase);
 
         var wire = envelope.QualitySignal;
-        Assert.Equal(signal.CorrelationId, wire.CorrelationId);
-        Assert.Equal(signal.SessionId, wire.SessionId);
-        Assert.Equal(signal.Dimension, wire.Dimension);
-        Assert.Equal(signal.Model, wire.Model);
-        Assert.Equal(signal.Language, wire.Language);
-        Assert.Equal(signal.SyntaxValid, wire.SyntaxValid);
-        Assert.Equal(signal.SyntaxAuthoritative, wire.SyntaxAuthoritative);
+        Assert.Equal(expected: signal.CorrelationId, actual: wire.CorrelationId);
+        Assert.Equal(expected: signal.SessionId, actual: wire.SessionId);
+        Assert.Equal(expected: signal.Dimension, actual: wire.Dimension);
+        Assert.Equal(expected: signal.Model, actual: wire.Model);
+        Assert.Equal(expected: signal.Language, actual: wire.Language);
+        Assert.Equal(expected: signal.SyntaxValid, actual: wire.SyntaxValid);
+        Assert.Equal(expected: signal.SyntaxAuthoritative, actual: wire.SyntaxAuthoritative);
         Assert.True(wire.HasAnalysisScore);
-        Assert.Equal(signal.AnalysisScore, wire.AnalysisScore);
+        Assert.Equal(expected: signal.AnalysisScore, actual: wire.AnalysisScore);
         Assert.True(wire.HasJudgeScore);
-        Assert.Equal(signal.JudgeScore, wire.JudgeScore);
-        Assert.Equal(signal.UnifiedScore, wire.UnifiedScore);
-        Assert.Equal(signal.TimestampUtc, wire.TimestampUtc.ToDateTimeOffset());
+        Assert.Equal(expected: signal.JudgeScore, actual: wire.JudgeScore);
+        Assert.Equal(expected: signal.UnifiedScore, actual: wire.UnifiedScore);
+        Assert.Equal(expected: signal.TimestampUtc, actual: wire.TimestampUtc.ToDateTimeOffset());
     }
 
     // An unjudged score and a judge score of zero are different facts, and the wire has to keep them
@@ -348,4 +362,3 @@ public class TelemetryBroadcasterTests
         Assert.Throws<ArgumentNullException>(() => broadcaster.Publish((QualitySignalEvent)null!));
     }
 }
-

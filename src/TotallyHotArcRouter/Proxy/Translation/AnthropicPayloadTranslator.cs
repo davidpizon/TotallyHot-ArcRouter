@@ -11,7 +11,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation;
 /// transformation (the parity reference used throughout this pillar), scoped to the surface this
 /// pillar needs: text messages, function/tool calling, extended-thinking round-tripping, and the
 /// common generation parameters.
-///
 /// <para>
 /// <b>Unlike every other translated provider (Ollama, Gemini), "anthropic" is dual-mode</b>: the same
 /// provider key already serves real Claude Code production traffic, which sends Anthropic-native
@@ -21,7 +20,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation;
 /// is never touched, and only a client sending an OpenAI-shaped request (e.g. to
 /// <c>/v1/chat/completions</c>) gets translated.
 /// </para>
-///
 /// <para>
 /// <b>Deliberately out of scope</b> (documented, not silently dropped): image/document content blocks,
 /// prompt caching (<c>cache_control</c>), and Anthropic's built-in tools (web search, code execution,
@@ -32,24 +30,22 @@ namespace TotallyHot.ArcRouter.Proxy.Translation;
 /// </summary>
 public sealed class AnthropicPayloadTranslator : IPayloadTranslator
 {
-    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
-
     // Anthropic requires max_tokens on every request; OpenAI clients often omit it (or send neither
     // max_tokens nor max_completion_tokens). This floor keeps a request from being rejected outright
     // rather than guessing at what the client actually wanted - documented, not silent.
     private const int DefaultMaxTokens = 4096;
+    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public string Provider => "anthropic";
 
-    /// <inheritdoc />
-    public bool ShouldTranslate(HttpRequest request) => !IsNativeMessagesPath(request.Path);
+    /// <inheritdoc/>
+    public bool ShouldTranslate(HttpRequest request)
+    {
+        return !IsNativeMessagesPath(request.Path);
+    }
 
-    /// <summary>Matches Anthropic's own Messages API path, case-insensitively, tolerating a trailing slash - the request-path detection strategy chosen for this dual-mode provider (§4.4's "first open question").</summary>
-    private static bool IsNativeMessagesPath(PathString path) =>
-        string.Equals(path.Value?.TrimEnd('/'), "/v1/messages", StringComparison.OrdinalIgnoreCase);
-
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public Uri BuildRequestUri(Uri baseUrl, string providerModelId, bool isStreaming)
     {
         ArgumentNullException.ThrowIfNull(baseUrl);
@@ -57,58 +53,37 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
         // Unlike Gemini, Anthropic encodes neither the model id nor the streaming choice in the URL -
         // both live in the body (model, stream) - so the target is always the same fixed path.
         var trimmedBase = baseUrl.ToString().TrimEnd('/');
-        return new Uri($"{trimmedBase}/v1/messages", UriKind.Absolute);
+        return new Uri(uriString: $"{trimmedBase}/v1/messages", uriKind: UriKind.Absolute);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public byte[] TranslateRequest(byte[] openAiShapedBody)
     {
         var root = JsonNode.Parse(openAiShapedBody) as JsonObject
-            ?? throw new JsonException("Anthropic request translation expected a JSON object body.");
+                   ?? throw new JsonException("Anthropic request translation expected a JSON object body.");
 
         var anthropic = new JsonObject();
 
         // RequestInterceptor has already rewritten "model" to the resolved provider model id before the
         // body reaches here (see RequestInterceptor.ResolveModelRouteAsync) - copied through as-is.
-        if (root["model"]?.GetValue<string>() is { Length: > 0 } model)
-        {
-            anthropic["model"] = model;
-        }
+        if (root["model"]?.GetValue<string>() is { Length: > 0 } model) anthropic["model"] = model;
 
         var messages = root["messages"] as JsonArray ?? new JsonArray();
         var (system, translatedMessages) = TranslateMessages(messages);
 
-        if (system is not null)
-        {
-            anthropic["system"] = system;
-        }
+        if (system is not null) anthropic["system"] = system;
 
         anthropic["messages"] = translatedMessages;
 
-        if (TranslateTools(root["tools"] as JsonArray) is { } tools)
-        {
-            anthropic["tools"] = tools;
-        }
+        if (TranslateTools(root["tools"] as JsonArray) is { } tools) anthropic["tools"] = tools;
 
-        if (TranslateToolChoice(root["tool_choice"]) is { } toolChoice)
-        {
-            anthropic["tool_choice"] = toolChoice;
-        }
+        if (TranslateToolChoice(root["tool_choice"]) is { } toolChoice) anthropic["tool_choice"] = toolChoice;
 
-        if (root["temperature"] is JsonNode temperature)
-        {
-            anthropic["temperature"] = temperature.DeepClone();
-        }
+        if (root["temperature"] is JsonNode temperature) anthropic["temperature"] = temperature.DeepClone();
 
-        if (root["top_p"] is JsonNode topP)
-        {
-            anthropic["top_p"] = topP.DeepClone();
-        }
+        if (root["top_p"] is JsonNode topP) anthropic["top_p"] = topP.DeepClone();
 
-        if (root["top_k"] is JsonNode topK)
-        {
-            anthropic["top_k"] = topK.DeepClone();
-        }
+        if (root["top_k"] is JsonNode topK) anthropic["top_k"] = topK.DeepClone();
 
         // Anthropic's max_tokens is mandatory, unlike OpenAI's optional max_tokens/max_completion_tokens.
         anthropic["max_tokens"] = (root["max_tokens"] ?? root["max_completion_tokens"]) is JsonNode maxTokens
@@ -125,37 +100,148 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
             case JsonArray stopArray:
                 var stopSequences = new JsonArray();
                 foreach (var element in stopArray)
-                {
                     if (element is JsonValue value && value.TryGetValue<string>(out var sequence))
-                    {
                         stopSequences.Add(sequence);
-                    }
-                }
 
-                if (stopSequences.Count > 0)
-                {
-                    anthropic["stop_sequences"] = stopSequences;
-                }
+                if (stopSequences.Count > 0) anthropic["stop_sequences"] = stopSequences;
 
                 break;
         }
 
         // Anthropic's own streaming signal is a body field (unlike Gemini's URL-encoded choice), and it
         // happens to share OpenAI's exact name and boolean semantics - passed straight through.
-        if (root["stream"] is JsonNode stream)
-        {
-            anthropic["stream"] = stream.DeepClone();
-        }
+        if (root["stream"] is JsonNode stream) anthropic["stream"] = stream.DeepClone();
 
         // Extended-thinking opt-in has no OpenAI-standard field; a client that wants it sends Anthropic's
         // own already-shaped `thinking: {type, budget_tokens}` object as a pass-through extension field
         // (mirrors LiteLLM accepting **kwargs straight through), forwarded verbatim.
-        if (root["thinking"] is JsonObject thinkingParam)
+        if (root["thinking"] is JsonObject thinkingParam) anthropic["thinking"] = thinkingParam.DeepClone();
+
+        return JsonSerializer.SerializeToUtf8Bytes(value: anthropic, options: SerializerOptions);
+    }
+
+    /// <inheritdoc/>
+    public byte[] TranslateResponse(byte[] nativeShapedBody)
+    {
+        var root = JsonNode.Parse(nativeShapedBody) as JsonObject
+                   ?? throw new JsonException("Anthropic response translation expected a JSON object body.");
+
+        var openAi = new JsonObject
         {
-            anthropic["thinking"] = thinkingParam.DeepClone();
+            ["id"] = root["id"]?.GetValue<string>() ?? PayloadTranslationHelpers.GenerateCompletionId(),
+            ["object"] = "chat.completion",
+            ["created"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            ["model"] = root["model"]?.GetValue<string>() ?? string.Empty
+        };
+
+        var message = new JsonObject { ["role"] = "assistant" };
+        var contentText = new StringBuilder();
+        var reasoningText = new StringBuilder();
+        JsonArray? thinkingBlocks = null;
+        var toolCalls = new JsonArray();
+
+        if (root["content"] is JsonArray content)
+            foreach (var blockNode in content)
+            {
+                if (blockNode is not JsonObject block) continue;
+
+                switch (block["type"]?.GetValue<string>())
+                {
+                    case "text":
+                        if (block["text"]?.GetValue<string>() is { } text) contentText.Append(text);
+
+                        break;
+
+                    case "tool_use":
+                        toolCalls.Add(BuildToolCall(block: block, index: toolCalls.Count));
+                        break;
+
+                    case "thinking":
+                        if (block["thinking"]?.GetValue<string>() is { } thinking) reasoningText.Append(thinking);
+
+                        thinkingBlocks ??= new JsonArray();
+                        thinkingBlocks.Add(block.DeepClone());
+                        break;
+
+                    case "redacted_thinking":
+                        thinkingBlocks ??= new JsonArray();
+                        thinkingBlocks.Add(block.DeepClone());
+                        break;
+                }
+            }
+
+        var hasToolCalls = toolCalls.Count > 0;
+
+        // OpenAI content is null (not "") when the turn is purely tool calls.
+        message["content"] = contentText.Length > 0 || !hasToolCalls ? contentText.ToString() : null;
+
+        // reasoning_content/thinking_blocks: LiteLLM's standardized cross-provider reasoning
+        // representation - the string is the portable summary, thinking_blocks (with its signature) is
+        // what must be resent verbatim on a later turn for Anthropic to accept it back.
+        if (reasoningText.Length > 0) message["reasoning_content"] = reasoningText.ToString();
+
+        if (thinkingBlocks is not null) message["thinking_blocks"] = thinkingBlocks;
+
+        if (hasToolCalls) message["tool_calls"] = toolCalls;
+
+        var finishReason =
+            MapStopReason(stopReason: root["stop_reason"]?.GetValue<string>(), hasToolCalls: hasToolCalls);
+
+        openAi["choices"] = new JsonArray
+        {
+            new JsonObject { ["index"] = 0, ["message"] = message, ["finish_reason"] = finishReason }
+        };
+
+        if (root["usage"] is JsonObject usage) openAi["usage"] = TranslateUsage(usage);
+
+        return JsonSerializer.SerializeToUtf8Bytes(value: openAi, options: SerializerOptions);
+    }
+
+    /// <inheritdoc/>
+    public IStreamTranslator CreateStreamTranslator()
+    {
+        return new AnthropicStreamTranslator();
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// 400 only, matching <see cref="GeminiPayloadTranslator.HandlesEmbeddedErrorAt"/>. Anthropic's
+    /// 429s are ordinary rate-limit responses whose bodies are currently streamed rather than
+    /// buffered, and opting into them here would change that.
+    /// </remarks>
+    public bool HandlesEmbeddedErrorAt(int statusCode)
+    {
+        return statusCode == StatusCodes.Status400BadRequest;
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Always reports <see cref="EmbeddedProviderError.IsAuthFailure"/> as <see langword="false"/>:
+    /// Anthropic returns a real 401 for a bad credential, so it has none of the disguised-401 wrinkle
+    /// <see cref="GeminiPayloadTranslator"/> has to compensate for. The extracted
+    /// <see cref="EmbeddedProviderError.Status"/> is Anthropic's <c>error.type</c>
+    /// (e.g. <c>invalid_request_error</c>).
+    /// </remarks>
+    public bool TryExtractEmbeddedError(byte[] body, out EmbeddedProviderError error)
+    {
+        if (!TryExtractEmbeddedError(body: body, errorType: out var errorType, message: out var message))
+        {
+            error = default;
+            return false;
         }
 
-        return JsonSerializer.SerializeToUtf8Bytes(anthropic, SerializerOptions);
+        error = new EmbeddedProviderError(Status: errorType, Message: message, false);
+        return true;
+    }
+
+    /// <summary>
+    /// Matches Anthropic's own Messages API path, case-insensitively, tolerating a trailing slash - the request-path
+    /// detection strategy chosen for this dual-mode provider (§4.4's "first open question").
+    /// </summary>
+    private static bool IsNativeMessagesPath(PathString path)
+    {
+        return string.Equals(a: path.Value?.TrimEnd('/'), b: "/v1/messages",
+            comparisonType: StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -173,10 +259,7 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
 
         foreach (var messageNode in messages)
         {
-            if (messageNode is not JsonObject message)
-            {
-                continue;
-            }
+            if (messageNode is not JsonObject message) continue;
 
             var role = message["role"]?.GetValue<string>();
 
@@ -184,24 +267,22 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
             {
                 case "system":
                     if (PayloadTranslationHelpers.ExtractText(message["content"]) is { Length: > 0 } systemText)
-                    {
                         systemParts.Add(systemText);
-                    }
 
                     break;
 
                 case "assistant":
-                    AppendAssistantContent(result, message);
+                    AppendAssistantContent(messages: result, message: message);
                     break;
 
                 case "tool":
                 case "function":
-                    AppendToolResult(result, message);
+                    AppendToolResult(messages: result, message: message);
                     break;
 
                 case "user":
                 default:
-                    AppendUserContent(result, message);
+                    AppendUserContent(messages: result, message: message);
                     break;
             }
         }
@@ -209,23 +290,28 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
         // Anthropic rejects an empty messages array; guard with a blank user turn, mirroring Gemini's
         // own empty-contents guard.
         if (result.Count == 0)
-        {
-            AppendMergedContent(result, "user", new JsonArray { new JsonObject { ["type"] = "text", ["text"] = " " } });
-        }
+            AppendMergedContent(messages: result, role: "user",
+                blocks: new JsonArray { new JsonObject { ["type"] = "text", ["text"] = " " } });
 
-        var system = systemParts.Count > 0 ? string.Join("\n\n", systemParts) : null;
+        var system = systemParts.Count > 0 ? string.Join(separator: "\n\n", values: systemParts) : null;
         return (system, result);
     }
 
-    /// <summary>Appends a user message's text as a single Anthropic text content block, substituting a blank space when the text is empty since Anthropic rejects empty text blocks.</summary>
+    /// <summary>
+    /// Appends a user message's text as a single Anthropic text content block, substituting a blank space when the
+    /// text is empty since Anthropic rejects empty text blocks.
+    /// </summary>
     private static void AppendUserContent(JsonArray messages, JsonObject message)
     {
         var text = PayloadTranslationHelpers.ExtractText(message["content"]);
         var block = new JsonObject { ["type"] = "text", ["text"] = string.IsNullOrEmpty(text) ? " " : text };
-        AppendMergedContent(messages, "user", new JsonArray { block });
+        AppendMergedContent(messages: messages, role: "user", blocks: new JsonArray { block });
     }
 
-    /// <summary>Builds an assistant turn's Anthropic content blocks in required order: thinking/reasoning blocks first, then text, then tool_use blocks converted from OpenAI-style tool_calls.</summary>
+    /// <summary>
+    /// Builds an assistant turn's Anthropic content blocks in required order: thinking/reasoning blocks first, then
+    /// text, then tool_use blocks converted from OpenAI-style tool_calls.
+    /// </summary>
     private static void AppendAssistantContent(JsonArray messages, JsonObject message)
     {
         var blocks = new JsonArray();
@@ -235,14 +321,11 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
         if (message["thinking_blocks"] is JsonArray thinkingBlocks)
         {
             foreach (var thinkingBlockNode in thinkingBlocks)
-            {
                 if (thinkingBlockNode is JsonObject thinkingBlock)
-                {
                     blocks.Add(thinkingBlock.DeepClone());
-                }
-            }
         }
-        else if (message["reasoning_content"] is JsonValue reasoningValue && reasoningValue.TryGetValue<string>(out var reasoningText) && reasoningText.Length > 0)
+        else if (message["reasoning_content"] is JsonValue reasoningValue &&
+                 reasoningValue.TryGetValue<string>(out var reasoningText) && reasoningText.Length > 0)
         {
             // A client kept only the plain reasoning text, not the raw thinking_blocks (with its
             // signature). Reconstruct a best-effort thinking block so the text isn't silently dropped;
@@ -251,24 +334,16 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
         }
 
         if (PayloadTranslationHelpers.ExtractText(message["content"]) is { Length: > 0 } text)
-        {
             blocks.Add(new JsonObject { ["type"] = "text", ["text"] = text });
-        }
 
         if (message["tool_calls"] is JsonArray toolCalls)
-        {
             foreach (var toolCallNode in toolCalls)
             {
-                if (toolCallNode is not JsonObject toolCall || toolCall["function"] is not JsonObject function)
-                {
-                    continue;
-                }
+                if (toolCallNode is not JsonObject toolCall ||
+                    toolCall["function"] is not JsonObject function) continue;
 
                 var name = function["name"]?.GetValue<string>();
-                if (string.IsNullOrEmpty(name))
-                {
-                    continue;
-                }
+                if (string.IsNullOrEmpty(name)) continue;
 
                 var id = toolCall["id"]?.GetValue<string>() is { Length: > 0 } toolCallId
                     ? toolCallId
@@ -279,20 +354,19 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
                     ["type"] = "tool_use",
                     ["id"] = id,
                     ["name"] = name,
-                    ["input"] = PayloadTranslationHelpers.ParseArgumentsObject(function["arguments"]),
+                    ["input"] = PayloadTranslationHelpers.ParseArgumentsObject(function["arguments"])
                 });
             }
-        }
 
-        if (blocks.Count == 0)
-        {
-            return;
-        }
+        if (blocks.Count == 0) return;
 
-        AppendMergedContent(messages, "assistant", blocks);
+        AppendMergedContent(messages: messages, role: "assistant", blocks: blocks);
     }
 
-    /// <summary>Appends a tool result as an Anthropic tool_result block on a user turn, falling back to a plain labeled text block when the message lacks a tool_call_id so the content isn't silently dropped.</summary>
+    /// <summary>
+    /// Appends a tool result as an Anthropic tool_result block on a user turn, falling back to a plain labeled text
+    /// block when the message lacks a tool_call_id so the content isn't silently dropped.
+    /// </summary>
     private static void AppendToolResult(JsonArray messages, JsonObject message)
     {
         var content = PayloadTranslationHelpers.ExtractText(message["content"]) ?? string.Empty;
@@ -310,20 +384,22 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
             {
                 ["type"] = "tool_result",
                 ["tool_use_id"] = toolUseId,
-                ["content"] = content,
+                ["content"] = content
             };
 
-            AppendMergedContent(messages, "user", new JsonArray { block });
+            AppendMergedContent(messages: messages, role: "user", blocks: new JsonArray { block });
             return;
         }
 
         if (content.Length > 0)
-        {
-            AppendMergedContent(messages, "user", new JsonArray { new JsonObject { ["type"] = "text", ["text"] = $"Tool result: {content}" } });
-        }
+            AppendMergedContent(messages: messages, role: "user",
+                blocks: new JsonArray { new JsonObject { ["type"] = "text", ["text"] = $"Tool result: {content}" } });
     }
 
-    /// <summary>Appends blocks to the last message when it shares <paramref name="role"/>, else starts a new message - the consecutive-role merge Anthropic requires.</summary>
+    /// <summary>
+    /// Appends blocks to the last message when it shares <paramref name="role"/>, else starts a new message - the
+    /// consecutive-role merge Anthropic requires.
+    /// </summary>
     private static void AppendMergedContent(JsonArray messages, string role, JsonArray blocks)
     {
         if (messages.Count > 0 &&
@@ -343,35 +419,28 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
         messages.Add(new JsonObject { ["role"] = role, ["content"] = blocks });
     }
 
-    /// <summary>Maps OpenAI <c>tools</c> to Anthropic's <c>{name, description, input_schema}</c> shape; returns null when there are no function tools. Internal so <c>AnthropicOnBedrockPayloadTranslator</c> can reuse it - Bedrock's Claude tool shape is identical.</summary>
+    /// <summary>
+    /// Maps OpenAI <c>tools</c> to Anthropic's <c>{name, description, input_schema}</c> shape; returns null when
+    /// there are no function tools. Internal so <c>AnthropicOnBedrockPayloadTranslator</c> can reuse it - Bedrock's Claude
+    /// tool shape is identical.
+    /// </summary>
     internal static JsonArray? TranslateTools(JsonArray? tools)
     {
-        if (tools is null)
-        {
-            return null;
-        }
+        if (tools is null) return null;
 
         var result = new JsonArray();
 
         foreach (var toolNode in tools)
         {
-            if (toolNode is not JsonObject tool || tool["function"] is not JsonObject function)
-            {
-                continue;
-            }
+            if (toolNode is not JsonObject tool || tool["function"] is not JsonObject function) continue;
 
             var name = function["name"]?.GetValue<string>();
-            if (string.IsNullOrEmpty(name))
-            {
-                continue;
-            }
+            if (string.IsNullOrEmpty(name)) continue;
 
             var entry = new JsonObject { ["name"] = name };
 
             if (function["description"]?.GetValue<string>() is { Length: > 0 } description)
-            {
                 entry["description"] = description;
-            }
 
             // Unlike Gemini's OpenAPI-subset schema, Anthropic's input_schema is regular JSON Schema -
             // no keyword stripping needed, copied through as-is.
@@ -385,121 +454,32 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
         return result.Count > 0 ? result : null;
     }
 
-    /// <summary>Internal so <c>AnthropicOnBedrockPayloadTranslator</c> can reuse it - Bedrock's Claude tool_choice shape is identical.</summary>
-    internal static JsonObject? TranslateToolChoice(JsonNode? toolChoice) => toolChoice switch
+    /// <summary>
+    /// Internal so <c>AnthropicOnBedrockPayloadTranslator</c> can reuse it - Bedrock's Claude tool_choice shape is
+    /// identical.
+    /// </summary>
+    internal static JsonObject? TranslateToolChoice(JsonNode? toolChoice)
     {
-        JsonValue value when value.TryGetValue<string>(out var s) => s switch
+        return toolChoice switch
         {
-            "auto" => new JsonObject { ["type"] = "auto" },
-            "none" => new JsonObject { ["type"] = "none" },
-            "required" => new JsonObject { ["type"] = "any" },
-            _ => null,
-        },
-        JsonObject obj when obj["function"] is JsonObject fn && fn["name"]?.GetValue<string>() is { Length: > 0 } name =>
-            new JsonObject { ["type"] = "tool", ["name"] = name },
-        _ => null,
-    };
-
-    /// <inheritdoc />
-    public byte[] TranslateResponse(byte[] nativeShapedBody)
-    {
-        var root = JsonNode.Parse(nativeShapedBody) as JsonObject
-            ?? throw new JsonException("Anthropic response translation expected a JSON object body.");
-
-        var openAi = new JsonObject
-        {
-            ["id"] = root["id"]?.GetValue<string>() ?? PayloadTranslationHelpers.GenerateCompletionId(),
-            ["object"] = "chat.completion",
-            ["created"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-            ["model"] = root["model"]?.GetValue<string>() ?? string.Empty,
-        };
-
-        var message = new JsonObject { ["role"] = "assistant" };
-        var contentText = new StringBuilder();
-        var reasoningText = new StringBuilder();
-        JsonArray? thinkingBlocks = null;
-        var toolCalls = new JsonArray();
-
-        if (root["content"] is JsonArray content)
-        {
-            foreach (var blockNode in content)
+            JsonValue value when value.TryGetValue<string>(out var s) => s switch
             {
-                if (blockNode is not JsonObject block)
-                {
-                    continue;
-                }
-
-                switch (block["type"]?.GetValue<string>())
-                {
-                    case "text":
-                        if (block["text"]?.GetValue<string>() is { } text)
-                        {
-                            contentText.Append(text);
-                        }
-
-                        break;
-
-                    case "tool_use":
-                        toolCalls.Add(BuildToolCall(block, toolCalls.Count));
-                        break;
-
-                    case "thinking":
-                        if (block["thinking"]?.GetValue<string>() is { } thinking)
-                        {
-                            reasoningText.Append(thinking);
-                        }
-
-                        thinkingBlocks ??= new JsonArray();
-                        thinkingBlocks.Add(block.DeepClone());
-                        break;
-
-                    case "redacted_thinking":
-                        thinkingBlocks ??= new JsonArray();
-                        thinkingBlocks.Add(block.DeepClone());
-                        break;
-                }
-            }
-        }
-
-        var hasToolCalls = toolCalls.Count > 0;
-
-        // OpenAI content is null (not "") when the turn is purely tool calls.
-        message["content"] = contentText.Length > 0 || !hasToolCalls ? contentText.ToString() : null;
-
-        // reasoning_content/thinking_blocks: LiteLLM's standardized cross-provider reasoning
-        // representation - the string is the portable summary, thinking_blocks (with its signature) is
-        // what must be resent verbatim on a later turn for Anthropic to accept it back.
-        if (reasoningText.Length > 0)
-        {
-            message["reasoning_content"] = reasoningText.ToString();
-        }
-
-        if (thinkingBlocks is not null)
-        {
-            message["thinking_blocks"] = thinkingBlocks;
-        }
-
-        if (hasToolCalls)
-        {
-            message["tool_calls"] = toolCalls;
-        }
-
-        var finishReason = MapStopReason(root["stop_reason"]?.GetValue<string>(), hasToolCalls);
-
-        openAi["choices"] = new JsonArray
-        {
-            new JsonObject { ["index"] = 0, ["message"] = message, ["finish_reason"] = finishReason },
+                "auto" => new JsonObject { ["type"] = "auto" },
+                "none" => new JsonObject { ["type"] = "none" },
+                "required" => new JsonObject { ["type"] = "any" },
+                _ => null
+            },
+            JsonObject obj when obj["function"] is JsonObject fn &&
+                                fn["name"]?.GetValue<string>() is { Length: > 0 } name =>
+                new JsonObject { ["type"] = "tool", ["name"] = name },
+            _ => null
         };
-
-        if (root["usage"] is JsonObject usage)
-        {
-            openAi["usage"] = TranslateUsage(usage);
-        }
-
-        return JsonSerializer.SerializeToUtf8Bytes(openAi, SerializerOptions);
     }
 
-    /// <summary>Converts an Anthropic tool_use content block into an OpenAI-shaped tool_calls entry, generating a synthetic id when the block is missing one and serializing the input object to a JSON string for the arguments field.</summary>
+    /// <summary>
+    /// Converts an Anthropic tool_use content block into an OpenAI-shaped tool_calls entry, generating a synthetic id
+    /// when the block is missing one and serializing the input object to a JSON string for the arguments field.
+    /// </summary>
     private static JsonObject BuildToolCall(JsonObject block, int index)
     {
         var id = block["id"]?.GetValue<string>() is { Length: > 0 } blockId ? blockId : $"toolu_{Guid.NewGuid():N}";
@@ -514,12 +494,15 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
             ["function"] = new JsonObject
             {
                 ["name"] = name,
-                ["arguments"] = arguments,
-            },
+                ["arguments"] = arguments
+            }
         };
     }
 
-    /// <summary>Maps a non-streaming response's native Anthropic <c>usage</c> object to the enriched OpenAI shape via <see cref="BuildEnrichedUsage"/>.</summary>
+    /// <summary>
+    /// Maps a non-streaming response's native Anthropic <c>usage</c> object to the enriched OpenAI shape via
+    /// <see cref="BuildEnrichedUsage"/>.
+    /// </summary>
     private static JsonObject TranslateUsage(JsonObject usage)
     {
         var inputTokens = usage["input_tokens"]?.GetValue<int>() ?? 0;
@@ -527,7 +510,8 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
         var cacheCreationTokens = usage["cache_creation_input_tokens"]?.GetValue<int>();
         var cacheReadTokens = usage["cache_read_input_tokens"]?.GetValue<int>();
 
-        return BuildEnrichedUsage(inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens);
+        return BuildEnrichedUsage(inputTokens: inputTokens, outputTokens: outputTokens,
+            cacheCreationTokens: cacheCreationTokens, cacheReadTokens: cacheReadTokens);
     }
 
     /// <summary>
@@ -542,7 +526,8 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
     /// non-streaming path) and <see cref="AnthropicStreamTranslator"/>'s terminal chunk, so the two paths
     /// can never disagree on the formula.
     /// </summary>
-    internal static JsonObject BuildEnrichedUsage(int inputTokens, int outputTokens, int? cacheCreationTokens, int? cacheReadTokens)
+    internal static JsonObject BuildEnrichedUsage(int inputTokens, int outputTokens, int? cacheCreationTokens,
+        int? cacheReadTokens)
     {
         var promptTokens = inputTokens + (cacheCreationTokens ?? 0) + (cacheReadTokens ?? 0);
 
@@ -550,34 +535,29 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
         {
             ["prompt_tokens"] = promptTokens,
             ["completion_tokens"] = outputTokens,
-            ["total_tokens"] = promptTokens + outputTokens,
+            ["total_tokens"] = promptTokens + outputTokens
         };
 
         if (cacheCreationTokens is not null || cacheReadTokens is not null)
         {
             result["prompt_tokens_details"] = new JsonObject { ["cached_tokens"] = cacheReadTokens ?? 0 };
 
-            if (cacheCreationTokens is not null)
-            {
-                result["cache_creation_input_tokens"] = cacheCreationTokens.Value;
-            }
+            if (cacheCreationTokens is not null) result["cache_creation_input_tokens"] = cacheCreationTokens.Value;
 
-            if (cacheReadTokens is not null)
-            {
-                result["cache_read_input_tokens"] = cacheReadTokens.Value;
-            }
+            if (cacheReadTokens is not null) result["cache_read_input_tokens"] = cacheReadTokens.Value;
         }
 
         return result;
     }
 
-    /// <summary>Maps an Anthropic <c>stop_reason</c> to OpenAI's <c>finish_reason</c>, mirroring LiteLLM's Anthropic finish-reason mapping. A turn carrying any tool_use block always reports "tool_calls", matching OpenAI's own convention regardless of the raw stop_reason.</summary>
+    /// <summary>
+    /// Maps an Anthropic <c>stop_reason</c> to OpenAI's <c>finish_reason</c>, mirroring LiteLLM's Anthropic
+    /// finish-reason mapping. A turn carrying any tool_use block always reports "tool_calls", matching OpenAI's own convention
+    /// regardless of the raw stop_reason.
+    /// </summary>
     internal static string MapStopReason(string? stopReason, bool hasToolCalls)
     {
-        if (hasToolCalls)
-        {
-            return "tool_calls";
-        }
+        if (hasToolCalls) return "tool_calls";
 
         return stopReason switch
         {
@@ -587,12 +567,9 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
             "tool_use" => "tool_calls",
             "pause_turn" => "stop",
             "refusal" => "content_filter",
-            _ => "stop",
+            _ => "stop"
         };
     }
-
-    /// <inheritdoc />
-    public IStreamTranslator CreateStreamTranslator() => new AnthropicStreamTranslator();
 
     // --- shared helpers now live in PayloadTranslationHelpers; see below for the provider-specific ones ---
 
@@ -605,9 +582,15 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
     /// through <see cref="TranslateResponse"/>, mirroring <c>GeminiPayloadTranslator.TryExtractEmbeddedError</c>.
     /// </summary>
     /// <param name="body">The raw upstream response body.</param>
-    /// <param name="errorType">The Anthropic error type (e.g. <c>invalid_request_error</c>) when extraction succeeds; otherwise empty.</param>
+    /// <param name="errorType">
+    /// The Anthropic error type (e.g. <c>invalid_request_error</c>) when extraction succeeds;
+    /// otherwise empty.
+    /// </param>
     /// <param name="message">The human-readable error message when extraction succeeds; otherwise empty.</param>
-    /// <returns><see langword="true"/> if <paramref name="body"/> parsed as an Anthropic error envelope with a non-empty message.</returns>
+    /// <returns>
+    /// <see langword="true"/> if <paramref name="body"/> parsed as an Anthropic error envelope with a non-empty
+    /// message.
+    /// </returns>
     internal static bool TryExtractEmbeddedError(byte[] body, out string errorType, out string message)
     {
         errorType = string.Empty;
@@ -623,42 +606,11 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
             return false;
         }
 
-        if (parsed is not JsonObject root || root["type"]?.GetValue<string>() != "error" || root["error"] is not JsonObject errorObject)
-        {
-            return false;
-        }
+        if (parsed is not JsonObject root || root["type"]?.GetValue<string>() != "error" ||
+            root["error"] is not JsonObject errorObject) return false;
 
         errorType = errorObject["type"]?.GetValue<string>() ?? string.Empty;
         message = errorObject["message"]?.GetValue<string>() ?? string.Empty;
         return message.Length > 0;
     }
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// 400 only, matching <see cref="GeminiPayloadTranslator.HandlesEmbeddedErrorAt"/>. Anthropic's
-    /// 429s are ordinary rate-limit responses whose bodies are currently streamed rather than
-    /// buffered, and opting into them here would change that.
-    /// </remarks>
-    public bool HandlesEmbeddedErrorAt(int statusCode) => statusCode == StatusCodes.Status400BadRequest;
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// Always reports <see cref="EmbeddedProviderError.IsAuthFailure"/> as <see langword="false"/>:
-    /// Anthropic returns a real 401 for a bad credential, so it has none of the disguised-401 wrinkle
-    /// <see cref="GeminiPayloadTranslator"/> has to compensate for. The extracted
-    /// <see cref="EmbeddedProviderError.Status"/> is Anthropic's <c>error.type</c>
-    /// (e.g. <c>invalid_request_error</c>).
-    /// </remarks>
-    public bool TryExtractEmbeddedError(byte[] body, out EmbeddedProviderError error)
-    {
-        if (!TryExtractEmbeddedError(body, out var errorType, out var message))
-        {
-            error = default;
-            return false;
-        }
-
-        error = new EmbeddedProviderError(errorType, message, IsAuthFailure: false);
-        return true;
-    }
 }
-

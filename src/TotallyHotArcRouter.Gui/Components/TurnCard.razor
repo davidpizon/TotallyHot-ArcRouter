@@ -14,15 +14,21 @@
             aria-label="@HeaderAriaLabel"
             class="w-full flex items-center gap-2 px-2.5 pt-1.5 text-left ls-turn-card-toggle">
         <span class="text-xs font-mono text-slate-500 shrink-0 ls-tip"
-              data-tip="Turn position within this conversation">@Turn.TurnNumber/@TotalTurns</span>
+              data-tip="Turn position within this conversation">
+            @Turn.TurnNumber/@TotalTurns
+        </span>
         <span class="text-xs font-medium text-slate-200 ls-truncate ls-flex-auto">@TitleExcerpt</span>
         <span class="shrink-0 rounded px-1.5 py-0.5 text-xs font-semibold ls-tip"
               data-tip="Agent the router selected for this turn"
-              style="background:@(AgentColor)22;color:@AgentColor;border:1px solid @(AgentColor)44">@Turn.Agent</span>
+              style="background:@(AgentColor)22;color:@AgentColor;border:1px solid @(AgentColor)44">
+            @Turn.Agent
+        </span>
         @if (Turn.IsFallback)
         {
             <span class="ds-badge-warning shrink-0 rounded px-1.5 py-0.5 text-xs font-semibold ls-tip"
-                  data-tip="This turn was served by fallback routing">⚠</span>
+                  data-tip="This turn was served by fallback routing">
+                ⚠
+            </span>
         }
         <span class="text-xs font-mono text-slate-600 shrink-0">@Turn.Timestamp</span>
         <span class="text-xs text-slate-500 shrink-0" aria-hidden="true">@(_expanded ? "▴" : "▾")</span>
@@ -37,13 +43,13 @@
               data-tip="Routing ROI: cost reduction from routing this task to a cheaper model vs. the worst-case expensive model">
             <span class="ls-stat-label">ROI</span>
             <span class="font-mono text-xs @(Turn.RoutingRoi > 0 ? "metric-positive" : "metric-neutral")">
-                @(Turn.RoutingRoi > 0 ? $"{Turn.RoutingRoi.ToString("F1", CultureInfo.InvariantCulture)}% ↓" : "—")
+                @(Turn.RoutingRoi > 0 ? $"{Turn.RoutingRoi.ToString(format: "F1", provider: CultureInfo.InvariantCulture)}% ↓" : "—")
             </span>
         </span>
         <span class="flex items-baseline gap-1 ls-tip" tabindex="0" aria-describedby="ls-tooltip"
               data-tip="@CostTip">
             <span class="ls-stat-label">Cost</span>
-            <span class="font-mono text-xs metric-accent">$@Turn.TotalCost.ToString("F6", CultureInfo.InvariantCulture)</span>
+            <span class="font-mono text-xs metric-accent">$@Turn.TotalCost.ToString(format: "F6", provider: CultureInfo.InvariantCulture)</span>
             @if (IsApproximateCost)
             {
                 <span aria-hidden="true" class="metric-fallback">≈</span>
@@ -52,7 +58,9 @@
         <span class="flex items-baseline gap-1 ls-tip" tabindex="0" aria-describedby="ls-tooltip"
               data-tip="Token volume: prompt tokens sent to the LLM / completion tokens generated. Watch prompt tokens compound turn-over-turn (the hockey stick curve).">
             <span class="ls-stat-label">Tok P/C</span>
-            <span class="font-mono text-xs stat-color-tokens">@Turn.PromptTokens.ToString("N0", CultureInfo.InvariantCulture)<span class="text-slate-600">/</span>@Turn.CompletionTokens.ToString("N0", CultureInfo.InvariantCulture)</span>
+            <span class="font-mono text-xs stat-color-tokens">
+                @Turn.PromptTokens.ToString(format: "N0", provider: CultureInfo.InvariantCulture)<span class="text-slate-600">/</span>@Turn.CompletionTokens.ToString(format: "N0", provider: CultureInfo.InvariantCulture)
+            </span>
         </span>
         <span class="flex items-baseline gap-1 ls-tip" tabindex="0" aria-describedby="ls-tooltip"
               data-tip="Tool execution steps: number of tool invocations/API calls within this turn's multi-step workflow">
@@ -63,7 +71,7 @@
               data-tip="Cache hit rate: percentage of prompt tokens served from the provider's prompt cache instead of being processed from scratch">
             <span class="ls-stat-label">Cache</span>
             <span class="font-mono text-xs @(Turn.CacheHitRate > 0 ? "metric-positive" : "metric-neutral")">
-                @(Turn.CacheHitRate > 0 ? $"{Turn.CacheHitRate.ToString("F0", CultureInfo.InvariantCulture)}%" : "—")
+                @(Turn.CacheHitRate > 0 ? $"{Turn.CacheHitRate.ToString(format: "F0", provider: CultureInfo.InvariantCulture)}%" : "—")
             </span>
         </span>
         <span class="flex items-baseline gap-1 ls-tip" tabindex="0" aria-describedby="ls-tooltip"
@@ -74,7 +82,7 @@
         <span class="flex items-baseline gap-1 ls-tip" tabindex="0" aria-describedby="ls-tooltip"
               data-tip="Context buffer: current session context size relative to the model's maximum context window">
             <span class="ls-stat-label">Ctx</span>
-            <span class="font-mono text-xs text-slate-300">@Turn.ContextBufferPercent.ToString("F1", CultureInfo.InvariantCulture)%</span>
+            <span class="font-mono text-xs text-slate-300">@Turn.ContextBufferPercent.ToString(format: "F1", provider: CultureInfo.InvariantCulture)%</span>
         </span>
         <span class="flex items-baseline gap-1 ls-tip" tabindex="0" aria-describedby="ls-tooltip"
               data-tip="Model the router selected for this turn">
@@ -101,7 +109,7 @@
                         case StepStatus.Warn:
                             <div class="disclosure-enter flex items-start gap-2 rounded px-2 py-1.5 text-xs font-mono ds-step-warning"
                                  style="--i:@i">
-                                <Icon Name="alert-triangle" Size="16" Class="mt-0.5 shrink-0" />
+                                <Icon Name="alert-triangle" Size="16" Class="mt-0.5 shrink-0"/>
                                 <span>@step.Message</span>
                             </div>
                             break;
@@ -115,7 +123,7 @@
                         default:
                             <div class="disclosure-enter flex items-start gap-2 rounded px-2 py-1.5 text-xs font-mono ds-step-success"
                                  style="--i:@i">
-                                <Icon Name="check-circle" Size="16" Class="mt-0.5 shrink-0" />
+                                <Icon Name="check-circle" Size="16" Class="mt-0.5 shrink-0"/>
                                 <span>@step.Message</span>
                             </div>
                             break;
@@ -143,12 +151,15 @@
 </div>
 
 @code {
+
     /// <summary>The turn this card renders.</summary>
-    [Parameter, EditorRequired]
+    [Parameter]
+    [EditorRequired]
     public ConversationTurn Turn { get; set; } = null!;
 
     /// <summary>Total number of turns in the parent conversation, used in the "N/total" header label.</summary>
-    [Parameter, EditorRequired]
+    [Parameter]
+    [EditorRequired]
     public int TotalTurns { get; set; }
 
     private bool _expanded;
@@ -167,7 +178,7 @@
         "NoUsage" => "Total turn cost: usage could not be extracted for this turn, so cost is unknown (shown as $0).",
         "Unknown" => "Total turn cost: no fresh catalog price for this model, so cost is unknown (shown as $0).",
         "CatalogApproximate" => "Total turn cost: an approximate estimate - a cache rate or model match fell back to a conservative default. See docs/router/token-tracking-improvements.md §5.6/§5.7.",
-        _ => "Total turn cost: prompt token cost + completion token cost for this turn",
+        _ => "Total turn cost: prompt token cost + completion token cost for this turn"
     };
 
     // Substitution reasons that describe the client's own choice rather than an override - mirrors
@@ -176,17 +187,23 @@
     private static readonly HashSet<string> SilentSubstitutionReasons = new(StringComparer.Ordinal)
     {
         "None",
-        "AutoSelect",
+        "AutoSelect"
     };
 
-    /// <summary>Whether the router substituted a model the client did not ask for (docs/router/orchestrator-live-path-plan.md §M3.1) - drives the Model stat's fallback styling and the header's accessible label.</summary>
+    /// <summary>
+    /// Whether the router substituted a model the client did not ask for (docs/router/orchestrator-live-path-plan.md
+    /// §M3.1) - drives the Model stat's fallback styling and the header's accessible label.
+    /// </summary>
     private bool IsSubstituted =>
         Turn.SubstitutionReason is { } reason && !SilentSubstitutionReasons.Contains(reason)
-        && Turn.RequestedModel is not null && Turn.RoutedModel is not null;
+                                              && Turn.RequestedModel is not null && Turn.RoutedModel is not null;
 
     // Screen-reader equivalent of the header's visible sub-spans (see the accessibility note in the
     // markup above for why those spans aren't independently focusable).
-    /// <summary>The header button's accessible label, restating the turn's identifying facts and current expand/collapse state.</summary>
+    /// <summary>
+    /// The header button's accessible label, restating the turn's identifying facts and current expand/collapse
+    /// state.
+    /// </summary>
     private string HeaderAriaLabel =>
         $"Turn {Turn.TurnNumber} of {TotalTurns}, agent {Turn.Agent}" +
         (Turn.IsFallback ? ", fallback routing" : string.Empty) +
@@ -194,7 +211,10 @@
         $", at {Turn.Timestamp}. {(_expanded ? "Collapse" : "Expand")} details.";
 
     // First few words of the turn's request text, used as the card title.
-    /// <summary>The card header's title text: the first 8 words of the request summary, or a generic "Turn N" label when there is none.</summary>
+    /// <summary>
+    /// The card header's title text: the first 8 words of the request summary, or a generic "Turn N" label when there
+    /// is none.
+    /// </summary>
     private string TitleExcerpt
     {
         get
@@ -204,8 +224,9 @@
                 return $"Turn {Turn.TurnNumber}";
             }
 
-            var words = Turn.RequestSummary.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            return words.Length <= 8 ? Turn.RequestSummary : string.Join(' ', words.Take(8)) + "…";
+            var words = Turn.RequestSummary.Split(' ', options: StringSplitOptions.RemoveEmptyEntries);
+            return words.Length <= 8 ? Turn.RequestSummary : string.Join(' ', values: words.Take(8)) + "…";
         }
     }
+
 }

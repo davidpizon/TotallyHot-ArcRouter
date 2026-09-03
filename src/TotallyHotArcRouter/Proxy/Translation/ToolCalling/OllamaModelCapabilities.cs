@@ -4,7 +4,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// Maps what the router knows about a model's tool calling onto the <c>capabilities</c> array Ollama's
 /// <c>POST /api/show</c> publishes, which capability-filtering clients (Visual Studio's Copilot chat among
 /// them) use to decide whether a model may be selected at all.
-///
 /// <para>
 /// The governing principle is that <c>/api/show</c> describes what <em>this endpoint</em> can do with
 /// <em>this model name</em> - the client is talking to the router, not to the weights. Every dialect the
@@ -48,7 +47,7 @@ internal static class OllamaModelCapabilities
         // Every branch currently yields the same pair; see the type-level remarks for why this is still a
         // function. An unrecognized name - a row written by a newer build, or hand-edited - lands here too
         // and is treated as unclassified, matching how ToolCallNormalizerFactory reads it.
-        _ = ToolCallDialectRegistry.TryGet(dialectName, out _);
+        _ = ToolCallDialectRegistry.TryGet(name: dialectName, dialect: out _);
 
         return CanonicalOrder;
     }
@@ -73,12 +72,8 @@ internal static class OllamaModelCapabilities
 
         var present = new HashSet<string>(StringComparer.Ordinal) { Completion };
         foreach (var set in sets)
-        {
-            foreach (var capability in set)
-            {
-                present.Add(capability);
-            }
-        }
+        foreach (var capability in set)
+            present.Add(capability);
 
         // Filtered through the canonical order rather than emitted from the set, so ordering is fixed and a
         // capability from a newer build that this one does not know how to order cannot appear in an

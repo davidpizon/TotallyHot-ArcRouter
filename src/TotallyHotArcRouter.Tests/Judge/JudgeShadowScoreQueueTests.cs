@@ -16,7 +16,7 @@ public class JudgeShadowScoreQueueTests
         var queue = new JudgeShadowScoreQueue(Options.Create(new JudgeOptions { QueueCapacity = 2 }));
 
         Assert.True(queue.TryEnqueue(MakeJob("corr-1")));
-        Assert.Equal(0, queue.DroppedCount);
+        Assert.Equal(0, actual: queue.DroppedCount);
     }
 
     [Fact]
@@ -29,7 +29,7 @@ public class JudgeShadowScoreQueueTests
         var enqueued = queue.TryEnqueue(MakeJob("corr-2"));
 
         Assert.False(enqueued);
-        Assert.Equal(1, queue.DroppedCount);
+        Assert.Equal(1, actual: queue.DroppedCount);
     }
 
     [Fact]
@@ -44,15 +44,14 @@ public class JudgeShadowScoreQueueTests
         await foreach (var job in queue.DequeueAllAsync(cts.Token))
         {
             results.Add(job.CorrelationId);
-            if (results.Count == 2)
-            {
-                break;
-            }
+            if (results.Count == 2) break;
         }
 
-        Assert.Equal(["corr-1", "corr-2"], results);
+        Assert.Equal(expected: ["corr-1", "corr-2"], actual: results);
     }
 
-    private static JudgeShadowScoringJob MakeJob(string correlationId) =>
-        new(correlationId, "algorithm", "model-a", StaticScore: 0.5);
+    private static JudgeShadowScoringJob MakeJob(string correlationId)
+    {
+        return new JudgeShadowScoringJob(CorrelationId: correlationId, Dimension: "algorithm", Model: "model-a", 0.5);
+    }
 }

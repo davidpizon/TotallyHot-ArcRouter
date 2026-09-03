@@ -41,24 +41,33 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// </remarks>
 public sealed class LlmRouterVoter : IRoutingVoter
 {
-    /// <summary>Synthesized confidence for a pick parsed directly from a bare JSON response - the highest-confidence parse stage.</summary>
+    /// <summary>
+    /// Synthesized confidence for a pick parsed directly from a bare JSON response - the highest-confidence parse
+    /// stage.
+    /// </summary>
     private const double JsonParseConfidence = 0.9;
 
     /// <summary>Synthesized confidence for a pick parsed from a fenced JSON code block within the response.</summary>
     private const double CodeBlockParseConfidence = 0.75;
 
-    /// <summary>Synthesized confidence for a pick recovered by matching a candidate name mentioned anywhere in the response text.</summary>
+    /// <summary>
+    /// Synthesized confidence for a pick recovered by matching a candidate name mentioned anywhere in the response
+    /// text.
+    /// </summary>
     private const double NameMatchConfidence = 0.5;
 
-    /// <summary>Matches a fenced (optionally <c>json</c>-tagged) code block containing a JSON object, used as the second stage of <see cref="ParseResponse"/>'s fallback chain.</summary>
+    /// <summary>
+    /// Matches a fenced (optionally <c>json</c>-tagged) code block containing a JSON object, used as the second stage
+    /// of <see cref="ParseResponse"/>'s fallback chain.
+    /// </summary>
     // The body excludes any run of three backticks, so a plain-greedy `.*}` can't backtrack past this
     // block's own closing fence into a later fenced block (which would splice two blocks' text together
     // into invalid JSON). Within that bound it still matches greedily, so a "reasoning" string containing
     // its own '}' or a nested object no longer truncates the capture the way a naive non-greedy body did.
     private static readonly Regex FencedCodeBlockPattern = new(
-        @"```(?:json)?\s*(?<body>\{(?:[^`]|`(?!``))*\})\s*```",
-        RegexOptions.Singleline | RegexOptions.Compiled,
-        TimeSpan.FromMilliseconds(200));
+        pattern: @"```(?:json)?\s*(?<body>\{(?:[^`]|`(?!``))*\})\s*```",
+        options: RegexOptions.Singleline | RegexOptions.Compiled,
+        matchTimeout: TimeSpan.FromMilliseconds(200));
 
     private readonly ITextGenerationClient _generationClient;
     private readonly ILogger<LlmRouterVoter> _logger;
@@ -77,10 +86,10 @@ public sealed class LlmRouterVoter : IRoutingVoter
         _logger = logger;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public string Name => VoterNames.LlmRouter;
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     /// <remarks>
     /// Abstains without task text to route on (nothing to prompt the model with), when the model's
     /// response fails every stage of the parsing chain, when it names a model outside
@@ -93,16 +102,15 @@ public sealed class LlmRouterVoter : IRoutingVoter
         ArgumentNullException.ThrowIfNull(context);
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (string.IsNullOrWhiteSpace(context.TaskText))
-        {
-            return VoterVote.Abstain(Name);
-        }
+        if (string.IsNullOrWhiteSpace(context.TaskText)) return VoterVote.Abstain(Name);
 
         string response;
         try
         {
-            var prompt = BuildPrompt(context.Dimension, context.Candidates, context.TaskText);
-            response = await _generationClient.GenerateAsync(prompt, cancellationToken).ConfigureAwait(false);
+            var prompt = BuildPrompt(dimension: context.Dimension, candidates: context.Candidates,
+                taskText: context.TaskText);
+            response = await _generationClient.GenerateAsync(prompt: prompt, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -113,20 +121,20 @@ public sealed class LlmRouterVoter : IRoutingVoter
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "[LLM_ROUTER] Generation failed; abstaining.");
+            _logger.LogWarning(exception: ex, message: "[LLM_ROUTER] Generation failed; abstaining.");
             return VoterVote.Abstain(Name);
         }
 
         try
         {
-            return ParseResponse(response, context.Candidates);
+            return ParseResponse(response: response, candidates: context.Candidates);
         }
         catch (RegexMatchTimeoutException ex)
         {
             // The fenced-code-block regex hit its 200ms timeout - degrade to an abstention like any
             // other unparseable response, per this method's contract, rather than letting a
             // pathological response string fail the whole routing decision.
-            _logger.LogWarning(ex, "[LLM_ROUTER] Response parsing timed out; abstaining.");
+            _logger.LogWarning(exception: ex, message: "[LLM_ROUTER] Response parsing timed out; abstaining.");
             return VoterVote.Abstain(Name);
         }
     }
@@ -138,7 +146,7 @@ public sealed class LlmRouterVoter : IRoutingVoter
     /// </summary>
     private static string BuildPrompt(string dimension, IReadOnlyList<RoutingCandidate> candidates, string taskText)
     {
-        var modelList = string.Join(", ", candidates.Select(c => c.ModelName));
+        var modelList = string.Join(separator: ", ", values: candidates.Select(c => c.ModelName));
 
         var system =
             "You are a coding task router. Your objective is to maximize the performance-cost " +
@@ -157,18 +165,15 @@ public sealed class LlmRouterVoter : IRoutingVoter
     /// </summary>
     private VoterVote ParseResponse(string response, IReadOnlyList<RoutingCandidate> candidates)
     {
-        if (TryParseJsonModel(response, out var direct) && TryMatchCandidate(direct, candidates, out var directMatch))
-        {
-            return new VoterVote(Name, directMatch, JsonParseConfidence);
-        }
+        if (TryParseJsonModel(text: response, modelName: out var direct) && TryMatchCandidate(modelName: direct,
+                candidates: candidates, matchedModelName: out var directMatch))
+            return new VoterVote(VoterName: Name, ModelName: directMatch, Confidence: JsonParseConfidence);
 
         var codeBlockMatch = FencedCodeBlockPattern.Match(response);
         if (codeBlockMatch.Success &&
-            TryParseJsonModel(codeBlockMatch.Groups["body"].Value, out var fenced) &&
-            TryMatchCandidate(fenced, candidates, out var fencedMatch))
-        {
-            return new VoterVote(Name, fencedMatch, CodeBlockParseConfidence);
-        }
+            TryParseJsonModel(text: codeBlockMatch.Groups["body"].Value, modelName: out var fenced) &&
+            TryMatchCandidate(modelName: fenced, candidates: candidates, matchedModelName: out var fencedMatch))
+            return new VoterVote(VoterName: Name, ModelName: fencedMatch, Confidence: CodeBlockParseConfidence);
 
         // When the response mentions more than one candidate (common when it restates the candidate
         // list before committing to one), the last-mentioned name is taken as the pick - it tracks the
@@ -182,14 +187,13 @@ public sealed class LlmRouterVoter : IRoutingVoter
         var lastMentionedIndex = -1;
         foreach (var candidate in candidates)
         {
-            var index = response.LastIndexOf(candidate.ModelName, StringComparison.OrdinalIgnoreCase);
-            if (index < 0)
-            {
-                continue;
-            }
+            var index = response.LastIndexOf(value: candidate.ModelName,
+                comparisonType: StringComparison.OrdinalIgnoreCase);
+            if (index < 0) continue;
 
             if (index > lastMentionedIndex ||
-                (index == lastMentionedIndex && lastMentioned is not null && candidate.ModelName.Length > lastMentioned.Length))
+                (index == lastMentionedIndex && lastMentioned is not null &&
+                 candidate.ModelName.Length > lastMentioned.Length))
             {
                 lastMentionedIndex = index;
                 lastMentioned = candidate.ModelName;
@@ -197,11 +201,10 @@ public sealed class LlmRouterVoter : IRoutingVoter
         }
 
         if (lastMentioned is not null)
-        {
-            return new VoterVote(Name, lastMentioned, NameMatchConfidence);
-        }
+            return new VoterVote(VoterName: Name, ModelName: lastMentioned, Confidence: NameMatchConfidence);
 
-        _logger.LogInformation("[LLM_ROUTER] Could not parse a candidate model from the generated response; abstaining.");
+        _logger.LogInformation(
+            "[LLM_ROUTER] Could not parse a candidate model from the generated response; abstaining.");
         return VoterVote.Abstain(Name);
     }
 
@@ -216,7 +219,7 @@ public sealed class LlmRouterVoter : IRoutingVoter
         {
             using var document = JsonDocument.Parse(text);
             if (document.RootElement.ValueKind == JsonValueKind.Object &&
-                document.RootElement.TryGetProperty("model", out var modelProperty) &&
+                document.RootElement.TryGetProperty(propertyName: "model", value: out var modelProperty) &&
                 modelProperty.ValueKind == JsonValueKind.String)
             {
                 modelName = modelProperty.GetString();
@@ -236,24 +239,19 @@ public sealed class LlmRouterVoter : IRoutingVoter
     /// spelling differences <see cref="OrchestratorRoutingPolicy"/> itself tolerates when reconciling a
     /// voter's pick.
     /// </summary>
-    private static bool TryMatchCandidate(string? modelName, IReadOnlyList<RoutingCandidate> candidates, out string matchedModelName)
+    private static bool TryMatchCandidate(string? modelName, IReadOnlyList<RoutingCandidate> candidates,
+        out string matchedModelName)
     {
         matchedModelName = string.Empty;
-        if (string.IsNullOrWhiteSpace(modelName))
-        {
-            return false;
-        }
+        if (string.IsNullOrWhiteSpace(modelName)) return false;
 
         var match = candidates.FirstOrDefault(candidate =>
             string.Equals(
-                ModelNameCanonicalizer.Canonicalize(candidate.ModelName, candidate.Provider),
-                ModelNameCanonicalizer.Canonicalize(modelName, candidate.Provider),
-                StringComparison.Ordinal));
+                a: ModelNameCanonicalizer.Canonicalize(modelId: candidate.ModelName, provider: candidate.Provider),
+                b: ModelNameCanonicalizer.Canonicalize(modelId: modelName, provider: candidate.Provider),
+                comparisonType: StringComparison.Ordinal));
 
-        if (match is null)
-        {
-            return false;
-        }
+        if (match is null) return false;
 
         matchedModelName = match.ModelName;
         return true;

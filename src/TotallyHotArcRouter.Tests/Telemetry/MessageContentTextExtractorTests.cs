@@ -17,7 +17,7 @@ public class MessageContentTextExtractorTests
     {
         JsonNode content = "hello";
 
-        Assert.Equal("hello", MessageContentTextExtractor.ExtractText(content));
+        Assert.Equal(expected: "hello", actual: MessageContentTextExtractor.ExtractText(content));
     }
 
     [Fact]
@@ -35,7 +35,7 @@ public class MessageContentTextExtractorTests
             new JsonObject { ["type"] = "text", ["text"] = "hello" },
             new JsonObject { ["type"] = "text", ["text"] = "world" });
 
-        Assert.Equal("hello world", MessageContentTextExtractor.ExtractText(content));
+        Assert.Equal(expected: "hello world", actual: MessageContentTextExtractor.ExtractText(content));
     }
 
     [Fact]
@@ -46,7 +46,7 @@ public class MessageContentTextExtractorTests
             new JsonObject { ["type"] = "tool_use", ["id"] = "t1" },
             new JsonObject { ["type"] = "text", ["text"] = "world" });
 
-        Assert.Equal("hello world", MessageContentTextExtractor.ExtractText(content));
+        Assert.Equal(expected: "hello world", actual: MessageContentTextExtractor.ExtractText(content));
     }
 
     [Fact]
@@ -71,4 +71,3 @@ public class MessageContentTextExtractorTests
         Assert.Null(MessageContentTextExtractor.ExtractText(content));
     }
 }
-

@@ -11,10 +11,13 @@ namespace TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 /// </summary>
 public static class KnnRetrievalArtifactSerializer
 {
-    /// <summary>Serializer options shared by <see cref="Serialize"/> and <see cref="Deserialize"/>: indented so a manually inspected artifact file stays human-readable.</summary>
+    /// <summary>
+    /// Serializer options shared by <see cref="Serialize"/> and <see cref="Deserialize"/>: indented so a manually
+    /// inspected artifact file stays human-readable.
+    /// </summary>
     private static readonly JsonSerializerOptions Options = new()
     {
-        WriteIndented = true,
+        WriteIndented = true
     };
 
     /// <summary>Serializes <paramref name="artifact"/> to indented JSON.</summary>
@@ -27,16 +30,19 @@ public static class KnnRetrievalArtifactSerializer
         {
             EmbeddingDimension = artifact.EmbeddingDimension,
             EmbeddingModel = artifact.EmbeddingModel,
-            Entries = [.. artifact.Entries.Select(entry => new EntryDto
-            {
-                TaskId = entry.TaskId,
-                Embedding = [.. entry.Embedding],
-                Label = entry.Label,
-            })],
-            TrainedFrom = artifact.TrainedFrom,
+            Entries =
+            [
+                .. artifact.Entries.Select(entry => new EntryDto
+                {
+                    TaskId = entry.TaskId,
+                    Embedding = [.. entry.Embedding],
+                    Label = entry.Label
+                })
+            ],
+            TrainedFrom = artifact.TrainedFrom
         };
 
-        return JsonSerializer.Serialize(dto, Options);
+        return JsonSerializer.Serialize(value: dto, options: Options);
     }
 
     /// <summary>Deserializes an artifact previously produced by <see cref="Serialize"/>.</summary>
@@ -46,14 +52,18 @@ public static class KnnRetrievalArtifactSerializer
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
 
-        var dto = JsonSerializer.Deserialize<Dto>(json, Options)
-            ?? throw new FormatException("The kNN retrieval baseline artifact document deserialized to null.");
+        var dto = JsonSerializer.Deserialize<Dto>(json: json, options: Options)
+                  ?? throw new FormatException("The kNN retrieval baseline artifact document deserialized to null.");
 
         var artifact = new KnnRetrievalArtifact(
-            dto.EmbeddingDimension,
-            dto.EmbeddingModel,
-            [.. dto.Entries.Select(entry => new KnnRetrievalEntry(entry.TaskId, entry.Embedding, entry.Label))],
-            dto.TrainedFrom);
+            EmbeddingDimension: dto.EmbeddingDimension,
+            EmbeddingModel: dto.EmbeddingModel,
+            Entries:
+            [
+                .. dto.Entries.Select(entry =>
+                    new KnnRetrievalEntry(TaskId: entry.TaskId, Embedding: entry.Embedding, Label: entry.Label))
+            ],
+            TrainedFrom: dto.TrainedFrom);
         Validate(artifact);
         return artifact;
     }
@@ -74,41 +84,29 @@ public static class KnnRetrievalArtifactSerializer
         ArgumentNullException.ThrowIfNull(artifact);
 
         if (artifact.EmbeddingDimension <= 0)
-        {
             throw new FormatException(
                 $"The kNN retrieval baseline artifact's embeddingDimension is {artifact.EmbeddingDimension}, must be positive.");
-        }
 
         if (artifact.Entries is null || artifact.Entries.Count == 0)
-        {
             throw new FormatException("The kNN retrieval baseline artifact has no entries.");
-        }
 
         var seenTaskIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var entry in artifact.Entries)
         {
-            if (entry is null)
-            {
-                throw new FormatException("The kNN retrieval baseline artifact contains a null entry.");
-            }
+            if (entry is null) throw new FormatException("The kNN retrieval baseline artifact contains a null entry.");
 
             if (!seenTaskIds.Add(entry.TaskId))
-            {
-                throw new FormatException($"The kNN retrieval baseline artifact contains duplicate task id '{entry.TaskId}'.");
-            }
+                throw new FormatException(
+                    $"The kNN retrieval baseline artifact contains duplicate task id '{entry.TaskId}'.");
 
             if (entry.Embedding is null || entry.Embedding.Count != artifact.EmbeddingDimension)
-            {
                 throw new FormatException(
                     $"The kNN retrieval baseline artifact's entry for task '{entry.TaskId}' has embedding length " +
                     $"{entry.Embedding?.Count.ToString() ?? "null"}, expected {artifact.EmbeddingDimension}.");
-            }
 
             if (entry.Embedding.Any(value => !float.IsFinite(value)))
-            {
                 throw new FormatException(
                     $"The kNN retrieval baseline artifact's entry for task '{entry.TaskId}' contains a non-finite embedding value (NaN or Infinity).");
-            }
         }
     }
 

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Router.Embeddings;
@@ -19,17 +20,18 @@ public class OodClusterBootstrapSampleSourceTests
     {
         using var temp = new TempBenchmarkDatabase();
         temp.Database.EnsureCreated();
-        InsertTask(temp.Database, "t1", "fix the bug");
-        InsertTask(temp.Database, "t2", "write a proof");
+        InsertTask(database: temp.Database, taskId: "t1", prompt: "fix the bug");
+        InsertTask(database: temp.Database, taskId: "t2", prompt: "write a proof");
 
         var source = new OodClusterBootstrapSampleSource(
-            temp.Database, new FakeEmbeddingClient(text => [1, 0, 0]), NullLogger<OodClusterBootstrapSampleSource>.Instance);
+            database: temp.Database, embeddingClient: new FakeEmbeddingClient(text => [1, 0, 0]),
+            logger: NullLogger<OodClusterBootstrapSampleSource>.Instance);
 
         var samples = await source.LoadAsync(cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(2, samples.Count);
-        Assert.All(samples, s => Assert.Null(s.Dimension));
-        Assert.All(samples, s => Assert.Equal(1.0, s.Weight));
+        Assert.Equal(2, actual: samples.Count);
+        Assert.All(collection: samples, action: s => Assert.Null(s.Dimension));
+        Assert.All(collection: samples, action: s => Assert.Equal(1.0, actual: s.Weight));
     }
 
     [Fact]
@@ -37,10 +39,11 @@ public class OodClusterBootstrapSampleSourceTests
     {
         using var temp = new TempBenchmarkDatabase();
         temp.Database.EnsureCreated();
-        InsertTaskWithRawJson(temp.Database, "t1", """{"task_id":"t1"}""");
+        InsertTaskWithRawJson(database: temp.Database, taskId: "t1", """{"task_id":"t1"}""");
 
         var source = new OodClusterBootstrapSampleSource(
-            temp.Database, new FakeEmbeddingClient(text => [1, 0, 0]), NullLogger<OodClusterBootstrapSampleSource>.Instance);
+            database: temp.Database, embeddingClient: new FakeEmbeddingClient(text => [1, 0, 0]),
+            logger: NullLogger<OodClusterBootstrapSampleSource>.Instance);
 
         var samples = await source.LoadAsync(cancellationToken: TestContext.Current.CancellationToken);
 
@@ -50,39 +53,47 @@ public class OodClusterBootstrapSampleSourceTests
     [Fact]
     public async Task LoadAsync_DatabaseNotSynced_Throws()
     {
-        var directory = Path.Combine(Path.GetTempPath(), "arcrouter-tests", Guid.NewGuid().ToString("N"));
+        var directory = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
+            path3: Guid.NewGuid().ToString("N"));
         var database = new BenchmarkDatabase(
-            Microsoft.Extensions.Options.Options.Create(
-                new StorageOptions { BenchmarkDatabasePath = Path.Combine(directory, "coderouterbench.db") }));
+            Options.Create(
+                new StorageOptions
+                    { BenchmarkDatabasePath = Path.Combine(path1: directory, path2: "coderouterbench.db") }));
 
         var source = new OodClusterBootstrapSampleSource(
-            database, new FakeEmbeddingClient(text => [1, 0, 0]), NullLogger<OodClusterBootstrapSampleSource>.Instance);
+            database: database, embeddingClient: new FakeEmbeddingClient(text => [1, 0, 0]),
+            logger: NullLogger<OodClusterBootstrapSampleSource>.Instance);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            () => source.LoadAsync(cancellationToken: TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            source.LoadAsync(cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.False(File.Exists(database.DatabasePath));
     }
 
-    private static void InsertTask(BenchmarkDatabase database, string taskId, string prompt) =>
-        InsertTaskWithRawJson(database, taskId, $$"""{"task_id":"{{taskId}}","prompt":"{{prompt}}"}""");
+    private static void InsertTask(BenchmarkDatabase database, string taskId, string prompt)
+    {
+        InsertTaskWithRawJson(database: database, taskId: taskId,
+            rawJson: $$"""{"task_id":"{{taskId}}","prompt":"{{prompt}}"}""");
+    }
 
     private static void InsertTaskWithRawJson(BenchmarkDatabase database, string taskId, string rawJson)
     {
         using var connection = database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO benchmark_ood_tasks (task_id, source_split, bench, dimension, raw_json)
-            VALUES ($taskId, 'test', 'test-bench', 'bug_fixing', $rawJson);
-            """;
-        command.Parameters.AddWithValue("$taskId", taskId);
-        command.Parameters.AddWithValue("$rawJson", rawJson);
+                              INSERT INTO benchmark_ood_tasks (task_id, source_split, bench, dimension, raw_json)
+                              VALUES ($taskId, 'test', 'test-bench', 'bug_fixing', $rawJson);
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$taskId", value: taskId);
+        command.Parameters.AddWithValue(parameterName: "$rawJson", value: rawJson);
         command.ExecuteNonQuery();
     }
 
     private sealed class FakeEmbeddingClient(Func<string, float[]> embed) : IEmbeddingClient
     {
-        public Task<EmbeddingResult> EmbedAsync(string text, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new EmbeddingResult(embed(text), TokenCount: 0));
+        public Task<EmbeddingResult> EmbedAsync(string text, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(new EmbeddingResult(Vector: embed(text), 0));
+        }
     }
 }

@@ -30,7 +30,9 @@ public static class ClusterModelArtifactLoader
 
         if (!File.Exists(path))
         {
-            logger.LogDebug("No cluster model found at {Path} for {Consumer}; it will stand down until one is trained.", path, consumer);
+            logger.LogDebug(
+                message: "No cluster model found at {Path} for {Consumer}; it will stand down until one is trained.",
+                path, consumer);
             return null;
         }
 
@@ -38,12 +40,14 @@ public static class ClusterModelArtifactLoader
         {
             var model = ClusterModelArtifactSerializer.Deserialize(File.ReadAllText(path));
             logger.LogInformation(
-                "Loaded cluster model from {Path} for {Consumer} (trained from: {TrainedFrom}).", path, consumer, model.TrainedFrom);
+                message: "Loaded cluster model from {Path} for {Consumer} (trained from: {TrainedFrom}).", path,
+                consumer, model.TrainedFrom);
             return model;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException or JsonException)
         {
-            logger.LogWarning(ex, "Failed to load the cluster model from {Path} for {Consumer}.", path, consumer);
+            logger.LogWarning(exception: ex, message: "Failed to load the cluster model from {Path} for {Consumer}.",
+                path, consumer);
             return null;
         }
     }

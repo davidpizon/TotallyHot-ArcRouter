@@ -1,5 +1,5 @@
-using Microsoft.Data.Sqlite;
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 
 namespace TotallyHot.ArcRouter.CodeRouterBench;
 
@@ -41,12 +41,12 @@ public static class BenchmarkSummaryJsonImporter
         using var insert = connection.CreateCommand();
         insert.Transaction = transaction;
         insert.CommandText = """
-            INSERT INTO benchmark_summary (key, raw_json)
-            VALUES ($key, $rawJson)
-            ON CONFLICT(key) DO UPDATE SET raw_json = excluded.raw_json;
-            """;
-        var keyParam = insert.Parameters.Add("$key", SqliteType.Text);
-        var rawJsonParam = insert.Parameters.Add("$rawJson", SqliteType.Text);
+                             INSERT INTO benchmark_summary (key, raw_json)
+                             VALUES ($key, $rawJson)
+                             ON CONFLICT(key) DO UPDATE SET raw_json = excluded.raw_json;
+                             """;
+        var keyParam = insert.Parameters.Add(parameterName: "$key", type: SqliteType.Text);
+        var rawJsonParam = insert.Parameters.Add(parameterName: "$rawJson", type: SqliteType.Text);
 
         var rowCount = 0;
         if (root.ValueKind == JsonValueKind.Object)

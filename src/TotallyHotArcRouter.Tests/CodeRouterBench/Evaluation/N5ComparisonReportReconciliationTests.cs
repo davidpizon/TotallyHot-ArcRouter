@@ -23,7 +23,7 @@ namespace TotallyHot.ArcRouter.Tests.CodeRouterBench.Evaluation;
 /// <em>an</em> <see cref="IEmbeddingClient"/>, not specifically the real BGE-large ONNX one, and the real
 /// one would add a multi-hundred-MB download to a test AGENTS.md caps at 5 seconds for no additional proof.
 /// </remarks>
-[Trait("Category", "Integration")]
+[Trait(name: "Category", value: "Integration")]
 public class N5ComparisonReportReconciliationTests
 {
     private const string SkipReason =
@@ -31,24 +31,21 @@ public class N5ComparisonReportReconciliationTests
         "sync it first (Governance -> Benchmark Data, the sync_benchmark_data MCP tool, or " +
         "--sync-benchmark-data). The corpus is synced on demand, never populated automatically by CI.";
 
-    private static BenchmarkDatabase OpenRealDatabase() => new(Options.Create(new StorageOptions()));
+    private static BenchmarkDatabase OpenRealDatabase()
+    {
+        return new BenchmarkDatabase(Options.Create(new StorageOptions()));
+    }
 
     private static bool CorpusIsReadyForN5(BenchmarkDatabase database)
     {
-        if (!File.Exists(database.DatabasePath))
-        {
-            return false;
-        }
+        if (!File.Exists(database.DatabasePath)) return false;
 
         try
         {
             using var connection = database.OpenConnection();
             using var oodCommand = connection.CreateCommand();
             oodCommand.CommandText = "SELECT COUNT(*) FROM benchmark_ood_results WHERE resolved = 1;";
-            if (Convert.ToInt64(oodCommand.ExecuteScalar()) == 0)
-            {
-                return false;
-            }
+            if (Convert.ToInt64(oodCommand.ExecuteScalar()) == 0) return false;
 
             using var idCommand = connection.CreateCommand();
             idCommand.CommandText = "SELECT COUNT(*) FROM benchmark_id_results WHERE split = 'id_test';";
@@ -69,33 +66,39 @@ public class N5ComparisonReportReconciliationTests
     public async Task Replay_OnRealCorpus_ProducesTheFullComparisonReport()
     {
         var database = OpenRealDatabase();
-        Assert.SkipUnless(CorpusIsReadyForN5(database), SkipReason);
+        Assert.SkipUnless(condition: CorpusIsReadyForN5(database), reason: SkipReason);
 
-        var probingMatrix = DimensionModelScoreMatrix.FromDatabase(database, "probing");
-        var probingOutcomes = IdSplitRegretTaskOutcomeLoader.Load(database, "probing");
-        var idTestOutcomes = IdSplitRegretTaskOutcomeLoader.Load(database, "id_test");
+        var probingMatrix = DimensionModelScoreMatrix.FromDatabase(database: database, split: "probing");
+        var probingOutcomes = IdSplitRegretTaskOutcomeLoader.Load(database: database, split: "probing");
+        var idTestOutcomes = IdSplitRegretTaskOutcomeLoader.Load(database: database, split: "id_test");
         var oodOutcomes = OodRegretTaskOutcomeLoader.Load(database);
 
         var logRegArtifact = LogRegTrainer.Train(database);
         var knnArtifact = await KnnRetrievalIndexBuilder.BuildAsync(
-            database, new DeterministicFakeEmbeddingClient(), TestContext.Current.CancellationToken);
-        var orchestratorArm = OrchestratorArmFactory.Build(database, oodOutcomes, knnArtifact, NullLoggerFactory.Instance);
+            database: database, embeddingClient: new DeterministicFakeEmbeddingClient(),
+            cancellationToken: TestContext.Current.CancellationToken);
+        var orchestratorArm = OrchestratorArmFactory.Build(database: database, oodOutcomes: oodOutcomes,
+            embeddingIndex: knnArtifact, loggerFactory: NullLoggerFactory.Instance);
 
         var idTestReport = RegretComparisonReportBuilder.BuildReport(
-            idTestOutcomes, probingOutcomes, probingMatrix, logRegArtifact, knnArtifact, orchestratorArm, RewardWeights.Canonical);
+            outcomes: idTestOutcomes, probingOutcomes: probingOutcomes, probingMatrix: probingMatrix,
+            logRegArtifact: logRegArtifact, knnArtifact: knnArtifact, orchestratorArm: orchestratorArm,
+            weights: RewardWeights.Canonical);
         var oodReport = RegretComparisonReportBuilder.BuildReport(
-            oodOutcomes, probingOutcomes, probingMatrix, logRegArtifact, knnArtifact, orchestratorArm, RewardWeights.Canonical);
+            outcomes: oodOutcomes, probingOutcomes: probingOutcomes, probingMatrix: probingMatrix,
+            logRegArtifact: logRegArtifact, knnArtifact: knnArtifact, orchestratorArm: orchestratorArm,
+            weights: RewardWeights.Canonical);
 
         Assert.NotEmpty(idTestReport);
         Assert.NotEmpty(oodReport);
-        Assert.All(idTestReport, row => Assert.True(double.IsFinite(row.CumulativeRegret)));
-        Assert.All(oodReport, row => Assert.True(double.IsFinite(row.CumulativeRegret)));
+        Assert.All(collection: idTestReport, action: row => Assert.True(double.IsFinite(row.CumulativeRegret)));
+        Assert.All(collection: oodReport, action: row => Assert.True(double.IsFinite(row.CumulativeRegret)));
 
         // Published for a human to read and copy into the harness plan doc's changelog - this is the
         // "publish the numbers obtained either way" recipe, not an assertion on their content.
-        Console.WriteLine(RegretComparisonReportBuilder.FormatMarkdownTable("ID test", idTestReport));
+        Console.WriteLine(RegretComparisonReportBuilder.FormatMarkdownTable(title: "ID test", rows: idTestReport));
         Console.WriteLine();
-        Console.WriteLine(RegretComparisonReportBuilder.FormatMarkdownTable("OOD", oodReport));
+        Console.WriteLine(RegretComparisonReportBuilder.FormatMarkdownTable(title: "OOD", rows: oodReport));
 
         var orchestratorIdTest = idTestReport.Single(row => row.RouterName == "orchestrator");
         var dimBestIdTest = idTestReport.Single(row => row.RouterName == "dim_best");
@@ -115,12 +118,9 @@ public class N5ComparisonReportReconciliationTests
         {
             var hash = text.GetHashCode(StringComparison.Ordinal);
             var vector = new float[8];
-            for (var i = 0; i < vector.Length; i++)
-            {
-                vector[i] = ((hash >> (i * 4)) & 0xF) / 15f;
-            }
+            for (var i = 0; i < vector.Length; i++) vector[i] = ((hash >> (i * 4)) & 0xF) / 15f;
 
-            return Task.FromResult(new EmbeddingResult(vector, TokenCount: 0));
+            return Task.FromResult(new EmbeddingResult(Vector: vector, 0));
         }
     }
 }

@@ -16,14 +16,15 @@ public class CompositeRouterScoreObserverTests
     {
         var first = new RecordingObserver();
         var second = new RecordingObserver();
-        var composite = new CompositeRouterScoreObserver([first, second], NullLogger<CompositeRouterScoreObserver>.Instance);
+        var composite = new CompositeRouterScoreObserver(observers: [first, second],
+            logger: NullLogger<CompositeRouterScoreObserver>.Instance);
 
         var result = new QualityResult { Model = "m", RequestCorrelationId = "c" };
 
-        await composite.ObserveAsync(result, TestContext.Current.CancellationToken);
+        await composite.ObserveAsync(result: result, cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Same(result, Assert.Single(first.Observed));
-        Assert.Same(result, Assert.Single(second.Observed));
+        Assert.Same(expected: result, actual: Assert.Single(first.Observed));
+        Assert.Same(expected: result, actual: Assert.Single(second.Observed));
     }
 
     [Fact]
@@ -31,22 +32,24 @@ public class CompositeRouterScoreObserverTests
     {
         var throwing = new ThrowingObserver();
         var second = new RecordingObserver();
-        var composite = new CompositeRouterScoreObserver([throwing, second], NullLogger<CompositeRouterScoreObserver>.Instance);
+        var composite = new CompositeRouterScoreObserver(observers: [throwing, second],
+            logger: NullLogger<CompositeRouterScoreObserver>.Instance);
 
         var result = new QualityResult { Model = "m", RequestCorrelationId = "c" };
 
-        await composite.ObserveAsync(result, TestContext.Current.CancellationToken);
+        await composite.ObserveAsync(result: result, cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Same(result, Assert.Single(second.Observed));
+        Assert.Same(expected: result, actual: Assert.Single(second.Observed));
     }
 
     [Fact]
     public async Task ObserveAsync_NullResult_Throws()
     {
-        var composite = new CompositeRouterScoreObserver([], NullLogger<CompositeRouterScoreObserver>.Instance);
+        var composite =
+            new CompositeRouterScoreObserver(observers: [], logger: NullLogger<CompositeRouterScoreObserver>.Instance);
 
-        await Assert.ThrowsAsync<ArgumentNullException>(
-            () => composite.ObserveAsync(null!, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            composite.ObserveAsync(result: null!, cancellationToken: TestContext.Current.CancellationToken));
     }
 
     private sealed class RecordingObserver : IQualityScoreObserver
@@ -62,7 +65,9 @@ public class CompositeRouterScoreObserverTests
 
     private sealed class ThrowingObserver : IQualityScoreObserver
     {
-        public Task ObserveAsync(QualityResult result, CancellationToken cancellationToken = default) =>
+        public Task ObserveAsync(QualityResult result, CancellationToken cancellationToken = default)
+        {
             throw new InvalidOperationException("boom");
+        }
     }
 }

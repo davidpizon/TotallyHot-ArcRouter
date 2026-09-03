@@ -12,20 +12,26 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Management;
 /// </summary>
 public sealed class AdminApiKeySecretTests
 {
-    private static ModelRoutingOptions SeedOptions() => new()
+    private static ModelRoutingOptions SeedOptions()
     {
-        Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+        return new ModelRoutingOptions
         {
-            ["anthropic"] = new ProviderOptions { BaseUrl = "https://api.anthropic.com", AuthHeaderName = "x-api-key" }
-        }
-    };
+            Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["anthropic"] = new() { BaseUrl = "https://api.anthropic.com", AuthHeaderName = "x-api-key" }
+            }
+        };
+    }
 
-    private static ManagementFacade CreateFacade(ISecretWriter? secretWriter = null, ISecretReader? secretReader = null) =>
-        new(
-            new InMemoryProviderConfigStore(SeedOptions()),
-            Mock.Of<IEnvironmentVariableProvider>(),
-            new HttpClient(),
-            new ManagementFacadeDependencies { SecretWriter = secretWriter, SecretReader = secretReader });
+    private static ManagementFacade CreateFacade(ISecretWriter? secretWriter = null, ISecretReader? secretReader = null)
+    {
+        return new ManagementFacade(
+            store: new InMemoryProviderConfigStore(SeedOptions()),
+            environment: Mock.Of<IEnvironmentVariableProvider>(),
+            httpClient: new HttpClient(),
+            dependencies: new ManagementFacadeDependencies
+                { SecretWriter = secretWriter, SecretReader = secretReader });
+    }
 
     [Fact]
     public void SetSecret_RecognizedAnthropicAdminKeyName_WritesToStore()
@@ -33,10 +39,11 @@ public sealed class AdminApiKeySecretTests
         var writer = new Mock<ISecretWriter>();
         var facade = CreateFacade(secretWriter: writer.Object);
 
-        var result = facade.SetSecret("reconciliation:anthropic:admin-key", "sk-ant-admin01-abc");
+        var result = facade.SetSecret(name: "reconciliation:anthropic:admin-key", value: "sk-ant-admin01-abc");
 
         Assert.True(result.Success);
-        writer.Verify(w => w.Write("reconciliation:anthropic:admin-key", "sk-ant-admin01-abc"), Times.Once);
+        writer.Verify(expression: w => w.Write("reconciliation:anthropic:admin-key", "sk-ant-admin01-abc"),
+            times: Times.Once);
     }
 
     [Fact]
@@ -45,10 +52,11 @@ public sealed class AdminApiKeySecretTests
         var writer = new Mock<ISecretWriter>();
         var facade = CreateFacade(secretWriter: writer.Object);
 
-        var result = facade.SetSecret("reconciliation:openai:admin-key", "sk-openai-admin");
+        var result = facade.SetSecret(name: "reconciliation:openai:admin-key", value: "sk-openai-admin");
 
         Assert.True(result.Success);
-        writer.Verify(w => w.Write("reconciliation:openai:admin-key", "sk-openai-admin"), Times.Once);
+        writer.Verify(expression: w => w.Write("reconciliation:openai:admin-key", "sk-openai-admin"),
+            times: Times.Once);
     }
 
     [Theory]
@@ -61,10 +69,10 @@ public sealed class AdminApiKeySecretTests
         var writer = new Mock<ISecretWriter>(MockBehavior.Strict);
         var facade = CreateFacade(secretWriter: writer.Object);
 
-        var result = facade.SetSecret(name, "some-value");
+        var result = facade.SetSecret(name: name, value: "some-value");
 
         Assert.False(result.Success);
-        Assert.Equal(ManagementErrorType.InvalidRequest, result.ErrorType);
+        Assert.Equal(expected: ManagementErrorType.InvalidRequest, actual: result.ErrorType);
         // Strict mock: Write would throw if called, since nothing is set up on it.
     }
 
@@ -74,10 +82,10 @@ public sealed class AdminApiKeySecretTests
         var writer = new Mock<ISecretWriter>(MockBehavior.Strict);
         var facade = CreateFacade(secretWriter: writer.Object);
 
-        var result = facade.SetSecret("reconciliation:anthropic:admin-key", "   ");
+        var result = facade.SetSecret(name: "reconciliation:anthropic:admin-key", value: "   ");
 
         Assert.False(result.Success);
-        Assert.Equal(ManagementErrorType.InvalidRequest, result.ErrorType);
+        Assert.Equal(expected: ManagementErrorType.InvalidRequest, actual: result.ErrorType);
     }
 
     [Fact]
@@ -85,10 +93,10 @@ public sealed class AdminApiKeySecretTests
     {
         var facade = CreateFacade(secretWriter: null);
 
-        var result = facade.SetSecret("reconciliation:anthropic:admin-key", "sk-ant-admin01-abc");
+        var result = facade.SetSecret(name: "reconciliation:anthropic:admin-key", value: "sk-ant-admin01-abc");
 
         Assert.False(result.Success);
-        Assert.Equal(ManagementErrorType.Unavailable, result.ErrorType);
+        Assert.Equal(expected: ManagementErrorType.Unavailable, actual: result.ErrorType);
     }
 
     [Fact]
@@ -100,7 +108,7 @@ public sealed class AdminApiKeySecretTests
         var result = facade.DeleteSecret("reconciliation:anthropic:admin-key");
 
         Assert.True(result.Success);
-        writer.Verify(w => w.Delete("reconciliation:anthropic:admin-key"), Times.Once);
+        writer.Verify(expression: w => w.Delete("reconciliation:anthropic:admin-key"), times: Times.Once);
     }
 
     [Fact]
@@ -112,14 +120,14 @@ public sealed class AdminApiKeySecretTests
         var result = facade.DeleteSecret("provider:anthropic:header:x-api-key");
 
         Assert.False(result.Success);
-        Assert.Equal(ManagementErrorType.InvalidRequest, result.ErrorType);
+        Assert.Equal(expected: ManagementErrorType.InvalidRequest, actual: result.ErrorType);
     }
 
     [Fact]
     public void ListProviders_HasStoredAdminKey_TrueWhenAdminKeySecretExists()
     {
         var reader = new Mock<ISecretReader>();
-        string stored = "sk-ant-admin01-abc";
+        var stored = "sk-ant-admin01-abc";
         reader.Setup(r => r.TryRead("reconciliation:anthropic:admin-key", out stored)).Returns(true);
         var facade = CreateFacade(secretReader: reader.Object);
 
@@ -132,7 +140,7 @@ public sealed class AdminApiKeySecretTests
     public void ListProviders_HasStoredAdminKey_FalseWhenNoAdminKeyStored()
     {
         var reader = new Mock<ISecretReader>();
-        string empty = string.Empty;
+        var empty = string.Empty;
         reader.Setup(r => r.TryRead("reconciliation:anthropic:admin-key", out empty)).Returns(false);
         var facade = CreateFacade(secretReader: reader.Object);
 

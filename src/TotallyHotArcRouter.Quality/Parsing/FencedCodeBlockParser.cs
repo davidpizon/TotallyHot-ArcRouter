@@ -17,13 +17,10 @@ internal static class FencedCodeBlockParser
     public static IReadOnlyList<FencedCodeBlock> Parse(string text, int maxBlocks)
     {
         var results = new List<FencedCodeBlock>();
-        if (string.IsNullOrEmpty(text) || maxBlocks <= 0)
-        {
-            return results;
-        }
+        if (string.IsNullOrEmpty(text) || maxBlocks <= 0) return results;
 
         var lines = text.Split('\n');
-        int i = 0;
+        var i = 0;
         while (i < lines.Length && results.Count < maxBlocks)
         {
             var trimmed = lines[i].TrimStart();
@@ -37,11 +34,11 @@ internal static class FencedCodeBlockParser
             var hint = trimmed[fence.Length..].Trim();
             var body = new StringBuilder();
             i++;
-            bool closed = false;
+            var closed = false;
             while (i < lines.Length)
             {
                 var inner = lines[i];
-                if (inner.TrimStart().StartsWith(fence, StringComparison.Ordinal))
+                if (inner.TrimStart().StartsWith(value: fence, comparisonType: StringComparison.Ordinal))
                 {
                     closed = true;
                     i++;
@@ -52,29 +49,22 @@ internal static class FencedCodeBlockParser
                 i++;
             }
 
-            if (closed && body.Length > 0)
-            {
-                results.Add(new FencedCodeBlock(hint, body.ToString()));
-            }
+            if (closed && body.Length > 0) results.Add(new FencedCodeBlock(LanguageHint: hint, Code: body.ToString()));
         }
 
         return results;
     }
 
-    /// <summary>Returns the fence marker (triple backtick or triple tilde) the trimmed line opens with, or null if it is not a fence line.</summary>
+    /// <summary>
+    /// Returns the fence marker (triple backtick or triple tilde) the trimmed line opens with, or null if it is not a
+    /// fence line.
+    /// </summary>
     private static string? GetFenceToken(string trimmedLine)
     {
-        if (trimmedLine.StartsWith("```", StringComparison.Ordinal))
-        {
-            return "```";
-        }
+        if (trimmedLine.StartsWith(value: "```", comparisonType: StringComparison.Ordinal)) return "```";
 
-        if (trimmedLine.StartsWith("~~~", StringComparison.Ordinal))
-        {
-            return "~~~";
-        }
+        if (trimmedLine.StartsWith(value: "~~~", comparisonType: StringComparison.Ordinal)) return "~~~";
 
         return null;
     }
 }
-

@@ -10,7 +10,7 @@ public enum LogRegTrainingResultKind
     Declined,
 
     /// <summary>A retrain was already in progress; this call was skipped rather than queued.</summary>
-    AlreadyRunning,
+    AlreadyRunning
 }
 
 /// <summary>
@@ -22,7 +22,10 @@ public enum LogRegTrainingResultKind
 /// <param name="Message">A human-readable explanation, suitable for a log line or an admin surface.</param>
 /// <param name="BootstrapTaskCount">The number of OOD bootstrap tasks gathered, regardless of outcome.</param>
 /// <param name="MemoryEntryCount">The number of live memory entries gathered, regardless of outcome.</param>
-/// <param name="SampleCount">The total number of training samples gathered (bootstrap rows plus one per live memory entry), regardless of outcome.</param>
+/// <param name="SampleCount">
+/// The total number of training samples gathered (bootstrap rows plus one per live memory
+/// entry), regardless of outcome.
+/// </param>
 /// <param name="ModelsRepresented">The number of distinct models with at least one training sample, regardless of outcome.</param>
 public sealed record LogRegTrainingOutcome(
     LogRegTrainingResultKind Kind,

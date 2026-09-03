@@ -9,7 +9,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation;
 /// Anthropic's native SSE bytes (<c>event: ...</c> / <c>data: {...}</c> pairs) as they arrive and emits
 /// OpenAI <c>chat.completion.chunk</c> SSE bytes for the client. Created per response by
 /// <see cref="AnthropicPayloadTranslator.CreateStreamTranslator"/>; not thread-safe.
-///
 /// <para>
 /// Error semantics mirror LiteLLM's Anthropic iterator (the parity reference, same rule Gemini's
 /// translator follows): an <c>error</c> event throws <see cref="AnthropicStreamException"/> to
@@ -17,7 +16,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation;
 /// buffered rather than being dropped or forwarded raw; and <c>message_stop</c> still emits a final
 /// chunk so <c>finish_reason</c> is never lost.
 /// </para>
-///
 /// <para>
 /// Anthropic's event sequence is <c>message_start</c> → repeated
 /// (<c>content_block_start</c> → <c>content_block_delta</c>* → <c>content_block_stop</c>) →
@@ -33,25 +31,22 @@ public sealed class AnthropicStreamTranslator : IStreamTranslator
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
     private static readonly byte[] DoneLine = Encoding.UTF8.GetBytes("data: [DONE]\n\n");
 
+    // Per-content-block-index state, keyed by Anthropic's own content_block index (not necessarily
+    // contiguous with the OpenAI tool_calls index, since text/thinking blocks share the same index space).
+    private readonly Dictionary<int, string> _blockTypes = new();
+
     // Raw upstream bytes not yet forming a complete SSE event. Carriage returns are stripped on
     // ingestion so the event delimiter is always "\n\n".
     private readonly List<byte> _buffer = new();
+    private readonly long _created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+    private readonly Dictionary<int, StringBuilder> _thinkingSignature = new();
+    private readonly Dictionary<int, StringBuilder> _thinkingText = new();
+    private readonly Dictionary<int, int> _toolCallOpenAiIndex = new();
+    private string? _finishReason;
 
     // Stable across the whole stream, seeded from message_start.
     private string _id = PayloadTranslationHelpers.GenerateCompletionId();
     private string _model = string.Empty;
-    private readonly long _created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-
-    private bool _roleSent;
-    private string? _finishReason;
-    private JsonObject? _usage;
-
-    // Per-content-block-index state, keyed by Anthropic's own content_block index (not necessarily
-    // contiguous with the OpenAI tool_calls index, since text/thinking blocks share the same index space).
-    private readonly Dictionary<int, string> _blockTypes = new();
-    private readonly Dictionary<int, int> _toolCallOpenAiIndex = new();
-    private readonly Dictionary<int, StringBuilder> _thinkingText = new();
-    private readonly Dictionary<int, StringBuilder> _thinkingSignature = new();
     private int _nextToolCallIndex;
 
     // An error event terminates the stream, but only after the valid chunks that preceded it in the
@@ -59,29 +54,25 @@ public sealed class AnthropicStreamTranslator : IStreamTranslator
     // the next Push/Flush, once the good bytes are already on the wire.
     private AnthropicStreamException? _pendingError;
 
-    /// <inheritdoc />
+    private bool _roleSent;
+    private JsonObject? _usage;
+
+    /// <inheritdoc/>
     public byte[] Push(ReadOnlySpan<byte> upstreamChunk)
     {
-        if (_pendingError is not null)
-        {
-            throw _pendingError;
-        }
+        if (_pendingError is not null) throw _pendingError;
 
         foreach (var b in upstreamChunk)
-        {
             if (b != (byte)'\r')
-            {
                 _buffer.Add(b);
-            }
-        }
 
         using var output = new MemoryStream();
 
         int delimiter;
         while ((delimiter = IndexOfDoubleNewline()) >= 0)
         {
-            var eventBytes = _buffer.GetRange(0, delimiter).ToArray();
-            _buffer.RemoveRange(0, delimiter + 2);
+            var eventBytes = _buffer.GetRange(0, count: delimiter).ToArray();
+            _buffer.RemoveRange(0, count: delimiter + 2);
 
             byte[]? translated;
             try
@@ -94,22 +85,16 @@ public sealed class AnthropicStreamTranslator : IStreamTranslator
                 break;
             }
 
-            if (translated is not null)
-            {
-                output.Write(translated, 0, translated.Length);
-            }
+            if (translated is not null) output.Write(buffer: translated, 0, count: translated.Length);
         }
 
         return output.ToArray();
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public byte[] Flush()
     {
-        if (_pendingError is not null)
-        {
-            throw _pendingError;
-        }
+        if (_pendingError is not null) throw _pendingError;
 
         using var output = new MemoryStream();
 
@@ -118,40 +103,37 @@ public sealed class AnthropicStreamTranslator : IStreamTranslator
             var remaining = _buffer.ToArray();
             _buffer.Clear();
             if (TranslateEvent(remaining) is { } translated)
-            {
-                output.Write(translated, 0, translated.Length);
-            }
+                output.Write(buffer: translated, 0, count: translated.Length);
         }
 
-        output.Write(DoneLine, 0, DoneLine.Length);
+        output.Write(buffer: DoneLine, 0, count: DoneLine.Length);
         return output.ToArray();
     }
 
-    /// <summary>Scans the buffered bytes for the first blank-line separator (<c>\n\n</c>) marking the end of one complete SSE event, returning -1 if no complete event is buffered yet.</summary>
+    /// <summary>
+    /// Scans the buffered bytes for the first blank-line separator (<c>\n\n</c>) marking the end of one complete SSE
+    /// event, returning -1 if no complete event is buffered yet.
+    /// </summary>
     private int IndexOfDoubleNewline()
     {
         for (var i = 0; i + 1 < _buffer.Count; i++)
-        {
             if (_buffer[i] == (byte)'\n' && _buffer[i + 1] == (byte)'\n')
-            {
                 return i;
-            }
-        }
 
         return -1;
     }
 
-    /// <summary>Parses one complete SSE-framed event's bytes into its event type and JSON payload, then dispatches it by type; returns null when the event carries no data payload (e.g. a bare comment/keepalive).</summary>
+    /// <summary>
+    /// Parses one complete SSE-framed event's bytes into its event type and JSON payload, then dispatches it by type;
+    /// returns null when the event carries no data payload (e.g. a bare comment/keepalive).
+    /// </summary>
     private byte[]? TranslateEvent(byte[] eventBytes)
     {
         var (eventType, payload) = ParseSseEvent(eventBytes);
-        if (payload is null)
-        {
-            return null;
-        }
+        if (payload is null) return null;
 
         var evt = ParseEventJson(Encoding.UTF8.GetBytes(payload));
-        return DispatchEvent(evt, eventType);
+        return DispatchEvent(evt: evt, explicitEventType: eventType);
     }
 
     /// <summary>
@@ -165,24 +147,32 @@ public sealed class AnthropicStreamTranslator : IStreamTranslator
     internal byte[]? TranslateNativeJsonChunk(byte[] nativeChunkJson)
     {
         var evt = ParseEventJson(nativeChunkJson);
-        return DispatchEvent(evt, explicitEventType: null);
+        return DispatchEvent(evt: evt, null);
     }
 
-    /// <summary>Parses raw event JSON bytes into a <see cref="JsonObject"/>, wrapping any parse failure or non-object result in an <see cref="AnthropicStreamException"/>.</summary>
+    /// <summary>
+    /// Parses raw event JSON bytes into a <see cref="JsonObject"/>, wrapping any parse failure or non-object result
+    /// in an <see cref="AnthropicStreamException"/>.
+    /// </summary>
     private static JsonObject ParseEventJson(byte[] jsonBytes)
     {
         try
         {
             return JsonNode.Parse(jsonBytes) as JsonObject
-                ?? throw new AnthropicStreamException("Anthropic stream event was not a JSON object.");
+                   ?? throw new AnthropicStreamException("Anthropic stream event was not a JSON object.");
         }
         catch (JsonException ex)
         {
-            throw new AnthropicStreamException($"Failed to parse Anthropic stream event: {ex.Message}", ex);
+            throw new AnthropicStreamException(message: $"Failed to parse Anthropic stream event: {ex.Message}",
+                innerException: ex);
         }
     }
 
-    /// <summary>Dispatches one parsed event JSON object by its type - <paramref name="explicitEventType"/> (from an SSE <c>event:</c> line) wins when present, else the JSON's own <c>"type"</c> field is used (always the case for Bedrock's framing-free chunks).</summary>
+    /// <summary>
+    /// Dispatches one parsed event JSON object by its type - <paramref name="explicitEventType"/> (from an SSE
+    /// <c>event:</c> line) wins when present, else the JSON's own <c>"type"</c> field is used (always the case for Bedrock's
+    /// framing-free chunks).
+    /// </summary>
     private byte[]? DispatchEvent(JsonObject evt, string? explicitEventType)
     {
         var type = explicitEventType ?? evt["type"]?.GetValue<string>();
@@ -197,11 +187,14 @@ public sealed class AnthropicStreamTranslator : IStreamTranslator
             "content_block_stop" => HandleContentBlockStop(evt),
             "message_delta" => HandleMessageDelta(evt),
             "message_stop" => HandleMessageStop(),
-            _ => null,
+            _ => null
         };
     }
 
-    /// <summary>Builds an <see cref="AnthropicStreamException"/> from an Anthropic <c>error</c> stream event, combining its error type and message into the exception text.</summary>
+    /// <summary>
+    /// Builds an <see cref="AnthropicStreamException"/> from an Anthropic <c>error</c> stream event, combining its
+    /// error type and message into the exception text.
+    /// </summary>
     private static AnthropicStreamException BuildStreamError(JsonObject evt)
     {
         var error = evt["error"] as JsonObject;
@@ -210,43 +203,35 @@ public sealed class AnthropicStreamTranslator : IStreamTranslator
         return new AnthropicStreamException($"{errorType} - {message}");
     }
 
-    /// <summary>Handles a <c>message_start</c> event by capturing the message's id, model, and initial usage for reuse on later chunks, then emits the initial role delta.</summary>
+    /// <summary>
+    /// Handles a <c>message_start</c> event by capturing the message's id, model, and initial usage for reuse on
+    /// later chunks, then emits the initial role delta.
+    /// </summary>
     private byte[]? HandleMessageStart(JsonObject evt)
     {
-        if (evt["message"] is not JsonObject message)
-        {
-            return null;
-        }
+        if (evt["message"] is not JsonObject message) return null;
 
-        if (message["id"]?.GetValue<string>() is { Length: > 0 } id)
-        {
-            _id = id;
-        }
+        if (message["id"]?.GetValue<string>() is { Length: > 0 } id) _id = id;
 
-        if (message["model"]?.GetValue<string>() is { Length: > 0 } model)
-        {
-            _model = model;
-        }
+        if (message["model"]?.GetValue<string>() is { Length: > 0 } model) _model = model;
 
-        if (message["usage"] is JsonObject usage)
-        {
-            _usage = usage.DeepClone().AsObject();
-        }
+        if (message["usage"] is JsonObject usage) _usage = usage.DeepClone().AsObject();
 
         var delta = new JsonObject { ["role"] = "assistant" };
         _roleSent = true;
 
-        return EmitChunk(delta, finishReason: null);
+        return EmitChunk(delta: delta, null);
     }
 
-    /// <summary>Handles a <c>content_block_start</c> event: records the block's type by index, and for a <c>tool_use</c> block assigns it the next OpenAI tool-call index and emits an initial tool_calls delta with its id and name; for a thinking/redacted_thinking block, initializes accumulator buffers for its text and signature.</summary>
+    /// <summary>
+    /// Handles a <c>content_block_start</c> event: records the block's type by index, and for a <c>tool_use</c> block
+    /// assigns it the next OpenAI tool-call index and emits an initial tool_calls delta with its id and name; for a
+    /// thinking/redacted_thinking block, initializes accumulator buffers for its text and signature.
+    /// </summary>
     private byte[]? HandleContentBlockStart(JsonObject evt)
     {
         var index = evt["index"]?.GetValue<int>() ?? 0;
-        if (evt["content_block"] is not JsonObject block)
-        {
-            return null;
-        }
+        if (evt["content_block"] is not JsonObject block) return null;
 
         var type = block["type"]?.GetValue<string>() ?? string.Empty;
         _blockTypes[index] = type;
@@ -264,10 +249,10 @@ public sealed class AnthropicStreamTranslator : IStreamTranslator
                 ["index"] = toolCallIndex,
                 ["id"] = id,
                 ["type"] = "function",
-                ["function"] = new JsonObject { ["name"] = name, ["arguments"] = string.Empty },
+                ["function"] = new JsonObject { ["name"] = name, ["arguments"] = string.Empty }
             };
 
-            return EmitChunk(new JsonObject { ["tool_calls"] = new JsonArray { toolCallDelta } }, finishReason: null);
+            return EmitChunk(delta: new JsonObject { ["tool_calls"] = new JsonArray { toolCallDelta } }, null);
         }
 
         if (type is "thinking" or "redacted_thinking")
@@ -279,36 +264,35 @@ public sealed class AnthropicStreamTranslator : IStreamTranslator
         return null;
     }
 
-    /// <summary>Handles a <c>content_block_delta</c> event by dispatching on the delta's own type: text_delta emits a content chunk, input_json_delta appends to the matching tool call's arguments, thinking_delta accumulates and emits reasoning text, and signature_delta accumulates the thinking block's signature without emitting a chunk.</summary>
+    /// <summary>
+    /// Handles a <c>content_block_delta</c> event by dispatching on the delta's own type: text_delta emits a content
+    /// chunk, input_json_delta appends to the matching tool call's arguments, thinking_delta accumulates and emits reasoning
+    /// text, and signature_delta accumulates the thinking block's signature without emitting a chunk.
+    /// </summary>
     private byte[]? HandleContentBlockDelta(JsonObject evt)
     {
         var index = evt["index"]?.GetValue<int>() ?? 0;
-        if (evt["delta"] is not JsonObject delta)
-        {
-            return null;
-        }
+        if (evt["delta"] is not JsonObject delta) return null;
 
         switch (delta["type"]?.GetValue<string>())
         {
             case "text_delta":
                 if (delta["text"]?.GetValue<string>() is { } text)
-                {
-                    return EmitChunk(new JsonObject { ["content"] = text }, finishReason: null);
-                }
+                    return EmitChunk(delta: new JsonObject { ["content"] = text }, null);
 
                 return null;
 
             case "input_json_delta":
-                if (_toolCallOpenAiIndex.TryGetValue(index, out var toolCallIndex) &&
+                if (_toolCallOpenAiIndex.TryGetValue(key: index, value: out var toolCallIndex) &&
                     delta["partial_json"]?.GetValue<string>() is { } partialJson)
                 {
                     var toolCallDelta = new JsonObject
                     {
                         ["index"] = toolCallIndex,
-                        ["function"] = new JsonObject { ["arguments"] = partialJson },
+                        ["function"] = new JsonObject { ["arguments"] = partialJson }
                     };
 
-                    return EmitChunk(new JsonObject { ["tool_calls"] = new JsonArray { toolCallDelta } }, finishReason: null);
+                    return EmitChunk(delta: new JsonObject { ["tool_calls"] = new JsonArray { toolCallDelta } }, null);
                 }
 
                 return null;
@@ -316,22 +300,17 @@ public sealed class AnthropicStreamTranslator : IStreamTranslator
             case "thinking_delta":
                 if (delta["thinking"]?.GetValue<string>() is { } thinking)
                 {
-                    if (_thinkingText.TryGetValue(index, out var textBuilder))
-                    {
-                        textBuilder.Append(thinking);
-                    }
+                    if (_thinkingText.TryGetValue(key: index, value: out var textBuilder)) textBuilder.Append(thinking);
 
-                    return EmitChunk(new JsonObject { ["reasoning_content"] = thinking }, finishReason: null);
+                    return EmitChunk(delta: new JsonObject { ["reasoning_content"] = thinking }, null);
                 }
 
                 return null;
 
             case "signature_delta":
                 if (delta["signature"]?.GetValue<string>() is { } signature &&
-                    _thinkingSignature.TryGetValue(index, out var signatureBuilder))
-                {
+                    _thinkingSignature.TryGetValue(key: index, value: out var signatureBuilder))
                     signatureBuilder.Append(signature);
-                }
 
                 return null;
 
@@ -340,44 +319,39 @@ public sealed class AnthropicStreamTranslator : IStreamTranslator
         }
     }
 
-    /// <summary>Handles a <c>content_block_stop</c> event for a completed thinking/redacted_thinking block by assembling its accumulated text and signature into a thinking_blocks delta; a no-op for any other block type.</summary>
+    /// <summary>
+    /// Handles a <c>content_block_stop</c> event for a completed thinking/redacted_thinking block by assembling its
+    /// accumulated text and signature into a thinking_blocks delta; a no-op for any other block type.
+    /// </summary>
     private byte[]? HandleContentBlockStop(JsonObject evt)
     {
         var index = evt["index"]?.GetValue<int>() ?? 0;
-        if (!_blockTypes.TryGetValue(index, out var type) || type is not ("thinking" or "redacted_thinking"))
-        {
-            return null;
-        }
+        if (!_blockTypes.TryGetValue(key: index, value: out var type) ||
+            type is not ("thinking" or "redacted_thinking")) return null;
 
-        if (!_thinkingText.TryGetValue(index, out var textBuilder))
-        {
-            return null;
-        }
+        if (!_thinkingText.TryGetValue(key: index, value: out var textBuilder)) return null;
 
         var thinkingBlock = new JsonObject { ["type"] = type, ["thinking"] = textBuilder.ToString() };
-        if (_thinkingSignature.TryGetValue(index, out var signatureBuilder) && signatureBuilder.Length > 0)
-        {
+        if (_thinkingSignature.TryGetValue(key: index, value: out var signatureBuilder) && signatureBuilder.Length > 0)
             thinkingBlock["signature"] = signatureBuilder.ToString();
-        }
 
-        return EmitChunk(new JsonObject { ["thinking_blocks"] = new JsonArray { thinkingBlock } }, finishReason: null);
+        return EmitChunk(delta: new JsonObject { ["thinking_blocks"] = new JsonArray { thinkingBlock } }, null);
     }
 
-    /// <summary>Handles a <c>message_delta</c> event by recording the mapped finish reason and merging any updated usage totals into state; carries no client-visible delta of its own, so it always returns null.</summary>
+    /// <summary>
+    /// Handles a <c>message_delta</c> event by recording the mapped finish reason and merging any updated usage
+    /// totals into state; carries no client-visible delta of its own, so it always returns null.
+    /// </summary>
     private byte[]? HandleMessageDelta(JsonObject evt)
     {
         if (evt["delta"] is JsonObject delta && delta["stop_reason"]?.GetValue<string>() is { } stopReason)
-        {
-            _finishReason = AnthropicPayloadTranslator.MapStopReason(stopReason, _toolCallOpenAiIndex.Count > 0);
-        }
+            _finishReason = AnthropicPayloadTranslator.MapStopReason(stopReason: stopReason,
+                hasToolCalls: _toolCallOpenAiIndex.Count > 0);
 
         if (evt["usage"] is JsonObject usage)
         {
             _usage ??= new JsonObject();
-            foreach (var (key, value) in usage)
-            {
-                _usage[key] = value?.DeepClone();
-            }
+            foreach (var (key, value) in usage) _usage[key] = value?.DeepClone();
         }
 
         // No client-visible delta here - message_delta only carries metadata (stop reason, running
@@ -385,7 +359,10 @@ public sealed class AnthropicStreamTranslator : IStreamTranslator
         return null;
     }
 
-    /// <summary>Handles the terminal <c>message_stop</c> event by emitting the final chunk carrying the accumulated finish reason and usage, sending the role delta first if it was never sent.</summary>
+    /// <summary>
+    /// Handles the terminal <c>message_stop</c> event by emitting the final chunk carrying the accumulated finish
+    /// reason and usage, sending the role delta first if it was never sent.
+    /// </summary>
     private byte[]? HandleMessageStop()
     {
         var delta = new JsonObject();
@@ -395,17 +372,20 @@ public sealed class AnthropicStreamTranslator : IStreamTranslator
             _roleSent = true;
         }
 
-        return EmitChunk(delta, _finishReason ?? "stop", includeUsage: true);
+        return EmitChunk(delta: delta, finishReason: _finishReason ?? "stop", true);
     }
 
-    /// <summary>Wraps a delta object into an OpenAI-shaped <c>chat.completion.chunk</c> SSE event, using the stream's captured id/model/created values and optionally attaching the accumulated usage.</summary>
+    /// <summary>
+    /// Wraps a delta object into an OpenAI-shaped <c>chat.completion.chunk</c> SSE event, using the stream's captured
+    /// id/model/created values and optionally attaching the accumulated usage.
+    /// </summary>
     private byte[] EmitChunk(JsonObject delta, string? finishReason, bool includeUsage = false)
     {
         var choice = new JsonObject
         {
             ["index"] = 0,
             ["delta"] = delta,
-            ["finish_reason"] = finishReason,
+            ["finish_reason"] = finishReason
         };
 
         var chunk = new JsonObject
@@ -414,7 +394,7 @@ public sealed class AnthropicStreamTranslator : IStreamTranslator
             ["object"] = "chat.completion.chunk",
             ["created"] = _created,
             ["model"] = _model,
-            ["choices"] = new JsonArray { choice },
+            ["choices"] = new JsonArray { choice }
         };
 
         if (includeUsage && _usage is not null)
@@ -424,14 +404,18 @@ public sealed class AnthropicStreamTranslator : IStreamTranslator
             var cacheCreationTokens = _usage["cache_creation_input_tokens"]?.GetValue<int>();
             var cacheReadTokens = _usage["cache_read_input_tokens"]?.GetValue<int>();
 
-            chunk["usage"] = AnthropicPayloadTranslator.BuildEnrichedUsage(inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens);
+            chunk["usage"] = AnthropicPayloadTranslator.BuildEnrichedUsage(inputTokens: inputTokens,
+                outputTokens: outputTokens, cacheCreationTokens: cacheCreationTokens, cacheReadTokens: cacheReadTokens);
         }
 
-        var json = JsonSerializer.Serialize(chunk, SerializerOptions);
+        var json = JsonSerializer.Serialize(value: chunk, options: SerializerOptions);
         return Encoding.UTF8.GetBytes($"data: {json}\n\n");
     }
 
-    /// <summary>Pulls the <c>event:</c> type and concatenated <c>data:</c> payload out of one SSE event block. Returns a null Data when the event has no data line.</summary>
+    /// <summary>
+    /// Pulls the <c>event:</c> type and concatenated <c>data:</c> payload out of one SSE event block. Returns a null
+    /// Data when the event has no data line.
+    /// </summary>
     private static (string? EventType, string? Data) ParseSseEvent(byte[] eventBytes)
     {
         var text = Encoding.UTF8.GetString(eventBytes);
@@ -439,29 +423,23 @@ public sealed class AnthropicStreamTranslator : IStreamTranslator
         StringBuilder? data = null;
 
         foreach (var line in text.Split('\n'))
-        {
-            if (line.StartsWith("event:", StringComparison.Ordinal))
+            if (line.StartsWith(value: "event:", comparisonType: StringComparison.Ordinal))
             {
                 eventType = line.Length > 6 && line[6] == ' ' ? line[7..] : line[6..];
             }
-            else if (line.StartsWith("data:", StringComparison.Ordinal))
+            else if (line.StartsWith(value: "data:", comparisonType: StringComparison.Ordinal))
             {
                 // Per the SSE spec, multiple data: lines within one event are joined with "\n" (not
                 // concatenated directly) - required for a multi-line or pretty-printed JSON payload to
                 // parse correctly. No separator before the first line, none trailing after the last.
                 if (data is null)
-                {
                     data = new StringBuilder();
-                }
                 else
-                {
                     data.Append('\n');
-                }
 
                 var value = line.Length > 5 && line[5] == ' ' ? line[6..] : line[5..];
                 data.Append(value);
             }
-        }
 
         return (eventType, data?.ToString());
     }
@@ -480,8 +458,8 @@ public sealed class AnthropicStreamException : Exception
     }
 
     /// <summary>Initializes a new instance with the given message and inner exception.</summary>
-    public AnthropicStreamException(string message, Exception innerException) : base(message, innerException)
+    public AnthropicStreamException(string message, Exception innerException) : base(message: message,
+        innerException: innerException)
     {
     }
 }
-

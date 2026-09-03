@@ -33,4 +33,3 @@ public sealed record QualityRequest(
     string Model,
     string CorrelationId,
     string SessionId);
-

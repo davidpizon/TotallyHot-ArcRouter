@@ -15,7 +15,7 @@ public class JudgeShadowScoreRetentionServiceTests
     public async Task CheckAndPurgeAsync_UnderBothLimits_NoDeletes()
     {
         var store = new FakeJudgeShadowScoreStore(rowCount: 30_000);
-        var service = CreateService(store, retentionDays: 30, maxRows: 50_000, enabled: true);
+        var service = CreateService(store: store, 30, 50_000, true);
 
         await service.CheckAndPurgeAsync(TestContext.Current.CancellationToken);
 
@@ -27,25 +27,25 @@ public class JudgeShadowScoreRetentionServiceTests
     public async Task CheckAndPurgeAsync_ExceedsMaxRows_DeletesOldestFirst()
     {
         var store = new FakeJudgeShadowScoreStore(rowCount: 60_000);
-        var service = CreateService(store, retentionDays: 30, maxRows: 50_000, enabled: true);
+        var service = CreateService(store: store, 30, 50_000, true);
 
         await service.CheckAndPurgeAsync(TestContext.Current.CancellationToken);
 
         Assert.True(store.DeleteOldestWasCalled);
         Assert.True(store.DeleteBeforeWasCalled);
-        Assert.Equal(10_000, store.LastDeleteOldestArgument);
+        Assert.Equal(10_000, actual: store.LastDeleteOldestArgument);
     }
 
     [Fact]
     public async Task CheckAndPurgeAsync_Disabled_NoOp()
     {
         var store = new FakeJudgeShadowScoreStore(rowCount: 100_000);
-        var service = CreateService(store, retentionDays: 30, maxRows: 50_000, enabled: false);
+        var service = CreateService(store: store, 30, 50_000, false);
 
         await service.CheckAndPurgeAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(0, store.DeleteOldestCount);
-        Assert.Equal(0, store.DeleteBeforeCount);
+        Assert.Equal(0, actual: store.DeleteOldestCount);
+        Assert.Equal(0, actual: store.DeleteBeforeCount);
     }
 
     private static JudgeShadowScoreRetentionService CreateService(
@@ -55,13 +55,13 @@ public class JudgeShadowScoreRetentionServiceTests
         bool enabled)
     {
         return new JudgeShadowScoreRetentionService(
-            NullLogger<JudgeShadowScoreRetentionService>.Instance,
-            store,
-            new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions
+            logger: NullLogger<JudgeShadowScoreRetentionService>.Instance,
+            store: store,
+            options: new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions
             {
                 Enabled = enabled,
                 RetentionDays = retentionDays,
-                MaxRows = maxRows,
+                MaxRows = maxRows
             }));
     }
 
@@ -69,21 +69,26 @@ public class JudgeShadowScoreRetentionServiceTests
     {
         private readonly int _rowCount;
 
+        public FakeJudgeShadowScoreStore(int rowCount)
+        {
+            _rowCount = rowCount;
+        }
+
         public int DeleteOldestCount { get; private set; }
         public int LastDeleteOldestArgument { get; private set; }
         public int DeleteBeforeCount { get; private set; }
         public bool DeleteOldestWasCalled => DeleteOldestCount > 0;
         public bool DeleteBeforeWasCalled => DeleteBeforeCount > 0;
 
-        public FakeJudgeShadowScoreStore(int rowCount)
+        public Task InsertAsync(JudgeShadowScoreRecord record, CancellationToken cancellationToken = default)
         {
-            _rowCount = rowCount;
+            throw new NotSupportedException();
         }
 
-        public Task InsertAsync(JudgeShadowScoreRecord record, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
-        public Task<int> GetRowCountAsync(CancellationToken cancellationToken = default) => Task.FromResult(_rowCount);
+        public Task<int> GetRowCountAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(_rowCount);
+        }
 
         public Task<int> DeleteOldestAsync(int count, CancellationToken cancellationToken = default)
         {

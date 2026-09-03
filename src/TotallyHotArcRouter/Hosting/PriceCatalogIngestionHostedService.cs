@@ -19,8 +19,8 @@ namespace TotallyHot.ArcRouter.Hosting;
 /// </remarks>
 public sealed class PriceCatalogIngestionHostedService : IHostedService, IDisposable
 {
-    private readonly ILogger<PriceCatalogIngestionHostedService> _logger;
     private readonly PriceCatalogIngestionService _ingestionService;
+    private readonly ILogger<PriceCatalogIngestionHostedService> _logger;
     private readonly TimeSpan _pollInterval;
 
     private readonly CancellationTokenSource _stopping = new();
@@ -43,29 +43,33 @@ public sealed class PriceCatalogIngestionHostedService : IHostedService, IDispos
         _pollInterval = TimeSpan.FromHours(options.Value.PollIntervalHours);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
+    public void Dispose()
+    {
+        _stopping.Dispose();
+    }
+
+    /// <inheritdoc/>
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation(
-            "Price catalog ingestion poll loop starting; interval {IntervalHours}h.", _pollInterval.TotalHours);
+            message: "Price catalog ingestion poll loop starting; interval {IntervalHours}h.",
+            _pollInterval.TotalHours);
         _pollLoop = PollLoopAsync(_stopping.Token);
         return Task.CompletedTask;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task StopAsync(CancellationToken cancellationToken)
     {
         await _stopping.CancelAsync().ConfigureAwait(false);
 
         if (_pollLoop is not null)
-        {
             // Wait for the loop to unwind, but never past the host's own shutdown deadline.
-            await Task.WhenAny(_pollLoop, Task.Delay(Timeout.Infinite, cancellationToken)).ConfigureAwait(false);
-        }
+            await Task.WhenAny(task1: _pollLoop,
+                    task2: Task.Delay(millisecondsDelay: Timeout.Infinite, cancellationToken: cancellationToken))
+                .ConfigureAwait(false);
     }
-
-    /// <inheritdoc />
-    public void Dispose() => _stopping.Dispose();
 
     /// <summary>
     /// Runs the poll loop until cancelled: sleeps until the next cycle is due, re-checks the due time in case
@@ -80,7 +84,7 @@ public sealed class PriceCatalogIngestionHostedService : IHostedService, IDispos
                 var untilDue = TimeUntilDue();
                 if (untilDue > TimeSpan.Zero)
                 {
-                    await Task.Delay(untilDue, cancellationToken).ConfigureAwait(false);
+                    await Task.Delay(delay: untilDue, cancellationToken: cancellationToken).ConfigureAwait(false);
 
                     // Re-check rather than fall through and run. A cycle may have completed while we slept -
                     // a Pull Now, or a toggle - which re-anchored the schedule and pushed the due time out
@@ -98,7 +102,8 @@ public sealed class PriceCatalogIngestionHostedService : IHostedService, IDispos
                     // A cycle should already swallow per-source failures; this guards the unexpected so a
                     // single bad tick never tears down the loop. RunCycleAsync re-anchors the schedule even
                     // when it throws, so the loop cannot spin here - it will wait a full interval next pass.
-                    _logger.LogError(ex, "Price catalog ingestion cycle threw unexpectedly; continuing.");
+                    _logger.LogError(exception: ex,
+                        message: "Price catalog ingestion cycle threw unexpectedly; continuing.");
                 }
             }
         }
@@ -112,7 +117,8 @@ public sealed class PriceCatalogIngestionHostedService : IHostedService, IDispos
     /// Computes the time remaining until the next ingestion cycle is due, based on the ingestion service's
     /// last schedule anchor plus the configured poll interval.
     /// </summary>
-    private TimeSpan TimeUntilDue() =>
-        _ingestionService.ScheduleAnchorUtc + _pollInterval - DateTimeOffset.UtcNow;
+    private TimeSpan TimeUntilDue()
+    {
+        return _ingestionService.ScheduleAnchorUtc + _pollInterval - DateTimeOffset.UtcNow;
+    }
 }
-

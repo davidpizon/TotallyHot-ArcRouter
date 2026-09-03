@@ -1,8 +1,8 @@
+using System.Diagnostics.CodeAnalysis;
+using System.Reflection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Maui.LifecycleEvents;
 using Serilog;
-using System.Diagnostics.CodeAnalysis;
-using System.Reflection;
 using TotallyHot.ArcRouter.Gui.Platforms.Windows;
 using TotallyHot.ArcRouter.Gui.Services;
 
@@ -48,7 +48,7 @@ public static class MauiProgram
         // WebView2 host, whose "Failed to create WebView2 environment" error is what a blank dashboard
         // window actually looks like from the inside. dispose: false because Log.CloseAndFlush on
         // process exit already owns the logger's lifetime.
-        builder.Logging.AddSerilog(Log.Logger, dispose: false);
+        builder.Logging.AddSerilog(logger: Log.Logger, false);
 
         builder.Services.AddMauiBlazorWebView();
         // Local, per-user GUI settings (currently just the telemetry server address) - see
@@ -65,8 +65,8 @@ public static class MauiProgram
         // the next launch (the singleton factory below runs once, on first resolution).
         builder.Services.AddSingleton(sp =>
             new LiveDataStore(
-                sp.GetRequiredService<ILogger<LiveDataStore>>(),
-                sp.GetRequiredService<IGuiSettingsStore>().Load().TelemetryServerAddress));
+                logger: sp.GetRequiredService<ILogger<LiveDataStore>>(),
+                serverAddress: sp.GetRequiredService<IGuiSettingsStore>().Load().TelemetryServerAddress));
         // Backs the Governance tab's provider/credential/model manager. A singleton so its loaded
         // provider list survives tab switches; it talks to the proxy's /admin API (port 5001) via the
         // tested TotallyHot.ArcRouter.Gui.Admin client. See Services/ProviderAdminStore.cs.
@@ -130,15 +130,19 @@ public static class MauiProgram
     /// runs from %ProgramFiles% and auto-starts from a registry Run key, so neither its version nor its
     /// working directory can be assumed from how a developer launches it.
     /// </summary>
-    private static void LogStartupEnvironment() =>
+    private static void LogStartupEnvironment()
+    {
         Log.Information(
+            messageTemplate:
             "GUI starting. Version {Version}, process {ProcessId}, user {UserName}, base directory {BaseDirectory}, working directory {WorkingDirectory}, OS {OperatingSystem}.",
-            typeof(MauiProgram).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown",
+            typeof(MauiProgram).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+                ?.InformationalVersion ?? "unknown",
             Environment.ProcessId,
             Environment.UserName,
             AppContext.BaseDirectory,
             Environment.CurrentDirectory,
             Environment.OSVersion.VersionString);
+    }
 
     /// <summary>
     /// Points WebView2 at a writable per-user folder and logs where that landed. The failure is caught
@@ -150,12 +154,14 @@ public static class MauiProgram
     {
         try
         {
-            Log.Information("WebView2 user-data folder resolved to {UserDataFolder}.", WebViewUserData.Apply());
+            Log.Information(messageTemplate: "WebView2 user-data folder resolved to {UserDataFolder}.",
+                propertyValue: WebViewUserData.Apply());
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
         {
             Log.Error(
-                ex,
+                exception: ex,
+                messageTemplate:
                 "Could not prepare the WebView2 user-data folder; WebView2 will fall back to its default location beside the executable and the dashboard may render blank.");
         }
     }
@@ -178,9 +184,9 @@ public static class MauiProgram
     private static void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
     {
         Log.Fatal(
-            e.ExceptionObject as Exception,
-            "Unhandled exception reached the app domain. Runtime terminating: {IsTerminating}.",
-            e.IsTerminating);
+            exception: e.ExceptionObject as Exception,
+            messageTemplate: "Unhandled exception reached the app domain. Runtime terminating: {IsTerminating}.",
+            propertyValue: e.IsTerminating);
         Log.CloseAndFlush();
     }
 
@@ -192,7 +198,7 @@ public static class MauiProgram
     /// <param name="e">Carries the unobserved exception.</param>
     private static void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
     {
-        Log.Error(e.Exception, "A background task faulted with nobody awaiting it.");
+        Log.Error(exception: e.Exception, messageTemplate: "A background task faulted with nobody awaiting it.");
         e.SetObserved();
     }
 
@@ -205,4 +211,3 @@ public static class MauiProgram
         Log.CloseAndFlush();
     }
 }
-

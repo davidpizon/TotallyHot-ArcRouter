@@ -29,8 +29,8 @@ public sealed class OpenRouterPriceSourceClient : IPriceSourceClient
     private const decimal TokensPerMillion = 1_000_000m;
 
     private readonly HttpClient _httpClient;
-    private readonly string _url;
     private readonly ILogger<OpenRouterPriceSourceClient> _logger;
+    private readonly string _url;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="OpenRouterPriceSourceClient"/> class.
@@ -52,14 +52,16 @@ public sealed class OpenRouterPriceSourceClient : IPriceSourceClient
         _logger = logger;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public string Name => PriceCatalogOptions.OpenRouterSourceName;
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<IReadOnlyList<NormalizedPrice>> FetchAsync(CancellationToken cancellationToken)
     {
-        await using var stream = await _httpClient.GetStreamAsync(_url, cancellationToken).ConfigureAwait(false);
-        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+        await using var stream = await _httpClient
+            .GetStreamAsync(requestUri: _url, cancellationToken: cancellationToken).ConfigureAwait(false);
+        using var document = await JsonDocument.ParseAsync(utf8Json: stream, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
 
         return Normalize(document.RootElement);
     }
@@ -73,7 +75,7 @@ public sealed class OpenRouterPriceSourceClient : IPriceSourceClient
         var prices = new List<NormalizedPrice>();
         var skipped = 0;
 
-        if (!root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array)
+        if (!root.TryGetProperty(propertyName: "data", value: out var data) || data.ValueKind != JsonValueKind.Array)
         {
             _logger.LogWarning("OpenRouter response had no 'data' array; nothing to normalize.");
             return prices;
@@ -81,7 +83,8 @@ public sealed class OpenRouterPriceSourceClient : IPriceSourceClient
 
         foreach (var model in data.EnumerateArray())
         {
-            if (!model.TryGetProperty("id", out var idElement) || idElement.ValueKind != JsonValueKind.String)
+            if (!model.TryGetProperty(propertyName: "id", value: out var idElement) ||
+                idElement.ValueKind != JsonValueKind.String)
             {
                 skipped++;
                 continue;
@@ -92,7 +95,7 @@ public sealed class OpenRouterPriceSourceClient : IPriceSourceClient
             // The id is "provider/model" (e.g. "anthropic/claude-opus-4"). Provider is mandatory under D7:
             // without it the row cannot be keyed. An id with no separator, or an empty provider segment, is
             // skipped rather than guessed at.
-            var separatorIndex = id?.IndexOf('/', StringComparison.Ordinal) ?? -1;
+            var separatorIndex = id?.IndexOf('/', comparisonType: StringComparison.Ordinal) ?? -1;
             if (string.IsNullOrEmpty(id) || separatorIndex <= 0 || separatorIndex == id.Length - 1)
             {
                 skipped++;
@@ -101,14 +104,15 @@ public sealed class OpenRouterPriceSourceClient : IPriceSourceClient
 
             var provider = id[..separatorIndex];
 
-            if (!model.TryGetProperty("pricing", out var pricing) || pricing.ValueKind != JsonValueKind.Object)
+            if (!model.TryGetProperty(propertyName: "pricing", value: out var pricing) ||
+                pricing.ValueKind != JsonValueKind.Object)
             {
                 skipped++;
                 continue;
             }
 
-            var standardInput = ReadPerMillion(pricing, "prompt");
-            var standardOutput = ReadPerMillion(pricing, "completion");
+            var standardInput = ReadPerMillion(pricing: pricing, fieldName: "prompt");
+            var standardOutput = ReadPerMillion(pricing: pricing, fieldName: "completion");
 
             if (standardInput is null && standardOutput is null)
             {
@@ -122,19 +126,17 @@ public sealed class OpenRouterPriceSourceClient : IPriceSourceClient
                 Provider: provider,
                 StandardInputPrice: standardInput,
                 StandardOutputPrice: standardOutput,
-                CachedInputPrice: ReadPerMillion(pricing, "input_cache_read"),
-                BatchInputPrice: null,
-                BatchOutputPrice: null,
-                CacheWriteInputPrice: ReadPerMillion(pricing, "input_cache_write")));
+                CachedInputPrice: ReadPerMillion(pricing: pricing, fieldName: "input_cache_read"),
+                null,
+                null,
+                CacheWriteInputPrice: ReadPerMillion(pricing: pricing, fieldName: "input_cache_write")));
         }
 
         if (skipped > 0)
-        {
             _logger.LogInformation(
-                "OpenRouter normalization skipped {SkippedCount} unmappable entries, kept {KeptCount}.",
+                message: "OpenRouter normalization skipped {SkippedCount} unmappable entries, kept {KeptCount}.",
                 skipped,
                 prices.Count);
-        }
 
         return prices;
     }
@@ -149,19 +151,15 @@ public sealed class OpenRouterPriceSourceClient : IPriceSourceClient
     // per D7), and a "0" string round-trips to a real, deliberate zero rather than "not offered".
     private static decimal? ReadPerMillion(JsonElement pricing, string fieldName)
     {
-        if (!pricing.TryGetProperty(fieldName, out var element) || element.ValueKind != JsonValueKind.String)
-        {
-            return null;
-        }
+        if (!pricing.TryGetProperty(propertyName: fieldName, value: out var element) ||
+            element.ValueKind != JsonValueKind.String) return null;
 
         var text = element.GetString();
         if (string.IsNullOrWhiteSpace(text) ||
-            !decimal.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var perToken))
-        {
+            !decimal.TryParse(s: text, style: NumberStyles.Float, provider: CultureInfo.InvariantCulture,
+                result: out var perToken))
             return null;
-        }
 
         return perToken * TokensPerMillion;
     }
 }
-

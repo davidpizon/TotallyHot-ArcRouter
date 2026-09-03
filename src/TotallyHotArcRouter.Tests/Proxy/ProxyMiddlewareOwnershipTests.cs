@@ -1,3 +1,4 @@
+using System.Reflection;
 using Microsoft.Extensions.Logging.Abstractions;
 using TotallyHot.ArcRouter.Proxy;
 
@@ -6,7 +7,6 @@ namespace TotallyHot.ArcRouter.Tests.Proxy;
 /// <summary>
 /// Pins <see cref="ProxyMiddleware"/>'s disposal contract: it disposes the collaborators it built for
 /// itself and leaves supplied ones to their owner.
-///
 /// <para>
 /// The class already applied this rule to its Bedrock client factory (via <c>_ownsBedrockClientFactory</c>)
 /// but not to its <see cref="HttpClient"/>, which it also constructs when none is supplied - so a
@@ -16,26 +16,14 @@ namespace TotallyHot.ArcRouter.Tests.Proxy;
 /// </summary>
 public sealed class ProxyMiddlewareOwnershipTests
 {
-    /// <summary>Records whether it was disposed. Never actually sends: these tests construct and dispose only.</summary>
-    private sealed class TrackingHandler : HttpMessageHandler
+    private static ProxyMiddleware Build(HttpClient? httpClient)
     {
-        internal bool Disposed { get; private set; }
-
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            throw new NotSupportedException("These tests never send a request.");
-
-        protected override void Dispose(bool disposing)
-        {
-            Disposed = true;
-            base.Dispose(disposing);
-        }
+        return new ProxyMiddleware(logger: NullLogger<ProxyMiddleware>.Instance,
+            interceptor: new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance,
+                modelRouteResolver: ModelRouteResolverTestFactory.CreateWithModels(
+                    ("primary", "prov-a", "primary-upstream", "https://primary.test"))),
+            httpClient: httpClient);
     }
-
-    private static ProxyMiddleware Build(HttpClient? httpClient) =>
-        new(NullLogger<ProxyMiddleware>.Instance,
-            new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, ModelRouteResolverTestFactory.CreateWithModels(
-                ("primary", "prov-a", "primary-upstream", "https://primary.test"))),
-            httpClient);
 
     [Fact]
     public void Dispose_SuppliedHttpClient_IsLeftToItsOwner()
@@ -58,7 +46,7 @@ public sealed class ProxyMiddlewareOwnershipTests
         // is private and there is no public surface that reveals it.
         var middleware = Build(httpClient: null);
         var selfBuilt = (HttpClient)typeof(ProxyMiddleware)
-            .GetField("_httpClient", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetField(name: "_httpClient", bindingAttr: BindingFlags.Instance | BindingFlags.NonPublic)!
             .GetValue(middleware)!;
 
         middleware.Dispose();
@@ -76,5 +64,23 @@ public sealed class ProxyMiddlewareOwnershipTests
 
         var second = Record.Exception(middleware.Dispose);
         Assert.Null(second);
+    }
+
+    /// <summary>Records whether it was disposed. Never actually sends: these tests construct and dispose only.</summary>
+    private sealed class TrackingHandler : HttpMessageHandler
+    {
+        internal bool Disposed { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            throw new NotSupportedException("These tests never send a request.");
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            Disposed = true;
+            base.Dispose(disposing);
+        }
     }
 }

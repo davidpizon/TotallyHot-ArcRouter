@@ -32,51 +32,36 @@ public sealed class SessionIdResolver : ISessionIdResolver
         "session_id", "sessionId",
         "conversation_id", "conversationId",
         "chat_id", "chatId",
-        "thread_id", "threadId",
+        "thread_id", "threadId"
     ];
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public string? Resolve(IHeaderDictionary headers, JsonObject? body)
     {
         ArgumentNullException.ThrowIfNull(headers);
 
         foreach (var headerName in HeaderNamesInPriorityOrder)
-        {
-            if (headers.TryGetValue(headerName, out var values))
+            if (headers.TryGetValue(key: headerName, value: out var values))
             {
                 var value = values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
-                if (value is not null)
-                {
-                    return value;
-                }
+                if (value is not null) return value;
             }
-        }
 
-        if (body is null)
-        {
-            return null;
-        }
+        if (body is null) return null;
 
         foreach (var fieldName in BodyFieldNamesInPriorityOrder)
-        {
-            if (TryReadNonEmptyString(body, fieldName, out var value))
-            {
+            if (TryReadNonEmptyString(obj: body, propertyName: fieldName, value: out var value))
                 return value;
-            }
-        }
 
         // Anthropic-style convention: metadata.user_id formatted as "{user}_session_{sessionId}".
         if (body["metadata"] is JsonObject metadata &&
-            TryReadNonEmptyString(metadata, "user_id", out var userId))
+            TryReadNonEmptyString(obj: metadata, propertyName: "user_id", value: out var userId))
         {
-            var parts = userId.Split("_session_", StringSplitOptions.None);
+            var parts = userId.Split(separator: "_session_", options: StringSplitOptions.None);
             if (parts.Length > 1)
             {
                 var sessionPart = parts[^1];
-                if (!string.IsNullOrWhiteSpace(sessionPart))
-                {
-                    return sessionPart;
-                }
+                if (!string.IsNullOrWhiteSpace(sessionPart)) return sessionPart;
             }
         }
 
@@ -90,18 +75,12 @@ public sealed class SessionIdResolver : ISessionIdResolver
     {
         value = string.Empty;
 
-        if (obj[propertyName] is not JsonValue jsonValue || !jsonValue.TryGetValue<string>(out var stringValue))
-        {
-            return false;
-        }
+        if (obj[propertyName] is not JsonValue jsonValue ||
+            !jsonValue.TryGetValue<string>(out var stringValue)) return false;
 
-        if (string.IsNullOrWhiteSpace(stringValue))
-        {
-            return false;
-        }
+        if (string.IsNullOrWhiteSpace(stringValue)) return false;
 
         value = stringValue;
         return true;
     }
 }
-

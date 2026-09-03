@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
+using TotallyHot.ArcRouter.Router.Embeddings;
 
 namespace TotallyHot.ArcRouter.Router.Orchestrator;
 
@@ -28,16 +29,16 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// </remarks>
 public sealed class ClusterBestVoter : IRoutingVoter
 {
-    private readonly IMemoryEntryStore _memoryEntryStore;
-    private readonly Embeddings.IEmbeddingClient _embeddingClient;
-    private readonly RoutingOptions _routingOptions;
-    private readonly ILogger<ClusterBestVoter> _logger;
-    private readonly string _modelPath;
+    private readonly IEmbeddingClient _embeddingClient;
     private readonly SemaphoreSlim _loadLock = new(1, 1);
-
-    private bool _loadAttempted;
+    private readonly ILogger<ClusterBestVoter> _logger;
+    private readonly IMemoryEntryStore _memoryEntryStore;
+    private readonly string _modelPath;
+    private readonly RoutingOptions _routingOptions;
     private ClusterModelArtifact? _artifact;
     private IReadOnlyDictionary<int, IReadOnlyDictionary<string, ClusterLedger.ClusterModelScore>>? _ledger;
+
+    private bool _loadAttempted;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ClusterBestVoter"/> class, resolving the model
@@ -55,7 +56,7 @@ public sealed class ClusterBestVoter : IRoutingVoter
     /// <param name="logger">The logger.</param>
     public ClusterBestVoter(
         IMemoryEntryStore memoryEntryStore,
-        Embeddings.IEmbeddingClient embeddingClient,
+        IEmbeddingClient embeddingClient,
         IOptions<RoutingOptions> routingOptions,
         IOptions<StorageOptions> storageOptions,
         ILogger<ClusterBestVoter> logger)
@@ -73,31 +74,26 @@ public sealed class ClusterBestVoter : IRoutingVoter
         _modelPath = storageOptions.Value.ResolveClusterModelPath();
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public string Name => VoterNames.ClusterBest;
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<VoterVote> VoteAsync(VotingContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (context.TaskEmbedding is null)
-        {
-            return VoterVote.Abstain(Name);
-        }
+        if (context.TaskEmbedding is null) return VoterVote.Abstain(Name);
 
         var (artifact, ledger) = await GetModelAsync(cancellationToken).ConfigureAwait(false);
-        if (artifact is null || ledger is null)
-        {
-            return VoterVote.Abstain(Name);
-        }
+        if (artifact is null || ledger is null) return VoterVote.Abstain(Name);
 
         if (context.TaskEmbedding.Length != artifact.EmbeddingDimension)
         {
             // A silent index mismatch would score against the wrong centroid space entirely - see the
             // type-level remarks on why this artifact is never a placeholder someone might trust anyway.
             _logger.LogWarning(
+                message:
                 "cluster_best voter received a {ActualDimension}-dimensional embedding but its model was trained at {ExpectedDimension}; abstaining.",
                 context.TaskEmbedding.Length,
                 artifact.EmbeddingDimension);
@@ -105,47 +101,40 @@ public sealed class ClusterBestVoter : IRoutingVoter
         }
 
         if (artifact.EmbeddingModel is not null &&
-            !string.Equals(artifact.EmbeddingModel, _embeddingClient.ModelIdentity, StringComparison.Ordinal))
+            !string.Equals(a: artifact.EmbeddingModel, b: _embeddingClient.ModelIdentity,
+                comparisonType: StringComparison.Ordinal))
         {
             // The same-dimension model swap the length check above structurally cannot see: these
             // centroids describe a coordinate space the current client no longer produces, so the nearest
             // one to a fresh embedding is meaningless. A null EmbeddingModel is a pre-provenance artifact
             // and is trusted, on the same reasoning MemoryEntry.MatchesEmbeddingModel documents.
             _logger.LogWarning(
+                message:
                 "cluster_best voter model was trained against embedding model {TrainedModel} but the current client is {CurrentModel}; abstaining until retrained.",
                 artifact.EmbeddingModel,
                 _embeddingClient.ModelIdentity);
             return VoterVote.Abstain(Name);
         }
 
-        var (clusterIndex, similarity) = ClusterLedger.AssignNearestCluster(artifact, context.TaskEmbedding);
+        var (clusterIndex, similarity) =
+            ClusterLedger.AssignNearestCluster(artifact: artifact, embedding: context.TaskEmbedding);
         if (similarity < _routingOptions.ClusterAssignmentThreshold)
-        {
             // Unclustered - a designed abstention, not a forced low-confidence guess (Phase T3's exit bar).
             return VoterVote.Abstain(Name);
-        }
 
-        if (!ledger.TryGetValue(clusterIndex, out var clusterScores))
-        {
-            return VoterVote.Abstain(Name);
-        }
+        if (!ledger.TryGetValue(key: clusterIndex, value: out var clusterScores)) return VoterVote.Abstain(Name);
 
         var scored = new List<(string Model, double Score)>();
         foreach (var candidate in context.Candidates)
         {
-            var key = ModelNameCanonicalizer.Canonicalize(candidate.ModelName, candidate.Provider);
-            if (!clusterScores.TryGetValue(key, out var cell) || cell.ObservationCount < _routingOptions.ClusterBestMinObservations)
-            {
-                continue;
-            }
+            var key = ModelNameCanonicalizer.Canonicalize(modelId: candidate.ModelName, provider: candidate.Provider);
+            if (!clusterScores.TryGetValue(key: key, value: out var cell) ||
+                cell.ObservationCount < _routingOptions.ClusterBestMinObservations) continue;
 
             scored.Add((candidate.ModelName, cell.MeanScore));
         }
 
-        if (scored.Count == 0)
-        {
-            return VoterVote.Abstain(Name);
-        }
+        if (scored.Count == 0) return VoterVote.Abstain(Name);
 
         // Softmax over the restricted candidate scores turns raw mean scores into a [0, 1] confidence
         // without changing the argmax - softmax is monotonic in its inputs. Mirrors LogRegVoter.VoteAsync.
@@ -155,15 +144,12 @@ public sealed class ClusterBestVoter : IRoutingVoter
 
         var bestIndex = 0;
         for (var i = 1; i < scored.Count; i++)
-        {
             if (expScores[i] > expScores[bestIndex])
-            {
                 bestIndex = i;
-            }
-        }
 
         var confidence = sumExp > 0 ? expScores[bestIndex] / sumExp : 1d / scored.Count;
-        return new VoterVote(Name, scored[bestIndex].Model, Math.Clamp(confidence, 0d, 1d));
+        return new VoterVote(VoterName: Name, ModelName: scored[bestIndex].Model,
+            Confidence: Math.Clamp(value: confidence, 0d, 1d));
     }
 
     /// <summary>
@@ -192,23 +178,25 @@ public sealed class ClusterBestVoter : IRoutingVoter
     /// ledger rebuild from the current live memory working set) on the first call or after a
     /// <see cref="Reload"/>.
     /// </summary>
-    private async Task<(ClusterModelArtifact? Artifact, IReadOnlyDictionary<int, IReadOnlyDictionary<string, ClusterLedger.ClusterModelScore>>? Ledger)> GetModelAsync(
-        CancellationToken cancellationToken)
+    private async
+        Task<(ClusterModelArtifact? Artifact,
+            IReadOnlyDictionary<int, IReadOnlyDictionary<string, ClusterLedger.ClusterModelScore>>? Ledger)>
+        GetModelAsync(
+            CancellationToken cancellationToken)
     {
         await _loadLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_loadAttempted)
-            {
-                return (_artifact, _ledger);
-            }
+            if (_loadAttempted) return (_artifact, _ledger);
 
             _loadAttempted = true;
-            _artifact = ClusterModelArtifactLoader.TryLoad(_modelPath, _logger, VoterNames.ClusterBest);
+            _artifact = ClusterModelArtifactLoader.TryLoad(path: _modelPath, logger: _logger,
+                consumer: VoterNames.ClusterBest);
             if (_artifact is not null)
             {
                 var entries = await _memoryEntryStore.LoadAllAsync(cancellationToken).ConfigureAwait(false);
-                _ledger = ClusterLedger.Build(_artifact, entries, _routingOptions.ClusterAssignmentThreshold);
+                _ledger = ClusterLedger.Build(artifact: _artifact, entries: entries,
+                    assignmentThreshold: _routingOptions.ClusterAssignmentThreshold);
             }
 
             return (_artifact, _ledger);
@@ -218,5 +206,4 @@ public sealed class ClusterBestVoter : IRoutingVoter
             _loadLock.Release();
         }
     }
-
 }

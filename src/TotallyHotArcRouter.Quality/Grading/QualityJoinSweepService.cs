@@ -42,7 +42,7 @@ public sealed class QualityJoinSweepService : BackgroundService
         _sweepInterval = sweepInterval ?? DefaultSweepInterval;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var timer = new PeriodicTimer(_sweepInterval);
@@ -50,21 +50,19 @@ public sealed class QualityJoinSweepService : BackgroundService
         try
         {
             while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
-            {
                 try
                 {
                     var written = await _aggregator.SweepExpiredAsync(stoppingToken).ConfigureAwait(false);
                     if (written > 0)
-                    {
-                        _logger.LogDebug("Swept {Count} expired judge join(s), writing their static scores.", written);
-                    }
+                        _logger.LogDebug(message: "Swept {Count} expired judge join(s), writing their static scores.",
+                            written);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     // A sweep failure must not end the loop: the next tick should still get a chance.
-                    _logger.LogWarning(ex, "Sweeping expired judge joins failed; retrying on the next tick.");
+                    _logger.LogWarning(exception: ex,
+                        message: "Sweeping expired judge joins failed; retrying on the next tick.");
                 }
-            }
         }
         catch (OperationCanceledException)
         {

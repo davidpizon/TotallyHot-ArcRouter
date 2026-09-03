@@ -1,7 +1,8 @@
-using Microsoft.Extensions.Options;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Reflection;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Update;
 
@@ -28,19 +29,20 @@ public sealed class GitHubReleaseCheckClient : IReleaseCheckClient
     public const string ChecksumsAssetName = "checksums.txt";
 
     private const string UserAgent = "TotallyHotArcRouter-Router";
+    private readonly string _currentVersion;
 
     private readonly HttpClient _httpClient;
+    private readonly ILogger<GitHubReleaseCheckClient> _logger;
     private readonly UpdateOptions _options;
     private readonly string _owner;
     private readonly string _repo;
-    private readonly string _currentVersion;
-    private readonly ILogger<GitHubReleaseCheckClient> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="GitHubReleaseCheckClient"/> class.</summary>
     /// <param name="httpClient">The HTTP client used to call the GitHub API.</param>
     /// <param name="options">Auto-update configuration, including the API base URL override.</param>
     /// <param name="logger">The logger.</param>
-    public GitHubReleaseCheckClient(HttpClient httpClient, IOptions<UpdateOptions> options, ILogger<GitHubReleaseCheckClient> logger)
+    public GitHubReleaseCheckClient(HttpClient httpClient, IOptions<UpdateOptions> options,
+        ILogger<GitHubReleaseCheckClient> logger)
     {
         ArgumentNullException.ThrowIfNull(httpClient);
         ArgumentNullException.ThrowIfNull(options);
@@ -51,72 +53,75 @@ public sealed class GitHubReleaseCheckClient : IReleaseCheckClient
         _logger = logger;
 
         var assembly = Assembly.GetExecutingAssembly();
-        _owner = ReadMetadata(assembly, "UpdateGitHubOwner") ?? "davidpizon";
-        _repo = ReadMetadata(assembly, "UpdateGitHubRepo") ?? "TotallyHot-ArcRouter";
+        _owner = ReadMetadata(assembly: assembly, key: "UpdateGitHubOwner") ?? "davidpizon";
+        _repo = ReadMetadata(assembly: assembly, key: "UpdateGitHubRepo") ?? "TotallyHot-ArcRouter";
 
         // The SDK appends "+<git-commit-sha>" (IncludeSourceRevisionInInformationalVersion, on by
         // default for a git checkout) onto InformationalVersion, which System.Version cannot parse at
         // all. Strip it - Directory.Build.props' Version is always the plain "<major>.<minor>.<patch>"
         // this comparison needs.
-        var informationalVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0";
-        var plusIndex = informationalVersion.IndexOf('+', StringComparison.Ordinal);
+        var informationalVersion =
+            assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0";
+        var plusIndex = informationalVersion.IndexOf('+', comparisonType: StringComparison.Ordinal);
         _currentVersion = plusIndex >= 0 ? informationalVersion[..plusIndex] : informationalVersion;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<ReleaseCheckResult> CheckAsync(CancellationToken cancellationToken = default)
     {
         using var request = new HttpRequestMessage(
-            HttpMethod.Get,
-            $"{_options.GitHubApiBaseUrl.TrimEnd('/')}/repos/{_owner}/{_repo}/releases/latest");
-        request.Headers.UserAgent.Add(new ProductInfoHeaderValue(UserAgent, "1.0"));
+            method: HttpMethod.Get,
+            requestUri: $"{_options.GitHubApiBaseUrl.TrimEnd('/')}/repos/{_owner}/{_repo}/releases/latest");
+        request.Headers.UserAgent.Add(new ProductInfoHeaderValue(productName: UserAgent, productVersion: "1.0"));
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
 
         HttpResponseMessage response;
         try
         {
-            response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            response = await _httpClient.SendAsync(request: request, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "GitHub release check failed to reach the API.");
-            return ReleaseCheckResult.Unavailable(_currentVersion, ReleaseCheckUnavailableReason.NetworkOrApiFailure, ex.Message);
+            _logger.LogWarning(exception: ex, message: "GitHub release check failed to reach the API.");
+            return ReleaseCheckResult.Unavailable(currentVersion: _currentVersion,
+                reason: ReleaseCheckUnavailableReason.NetworkOrApiFailure, detail: ex.Message);
         }
 
         using (response)
         {
-            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
-            {
+            if (response.StatusCode == HttpStatusCode.NotFound)
                 // GitHub returns 404 for /releases/latest on a repo with zero published releases.
                 return ReleaseCheckResult.Unavailable(
-                    _currentVersion,
-                    ReleaseCheckUnavailableReason.NoReleasesPublished,
-                    "No releases have been published yet.");
-            }
+                    currentVersion: _currentVersion,
+                    reason: ReleaseCheckUnavailableReason.NoReleasesPublished,
+                    detail: "No releases have been published yet.");
 
             if (!response.IsSuccessStatusCode)
-            {
                 return ReleaseCheckResult.Unavailable(
-                    _currentVersion,
-                    ReleaseCheckUnavailableReason.NetworkOrApiFailure,
-                    $"GitHub API returned {(int)response.StatusCode} {response.ReasonPhrase}.");
-            }
+                    currentVersion: _currentVersion,
+                    reason: ReleaseCheckUnavailableReason.NetworkOrApiFailure,
+                    detail: $"GitHub API returned {(int)response.StatusCode} {response.ReasonPhrase}.");
 
             JsonDocument document;
             try
             {
-                await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-                document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+                await using var stream =
+                    await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+                document = await JsonDocument.ParseAsync(utf8Json: stream, cancellationToken: cancellationToken)
+                    .ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogWarning(ex, "GitHub release check received a malformed response body.");
-                return ReleaseCheckResult.Unavailable(_currentVersion, ReleaseCheckUnavailableReason.NetworkOrApiFailure, ex.Message);
+                _logger.LogWarning(exception: ex, message: "GitHub release check received a malformed response body.");
+                return ReleaseCheckResult.Unavailable(currentVersion: _currentVersion,
+                    reason: ReleaseCheckUnavailableReason.NetworkOrApiFailure, detail: ex.Message);
             }
 
             using (document)
             {
-                return await ParseReleaseAsync(document.RootElement, cancellationToken).ConfigureAwait(false);
+                return await ParseReleaseAsync(release: document.RootElement, cancellationToken: cancellationToken)
+                    .ConfigureAwait(false);
             }
         }
     }
@@ -124,42 +129,37 @@ public sealed class GitHubReleaseCheckClient : IReleaseCheckClient
     /// <summary>Parses one <c>/releases/latest</c> JSON payload into a result, never throwing on a malformed shape.</summary>
     private async Task<ReleaseCheckResult> ParseReleaseAsync(JsonElement release, CancellationToken cancellationToken)
     {
-        if (!release.TryGetProperty("tag_name", out var tagElement) || tagElement.ValueKind != JsonValueKind.String)
-        {
-            return ReleaseCheckResult.Unavailable(_currentVersion, ReleaseCheckUnavailableReason.MalformedTag, "Release has no tag_name.");
-        }
+        if (!release.TryGetProperty(propertyName: "tag_name", value: out var tagElement) ||
+            tagElement.ValueKind != JsonValueKind.String)
+            return ReleaseCheckResult.Unavailable(currentVersion: _currentVersion,
+                reason: ReleaseCheckUnavailableReason.MalformedTag, detail: "Release has no tag_name.");
 
         var tag = tagElement.GetString() ?? string.Empty;
         var versionText = tag.StartsWith('v') || tag.StartsWith('V') ? tag[1..] : tag;
 
-        if (!Version.TryParse(versionText, out var latestVersion))
-        {
+        if (!Version.TryParse(input: versionText, result: out var latestVersion))
             return ReleaseCheckResult.Unavailable(
-                _currentVersion,
-                ReleaseCheckUnavailableReason.MalformedTag,
-                $"Release tag '{tag}' is not a parseable 'v<version>'.");
-        }
+                currentVersion: _currentVersion,
+                reason: ReleaseCheckUnavailableReason.MalformedTag,
+                detail: $"Release tag '{tag}' is not a parseable 'v<version>'.");
 
-        if (!Version.TryParse(_currentVersion, out var currentVersion))
-        {
+        if (!Version.TryParse(input: _currentVersion, result: out var currentVersion))
             // The running app's own version is always Directory.Build.props' Version, which is always
             // well-formed; this branch exists only so a corrupted build metadata attribute degrades to
             // "unavailable" rather than throwing.
             return ReleaseCheckResult.Unavailable(
-                _currentVersion,
-                ReleaseCheckUnavailableReason.MalformedTag,
-                $"The running version '{_currentVersion}' is not a parseable version.");
-        }
+                currentVersion: _currentVersion,
+                reason: ReleaseCheckUnavailableReason.MalformedTag,
+                detail: $"The running version '{_currentVersion}' is not a parseable version.");
 
         var isNewer = latestVersion > currentVersion;
 
-        if (!release.TryGetProperty("assets", out var assetsElement) || assetsElement.ValueKind != JsonValueKind.Array)
-        {
+        if (!release.TryGetProperty(propertyName: "assets", value: out var assetsElement) ||
+            assetsElement.ValueKind != JsonValueKind.Array)
             return ReleaseCheckResult.Unavailable(
-                _currentVersion,
-                ReleaseCheckUnavailableReason.AssetOrChecksumMissing,
-                "Release has no assets array.");
-        }
+                currentVersion: _currentVersion,
+                reason: ReleaseCheckUnavailableReason.AssetOrChecksumMissing,
+                detail: "Release has no assets array.");
 
         string? msiAssetUrl = null;
         string? msiAssetName = null;
@@ -167,28 +167,24 @@ public sealed class GitHubReleaseCheckClient : IReleaseCheckClient
 
         foreach (var asset in assetsElement.EnumerateArray())
         {
-            if (!asset.TryGetProperty("name", out var nameElement) || nameElement.ValueKind != JsonValueKind.String)
-            {
-                continue;
-            }
+            if (!asset.TryGetProperty(propertyName: "name", value: out var nameElement) ||
+                nameElement.ValueKind != JsonValueKind.String) continue;
 
             var name = nameElement.GetString() ?? string.Empty;
-            var downloadUrl = asset.TryGetProperty("browser_download_url", out var urlElement) && urlElement.ValueKind == JsonValueKind.String
+            var downloadUrl = asset.TryGetProperty(propertyName: "browser_download_url", value: out var urlElement) &&
+                              urlElement.ValueKind == JsonValueKind.String
                 ? urlElement.GetString()
                 : null;
 
-            if (downloadUrl is null)
-            {
-                continue;
-            }
+            if (downloadUrl is null) continue;
 
-            if (string.Equals(name, ChecksumsAssetName, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(a: name, b: ChecksumsAssetName, comparisonType: StringComparison.OrdinalIgnoreCase))
             {
                 checksumsUrl = downloadUrl;
                 continue;
             }
 
-            if (name.EndsWith(".msi", StringComparison.OrdinalIgnoreCase))
+            if (name.EndsWith(value: ".msi", comparisonType: StringComparison.OrdinalIgnoreCase))
             {
                 msiAssetUrl = downloadUrl;
                 msiAssetName = name;
@@ -196,22 +192,23 @@ public sealed class GitHubReleaseCheckClient : IReleaseCheckClient
         }
 
         if (msiAssetUrl is null || checksumsUrl is null)
-        {
             return ReleaseCheckResult.Unavailable(
-                _currentVersion,
-                ReleaseCheckUnavailableReason.AssetOrChecksumMissing,
-                $"Release '{tag}' does not publish an installer .msi asset and '{ChecksumsAssetName}'.");
-        }
+                currentVersion: _currentVersion,
+                reason: ReleaseCheckUnavailableReason.AssetOrChecksumMissing,
+                detail: $"Release '{tag}' does not publish an installer .msi asset and '{ChecksumsAssetName}'.");
 
         if (!isNewer)
-        {
-            return ReleaseCheckResult.Resolved(_currentVersion, versionText, isUpdateAvailable: false, assetDownloadUrl: null, assetSha256: null);
-        }
+            return ReleaseCheckResult.Resolved(currentVersion: _currentVersion, latestVersion: versionText, false, null,
+                null);
 
-        return await ResolveWithChecksumAsync(versionText, msiAssetUrl, msiAssetName!, checksumsUrl, cancellationToken).ConfigureAwait(false);
+        return await ResolveWithChecksumAsync(versionText: versionText, assetUrl: msiAssetUrl, assetName: msiAssetName!,
+            checksumsUrl: checksumsUrl, cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Downloads <c>checksums.txt</c> once and looks up the MSI's published SHA256, completing the result only when both pieces an apply needs are known.</summary>
+    /// <summary>
+    /// Downloads <c>checksums.txt</c> once and looks up the MSI's published SHA256, completing the result only when
+    /// both pieces an apply needs are known.
+    /// </summary>
     private async Task<ReleaseCheckResult> ResolveWithChecksumAsync(
         string versionText,
         string assetUrl,
@@ -222,62 +219,61 @@ public sealed class GitHubReleaseCheckClient : IReleaseCheckClient
         string checksumsText;
         try
         {
-            checksumsText = await _httpClient.GetStringAsync(checksumsUrl, cancellationToken).ConfigureAwait(false);
+            checksumsText = await _httpClient
+                .GetStringAsync(requestUri: checksumsUrl, cancellationToken: cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "Failed to download {ChecksumsAssetName} for release {Version}.", ChecksumsAssetName, versionText);
-            return ReleaseCheckResult.Unavailable(_currentVersion, ReleaseCheckUnavailableReason.NetworkOrApiFailure, ex.Message);
+            _logger.LogWarning(exception: ex, message: "Failed to download {ChecksumsAssetName} for release {Version}.",
+                ChecksumsAssetName, versionText);
+            return ReleaseCheckResult.Unavailable(currentVersion: _currentVersion,
+                reason: ReleaseCheckUnavailableReason.NetworkOrApiFailure, detail: ex.Message);
         }
 
-        var sha256 = ParseChecksum(checksumsText, assetName);
+        var sha256 = ParseChecksum(checksumsText: checksumsText, assetName: assetName);
         if (sha256 is null)
-        {
             return ReleaseCheckResult.Unavailable(
-                _currentVersion,
-                ReleaseCheckUnavailableReason.AssetOrChecksumMissing,
-                $"'{ChecksumsAssetName}' does not list a checksum for '{assetName}'.");
-        }
+                currentVersion: _currentVersion,
+                reason: ReleaseCheckUnavailableReason.AssetOrChecksumMissing,
+                detail: $"'{ChecksumsAssetName}' does not list a checksum for '{assetName}'.");
 
         return ReleaseCheckResult.Resolved(
-            _currentVersion,
-            versionText,
-            isUpdateAvailable: true,
+            currentVersion: _currentVersion,
+            latestVersion: versionText,
+            true,
             assetDownloadUrl: assetUrl,
             assetSha256: sha256);
     }
 
-    /// <summary>Parses <c>&lt;sha256&gt;  &lt;filename&gt;</c> lines (the <c>sha256sum</c> output format) looking for <paramref name="assetName"/>.</summary>
+    /// <summary>
+    /// Parses <c>&lt;sha256&gt;  &lt;filename&gt;</c> lines (the <c>sha256sum</c> output format) looking for
+    /// <paramref name="assetName"/>.
+    /// </summary>
     internal static string? ParseChecksum(string checksumsText, string assetName)
     {
         foreach (var rawLine in checksumsText.Split('\n'))
         {
             var line = rawLine.Trim();
-            if (line.Length == 0)
-            {
-                continue;
-            }
+            if (line.Length == 0) continue;
 
-            var parts = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length != 2)
-            {
-                continue;
-            }
+            var parts = line.Split(separator: (char[]?)null, options: StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length != 2) continue;
 
             // sha256sum output may prefix the filename with "*" for binary mode.
             var fileName = parts[1].TrimStart('*');
-            if (string.Equals(fileName, assetName, StringComparison.OrdinalIgnoreCase))
-            {
+            if (string.Equals(a: fileName, b: assetName, comparisonType: StringComparison.OrdinalIgnoreCase))
                 return parts[0].ToLowerInvariant();
-            }
         }
 
         return null;
     }
 
     /// <summary>Reads one named value out of this assembly's compiled-in <see cref="AssemblyMetadataAttribute"/>s.</summary>
-    private static string? ReadMetadata(Assembly assembly, string key) =>
-        assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
-            .FirstOrDefault(attribute => string.Equals(attribute.Key, key, StringComparison.Ordinal))
+    private static string? ReadMetadata(Assembly assembly, string key)
+    {
+        return assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(attribute =>
+                string.Equals(a: attribute.Key, b: key, comparisonType: StringComparison.Ordinal))
             ?.Value;
+    }
 }

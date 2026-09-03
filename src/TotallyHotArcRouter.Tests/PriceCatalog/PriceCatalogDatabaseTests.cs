@@ -37,13 +37,13 @@ public class PriceCatalogDatabaseTests
 
         var tables = ReadTableNames(temp.Database);
 
-        Assert.Contains("providers", tables);
-        Assert.Contains("models", tables);
-        Assert.Contains("model_aliases", tables);
-        Assert.Contains("aggregator_sources", tables);
-        Assert.Contains("model_prices", tables);
-        Assert.Contains("multimodal_prices", tables);
-        Assert.Contains("model_price_observations", tables);
+        Assert.Contains(expected: "providers", collection: tables);
+        Assert.Contains(expected: "models", collection: tables);
+        Assert.Contains(expected: "model_aliases", collection: tables);
+        Assert.Contains(expected: "aggregator_sources", collection: tables);
+        Assert.Contains(expected: "model_prices", collection: tables);
+        Assert.Contains(expected: "multimodal_prices", collection: tables);
+        Assert.Contains(expected: "model_price_observations", collection: tables);
     }
 
     [Fact]
@@ -55,14 +55,19 @@ public class PriceCatalogDatabaseTests
         using var temp = new TempDatabase();
         temp.Database.EnsureCreated();
         var repository = new PriceRepository(temp.Database);
-        repository.UpsertPrices("litellm", 0, [new NormalizedPrice("gpt-4o", "openai", 2.50m, 10.00m, null, null, null)], DateTimeOffset.UtcNow);
+        repository.UpsertPrices(sourceName: "litellm", 0,
+            prices:
+            [
+                new NormalizedPrice(ModelIdentifier: "gpt-4o", Provider: "openai", 2.50m, 10.00m, null, null, null)
+            ], asOfUtc: DateTimeOffset.UtcNow);
 
         temp.Database.EnsureCreated();
 
-        Assert.Contains("model_price_observations", ReadTableNames(temp.Database));
-        var price = repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24));
+        Assert.Contains(expected: "model_price_observations", collection: ReadTableNames(temp.Database));
+        var price = repository.GetFreshPrice(key: new ModelKey(ModelName: "gpt-4o", Provider: "openai"),
+            maxAge: TimeSpan.FromHours(24));
         Assert.NotNull(price);
-        Assert.Equal(2.50m, price!.InputPerMillionTokens);
+        Assert.Equal(2.50m, actual: price!.InputPerMillionTokens);
     }
 
     [Fact]
@@ -71,12 +76,13 @@ public class PriceCatalogDatabaseTests
         using var temp = new TempDatabase();
         temp.Database.EnsureCreated();
 
-        Assert.Contains("usage_ledger", ReadTableNames(temp.Database));
+        Assert.Contains(expected: "usage_ledger", collection: ReadTableNames(temp.Database));
 
         using var connection = temp.Database.OpenConnection();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM pragma_index_list('usage_ledger') WHERE name = 'ix_usage_ledger_dedup_key' AND \"unique\" = 1;";
-        Assert.Equal(1, Convert.ToInt32(command.ExecuteScalar()));
+        command.CommandText =
+            "SELECT COUNT(*) FROM pragma_index_list('usage_ledger') WHERE name = 'ix_usage_ledger_dedup_key' AND \"unique\" = 1;";
+        Assert.Equal(1, actual: Convert.ToInt32(command.ExecuteScalar()));
     }
 
     [Fact]
@@ -87,8 +93,8 @@ public class PriceCatalogDatabaseTests
 
         var tables = ReadTableNames(temp.Database);
 
-        Assert.Contains("provider_cost_reconciliation", tables);
-        Assert.Contains("reconciliation_checkpoint", tables);
+        Assert.Contains(expected: "provider_cost_reconciliation", collection: tables);
+        Assert.Contains(expected: "reconciliation_checkpoint", collection: tables);
     }
 
     [Fact]
@@ -100,9 +106,9 @@ public class PriceCatalogDatabaseTests
         // Rows previously appeared only after a successful poll, which left a fresh install with nothing to
         // toggle and no way to switch a source off before the startup pull fired.
         var states = new PriceSourceRepository(temp.Database).GetSourceStates();
-        Assert.Equal(2, states.Count);
-        Assert.All(states, s => Assert.Equal(0, s.PriceCount));
-        Assert.All(states, s => Assert.True(s.Enabled));
+        Assert.Equal(2, actual: states.Count);
+        Assert.All(collection: states, action: s => Assert.Equal(0, actual: s.PriceCount));
+        Assert.All(collection: states, action: s => Assert.True(s.Enabled));
     }
 
     [Fact]
@@ -123,7 +129,7 @@ public class PriceCatalogDatabaseTests
     {
         using var temp = new TempDatabase();
         var repository = temp.CreateSourceRepository();
-        repository.SetSourceEnabled(PriceCatalogOptions.LiteLlmSourceName, enabled: false);
+        repository.SetSourceEnabled(sourceName: PriceCatalogOptions.LiteLlmSourceName, false);
 
         // EnsureCreated runs on every startup. If the seed used DO UPDATE instead of DO NOTHING, an operator
         // who switched a source off would find it quietly back on after the next restart.
@@ -138,7 +144,9 @@ public class PriceCatalogDatabaseTests
     {
         using var temp = new TempDatabase();
         var repository = temp.CreateSourceRepository();
-        Assert.True(repository.ReorderSources([PriceCatalogOptions.OpenRouterSourceName, PriceCatalogOptions.LiteLlmSourceName]));
+        Assert.True(repository.ReorderSources([
+            PriceCatalogOptions.OpenRouterSourceName, PriceCatalogOptions.LiteLlmSourceName
+        ]));
 
         // EnsureCreated runs on every startup, and its seed step must not rewrite a rank the operator (or a
         // previous reorder) already set - only ON CONFLICT DO NOTHING protects that.
@@ -163,12 +171,13 @@ public class PriceCatalogDatabaseTests
 
         var states = new PriceSourceRepository(temp.Database).GetSourceStates();
         var liteLlm = states.Single(s => s.Name == "litellm");
-        Assert.True(liteLlm.Enabled, "an existing source must migrate to enabled, matching its pre-toggle behavior");
+        Assert.True(condition: liteLlm.Enabled,
+            userMessage: "an existing source must migrate to enabled, matching its pre-toggle behavior");
 
         // openrouter didn't exist in this simulated legacy database (it predates OpenRouter's client
         // entirely) - EnsureCreated's seed step must still add it, exactly as it would for any install
         // upgrading straight to this version.
-        Assert.Contains(states, s => s.Name == PriceCatalogOptions.OpenRouterSourceName);
+        Assert.Contains(collection: states, filter: s => s.Name == PriceCatalogOptions.OpenRouterSourceName);
     }
 
     [Fact]
@@ -190,7 +199,8 @@ public class PriceCatalogDatabaseTests
         // exactly the operators already hitting the bug.
         var lmStudio = stored.Single(c => c.ProviderKey == "lmstudio");
         Assert.True(lmStudio.JsonSchemaResponseFormat);
-        Assert.True(lmStudio.LmStudioNative, "the pre-existing row's other flags must survive the migration");
+        Assert.True(condition: lmStudio.LmStudioNative,
+            userMessage: "the pre-existing row's other flags must survive the migration");
 
         // A cloud provider speaking only OpenAI is deliberately not backfilled: that flag is true for every
         // one of them, and constrained mode exists for local models.
@@ -207,20 +217,20 @@ public class PriceCatalogDatabaseTests
         using var connection = database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            CREATE TABLE provider_endpoint_capabilities (
-                provider_key         TEXT PRIMARY KEY COLLATE NOCASE,
-                openai_compatible    INTEGER NOT NULL DEFAULT 0,
-                lmstudio_native      INTEGER NOT NULL DEFAULT 0,
-                ollama_native        INTEGER NOT NULL DEFAULT 0,
-                anthropic_compatible INTEGER NOT NULL DEFAULT 0,
-                scanned_at_utc       TEXT    NOT NULL,
-                scan_error           TEXT
-            );
-            INSERT INTO provider_endpoint_capabilities
-                (provider_key, openai_compatible, lmstudio_native, ollama_native, anthropic_compatible, scanned_at_utc)
-            VALUES ('lmstudio', 1, 1, 0, 0, '2026-07-31T00:00:00.0000000Z'),
-                   ('openai',   1, 0, 0, 0, '2026-07-31T00:00:00.0000000Z');
-            """;
+                              CREATE TABLE provider_endpoint_capabilities (
+                                  provider_key         TEXT PRIMARY KEY COLLATE NOCASE,
+                                  openai_compatible    INTEGER NOT NULL DEFAULT 0,
+                                  lmstudio_native      INTEGER NOT NULL DEFAULT 0,
+                                  ollama_native        INTEGER NOT NULL DEFAULT 0,
+                                  anthropic_compatible INTEGER NOT NULL DEFAULT 0,
+                                  scanned_at_utc       TEXT    NOT NULL,
+                                  scan_error           TEXT
+                              );
+                              INSERT INTO provider_endpoint_capabilities
+                                  (provider_key, openai_compatible, lmstudio_native, ollama_native, anthropic_compatible, scanned_at_utc)
+                              VALUES ('lmstudio', 1, 1, 0, 0, '2026-07-31T00:00:00.0000000Z'),
+                                     ('openai',   1, 0, 0, 0, '2026-07-31T00:00:00.0000000Z');
+                              """;
         command.ExecuteNonQuery();
     }
 
@@ -233,13 +243,13 @@ public class PriceCatalogDatabaseTests
         using var connection = database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            CREATE TABLE aggregator_sources (
-                source_id      INTEGER PRIMARY KEY AUTOINCREMENT,
-                source_name    TEXT    NOT NULL UNIQUE,
-                priority_score INTEGER NOT NULL DEFAULT 0
-            );
-            INSERT INTO aggregator_sources (source_name, priority_score) VALUES ('litellm', 0);
-            """;
+                              CREATE TABLE aggregator_sources (
+                                  source_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                                  source_name    TEXT    NOT NULL UNIQUE,
+                                  priority_score INTEGER NOT NULL DEFAULT 0
+                              );
+                              INSERT INTO aggregator_sources (source_name, priority_score) VALUES ('litellm', 0);
+                              """;
         command.ExecuteNonQuery();
     }
 
@@ -251,12 +261,8 @@ public class PriceCatalogDatabaseTests
 
         var names = new List<string>();
         using var reader = command.ExecuteReader();
-        while (reader.Read())
-        {
-            names.Add(reader.GetString(0));
-        }
+        while (reader.Read()) names.Add(reader.GetString(0));
 
         return names;
     }
 }
-

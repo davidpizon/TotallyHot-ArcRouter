@@ -23,10 +23,16 @@ public sealed record LiveConversationTurn(
 
 /// <summary>A conversation (session) reconstructed from the live telemetry stream.</summary>
 /// <param name="SessionId">The session id every turn in <paramref name="Turns"/> shares.</param>
-/// <param name="IsSessionSynthesized">Whether the session id was synthesized rather than resolved from an explicit client-sent id.</param>
+/// <param name="IsSessionSynthesized">
+/// Whether the session id was synthesized rather than resolved from an explicit
+/// client-sent id.
+/// </param>
 /// <param name="FirstTimestampUtc">The first turn's timestamp.</param>
 /// <param name="LastTimestampUtc">The most recent turn's timestamp.</param>
-/// <param name="TotalCost">The sum of every turn's known cost - see <paramref name="UnpricedTurns"/> for what this excludes.</param>
+/// <param name="TotalCost">
+/// The sum of every turn's known cost - see <paramref name="UnpricedTurns"/> for what this
+/// excludes.
+/// </param>
 /// <param name="TotalPromptTokens">The sum of every turn's prompt tokens.</param>
 /// <param name="TotalCompletionTokens">The sum of every turn's completion tokens.</param>
 /// <param name="HasFallbackTurns">Whether any turn in <paramref name="Turns"/> was served by fallback routing.</param>
@@ -80,13 +86,16 @@ public static class ConversationAggregator
         ArgumentNullException.ThrowIfNull(events);
 
         return events
-            .GroupBy(e => e.SessionId, StringComparer.Ordinal)
+            .GroupBy(keySelector: e => e.SessionId, comparer: StringComparer.Ordinal)
             .Select(BuildConversation)
             .OrderByDescending(c => c.LastTimestampUtc)
             .ToList();
     }
 
-    /// <summary>Builds one <see cref="LiveConversation"/> from a single session's grouped events, ordering its turns chronologically.</summary>
+    /// <summary>
+    /// Builds one <see cref="LiveConversation"/> from a single session's grouped events, ordering its turns
+    /// chronologically.
+    /// </summary>
     private static LiveConversation BuildConversation(IGrouping<string, RoutingTelemetryEventDto> group)
     {
         var orderedEvents = group.OrderBy(e => e.TurnNumber).ToList();
@@ -128,4 +137,3 @@ public static class ConversationAggregator
             UnpricedTurns: orderedEvents.Count(e => e.EstimatedCostUsd is null));
     }
 }
-

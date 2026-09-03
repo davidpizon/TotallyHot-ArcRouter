@@ -16,4 +16,3 @@ public sealed class SpendTrackingOptions
     /// </summary>
     public bool Enabled { get; init; } = true;
 }
-

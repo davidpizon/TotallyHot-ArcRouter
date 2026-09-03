@@ -16,22 +16,21 @@ namespace TotallyHot.ArcRouter.Judge;
 /// </summary>
 public sealed class PendingResponseTextCache
 {
-    /// <summary>A single cached response text awaiting judging, with the absolute time it expires.</summary>
-    /// <param name="Text">The (possibly truncated) response text.</param>
-    /// <param name="ExpiresAtUtc">The UTC instant after which this entry is treated as evicted.</param>
-    private sealed record Entry(string Text, DateTimeOffset ExpiresAtUtc);
+    private readonly int _capacity;
 
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
     private readonly Queue<string> _insertionOrder = new();
     private readonly object _lock = new();
+    private readonly int _maxTextChars;
     private readonly TimeProvider _timeProvider;
     private readonly TimeSpan _ttl;
-    private readonly int _capacity;
-    private readonly int _maxTextChars;
 
     /// <summary>Initializes a new instance of the <see cref="PendingResponseTextCache"/> class.</summary>
     /// <param name="options">Supplies the capacity, TTL, and per-entry text-size bounds.</param>
-    /// <param name="timeProvider">Clock used for TTL expiry; defaults to <see cref="TimeProvider.System"/>. Overridable for deterministic tests.</param>
+    /// <param name="timeProvider">
+    /// Clock used for TTL expiry; defaults to <see cref="TimeProvider.System"/>. Overridable for
+    /// deterministic tests.
+    /// </param>
     public PendingResponseTextCache(IOptions<JudgeOptions> options, TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -70,12 +69,9 @@ public sealed class PendingResponseTextCache
         {
             EvictExpiredAndStale();
 
-            if (!_entries.ContainsKey(correlationId))
-            {
-                _insertionOrder.Enqueue(correlationId);
-            }
+            if (!_entries.ContainsKey(correlationId)) _insertionOrder.Enqueue(correlationId);
 
-            _entries[correlationId] = new Entry(bounded, _timeProvider.GetUtcNow() + _ttl);
+            _entries[correlationId] = new Entry(Text: bounded, ExpiresAtUtc: _timeProvider.GetUtcNow() + _ttl);
 
             while (_entries.Count > _capacity && _insertionOrder.Count > 0)
             {
@@ -100,7 +96,7 @@ public sealed class PendingResponseTextCache
             // EvictExpiredAndStale performs a full sweep, so no remaining entry is expired afterward.
             EvictExpiredAndStale();
 
-            if (_entries.Remove(correlationId, out var entry))
+            if (_entries.Remove(key: correlationId, value: out var entry))
             {
                 text = entry.Text;
                 return true;
@@ -126,10 +122,7 @@ public sealed class PendingResponseTextCache
         for (var i = 0; i < remaining; i++)
         {
             var key = _insertionOrder.Dequeue();
-            if (!_entries.TryGetValue(key, out var entry))
-            {
-                continue;
-            }
+            if (!_entries.TryGetValue(key: key, value: out var entry)) continue;
 
             if (entry.ExpiresAtUtc > now)
             {
@@ -140,4 +133,9 @@ public sealed class PendingResponseTextCache
             _entries.Remove(key);
         }
     }
+
+    /// <summary>A single cached response text awaiting judging, with the absolute time it expires.</summary>
+    /// <param name="Text">The (possibly truncated) response text.</param>
+    /// <param name="ExpiresAtUtc">The UTC instant after which this entry is treated as evicted.</param>
+    private sealed record Entry(string Text, DateTimeOffset ExpiresAtUtc);
 }

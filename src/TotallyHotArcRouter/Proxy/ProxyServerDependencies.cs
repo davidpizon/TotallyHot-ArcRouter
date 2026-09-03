@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.CodeRouterBench;
+using TotallyHot.ArcRouter.Judge;
+using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
@@ -53,7 +55,7 @@ public sealed record ProxyServerDependencies
     /// whether its API exists. When omitted, <see cref="Models.RoutingOptions"/>'s own coded defaults are
     /// reported.
     /// </summary>
-    public IOptions<Models.RoutingOptions>? RoutingOptions { get; init; }
+    public IOptions<RoutingOptions>? RoutingOptions { get; init; }
 
     /// <summary>The <c>/admin/*</c> REST management API on the plain-HTTP port. <see langword="null"/> leaves it unmapped.</summary>
     public ManagementApiDependencies? ManagementApi { get; init; }
@@ -70,7 +72,10 @@ public sealed record ProxyServerDependencies
     /// <summary>The Governance UI's Cluster Model panel API (Phase T5). <see langword="null"/> leaves it unmapped.</summary>
     public ClusterModelAdminDependencies? ClusterModelAdmin { get; init; }
 
-    /// <summary>The Governance UI's Router Model panel API (live-feedback-learning-plan.md Phase 5). <see langword="null"/> leaves it unmapped.</summary>
+    /// <summary>
+    /// The Governance UI's Router Model panel API (live-feedback-learning-plan.md Phase 5). <see langword="null"/>
+    /// leaves it unmapped.
+    /// </summary>
     public LogRegModelAdminDependencies? LogRegModelAdmin { get; init; }
 
     /// <summary>The Governance UI's System Settings window API (Phase T6). <see langword="null"/> leaves it unmapped.</summary>
@@ -111,7 +116,10 @@ public sealed record ProxyServerDependencies
 /// </param>
 public sealed record ManagementApiDependencies(IProviderConfigStore ConfigStore)
 {
-    /// <summary>Resolves provider credentials for model discovery. Defaults to a real <see cref="EnvironmentVariableProvider"/>.</summary>
+    /// <summary>
+    /// Resolves provider credentials for model discovery. Defaults to a real
+    /// <see cref="EnvironmentVariableProvider"/>.
+    /// </summary>
     public IEnvironmentVariableProvider? Environment { get; init; }
 
     /// <summary>
@@ -129,16 +137,25 @@ public sealed record ManagementApiDependencies(IProviderConfigStore ConfigStore)
     /// </summary>
     public ProviderEndpointScanner? EndpointScanner { get; init; }
 
-    /// <summary>Persists endpoint/model capability records. Useful on its own for reading them back, even with no <see cref="EndpointScanner"/>.</summary>
+    /// <summary>
+    /// Persists endpoint/model capability records. Useful on its own for reading them back, even with no
+    /// <see cref="EndpointScanner"/>.
+    /// </summary>
     public ToolCallCapabilityStore? CapabilityStore { get; init; }
 
     /// <summary>Reads a fresh catalog price, backing the price-resolution diagnosis view.</summary>
     public PriceRepository? PriceRepository { get; init; }
 
-    /// <summary>Supplies each provider's captured <c>anthropic-ratelimit-*</c> snapshot/history to <c>GET /admin/providers</c>.</summary>
+    /// <summary>
+    /// Supplies each provider's captured <c>anthropic-ratelimit-*</c> snapshot/history to <c>GET /admin/providers</c>
+    /// .
+    /// </summary>
     public RateLimitRepository? RateLimitRepository { get; init; }
 
-    /// <summary>Supplies each provider's own reported usage (docs/router/secrets-at-rest-plan.md §8.1) to <c>GET /admin/providers</c>.</summary>
+    /// <summary>
+    /// Supplies each provider's own reported usage (docs/router/secrets-at-rest-plan.md §8.1) to
+    /// <c>GET /admin/providers</c>.
+    /// </summary>
     public ReportedUsageRepository? ReportedUsageRepository { get; init; }
 
     /// <summary>Operator price overrides, backing <c>PUT/DELETE /admin/price-overrides</c>.</summary>
@@ -256,20 +273,32 @@ public sealed record LogRegModelAdminDependencies(
 /// that mutates <see cref="Models.RoutingOptions"/>.
 /// </summary>
 /// <param name="Store">Persists the settings overrides layered on top of <see cref="Models.RoutingOptions"/>.</param>
-/// <param name="ReloadToken">Triggered after a successful save so <paramref name="OptionsMonitor"/> recomputes immediately.</param>
+/// <param name="ReloadToken">
+/// Triggered after a successful save so <paramref name="OptionsMonitor"/> recomputes
+/// immediately.
+/// </param>
 /// <param name="OptionsMonitor">Reports the currently effective values once precedence has been applied.</param>
-/// <param name="JudgeOptionsMonitor">Reports the shadow judge's currently effective settings, the same way <paramref name="OptionsMonitor"/> does for routing.</param>
-/// <param name="JudgeModelSelector">Supplies the eligible judge-backbone list, both to populate the dropdown and to validate a save against it.</param>
-/// <param name="TranscriptOptionsMonitor">Reports the Transcription Capture toggle's currently effective value, the same way <paramref name="OptionsMonitor"/> does for routing.</param>
+/// <param name="JudgeOptionsMonitor">
+/// Reports the shadow judge's currently effective settings, the same way
+/// <paramref name="OptionsMonitor"/> does for routing.
+/// </param>
+/// <param name="JudgeModelSelector">
+/// Supplies the eligible judge-backbone list, both to populate the dropdown and to
+/// validate a save against it.
+/// </param>
+/// <param name="TranscriptOptionsMonitor">
+/// Reports the Transcription Capture toggle's currently effective value, the same
+/// way <paramref name="OptionsMonitor"/> does for routing.
+/// </param>
 /// <param name="TranscriptStore">Backs the Transcription Capture row's "Clear" action.</param>
 public sealed record RouterSettingsAdminDependencies(
     RouterSettingsStore Store,
     RouterSettingsReloadToken ReloadToken,
-    IOptionsMonitor<Models.RoutingOptions> OptionsMonitor,
-    IOptionsMonitor<Judge.JudgeOptions> JudgeOptionsMonitor,
-    Judge.JudgeModelSelector JudgeModelSelector,
-    IOptionsMonitor<Transcripts.TranscriptOptions> TranscriptOptionsMonitor,
-    Transcripts.ITranscriptStore TranscriptStore)
+    IOptionsMonitor<RoutingOptions> OptionsMonitor,
+    IOptionsMonitor<JudgeOptions> JudgeOptionsMonitor,
+    JudgeModelSelector JudgeModelSelector,
+    IOptionsMonitor<TranscriptOptions> TranscriptOptionsMonitor,
+    ITranscriptStore TranscriptStore)
 {
     /// <summary>
     /// The working set trimmed synchronously when a save lowers the capacity, so the response reflects the
@@ -305,4 +334,4 @@ public sealed record UpdateAdminDependencies(
 /// <see cref="ProxyServerDependencies.RoutingGateAdmin"/>'s remarks.
 /// </summary>
 /// <param name="Gate">The routing kill switch this service reads and mutates.</param>
-public sealed record RoutingGateAdminDependencies(Router.IRoutingGate Gate);
+public sealed record RoutingGateAdminDependencies(IRoutingGate Gate);

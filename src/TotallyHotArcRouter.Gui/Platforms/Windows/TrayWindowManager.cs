@@ -1,11 +1,13 @@
-using Microsoft.UI.Dispatching;
-using Serilog;
 using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using System.ServiceProcess;
+using Microsoft.UI.Dispatching;
+using Serilog;
 using TotallyHot.ArcRouter.Gui.Services;
 using TotallyHot.ArcRouter.Gui.Telemetry;
+using WinRT.Interop;
+using Window = Microsoft.UI.Xaml.Window;
 
 namespace TotallyHot.ArcRouter.Gui.Platforms.Windows;
 
@@ -75,12 +77,6 @@ internal static class TrayWindowManager
     // service control manager knows the router by, and the only handle this app has on its real state.
     private const string RouterServiceName = "TotallyHotArcRouter";
 
-    /// <summary>
-    /// Signature matching a native Win32 window procedure, used to invoke the previously-installed
-    /// WndProc once it has been replaced by <see cref="WindowProc"/> via <see cref="SetWindowLongPtrW"/>.
-    /// </summary>
-    private delegate IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
-
     // Single-thread invariant: every mutation of the static fields below happens on the UI/window-owning
     // thread. Attach (the only place that sets them up) has exactly one call site - MauiProgram.cs's
     // windows.OnWindowCreated(TrayWindowManager.Attach) - which WinUI invokes on the UI thread; WindowProc
@@ -120,9 +116,9 @@ internal static class TrayWindowManager
     /// so startup never paints it, installs the WndProc subclass, adds the tray icon, centers the window,
     /// and hides it so the app starts in the tray only.
     /// </summary>
-    public static void Attach(Microsoft.UI.Xaml.Window nativeWindow)
+    public static void Attach(Window nativeWindow)
     {
-        _hwnd = WinRT.Interop.WindowNative.GetWindowHandle(nativeWindow);
+        _hwnd = WindowNative.GetWindowHandle(nativeWindow);
 
         // Cloaked before anything else, because hiding alone cannot win this race: MAUI activates (shows)
         // the window immediately after this callback returns, which undoes the SW_HIDE below and used to
@@ -133,27 +129,25 @@ internal static class TrayWindowManager
         SetCloaked(true);
 
         _wndProcDelegate = WindowProc;
-        _originalWndProc = SetWindowLongPtrW(_hwnd, GWLP_WNDPROC, Marshal.GetFunctionPointerForDelegate(_wndProcDelegate));
+        _originalWndProc = SetWindowLongPtrW(hWnd: _hwnd, nIndex: GWLP_WNDPROC,
+            dwNewLong: Marshal.GetFunctionPointerForDelegate(_wndProcDelegate));
 
-        ShowWindowNative(_hwnd, SW_HIDE);
+        ShowWindowNative(hWnd: _hwnd, nCmdShow: SW_HIDE);
 
         AddTrayIcon();
 
         _dispatcherQueue = nativeWindow.DispatcherQueue;
         _routingGateStore = ResolveRoutingGateStore();
-        if (_routingGateStore is not null)
-        {
-            _routingGateStore.BecameUnusable += OnRoutingGateBecameUnusable;
-        }
+        if (_routingGateStore is not null) _routingGateStore.BecameUnusable += OnRoutingGateBecameUnusable;
 
         // MAUI activates (shows) the window right after this lifecycle callback, which would undo the
         // immediate hide above - so also queue a low-priority hide to run after that activation. The
         // window is invisible throughout thanks to the cloak, so this settles the real show state before
         // anyone can see it.
-        nativeWindow.DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        nativeWindow.DispatcherQueue.TryEnqueue(priority: DispatcherQueuePriority.Low, callback: () =>
         {
             CenterOnWorkArea();
-            ShowWindowNative(_hwnd, SW_HIDE);
+            ShowWindowNative(hWnd: _hwnd, nCmdShow: SW_HIDE);
 
             // Uncloaked only now, once the window is genuinely hidden - uncloaking while it is still
             // shown would reveal the very frame this avoids. Order here is load-bearing.
@@ -163,9 +157,10 @@ internal static class TrayWindowManager
         // The app launches straight to the tray with no visible window, so this line is how anyone
         // confirms after the fact that the GUI actually started rather than failing before it got here.
         Log.Information(
+            messageTemplate:
             "Tray window attached. Window handle {WindowHandle}, routing gate store resolved: {RoutingGateResolved}.",
-            _hwnd,
-            _routingGateStore is not null);
+            propertyValue0: _hwnd,
+            propertyValue1: _routingGateStore is not null);
     }
 
     /// <summary>
@@ -182,7 +177,8 @@ internal static class TrayWindowManager
         // A failed HRESULT here only means the window stays visible - the pre-existing flash - so it is
         // deliberately not escalated into a startup failure.
         var value = cloaked ? 1 : 0;
-        _ = DwmSetWindowAttribute(_hwnd, DWMWA_CLOAK, in value, sizeof(int));
+        _ = DwmSetWindowAttribute(hwnd: _hwnd, dwAttribute: DWMWA_CLOAK, pvAttribute: in value,
+            cbAttribute: sizeof(int));
     }
 
     /// <summary>
@@ -191,16 +187,21 @@ internal static class TrayWindowManager
     /// constructed instance), so this is the seam it uses instead - the same pattern would extend to any
     /// future tray feature that needs an app singleton.
     /// </summary>
-    private static RoutingGateStore? ResolveRoutingGateStore() =>
-        Application.Current?.Handler?.MauiContext?.Services?.GetService(typeof(RoutingGateStore)) as RoutingGateStore;
+    private static RoutingGateStore? ResolveRoutingGateStore()
+    {
+        return Application.Current?.Handler?.MauiContext?.Services?.GetService(typeof(RoutingGateStore)) as
+            RoutingGateStore;
+    }
 
     /// <summary>
     /// Proactively shows the router-status balloon the moment <see cref="RoutingGateStore"/> detects the
     /// router stopped being usable, marshaled onto the UI thread since the store's poll loop runs on a
     /// background thread.
     /// </summary>
-    private static void OnRoutingGateBecameUnusable() =>
+    private static void OnRoutingGateBecameUnusable()
+    {
         _dispatcherQueue?.TryEnqueue(ShowRouterUnavailableBalloon);
+    }
 
     /// <summary>
     /// The subclassed window procedure installed over the main window: intercepts tray-icon callbacks,
@@ -226,16 +227,16 @@ internal static class TrayWindowManager
 
             case WM_SYSCOMMAND when ((long)wParam & 0xFFF0) == SC_MINIMIZE:
                 // Minimize hides to the tray instead of going to the taskbar.
-                ShowWindowNative(hWnd, SW_HIDE);
+                ShowWindowNative(hWnd: hWnd, nCmdShow: SW_HIDE);
                 return IntPtr.Zero;
 
             case WM_CLOSE when !_isExiting:
                 // The title bar X hides to the tray; only the tray menu's Exit really closes.
-                ShowWindowNative(hWnd, SW_HIDE);
+                ShowWindowNative(hWnd: hWnd, nCmdShow: SW_HIDE);
                 return IntPtr.Zero;
         }
 
-        return CallWindowProcW(_originalWndProc, hWnd, msg, wParam, lParam);
+        return CallWindowProcW(lpPrevWndFunc: _originalWndProc, hWnd: hWnd, msg: msg, wParam: wParam, lParam: lParam);
     }
 
     /// <summary>
@@ -248,8 +249,8 @@ internal static class TrayWindowManager
         // uncloak never ran, the window would show without ever painting. Cheap enough to just repeat.
         SetCloaked(false);
 
-        ShowWindowNative(_hwnd, SW_RESTORE);
-        ShowWindowNative(_hwnd, SW_SHOW);
+        ShowWindowNative(hWnd: _hwnd, nCmdShow: SW_RESTORE);
+        ShowWindowNative(hWnd: _hwnd, nCmdShow: SW_SHOW);
         SetForegroundWindow(_hwnd);
     }
 
@@ -280,26 +281,29 @@ internal static class TrayWindowManager
                 // A greyed, uncommandable caption rather than a real item - TrackPopupMenuEx never returns
                 // MF_GRAYED entries, so it needs no CMD_ id and can share CMD_SHOW_DASHBOARD's harmlessly.
                 // This carries the short form of what the balloon says at length; see BuildRouterStatusLabel.
-                AppendMenuW(menu, MF_STRING | MF_GRAYED, CMD_SHOW_DASHBOARD, BuildRouterStatusLabel());
-                AppendMenuW(menu, MF_SEPARATOR, UIntPtr.Zero, null);
+                AppendMenuW(hMenu: menu, uFlags: MF_STRING | MF_GRAYED, uIDNewItem: CMD_SHOW_DASHBOARD,
+                    lpNewItem: BuildRouterStatusLabel());
+                AppendMenuW(hMenu: menu, uFlags: MF_SEPARATOR, uIDNewItem: UIntPtr.Zero, null);
             }
 
-            AppendMenuW(menu, MF_STRING, CMD_SHOW_DASHBOARD, "Show Dashboard");
-            AppendMenuW(menu, MF_SEPARATOR, UIntPtr.Zero, null);
+            AppendMenuW(hMenu: menu, uFlags: MF_STRING, uIDNewItem: CMD_SHOW_DASHBOARD, lpNewItem: "Show Dashboard");
+            AppendMenuW(hMenu: menu, uFlags: MF_SEPARATOR, uIDNewItem: UIntPtr.Zero, null);
 
             // A single flipping item rather than two always-present entries: its label and action reflect
             // whatever RoutingGateStore last polled, so there is never a state where the menu offers an
             // action that would be a no-op. With no reachable router to command, neither label would be
             // truthful, so the item states that plainly instead of guessing a direction.
             var routingLabel = routerUsable
-                ? (_routingGateStore?.IsEnabled == false ? "Enable Routing" : "Disable Routing")
+                ? _routingGateStore?.IsEnabled == false ? "Enable Routing" : "Disable Routing"
                 : "Routing Unavailable";
-            AppendMenuW(menu, routerUsable ? MF_STRING : MF_STRING | MF_GRAYED, CMD_TOGGLE_ROUTING, routingLabel);
-            AppendMenuW(menu, MF_SEPARATOR, UIntPtr.Zero, null);
-            AppendMenuW(menu, MF_STRING, CMD_EXIT, "Exit");
+            AppendMenuW(hMenu: menu, uFlags: routerUsable ? MF_STRING : MF_STRING | MF_GRAYED,
+                uIDNewItem: CMD_TOGGLE_ROUTING, lpNewItem: routingLabel);
+            AppendMenuW(hMenu: menu, uFlags: MF_SEPARATOR, uIDNewItem: UIntPtr.Zero, null);
+            AppendMenuW(hMenu: menu, uFlags: MF_STRING, uIDNewItem: CMD_EXIT, lpNewItem: "Exit");
 
             GetCursorPos(out var cursor);
-            var command = TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON, cursor.X, cursor.Y, _hwnd, IntPtr.Zero);
+            var command = TrackPopupMenuEx(hMenu: menu, uFlags: TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
+                x: cursor.X, y: cursor.Y, hWnd: _hwnd, lptpm: IntPtr.Zero);
 
             switch ((uint)command)
             {
@@ -327,10 +331,7 @@ internal static class TrayWindowManager
     /// </summary>
     private static void ToggleRouting()
     {
-        if (_routingGateStore is null)
-        {
-            return;
-        }
+        if (_routingGateStore is null) return;
 
         _ = ToggleRoutingAsync(enable: !_routingGateStore.IsEnabled);
     }
@@ -347,13 +348,9 @@ internal static class TrayWindowManager
         try
         {
             if (enable)
-            {
                 await _routingGateStore!.EnableAsync();
-            }
             else
-            {
                 await _routingGateStore!.DisableAsync();
-            }
         }
         catch (RoutingGateAdminException)
         {
@@ -401,7 +398,7 @@ internal static class TrayWindowManager
             // the poll actually established, with no claim about the service either way.
             (null, RouterConnectionState.Rejected) =>
                 "The router rejected this app's request. Its management token may not match.",
-            _ => "The router is not responding.",
+            _ => "The router is not responding."
         };
 
         var data = NewIconData();
@@ -409,7 +406,7 @@ internal static class TrayWindowManager
         data.szInfoTitle = "TotallyHot Arc Router";
         data.szInfo = message;
         data.dwInfoFlags = NIIF_WARNING;
-        Shell_NotifyIconW(NIM_MODIFY, ref data);
+        Shell_NotifyIconW(dwMessage: NIM_MODIFY, lpData: ref data);
     }
 
     /// <summary>
@@ -420,17 +417,20 @@ internal static class TrayWindowManager
     /// of a failed poll alone. Kept separate from the balloon's text rather than shared: a balloon has room
     /// for a sentence of remediation, a menu item has room for a few words.
     /// </summary>
-    private static string BuildRouterStatusLabel() => (TryGetServiceStatus(), _routingGateStore?.ConnectionState ?? RouterConnectionState.Unreachable) switch
+    private static string BuildRouterStatusLabel()
     {
-        (ServiceControllerStatus.Stopped, _) => "Router service: stopped",
-        (ServiceControllerStatus.StartPending, _) => "Router service: starting",
-        (ServiceControllerStatus.StopPending, _) => "Router service: stopping",
-        (ServiceControllerStatus.Paused, _) => "Router service: paused",
-        (ServiceControllerStatus.Running, RouterConnectionState.Rejected) => "Router: request rejected",
-        (ServiceControllerStatus.Running, _) => "Router: not responding yet",
-        (null, RouterConnectionState.Rejected) => "Router: request rejected",
-        _ => "Router: not responding",
-    };
+        return (TryGetServiceStatus(), _routingGateStore?.ConnectionState ?? RouterConnectionState.Unreachable) switch
+        {
+            (ServiceControllerStatus.Stopped, _) => "Router service: stopped",
+            (ServiceControllerStatus.StartPending, _) => "Router service: starting",
+            (ServiceControllerStatus.StopPending, _) => "Router service: stopping",
+            (ServiceControllerStatus.Paused, _) => "Router service: paused",
+            (ServiceControllerStatus.Running, RouterConnectionState.Rejected) => "Router: request rejected",
+            (ServiceControllerStatus.Running, _) => "Router: not responding yet",
+            (null, RouterConnectionState.Rejected) => "Router: request rejected",
+            _ => "Router: not responding"
+        };
+    }
 
     /// <summary>
     /// Reads the installed router service's current status, or <see langword="null"/> when it can't be
@@ -491,12 +491,12 @@ internal static class TrayWindowManager
         data.uCallbackMessage = WM_TRAYICON;
         data.hIcon = LoadAppIcon();
         data.szTip = "TotallyHot Arc Router";
-        Shell_NotifyIconW(NIM_ADD, ref data);
+        Shell_NotifyIconW(dwMessage: NIM_ADD, lpData: ref data);
 
         // Opt into the modern notify-icon behavior (consistent callback semantics for double-click vs.
         // click-and-hold, tooltips, etc. across Windows versions). Must be sent after NIM_ADD.
         data.uTimeoutOrVersion = NOTIFYICON_VERSION_4;
-        Shell_NotifyIconW(NIM_SETVERSION, ref data);
+        Shell_NotifyIconW(dwMessage: NIM_SETVERSION, lpData: ref data);
     }
 
     /// <summary>
@@ -505,7 +505,7 @@ internal static class TrayWindowManager
     private static void RemoveTrayIcon()
     {
         var data = NewIconData();
-        Shell_NotifyIconW(NIM_DELETE, ref data);
+        Shell_NotifyIconW(dwMessage: NIM_DELETE, lpData: ref data);
 
         // Only ours to destroy - see _trayIconHandle. Released after NIM_DELETE so the shell is no longer
         // referencing the icon when the handle goes away.
@@ -533,16 +533,16 @@ internal static class TrayWindowManager
     /// </remarks>
     private static IntPtr LoadAppIcon()
     {
-        var iconPath = Path.Combine(AppContext.BaseDirectory, "appicon.ico");
+        var iconPath = Path.Combine(path1: AppContext.BaseDirectory, path2: "appicon.ico");
         if (File.Exists(iconPath))
         {
             var handle = LoadImageW(
-                IntPtr.Zero,
-                iconPath,
-                IMAGE_ICON,
-                GetSystemMetrics(SM_CXSMICON),
-                GetSystemMetrics(SM_CYSMICON),
-                LR_LOADFROMFILE);
+                hInst: IntPtr.Zero,
+                name: iconPath,
+                type: IMAGE_ICON,
+                cx: GetSystemMetrics(SM_CXSMICON),
+                cy: GetSystemMetrics(SM_CYSMICON),
+                fuLoad: LR_LOADFROMFILE);
 
             if (handle != IntPtr.Zero)
             {
@@ -552,22 +552,25 @@ internal static class TrayWindowManager
         }
 
         _trayIconHandle = IntPtr.Zero;
-        return LoadIconW(IntPtr.Zero, IDI_APPLICATION);
+        return LoadIconW(hInstance: IntPtr.Zero, lpIconName: IDI_APPLICATION);
     }
 
     /// <summary>
     /// Builds a <see cref="NOTIFYICONDATAW"/> populated with the fields common to every
     /// Shell_NotifyIcon call for the main window's tray icon.
     /// </summary>
-    private static NOTIFYICONDATAW NewIconData() => new()
+    private static NOTIFYICONDATAW NewIconData()
     {
-        cbSize = (uint)Marshal.SizeOf<NOTIFYICONDATAW>(),
-        hWnd = _hwnd,
-        uID = 1,
-        szTip = string.Empty,
-        szInfo = string.Empty,
-        szInfoTitle = string.Empty,
-    };
+        return new NOTIFYICONDATAW
+        {
+            cbSize = (uint)Marshal.SizeOf<NOTIFYICONDATAW>(),
+            hWnd = _hwnd,
+            uID = 1,
+            szTip = string.Empty,
+            szInfo = string.Empty,
+            szInfoTitle = string.Empty
+        };
+    }
 
     /// <summary>
     /// Repositions the main window so it is centered within the current monitor's work area.
@@ -575,73 +578,15 @@ internal static class TrayWindowManager
     private static void CenterOnWorkArea()
     {
         var workArea = default(RECT);
-        if (!SystemParametersInfoW(SPI_GETWORKAREA, 0, ref workArea, 0) || !GetWindowRect(_hwnd, out var window))
-        {
-            return;
-        }
+        if (!SystemParametersInfoW(uiAction: SPI_GETWORKAREA, 0, pvParam: ref workArea, 0) ||
+            !GetWindowRect(hWnd: _hwnd, lpRect: out var window)) return;
 
         var width = window.Right - window.Left;
         var height = window.Bottom - window.Top;
-        var x = workArea.Left + ((workArea.Right - workArea.Left - width) / 2);
-        var y = workArea.Top + ((workArea.Bottom - workArea.Top - height) / 2);
-        SetWindowPos(_hwnd, IntPtr.Zero, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-    }
-
-    /// <summary>
-    /// Managed layout of the Win32 POINT structure, used to receive the cursor position from
-    /// <see cref="GetCursorPos"/>.
-    /// </summary>
-    [StructLayout(LayoutKind.Sequential)]
-    private struct POINT
-    {
-        public int X;
-        public int Y;
-    }
-
-    /// <summary>
-    /// Managed layout of the Win32 RECT structure, used for the window and work-area rectangles returned
-    /// by <see cref="GetWindowRect"/> and <see cref="SystemParametersInfoW"/>.
-    /// </summary>
-    [StructLayout(LayoutKind.Sequential)]
-    private struct RECT
-    {
-        public int Left;
-        public int Top;
-        public int Right;
-        public int Bottom;
-    }
-
-    /// <summary>
-    /// Managed layout of the Win32 NOTIFYICONDATAW structure, used to describe the tray icon passed to
-    /// <see cref="Shell_NotifyIconW"/>.
-    /// </summary>
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct NOTIFYICONDATAW
-    {
-        public uint cbSize;
-        public IntPtr hWnd;
-        public uint uID;
-        public uint uFlags;
-        public uint uCallbackMessage;
-        public IntPtr hIcon;
-
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
-        public string szTip;
-
-        public uint dwState;
-        public uint dwStateMask;
-
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
-        public string szInfo;
-
-        public uint uTimeoutOrVersion;
-
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)]
-        public string szInfoTitle;
-
-        public uint dwInfoFlags;
-        public Guid guidItem;
-        public IntPtr hBalloonIcon;
+        var x = workArea.Left + (workArea.Right - workArea.Left - width) / 2;
+        var y = workArea.Top + (workArea.Bottom - workArea.Top - height) / 2;
+        SetWindowPos(hWnd: _hwnd, hWndInsertAfter: IntPtr.Zero, x: x, y: y, 0, 0,
+            uFlags: SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
 
     /// <summary>
@@ -656,7 +601,8 @@ internal static class TrayWindowManager
     /// subclassed WndProc to the original window procedure.
     /// </summary>
     [DllImport("user32.dll")]
-    private static extern IntPtr CallWindowProcW(IntPtr lpPrevWndFunc, IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+    private static extern IntPtr CallWindowProcW(IntPtr lpPrevWndFunc, IntPtr hWnd, uint msg, IntPtr wParam,
+        IntPtr lParam);
 
     /// <summary>
     /// P/Invoke binding for the Win32 Shell_NotifyIconW API, used to add, update, and remove the tray
@@ -765,7 +711,8 @@ internal static class TrayWindowManager
     /// it on the work area.
     /// </summary>
     [DllImport("user32.dll")]
-    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy,
+        uint uFlags);
 
     /// <summary>
     /// P/Invoke binding for the Win32 SystemParametersInfoW API, used to read the current monitor's work
@@ -773,5 +720,67 @@ internal static class TrayWindowManager
     /// </summary>
     [DllImport("user32.dll")]
     private static extern bool SystemParametersInfoW(uint uiAction, uint uiParam, ref RECT pvParam, uint fWinIni);
-}
 
+    /// <summary>
+    /// Signature matching a native Win32 window procedure, used to invoke the previously-installed
+    /// WndProc once it has been replaced by <see cref="WindowProc"/> via <see cref="SetWindowLongPtrW"/>.
+    /// </summary>
+    private delegate IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    /// <summary>
+    /// Managed layout of the Win32 POINT structure, used to receive the cursor position from
+    /// <see cref="GetCursorPos"/>.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT
+    {
+        public int X;
+        public int Y;
+    }
+
+    /// <summary>
+    /// Managed layout of the Win32 RECT structure, used for the window and work-area rectangles returned
+    /// by <see cref="GetWindowRect"/> and <see cref="SystemParametersInfoW"/>.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    /// <summary>
+    /// Managed layout of the Win32 NOTIFYICONDATAW structure, used to describe the tray icon passed to
+    /// <see cref="Shell_NotifyIconW"/>.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct NOTIFYICONDATAW
+    {
+        public uint cbSize;
+        public IntPtr hWnd;
+        public uint uID;
+        public uint uFlags;
+        public uint uCallbackMessage;
+        public IntPtr hIcon;
+
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+        public string szTip;
+
+        public uint dwState;
+        public uint dwStateMask;
+
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
+        public string szInfo;
+
+        public uint uTimeoutOrVersion;
+
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)]
+        public string szInfoTitle;
+
+        public uint dwInfoFlags;
+        public Guid guidItem;
+        public IntPtr hBalloonIcon;
+    }
+}

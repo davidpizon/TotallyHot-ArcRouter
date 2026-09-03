@@ -21,10 +21,10 @@ public sealed class AlwaysModelBaseline : IRegretBaselineRouter
         Name = $"always_{_canonicalModelId}";
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public string Name { get; }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     /// <remarks>
     /// Returns <see langword="null"/> — not a fallback candidate — when this task's outcome row never
     /// scored the fixed model at all, so that task is excluded from this baseline's metrics rather than
@@ -33,6 +33,7 @@ public sealed class AlwaysModelBaseline : IRegretBaselineRouter
     public string? Route(RegretReplayContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
-        return context.CandidateModelIds.FirstOrDefault(id => string.Equals(id, _canonicalModelId, StringComparison.Ordinal));
+        return context.CandidateModelIds.FirstOrDefault(id =>
+            string.Equals(a: id, b: _canonicalModelId, comparisonType: StringComparison.Ordinal));
     }
 }

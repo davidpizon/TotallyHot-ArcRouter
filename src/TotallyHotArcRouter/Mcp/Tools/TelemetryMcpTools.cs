@@ -1,5 +1,5 @@
-using ModelContextProtocol.Server;
 using System.ComponentModel;
+using ModelContextProtocol.Server;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Telemetry;
 
@@ -30,14 +30,19 @@ public sealed class TelemetryMcpTools
 
     /// <summary>Gets a provider's current-month budget caps, spend, and breach state.</summary>
     [McpServerTool(Name = "get_budget_status")]
-    [Description("Gets a provider's current-month budget caps, spend, and whether it has breached a cap. An unbudgeted or unknown provider reports an all-zero, no-cap state.")]
+    [Description(
+        "Gets a provider's current-month budget caps, spend, and whether it has breached a cap. An unbudgeted or unknown provider reports an all-zero, no-cap state.")]
     public ProviderBudgetState GetBudgetStatus(
-        [Description("The provider key.")] string providerKey) =>
-        _budgetStore.GetStatus(providerKey);
+        [Description("The provider key.")] string providerKey)
+    {
+        return _budgetStore.GetStatus(providerKey);
+    }
 
     /// <summary>Gets the router's running spend/usage totals since process start.</summary>
     [McpServerTool(Name = "get_spend_summary")]
     [Description("Gets the router's running request count, token totals, and estimated USD cost since process start.")]
-    public SpendSummary GetSpendSummary() => _spendTracker.GetSummary();
+    public SpendSummary GetSpendSummary()
+    {
+        return _spendTracker.GetSummary();
+    }
 }
-

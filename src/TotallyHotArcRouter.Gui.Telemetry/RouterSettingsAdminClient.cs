@@ -12,7 +12,7 @@ public sealed class RouterSettingsAdminException : GrpcAdminException
 {
     /// <summary>Initializes a new instance of the <see cref="RouterSettingsAdminException"/> class.</summary>
     public RouterSettingsAdminException(string message, Exception? innerException = null, bool isUnavailable = false)
-        : base(message, innerException, isUnavailable)
+        : base(message: message, innerException: innerException, isUnavailable: isUnavailable)
     {
     }
 }
@@ -22,9 +22,18 @@ public sealed class RouterSettingsAdminException : GrpcAdminException
 /// Phase T6; docs/router/geval-shadow-scoring-plan.md), as read or written by the System Settings window's
 /// Adaptive Routing and Shadow Judge rows.
 /// </summary>
-/// <param name="AdaptiveRoutingEnabled">Whether adaptive routing's transcript capture, cluster retraining, and <c>cluster_best</c> voter are enabled.</param>
-/// <param name="EmbeddingMemoryCapacity">The maximum number of embedding-memory entries retained before oldest-first eviction.</param>
-/// <param name="JudgeEnabled">Whether the G-Eval shadow judge is enabled. Also governs whether raw response text is retained in memory for judging.</param>
+/// <param name="AdaptiveRoutingEnabled">
+/// Whether adaptive routing's transcript capture, cluster retraining, and
+/// <c>cluster_best</c> voter are enabled.
+/// </param>
+/// <param name="EmbeddingMemoryCapacity">
+/// The maximum number of embedding-memory entries retained before oldest-first
+/// eviction.
+/// </param>
+/// <param name="JudgeEnabled">
+/// Whether the G-Eval shadow judge is enabled. Also governs whether raw response text is
+/// retained in memory for judging.
+/// </param>
 /// <param name="JudgeModelName">
 /// The operator's chosen judge backbone, as a client-facing model name; empty means automatic (the first
 /// eligible free model). This is the stored setting, not necessarily what will run - a pick that stops
@@ -49,15 +58,18 @@ public sealed record RouterSettingsInfo(
 /// rather than the Windows-only MAUI project so CI can unit-test it, exactly like <see cref="ClusterModelAdminClient"/>.
 /// </summary>
 public sealed class RouterSettingsAdminClient
-    : GrpcAdminClientBase<Contract.RouterSettingsAdminService.RouterSettingsAdminServiceClient, RouterSettingsAdminException>,
-      IRouterSettingsAdminClient
+    : GrpcAdminClientBase<Contract.RouterSettingsAdminService.RouterSettingsAdminServiceClient,
+            RouterSettingsAdminException>,
+        IRouterSettingsAdminClient
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="RouterSettingsAdminClient"/> class, creating and owning a
     /// channel to <paramref name="serverAddress"/>.
     /// </summary>
     public RouterSettingsAdminClient(string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
-        : base(serverAddress, callInvoker => new Contract.RouterSettingsAdminService.RouterSettingsAdminServiceClient(callInvoker))
+        : base(serverAddress: serverAddress,
+            createClient: callInvoker =>
+                new Contract.RouterSettingsAdminService.RouterSettingsAdminServiceClient(callInvoker))
     {
     }
 
@@ -71,23 +83,24 @@ public sealed class RouterSettingsAdminClient
     {
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<RouterSettingsInfo> GetAsync(CancellationToken cancellationToken = default)
     {
         try
         {
             var response = await Client
-                .GetRouterSettingsAsync(new Contract.GetRouterSettingsRequest(), cancellationToken: cancellationToken)
+                .GetRouterSettingsAsync(request: new Contract.GetRouterSettingsRequest(),
+                    cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             return Map(response);
         }
         catch (RpcException ex)
         {
-            throw Wrap(ex, "Could not read the router settings");
+            throw Wrap(ex: ex, action: "Could not read the router settings");
         }
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<RouterSettingsInfo> UpdateAsync(
         bool adaptiveRoutingEnabled,
         int embeddingMemoryCapacity,
@@ -100,13 +113,13 @@ public sealed class RouterSettingsAdminClient
         {
             var response = await Client
                 .UpdateRouterSettingsAsync(
-                    new Contract.UpdateRouterSettingsRequest
+                    request: new Contract.UpdateRouterSettingsRequest
                     {
                         AdaptiveRoutingEnabled = adaptiveRoutingEnabled,
                         EmbeddingMemoryCapacity = embeddingMemoryCapacity,
                         JudgeEnabled = judgeEnabled,
                         JudgeModelName = judgeModelName ?? string.Empty,
-                        TranscriptCaptureEnabled = transcriptCaptureEnabled,
+                        TranscriptCaptureEnabled = transcriptCaptureEnabled
                     },
                     cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
@@ -114,37 +127,44 @@ public sealed class RouterSettingsAdminClient
         }
         catch (RpcException ex)
         {
-            throw Wrap(ex, "Could not save the router settings");
+            throw Wrap(ex: ex, action: "Could not save the router settings");
         }
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<int> ClearTranscriptsAsync(CancellationToken cancellationToken = default)
     {
         try
         {
             var response = await Client
-                .ClearTranscriptsAsync(new Contract.ClearTranscriptsRequest(), cancellationToken: cancellationToken)
+                .ClearTranscriptsAsync(request: new Contract.ClearTranscriptsRequest(),
+                    cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             return response.RowsDeleted;
         }
         catch (RpcException ex)
         {
-            throw Wrap(ex, "Could not clear the transcript data");
+            throw Wrap(ex: ex, action: "Could not clear the transcript data");
         }
     }
 
     /// <summary>Converts a gRPC-contract response into the client's <see cref="RouterSettingsInfo"/>.</summary>
-    private static RouterSettingsInfo Map(Contract.RouterSettingsResponse response) =>
-        new(
-            response.AdaptiveRoutingEnabled,
-            response.EmbeddingMemoryCapacity,
-            response.JudgeEnabled,
-            response.JudgeModelName,
-            response.EligibleJudgeModels.ToList(),
-            response.TranscriptCaptureEnabled);
+    private static RouterSettingsInfo Map(Contract.RouterSettingsResponse response)
+    {
+        return new RouterSettingsInfo(
+            AdaptiveRoutingEnabled: response.AdaptiveRoutingEnabled,
+            EmbeddingMemoryCapacity: response.EmbeddingMemoryCapacity,
+            JudgeEnabled: response.JudgeEnabled,
+            JudgeModelName: response.JudgeModelName,
+            EligibleJudgeModels: response.EligibleJudgeModels.ToList(),
+            TranscriptCaptureEnabled: response.TranscriptCaptureEnabled);
+    }
 
-    /// <inheritdoc />
-    protected override RouterSettingsAdminException CreateException(string message, Exception? innerException, bool isUnavailable) =>
-        new(message, innerException, isUnavailable);
+    /// <inheritdoc/>
+    protected override RouterSettingsAdminException CreateException(string message, Exception? innerException,
+        bool isUnavailable)
+    {
+        return new RouterSettingsAdminException(message: message, innerException: innerException,
+            isUnavailable: isUnavailable);
+    }
 }

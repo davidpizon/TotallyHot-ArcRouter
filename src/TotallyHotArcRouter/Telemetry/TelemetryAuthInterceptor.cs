@@ -37,7 +37,7 @@ public sealed class TelemetryAuthInterceptor : Interceptor
         UnaryServerMethod<TRequest, TResponse> continuation)
     {
         Authenticate(context);
-        return continuation(request, context);
+        return continuation(request: request, context: context);
     }
 
     /// <inheritdoc/>
@@ -48,7 +48,7 @@ public sealed class TelemetryAuthInterceptor : Interceptor
         ServerStreamingServerMethod<TRequest, TResponse> continuation)
     {
         Authenticate(context);
-        return continuation(request, responseStream, context);
+        return continuation(request: request, responseStream: responseStream, context: context);
     }
 
     /// <inheritdoc/>
@@ -58,7 +58,7 @@ public sealed class TelemetryAuthInterceptor : Interceptor
         ClientStreamingServerMethod<TRequest, TResponse> continuation)
     {
         Authenticate(context);
-        return continuation(requestStream, context);
+        return continuation(requestStream: requestStream, context: context);
     }
 
     /// <inheritdoc/>
@@ -69,7 +69,7 @@ public sealed class TelemetryAuthInterceptor : Interceptor
         DuplexStreamingServerMethod<TRequest, TResponse> continuation)
     {
         Authenticate(context);
-        return continuation(requestStream, responseStream, context);
+        return continuation(requestStream: requestStream, responseStream: responseStream, context: context);
     }
 
     /// <summary>
@@ -79,12 +79,12 @@ public sealed class TelemetryAuthInterceptor : Interceptor
     private void Authenticate(ServerCallContext context)
     {
         var presented = context.RequestHeaders
-            .FirstOrDefault(entry => string.Equals(entry.Key, TokenHeaderName, StringComparison.OrdinalIgnoreCase))
+            .FirstOrDefault(entry =>
+                string.Equals(a: entry.Key, b: TokenHeaderName, comparisonType: StringComparison.OrdinalIgnoreCase))
             ?.Value;
 
-        if (!ManagementAccessToken.Verify(presented, _expectedToken))
-        {
-            throw new RpcException(new Status(StatusCode.Unauthenticated, "Missing or invalid management token."));
-        }
+        if (!ManagementAccessToken.Verify(presented: presented, expected: _expectedToken))
+            throw new RpcException(new Status(statusCode: StatusCode.Unauthenticated,
+                detail: "Missing or invalid management token."));
     }
 }

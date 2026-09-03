@@ -8,8 +8,8 @@ namespace TotallyHot.ArcRouter.Gui.Console;
 /// </summary>
 public sealed class LogBuffer
 {
-    private readonly object _lock = new();
     private readonly Queue<LogLineDto> _lines = new();
+    private readonly object _lock = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LogBuffer"/> class.
@@ -17,7 +17,7 @@ public sealed class LogBuffer
     /// <param name="capacity">Maximum number of lines retained. Must be positive.</param>
     public LogBuffer(int capacity = 1000)
     {
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(capacity, 0);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value: capacity, 0);
         Capacity = capacity;
     }
 
@@ -32,10 +32,7 @@ public sealed class LogBuffer
         lock (_lock)
         {
             _lines.Enqueue(line);
-            while (_lines.Count > Capacity)
-            {
-                _lines.Dequeue();
-            }
+            while (_lines.Count > Capacity) _lines.Dequeue();
         }
     }
 
@@ -57,4 +54,3 @@ public sealed class LogBuffer
         }
     }
 }
-

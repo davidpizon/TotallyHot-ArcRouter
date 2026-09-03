@@ -1,6 +1,6 @@
+using System.Runtime.CompilerServices;
 using AwesomeAssertions;
 using Bunit;
-using System.Runtime.CompilerServices;
 using TotallyHot.ArcRouter.Gui.Components;
 using TotallyHot.ArcRouter.Gui.Services;
 using TotallyHot.ArcRouter.Gui.Telemetry;
@@ -13,36 +13,42 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 /// </summary>
 public sealed class RouterModelAdminTests
 {
-    private static Bunit.BunitContext NewContext(ILogRegModelAdminClient client)
+    private static BunitContext NewContext(ILogRegModelAdminClient client)
     {
-        var ctx = new Bunit.BunitContext();
+        var ctx = new BunitContext();
         ctx.Services.AddSingleton(new LogRegModelAdminStore(client));
         return ctx;
     }
 
-    private static LogRegModelStatusInfo NoArtifact(int entriesSinceLastRetrain = 7) => new(
-        ArtifactPresent: false,
-        EmbeddingDimension: 0,
-        TrainedAtUtc: null,
-        TrainedFrom: string.Empty,
-        BootstrapTaskCount: 0,
-        MemoryEntryCount: 0,
-        ModelsRepresented: 0,
-        EntriesSinceLastRetrain: entriesSinceLastRetrain,
-        RetrainThreshold: 500,
-        LiveSampleWeight: 3.0);
+    private static LogRegModelStatusInfo NoArtifact(int entriesSinceLastRetrain = 7)
+    {
+        return new LogRegModelStatusInfo(
+            false,
+            0,
+            null,
+            TrainedFrom: string.Empty,
+            0,
+            0,
+            0,
+            EntriesSinceLastRetrain: entriesSinceLastRetrain,
+            500,
+            3.0);
+    }
 
-    private static LogRegModelStatusInfo WithArtifact() => new(
-        ArtifactPresent: true,
-        EmbeddingDimension: 1024,
-        TrainedAtUtc: new DateTimeOffset(2026, 7, 16, 12, 0, 0, TimeSpan.Zero),
-        TrainedFrom: "bootstrap_tasks=20, memory_entries=5, samples=25",
-        BootstrapTaskCount: 20,
-        MemoryEntryCount: 5,
-        ModelsRepresented: 8,
-        EntriesSinceLastRetrain: 3,
-        RetrainThreshold: 500,
-        LiveSampleWeight: 3.0);
+    private static LogRegModelStatusInfo WithArtifact()
+    {
+        return new LogRegModelStatusInfo(
+            true,
+            1024,
+            TrainedAtUtc: new DateTimeOffset(2026, 7, 16, 12, 0, 0, offset: TimeSpan.Zero),
+            TrainedFrom: "bootstrap_tasks=20, memory_entries=5, samples=25",
+            20,
+            5,
+            8,
+            3,
+            500,
+            3.0);
+    }
 
     [Fact]
     public void No_artifact_renders_the_train_button_and_no_model_when_untrained()
@@ -83,7 +89,8 @@ public sealed class RouterModelAdminTests
     [Fact]
     public void Renders_an_unreachable_state_when_the_router_cannot_be_reached()
     {
-        using var ctx = NewContext(new FakeClient { Error = new LogRegModelAdminException("nope", isUnavailable: true) });
+        using var ctx = NewContext(new FakeClient
+            { Error = new LogRegModelAdminException(message: "nope", isUnavailable: true) });
 
         var cut = ctx.Render<RouterModelAdmin>();
 
@@ -94,7 +101,7 @@ public sealed class RouterModelAdminTests
     [Fact]
     public void Retry_reloads_after_the_router_becomes_reachable()
     {
-        var client = new FakeClient { Error = new LogRegModelAdminException("nope", isUnavailable: true) };
+        var client = new FakeClient { Error = new LogRegModelAdminException(message: "nope", isUnavailable: true) };
         using var ctx = NewContext(client);
         var cut = ctx.Render<RouterModelAdmin>();
         cut.Markup.Should().Contain("Router unreachable");
@@ -113,11 +120,12 @@ public sealed class RouterModelAdminTests
         {
             RetrainEvents =
             [
-                new LogRegRetrainEvent(new LogRegRetrainBootstrapProgressInfo(5), Result: null),
+                new LogRegRetrainEvent(BootstrapProgress: new LogRegRetrainBootstrapProgressInfo(5), null),
                 new LogRegRetrainEvent(
-                    BootstrapProgress: null,
-                    new LogRegRetrainResultInfo(LogRegRetrainResultKindInfo.Trained, "Trained 8 heads.", WithArtifact())),
-            ],
+                    null,
+                    Result: new LogRegRetrainResultInfo(Kind: LogRegRetrainResultKindInfo.Trained,
+                        Message: "Trained 8 heads.", Status: WithArtifact()))
+            ]
         };
         using var ctx = NewContext(client);
         var cut = ctx.Render<RouterModelAdmin>();
@@ -139,11 +147,12 @@ public sealed class RouterModelAdminTests
             Gate = gate,
             RetrainEvents =
             [
-                new LogRegRetrainEvent(new LogRegRetrainBootstrapProgressInfo(5), Result: null),
+                new LogRegRetrainEvent(BootstrapProgress: new LogRegRetrainBootstrapProgressInfo(5), null),
                 new LogRegRetrainEvent(
-                    BootstrapProgress: null,
-                    new LogRegRetrainResultInfo(LogRegRetrainResultKindInfo.Trained, "Trained.", WithArtifact())),
-            ],
+                    null,
+                    Result: new LogRegRetrainResultInfo(Kind: LogRegRetrainResultKindInfo.Trained, Message: "Trained.",
+                        Status: WithArtifact()))
+            ]
         };
         using var ctx = NewContext(client);
         var cut = ctx.Render<RouterModelAdmin>();
@@ -173,25 +182,21 @@ public sealed class RouterModelAdminTests
         /// </summary>
         public TaskCompletionSource<bool>? Gate { get; set; }
 
-        public Task<LogRegModelStatusInfo> GetStatusAsync(CancellationToken cancellationToken = default) =>
-            Error is not null
+        public Task<LogRegModelStatusInfo> GetStatusAsync(CancellationToken cancellationToken = default)
+        {
+            return Error is not null
                 ? Task.FromException<LogRegModelStatusInfo>(Error)
                 : Task.FromResult(Status!);
+        }
 
         public async IAsyncEnumerable<LogRegRetrainEvent> RetrainAsync(
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            if (Error is not null)
-            {
-                throw Error;
-            }
+            if (Error is not null) throw Error;
 
             foreach (var retrainEvent in RetrainEvents)
             {
-                if (retrainEvent.Result is not null && Gate is not null)
-                {
-                    await Gate.Task;
-                }
+                if (retrainEvent.Result is not null && Gate is not null) await Gate.Task;
 
                 yield return retrainEvent;
             }

@@ -1,11 +1,12 @@
+using System.Text;
+using System.Text.Json;
 using Amazon.BedrockRuntime;
 using Amazon.BedrockRuntime.Model;
 using Amazon.Runtime;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Moq;
-using System.Text;
-using System.Text.Json;
+using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Bedrock;
 using TotallyHot.ArcRouter.Proxy.Translation;
@@ -27,13 +28,18 @@ public class BedrockProviderTests
 {
     private const string AwsRegion = "us-east-1";
 
-    private static IModelRouteResolver Resolver(string modelName, string providerModelId, string providerName, string awsRegion = AwsRegion) =>
-        ModelRouteResolverTestFactory.Create(
+    private static readonly uint[] Crc32Table = BuildCrc32Table();
+
+    private static IModelRouteResolver Resolver(string modelName, string providerModelId, string providerName,
+        string awsRegion = AwsRegion)
+    {
+        return ModelRouteResolverTestFactory.Create(
             modelName: modelName,
             providerModelId: providerModelId,
             baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
             providerName: providerName,
             awsRegion: awsRegion);
+    }
 
     private static ProxyMiddleware BuildMiddleware(
         string modelName,
@@ -42,15 +48,17 @@ public class BedrockProviderTests
         IAmazonBedrockRuntime client,
         ITelemetryPublisher? telemetry = null)
     {
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), Resolver(modelName, providerModelId, translator.Provider));
+        var interceptor = new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: Resolver(modelName: modelName, providerModelId: providerModelId,
+                providerName: translator.Provider));
         var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
         {
-            [translator.Provider] = translator,
+            [translator.Provider] = translator
         };
 
         return new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(),
-            interceptor,
+            logger: Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor: interceptor,
             dependencies: new ProxyMiddlewareDependencies
             {
                 TelemetryPublisher = telemetry,
@@ -77,7 +85,7 @@ public class BedrockProviderTests
     private static string ReadResponse(DefaultHttpContext context)
     {
         context.Response.Body.Position = 0;
-        using var reader = new StreamReader(context.Response.Body, Encoding.UTF8);
+        using var reader = new StreamReader(stream: context.Response.Body, encoding: Encoding.UTF8);
         return reader.ReadToEnd();
     }
 
@@ -94,41 +102,50 @@ public class BedrockProviderTests
             .ReturnsAsync(() =>
             {
                 const string claudeResponse = """
-                    {
-                      "id": "msg_bedrock_01",
-                      "type": "message",
-                      "role": "assistant",
-                      "model": "anthropic.claude-3-5-sonnet-20241022-v2:0",
-                      "content": [ { "type": "text", "text": "Hello from Bedrock Claude." } ],
-                      "stop_reason": "end_turn",
-                      "usage": { "input_tokens": 12, "output_tokens": 6 }
-                    }
-                    """;
-                return new InvokeModelResponse { Body = new MemoryStream(Encoding.UTF8.GetBytes(claudeResponse)), ContentType = "application/json" };
+                                              {
+                                                "id": "msg_bedrock_01",
+                                                "type": "message",
+                                                "role": "assistant",
+                                                "model": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+                                                "content": [ { "type": "text", "text": "Hello from Bedrock Claude." } ],
+                                                "stop_reason": "end_turn",
+                                                "usage": { "input_tokens": 12, "output_tokens": 6 }
+                                              }
+                                              """;
+                return new InvokeModelResponse
+                {
+                    Body = new MemoryStream(Encoding.UTF8.GetBytes(claudeResponse)), ContentType = "application/json"
+                };
             });
 
         var capturing = new CapturingTelemetryPublisher();
-        var middleware = BuildMiddleware("claude-sonnet-bedrock", "anthropic.claude-3-5-sonnet-20241022-v2:0", new AnthropicOnBedrockPayloadTranslator(), mockClient.Object, capturing);
+        var middleware = BuildMiddleware(modelName: "claude-sonnet-bedrock",
+            providerModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+            translator: new AnthropicOnBedrockPayloadTranslator(), client: mockClient.Object, telemetry: capturing);
 
         var context = BuildContext("""
-            {"model":"claude-sonnet-bedrock","messages":[{"role":"system","content":"be brief"},{"role":"user","content":"hi"}]}
-            """);
+                                   {"model":"claude-sonnet-bedrock","messages":[{"role":"system","content":"be brief"},{"role":"user","content":"hi"}]}
+                                   """);
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal("anthropic.claude-3-5-sonnet-20241022-v2:0", capturedRequest!.ModelId);
+        Assert.Equal(expected: "anthropic.claude-3-5-sonnet-20241022-v2:0", actual: capturedRequest!.ModelId);
         using var forwardedBody = JsonDocument.Parse(Encoding.UTF8.GetString(capturedRequest.Body.ToArray()));
-        Assert.Equal("bedrock-2023-05-31", forwardedBody.RootElement.GetProperty("anthropic_version").GetString());
-        Assert.False(forwardedBody.RootElement.TryGetProperty("model", out _), "Bedrock body must not carry 'model' - it's the SDK's ModelId.");
-        Assert.Equal("be brief", forwardedBody.RootElement.GetProperty("system").GetString());
+        Assert.Equal(expected: "bedrock-2023-05-31",
+            actual: forwardedBody.RootElement.GetProperty("anthropic_version").GetString());
+        Assert.False(condition: forwardedBody.RootElement.TryGetProperty(propertyName: "model", value: out _),
+            userMessage: "Bedrock body must not carry 'model' - it's the SDK's ModelId.");
+        Assert.Equal(expected: "be brief", actual: forwardedBody.RootElement.GetProperty("system").GetString());
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
         using var openAi = JsonDocument.Parse(ReadResponse(context));
-        Assert.Equal("Hello from Bedrock Claude.", openAi.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString());
+        Assert.Equal(expected: "Hello from Bedrock Claude.",
+            actual: openAi.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content")
+                .GetString());
 
         var published = await capturing.WaitForEventAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(12, published.PromptTokens);
-        Assert.Equal(6, published.CompletionTokens);
+        Assert.Equal(12, actual: published.PromptTokens);
+        Assert.Equal(6, actual: published.CompletionTokens);
     }
 
     [Fact]
@@ -138,41 +155,52 @@ public class BedrockProviderTests
         // + CRC32s, per the Smithy spec) - exercised through the real AWS SDK's own ResponseStream
         // decoder, not a fake shortcut, so this proves the SDK-decoded-chunk path end-to-end.
         var frames = new MemoryStream();
-        AppendFrame(frames, "chunk", """{"type":"message_start","message":{"id":"msg_stream_01","model":"anthropic.claude-3-5-sonnet-20241022-v2:0","usage":{"input_tokens":5}}}""");
-        AppendFrame(frames, "chunk", """{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}""");
-        AppendFrame(frames, "chunk", """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel"}}""");
-        AppendFrame(frames, "chunk", """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"lo"}}""");
-        AppendFrame(frames, "chunk", """{"type":"content_block_stop","index":0}""");
-        AppendFrame(frames, "chunk", """{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}""");
-        AppendFrame(frames, "chunk", """{"type":"message_stop"}""");
+        AppendFrame(destination: frames, eventType: "chunk",
+            """{"type":"message_start","message":{"id":"msg_stream_01","model":"anthropic.claude-3-5-sonnet-20241022-v2:0","usage":{"input_tokens":5}}}""");
+        AppendFrame(destination: frames, eventType: "chunk",
+            """{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}""");
+        AppendFrame(destination: frames, eventType: "chunk",
+            """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel"}}""");
+        AppendFrame(destination: frames, eventType: "chunk",
+            """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"lo"}}""");
+        AppendFrame(destination: frames, eventType: "chunk", """{"type":"content_block_stop","index":0}""");
+        AppendFrame(destination: frames, eventType: "chunk",
+            """{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}""");
+        AppendFrame(destination: frames, eventType: "chunk", """{"type":"message_stop"}""");
         frames.Position = 0;
 
         var mockClient = new Mock<IAmazonBedrockRuntime>();
-        mockClient.Setup(c => c.InvokeModelWithResponseStreamAsync(It.IsAny<InvokeModelWithResponseStreamRequest>(), It.IsAny<CancellationToken>()))
+        mockClient.Setup(c =>
+                c.InvokeModelWithResponseStreamAsync(It.IsAny<InvokeModelWithResponseStreamRequest>(),
+                    It.IsAny<CancellationToken>()))
             .ReturnsAsync(new InvokeModelWithResponseStreamResponse { Body = new ResponseStream(frames) });
 
-        var middleware = BuildMiddleware("claude-sonnet-bedrock", "anthropic.claude-3-5-sonnet-20241022-v2:0", new AnthropicOnBedrockPayloadTranslator(), mockClient.Object);
+        var middleware = BuildMiddleware(modelName: "claude-sonnet-bedrock",
+            providerModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+            translator: new AnthropicOnBedrockPayloadTranslator(), client: mockClient.Object);
 
         var context = BuildContext("""
-            {"model":"claude-sonnet-bedrock","messages":[{"role":"user","content":"hi"}],"stream":true}
-            """);
+                                   {"model":"claude-sonnet-bedrock","messages":[{"role":"user","content":"hi"}],"stream":true}
+                                   """);
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
         var body = ReadResponse(context);
-        var dataLines = body.Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
-            .Where(l => l.StartsWith("data: ", StringComparison.Ordinal))
+        var dataLines = body.Split(separator: "\n\n", options: StringSplitOptions.RemoveEmptyEntries)
+            .Where(l => l.StartsWith(value: "data: ", comparisonType: StringComparison.Ordinal))
             .Select(l => l["data: ".Length..])
             .ToList();
 
-        Assert.Equal("[DONE]", dataLines[^1]);
+        Assert.Equal(expected: "[DONE]", actual: dataLines[^1]);
         var chunks = dataLines.Where(l => l != "[DONE]").Select(l => JsonDocument.Parse(l)).ToList();
         var assembled = string.Concat(chunks.Select(c =>
-            c.RootElement.GetProperty("choices")[0].GetProperty("delta").TryGetProperty("content", out var content)
+            c.RootElement.GetProperty("choices")[0].GetProperty("delta")
+                .TryGetProperty(propertyName: "content", value: out var content)
                 ? content.GetString()
                 : string.Empty));
-        Assert.Equal("Hello", assembled);
-        Assert.Equal("stop", chunks[^1].RootElement.GetProperty("choices")[0].GetProperty("finish_reason").GetString());
+        Assert.Equal(expected: "Hello", actual: assembled);
+        Assert.Equal(expected: "stop",
+            actual: chunks[^1].RootElement.GetProperty("choices")[0].GetProperty("finish_reason").GetString());
     }
 
     [Fact]
@@ -182,18 +210,20 @@ public class BedrockProviderTests
         mockClient.Setup(c => c.InvokeModelAsync(It.IsAny<InvokeModelRequest>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new AmazonBedrockRuntimeException("access denied"));
 
-        var middleware = BuildMiddleware("claude-sonnet-bedrock", "anthropic.claude-3-5-sonnet-20241022-v2:0", new AnthropicOnBedrockPayloadTranslator(), mockClient.Object);
+        var middleware = BuildMiddleware(modelName: "claude-sonnet-bedrock",
+            providerModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+            translator: new AnthropicOnBedrockPayloadTranslator(), client: mockClient.Object);
         var context = BuildContext("""{"model":"claude-sonnet-bedrock","messages":[{"role":"user","content":"hi"}]}""");
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status502BadGateway, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status502BadGateway, actual: context.Response.StatusCode);
         using var error = JsonDocument.Parse(ReadResponse(context));
         var message = error.RootElement.GetProperty("error").GetProperty("message").GetString();
         // The 502 envelope must carry a generic message, not the raw SDK exception text, which can leak
         // internal endpoint/region/request-id detail (the exception is logged server-side instead).
-        Assert.Equal("The upstream provider is unavailable.", message);
-        Assert.DoesNotContain("access denied", message);
+        Assert.Equal(expected: "The upstream provider is unavailable.", actual: message);
+        Assert.DoesNotContain(expectedSubstring: "access denied", actualString: message);
     }
 
     // --- Bedrock failover: a Bedrock candidate is no longer terminal (docs/router/agent-resilience-strategies.md) ---
@@ -202,21 +232,26 @@ public class BedrockProviderTests
         string primaryModel, string primaryProvider, string primaryProviderModelId,
         string backupModel, string backupProvider, string backupProviderModelId)
     {
-        var options = new TotallyHot.ArcRouter.Models.ModelRoutingOptions
+        var options = new ModelRoutingOptions
         {
-            Providers = new Dictionary<string, TotallyHot.ArcRouter.Models.ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+            Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                [primaryProvider] = new TotallyHot.ArcRouter.Models.ProviderOptions { BaseUrl = "https://bedrock-runtime.us-east-1.amazonaws.com", AwsRegion = AwsRegion },
-                [backupProvider] = new TotallyHot.ArcRouter.Models.ProviderOptions { BaseUrl = "https://bedrock-runtime.us-east-1.amazonaws.com", AwsRegion = AwsRegion },
+                [primaryProvider] = new()
+                    { BaseUrl = "https://bedrock-runtime.us-east-1.amazonaws.com", AwsRegion = AwsRegion },
+                [backupProvider] = new()
+                    { BaseUrl = "https://bedrock-runtime.us-east-1.amazonaws.com", AwsRegion = AwsRegion }
             },
             ModelList =
             [
-                new TotallyHot.ArcRouter.Models.ModelRouteEntry { ModelName = primaryModel, Provider = primaryProvider, ProviderModelId = primaryProviderModelId },
-                new TotallyHot.ArcRouter.Models.ModelRouteEntry { ModelName = backupModel, Provider = backupProvider, ProviderModelId = backupProviderModelId },
+                new ModelRouteEntry
+                    { ModelName = primaryModel, Provider = primaryProvider, ProviderModelId = primaryProviderModelId },
+                new ModelRouteEntry
+                    { ModelName = backupModel, Provider = backupProvider, ProviderModelId = backupProviderModelId }
             ]
         };
 
-        return new ModelRouteResolver(new InMemoryProviderConfigStore(options), Mock.Of<IEnvironmentVariableProvider>());
+        return new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
     }
 
     [Fact]
@@ -235,14 +270,18 @@ public class BedrockProviderTests
             });
 
         var translator = new AnthropicOnBedrockPayloadTranslator();
-        var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase) { [translator.Provider] = translator };
+        var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
+            { [translator.Provider] = translator };
         var resolver = TwoCandidateResolver(
-            "primary-claude", translator.Provider, "primary-model-id",
-            "backup-claude", translator.Provider, "backup-model-id");
+            primaryModel: "primary-claude", primaryProvider: translator.Provider,
+            primaryProviderModelId: "primary-model-id",
+            backupModel: "backup-claude", backupProvider: translator.Provider,
+            backupProviderModelId: "backup-model-id");
 
         var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(),
-            new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver),
+            logger: Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor: new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(),
+                modelRouteResolver: resolver),
             dependencies: new ProxyMiddlewareDependencies
             {
                 Translators = translators,
@@ -251,12 +290,16 @@ public class BedrockProviderTests
         );
 
         var context = BuildContext("""{"model":"primary-claude","messages":[{"role":"user","content":"hi"}]}""");
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
         using var openAi = JsonDocument.Parse(ReadResponse(context));
-        Assert.Equal("served by backup", openAi.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString());
-        mockClient.Verify(c => c.InvokeModelAsync(It.IsAny<InvokeModelRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+        Assert.Equal(expected: "served by backup",
+            actual: openAi.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content")
+                .GetString());
+        mockClient.Verify(
+            expression: c => c.InvokeModelAsync(It.IsAny<InvokeModelRequest>(), It.IsAny<CancellationToken>()),
+            times: Times.Exactly(2));
     }
 
     [Fact]
@@ -270,9 +313,8 @@ public class BedrockProviderTests
             .Callback<InvokeModelRequest, CancellationToken>((req, _) =>
             {
                 if (req.ModelId == "anthropic.claude-3-5-sonnet-20241022-v2:0")
-                {
-                    throw new AmazonClientException("Failed to resolve bearer token in DefaultAWSTokenIdentityResolver");
-                }
+                    throw new AmazonClientException(
+                        "Failed to resolve bearer token in DefaultAWSTokenIdentityResolver");
             })
             .ReturnsAsync(new InvokeModelResponse
             {
@@ -283,15 +325,18 @@ public class BedrockProviderTests
         var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
         {
             ["bedrock-anthropic"] = new AnthropicOnBedrockPayloadTranslator(),
-            ["bedrock-titan"] = new TitanPayloadTranslator(),
+            ["bedrock-titan"] = new TitanPayloadTranslator()
         };
         var resolver = TwoCandidateResolver(
-            "primary-claude", "bedrock-anthropic", "anthropic.claude-3-5-sonnet-20241022-v2:0",
-            "backup-titan", "bedrock-titan", "amazon.titan-text-premier-v1:0");
+            primaryModel: "primary-claude", primaryProvider: "bedrock-anthropic",
+            primaryProviderModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+            backupModel: "backup-titan", backupProvider: "bedrock-titan",
+            backupProviderModelId: "amazon.titan-text-premier-v1:0");
 
         var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(),
-            new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver),
+            logger: Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor: new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(),
+                modelRouteResolver: resolver),
             dependencies: new ProxyMiddlewareDependencies
             {
                 Translators = translators,
@@ -300,11 +345,13 @@ public class BedrockProviderTests
         );
 
         var context = BuildContext("""{"model":"primary-claude","messages":[{"role":"user","content":"hi"}]}""");
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
         using var openAi = JsonDocument.Parse(ReadResponse(context));
-        Assert.Equal("served by backup", openAi.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString());
+        Assert.Equal(expected: "served by backup",
+            actual: openAi.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content")
+                .GetString());
     }
 
     [Fact]
@@ -318,22 +365,24 @@ public class BedrockProviderTests
         mockClient.Setup(c => c.InvokeModelAsync(It.IsAny<InvokeModelRequest>(), It.IsAny<CancellationToken>()))
             .Callback<InvokeModelRequest, CancellationToken>((req, _) =>
             {
-                if (req.ModelId == "backup-model-id")
-                {
-                    backupAttempted = true;
-                }
+                if (req.ModelId == "backup-model-id") backupAttempted = true;
             })
-            .ThrowsAsync(new AmazonClientException("Failed to resolve bearer token in DefaultAWSTokenIdentityResolver"));
+            .ThrowsAsync(
+                new AmazonClientException("Failed to resolve bearer token in DefaultAWSTokenIdentityResolver"));
 
         var translator = new AnthropicOnBedrockPayloadTranslator();
-        var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase) { [translator.Provider] = translator };
+        var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
+            { [translator.Provider] = translator };
         var resolver = TwoCandidateResolver(
-            "primary-claude", translator.Provider, "primary-model-id",
-            "backup-claude", translator.Provider, "backup-model-id");
+            primaryModel: "primary-claude", primaryProvider: translator.Provider,
+            primaryProviderModelId: "primary-model-id",
+            backupModel: "backup-claude", backupProvider: translator.Provider,
+            backupProviderModelId: "backup-model-id");
 
         var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(),
-            new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver),
+            logger: Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor: new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(),
+                modelRouteResolver: resolver),
             dependencies: new ProxyMiddlewareDependencies
             {
                 Translators = translators,
@@ -342,9 +391,9 @@ public class BedrockProviderTests
         );
 
         var context = BuildContext("""{"model":"primary-claude","messages":[{"role":"user","content":"hi"}]}""");
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status401Unauthorized, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status401Unauthorized, actual: context.Response.StatusCode);
         Assert.False(backupAttempted);
     }
 
@@ -361,27 +410,34 @@ public class BedrockProviderTests
             .ReturnsAsync(() =>
             {
                 const string titanResponse = """
-                    {
-                      "inputTextTokenCount": 7,
-                      "results": [ { "tokenCount": 3, "outputText": "Hello from Titan.", "completionReason": "FINISHED" } ]
-                    }
-                    """;
+                                             {
+                                               "inputTextTokenCount": 7,
+                                               "results": [ { "tokenCount": 3, "outputText": "Hello from Titan.", "completionReason": "FINISHED" } ]
+                                             }
+                                             """;
                 return new InvokeModelResponse { Body = new MemoryStream(Encoding.UTF8.GetBytes(titanResponse)) };
             });
 
-        var middleware = BuildMiddleware("titan-text-premier-bedrock", "amazon.titan-text-premier-v1:0", new TitanPayloadTranslator(), mockClient.Object);
-        var context = BuildContext("""{"model":"titan-text-premier-bedrock","messages":[{"role":"user","content":"hi"}]}""");
+        var middleware = BuildMiddleware(modelName: "titan-text-premier-bedrock",
+            providerModelId: "amazon.titan-text-premier-v1:0", translator: new TitanPayloadTranslator(),
+            client: mockClient.Object);
+        var context =
+            BuildContext("""{"model":"titan-text-premier-bedrock","messages":[{"role":"user","content":"hi"}]}""");
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal("amazon.titan-text-premier-v1:0", capturedRequest!.ModelId);
+        Assert.Equal(expected: "amazon.titan-text-premier-v1:0", actual: capturedRequest!.ModelId);
         using var forwardedBody = JsonDocument.Parse(Encoding.UTF8.GetString(capturedRequest.Body.ToArray()));
-        Assert.Contains("User: hi", forwardedBody.RootElement.GetProperty("inputText").GetString());
+        Assert.Contains(expectedSubstring: "User: hi",
+            actualString: forwardedBody.RootElement.GetProperty("inputText").GetString());
 
         using var openAi = JsonDocument.Parse(ReadResponse(context));
-        Assert.Equal("bedrock-titan", openAi.RootElement.GetProperty("model").GetString());
-        Assert.Equal("Hello from Titan.", openAi.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString());
-        Assert.Equal("stop", openAi.RootElement.GetProperty("choices")[0].GetProperty("finish_reason").GetString());
+        Assert.Equal(expected: "bedrock-titan", actual: openAi.RootElement.GetProperty("model").GetString());
+        Assert.Equal(expected: "Hello from Titan.",
+            actual: openAi.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content")
+                .GetString());
+        Assert.Equal(expected: "stop",
+            actual: openAi.RootElement.GetProperty("choices")[0].GetProperty("finish_reason").GetString());
     }
 
     // --- Llama on Bedrock: non-streaming, through the real ProxyMiddleware + SDK dispatch ---
@@ -397,23 +453,28 @@ public class BedrockProviderTests
             .ReturnsAsync(() =>
             {
                 const string llamaResponse = """
-                    { "generation": "Hello from Llama.", "prompt_token_count": 9, "generation_token_count": 4, "stop_reason": "stop" }
-                    """;
+                                             { "generation": "Hello from Llama.", "prompt_token_count": 9, "generation_token_count": 4, "stop_reason": "stop" }
+                                             """;
                 return new InvokeModelResponse { Body = new MemoryStream(Encoding.UTF8.GetBytes(llamaResponse)) };
             });
 
-        var middleware = BuildMiddleware("llama3-70b-bedrock", "meta.llama3-70b-instruct-v1:0", new LlamaPayloadTranslator(), mockClient.Object);
+        var middleware = BuildMiddleware(modelName: "llama3-70b-bedrock",
+            providerModelId: "meta.llama3-70b-instruct-v1:0", translator: new LlamaPayloadTranslator(),
+            client: mockClient.Object);
         var context = BuildContext("""{"model":"llama3-70b-bedrock","messages":[{"role":"user","content":"hi"}]}""");
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal("meta.llama3-70b-instruct-v1:0", capturedRequest!.ModelId);
+        Assert.Equal(expected: "meta.llama3-70b-instruct-v1:0", actual: capturedRequest!.ModelId);
         using var forwardedBody = JsonDocument.Parse(Encoding.UTF8.GetString(capturedRequest.Body.ToArray()));
-        Assert.Contains("<|start_header_id|>user<|end_header_id|>", forwardedBody.RootElement.GetProperty("prompt").GetString());
+        Assert.Contains(expectedSubstring: "<|start_header_id|>user<|end_header_id|>",
+            actualString: forwardedBody.RootElement.GetProperty("prompt").GetString());
 
         using var openAi = JsonDocument.Parse(ReadResponse(context));
-        Assert.Equal("Hello from Llama.", openAi.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString());
-        Assert.Equal("bedrock-llama", openAi.RootElement.GetProperty("model").GetString());
+        Assert.Equal(expected: "Hello from Llama.",
+            actual: openAi.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content")
+                .GetString());
+        Assert.Equal(expected: "bedrock-llama", actual: openAi.RootElement.GetProperty("model").GetString());
     }
 
     // --- Direct translator unit coverage (no SDK involved) ---
@@ -433,11 +494,11 @@ public class BedrockProviderTests
         using var json = JsonDocument.Parse(translated);
         var inputText = json.RootElement.GetProperty("inputText").GetString()!;
 
-        Assert.Contains("User: weather?", inputText);
-        Assert.Contains("Bot: checking", inputText);
-        Assert.Contains("Tool: 72F", inputText);
-        Assert.Contains("User: thanks", inputText);
-        Assert.EndsWith("Bot:", inputText);
+        Assert.Contains(expectedSubstring: "User: weather?", actualString: inputText);
+        Assert.Contains(expectedSubstring: "Bot: checking", actualString: inputText);
+        Assert.Contains(expectedSubstring: "Tool: 72F", actualString: inputText);
+        Assert.Contains(expectedSubstring: "User: thanks", actualString: inputText);
+        Assert.EndsWith(expectedEndString: "Bot:", actualString: inputText);
     }
 
     [Fact]
@@ -450,11 +511,13 @@ public class BedrockProviderTests
         using var json = JsonDocument.Parse(translated);
         var prompt = json.RootElement.GetProperty("prompt").GetString()!;
 
-        Assert.StartsWith("<|begin_of_text|>", prompt);
-        Assert.Contains("<|start_header_id|>system<|end_header_id|>\n\nbe terse<|eot_id|>", prompt);
-        Assert.Contains("<|start_header_id|>user<|end_header_id|>\n\nhi<|eot_id|>", prompt);
-        Assert.EndsWith("<|start_header_id|>assistant<|end_header_id|>\n\n", prompt);
-        Assert.Equal(100, json.RootElement.GetProperty("max_gen_len").GetInt32());
+        Assert.StartsWith(expectedStartString: "<|begin_of_text|>", actualString: prompt);
+        Assert.Contains(expectedSubstring: "<|start_header_id|>system<|end_header_id|>\n\nbe terse<|eot_id|>",
+            actualString: prompt);
+        Assert.Contains(expectedSubstring: "<|start_header_id|>user<|end_header_id|>\n\nhi<|eot_id|>",
+            actualString: prompt);
+        Assert.EndsWith(expectedEndString: "<|start_header_id|>assistant<|end_header_id|>\n\n", actualString: prompt);
+        Assert.Equal(100, actual: json.RootElement.GetProperty("max_gen_len").GetInt32());
     }
 
     [Fact]
@@ -463,18 +526,22 @@ public class BedrockProviderTests
         var translator = new TitanStreamChunkTranslator("bedrock-titan");
 
         var first = translator.TranslateChunk(Encoding.UTF8.GetBytes("""{"index":0,"outputText":"Hel"}"""));
-        var second = translator.TranslateChunk(Encoding.UTF8.GetBytes("""{"index":1,"outputText":"lo","inputTextTokenCount":3,"totalOutputTextTokenCount":2,"completionReason":"FINISHED"}"""));
+        var second = translator.TranslateChunk(Encoding.UTF8.GetBytes(
+            """{"index":1,"outputText":"lo","inputTextTokenCount":3,"totalOutputTextTokenCount":2,"completionReason":"FINISHED"}"""));
         var flush = translator.Flush();
 
         using var firstJson = JsonDocument.Parse(ExtractData(first));
-        Assert.Equal("Hel", firstJson.RootElement.GetProperty("choices")[0].GetProperty("delta").GetProperty("content").GetString());
-        Assert.Equal("bedrock-titan", firstJson.RootElement.GetProperty("model").GetString());
+        Assert.Equal(expected: "Hel",
+            actual: firstJson.RootElement.GetProperty("choices")[0].GetProperty("delta").GetProperty("content")
+                .GetString());
+        Assert.Equal(expected: "bedrock-titan", actual: firstJson.RootElement.GetProperty("model").GetString());
 
         using var secondJson = JsonDocument.Parse(ExtractData(second));
-        Assert.Equal("stop", secondJson.RootElement.GetProperty("choices")[0].GetProperty("finish_reason").GetString());
-        Assert.Equal(3, secondJson.RootElement.GetProperty("usage").GetProperty("prompt_tokens").GetInt32());
+        Assert.Equal(expected: "stop",
+            actual: secondJson.RootElement.GetProperty("choices")[0].GetProperty("finish_reason").GetString());
+        Assert.Equal(3, actual: secondJson.RootElement.GetProperty("usage").GetProperty("prompt_tokens").GetInt32());
 
-        Assert.Equal("data: [DONE]\n\n", Encoding.UTF8.GetString(flush));
+        Assert.Equal(expected: "data: [DONE]\n\n", actual: Encoding.UTF8.GetString(flush));
     }
 
     [Fact]
@@ -483,21 +550,27 @@ public class BedrockProviderTests
         var translator = new LlamaStreamChunkTranslator("bedrock-llama");
 
         var first = translator.TranslateChunk(Encoding.UTF8.GetBytes("""{"generation":"Hel"}"""));
-        var second = translator.TranslateChunk(Encoding.UTF8.GetBytes("""{"generation":"lo","prompt_token_count":4,"generation_token_count":2,"stop_reason":"stop"}"""));
+        var second = translator.TranslateChunk(Encoding.UTF8.GetBytes(
+            """{"generation":"lo","prompt_token_count":4,"generation_token_count":2,"stop_reason":"stop"}"""));
 
         using var firstJson = JsonDocument.Parse(ExtractData(first));
-        Assert.Equal("Hel", firstJson.RootElement.GetProperty("choices")[0].GetProperty("delta").GetProperty("content").GetString());
-        Assert.Equal("bedrock-llama", firstJson.RootElement.GetProperty("model").GetString());
+        Assert.Equal(expected: "Hel",
+            actual: firstJson.RootElement.GetProperty("choices")[0].GetProperty("delta").GetProperty("content")
+                .GetString());
+        Assert.Equal(expected: "bedrock-llama", actual: firstJson.RootElement.GetProperty("model").GetString());
 
         using var secondJson = JsonDocument.Parse(ExtractData(second));
-        Assert.Equal("stop", secondJson.RootElement.GetProperty("choices")[0].GetProperty("finish_reason").GetString());
-        Assert.Equal(4, secondJson.RootElement.GetProperty("usage").GetProperty("prompt_tokens").GetInt32());
+        Assert.Equal(expected: "stop",
+            actual: secondJson.RootElement.GetProperty("choices")[0].GetProperty("finish_reason").GetString());
+        Assert.Equal(4, actual: secondJson.RootElement.GetProperty("usage").GetProperty("prompt_tokens").GetInt32());
     }
 
     [Fact]
     public void BedrockRuntimeClientFactory_MissingRegion_Throws()
     {
-        var route = new ResolvedModelRoute("m", "bedrock-anthropic", "anthropic.claude-3-5-sonnet-20241022-v2:0", new Uri("https://example.com"), "Authorization", []);
+        var route = new ResolvedModelRoute(ModelName: "m", Provider: "bedrock-anthropic",
+            ProviderModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+            UpstreamBaseUrl: new Uri("https://example.com"), AuthHeaderName: "Authorization", ExtraHeaders: []);
         var factory = new BedrockRuntimeClientFactory();
 
         Assert.Throws<InvalidOperationException>(() => factory.Create(route));
@@ -507,8 +580,8 @@ public class BedrockProviderTests
     {
         var text = Encoding.UTF8.GetString(sseLine);
         const string prefix = "data: ";
-        var start = text.IndexOf(prefix, StringComparison.Ordinal) + prefix.Length;
-        var end = text.IndexOf("\n\n", start, StringComparison.Ordinal);
+        var start = text.IndexOf(value: prefix, comparisonType: StringComparison.Ordinal) + prefix.Length;
+        var end = text.IndexOf(value: "\n\n", startIndex: start, comparisonType: StringComparison.Ordinal);
         return text[start..end];
     }
 
@@ -529,7 +602,7 @@ public class BedrockProviderTests
     private static void AppendFrame(Stream destination, string eventType, string nativeChunkJson)
     {
         var wrapped = "{\"bytes\":\"" + Convert.ToBase64String(Encoding.UTF8.GetBytes(nativeChunkJson)) + "\"}";
-        var frame = EncodeEventStreamMessage(eventType, wrapped);
+        var frame = EncodeEventStreamMessage(eventType: eventType, payloadJson: wrapped);
         destination.Write(frame);
     }
 
@@ -550,9 +623,9 @@ public class BedrockProviderTests
             headers.AddRange(valueBytes);
         }
 
-        AddHeader(":message-type", "event");
-        AddHeader(":event-type", eventType);
-        AddHeader(":content-type", "application/json");
+        AddHeader(name: ":message-type", value: "event");
+        AddHeader(name: ":event-type", value: eventType);
+        AddHeader(name: ":content-type", value: "application/json");
 
         var headerBytes = headers.ToArray();
         var totalLength = 4 + 4 + 4 + headerBytes.Length + payload.Length + 4;
@@ -560,16 +633,18 @@ public class BedrockProviderTests
         var message = new byte[totalLength];
         var offset = 0;
 
-        WriteUInt32BE(message, ref offset, (uint)totalLength);
-        WriteUInt32BE(message, ref offset, (uint)headerBytes.Length);
-        WriteUInt32BE(message, ref offset, Crc32(message.AsSpan(0, 8)));
+        WriteUInt32BE(buffer: message, offset: ref offset, value: (uint)totalLength);
+        WriteUInt32BE(buffer: message, offset: ref offset, value: (uint)headerBytes.Length);
+        WriteUInt32BE(buffer: message, offset: ref offset, value: Crc32(message.AsSpan(0, 8)));
 
-        Array.Copy(headerBytes, 0, message, offset, headerBytes.Length);
+        Array.Copy(sourceArray: headerBytes, 0, destinationArray: message, destinationIndex: offset,
+            length: headerBytes.Length);
         offset += headerBytes.Length;
-        Array.Copy(payload, 0, message, offset, payload.Length);
+        Array.Copy(sourceArray: payload, 0, destinationArray: message, destinationIndex: offset,
+            length: payload.Length);
         offset += payload.Length;
 
-        WriteUInt32BE(message, ref offset, Crc32(message.AsSpan(0, offset)));
+        WriteUInt32BE(buffer: message, offset: ref offset, value: Crc32(message.AsSpan(0, length: offset)));
 
         return message;
     }
@@ -583,18 +658,13 @@ public class BedrockProviderTests
         offset += 4;
     }
 
-    private static readonly uint[] Crc32Table = BuildCrc32Table();
-
     private static uint[] BuildCrc32Table()
     {
         var table = new uint[256];
         for (uint i = 0; i < 256; i++)
         {
             var c = i;
-            for (var k = 0; k < 8; k++)
-            {
-                c = (c & 1) != 0 ? 0xEDB88320 ^ (c >> 1) : c >> 1;
-            }
+            for (var k = 0; k < 8; k++) c = (c & 1) != 0 ? 0xEDB88320 ^ (c >> 1) : c >> 1;
 
             table[i] = c;
         }
@@ -605,10 +675,7 @@ public class BedrockProviderTests
     private static uint Crc32(ReadOnlySpan<byte> data)
     {
         var crc = 0xFFFFFFFFu;
-        foreach (var b in data)
-        {
-            crc = (crc >> 8) ^ Crc32Table[(crc ^ b) & 0xFF];
-        }
+        foreach (var b in data) crc = (crc >> 8) ^ Crc32Table[(crc ^ b) & 0xFF];
 
         return crc ^ 0xFFFFFFFFu;
     }
@@ -617,9 +684,15 @@ public class BedrockProviderTests
     {
         private readonly IAmazonBedrockRuntime _client;
 
-        public FakeBedrockRuntimeClientFactory(IAmazonBedrockRuntime client) => _client = client;
+        public FakeBedrockRuntimeClientFactory(IAmazonBedrockRuntime client)
+        {
+            _client = client;
+        }
 
-        public IAmazonBedrockRuntime Create(ResolvedModelRoute route) => _client;
+        public IAmazonBedrockRuntime Create(ResolvedModelRoute route)
+        {
+            return _client;
+        }
     }
 
     private sealed class CapturingTelemetryPublisher : ITelemetryPublisher
@@ -633,14 +706,17 @@ public class BedrockProviderTests
             return Task.CompletedTask;
         }
 
-        public Task PublishLogLineAsync(LogLineEvent logLine, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task PublishLogLineAsync(LogLineEvent logLine, CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
 
         public async Task<RoutingTelemetryEvent> WaitForEventAsync(TimeSpan timeout)
         {
-            var completed = await Task.WhenAny(_tcs.Task, Task.Delay(timeout));
-            Assert.True(ReferenceEquals(completed, _tcs.Task), "Timed out waiting for a routing telemetry event.");
+            var completed = await Task.WhenAny(task1: _tcs.Task, task2: Task.Delay(timeout));
+            Assert.True(condition: ReferenceEquals(objA: completed, objB: _tcs.Task),
+                userMessage: "Timed out waiting for a routing telemetry event.");
             return await _tcs.Task;
         }
     }
 }
-

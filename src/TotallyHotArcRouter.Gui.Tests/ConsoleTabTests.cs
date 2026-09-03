@@ -14,9 +14,9 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 /// </summary>
 public sealed class ConsoleTabTests
 {
-    private static Bunit.BunitContext NewContext()
+    private static BunitContext NewContext()
     {
-        var ctx = new Bunit.BunitContext();
+        var ctx = new BunitContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
         ctx.Services.AddSingleton(new LiveDataStore(serverAddress: "https://127.0.0.1:59992"));
         return ctx;
@@ -94,4 +94,3 @@ public sealed class ConsoleTabTests
         act.Should().NotThrow();
     }
 }
-

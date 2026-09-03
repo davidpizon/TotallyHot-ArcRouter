@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Quality.Grading;
 
 namespace TotallyHot.ArcRouter.Judge;
 
@@ -33,21 +34,21 @@ internal static class JudgeServiceCollectionExtensions
         // unconditionally and gates per call instead - a construction-time check could never see a
         // later toggle. Same reasoning at the drain worker, the retention loop, and ProxyMiddleware's
         // response-text retention site.
-        services.AddOptions<TotallyHot.ArcRouter.Judge.JudgeOptions>()
+        services.AddOptions<JudgeOptions>()
             .ValidateDataAnnotations();
-        services.AddSingleton<IConfigureOptions<TotallyHot.ArcRouter.Judge.JudgeOptions>, TotallyHot.ArcRouter.Judge.JudgeSettingsConfigureOptions>();
-        services.AddHttpClient(TotallyHot.ArcRouter.Judge.GEvalJudgeClient.HttpClientName);
-        services.AddSingleton<TotallyHot.ArcRouter.Judge.PendingResponseTextCache>();
-        services.AddSingleton<TotallyHot.ArcRouter.Judge.IJudgeShadowScoreQueue, TotallyHot.ArcRouter.Judge.JudgeShadowScoreQueue>();
-        services.AddSingleton<TotallyHot.ArcRouter.Judge.JudgeModelSelector>();
-        services.AddSingleton<TotallyHot.ArcRouter.Judge.IJudgeClient, TotallyHot.ArcRouter.Judge.GEvalJudgeClient>();
-        services.AddSingleton<TotallyHot.ArcRouter.Judge.IJudgeShadowScoreStore, TotallyHot.ArcRouter.Judge.SqliteJudgeShadowScoreStore>();
-        services.AddSingleton<TotallyHot.ArcRouter.Judge.JudgeShadowScoreObserver>();
+        services.AddSingleton<IConfigureOptions<JudgeOptions>, JudgeSettingsConfigureOptions>();
+        services.AddHttpClient(GEvalJudgeClient.HttpClientName);
+        services.AddSingleton<PendingResponseTextCache>();
+        services.AddSingleton<IJudgeShadowScoreQueue, JudgeShadowScoreQueue>();
+        services.AddSingleton<JudgeModelSelector>();
+        services.AddSingleton<IJudgeClient, GEvalJudgeClient>();
+        services.AddSingleton<IJudgeShadowScoreStore, SqliteJudgeShadowScoreStore>();
+        services.AddSingleton<JudgeShadowScoreObserver>();
 
         // Promotes the judge from a shadow observer to a real contributor: this is what tells the
         // quality aggregator to hold a static verdict open for a judge grade instead of writing it
         // immediately. Registered before AddQuality so it wins that method's TryAddSingleton default.
-        services.AddSingleton<TotallyHot.ArcRouter.Quality.Grading.IJudgeAvailability, TotallyHot.ArcRouter.Judge.JudgeAvailability>();
+        services.AddSingleton<IJudgeAvailability, JudgeAvailability>();
 
         return services;
     }

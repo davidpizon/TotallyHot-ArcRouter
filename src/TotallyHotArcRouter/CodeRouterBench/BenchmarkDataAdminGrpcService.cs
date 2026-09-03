@@ -14,10 +14,10 @@ namespace TotallyHot.ArcRouter.CodeRouterBench;
 /// </summary>
 public sealed class BenchmarkDataAdminGrpcService : Contract.BenchmarkDataAdminService.BenchmarkDataAdminServiceBase
 {
-    private readonly BenchmarkDataStatusService _statusService;
     private readonly BenchmarkFileLedger _ledger;
-    private readonly BenchmarkSyncService _syncService;
     private readonly BenchmarkSyncOptions _options;
+    private readonly BenchmarkDataStatusService _statusService;
+    private readonly BenchmarkSyncService _syncService;
 
     /// <summary>Initializes a new instance of the <see cref="BenchmarkDataAdminGrpcService"/> class.</summary>
     public BenchmarkDataAdminGrpcService(
@@ -37,9 +37,10 @@ public sealed class BenchmarkDataAdminGrpcService : Contract.BenchmarkDataAdminS
         _options = options.Value;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     /// <remarks>
-    /// Reads the cached status computed by <c>TotallyHot.ArcRouter.Hosting.StartupHealthCheckHostedService</c>'s startup probe.
+    /// Reads the cached status computed by <c>TotallyHot.ArcRouter.Hosting.StartupHealthCheckHostedService</c>'s startup
+    /// probe.
     /// On the rare path where no probe has ever completed (the panel opened before startup's own probe
     /// finished, or that probe threw an unexpected exception the outer try/catch swallowed), this runs one
     /// itself rather than answering with an undefined state - the panel always has something to render.
@@ -49,11 +50,11 @@ public sealed class BenchmarkDataAdminGrpcService : Contract.BenchmarkDataAdminS
         ServerCallContext context)
     {
         var status = _statusService.Current
-            ?? await _statusService.RecheckAsync(context.CancellationToken).ConfigureAwait(false);
+                     ?? await _statusService.RecheckAsync(context.CancellationToken).ConfigureAwait(false);
         return BuildStatusResponse(status);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public override async Task<Contract.BenchmarkStatusResponse> RecheckBenchmarkData(
         Contract.RecheckBenchmarkDataRequest request,
         ServerCallContext context)
@@ -62,7 +63,7 @@ public sealed class BenchmarkDataAdminGrpcService : Contract.BenchmarkDataAdminS
         return BuildStatusResponse(status);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public override async Task SyncBenchmarkData(
         Contract.SyncBenchmarkDataRequest request,
         IServerStreamWriter<Contract.BenchmarkSyncStreamEvent> responseStream,
@@ -71,7 +72,8 @@ public sealed class BenchmarkDataAdminGrpcService : Contract.BenchmarkDataAdminS
         var progress = new StreamingSyncProgress(responseStream);
         var planProgress = new StreamingSyncPlan(responseStream);
         var result = await _syncService
-            .SyncAsync(_options.DatasetRef, progress, context.CancellationToken, planProgress)
+            .SyncAsync(datasetRef: _options.DatasetRef, progress: progress,
+                cancellationToken: context.CancellationToken, planProgress: planProgress)
             .ConfigureAwait(false);
 
         // The plain per-file progress events above report a Failed stage but carry no error text
@@ -80,17 +82,15 @@ public sealed class BenchmarkDataAdminGrpcService : Contract.BenchmarkDataAdminS
         // second call. Skipped files never failed - they simply weren't downloaded - so they are
         // excluded here the same way a succeeded file is.
         foreach (var outcome in result.Files.Where(f => !f.Succeeded && !f.Skipped))
-        {
             await responseStream.WriteAsync(new Contract.BenchmarkSyncStreamEvent
             {
                 Progress = new Contract.BenchmarkSyncProgressEvent
                 {
                     FileName = outcome.FileName,
                     Stage = Contract.BenchmarkSyncStage.Failed,
-                    Error = outcome.ErrorMessage ?? "Sync failed.",
-                },
+                    Error = outcome.ErrorMessage ?? "Sync failed."
+                }
             }).ConfigureAwait(false);
-        }
 
         // Re-probes rather than deriving the state from `result`: the sync itself doesn't know whether
         // its just-written ledger rows now match the published tree (a race with a concurrent upstream
@@ -99,7 +99,7 @@ public sealed class BenchmarkDataAdminGrpcService : Contract.BenchmarkDataAdminS
         var finalStatus = await _statusService.RecheckAsync(context.CancellationToken).ConfigureAwait(false);
         await responseStream.WriteAsync(new Contract.BenchmarkSyncStreamEvent
         {
-            FinalStatus = BuildStatusResponse(finalStatus),
+            FinalStatus = BuildStatusResponse(finalStatus)
         }).ConfigureAwait(false);
     }
 
@@ -109,13 +109,10 @@ public sealed class BenchmarkDataAdminGrpcService : Contract.BenchmarkDataAdminS
         var response = new Contract.BenchmarkStatusResponse
         {
             State = MapState(status.State),
-            CheckedAtUtc = Timestamp.FromDateTimeOffset(status.CheckedAtUtc),
+            CheckedAtUtc = Timestamp.FromDateTimeOffset(status.CheckedAtUtc)
         };
 
-        if (status.Reason is not null)
-        {
-            response.Reason = status.Reason;
-        }
+        if (status.Reason is not null) response.Reason = status.Reason;
 
         response.Files.AddRange(BuildFiles());
         return response;
@@ -128,40 +125,38 @@ public sealed class BenchmarkDataAdminGrpcService : Contract.BenchmarkDataAdminS
     /// </summary>
     private IEnumerable<Contract.BenchmarkFile> BuildFiles()
     {
-        var entries = _ledger.GetAll().ToDictionary(entry => entry.FileName, StringComparer.Ordinal);
+        var entries = _ledger.GetAll()
+            .ToDictionary(keySelector: entry => entry.FileName, comparer: StringComparer.Ordinal);
 
         foreach (var spec in BenchmarkFileSpec.All)
-        {
-            if (entries.TryGetValue(spec.FileName, out var entry))
-            {
+            if (entries.TryGetValue(key: spec.FileName, value: out var entry))
                 yield return new Contract.BenchmarkFile
                 {
                     FileName = spec.FileName,
                     Synced = true,
                     SizeBytes = entry.SizeBytes,
                     RowCount = entry.RowCount,
-                    SyncedAtUtc = Timestamp.FromDateTimeOffset(entry.SyncedAtUtc),
+                    SyncedAtUtc = Timestamp.FromDateTimeOffset(entry.SyncedAtUtc)
                 };
-            }
             else
-            {
                 yield return new Contract.BenchmarkFile
                 {
                     FileName = spec.FileName,
-                    Synced = false,
+                    Synced = false
                 };
-            }
-        }
     }
 
     /// <summary>Maps the domain freshness state onto its wire enum.</summary>
-    private static Contract.BenchmarkDataState MapState(BenchmarkDataState state) => state switch
+    private static Contract.BenchmarkDataState MapState(BenchmarkDataState state)
     {
-        BenchmarkDataState.Current => Contract.BenchmarkDataState.Current,
-        BenchmarkDataState.Update => Contract.BenchmarkDataState.Update,
-        BenchmarkDataState.CheckFailed => Contract.BenchmarkDataState.CheckFailed,
-        _ => Contract.BenchmarkDataState.Unspecified,
-    };
+        return state switch
+        {
+            BenchmarkDataState.Current => Contract.BenchmarkDataState.Current,
+            BenchmarkDataState.Update => Contract.BenchmarkDataState.Update,
+            BenchmarkDataState.CheckFailed => Contract.BenchmarkDataState.CheckFailed,
+            _ => Contract.BenchmarkDataState.Unspecified
+        };
+    }
 
     /// <summary>
     /// Bridges <see cref="BenchmarkSyncService"/>'s synchronous <see cref="IProgress{T}"/> callback onto
@@ -180,7 +175,10 @@ public sealed class BenchmarkDataAdminGrpcService : Contract.BenchmarkDataAdminS
 
         /// <summary>Initializes a new instance of the <see cref="StreamingSyncProgress"/> class.</summary>
         /// <param name="stream">The gRPC response stream to write each progress event to.</param>
-        public StreamingSyncProgress(IServerStreamWriter<Contract.BenchmarkSyncStreamEvent> stream) => _stream = stream;
+        public StreamingSyncProgress(IServerStreamWriter<Contract.BenchmarkSyncStreamEvent> stream)
+        {
+            _stream = stream;
+        }
 
         /// <inheritdoc/>
         public void Report(BenchmarkSyncProgress value)
@@ -188,37 +186,31 @@ public sealed class BenchmarkDataAdminGrpcService : Contract.BenchmarkDataAdminS
             var wire = new Contract.BenchmarkSyncProgressEvent
             {
                 FileName = value.FileName,
-                Stage = MapStage(value.Stage),
+                Stage = MapStage(value.Stage)
             };
 
-            if (value.BytesTransferred is long bytes)
-            {
-                wire.BytesTransferred = bytes;
-            }
+            if (value.BytesTransferred is long bytes) wire.BytesTransferred = bytes;
 
-            if (value.RowsImported is int rows)
-            {
-                wire.RowsImported = rows;
-            }
+            if (value.RowsImported is int rows) wire.RowsImported = rows;
 
-            if (value.TotalBytes is long totalBytes)
-            {
-                wire.TotalBytes = totalBytes;
-            }
+            if (value.TotalBytes is long totalBytes) wire.TotalBytes = totalBytes;
 
             _stream.WriteAsync(new Contract.BenchmarkSyncStreamEvent { Progress = wire }).GetAwaiter().GetResult();
         }
 
         /// <summary>Maps the domain sync stage onto its wire enum.</summary>
-        private static Contract.BenchmarkSyncStage MapStage(BenchmarkSyncStage stage) => stage switch
+        private static Contract.BenchmarkSyncStage MapStage(BenchmarkSyncStage stage)
         {
-            BenchmarkSyncStage.Downloading => Contract.BenchmarkSyncStage.Downloading,
-            BenchmarkSyncStage.Verifying => Contract.BenchmarkSyncStage.Verifying,
-            BenchmarkSyncStage.Importing => Contract.BenchmarkSyncStage.Importing,
-            BenchmarkSyncStage.Completed => Contract.BenchmarkSyncStage.Completed,
-            BenchmarkSyncStage.Failed => Contract.BenchmarkSyncStage.Failed,
-            _ => Contract.BenchmarkSyncStage.Unspecified,
-        };
+            return stage switch
+            {
+                BenchmarkSyncStage.Downloading => Contract.BenchmarkSyncStage.Downloading,
+                BenchmarkSyncStage.Verifying => Contract.BenchmarkSyncStage.Verifying,
+                BenchmarkSyncStage.Importing => Contract.BenchmarkSyncStage.Importing,
+                BenchmarkSyncStage.Completed => Contract.BenchmarkSyncStage.Completed,
+                BenchmarkSyncStage.Failed => Contract.BenchmarkSyncStage.Failed,
+                _ => Contract.BenchmarkSyncStage.Unspecified
+            };
+        }
     }
 
     /// <summary>
@@ -234,7 +226,10 @@ public sealed class BenchmarkDataAdminGrpcService : Contract.BenchmarkDataAdminS
 
         /// <summary>Initializes a new instance of the <see cref="StreamingSyncPlan"/> class.</summary>
         /// <param name="stream">The gRPC response stream to write the plan event to.</param>
-        public StreamingSyncPlan(IServerStreamWriter<Contract.BenchmarkSyncStreamEvent> stream) => _stream = stream;
+        public StreamingSyncPlan(IServerStreamWriter<Contract.BenchmarkSyncStreamEvent> stream)
+        {
+            _stream = stream;
+        }
 
         /// <inheritdoc/>
         public void Report(BenchmarkSyncPlan value)
@@ -243,7 +238,7 @@ public sealed class BenchmarkDataAdminGrpcService : Contract.BenchmarkDataAdminS
             wire.Files.AddRange(value.Files.Select(file => new Contract.BenchmarkSyncPlanFile
             {
                 FileName = file.FileName,
-                SizeBytes = file.SizeBytes,
+                SizeBytes = file.SizeBytes
             }));
 
             _stream.WriteAsync(new Contract.BenchmarkSyncStreamEvent { Plan = wire }).GetAwaiter().GetResult();

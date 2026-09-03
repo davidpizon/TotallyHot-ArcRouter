@@ -13,16 +13,16 @@ public class DialectDelimiterTests
     [Fact]
     public void ValidOpenAndClose_ConstructsSuccessfully()
     {
-        var delimiter = new DialectDelimiter("<tool_call>", "</tool_call>");
+        var delimiter = new DialectDelimiter(Open: "<tool_call>", Close: "</tool_call>");
 
-        Assert.Equal("<tool_call>", delimiter.Open);
-        Assert.Equal("</tool_call>", delimiter.Close);
+        Assert.Equal(expected: "<tool_call>", actual: delimiter.Open);
+        Assert.Equal(expected: "</tool_call>", actual: delimiter.Close);
     }
 
     [Fact]
     public void NullClose_IsAllowed_AndMeansRunsToEndOfMessage()
     {
-        var delimiter = new DialectDelimiter("[TOOL_CALLS]", Close: null);
+        var delimiter = new DialectDelimiter(Open: "[TOOL_CALLS]", null);
 
         Assert.Null(delimiter.Close);
     }
@@ -30,8 +30,8 @@ public class DialectDelimiterTests
     [Fact]
     public void EmptyOpen_Throws()
     {
-        var ex = Assert.Throws<ArgumentException>(() => new DialectDelimiter(string.Empty, "</x>"));
-        Assert.Equal("Open", ex.ParamName);
+        var ex = Assert.Throws<ArgumentException>(() => new DialectDelimiter(Open: string.Empty, Close: "</x>"));
+        Assert.Equal(expected: "Open", actual: ex.ParamName);
     }
 
     [Fact]
@@ -39,8 +39,7 @@ public class DialectDelimiterTests
     {
         // Distinct from null: null is the valid "runs to end of message" sentinel, so only an empty
         // *string* close - which would frame a zero-length region - is rejected.
-        var ex = Assert.Throws<ArgumentException>(() => new DialectDelimiter("<x>", string.Empty));
-        Assert.Equal("Close", ex.ParamName);
+        var ex = Assert.Throws<ArgumentException>(() => new DialectDelimiter(Open: "<x>", Close: string.Empty));
+        Assert.Equal(expected: "Close", actual: ex.ParamName);
     }
 }
-

@@ -17,14 +17,16 @@ public sealed class UpdateStateStoreTests
     public void Record_StoresResultAndStampsTimestamp()
     {
         var store = new UpdateStateStore();
-        var result = ReleaseCheckResult.Resolved("1.0.0", "2.0.0", true, "https://example.test/a.zip", "abc");
+        var result = ReleaseCheckResult.Resolved(currentVersion: "1.0.0", latestVersion: "2.0.0", true,
+            assetDownloadUrl: "https://example.test/a.zip", assetSha256: "abc");
 
         var before = DateTimeOffset.UtcNow;
         store.Record(result);
         var after = DateTimeOffset.UtcNow;
 
-        Assert.Same(result, store.Current.Result);
-        Assert.InRange(store.Current.CheckedAtUtc!.Value, before.AddSeconds(-1), after.AddSeconds(1));
+        Assert.Same(expected: result, actual: store.Current.Result);
+        Assert.InRange(actual: store.Current.CheckedAtUtc!.Value, low: before.AddSeconds(-1),
+            high: after.AddSeconds(1));
     }
 
     [Fact]
@@ -39,11 +41,12 @@ public sealed class UpdateStateStoreTests
     public void Record_SecondCall_ReplacesFirst()
     {
         var store = new UpdateStateStore();
-        store.Record(ReleaseCheckResult.Resolved("1.0.0", "1.0.0", false, null, null));
-        var second = ReleaseCheckResult.Resolved("1.0.0", "2.0.0", true, "https://example.test/a.zip", "abc");
+        store.Record(ReleaseCheckResult.Resolved(currentVersion: "1.0.0", latestVersion: "1.0.0", false, null, null));
+        var second = ReleaseCheckResult.Resolved(currentVersion: "1.0.0", latestVersion: "2.0.0", true,
+            assetDownloadUrl: "https://example.test/a.zip", assetSha256: "abc");
 
         store.Record(second);
 
-        Assert.Same(second, store.Current.Result);
+        Assert.Same(expected: second, actual: store.Current.Result);
     }
 }

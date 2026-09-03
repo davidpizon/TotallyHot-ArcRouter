@@ -76,10 +76,8 @@ public sealed class QualityOptions
     /// <returns>The configured weights, or <see cref="DimensionWeightOptions.Default"/>.</returns>
     public DimensionWeightOptions ResolveWeights(string dimension)
     {
-        if (!string.IsNullOrEmpty(dimension) && DimensionWeights.TryGetValue(dimension, out var weights))
-        {
-            return weights;
-        }
+        if (!string.IsNullOrEmpty(dimension) &&
+            DimensionWeights.TryGetValue(key: dimension, value: out var weights)) return weights;
 
         return DimensionWeightOptions.Default;
     }

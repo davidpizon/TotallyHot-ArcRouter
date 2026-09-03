@@ -16,14 +16,11 @@ public class HeuristicRequestClassifierTests
             ["model"] = "auto",
             ["messages"] = new JsonArray
             {
-                new JsonObject { ["role"] = "user", ["content"] = prompt },
-            },
+                new JsonObject { ["role"] = "user", ["content"] = prompt }
+            }
         };
 
-        if (maxTokens is not null)
-        {
-            body["max_tokens"] = maxTokens.Value;
-        }
+        if (maxTokens is not null) body["max_tokens"] = maxTokens.Value;
 
         return body;
     }
@@ -42,7 +39,7 @@ public class HeuristicRequestClassifierTests
     {
         var result = _classifier.Classify(RequestWithPrompt(prompt));
 
-        Assert.Equal(expectedDimension, result.Dimension);
+        Assert.Equal(expected: expectedDimension, actual: result.Dimension);
     }
 
     [Fact]
@@ -58,14 +55,11 @@ public class HeuristicRequestClassifierTests
             _classifier.Classify(RequestWithPrompt("Load the dataset into a pandas dataframe")).Dimension,
             _classifier.Classify(RequestWithPrompt("Complete this function for me")).Dimension,
             _classifier.Classify(RequestWithPrompt("Generate a REST endpoint")).Dimension,
-            _classifier.Classify(RequestWithPrompt("Port this algorithm from Python to Go")).Dimension,
+            _classifier.Classify(RequestWithPrompt("Port this algorithm from Python to Go")).Dimension
         };
 
-        Assert.Equal(RouterDimension.AllDimensions.Count, reachable.Count);
-        foreach (var dimension in RouterDimension.AllDimensions)
-        {
-            Assert.Contains(dimension, reachable);
-        }
+        Assert.Equal(expected: RouterDimension.AllDimensions.Count, actual: reachable.Count);
+        foreach (var dimension in RouterDimension.AllDimensions) Assert.Contains(expected: dimension, set: reachable);
     }
 
     [Fact]
@@ -73,7 +67,7 @@ public class HeuristicRequestClassifierTests
     {
         var result = _classifier.Classify(RequestWithPrompt("Add a null check here"));
 
-        Assert.Equal(RouterDifficulty.Easy, result.Difficulty);
+        Assert.Equal(expected: RouterDifficulty.Easy, actual: result.Difficulty);
     }
 
     [Fact]
@@ -82,31 +76,32 @@ public class HeuristicRequestClassifierTests
         var prompt = "Please review this thread-safe cache for a subtle race condition under high concurrency load.";
         var result = _classifier.Classify(RequestWithPrompt(prompt));
 
-        Assert.Equal(RouterDifficulty.Hard, result.Difficulty);
+        Assert.Equal(expected: RouterDifficulty.Hard, actual: result.Difficulty);
     }
 
     [Fact]
     public void Classify_LongPromptWithNoHardSignal_IsHardOnLengthAlone()
     {
-        var prompt = string.Concat(Enumerable.Repeat("Please generate a function that adds two numbers. ", 40));
+        var prompt =
+            string.Concat(Enumerable.Repeat(element: "Please generate a function that adds two numbers. ", 40));
         var result = _classifier.Classify(RequestWithPrompt(prompt));
 
-        Assert.Equal(RouterDifficulty.Hard, result.Difficulty);
+        Assert.Equal(expected: RouterDifficulty.Hard, actual: result.Difficulty);
     }
 
     [Fact]
     public void Classify_MediumLengthPromptWithNoSignal_IsMedium()
     {
-        var prompt = string.Concat(Enumerable.Repeat("Please generate a function that adds two numbers. ", 6));
+        var prompt = string.Concat(Enumerable.Repeat(element: "Please generate a function that adds two numbers. ", 6));
         var result = _classifier.Classify(RequestWithPrompt(prompt));
 
-        Assert.Equal(RouterDifficulty.Medium, result.Difficulty);
+        Assert.Equal(expected: RouterDifficulty.Medium, actual: result.Difficulty);
     }
 
     [Fact]
     public void Classify_SmallMaxTokens_IsUtility()
     {
-        var result = _classifier.Classify(RequestWithPrompt("Summarize this into a chat title", maxTokens: 16));
+        var result = _classifier.Classify(RequestWithPrompt(prompt: "Summarize this into a chat title", 16));
 
         Assert.True(result.IsUtility);
     }
@@ -133,7 +128,7 @@ public class HeuristicRequestClassifierTests
         var prompt = "Here is my code:\n```python\ndef f():\n    pass\n```\nplease fix the bug";
         var result = _classifier.Classify(RequestWithPrompt(prompt));
 
-        Assert.Equal("python", result.Language);
+        Assert.Equal(expected: "python", actual: result.Language);
     }
 
     [Fact]
@@ -141,7 +136,7 @@ public class HeuristicRequestClassifierTests
     {
         var result = _classifier.Classify(RequestWithPrompt("Generate a REST endpoint"));
 
-        Assert.Equal("unknown", result.Language);
+        Assert.Equal(expected: "unknown", actual: result.Language);
     }
 
     [Fact]

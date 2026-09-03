@@ -1,5 +1,5 @@
-using Microsoft.Extensions.Options;
 using System.Diagnostics;
+using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Quality.Grading;
 
 namespace TotallyHot.ArcRouter.Judge;
@@ -19,13 +19,13 @@ namespace TotallyHot.ArcRouter.Judge;
 /// </summary>
 public sealed class JudgeShadowScoreDrainService : BackgroundService
 {
-    private readonly IJudgeShadowScoreQueue _queue;
-    private readonly PendingResponseTextCache _pendingResponseTextCache;
-    private readonly IJudgeClient _judgeClient;
-    private readonly IJudgeShadowScoreStore _store;
     private readonly IQualityScoreAggregator _aggregator;
-    private readonly IOptionsMonitor<JudgeOptions> _options;
+    private readonly IJudgeClient _judgeClient;
     private readonly ILogger<JudgeShadowScoreDrainService> _logger;
+    private readonly IOptionsMonitor<JudgeOptions> _options;
+    private readonly PendingResponseTextCache _pendingResponseTextCache;
+    private readonly IJudgeShadowScoreQueue _queue;
+    private readonly IJudgeShadowScoreStore _store;
 
     /// <summary>Initializes a new instance of the <see cref="JudgeShadowScoreDrainService"/> class.</summary>
     /// <param name="queue">The work queue to drain.</param>
@@ -61,7 +61,7 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
         _logger = logger;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("Starting shadow-judge drain worker.");
@@ -69,9 +69,7 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
         try
         {
             await foreach (var job in _queue.DequeueAllAsync(stoppingToken).ConfigureAwait(false))
-            {
-                await ProcessAsync(job, stoppingToken).ConfigureAwait(false);
-            }
+                await ProcessAsync(job: job, stoppingToken: stoppingToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -94,24 +92,29 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
         // so a disabled judge still releases the retained response text rather than leaving it to age out.
         if (!_options.CurrentValue.Enabled)
         {
-            _pendingResponseTextCache.TryTake(job.CorrelationId, out _);
-            await _aggregator.AbandonJudgeAsync(job.CorrelationId, "judge-disabled", stoppingToken).ConfigureAwait(false);
+            _pendingResponseTextCache.TryTake(correlationId: job.CorrelationId, text: out _);
+            await _aggregator.AbandonJudgeAsync(correlationId: job.CorrelationId, reason: "judge-disabled",
+                cancellationToken: stoppingToken).ConfigureAwait(false);
             return;
         }
 
-        if (!_pendingResponseTextCache.TryTake(job.CorrelationId, out var responseText) || string.IsNullOrEmpty(responseText))
+        if (!_pendingResponseTextCache.TryTake(correlationId: job.CorrelationId, text: out var responseText) ||
+            string.IsNullOrEmpty(responseText))
         {
             _logger.LogDebug(
-                "No pending response text for correlation {CorrelationId}; skipping shadow-judge scoring.",
+                message: "No pending response text for correlation {CorrelationId}; skipping shadow-judge scoring.",
                 job.CorrelationId);
-            await _aggregator.AbandonJudgeAsync(job.CorrelationId, "judge-text-evicted", stoppingToken).ConfigureAwait(false);
+            await _aggregator.AbandonJudgeAsync(correlationId: job.CorrelationId, reason: "judge-text-evicted",
+                cancellationToken: stoppingToken).ConfigureAwait(false);
             return;
         }
 
         var stopwatch = Stopwatch.StartNew();
         try
         {
-            var result = await _judgeClient.ScoreAsync(new JudgeScoreRequest(job.Dimension, responseText), stoppingToken).ConfigureAwait(false);
+            var result = await _judgeClient
+                .ScoreAsync(request: new JudgeScoreRequest(Dimension: job.Dimension, ResponseText: responseText),
+                    cancellationToken: stoppingToken).ConfigureAwait(false);
             stopwatch.Stop();
 
             // An abstention, not a failure: no free model is currently eligible to judge. Recording nothing
@@ -120,15 +123,16 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
             if (result is null)
             {
                 _logger.LogDebug(
-                    "No eligible free judge model for correlation {CorrelationId}; recorded no shadow score.",
+                    message: "No eligible free judge model for correlation {CorrelationId}; recorded no shadow score.",
                     job.CorrelationId);
-                await _aggregator.AbandonJudgeAsync(job.CorrelationId, "judge-abstained", stoppingToken).ConfigureAwait(false);
+                await _aggregator.AbandonJudgeAsync(correlationId: job.CorrelationId, reason: "judge-abstained",
+                    cancellationToken: stoppingToken).ConfigureAwait(false);
                 return;
             }
 
             await _store.InsertAsync(
-                new JudgeShadowScoreRecord(
-                    Id: 0,
+                record: new JudgeShadowScoreRecord(
+                    0,
                     CorrelationId: job.CorrelationId,
                     CreatedAtUtc: DateTimeOffset.UtcNow,
                     Dimension: job.Dimension,
@@ -139,23 +143,23 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
                     JudgePromptVersion: _options.CurrentValue.PromptVersion,
                     JudgeLatencyMs: stopwatch.ElapsedMilliseconds,
                     UsedLogprobs: result.UsedLogprobs),
-                stoppingToken).ConfigureAwait(false);
+                cancellationToken: stoppingToken).ConfigureAwait(false);
 
             // The shadow row is written first, then the join is completed. Order matters: the row is the
             // audit trail for a score that is about to influence routing, so it must exist before the score
             // does - never the other way round, which would leave a routed-on grade with no record of where
             // it came from if the insert then failed.
-            await _aggregator.CompleteWithJudgeAsync(job.CorrelationId, result.Score, stoppingToken).ConfigureAwait(false);
+            await _aggregator.CompleteWithJudgeAsync(correlationId: job.CorrelationId, judgeScore: result.Score,
+                cancellationToken: stoppingToken).ConfigureAwait(false);
 
             if (_logger.IsEnabled(LogLevel.Debug))
-            {
                 _logger.LogDebug(
+                    message:
                     "Recorded shadow judge score {JudgeScore:F3} for model {Model} (correlation {CorrelationId}); static score was {StaticScore:F3}.",
                     result.Score,
                     job.Model,
                     job.CorrelationId,
                     job.StaticScore);
-            }
         }
         catch (OperationCanceledException)
         {
@@ -164,8 +168,8 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
         catch (Exception ex)
         {
             _logger.LogWarning(
-                ex,
-                "Shadow-judge scoring failed for correlation {CorrelationId}; dropping.",
+                exception: ex,
+                message: "Shadow-judge scoring failed for correlation {CorrelationId}; dropping.",
                 job.CorrelationId);
         }
     }

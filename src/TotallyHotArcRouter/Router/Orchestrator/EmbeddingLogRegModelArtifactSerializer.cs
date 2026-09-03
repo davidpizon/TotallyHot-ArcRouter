@@ -11,10 +11,13 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// </summary>
 public static class EmbeddingLogRegModelArtifactSerializer
 {
-    /// <summary>Serializer options shared by <see cref="Serialize"/> and <see cref="Deserialize"/>: indented so a manually inspected artifact file stays human-readable.</summary>
+    /// <summary>
+    /// Serializer options shared by <see cref="Serialize"/> and <see cref="Deserialize"/>: indented so a manually
+    /// inspected artifact file stays human-readable.
+    /// </summary>
     private static readonly JsonSerializerOptions Options = new()
     {
-        WriteIndented = true,
+        WriteIndented = true
     };
 
     /// <summary>Serializes <paramref name="artifact"/> to indented JSON.</summary>
@@ -27,13 +30,14 @@ public static class EmbeddingLogRegModelArtifactSerializer
         {
             EmbeddingDimension = artifact.EmbeddingDimension,
             EmbeddingModel = artifact.EmbeddingModel,
-            ClassWeights = artifact.ClassWeights.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+            ClassWeights =
+                artifact.ClassWeights.ToDictionary(keySelector: kvp => kvp.Key, elementSelector: kvp => kvp.Value),
             TrainedFrom = artifact.TrainedFrom,
             BootstrapTaskCount = artifact.BootstrapTaskCount,
-            MemoryEntryCount = artifact.MemoryEntryCount,
+            MemoryEntryCount = artifact.MemoryEntryCount
         };
 
-        return JsonSerializer.Serialize(dto, Options);
+        return JsonSerializer.Serialize(value: dto, options: Options);
     }
 
     /// <summary>Deserializes an artifact previously produced by <see cref="Serialize"/>.</summary>
@@ -43,16 +47,16 @@ public static class EmbeddingLogRegModelArtifactSerializer
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
 
-        var dto = JsonSerializer.Deserialize<Dto>(json, Options)
-            ?? throw new FormatException("The logreg voter model document deserialized to null.");
+        var dto = JsonSerializer.Deserialize<Dto>(json: json, options: Options)
+                  ?? throw new FormatException("The logreg voter model document deserialized to null.");
 
         var artifact = new EmbeddingLogRegModelArtifact(
-            dto.EmbeddingDimension,
-            dto.ClassWeights,
-            dto.TrainedFrom,
-            dto.BootstrapTaskCount,
-            dto.MemoryEntryCount,
-            dto.EmbeddingModel);
+            EmbeddingDimension: dto.EmbeddingDimension,
+            ClassWeights: dto.ClassWeights,
+            TrainedFrom: dto.TrainedFrom,
+            BootstrapTaskCount: dto.BootstrapTaskCount,
+            MemoryEntryCount: dto.MemoryEntryCount,
+            EmbeddingModel: dto.EmbeddingModel);
         Validate(artifact);
         return artifact;
     }
@@ -72,45 +76,39 @@ public static class EmbeddingLogRegModelArtifactSerializer
         ArgumentNullException.ThrowIfNull(artifact);
 
         if (artifact.EmbeddingDimension <= 0)
-        {
             throw new FormatException(
                 $"The logreg voter model document's embeddingDimension is {artifact.EmbeddingDimension}, must be positive.");
-        }
 
         if (artifact.ClassWeights is null)
-        {
             // A JSON document can carry an explicit null for the whole classWeights property (e.g.
             // "classWeights": null); the Dto's property initializer only covers a missing property, not
             // an explicit null, so this can reach here despite ClassWeights being non-nullable.
             throw new FormatException("The logreg voter model document's classWeights is null.");
-        }
 
         foreach (var (model, weights) in artifact.ClassWeights)
         {
             if (weights is null)
-            {
                 // A JSON document can carry an explicit null value for a classWeights entry (e.g.
                 // "model-a": null); accessing weights.Length below would otherwise throw
                 // NullReferenceException instead of a controlled FormatException.
                 throw new FormatException($"The logreg voter model's weight vector for '{model}' is null.");
-            }
 
             if (weights.Length != artifact.EmbeddingDimension + 1)
-            {
                 throw new FormatException(
                     $"The logreg voter model's weight vector for '{model}' has length {weights.Length}, " +
                     $"expected {artifact.EmbeddingDimension + 1} (embedding dimension + 1 bias term).");
-            }
 
             if (weights.Any(value => !double.IsFinite(value)))
-            {
                 throw new FormatException(
                     $"The logreg voter model's weight vector for '{model}' contains a non-finite value (NaN or Infinity).");
-            }
         }
     }
 
-    /// <summary>The wire shape for <see cref="EmbeddingLogRegModelArtifact"/>, needed because the record's <see cref="IReadOnlyDictionary{TKey,TValue}"/> member doesn't round-trip through <c>System.Text.Json</c>'s default record support.</summary>
+    /// <summary>
+    /// The wire shape for <see cref="EmbeddingLogRegModelArtifact"/>, needed because the record's
+    /// <see cref="IReadOnlyDictionary{TKey,TValue}"/> member doesn't round-trip through <c>System.Text.Json</c>'s default
+    /// record support.
+    /// </summary>
     private sealed class Dto
     {
         /// <summary>Gets or sets the embedding dimension the artifact was trained at.</summary>
@@ -133,7 +131,10 @@ public static class EmbeddingLogRegModelArtifactSerializer
         [JsonPropertyName("memoryEntryCount")]
         public int MemoryEntryCount { get; set; }
 
-        /// <summary>Gets or sets the identity of the embedding model this artifact was fitted against, or null for a pre-provenance artifact.</summary>
+        /// <summary>
+        /// Gets or sets the identity of the embedding model this artifact was fitted against, or null for a
+        /// pre-provenance artifact.
+        /// </summary>
         [JsonPropertyName("embeddingModel")]
         public string? EmbeddingModel { get; set; }
     }

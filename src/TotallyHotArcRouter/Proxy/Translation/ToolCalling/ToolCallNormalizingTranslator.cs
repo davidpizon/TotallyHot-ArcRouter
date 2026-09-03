@@ -9,7 +9,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// request (<c>docs/router/tool-call-normalization.md</c> Phase 4). Replaces
 /// <c>ToolCallEchoGuardTranslator</c>, which did the same job for exactly one dialect on a
 /// provider-wide flag.
-///
 /// <para>
 /// Constructed per request by <see cref="ToolCallNormalizerFactory"/> rather than registered as a
 /// singleton in <c>ServiceCollectionExtensions</c>' provider-keyed translator map, because what it scans
@@ -17,13 +16,11 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// which a provider-keyed lookup can express. <see cref="Provider"/> is therefore a placeholder, never
 /// consulted for routing.
 /// </para>
-///
 /// <para>
 /// Response-only (<see cref="IResponseOnlyTranslator"/>): the request is forwarded exactly as it would be
 /// with no translator at all, <c>tools</c> intact. Rewriting the request belongs to
 /// <see cref="ToolCallEmulatingTranslator"/>, which wraps this type unchanged for its own response half.
 /// </para>
-///
 /// <para>
 /// Never throws. A framed region that does not parse into a call is a heuristic miss, not an upstream
 /// protocol error, so it fails open - the raw text is forwarded with its delimiters intact and a warning
@@ -35,8 +32,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 internal sealed class ToolCallNormalizingTranslator : IResponseOnlyTranslator
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
-
-    private readonly ToolCallNormalizationPlan _plan;
     private readonly IToolCallCapabilityStore? _capabilityStore;
     private readonly ILogger _logger;
 
@@ -52,36 +47,46 @@ internal sealed class ToolCallNormalizingTranslator : IResponseOnlyTranslator
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(logger);
 
-        _plan = plan;
+        Plan = plan;
         _capabilityStore = capabilityStore;
         _logger = logger;
     }
 
     /// <summary>Gets the dialects this request's response is armed to scan for.</summary>
     /// <remarks>Exposed so <see cref="ToolCallNormalizerFactory"/>'s arming decisions can be asserted without a live response.</remarks>
-    public ToolCallNormalizationPlan Plan => _plan;
+    public ToolCallNormalizationPlan Plan { get; }
 
-    /// <inheritdoc />
-    /// <remarks>Never consulted for routing - see this type's remarks. A descriptive placeholder rather than an empty string, in case it surfaces in a log or debugger view.</remarks>
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Never consulted for routing - see this type's remarks. A descriptive placeholder rather than an empty string,
+    /// in case it surfaces in a log or debugger view.
+    /// </remarks>
     public string Provider => "tool-call-normalizer";
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     /// <remarks>Identity - <see cref="ProxyMiddleware"/> never calls this for an <see cref="IResponseOnlyTranslator"/>.</remarks>
-    public Uri BuildRequestUri(Uri baseUrl, string providerModelId, bool isStreaming) => baseUrl;
+    public Uri BuildRequestUri(Uri baseUrl, string providerModelId, bool isStreaming)
+    {
+        return baseUrl;
+    }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     /// <remarks>Identity - the request is forwarded with <c>tools</c> intact; only the response is scanned.</remarks>
-    public byte[] TranslateRequest(byte[] openAiShapedBody) => openAiShapedBody;
+    public byte[] TranslateRequest(byte[] openAiShapedBody)
+    {
+        return openAiShapedBody;
+    }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public byte[] TranslateResponse(byte[] nativeShapedBody)
     {
-        var recorder = new ToolCallObservationRecorder(_plan, _capabilityStore);
+        var recorder = new ToolCallObservationRecorder(plan: Plan, store: _capabilityStore);
 
         JsonObject root;
         try
         {
-            root = JsonNode.Parse(nativeShapedBody) as JsonObject ?? throw new JsonException("Response body was not a JSON object.");
+            root = JsonNode.Parse(nativeShapedBody) as JsonObject ??
+                   throw new JsonException("Response body was not a JSON object.");
         }
         catch (JsonException)
         {
@@ -96,19 +101,15 @@ internal sealed class ToolCallNormalizingTranslator : IResponseOnlyTranslator
             // translator's scope - it rewrites a single choice, so rewriting choices[0] and leaving the
             // rest untouched would be an inconsistent, half-applied response.
             if (root["choices"] is JsonArray { Count: > 1 } multiChoice)
-            {
                 _logger.LogWarning(
+                    message:
                     "Tool-call normalization: response had {ChoiceCount} choices; only a single choice per response is supported, so it is forwarded unrewritten to avoid a partial rewrite.",
                     multiChoice.Count);
-            }
 
             return nativeShapedBody;
         }
 
-        if (choice["message"] is not JsonObject message)
-        {
-            return nativeShapedBody;
-        }
+        if (choice["message"] is not JsonObject message) return nativeShapedBody;
 
         if (message["tool_calls"] is JsonArray { Count: > 0 })
         {
@@ -133,11 +134,9 @@ internal sealed class ToolCallNormalizingTranslator : IResponseOnlyTranslator
         if (message["content"] is not JsonValue contentValue ||
             !contentValue.TryGetValue<string>(out var content) ||
             string.IsNullOrEmpty(content))
-        {
             return nativeShapedBody;
-        }
 
-        var match = DialectMatcher.MatchAny(content, _plan.Candidates);
+        var match = DialectMatcher.MatchAny(content: content, candidates: Plan.Candidates);
         if (match is null)
         {
             WarnIfARegionWentUnparsed(content);
@@ -158,7 +157,7 @@ internal sealed class ToolCallNormalizingTranslator : IResponseOnlyTranslator
             {
                 ["id"] = $"call_{index}_{Guid.NewGuid():N}",
                 ["type"] = "function",
-                ["function"] = new JsonObject { ["name"] = call.Name, ["arguments"] = call.ArgumentsJson },
+                ["function"] = new JsonObject { ["name"] = call.Name, ["arguments"] = call.ArgumentsJson }
             });
             index++;
         }
@@ -171,14 +170,15 @@ internal sealed class ToolCallNormalizingTranslator : IResponseOnlyTranslator
         return Encoding.UTF8.GetBytes(root.ToJsonString(SerializerOptions));
     }
 
-    /// <inheritdoc />
-    public IStreamTranslator CreateStreamTranslator() =>
-        new ToolCallNormalizingStreamTranslator(_plan, _capabilityStore, _logger);
+    /// <inheritdoc/>
+    public IStreamTranslator CreateStreamTranslator()
+    {
+        return new ToolCallNormalizingStreamTranslator(plan: Plan, capabilityStore: _capabilityStore, logger: _logger);
+    }
 
     /// <summary>
     /// Logs the fail-open warning when the content carried a region that looked like a tool call and
     /// yielded none - the schema-echo and malformed-body cases.
-    ///
     /// <para>
     /// The three messages here are deliberately the same three
     /// <see cref="ToolCallNormalizingStreamTranslator"/> emits, chosen by the same conditions, because a
@@ -187,14 +187,12 @@ internal sealed class ToolCallNormalizingTranslator : IResponseOnlyTranslator
     /// over: an opener with no closer is not framed, and a close-less dialect's opener appearing in prose
     /// is not a failed tool call at all.
     /// </para>
-    ///
     /// <para>
     /// A close-less dialect (Mistral's <c>[TOOL_CALLS]</c>, Llama's <c>&lt;|python_tag|&gt;</c>) owns the
     /// rest of the message by definition, so its opener alone proves nothing - a model naming the token
     /// while explaining tool calling would warn on every such response. It is reported only when a
     /// <c>{</c> follows, which is the cheapest available evidence that a payload was actually attempted.
     /// </para>
-    ///
     /// <para>
     /// Guarded by the same <see cref="string.IndexOfAny(char[])"/> pre-filter the scanner uses, so
     /// ordinary prose - nearly all output - costs one vectorized scan rather than a delimiter search per
@@ -203,56 +201,44 @@ internal sealed class ToolCallNormalizingTranslator : IResponseOnlyTranslator
     /// </summary>
     private void WarnIfARegionWentUnparsed(string content)
     {
-        if (content.IndexOfAny(_plan.OpenerFirstChars) < 0)
-        {
-            return;
-        }
+        if (content.IndexOfAny(Plan.OpenerFirstChars) < 0) return;
 
-        foreach (var dialect in _plan.Candidates)
+        foreach (var dialect in Plan.Candidates)
+        foreach (var delimiter in dialect.Delimiters)
         {
-            foreach (var delimiter in dialect.Delimiters)
+            var openIndex = content.IndexOf(value: delimiter.Open, comparisonType: StringComparison.Ordinal);
+            if (openIndex < 0) continue;
+
+            var bodyStart = openIndex + delimiter.Open.Length;
+
+            if (delimiter.Close is null)
             {
-                var openIndex = content.IndexOf(delimiter.Open, StringComparison.Ordinal);
-                if (openIndex < 0)
-                {
-                    continue;
-                }
+                // No payload was even attempted - keep looking, since another dialect may own a real
+                // region later in the same message.
+                if (content.IndexOf('{', startIndex: bodyStart) < 0) continue;
 
-                var bodyStart = openIndex + delimiter.Open.Length;
-
-                if (delimiter.Close is null)
-                {
-                    // No payload was even attempted - keep looking, since another dialect may own a real
-                    // region later in the same message.
-                    if (content.IndexOf('{', bodyStart) < 0)
-                    {
-                        continue;
-                    }
-
-                    _logger.LogWarning(
-                        "Tool-call normalization: the text after {OpenToken} did not contain a valid tool call; forwarding it as plain content.",
-                        delimiter.Open);
-                    return;
-                }
-
-                var closeIndex = content.IndexOf(delimiter.Close, bodyStart, StringComparison.Ordinal);
-                if (closeIndex < 0)
-                {
-                    _logger.LogWarning(
-                        "Tool-call normalization: the message ended with an unterminated {OpenToken} block; forwarding the raw text as plain content.",
-                        delimiter.Open);
-                }
-                else
-                {
-                    _logger.LogWarning(
-                        "Tool-call normalization: {OpenToken}...{CloseToken} did not contain a valid tool call; forwarding the raw text as plain content.",
-                        delimiter.Open,
-                        delimiter.Close);
-                }
-
+                _logger.LogWarning(
+                    message:
+                    "Tool-call normalization: the text after {OpenToken} did not contain a valid tool call; forwarding it as plain content.",
+                    delimiter.Open);
                 return;
             }
+
+            var closeIndex = content.IndexOf(value: delimiter.Close, startIndex: bodyStart,
+                comparisonType: StringComparison.Ordinal);
+            if (closeIndex < 0)
+                _logger.LogWarning(
+                    message:
+                    "Tool-call normalization: the message ended with an unterminated {OpenToken} block; forwarding the raw text as plain content.",
+                    delimiter.Open);
+            else
+                _logger.LogWarning(
+                    message:
+                    "Tool-call normalization: {OpenToken}...{CloseToken} did not contain a valid tool call; forwarding the raw text as plain content.",
+                    delimiter.Open,
+                    delimiter.Close);
+
+            return;
         }
     }
 }
-

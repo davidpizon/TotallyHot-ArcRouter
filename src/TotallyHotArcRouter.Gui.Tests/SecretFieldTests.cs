@@ -18,9 +18,9 @@ public sealed class SecretFieldTests
     [Fact]
     public void Unlocked_field_is_an_ordinary_readable_text_box()
     {
-        using var ctx = new Bunit.BunitContext();
+        using var ctx = new BunitContext();
 
-        var cut = Render(ctx, "hello", locked: false);
+        var cut = Render(ctx: ctx, value: "hello", false);
 
         var input = cut.Find($"[data-testid='{TestId}']");
         input.GetAttribute("type").Should().Be("text");
@@ -31,9 +31,9 @@ public sealed class SecretFieldTests
     [Fact]
     public void Locked_field_masks_its_value()
     {
-        using var ctx = new Bunit.BunitContext();
+        using var ctx = new BunitContext();
 
-        var cut = Render(ctx, "s3cret", locked: true);
+        var cut = Render(ctx: ctx, value: "s3cret", true);
 
         cut.Find($"[data-testid='{TestId}']").GetAttribute("type").Should().Be("password");
         cut.Find($"[data-testid='{TestId}-lock']").GetAttribute("data-tip").Should().Be(SecretField.LockedTip);
@@ -42,10 +42,10 @@ public sealed class SecretFieldTests
     [Fact]
     public void Typing_raises_ValueChanged()
     {
-        using var ctx = new Bunit.BunitContext();
+        using var ctx = new BunitContext();
 
         string? value = null;
-        var cut = Render(ctx, string.Empty, locked: false, onValueChanged: v => value = v);
+        var cut = Render(ctx: ctx, value: string.Empty, false, onValueChanged: v => value = v);
 
         cut.Find($"[data-testid='{TestId}']").Input("typed");
 
@@ -55,11 +55,12 @@ public sealed class SecretFieldTests
     [Fact]
     public void Locking_takes_one_click_and_keeps_the_value()
     {
-        using var ctx = new Bunit.BunitContext();
+        using var ctx = new BunitContext();
 
         bool? locked = null;
-        string? value = "hello";
-        var cut = Render(ctx, "hello", locked: false, onValueChanged: v => value = v, onLockedChanged: l => locked = l);
+        var value = "hello";
+        var cut = Render(ctx: ctx, value: "hello", false, onValueChanged: v => value = v,
+            onLockedChanged: l => locked = l);
 
         cut.Find($"[data-testid='{TestId}-lock']").Click();
 
@@ -70,11 +71,12 @@ public sealed class SecretFieldTests
     [Fact]
     public void Clicking_a_locked_padlock_opens_a_confirmation_dialog()
     {
-        using var ctx = new Bunit.BunitContext();
+        using var ctx = new BunitContext();
 
         bool? locked = null;
         string? value = null;
-        var cut = Render(ctx, "s3cret", locked: true, onValueChanged: v => value = v, onLockedChanged: l => locked = l);
+        var cut = Render(ctx: ctx, value: "s3cret", true, onValueChanged: v => value = v,
+            onLockedChanged: l => locked = l);
 
         cut.Find($"[data-testid='{TestId}-lock']").Click();
 
@@ -88,11 +90,12 @@ public sealed class SecretFieldTests
     [Fact]
     public void Cancelling_the_dialog_leaves_the_field_locked_and_unchanged()
     {
-        using var ctx = new Bunit.BunitContext();
+        using var ctx = new BunitContext();
 
         bool? locked = null;
         string? value = null;
-        var cut = Render(ctx, "s3cret", locked: true, onValueChanged: v => value = v, onLockedChanged: l => locked = l);
+        var cut = Render(ctx: ctx, value: "s3cret", true, onValueChanged: v => value = v,
+            onLockedChanged: l => locked = l);
 
         cut.Find($"[data-testid='{TestId}-lock']").Click();
         cut.Find($"[data-testid='{TestId}-cancel']").Click();
@@ -106,11 +109,12 @@ public sealed class SecretFieldTests
     [Fact]
     public void Confirming_the_dialog_clears_the_value_and_unlocks()
     {
-        using var ctx = new Bunit.BunitContext();
+        using var ctx = new BunitContext();
 
         bool? locked = null;
         string? value = null;
-        var cut = Render(ctx, "s3cret", locked: true, onValueChanged: v => value = v, onLockedChanged: l => locked = l);
+        var cut = Render(ctx: ctx, value: "s3cret", true, onValueChanged: v => value = v,
+            onLockedChanged: l => locked = l);
 
         cut.Find($"[data-testid='{TestId}-lock']").Click();
         cut.Find($"[data-testid='{TestId}-continue']").Click();
@@ -123,12 +127,12 @@ public sealed class SecretFieldTests
     [Fact]
     public void Disabled_field_disables_both_the_input_and_the_padlock()
     {
-        using var ctx = new Bunit.BunitContext();
+        using var ctx = new BunitContext();
 
         var cut = ctx.Render<SecretField>(p => p
-            .Add(x => x.Value, "hello")
-            .Add(x => x.TestId, TestId)
-            .Add(x => x.Disabled, true));
+            .Add(parameterSelector: x => x.Value, value: "hello")
+            .Add(parameterSelector: x => x.TestId, value: TestId)
+            .Add(parameterSelector: x => x.Disabled, true));
 
         cut.Find($"[data-testid='{TestId}']").HasAttribute("disabled").Should().BeTrue();
         cut.Find($"[data-testid='{TestId}-lock']").HasAttribute("disabled").Should().BeTrue();
@@ -137,32 +141,28 @@ public sealed class SecretFieldTests
     [Fact]
     public void Without_a_TestId_neither_element_carries_one()
     {
-        using var ctx = new Bunit.BunitContext();
+        using var ctx = new BunitContext();
 
-        var cut = ctx.Render<SecretField>(p => p.Add(x => x.Value, "hello"));
+        var cut = ctx.Render<SecretField>(p => p.Add(parameterSelector: x => x.Value, value: "hello"));
 
         cut.FindAll("[data-testid]").Should().BeEmpty();
     }
 
     private static IRenderedComponent<SecretField> Render(
-        Bunit.BunitContext ctx,
+        BunitContext ctx,
         string value,
         bool locked,
         Action<string>? onValueChanged = null,
-        Action<bool>? onLockedChanged = null) =>
-        ctx.Render<SecretField>(p =>
+        Action<bool>? onLockedChanged = null)
+    {
+        return ctx.Render<SecretField>(p =>
         {
-            p.Add(x => x.Value, value);
-            p.Add(x => x.Locked, locked);
-            p.Add(x => x.TestId, TestId);
-            if (onValueChanged is not null)
-            {
-                p.Add(x => x.ValueChanged, onValueChanged);
-            }
+            p.Add(parameterSelector: x => x.Value, value: value);
+            p.Add(parameterSelector: x => x.Locked, value: locked);
+            p.Add(parameterSelector: x => x.TestId, value: TestId);
+            if (onValueChanged is not null) p.Add(parameterSelector: x => x.ValueChanged, callback: onValueChanged);
 
-            if (onLockedChanged is not null)
-            {
-                p.Add(x => x.LockedChanged, onLockedChanged);
-            }
+            if (onLockedChanged is not null) p.Add(parameterSelector: x => x.LockedChanged, callback: onLockedChanged);
         });
+    }
 }

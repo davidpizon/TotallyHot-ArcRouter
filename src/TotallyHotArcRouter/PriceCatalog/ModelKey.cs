@@ -18,4 +18,3 @@ namespace TotallyHot.ArcRouter.PriceCatalog;
 /// </param>
 /// <param name="Provider">The <c>ModelRouting:Providers</c> key, e.g. <c>"openai"</c>.</param>
 public readonly record struct ModelKey(string ModelName, string Provider);
-

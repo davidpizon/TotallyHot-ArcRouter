@@ -23,9 +23,12 @@ public class ModelRoutingOptionsTests
         {
             Providers = new Dictionary<string, ProviderOptions>
             {
-                ["openai"] = new ProviderOptions { BaseUrl = "https://api.openai.com" }
+                ["openai"] = new() { BaseUrl = "https://api.openai.com" }
             },
-            ModelList = [new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "openai", ProviderModelId = "gpt-5.4" }]
+            ModelList =
+            [
+                new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "openai", ProviderModelId = "gpt-5.4" }
+            ]
         };
 
         options.EnsureValid();
@@ -37,7 +40,10 @@ public class ModelRoutingOptionsTests
         var options = new ModelRoutingOptions
         {
             Providers = new Dictionary<string, ProviderOptions>(),
-            ModelList = [new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "openai", ProviderModelId = "gpt-5.4" }]
+            ModelList =
+            [
+                new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "openai", ProviderModelId = "gpt-5.4" }
+            ]
         };
 
         Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
@@ -50,7 +56,7 @@ public class ModelRoutingOptionsTests
         {
             Providers = new Dictionary<string, ProviderOptions>
             {
-                ["openai"] = new ProviderOptions { BaseUrl = "https://api.openai.com" }
+                ["openai"] = new() { BaseUrl = "https://api.openai.com" }
             },
             ModelList =
             [
@@ -69,7 +75,7 @@ public class ModelRoutingOptionsTests
         {
             Providers = new Dictionary<string, ProviderOptions>
             {
-                ["openai"] = new ProviderOptions { BaseUrl = "not-a-url" }
+                ["openai"] = new() { BaseUrl = "not-a-url" }
             }
         };
 
@@ -83,7 +89,7 @@ public class ModelRoutingOptionsTests
         {
             Providers = new Dictionary<string, ProviderOptions>
             {
-                ["openai"] = new ProviderOptions { BaseUrl = "https://api.openai.com" }
+                ["openai"] = new() { BaseUrl = "https://api.openai.com" }
             },
             ModelList = [new ModelRouteEntry { ModelName = "", Provider = "openai", ProviderModelId = "gpt-5.4" }]
         };
@@ -98,12 +104,10 @@ public class ModelRoutingOptionsTests
         {
             Providers = new Dictionary<string, ProviderOptions>
             {
-                ["openai"] = new ProviderOptions { BaseUrl = "https://api.openai.com", AuthHeaderName = "" }
+                ["openai"] = new() { BaseUrl = "https://api.openai.com", AuthHeaderName = "" }
             }
         };
 
         Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
     }
-
 }
-

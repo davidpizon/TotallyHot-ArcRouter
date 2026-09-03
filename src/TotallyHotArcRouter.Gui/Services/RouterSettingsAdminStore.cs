@@ -14,12 +14,15 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 public sealed class RouterSettingsAdminStore : IDisposable
 {
     private readonly IRouterSettingsAdminClient _client;
-    private readonly IDisposable? _ownedClient;
     private readonly ILogger<RouterSettingsAdminStore>? _logger;
+    private readonly IDisposable? _ownedClient;
 
     /// <summary>Initializes a new instance of the <see cref="RouterSettingsAdminStore"/> class.</summary>
     /// <param name="logger">Optional logger.</param>
-    /// <param name="serverAddress">The proxy's TLS gRPC endpoint; defaults to <see cref="TelemetryChannelFactory.DefaultServerAddress"/>.</param>
+    /// <param name="serverAddress">
+    /// The proxy's TLS gRPC endpoint; defaults to
+    /// <see cref="TelemetryChannelFactory.DefaultServerAddress"/>.
+    /// </param>
     public RouterSettingsAdminStore(
         ILogger<RouterSettingsAdminStore>? logger = null,
         string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
@@ -59,6 +62,12 @@ public sealed class RouterSettingsAdminStore : IDisposable
     /// <summary>Whether a save is currently in flight, so the UI can disable the Save button.</summary>
     public bool IsSaving { get; private set; }
 
+    /// <inheritdoc/>
+    public void Dispose()
+    {
+        _ownedClient?.Dispose();
+    }
+
     /// <summary>Raised after any of the above change.</summary>
     public event Action? Changed;
 
@@ -79,7 +88,7 @@ public sealed class RouterSettingsAdminStore : IDisposable
         {
             IsReachable = !ex.IsUnavailable;
             LastError = ex.Message;
-            _logger?.LogWarning(ex, "Failed to load the router settings.");
+            _logger?.LogWarning(exception: ex, message: "Failed to load the router settings.");
         }
         finally
         {
@@ -114,7 +123,10 @@ public sealed class RouterSettingsAdminStore : IDisposable
         try
         {
             Settings = await _client
-                .UpdateAsync(adaptiveRoutingEnabled, embeddingMemoryCapacity, judgeEnabled, judgeModelName, transcriptCaptureEnabled, cancellationToken)
+                .UpdateAsync(adaptiveRoutingEnabled: adaptiveRoutingEnabled,
+                    embeddingMemoryCapacity: embeddingMemoryCapacity, judgeEnabled: judgeEnabled,
+                    judgeModelName: judgeModelName, transcriptCaptureEnabled: transcriptCaptureEnabled,
+                    cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             IsReachable = true;
             IsLoaded = true;
@@ -174,15 +186,9 @@ public sealed class RouterSettingsAdminStore : IDisposable
     private void RecordFailure(RouterSettingsAdminException ex)
     {
         LastError = ex.Message;
-        if (!ex.IsUnavailable)
-        {
-            return;
-        }
+        if (!ex.IsUnavailable) return;
 
         IsReachable = false;
-        _logger?.LogWarning(ex, "The router became unreachable while saving the router settings.");
+        _logger?.LogWarning(exception: ex, message: "The router became unreachable while saving the router settings.");
     }
-
-    /// <inheritdoc />
-    public void Dispose() => _ownedClient?.Dispose();
 }

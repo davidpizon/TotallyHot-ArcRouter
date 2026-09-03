@@ -21,16 +21,28 @@ namespace TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 /// </remarks>
 public sealed class OrchestratorArmBaseline : IRegretBaselineRouter
 {
-    /// <summary>The placeholder provider stamped on every synthetic <see cref="RoutingCandidate"/> this arm builds - CodeRouterBench model ids carry no real provider, and this value is applied identically on both the candidate and the voters' own canonicalization, so it is a no-op rather than a source of mismatches.</summary>
+    /// <summary>
+    /// The placeholder provider stamped on every synthetic <see cref="RoutingCandidate"/> this arm builds -
+    /// CodeRouterBench model ids carry no real provider, and this value is applied identically on both the candidate and the
+    /// voters' own canonicalization, so it is a no-op rather than a source of mismatches.
+    /// </summary>
     internal const string CandidateProvider = "coderouterbench";
 
-    private readonly OrchestratorRoutingPolicy _policy;
     private readonly IReadOnlyDictionary<string, float[]> _embeddingsByTaskId;
 
+    private readonly OrchestratorRoutingPolicy _policy;
+
     /// <summary>Initializes a new instance of the <see cref="OrchestratorArmBaseline"/> class.</summary>
-    /// <param name="policy">The isolated, offline-safe <see cref="OrchestratorRoutingPolicy"/> instance, e.g. from <see cref="OrchestratorArmFactory.Build"/>.</param>
-    /// <param name="embeddingsByTaskId">Precomputed embeddings keyed by task id - present only for tasks the split publishes text for (OOD). A task with no entry is voted on with a <see langword="null"/> embedding.</param>
-    public OrchestratorArmBaseline(OrchestratorRoutingPolicy policy, IReadOnlyDictionary<string, float[]> embeddingsByTaskId)
+    /// <param name="policy">
+    /// The isolated, offline-safe <see cref="OrchestratorRoutingPolicy"/> instance, e.g. from
+    /// <see cref="OrchestratorArmFactory.Build"/>.
+    /// </param>
+    /// <param name="embeddingsByTaskId">
+    /// Precomputed embeddings keyed by task id - present only for tasks the split publishes
+    /// text for (OOD). A task with no entry is voted on with a <see langword="null"/> embedding.
+    /// </param>
+    public OrchestratorArmBaseline(OrchestratorRoutingPolicy policy,
+        IReadOnlyDictionary<string, float[]> embeddingsByTaskId)
     {
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(embeddingsByTaskId);
@@ -39,10 +51,10 @@ public sealed class OrchestratorArmBaseline : IRegretBaselineRouter
         _embeddingsByTaskId = embeddingsByTaskId;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public string Name => "orchestrator";
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     /// <remarks>
     /// Returns <see langword="null"/> when every voter abstained - <see cref="OrchestratorRoutingPolicy.DecideAsync"/>
     /// then falls back to <see cref="Models.RoutingOptions.DefaultModel"/>, which is never one of this
@@ -55,13 +67,14 @@ public sealed class OrchestratorArmBaseline : IRegretBaselineRouter
         ArgumentNullException.ThrowIfNull(context);
 
         var candidates = context.CandidateModelIds
-            .Select(id => new RoutingCandidate(id, CandidateProvider, IsFree: false))
+            .Select(id => new RoutingCandidate(ModelName: id, Provider: CandidateProvider, false))
             .ToList();
-        var routingContext = new RoutingContext(context.Dimension, IsUtility: false, candidates);
+        var routingContext = new RoutingContext(Dimension: context.Dimension, false, Candidates: candidates);
 
-        var embedding = _embeddingsByTaskId.TryGetValue(context.TaskId, out var vector) ? vector : null;
+        var embedding = _embeddingsByTaskId.TryGetValue(key: context.TaskId, value: out var vector) ? vector : null;
 
-        var decision = _policy.DecideAsync(routingContext, embedding, context.TaskText, CancellationToken.None)
+        var decision = _policy.DecideAsync(context: routingContext, taskEmbedding: embedding,
+                taskText: context.TaskText, cancellationToken: CancellationToken.None)
             .GetAwaiter().GetResult();
 
         return context.CandidateModelIds.Contains(decision.SelectedModel) ? decision.SelectedModel : null;

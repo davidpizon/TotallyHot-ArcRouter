@@ -13,42 +13,51 @@ namespace TotallyHot.ArcRouter.Gui.Components;
 /// </summary>
 public partial class SettingsModal
 {
-    /// <summary>Invoked when the modal should close - clicking the backdrop, the X button, or confirming a destructive action.</summary>
-    [Parameter]
-    public EventCallback OnClose { get; set; }
-
-    /// <summary>The inclusive lower bound accepted for Sample Size, mirroring <c>RouterSettingsAdminGrpcService.MinEmbeddingMemoryCapacity</c>.</summary>
+    /// <summary>
+    /// The inclusive lower bound accepted for Sample Size, mirroring
+    /// <c>RouterSettingsAdminGrpcService.MinEmbeddingMemoryCapacity</c>.
+    /// </summary>
     private const int MinEmbeddingMemoryCapacity = 500;
 
-    /// <summary>The inclusive upper bound accepted for Sample Size, mirroring <c>RouterSettingsAdminGrpcService.MaxEmbeddingMemoryCapacity</c>.</summary>
+    /// <summary>
+    /// The inclusive upper bound accepted for Sample Size, mirroring
+    /// <c>RouterSettingsAdminGrpcService.MaxEmbeddingMemoryCapacity</c>.
+    /// </summary>
     private const int MaxEmbeddingMemoryCapacity = 50_000;
 
-    /// <summary>The Sample Size below which the warning icon/tooltip renders, matching <c>RoutingOptions</c>'s shipped default.</summary>
+    /// <summary>
+    /// The Sample Size below which the warning icon/tooltip renders, matching <c>RoutingOptions</c>'s shipped
+    /// default.
+    /// </summary>
     private const int RecommendedEmbeddingMemoryCapacity = 20_000;
 
     private string? _activeAction;
-    private string _confirmText = string.Empty;
-    private ElementReference _confirmInput;
-    private bool _focusPending;
-    private string _telemetryAddress = string.Empty;
-    private string _persistedTelemetryAddress = string.Empty;
-    private bool _telemetryAddressSaved;
     private bool _adaptiveRoutingEnabled;
+    private bool _clearTranscriptsFailed;
+    private string? _clearTranscriptsMessage;
+    private bool _clearingTranscripts;
+    private ElementReference _confirmInput;
+    private string _confirmText = string.Empty;
+    private bool _confirmingApply;
+    private bool _confirmingClearTranscripts;
+    private IReadOnlyList<string> _eligibleJudgeModels = [];
     private int _embeddingMemoryCapacity = RecommendedEmbeddingMemoryCapacity;
-    private string _sampleSizeText = RecommendedEmbeddingMemoryCapacity.ToString();
+    private bool _focusPending;
     private bool _judgeEnabled;
     private string _judgeModelName = string.Empty;
-    private IReadOnlyList<string> _eligibleJudgeModels = [];
-    private bool _transcriptCaptureEnabled;
-    private bool _confirmingClearTranscripts;
-    private bool _clearingTranscripts;
-    private string? _clearTranscriptsMessage;
-    private bool _clearTranscriptsFailed;
-    private bool _routerSettingsSaving;
+    private string _persistedTelemetryAddress = string.Empty;
     private string? _routerSettingsMessage;
     private bool _routerSettingsSaveFailed;
-    private bool _confirmingApply;
+    private bool _routerSettingsSaving;
+    private string _sampleSizeText = RecommendedEmbeddingMemoryCapacity.ToString();
+    private string _telemetryAddress = string.Empty;
+    private bool _telemetryAddressSaved;
+    private bool _transcriptCaptureEnabled;
     private string? _updateErrorMessage;
+
+    /// <summary>Invoked when the modal should close - clicking the backdrop, the X button, or confirming a destructive action.</summary>
+    [Parameter]
+    public EventCallback OnClose { get; set; }
 
     /// <summary>The exact word the operator must type to confirm the active destructive action.</summary>
     private string Required => _activeAction == "reset" ? "RESET" : "PURGE";
@@ -60,20 +69,22 @@ public partial class SettingsModal
     private bool HasTelemetryAddressChanged => _telemetryAddress != _persistedTelemetryAddress;
 
     /// <summary>Whether the telemetry address field holds a real, savable pending change.</summary>
-    private bool CanSaveTelemetryAddress => HasTelemetryAddressChanged && !string.IsNullOrWhiteSpace(_telemetryAddress.Trim());
+    private bool CanSaveTelemetryAddress =>
+        HasTelemetryAddressChanged && !string.IsNullOrWhiteSpace(_telemetryAddress.Trim());
 
     // Read off the live (possibly out-of-bounds or unparsable) text rather than the clamped
     // _embeddingMemoryCapacity, which only updates on blur/save - otherwise the warning would lag a full
     // keystroke behind what the operator actually typed.
     /// <summary>Whether the warning icon/tooltip should render for the Sample Size text as currently typed.</summary>
-    private bool ShowSampleSizeWarning => int.TryParse(_sampleSizeText, out var parsed) && parsed < RecommendedEmbeddingMemoryCapacity;
+    private bool ShowSampleSizeWarning => int.TryParse(s: _sampleSizeText, result: out var parsed) &&
+                                          parsed < RecommendedEmbeddingMemoryCapacity;
 
     /// <summary>
     /// The footer's Router half: the version reported by the Router that answered the most recent status
     /// poll, or "Router unknown" when none did.
     /// </summary>
     /// <remarks>
-    /// Gated on <see cref="UpdateStore.IsReachable"/> rather than merely on a non-null Status, because
+    /// Gated on <see cref="Services.UpdateStore.IsReachable"/> rather than merely on a non-null Status, because
     /// <see cref="UpdateStore"/> is an app-lifetime singleton that keeps its last successful status when
     /// a later poll fails. Reading Status alone would therefore keep displaying the version of a Router
     /// that has since stopped, which is precisely the case this label exists to make visible. A blank
@@ -86,6 +97,12 @@ public partial class SettingsModal
             : "Router unknown";
 
     /// <inheritdoc/>
+    public void Dispose()
+    {
+        UpdateStore.Changed -= OnUpdateStoreChanged;
+    }
+
+    /// <inheritdoc/>
     protected override async Task OnInitializedAsync()
     {
         var loadedAddress = SettingsStore.Load().TelemetryServerAddress;
@@ -96,10 +113,7 @@ public partial class SettingsModal
         await UpdateStore.LoadAsync();
 
         await RouterSettingsStore.LoadAsync();
-        if (RouterSettingsStore.Settings is { } settings)
-        {
-            ApplyRouterSettings(settings);
-        }
+        if (RouterSettingsStore.Settings is { } settings) ApplyRouterSettings(settings);
     }
 
     // Shared by the initial load and every instant save's post-mutation refresh (success re-syncs to the
@@ -118,9 +132,10 @@ public partial class SettingsModal
         // A stored pick that is no longer eligible is shown as Automatic rather than as a phantom
         // option: that is what the selector will actually do at call time, and re-offering the dead
         // name would let the operator "save" a choice the server would now reject.
-        _judgeModelName = _eligibleJudgeModels.Contains(settings.JudgeModelName, StringComparer.OrdinalIgnoreCase)
-            ? settings.JudgeModelName
-            : string.Empty;
+        _judgeModelName =
+            _eligibleJudgeModels.Contains(value: settings.JudgeModelName, comparer: StringComparer.OrdinalIgnoreCase)
+                ? settings.JudgeModelName
+                : string.Empty;
     }
 
     /// <summary>Updates the address field and clears any stale "Saved" confirmation from a previous save.</summary>
@@ -134,10 +149,7 @@ public partial class SettingsModal
     private void SaveTelemetryAddress()
     {
         var trimmed = _telemetryAddress.Trim();
-        if (string.IsNullOrWhiteSpace(trimmed))
-        {
-            return;
-        }
+        if (string.IsNullOrWhiteSpace(trimmed)) return;
 
         _telemetryAddress = trimmed;
         _persistedTelemetryAddress = trimmed;
@@ -240,16 +252,17 @@ public partial class SettingsModal
     /// </summary>
     private void ClampSampleSize()
     {
-        if (int.TryParse(_sampleSizeText, out var parsed))
-        {
-            _embeddingMemoryCapacity = parsed;
-        }
+        if (int.TryParse(s: _sampleSizeText, result: out var parsed)) _embeddingMemoryCapacity = parsed;
 
-        _embeddingMemoryCapacity = Math.Clamp(_embeddingMemoryCapacity, MinEmbeddingMemoryCapacity, MaxEmbeddingMemoryCapacity);
+        _embeddingMemoryCapacity = Math.Clamp(value: _embeddingMemoryCapacity, min: MinEmbeddingMemoryCapacity,
+            max: MaxEmbeddingMemoryCapacity);
         _sampleSizeText = _embeddingMemoryCapacity.ToString();
     }
 
-    /// <summary>Clears the router settings' save outcome message, e.g. because the operator edited a field after a prior save attempt.</summary>
+    /// <summary>
+    /// Clears the router settings' save outcome message, e.g. because the operator edited a field after a prior save
+    /// attempt.
+    /// </summary>
     private void ClearRouterSettingsMessage()
     {
         _routerSettingsMessage = null;
@@ -264,28 +277,28 @@ public partial class SettingsModal
     // Reads the outcome off RouterSettingsAdminStore's own IsReachable/LastError rather than recomputing a
     // message from the caught exception - the store already resolved unreachable-vs-rejected via
     // IRouterSettingsAdminClient's isUnavailable flag, so recomputing it here would just duplicate that logic.
-    /// <summary>Persists the adaptive-routing and shadow-judge settings through <see cref="RouterSettingsAdminStore"/> immediately.</summary>
+    /// <summary>
+    /// Persists the adaptive-routing and shadow-judge settings through <see cref="RouterSettingsAdminStore"/>
+    /// immediately.
+    /// </summary>
     private async Task SaveRouterSettingsNow()
     {
         _routerSettingsSaving = true;
         try
         {
             await RouterSettingsStore.UpdateAsync(
-                _adaptiveRoutingEnabled,
-                _embeddingMemoryCapacity,
-                _judgeEnabled,
-                _judgeModelName,
-                _transcriptCaptureEnabled);
+                adaptiveRoutingEnabled: _adaptiveRoutingEnabled,
+                embeddingMemoryCapacity: _embeddingMemoryCapacity,
+                judgeEnabled: _judgeEnabled,
+                judgeModelName: _judgeModelName,
+                transcriptCaptureEnabled: _transcriptCaptureEnabled);
             _routerSettingsMessage = "Saved";
             _routerSettingsSaveFailed = false;
 
             // The server is now the single source of truth for what actually took effect (it recomputes the
             // eligible judge-model list too), so resync the whole form to its response rather than only the
             // list, the way the pre-instant-save footer button used to.
-            if (RouterSettingsStore.Settings is { } saved)
-            {
-                ApplyRouterSettings(saved);
-            }
+            if (RouterSettingsStore.Settings is { } saved) ApplyRouterSettings(saved);
         }
         catch (RouterSettingsAdminException)
         {
@@ -296,10 +309,7 @@ public partial class SettingsModal
 
             // The edit never took effect, so roll the form back to whatever last actually saved - otherwise
             // the toggle would keep showing a state the router never received.
-            if (RouterSettingsStore.Settings is { } lastGood)
-            {
-                ApplyRouterSettings(lastGood);
-            }
+            if (RouterSettingsStore.Settings is { } lastGood) ApplyRouterSettings(lastGood);
         }
         finally
         {
@@ -330,16 +340,10 @@ public partial class SettingsModal
     /// <summary>Runs the confirmed destructive action (Reset Stats or Clear History), then closes the modal.</summary>
     private async Task ExecuteAction()
     {
-        if (!IsConfirmed)
-        {
-            return;
-        }
+        if (!IsConfirmed) return;
 
         LiveDataStore.ClearEvents();
-        if (_activeAction == "purge")
-        {
-            LiveDataStore.ClearLogLines();
-        }
+        if (_activeAction == "purge") LiveDataStore.ClearLogLines();
 
         CancelAction();
         await OnClose.InvokeAsync();
@@ -356,7 +360,10 @@ public partial class SettingsModal
     }
 
     /// <summary>Re-renders when <see cref="UpdateStore"/> publishes a state change (a load, check, or apply completing).</summary>
-    private void OnUpdateStoreChanged() => InvokeAsync(StateHasChanged);
+    private void OnUpdateStoreChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
 
     /// <summary>Forces an immediate update check via the "Check Now" button.</summary>
     private async Task CheckForUpdatesNow()
@@ -395,7 +402,4 @@ public partial class SettingsModal
             _updateErrorMessage = ex.Message;
         }
     }
-
-    /// <inheritdoc />
-    public void Dispose() => UpdateStore.Changed -= OnUpdateStoreChanged;
 }

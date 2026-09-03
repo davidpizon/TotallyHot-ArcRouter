@@ -1,10 +1,11 @@
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging;
-using Moq;
 using System.Net;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
+using Moq;
+using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Translation;
 using TotallyHot.ArcRouter.Telemetry;
@@ -27,27 +28,31 @@ public class AnthropicProviderTests
     private const string AnthropicBaseUrl = "https://api.anthropic.com";
     private const string AnthropicApiKey = "test-anthropic-key";
 
-    private static IModelRouteResolver AnthropicResolver() => ModelRouteResolverTestFactory.Create(
-        modelName: "claude-sonnet-5",
-        providerModelId: "claude-sonnet-5",
-        baseUrl: AnthropicBaseUrl,
-        authHeaderName: "x-api-key",
-        authHeaderScheme: string.Empty,
-        apiKey: AnthropicApiKey,
-        providerName: "anthropic");
+    private static IModelRouteResolver AnthropicResolver()
+    {
+        return ModelRouteResolverTestFactory.Create(
+            modelName: "claude-sonnet-5",
+            providerModelId: "claude-sonnet-5",
+            baseUrl: AnthropicBaseUrl,
+            authHeaderName: "x-api-key",
+            authHeaderScheme: string.Empty,
+            apiKey: AnthropicApiKey,
+            providerName: "anthropic");
+    }
 
     private static ProxyMiddleware BuildMiddleware(HttpMessageHandler handler, ITelemetryPublisher? telemetry = null)
     {
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), AnthropicResolver());
+        var interceptor = new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: AnthropicResolver());
         var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
         {
-            ["anthropic"] = new AnthropicPayloadTranslator(),
+            ["anthropic"] = new AnthropicPayloadTranslator()
         };
 
         return new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(),
-            interceptor,
-            new HttpClient(handler),
+            logger: Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 TelemetryPublisher = telemetry,
@@ -73,7 +78,7 @@ public class AnthropicProviderTests
     private static string ReadResponse(DefaultHttpContext context)
     {
         context.Response.Body.Position = 0;
-        using var reader = new StreamReader(context.Response.Body, Encoding.UTF8);
+        using var reader = new StreamReader(stream: context.Response.Body, encoding: Encoding.UTF8);
         return reader.ReadToEnd();
     }
 
@@ -87,16 +92,16 @@ public class AnthropicProviderTests
         Uri? forwardedUri = null;
 
         const string nativeAnthropicResponse = """
-            {
-              "id": "msg_01",
-              "type": "message",
-              "role": "assistant",
-              "model": "claude-sonnet-5",
-              "content": [ { "type": "text", "text": "native response" } ],
-              "stop_reason": "end_turn",
-              "usage": { "input_tokens": 10, "output_tokens": 5 }
-            }
-            """;
+                                               {
+                                                 "id": "msg_01",
+                                                 "type": "message",
+                                                 "role": "assistant",
+                                                 "model": "claude-sonnet-5",
+                                                 "content": [ { "type": "text", "text": "native response" } ],
+                                                 "stop_reason": "end_turn",
+                                                 "usage": { "input_tokens": 10, "output_tokens": 5 }
+                                               }
+                                               """;
 
         var handler = new DelegatingHandlerStub(async request =>
         {
@@ -104,31 +109,34 @@ public class AnthropicProviderTests
             forwardedBody = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(nativeAnthropicResponse, Encoding.UTF8, "application/json"),
+                Content = new StringContent(content: nativeAnthropicResponse, encoding: Encoding.UTF8,
+                    mediaType: "application/json")
             };
         });
 
         var middleware = BuildMiddleware(handler);
         const string nativeRequestBody = """
-            {"model":"claude-sonnet-5","system":"be brief","messages":[{"role":"user","content":"hi"}],"max_tokens":1024}
-            """;
-        var context = BuildContext("/v1/messages", nativeRequestBody);
+                                         {"model":"claude-sonnet-5","system":"be brief","messages":[{"role":"user","content":"hi"}],"max_tokens":1024}
+                                         """;
+        var context = BuildContext(requestPath: "/v1/messages", requestBody: nativeRequestBody);
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal("https://api.anthropic.com/v1/messages", forwardedUri!.ToString());
+        Assert.Equal(expected: "https://api.anthropic.com/v1/messages", actual: forwardedUri!.ToString());
 
         // The forwarded body is byte-for-byte the same JSON shape the client sent - not re-encoded by a
         // translator (RequestInterceptor only rewrites "model"; nothing else is touched).
-        Assert.Equal("be brief", forwardedBody!.RootElement.GetProperty("system").GetString());
-        Assert.False(forwardedBody.RootElement.TryGetProperty("stream", out _));
+        Assert.Equal(expected: "be brief", actual: forwardedBody!.RootElement.GetProperty("system").GetString());
+        Assert.False(forwardedBody.RootElement.TryGetProperty(propertyName: "stream", value: out _));
 
         // The response reaching the client is Anthropic's own native shape, not translated to OpenAI's.
         var responseBody = ReadResponse(context);
         using var response = JsonDocument.Parse(responseBody);
-        Assert.Equal("message", response.RootElement.GetProperty("type").GetString());
-        Assert.Equal("native response", response.RootElement.GetProperty("content")[0].GetProperty("text").GetString());
-        Assert.False(response.RootElement.TryGetProperty("choices", out _), "A native passthrough response must not be OpenAI-shaped.");
+        Assert.Equal(expected: "message", actual: response.RootElement.GetProperty("type").GetString());
+        Assert.Equal(expected: "native response",
+            actual: response.RootElement.GetProperty("content")[0].GetProperty("text").GetString());
+        Assert.False(condition: response.RootElement.TryGetProperty(propertyName: "choices", value: out _),
+            userMessage: "A native passthrough response must not be OpenAI-shaped.");
     }
 
     [Fact]
@@ -141,61 +149,68 @@ public class AnthropicProviderTests
         var handler = new DelegatingHandlerStub(async request =>
         {
             forwardedUri = request.RequestUri;
-            authHeader = request.Headers.TryGetValues("x-api-key", out var values) ? values.First() : null;
+            authHeader = request.Headers.TryGetValues(name: "x-api-key", values: out var values)
+                ? values.First()
+                : null;
             forwardedBody = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
 
             const string anthropicResponse = """
-                {
-                  "id": "msg_01ABC",
-                  "type": "message",
-                  "role": "assistant",
-                  "model": "claude-sonnet-5",
-                  "content": [ { "type": "text", "text": "Hello from Claude." } ],
-                  "stop_reason": "end_turn",
-                  "usage": { "input_tokens": 8, "output_tokens": 4 }
-                }
-                """;
+                                             {
+                                               "id": "msg_01ABC",
+                                               "type": "message",
+                                               "role": "assistant",
+                                               "model": "claude-sonnet-5",
+                                               "content": [ { "type": "text", "text": "Hello from Claude." } ],
+                                               "stop_reason": "end_turn",
+                                               "usage": { "input_tokens": 8, "output_tokens": 4 }
+                                             }
+                                             """;
 
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(anthropicResponse, Encoding.UTF8, "application/json"),
+                Content = new StringContent(content: anthropicResponse, encoding: Encoding.UTF8,
+                    mediaType: "application/json")
             };
         });
 
         var capturing = new CapturingTelemetryPublisher();
-        var middleware = BuildMiddleware(handler, capturing);
+        var middleware = BuildMiddleware(handler: handler, telemetry: capturing);
 
-        var context = BuildContext("/v1/chat/completions", """
-            {"model":"claude-sonnet-5","messages":[{"role":"system","content":"be brief"},{"role":"user","content":"hi"}]}
-            """);
+        var context = BuildContext(requestPath: "/v1/chat/completions", """
+                                                                        {"model":"claude-sonnet-5","messages":[{"role":"system","content":"be brief"},{"role":"user","content":"hi"}]}
+                                                                        """);
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
         // --- Request was translated to Anthropic's URL + shape ---
-        Assert.Equal("https://api.anthropic.com/v1/messages", forwardedUri!.ToString());
-        Assert.Equal(AnthropicApiKey, authHeader);
+        Assert.Equal(expected: "https://api.anthropic.com/v1/messages", actual: forwardedUri!.ToString());
+        Assert.Equal(expected: AnthropicApiKey, actual: authHeader);
 
         var root = forwardedBody!.RootElement;
-        Assert.False(root.TryGetProperty("messages", out var messagesCheck) && messagesCheck.EnumerateArray().Any(m => m.TryGetProperty("role", out var r) && r.GetString() == "system"),
-            "A 'system' role message must not leak into Anthropic's messages array.");
-        Assert.Equal("be brief", root.GetProperty("system").GetString());
-        Assert.Equal(4096, root.GetProperty("max_tokens").GetInt32());
+        Assert.False(
+            condition: root.TryGetProperty(propertyName: "messages", value: out var messagesCheck) && messagesCheck
+                .EnumerateArray().Any(m =>
+                    m.TryGetProperty(propertyName: "role", value: out var r) && r.GetString() == "system"),
+            userMessage: "A 'system' role message must not leak into Anthropic's messages array.");
+        Assert.Equal(expected: "be brief", actual: root.GetProperty("system").GetString());
+        Assert.Equal(4096, actual: root.GetProperty("max_tokens").GetInt32());
         var messages = root.GetProperty("messages");
-        Assert.Equal("user", messages[0].GetProperty("role").GetString());
-        Assert.Equal("hi", messages[0].GetProperty("content")[0].GetProperty("text").GetString());
+        Assert.Equal(expected: "user", actual: messages[0].GetProperty("role").GetString());
+        Assert.Equal(expected: "hi", actual: messages[0].GetProperty("content")[0].GetProperty("text").GetString());
 
         // --- Response was translated back to OpenAI's shape ---
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
         using var openAi = JsonDocument.Parse(ReadResponse(context));
         var choice = openAi.RootElement.GetProperty("choices")[0];
-        Assert.Equal("Hello from Claude.", choice.GetProperty("message").GetProperty("content").GetString());
-        Assert.Equal("stop", choice.GetProperty("finish_reason").GetString());
-        Assert.Equal("chat.completion", openAi.RootElement.GetProperty("object").GetString());
+        Assert.Equal(expected: "Hello from Claude.",
+            actual: choice.GetProperty("message").GetProperty("content").GetString());
+        Assert.Equal(expected: "stop", actual: choice.GetProperty("finish_reason").GetString());
+        Assert.Equal(expected: "chat.completion", actual: openAi.RootElement.GetProperty("object").GetString());
 
         // --- Usage was parsed via the OpenAI-shaped translated buffer (telemetryShapeProvider="openai") ---
         var published = await capturing.WaitForEventAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(8, published.PromptTokens);
-        Assert.Equal(4, published.CompletionTokens);
+        Assert.Equal(8, actual: published.PromptTokens);
+        Assert.Equal(4, actual: published.CompletionTokens);
     }
 
     [Fact]
@@ -208,43 +223,48 @@ public class AnthropicProviderTests
             forwardedBody = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
 
             const string anthropicResponse = """
-                {
-                  "id": "msg_02",
-                  "type": "message",
-                  "role": "assistant",
-                  "model": "claude-sonnet-5",
-                  "content": [ { "type": "tool_use", "id": "toolu_01", "name": "get_weather", "input": { "city": "SF" } } ],
-                  "stop_reason": "tool_use",
-                  "usage": { "input_tokens": 20, "output_tokens": 6 }
-                }
-                """;
+                                             {
+                                               "id": "msg_02",
+                                               "type": "message",
+                                               "role": "assistant",
+                                               "model": "claude-sonnet-5",
+                                               "content": [ { "type": "tool_use", "id": "toolu_01", "name": "get_weather", "input": { "city": "SF" } } ],
+                                               "stop_reason": "tool_use",
+                                               "usage": { "input_tokens": 20, "output_tokens": 6 }
+                                             }
+                                             """;
 
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(anthropicResponse, Encoding.UTF8, "application/json"),
+                Content = new StringContent(content: anthropicResponse, encoding: Encoding.UTF8,
+                    mediaType: "application/json")
             };
         });
 
         var middleware = BuildMiddleware(handler);
-        var context = BuildContext("/v1/chat/completions", """
-            {"model":"claude-sonnet-5","messages":[{"role":"user","content":"weather in SF?"}],"tools":[{"type":"function","function":{"name":"get_weather","description":"Get weather","parameters":{"type":"object","properties":{"city":{"type":"string"}}}}}]}
-            """);
+        var context = BuildContext(requestPath: "/v1/chat/completions", """
+                                                                        {"model":"claude-sonnet-5","messages":[{"role":"user","content":"weather in SF?"}],"tools":[{"type":"function","function":{"name":"get_weather","description":"Get weather","parameters":{"type":"object","properties":{"city":{"type":"string"}}}}}]}
+                                                                        """);
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
         // OpenAI tools -> Anthropic {name, description, input_schema}.
         var tool = forwardedBody!.RootElement.GetProperty("tools")[0];
-        Assert.Equal("get_weather", tool.GetProperty("name").GetString());
-        Assert.Equal("string", tool.GetProperty("input_schema").GetProperty("properties").GetProperty("city").GetProperty("type").GetString());
+        Assert.Equal(expected: "get_weather", actual: tool.GetProperty("name").GetString());
+        Assert.Equal(expected: "string",
+            actual: tool.GetProperty("input_schema").GetProperty("properties").GetProperty("city").GetProperty("type")
+                .GetString());
 
         // Anthropic tool_use -> OpenAI tool_calls, finish_reason tool_calls, id preserved for round trip.
         using var openAi = JsonDocument.Parse(ReadResponse(context));
         var message = openAi.RootElement.GetProperty("choices")[0].GetProperty("message");
         var toolCall = message.GetProperty("tool_calls")[0];
-        Assert.Equal("toolu_01", toolCall.GetProperty("id").GetString());
-        Assert.Equal("get_weather", toolCall.GetProperty("function").GetProperty("name").GetString());
-        Assert.Contains("SF", toolCall.GetProperty("function").GetProperty("arguments").GetString());
-        Assert.Equal("tool_calls", openAi.RootElement.GetProperty("choices")[0].GetProperty("finish_reason").GetString());
+        Assert.Equal(expected: "toolu_01", actual: toolCall.GetProperty("id").GetString());
+        Assert.Equal(expected: "get_weather", actual: toolCall.GetProperty("function").GetProperty("name").GetString());
+        Assert.Contains(expectedSubstring: "SF",
+            actualString: toolCall.GetProperty("function").GetProperty("arguments").GetString());
+        Assert.Equal(expected: "tool_calls",
+            actual: openAi.RootElement.GetProperty("choices")[0].GetProperty("finish_reason").GetString());
     }
 
     [Fact]
@@ -252,31 +272,31 @@ public class AnthropicProviderTests
     {
         var translator = new AnthropicPayloadTranslator();
         var translated = translator.TranslateRequest(Encoding.UTF8.GetBytes("""
-            {"model":"claude-sonnet-5","messages":[
-                {"role":"user","content":"weather in SF?"},
-                {"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"SF\"}"}}]},
-                {"role":"tool","tool_call_id":"call_1","content":"72F and sunny"}
-            ]}
-            """));
+                                                                            {"model":"claude-sonnet-5","messages":[
+                                                                                {"role":"user","content":"weather in SF?"},
+                                                                                {"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"SF\"}"}}]},
+                                                                                {"role":"tool","tool_call_id":"call_1","content":"72F and sunny"}
+                                                                            ]}
+                                                                            """));
 
         using var json = JsonDocument.Parse(translated);
         var messages = json.RootElement.GetProperty("messages");
 
         // assistant turn: tool_use block with the OpenAI tool_call's id preserved.
         var assistantTurn = messages[1];
-        Assert.Equal("assistant", assistantTurn.GetProperty("role").GetString());
+        Assert.Equal(expected: "assistant", actual: assistantTurn.GetProperty("role").GetString());
         var toolUse = assistantTurn.GetProperty("content")[0];
-        Assert.Equal("tool_use", toolUse.GetProperty("type").GetString());
-        Assert.Equal("call_1", toolUse.GetProperty("id").GetString());
-        Assert.Equal("SF", toolUse.GetProperty("input").GetProperty("city").GetString());
+        Assert.Equal(expected: "tool_use", actual: toolUse.GetProperty("type").GetString());
+        Assert.Equal(expected: "call_1", actual: toolUse.GetProperty("id").GetString());
+        Assert.Equal(expected: "SF", actual: toolUse.GetProperty("input").GetProperty("city").GetString());
 
         // tool result -> a user-role tool_result block referencing the same id.
         var toolResultTurn = messages[2];
-        Assert.Equal("user", toolResultTurn.GetProperty("role").GetString());
+        Assert.Equal(expected: "user", actual: toolResultTurn.GetProperty("role").GetString());
         var toolResultBlock = toolResultTurn.GetProperty("content")[0];
-        Assert.Equal("tool_result", toolResultBlock.GetProperty("type").GetString());
-        Assert.Equal("call_1", toolResultBlock.GetProperty("tool_use_id").GetString());
-        Assert.Equal("72F and sunny", toolResultBlock.GetProperty("content").GetString());
+        Assert.Equal(expected: "tool_result", actual: toolResultBlock.GetProperty("type").GetString());
+        Assert.Equal(expected: "call_1", actual: toolResultBlock.GetProperty("tool_use_id").GetString());
+        Assert.Equal(expected: "72F and sunny", actual: toolResultBlock.GetProperty("content").GetString());
     }
 
     [Fact]
@@ -288,24 +308,25 @@ public class AnthropicProviderTests
         // to a plain text block instead.
         var translator = new AnthropicPayloadTranslator();
         var translated = translator.TranslateRequest(Encoding.UTF8.GetBytes("""
-            {"model":"claude-sonnet-5","messages":[
-                {"role":"user","content":"weather in SF?"},
-                {"role":"function","name":"get_weather","content":"72F and sunny"}
-            ]}
-            """));
+                                                                            {"model":"claude-sonnet-5","messages":[
+                                                                                {"role":"user","content":"weather in SF?"},
+                                                                                {"role":"function","name":"get_weather","content":"72F and sunny"}
+                                                                            ]}
+                                                                            """));
 
         using var json = JsonDocument.Parse(translated);
         var messages = json.RootElement.GetProperty("messages");
 
         // Both messages map to Anthropic's "user" role and are consecutive, so they merge into one turn
         // (Anthropic's alternation requirement) - the fallback block is the second content block on it.
-        Assert.Equal(1, messages.GetArrayLength());
+        Assert.Equal(1, actual: messages.GetArrayLength());
         var turn = messages[0];
-        Assert.Equal("user", turn.GetProperty("role").GetString());
+        Assert.Equal(expected: "user", actual: turn.GetProperty("role").GetString());
         var block = turn.GetProperty("content")[1];
-        Assert.Equal("text", block.GetProperty("type").GetString());
-        Assert.False(block.TryGetProperty("tool_use_id", out _), "A fallback block must not claim a tool-result linkage that doesn't exist.");
-        Assert.Contains("72F and sunny", block.GetProperty("text").GetString());
+        Assert.Equal(expected: "text", actual: block.GetProperty("type").GetString());
+        Assert.False(condition: block.TryGetProperty(propertyName: "tool_use_id", value: out _),
+            userMessage: "A fallback block must not claim a tool-result linkage that doesn't exist.");
+        Assert.Contains(expectedSubstring: "72F and sunny", actualString: block.GetProperty("text").GetString());
     }
 
     [Fact]
@@ -313,27 +334,28 @@ public class AnthropicProviderTests
     {
         var translator = new AnthropicPayloadTranslator();
         const string anthropicResponse = """
-            {
-              "id": "msg_03",
-              "model": "claude-sonnet-5",
-              "content": [
-                { "type": "thinking", "thinking": "Let me work through this.", "signature": "sig-abc" },
-                { "type": "text", "text": "The answer is 4." }
-              ],
-              "stop_reason": "end_turn",
-              "usage": { "input_tokens": 5, "output_tokens": 9 }
-            }
-            """;
+                                         {
+                                           "id": "msg_03",
+                                           "model": "claude-sonnet-5",
+                                           "content": [
+                                             { "type": "thinking", "thinking": "Let me work through this.", "signature": "sig-abc" },
+                                             { "type": "text", "text": "The answer is 4." }
+                                           ],
+                                           "stop_reason": "end_turn",
+                                           "usage": { "input_tokens": 5, "output_tokens": 9 }
+                                         }
+                                         """;
 
         var translated = translator.TranslateResponse(Encoding.UTF8.GetBytes(anthropicResponse));
         using var json = JsonDocument.Parse(translated);
         var message = json.RootElement.GetProperty("choices")[0].GetProperty("message");
 
-        Assert.Equal("Let me work through this.", message.GetProperty("reasoning_content").GetString());
-        Assert.Equal("The answer is 4.", message.GetProperty("content").GetString());
+        Assert.Equal(expected: "Let me work through this.",
+            actual: message.GetProperty("reasoning_content").GetString());
+        Assert.Equal(expected: "The answer is 4.", actual: message.GetProperty("content").GetString());
         var thinkingBlock = message.GetProperty("thinking_blocks")[0];
-        Assert.Equal("thinking", thinkingBlock.GetProperty("type").GetString());
-        Assert.Equal("sig-abc", thinkingBlock.GetProperty("signature").GetString());
+        Assert.Equal(expected: "thinking", actual: thinkingBlock.GetProperty("type").GetString());
+        Assert.Equal(expected: "sig-abc", actual: thinkingBlock.GetProperty("signature").GetString());
     }
 
     [Fact]
@@ -344,25 +366,25 @@ public class AnthropicProviderTests
         // out and the raw Anthropic components riding along as extension fields.
         var translator = new AnthropicPayloadTranslator();
         const string anthropicResponse = """
-            {
-              "id": "msg_07",
-              "model": "claude-sonnet-5",
-              "content": [ { "type": "text", "text": "hi" } ],
-              "stop_reason": "end_turn",
-              "usage": { "input_tokens": 50, "output_tokens": 10, "cache_creation_input_tokens": 30, "cache_read_input_tokens": 200 }
-            }
-            """;
+                                         {
+                                           "id": "msg_07",
+                                           "model": "claude-sonnet-5",
+                                           "content": [ { "type": "text", "text": "hi" } ],
+                                           "stop_reason": "end_turn",
+                                           "usage": { "input_tokens": 50, "output_tokens": 10, "cache_creation_input_tokens": 30, "cache_read_input_tokens": 200 }
+                                         }
+                                         """;
 
         var translated = translator.TranslateResponse(Encoding.UTF8.GetBytes(anthropicResponse));
         using var json = JsonDocument.Parse(translated);
         var usage = json.RootElement.GetProperty("usage");
 
-        Assert.Equal(280, usage.GetProperty("prompt_tokens").GetInt32());
-        Assert.Equal(10, usage.GetProperty("completion_tokens").GetInt32());
-        Assert.Equal(290, usage.GetProperty("total_tokens").GetInt32());
-        Assert.Equal(200, usage.GetProperty("prompt_tokens_details").GetProperty("cached_tokens").GetInt32());
-        Assert.Equal(30, usage.GetProperty("cache_creation_input_tokens").GetInt32());
-        Assert.Equal(200, usage.GetProperty("cache_read_input_tokens").GetInt32());
+        Assert.Equal(280, actual: usage.GetProperty("prompt_tokens").GetInt32());
+        Assert.Equal(10, actual: usage.GetProperty("completion_tokens").GetInt32());
+        Assert.Equal(290, actual: usage.GetProperty("total_tokens").GetInt32());
+        Assert.Equal(200, actual: usage.GetProperty("prompt_tokens_details").GetProperty("cached_tokens").GetInt32());
+        Assert.Equal(30, actual: usage.GetProperty("cache_creation_input_tokens").GetInt32());
+        Assert.Equal(200, actual: usage.GetProperty("cache_read_input_tokens").GetInt32());
     }
 
     [Fact]
@@ -370,40 +392,40 @@ public class AnthropicProviderTests
     {
         var translator = new AnthropicPayloadTranslator();
         const string anthropicResponse = """
-            {
-              "id": "msg_08",
-              "model": "claude-sonnet-5",
-              "content": [ { "type": "text", "text": "hi" } ],
-              "stop_reason": "end_turn",
-              "usage": { "input_tokens": 8, "output_tokens": 4 }
-            }
-            """;
+                                         {
+                                           "id": "msg_08",
+                                           "model": "claude-sonnet-5",
+                                           "content": [ { "type": "text", "text": "hi" } ],
+                                           "stop_reason": "end_turn",
+                                           "usage": { "input_tokens": 8, "output_tokens": 4 }
+                                         }
+                                         """;
 
         var translated = translator.TranslateResponse(Encoding.UTF8.GetBytes(anthropicResponse));
         using var json = JsonDocument.Parse(translated);
         var usage = json.RootElement.GetProperty("usage");
 
-        Assert.Equal(8, usage.GetProperty("prompt_tokens").GetInt32());
-        Assert.Equal(4, usage.GetProperty("completion_tokens").GetInt32());
-        Assert.Equal(12, usage.GetProperty("total_tokens").GetInt32());
-        Assert.False(usage.TryGetProperty("prompt_tokens_details", out _));
-        Assert.False(usage.TryGetProperty("cache_creation_input_tokens", out _));
-        Assert.False(usage.TryGetProperty("cache_read_input_tokens", out _));
+        Assert.Equal(8, actual: usage.GetProperty("prompt_tokens").GetInt32());
+        Assert.Equal(4, actual: usage.GetProperty("completion_tokens").GetInt32());
+        Assert.Equal(12, actual: usage.GetProperty("total_tokens").GetInt32());
+        Assert.False(usage.TryGetProperty(propertyName: "prompt_tokens_details", value: out _));
+        Assert.False(usage.TryGetProperty(propertyName: "cache_creation_input_tokens", value: out _));
+        Assert.False(usage.TryGetProperty(propertyName: "cache_read_input_tokens", value: out _));
     }
 
     [Fact]
     public void TryExtractEmbeddedError_AnthropicErrorShape_ExtractsTypeAndMessage()
     {
         const string anthropicError = """
-            {"type":"error","error":{"type":"invalid_request_error","message":"messages: at least one message is required"}}
-            """;
+                                      {"type":"error","error":{"type":"invalid_request_error","message":"messages: at least one message is required"}}
+                                      """;
 
         var extracted = AnthropicPayloadTranslator.TryExtractEmbeddedError(
-            Encoding.UTF8.GetBytes(anthropicError), out var errorType, out var message);
+            body: Encoding.UTF8.GetBytes(anthropicError), errorType: out var errorType, message: out var message);
 
         Assert.True(extracted);
-        Assert.Equal("invalid_request_error", errorType);
-        Assert.Equal("messages: at least one message is required", message);
+        Assert.Equal(expected: "invalid_request_error", actual: errorType);
+        Assert.Equal(expected: "messages: at least one message is required", actual: message);
     }
 
     [Theory]
@@ -413,7 +435,7 @@ public class AnthropicProviderTests
     public void TryExtractEmbeddedError_NotAnAnthropicErrorShape_ReturnsFalse(string body)
     {
         var extracted = AnthropicPayloadTranslator.TryExtractEmbeddedError(
-            Encoding.UTF8.GetBytes(body), out _, out _);
+            body: Encoding.UTF8.GetBytes(body), errorType: out _, message: out _);
 
         Assert.False(extracted);
     }
@@ -431,28 +453,28 @@ public class AnthropicProviderTests
 
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StringContent(anthropicSse, Encoding.UTF8, "text/event-stream"),
+            Content = new StringContent(content: anthropicSse, encoding: Encoding.UTF8, mediaType: "text/event-stream")
         }));
 
         var middleware = BuildMiddleware(handler);
-        var context = BuildContext("/v1/chat/completions", """
-            {"model":"claude-sonnet-5","messages":[{"role":"user","content":"hi"}],"stream":true}
-            """);
+        var context = BuildContext(requestPath: "/v1/chat/completions", """
+                                                                        {"model":"claude-sonnet-5","messages":[{"role":"user","content":"hi"}],"stream":true}
+                                                                        """);
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
         var body = ReadResponse(context);
-        var lastData = body.Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
-            .Where(l => l.StartsWith("data: ", StringComparison.Ordinal) && l != "data: [DONE]")
+        var lastData = body.Split(separator: "\n\n", options: StringSplitOptions.RemoveEmptyEntries)
+            .Where(l => l.StartsWith(value: "data: ", comparisonType: StringComparison.Ordinal) && l != "data: [DONE]")
             .Select(l => l["data: ".Length..])
             .Last();
         using var lastChunk = JsonDocument.Parse(lastData);
         var usage = lastChunk.RootElement.GetProperty("usage");
 
-        Assert.Equal(280, usage.GetProperty("prompt_tokens").GetInt32());
-        Assert.Equal(10, usage.GetProperty("completion_tokens").GetInt32());
-        Assert.Equal(200, usage.GetProperty("prompt_tokens_details").GetProperty("cached_tokens").GetInt32());
-        Assert.Equal(30, usage.GetProperty("cache_creation_input_tokens").GetInt32());
+        Assert.Equal(280, actual: usage.GetProperty("prompt_tokens").GetInt32());
+        Assert.Equal(10, actual: usage.GetProperty("completion_tokens").GetInt32());
+        Assert.Equal(200, actual: usage.GetProperty("prompt_tokens_details").GetProperty("cached_tokens").GetInt32());
+        Assert.Equal(30, actual: usage.GetProperty("cache_creation_input_tokens").GetInt32());
     }
 
     [Fact]
@@ -464,44 +486,46 @@ public class AnthropicProviderTests
         var handler = new DelegatingHandlerStub(_ =>
         {
             const string anthropicResponse = """
-                {
-                  "id": "msg_10",
-                  "model": "claude-sonnet-5",
-                  "content": [ { "type": "text", "text": "hi" } ],
-                  "stop_reason": "end_turn",
-                  "usage": { "input_tokens": 50, "output_tokens": 10, "cache_creation_input_tokens": 30, "cache_read_input_tokens": 200 }
-                }
-                """;
+                                             {
+                                               "id": "msg_10",
+                                               "model": "claude-sonnet-5",
+                                               "content": [ { "type": "text", "text": "hi" } ],
+                                               "stop_reason": "end_turn",
+                                               "usage": { "input_tokens": 50, "output_tokens": 10, "cache_creation_input_tokens": 30, "cache_read_input_tokens": 200 }
+                                             }
+                                             """;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(anthropicResponse, Encoding.UTF8, "application/json"),
+                Content = new StringContent(content: anthropicResponse, encoding: Encoding.UTF8,
+                    mediaType: "application/json")
             });
         });
 
-        var budgetStore = new Mock<TotallyHot.ArcRouter.PriceCatalog.IBudgetEnforcer>();
+        var budgetStore = new Mock<IBudgetEnforcer>();
         int? capturedCacheCreation = null;
         int? capturedCacheRead = null;
         budgetStore
             .Setup(b => b.RecordUsageAsync(
                 It.IsAny<string>(), It.IsAny<decimal?>(), It.IsAny<int?>(), It.IsAny<int?>(),
                 It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
-            .Callback<string, decimal?, int?, int?, int?, int?, DateTimeOffset, CancellationToken>(
-                (_, _, _, _, cacheCreation, cacheRead, _, _) =>
-                {
-                    capturedCacheCreation = cacheCreation;
-                    capturedCacheRead = cacheRead;
-                })
+            .Callback<string, decimal?, int?, int?, int?, int?, DateTimeOffset, CancellationToken>((_, _, _, _,
+                cacheCreation, cacheRead, _, _) =>
+            {
+                capturedCacheCreation = cacheCreation;
+                capturedCacheRead = cacheRead;
+            })
             .Returns(Task.CompletedTask);
 
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), AnthropicResolver());
+        var interceptor = new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: AnthropicResolver());
         var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
         {
-            ["anthropic"] = new AnthropicPayloadTranslator(),
+            ["anthropic"] = new AnthropicPayloadTranslator()
         };
         var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(),
-            interceptor,
-            new HttpClient(handler),
+            logger: Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 Translators = translators,
@@ -509,14 +533,14 @@ public class AnthropicProviderTests
             }
         );
 
-        var context = BuildContext("/v1/chat/completions", """
-            {"model":"claude-sonnet-5","messages":[{"role":"user","content":"hi"}]}
-            """);
+        var context = BuildContext(requestPath: "/v1/chat/completions", """
+                                                                        {"model":"claude-sonnet-5","messages":[{"role":"user","content":"hi"}]}
+                                                                        """);
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(30, capturedCacheCreation);
-        Assert.Equal(200, capturedCacheRead);
+        Assert.Equal(30, actual: capturedCacheCreation);
+        Assert.Equal(200, actual: capturedCacheRead);
     }
 
     [Fact]
@@ -525,32 +549,33 @@ public class AnthropicProviderTests
         var handler = new DelegatingHandlerStub(_ =>
         {
             const string anthropicResponse = """
-                {
-                  "id": "msg_11",
-                  "model": "claude-sonnet-5",
-                  "content": [ { "type": "text", "text": "hi" } ],
-                  "stop_reason": "end_turn",
-                  "usage": { "input_tokens": 50, "output_tokens": 10, "cache_creation_input_tokens": 30, "cache_read_input_tokens": 200 }
-                }
-                """;
+                                             {
+                                               "id": "msg_11",
+                                               "model": "claude-sonnet-5",
+                                               "content": [ { "type": "text", "text": "hi" } ],
+                                               "stop_reason": "end_turn",
+                                               "usage": { "input_tokens": 50, "output_tokens": 10, "cache_creation_input_tokens": 30, "cache_read_input_tokens": 200 }
+                                             }
+                                             """;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(anthropicResponse, Encoding.UTF8, "application/json"),
+                Content = new StringContent(content: anthropicResponse, encoding: Encoding.UTF8,
+                    mediaType: "application/json")
             });
         });
 
         var capturing = new CapturingTelemetryPublisher();
-        var middleware = BuildMiddleware(handler, capturing);
+        var middleware = BuildMiddleware(handler: handler, telemetry: capturing);
 
-        var context = BuildContext("/v1/chat/completions", """
-            {"model":"claude-sonnet-5","messages":[{"role":"user","content":"hi"}]}
-            """);
+        var context = BuildContext(requestPath: "/v1/chat/completions", """
+                                                                        {"model":"claude-sonnet-5","messages":[{"role":"user","content":"hi"}]}
+                                                                        """);
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
         var published = await capturing.WaitForEventAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(30, published.CacheCreationTokens);
-        Assert.Equal(200, published.CacheReadTokens);
+        Assert.Equal(30, actual: published.CacheCreationTokens);
+        Assert.Equal(200, actual: published.CacheReadTokens);
     }
 
     [Fact]
@@ -561,20 +586,20 @@ public class AnthropicProviderTests
         // placed first in that turn's content, ahead of any text/tool_use blocks.
         var translator = new AnthropicPayloadTranslator();
         var translated = translator.TranslateRequest(Encoding.UTF8.GetBytes("""
-            {"model":"claude-sonnet-5","messages":[
-                {"role":"user","content":"what is 2+2?"},
-                {"role":"assistant","content":"4","thinking_blocks":[{"type":"thinking","thinking":"2+2=4","signature":"sig-xyz"}]}
-            ]}
-            """));
+                                                                            {"model":"claude-sonnet-5","messages":[
+                                                                                {"role":"user","content":"what is 2+2?"},
+                                                                                {"role":"assistant","content":"4","thinking_blocks":[{"type":"thinking","thinking":"2+2=4","signature":"sig-xyz"}]}
+                                                                            ]}
+                                                                            """));
 
         using var json = JsonDocument.Parse(translated);
         var assistantTurn = json.RootElement.GetProperty("messages")[1];
         var blocks = assistantTurn.GetProperty("content");
 
-        Assert.Equal("thinking", blocks[0].GetProperty("type").GetString());
-        Assert.Equal("sig-xyz", blocks[0].GetProperty("signature").GetString());
-        Assert.Equal("text", blocks[1].GetProperty("type").GetString());
-        Assert.Equal("4", blocks[1].GetProperty("text").GetString());
+        Assert.Equal(expected: "thinking", actual: blocks[0].GetProperty("type").GetString());
+        Assert.Equal(expected: "sig-xyz", actual: blocks[0].GetProperty("signature").GetString());
+        Assert.Equal(expected: "text", actual: blocks[1].GetProperty("type").GetString());
+        Assert.Equal(expected: "4", actual: blocks[1].GetProperty("text").GetString());
     }
 
     [Fact]
@@ -597,42 +622,48 @@ public class AnthropicProviderTests
             forwardedUri = request.RequestUri;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(anthropicSse, Encoding.UTF8, "text/event-stream"),
+                Content = new StringContent(content: anthropicSse, encoding: Encoding.UTF8,
+                    mediaType: "text/event-stream")
             });
         });
 
         var middleware = BuildMiddleware(handler);
-        var context = BuildContext("/v1/chat/completions", """
-            {"model":"claude-sonnet-5","messages":[{"role":"user","content":"hi"}],"stream":true}
-            """);
+        var context = BuildContext(requestPath: "/v1/chat/completions", """
+                                                                        {"model":"claude-sonnet-5","messages":[{"role":"user","content":"hi"}],"stream":true}
+                                                                        """);
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal("https://api.anthropic.com/v1/messages", forwardedUri!.ToString());
+        Assert.Equal(expected: "https://api.anthropic.com/v1/messages", actual: forwardedUri!.ToString());
 
         var body = ReadResponse(context);
-        var dataLines = body.Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
-            .Where(l => l.StartsWith("data: ", StringComparison.Ordinal))
+        var dataLines = body.Split(separator: "\n\n", options: StringSplitOptions.RemoveEmptyEntries)
+            .Where(l => l.StartsWith(value: "data: ", comparisonType: StringComparison.Ordinal))
             .Select(l => l["data: ".Length..])
             .ToList();
 
-        Assert.Equal("[DONE]", dataLines[^1]);
+        Assert.Equal(expected: "[DONE]", actual: dataLines[^1]);
 
         var chunks = dataLines.Where(l => l != "[DONE]").Select(l => JsonDocument.Parse(l)).ToList();
-        Assert.All(chunks, c => Assert.Equal("chat.completion.chunk", c.RootElement.GetProperty("object").GetString()));
+        Assert.All(collection: chunks,
+            action: c => Assert.Equal(expected: "chat.completion.chunk",
+                actual: c.RootElement.GetProperty("object").GetString()));
 
-        Assert.Equal("assistant", chunks[0].RootElement.GetProperty("choices")[0].GetProperty("delta").GetProperty("role").GetString());
+        Assert.Equal(expected: "assistant",
+            actual: chunks[0].RootElement.GetProperty("choices")[0].GetProperty("delta").GetProperty("role")
+                .GetString());
         var assembled = string.Concat(chunks.Select(c =>
-            c.RootElement.GetProperty("choices")[0].GetProperty("delta").TryGetProperty("content", out var content)
+            c.RootElement.GetProperty("choices")[0].GetProperty("delta")
+                .TryGetProperty(propertyName: "content", value: out var content)
                 ? content.GetString()
                 : string.Empty));
-        Assert.Equal("Hello", assembled);
+        Assert.Equal(expected: "Hello", actual: assembled);
 
         var lastChoice = chunks[^1].RootElement.GetProperty("choices")[0];
-        Assert.Equal("stop", lastChoice.GetProperty("finish_reason").GetString());
+        Assert.Equal(expected: "stop", actual: lastChoice.GetProperty("finish_reason").GetString());
         var usage = chunks[^1].RootElement.GetProperty("usage");
-        Assert.Equal(3, usage.GetProperty("prompt_tokens").GetInt32());
-        Assert.Equal(2, usage.GetProperty("completion_tokens").GetInt32());
+        Assert.Equal(3, actual: usage.GetProperty("prompt_tokens").GetInt32());
+        Assert.Equal(2, actual: usage.GetProperty("completion_tokens").GetInt32());
     }
 
     [Fact]
@@ -649,37 +680,39 @@ public class AnthropicProviderTests
 
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StringContent(anthropicSse, Encoding.UTF8, "text/event-stream"),
+            Content = new StringContent(content: anthropicSse, encoding: Encoding.UTF8, mediaType: "text/event-stream")
         }));
 
         var middleware = BuildMiddleware(handler);
-        var context = BuildContext("/v1/chat/completions", """
-            {"model":"claude-sonnet-5","messages":[{"role":"user","content":"weather in SF?"}],"stream":true}
-            """);
+        var context = BuildContext(requestPath: "/v1/chat/completions", """
+                                                                        {"model":"claude-sonnet-5","messages":[{"role":"user","content":"weather in SF?"}],"stream":true}
+                                                                        """);
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
         var body = ReadResponse(context);
-        var chunks = body.Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
-            .Where(l => l.StartsWith("data: ", StringComparison.Ordinal) && l != "data: [DONE]")
+        var chunks = body.Split(separator: "\n\n", options: StringSplitOptions.RemoveEmptyEntries)
+            .Where(l => l.StartsWith(value: "data: ", comparisonType: StringComparison.Ordinal) && l != "data: [DONE]")
             .Select(l => JsonDocument.Parse(l["data: ".Length..]))
             .ToList();
 
         var argumentFragments = chunks
             .Select(c => c.RootElement.GetProperty("choices")[0].GetProperty("delta"))
-            .Where(d => d.TryGetProperty("tool_calls", out _))
+            .Where(d => d.TryGetProperty(propertyName: "tool_calls", value: out _))
             .Select(d => d.GetProperty("tool_calls")[0])
             .ToList();
 
-        Assert.Equal("toolu_9", argumentFragments[0].GetProperty("id").GetString());
-        Assert.Equal("get_weather", argumentFragments[0].GetProperty("function").GetProperty("name").GetString());
+        Assert.Equal(expected: "toolu_9", actual: argumentFragments[0].GetProperty("id").GetString());
+        Assert.Equal(expected: "get_weather",
+            actual: argumentFragments[0].GetProperty("function").GetProperty("name").GetString());
 
         var assembledArguments = string.Concat(argumentFragments
-            .Where(f => f.GetProperty("function").TryGetProperty("arguments", out _))
+            .Where(f => f.GetProperty("function").TryGetProperty(propertyName: "arguments", value: out _))
             .Select(f => f.GetProperty("function").GetProperty("arguments").GetString()));
-        Assert.Equal("{\"city\":\"SF\"}", assembledArguments);
+        Assert.Equal(expected: "{\"city\":\"SF\"}", actual: assembledArguments);
 
-        Assert.Equal("tool_calls", chunks[^1].RootElement.GetProperty("choices")[0].GetProperty("finish_reason").GetString());
+        Assert.Equal(expected: "tool_calls",
+            actual: chunks[^1].RootElement.GetProperty("choices")[0].GetProperty("finish_reason").GetString());
     }
 
     [Fact]
@@ -696,19 +729,19 @@ public class AnthropicProviderTests
 
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StringContent(anthropicSse, Encoding.UTF8, "text/event-stream"),
+            Content = new StringContent(content: anthropicSse, encoding: Encoding.UTF8, mediaType: "text/event-stream")
         }));
 
         var middleware = BuildMiddleware(handler);
-        var context = BuildContext("/v1/chat/completions", """
-            {"model":"claude-sonnet-5","messages":[{"role":"user","content":"hi"}],"stream":true}
-            """);
+        var context = BuildContext(requestPath: "/v1/chat/completions", """
+                                                                        {"model":"claude-sonnet-5","messages":[{"role":"user","content":"hi"}],"stream":true}
+                                                                        """);
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
         var body = ReadResponse(context);
-        Assert.Contains("partial", body);
-        Assert.DoesNotContain("[DONE]", body);
+        Assert.Contains(expectedSubstring: "partial", actualString: body);
+        Assert.DoesNotContain(expectedSubstring: "[DONE]", actualString: body);
     }
 
     [Fact]
@@ -720,21 +753,28 @@ public class AnthropicProviderTests
         // through JSON parsing, which is too whitespace-tolerant to reliably distinguish "joined with \n"
         // from "concatenated" for most realistic payload splits.
         var eventBytes = Encoding.UTF8.GetBytes("data: line1\ndata: line2");
-        var method = typeof(AnthropicStreamTranslator).GetMethod("ParseSseEvent", BindingFlags.NonPublic | BindingFlags.Static)!;
+        var method = typeof(AnthropicStreamTranslator).GetMethod(name: "ParseSseEvent",
+            bindingAttr: BindingFlags.NonPublic | BindingFlags.Static)!;
 
-        var (_, data) = ((string? EventType, string? Data))method.Invoke(null, [eventBytes])!;
+        var (_, data) = ((string? EventType, string? Data))method.Invoke(null, parameters: [eventBytes])!;
 
-        Assert.Equal("line1\nline2", data);
+        Assert.Equal(expected: "line1\nline2", actual: data);
     }
 
     private sealed class DelegatingHandlerStub : HttpMessageHandler
     {
         private readonly Func<HttpRequestMessage, Task<HttpResponseMessage>> _handler;
 
-        public DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler) => _handler = handler;
+        public DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler)
+        {
+            _handler = handler;
+        }
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => _handler(request);
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            return _handler(request);
+        }
     }
 
     private sealed class CapturingTelemetryPublisher : ITelemetryPublisher
@@ -748,14 +788,17 @@ public class AnthropicProviderTests
             return Task.CompletedTask;
         }
 
-        public Task PublishLogLineAsync(LogLineEvent logLine, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task PublishLogLineAsync(LogLineEvent logLine, CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
 
         public async Task<RoutingTelemetryEvent> WaitForEventAsync(TimeSpan timeout)
         {
-            var completed = await Task.WhenAny(_tcs.Task, Task.Delay(timeout));
-            Assert.True(ReferenceEquals(completed, _tcs.Task), "Timed out waiting for a routing telemetry event.");
+            var completed = await Task.WhenAny(task1: _tcs.Task, task2: Task.Delay(timeout));
+            Assert.True(condition: ReferenceEquals(objA: completed, objB: _tcs.Task),
+                userMessage: "Timed out waiting for a routing telemetry event.");
             return await _tcs.Task;
         }
     }
 }
-

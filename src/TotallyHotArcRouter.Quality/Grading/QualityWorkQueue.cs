@@ -1,5 +1,5 @@
-using Microsoft.Extensions.Options;
 using System.Threading.Channels;
+using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Quality.Grading;
 
@@ -19,7 +19,7 @@ public sealed class QualityWorkQueue : IQualityQueue
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var capacity = Math.Max(1, options.Value.QueueCapacity);
+        var capacity = Math.Max(1, val2: options.Value.QueueCapacity);
         // Wait mode makes TryWrite return false (without blocking) when the channel is full, which is what
         // drop-on-full accounting needs. The Drop* modes would instead return true while silently discarding
         // an item, hiding the drop from DroppedCount.
@@ -27,29 +27,27 @@ public sealed class QualityWorkQueue : IQualityQueue
         {
             FullMode = BoundedChannelFullMode.Wait,
             SingleReader = false,
-            SingleWriter = false,
+            SingleWriter = false
         });
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public long DroppedCount => Interlocked.Read(ref _droppedCount);
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public bool TryEnqueue(QualityRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (_channel.Writer.TryWrite(request))
-        {
-            return true;
-        }
+        if (_channel.Writer.TryWrite(request)) return true;
 
         Interlocked.Increment(ref _droppedCount);
         return false;
     }
 
-    /// <inheritdoc />
-    public IAsyncEnumerable<QualityRequest> DequeueAllAsync(CancellationToken cancellationToken) =>
-        _channel.Reader.ReadAllAsync(cancellationToken);
+    /// <inheritdoc/>
+    public IAsyncEnumerable<QualityRequest> DequeueAllAsync(CancellationToken cancellationToken)
+    {
+        return _channel.Reader.ReadAllAsync(cancellationToken);
+    }
 }
-

@@ -12,15 +12,9 @@ namespace TotallyHot.ArcRouter.Tests.Update;
 /// </summary>
 public sealed class UpdateAdminGrpcServiceTests
 {
-    private sealed class FakeReleaseCheckClient : IReleaseCheckClient
+    private static ServerCallContext CreateContext()
     {
-        public ReleaseCheckResult Result { get; set; } = ReleaseCheckResult.Resolved("1.0.0", "1.0.0", false, null, null);
-
-        public Task<ReleaseCheckResult> CheckAsync(CancellationToken cancellationToken = default) => Task.FromResult(Result);
-    }
-
-    private static ServerCallContext CreateContext() =>
-        TestServerCallContext.Create(
+        return TestServerCallContext.Create(
             method: "Test",
             host: "localhost",
             deadline: DateTime.UtcNow.AddMinutes(1),
@@ -28,47 +22,56 @@ public sealed class UpdateAdminGrpcServiceTests
             cancellationToken: TestContext.Current.CancellationToken,
             peer: "test-peer",
             authContext: null!,
-            contextPropagationToken: null,
+            null,
             writeHeadersFunc: _ => Task.CompletedTask,
             writeOptionsGetter: () => null,
             writeOptionsSetter: _ => { });
+    }
 
     [Fact]
     public async Task GetUpdateStatus_BeforeAnyCheck_ReportsUnspecifiedWithNoTimestamp()
     {
-        var service = new UpdateAdminGrpcService(new UpdateStateStore(), new FakeReleaseCheckClient(), NullLogger<UpdateAdminGrpcService>.Instance);
+        var service = new UpdateAdminGrpcService(stateStore: new UpdateStateStore(),
+            releaseCheckClient: new FakeReleaseCheckClient(), logger: NullLogger<UpdateAdminGrpcService>.Instance);
 
-        var response = await service.GetUpdateStatus(new Contract.GetUpdateStatusRequest(), CreateContext());
+        var response =
+            await service.GetUpdateStatus(request: new Contract.GetUpdateStatusRequest(), context: CreateContext());
 
         Assert.False(response.UpdateAvailable);
         Assert.Null(response.CheckedAtUtc);
-        Assert.Equal(Contract.UpdateUnavailableReason.Unspecified, response.UnavailableReason);
+        Assert.Equal(expected: Contract.UpdateUnavailableReason.Unspecified, actual: response.UnavailableReason);
     }
 
     [Fact]
     public async Task GetUpdateStatus_AfterStateRecorded_ReturnsSnapshot()
     {
         var stateStore = new UpdateStateStore();
-        stateStore.Record(ReleaseCheckResult.Resolved("1.0.0", "2.0.0", true, "https://example.test/a.msi", "abc"));
-        var service = new UpdateAdminGrpcService(stateStore, new FakeReleaseCheckClient(), NullLogger<UpdateAdminGrpcService>.Instance);
+        stateStore.Record(ReleaseCheckResult.Resolved(currentVersion: "1.0.0", latestVersion: "2.0.0", true,
+            assetDownloadUrl: "https://example.test/a.msi", assetSha256: "abc"));
+        var service = new UpdateAdminGrpcService(stateStore: stateStore,
+            releaseCheckClient: new FakeReleaseCheckClient(), logger: NullLogger<UpdateAdminGrpcService>.Instance);
 
-        var response = await service.GetUpdateStatus(new Contract.GetUpdateStatusRequest(), CreateContext());
+        var response =
+            await service.GetUpdateStatus(request: new Contract.GetUpdateStatusRequest(), context: CreateContext());
 
         Assert.True(response.UpdateAvailable);
-        Assert.Equal("2.0.0", response.LatestVersion);
+        Assert.Equal(expected: "2.0.0", actual: response.LatestVersion);
         Assert.NotNull(response.CheckedAtUtc);
-        Assert.Equal("https://example.test/a.msi", response.AssetDownloadUrl);
-        Assert.Equal("abc", response.AssetSha256);
+        Assert.Equal(expected: "https://example.test/a.msi", actual: response.AssetDownloadUrl);
+        Assert.Equal(expected: "abc", actual: response.AssetSha256);
     }
 
     [Fact]
     public async Task GetUpdateStatus_NoUpdateAvailable_LeavesAssetFieldsUnset()
     {
         var stateStore = new UpdateStateStore();
-        stateStore.Record(ReleaseCheckResult.Resolved("1.0.0", "1.0.0", false, null, null));
-        var service = new UpdateAdminGrpcService(stateStore, new FakeReleaseCheckClient(), NullLogger<UpdateAdminGrpcService>.Instance);
+        stateStore.Record(ReleaseCheckResult.Resolved(currentVersion: "1.0.0", latestVersion: "1.0.0", false, null,
+            null));
+        var service = new UpdateAdminGrpcService(stateStore: stateStore,
+            releaseCheckClient: new FakeReleaseCheckClient(), logger: NullLogger<UpdateAdminGrpcService>.Instance);
 
-        var response = await service.GetUpdateStatus(new Contract.GetUpdateStatusRequest(), CreateContext());
+        var response =
+            await service.GetUpdateStatus(request: new Contract.GetUpdateStatusRequest(), context: CreateContext());
 
         Assert.False(response.HasAssetDownloadUrl);
         Assert.False(response.HasAssetSha256);
@@ -79,26 +82,30 @@ public sealed class UpdateAdminGrpcServiceTests
     {
         var releaseClient = new FakeReleaseCheckClient
         {
-            Result = ReleaseCheckResult.Resolved("1.0.0", "3.0.0", true, "https://example.test/a.msi", "abc"),
+            Result = ReleaseCheckResult.Resolved(currentVersion: "1.0.0", latestVersion: "3.0.0", true,
+                assetDownloadUrl: "https://example.test/a.msi", assetSha256: "abc")
         };
         var stateStore = new UpdateStateStore();
-        var service = new UpdateAdminGrpcService(stateStore, releaseClient, NullLogger<UpdateAdminGrpcService>.Instance);
+        var service = new UpdateAdminGrpcService(stateStore: stateStore, releaseCheckClient: releaseClient,
+            logger: NullLogger<UpdateAdminGrpcService>.Instance);
 
-        var response = await service.CheckForUpdatesNow(new Contract.CheckForUpdatesNowRequest(), CreateContext());
+        var response = await service.CheckForUpdatesNow(request: new Contract.CheckForUpdatesNowRequest(),
+            context: CreateContext());
 
         Assert.True(response.UpdateAvailable);
-        Assert.Equal("3.0.0", response.LatestVersion);
+        Assert.Equal(expected: "3.0.0", actual: response.LatestVersion);
         Assert.True(stateStore.Current.Result!.IsUpdateAvailable);
     }
 
     [Fact]
     public async Task NotifyApplyStarting_AlwaysAcknowledges()
     {
-        var service = new UpdateAdminGrpcService(new UpdateStateStore(), new FakeReleaseCheckClient(), NullLogger<UpdateAdminGrpcService>.Instance);
+        var service = new UpdateAdminGrpcService(stateStore: new UpdateStateStore(),
+            releaseCheckClient: new FakeReleaseCheckClient(), logger: NullLogger<UpdateAdminGrpcService>.Instance);
 
         var response = await service.NotifyApplyStarting(
-            new Contract.NotifyApplyStartingRequest { Version = "2.0.0" },
-            CreateContext());
+            request: new Contract.NotifyApplyStartingRequest { Version = "2.0.0" },
+            context: CreateContext());
 
         Assert.True(response.Acknowledged);
     }
@@ -110,8 +117,22 @@ public sealed class UpdateAdminGrpcServiceTests
         var releaseClient = new FakeReleaseCheckClient();
         var logger = NullLogger<UpdateAdminGrpcService>.Instance;
 
-        Assert.Throws<ArgumentNullException>(() => new UpdateAdminGrpcService(null!, releaseClient, logger));
-        Assert.Throws<ArgumentNullException>(() => new UpdateAdminGrpcService(stateStore, null!, logger));
-        Assert.Throws<ArgumentNullException>(() => new UpdateAdminGrpcService(stateStore, releaseClient, null!));
+        Assert.Throws<ArgumentNullException>(() =>
+            new UpdateAdminGrpcService(stateStore: null!, releaseCheckClient: releaseClient, logger: logger));
+        Assert.Throws<ArgumentNullException>(() =>
+            new UpdateAdminGrpcService(stateStore: stateStore, releaseCheckClient: null!, logger: logger));
+        Assert.Throws<ArgumentNullException>(() =>
+            new UpdateAdminGrpcService(stateStore: stateStore, releaseCheckClient: releaseClient, logger: null!));
+    }
+
+    private sealed class FakeReleaseCheckClient : IReleaseCheckClient
+    {
+        public ReleaseCheckResult Result { get; set; } =
+            ReleaseCheckResult.Resolved(currentVersion: "1.0.0", latestVersion: "1.0.0", false, null, null);
+
+        public Task<ReleaseCheckResult> CheckAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Result);
+        }
     }
 }

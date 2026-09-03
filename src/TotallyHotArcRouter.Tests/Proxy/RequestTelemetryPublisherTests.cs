@@ -1,6 +1,7 @@
+using System.Text;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
-using System.Text;
+using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Telemetry;
@@ -29,7 +30,7 @@ public class RequestTelemetryPublisherTests
         var telemetryPublisher = new FakeTelemetryPublisher();
         var publisher = CreatePublisher(telemetryPublisher: telemetryPublisher);
 
-        var route = CreateRoute(provider: "anthropic", isFree: true);
+        var route = CreateRoute(provider: "anthropic", true);
         var context = CreateContext(sessionId: "session-native");
 
         // Native (pre-translation) Anthropic bytes carry usage; the translated/client-shape capture
@@ -42,22 +43,22 @@ public class RequestTelemetryPublisherTests
             context: context,
             route: route,
             requestedModelName: "primary",
-            isFallback: false,
+            false,
             telemetryShapeProvider: "openai",
             rewrittenRequestBody: Encoding.UTF8.GetBytes("{}"),
             capturedResponseBytes: clientShapeBytes,
             nativeResponseBytes: nativeBytes,
-            isStreaming: false,
-            latencyToHeadersMs: 10,
-            totalDurationMs: 20,
-            statusCode: 200,
+            false,
+            10,
+            20,
+            200,
             cancellationToken: TestContext.Current.CancellationToken);
 
         var published = Assert.Single(telemetryPublisher.PublishedEvents);
-        Assert.Equal(11, published.PromptTokens);
-        Assert.Equal(22, published.CompletionTokens);
-        Assert.Equal(0m, published.EstimatedCostUsd);
-        Assert.Equal(CostConfidence.Exact, published.CostConfidence);
+        Assert.Equal(11, actual: published.PromptTokens);
+        Assert.Equal(22, actual: published.CompletionTokens);
+        Assert.Equal(0m, actual: published.EstimatedCostUsd);
+        Assert.Equal(expected: CostConfidence.Exact, actual: published.CostConfidence);
     }
 
     [Fact]
@@ -66,33 +67,34 @@ public class RequestTelemetryPublisherTests
         var telemetryPublisher = new FakeTelemetryPublisher();
         var publisher = CreatePublisher(telemetryPublisher: telemetryPublisher);
 
-        var route = CreateRoute(provider: "anthropic", isFree: true);
+        var route = CreateRoute(provider: "anthropic", true);
         var context = CreateContext(sessionId: "session-fallback");
 
         // Native bytes are non-empty but not valid usage-bearing JSON for the anthropic parser, so the
         // native attempt fails; the client-shape (openai-translated) bytes do carry usage and should be
         // what the fallback recovers.
         var nativeBytes = Encoding.UTF8.GetBytes("""{"not":"usage"}""");
-        var clientShapeBytes = Encoding.UTF8.GetBytes("""{"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":7}}""");
+        var clientShapeBytes =
+            Encoding.UTF8.GetBytes("""{"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":7}}""");
 
         await publisher.PublishAsync(
             context: context,
             route: route,
             requestedModelName: "primary",
-            isFallback: false,
+            false,
             telemetryShapeProvider: "openai",
             rewrittenRequestBody: Encoding.UTF8.GetBytes("{}"),
             capturedResponseBytes: clientShapeBytes,
             nativeResponseBytes: nativeBytes,
-            isStreaming: false,
-            latencyToHeadersMs: 10,
-            totalDurationMs: 20,
-            statusCode: 200,
+            false,
+            10,
+            20,
+            200,
             cancellationToken: TestContext.Current.CancellationToken);
 
         var published = Assert.Single(telemetryPublisher.PublishedEvents);
-        Assert.Equal(5, published.PromptTokens);
-        Assert.Equal(7, published.CompletionTokens);
+        Assert.Equal(5, actual: published.PromptTokens);
+        Assert.Equal(7, actual: published.CompletionTokens);
     }
 
     [Fact]
@@ -101,7 +103,7 @@ public class RequestTelemetryPublisherTests
         var telemetryPublisher = new FakeTelemetryPublisher();
         var publisher = CreatePublisher(telemetryPublisher: telemetryPublisher);
 
-        var route = CreateRoute(provider: "openai", isFree: true);
+        var route = CreateRoute(provider: "openai", true);
         var context = CreateContext(sessionId: "session-tail");
 
         // Neither the (absent) native capture nor the head-capped client-shape capture carries usage -
@@ -109,27 +111,28 @@ public class RequestTelemetryPublisherTests
         // - while the independently-retained tail window does.
         var clientShapeBytes = Encoding.UTF8.GetBytes("""{"choices":[]}""");
         var tailScanner = new IncrementalUsageScanner();
-        tailScanner.Append(Encoding.UTF8.GetBytes("""{"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":4}}"""));
+        tailScanner.Append(
+            Encoding.UTF8.GetBytes("""{"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":4}}"""));
 
         await publisher.PublishAsync(
             context: context,
             route: route,
             requestedModelName: "primary",
-            isFallback: false,
+            false,
             telemetryShapeProvider: "openai",
             rewrittenRequestBody: Encoding.UTF8.GetBytes("{}"),
             capturedResponseBytes: clientShapeBytes,
-            nativeResponseBytes: null,
-            isStreaming: false,
-            latencyToHeadersMs: 10,
-            totalDurationMs: 20,
-            statusCode: 200,
+            null,
+            false,
+            10,
+            20,
+            200,
             cancellationToken: TestContext.Current.CancellationToken,
             tailScanner: tailScanner);
 
         var published = Assert.Single(telemetryPublisher.PublishedEvents);
-        Assert.Equal(3, published.PromptTokens);
-        Assert.Equal(4, published.CompletionTokens);
+        Assert.Equal(3, actual: published.PromptTokens);
+        Assert.Equal(4, actual: published.CompletionTokens);
     }
 
     [Fact]
@@ -139,7 +142,7 @@ public class RequestTelemetryPublisherTests
         var budgetStore = new FakeBudgetEnforcer();
         var publisher = CreatePublisher(telemetryPublisher: telemetryPublisher, budgetStore: budgetStore);
 
-        var route = CreateRoute(provider: "openai", isFree: true);
+        var route = CreateRoute(provider: "openai", true);
         var context = CreateContext(sessionId: "session-no-usage");
 
         // No usage block anywhere: no native bytes, no tail scanner, and a client-shape body with none.
@@ -149,22 +152,22 @@ public class RequestTelemetryPublisherTests
             context: context,
             route: route,
             requestedModelName: "primary",
-            isFallback: false,
+            false,
             telemetryShapeProvider: "openai",
             rewrittenRequestBody: Encoding.UTF8.GetBytes("{}"),
             capturedResponseBytes: clientShapeBytes,
-            nativeResponseBytes: null,
-            isStreaming: false,
-            latencyToHeadersMs: 10,
-            totalDurationMs: 20,
-            statusCode: 200,
+            null,
+            false,
+            10,
+            20,
+            200,
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Empty(budgetStore.RecordedCalls);
         var published = Assert.Single(telemetryPublisher.PublishedEvents);
         Assert.Null(published.PromptTokens);
         Assert.Null(published.EstimatedCostUsd);
-        Assert.Equal(CostConfidence.NoUsage, published.CostConfidence);
+        Assert.Equal(expected: CostConfidence.NoUsage, actual: published.CostConfidence);
     }
 
     [Fact]
@@ -174,30 +177,31 @@ public class RequestTelemetryPublisherTests
         var budgetStore = new FakeBudgetEnforcer();
         var publisher = CreatePublisher(telemetryPublisher: telemetryPublisher, budgetStore: budgetStore);
 
-        var route = CreateRoute(provider: "openai", isFree: true);
+        var route = CreateRoute(provider: "openai", true);
         var context = CreateContext(sessionId: "session-budget");
 
-        var clientShapeBytes = Encoding.UTF8.GetBytes("""{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":2}}""");
+        var clientShapeBytes =
+            Encoding.UTF8.GetBytes("""{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":2}}""");
 
         await publisher.PublishAsync(
             context: context,
             route: route,
             requestedModelName: "primary",
-            isFallback: false,
+            false,
             telemetryShapeProvider: "openai",
             rewrittenRequestBody: Encoding.UTF8.GetBytes("{}"),
             capturedResponseBytes: clientShapeBytes,
-            nativeResponseBytes: null,
-            isStreaming: false,
-            latencyToHeadersMs: 10,
-            totalDurationMs: 20,
-            statusCode: 200,
+            null,
+            false,
+            10,
+            20,
+            200,
             cancellationToken: TestContext.Current.CancellationToken);
 
         var call = Assert.Single(budgetStore.RecordedCalls);
-        Assert.Equal("openai", call.ProviderKey);
-        Assert.Equal(1, call.PromptTokens);
-        Assert.Equal(2, call.CompletionTokens);
+        Assert.Equal(expected: "openai", actual: call.ProviderKey);
+        Assert.Equal(1, actual: call.PromptTokens);
+        Assert.Equal(2, actual: call.CompletionTokens);
     }
 
     [Fact]
@@ -205,13 +209,14 @@ public class RequestTelemetryPublisherTests
     {
         var telemetryPublisher = new FakeTelemetryPublisher();
         var transcriptStore = new ThrowingTranscriptStore();
-        var routingOptionsMonitor = new StaticOptionsMonitor<TotallyHot.ArcRouter.Models.RoutingOptions>(new TotallyHot.ArcRouter.Models.RoutingOptions { EnableAdaptiveRouting = true });
+        var routingOptionsMonitor =
+            new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions { EnableAdaptiveRouting = true });
         var publisher = CreatePublisher(
             telemetryPublisher: telemetryPublisher,
             transcriptStore: transcriptStore,
             routingOptionsMonitor: routingOptionsMonitor);
 
-        var route = CreateRoute(provider: "openai", isFree: true);
+        var route = CreateRoute(provider: "openai", true);
         var context = CreateContext(sessionId: "session-transcript");
 
         var clientShapeBytes = Encoding.UTF8.GetBytes("""{"choices":[]}""");
@@ -222,15 +227,15 @@ public class RequestTelemetryPublisherTests
             context: context,
             route: route,
             requestedModelName: "primary",
-            isFallback: false,
+            false,
             telemetryShapeProvider: "openai",
             rewrittenRequestBody: Encoding.UTF8.GetBytes("{}"),
             capturedResponseBytes: clientShapeBytes,
-            nativeResponseBytes: null,
-            isStreaming: false,
-            latencyToHeadersMs: 10,
-            totalDurationMs: 20,
-            statusCode: 200,
+            null,
+            false,
+            10,
+            20,
+            200,
             cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.Null(exception);
@@ -245,37 +250,38 @@ public class RequestTelemetryPublisherTests
         var telemetryPublisher = new FakeTelemetryPublisher();
         var publisher = CreatePublisher(telemetryPublisher: telemetryPublisher);
 
-        var route = CreateRoute(provider: "openai", isFree: true);
+        var route = CreateRoute(provider: "openai", true);
         var context = CreateContext(sessionId: "session-shape");
 
-        var clientShapeBytes = Encoding.UTF8.GetBytes("""{"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":50}}""");
+        var clientShapeBytes =
+            Encoding.UTF8.GetBytes("""{"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":50}}""");
 
         await publisher.PublishAsync(
             context: context,
             route: route,
             requestedModelName: "requested-model",
-            isFallback: false,
+            false,
             telemetryShapeProvider: "openai",
             rewrittenRequestBody: Encoding.UTF8.GetBytes("{}"),
             capturedResponseBytes: clientShapeBytes,
-            nativeResponseBytes: null,
-            isStreaming: false,
-            latencyToHeadersMs: 42,
-            totalDurationMs: 99,
-            statusCode: 200,
+            null,
+            false,
+            42,
+            99,
+            200,
             cancellationToken: TestContext.Current.CancellationToken);
 
         var published = Assert.Single(telemetryPublisher.PublishedEvents);
-        Assert.Equal("session-shape", published.SessionId);
-        Assert.Equal(1, published.TurnNumber);
+        Assert.Equal(expected: "session-shape", actual: published.SessionId);
+        Assert.Equal(1, actual: published.TurnNumber);
         Assert.False(published.IsSessionSynthesized);
-        Assert.Equal("requested-model", published.RequestedModel);
-        Assert.Equal("openai", published.Provider);
-        Assert.Equal(100, published.PromptTokens);
-        Assert.Equal(50, published.CompletionTokens);
-        Assert.Equal(0m, published.EstimatedCostUsd);
-        Assert.Equal(200, published.StatusCode);
-        Assert.Equal("session-shape:1", published.CorrelationId);
+        Assert.Equal(expected: "requested-model", actual: published.RequestedModel);
+        Assert.Equal(expected: "openai", actual: published.Provider);
+        Assert.Equal(100, actual: published.PromptTokens);
+        Assert.Equal(50, actual: published.CompletionTokens);
+        Assert.Equal(0m, actual: published.EstimatedCostUsd);
+        Assert.Equal(200, actual: published.StatusCode);
+        Assert.Equal(expected: "session-shape:1", actual: published.CorrelationId);
     }
 
     // -- helpers -------------------------------------------------------------
@@ -284,33 +290,34 @@ public class RequestTelemetryPublisherTests
         FakeTelemetryPublisher? telemetryPublisher = null,
         IBudgetEnforcer? budgetStore = null,
         ITranscriptStore? transcriptStore = null,
-        StaticOptionsMonitor<TotallyHot.ArcRouter.Models.RoutingOptions>? routingOptionsMonitor = null)
+        StaticOptionsMonitor<RoutingOptions>? routingOptionsMonitor = null)
     {
         return new RequestTelemetryPublisher(
-            NullLogger.Instance,
+            logger: NullLogger.Instance,
             sessionIdResolver: new SessionIdResolver(),
             continuityMatcher: new MessageHistoryContinuityMatcher(),
             turnTracker: new ConversationTurnTracker(),
             usageExtractor: new UsageExtractor(),
             responseTextExtractor: new ResponseTextExtractor(),
             telemetryPublisher: telemetryPublisher ?? new FakeTelemetryPublisher(),
-            qualityIngress: null,
+            null,
             spendTracker: NullSpendTracker.Instance,
-            priceLookup: null,
+            null,
             budgetStore: budgetStore,
-            usageLedger: null,
-            pendingTaskEmbeddingCache: null,
-            pendingRequestCostCache: null,
-            pendingRequestProvenanceCache: null,
-            pendingResponseTextCache: null,
+            null,
+            null,
+            null,
+            null,
+            null,
             transcriptStore: transcriptStore,
             routingOptionsMonitor: routingOptionsMonitor,
-            judgeOptionsMonitor: null,
-            selfHostedRouterPricePerMillionTokens: 0.054m);
+            null,
+            0.054m);
     }
 
-    private static ResolvedModelRoute CreateRoute(string provider, bool isFree) =>
-        new(
+    private static ResolvedModelRoute CreateRoute(string provider, bool isFree)
+    {
+        return new ResolvedModelRoute(
             ModelName: "primary",
             Provider: provider,
             ProviderModelId: "provider-model-id",
@@ -318,6 +325,7 @@ public class RequestTelemetryPublisherTests
             AuthHeaderName: "Authorization",
             ExtraHeaders: [],
             IsFree: isFree);
+    }
 
     private static HttpContext CreateContext(string sessionId)
     {
@@ -339,7 +347,10 @@ public class RequestTelemetryPublisherTests
             return Task.CompletedTask;
         }
 
-        public Task PublishLogLineAsync(LogLineEvent logLine, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task PublishLogLineAsync(LogLineEvent logLine, CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
     }
 
     /// <summary>Records every <see cref="RecordUsageAsync"/> call, for gating assertions. Never reports a breach.</summary>
@@ -347,7 +358,10 @@ public class RequestTelemetryPublisherTests
     {
         public List<RecordedCall> RecordedCalls { get; } = [];
 
-        public bool IsBreached(string providerKey) => false;
+        public bool IsBreached(string providerKey)
+        {
+            return false;
+        }
 
         public Task RecordUsageAsync(
             string providerKey,
@@ -359,11 +373,16 @@ public class RequestTelemetryPublisherTests
             DateTimeOffset usageAtUtc,
             CancellationToken cancellationToken = default)
         {
-            RecordedCalls.Add(new RecordedCall(providerKey, costUsd, promptTokens, completionTokens));
+            RecordedCalls.Add(new RecordedCall(ProviderKey: providerKey, CostUsd: costUsd, PromptTokens: promptTokens,
+                CompletionTokens: completionTokens));
             return Task.CompletedTask;
         }
 
-        public sealed record RecordedCall(string ProviderKey, decimal? CostUsd, int? PromptTokens, int? CompletionTokens);
+        public sealed record RecordedCall(
+            string ProviderKey,
+            decimal? CostUsd,
+            int? PromptTokens,
+            int? CompletionTokens);
     }
 
     /// <summary>
@@ -381,40 +400,71 @@ public class RequestTelemetryPublisherTests
             throw new InvalidOperationException("simulated transcript store failure");
         }
 
-        public Task UpdateOutcomeAsync(string correlationId, double? score, CancellationToken cancellationToken = default) =>
+        public Task UpdateOutcomeAsync(string correlationId, double? score,
+            CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
 
-        public Task<IReadOnlyList<long>> LoadUnembeddedScoredAsync(int limit, CancellationToken cancellationToken = default) =>
+        public Task<IReadOnlyList<long>> LoadUnembeddedScoredAsync(int limit,
+            CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
 
-        public Task<TranscriptRecord?> GetTranscriptAsync(long id, CancellationToken cancellationToken = default) =>
+        public Task<TranscriptRecord?> GetTranscriptAsync(long id, CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
 
-        public Task LinkMemoryEntryAsync(long transcriptId, long memoryEntryId, CancellationToken cancellationToken = default) =>
+        public Task LinkMemoryEntryAsync(long transcriptId, long memoryEntryId,
+            CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
 
-        public Task<IReadOnlyList<long>> LoadPendingQualityRescanAsync(string scorerVersion, int limit, CancellationToken cancellationToken = default) =>
+        public Task<IReadOnlyList<long>> LoadPendingQualityRescanAsync(string scorerVersion, int limit,
+            CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
 
-        public Task MarkQualityRescannedAsync(long transcriptId, string scorerVersion, double? score, CancellationToken cancellationToken = default) =>
+        public Task MarkQualityRescannedAsync(long transcriptId, string scorerVersion, double? score,
+            CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
 
-        public Task<int> GetRowCountAsync(CancellationToken cancellationToken = default) =>
+        public Task<int> GetRowCountAsync(CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
 
-        public Task<int> DeleteOldestAsync(int count, CancellationToken cancellationToken = default) =>
+        public Task<int> DeleteOldestAsync(int count, CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
 
-        public Task<int> DeleteBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken = default) =>
+        public Task<int> DeleteBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
 
-        public Task<int> DeleteAllAsync(CancellationToken cancellationToken = default) =>
+        public Task<int> DeleteAllAsync(CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
 
-        public Task<IReadOnlyDictionary<long, string>> LoadPromptTextByMemoryEntryIdAsync(CancellationToken cancellationToken = default) =>
+        public Task<IReadOnlyDictionary<long, string>> LoadPromptTextByMemoryEntryIdAsync(
+            CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
 
-        public Task<IReadOnlyDictionary<string, ModelTokenAverage>> LoadObservedTokenAveragesAsync(CancellationToken cancellationToken = default) =>
+        public Task<IReadOnlyDictionary<string, ModelTokenAverage>> LoadObservedTokenAveragesAsync(
+            CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
     }
 }

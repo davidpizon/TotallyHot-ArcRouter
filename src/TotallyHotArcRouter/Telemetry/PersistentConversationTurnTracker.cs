@@ -18,17 +18,20 @@ namespace TotallyHot.ArcRouter.Telemetry;
 public sealed class PersistentConversationTurnTracker : IConversationTurnTracker
 {
     private static readonly TimeSpan IdleEviction = TimeSpan.FromHours(12);
+    private readonly IUsageLedger _ledger;
 
     private readonly object _lock = new();
     private readonly Dictionary<string, TrackedSession> _sessions = new(StringComparer.Ordinal);
-    private readonly IUsageLedger _ledger;
     private readonly TimeProvider _timeProvider;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PersistentConversationTurnTracker"/> class.
     /// </summary>
     /// <param name="ledger">The durable ledger seeding each session's counter on first sight.</param>
-    /// <param name="timeProvider">Optional; defaults to <see cref="TimeProvider.System"/>. Overridable in tests to control idle eviction.</param>
+    /// <param name="timeProvider">
+    /// Optional; defaults to <see cref="TimeProvider.System"/>. Overridable in tests to control
+    /// idle eviction.
+    /// </param>
     public PersistentConversationTurnTracker(IUsageLedger ledger, TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(ledger);
@@ -36,13 +39,12 @@ public sealed class PersistentConversationTurnTracker : IConversationTurnTracker
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public int NextTurn(string sessionId)
     {
         if (string.IsNullOrWhiteSpace(sessionId))
-        {
-            throw new ArgumentException("Session id must not be null or whitespace.", nameof(sessionId));
-        }
+            throw new ArgumentException(message: "Session id must not be null or whitespace.",
+                paramName: nameof(sessionId));
 
         var now = _timeProvider.GetUtcNow();
 
@@ -53,10 +55,11 @@ public sealed class PersistentConversationTurnTracker : IConversationTurnTracker
         // as the single-path version did.
         lock (_lock)
         {
-            if (_sessions.TryGetValue(sessionId, out var tracked) && now - tracked.LastSeenUtc <= IdleEviction)
+            if (_sessions.TryGetValue(key: sessionId, value: out var tracked) &&
+                now - tracked.LastSeenUtc <= IdleEviction)
             {
                 var next = tracked.Counter + 1;
-                _sessions[sessionId] = new TrackedSession(next, now);
+                _sessions[sessionId] = new TrackedSession(Counter: next, LastSeenUtc: now);
                 return next;
             }
         }
@@ -72,9 +75,9 @@ public sealed class PersistentConversationTurnTracker : IConversationTurnTracker
             // Re-check under the lock: another thread may have raced this one and already tracked/advanced
             // this session while the ledger query above was in flight - use its counter rather than
             // silently reissuing an already-issued turn number.
-            var counter = _sessions.TryGetValue(sessionId, out var tracked) ? tracked.Counter : seed;
+            var counter = _sessions.TryGetValue(key: sessionId, value: out var tracked) ? tracked.Counter : seed;
             var next = counter + 1;
-            _sessions[sessionId] = new TrackedSession(next, now);
+            _sessions[sessionId] = new TrackedSession(Counter: next, LastSeenUtc: now);
             return next;
         }
     }
@@ -95,22 +98,12 @@ public sealed class PersistentConversationTurnTracker : IConversationTurnTracker
     {
         List<string>? stale = null;
         foreach (var (sessionId, tracked) in _sessions)
-        {
             if (now - tracked.LastSeenUtc > IdleEviction)
-            {
                 (stale ??= []).Add(sessionId);
-            }
-        }
 
-        if (stale is null)
-        {
-            return;
-        }
+        if (stale is null) return;
 
-        foreach (var sessionId in stale)
-        {
-            _sessions.Remove(sessionId);
-        }
+        foreach (var sessionId in stale) _sessions.Remove(sessionId);
     }
 
     /// <summary>One session's in-memory turn counter and when it was last advanced, for idle eviction.</summary>

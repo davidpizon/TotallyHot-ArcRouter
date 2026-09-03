@@ -12,7 +12,7 @@ public sealed class PriceSourceAdminException : GrpcAdminException
 {
     /// <summary>Initializes a new instance of the <see cref="PriceSourceAdminException"/> class.</summary>
     public PriceSourceAdminException(string message, Exception? innerException = null, bool isUnavailable = false)
-        : base(message, innerException, isUnavailable)
+        : base(message: message, innerException: innerException, isUnavailable: isUnavailable)
     {
     }
 }
@@ -22,7 +22,10 @@ public sealed class PriceSourceAdminException : GrpcAdminException
 /// </summary>
 /// <param name="Name">The source's registry name.</param>
 /// <param name="Enabled">Whether the source is polled and served.</param>
-/// <param name="PriorityScore">Rank arbitrating contested cells; higher wins. Reorderable via <see cref="IPriceSourceAdminClient.ReorderAsync"/>.</param>
+/// <param name="PriorityScore">
+/// Rank arbitrating contested cells; higher wins. Reorderable via
+/// <see cref="IPriceSourceAdminClient.ReorderAsync"/>.
+/// </param>
 /// <param name="PriceCount">How many price rows this source owns; 0 if it has never polled.</param>
 public sealed record PriceSourceStatus(
     string Name,
@@ -81,7 +84,7 @@ public sealed record PriceRefreshResult(
 /// </remarks>
 public sealed class PriceSourceAdminClient
     : GrpcAdminClientBase<Contract.PriceSourceAdminService.PriceSourceAdminServiceClient, PriceSourceAdminException>,
-      IPriceSourceAdminClient
+        IPriceSourceAdminClient
 {
     // Mirrors PriceCatalogOptions.PollIntervalHours' default, for the one case where a response carries no
     // schedule. Duplicated rather than shared because this library deliberately doesn't reference the router.
@@ -92,7 +95,9 @@ public sealed class PriceSourceAdminClient
     /// channel to <paramref name="serverAddress"/>.
     /// </summary>
     public PriceSourceAdminClient(string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
-        : base(serverAddress, callInvoker => new Contract.PriceSourceAdminService.PriceSourceAdminServiceClient(callInvoker))
+        : base(serverAddress: serverAddress,
+            createClient: callInvoker =>
+                new Contract.PriceSourceAdminService.PriceSourceAdminServiceClient(callInvoker))
     {
     }
 
@@ -106,23 +111,24 @@ public sealed class PriceSourceAdminClient
     {
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<PriceSourceList> ListAsync(CancellationToken cancellationToken = default)
     {
         try
         {
             var response = await Client
-                .ListPriceSourcesAsync(new Contract.ListPriceSourcesRequest(), cancellationToken: cancellationToken)
+                .ListPriceSourcesAsync(request: new Contract.ListPriceSourcesRequest(),
+                    cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
-            return MapList(response.Sources, response.Schedule);
+            return MapList(sources: response.Sources, schedule: response.Schedule);
         }
         catch (RpcException ex)
         {
-            throw Wrap(ex, "Could not read the price sources");
+            throw Wrap(ex: ex, action: "Could not read the price sources");
         }
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<PriceSourceList> SetEnabledAsync(
         string name,
         bool enabled,
@@ -134,34 +140,35 @@ public sealed class PriceSourceAdminClient
         {
             var response = await Client
                 .SetPriceSourceEnabledAsync(
-                    new Contract.SetPriceSourceEnabledRequest { Name = name, Enabled = enabled },
+                    request: new Contract.SetPriceSourceEnabledRequest { Name = name, Enabled = enabled },
                     cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
-            return MapList(response.Sources, response.Schedule);
+            return MapList(sources: response.Sources, schedule: response.Schedule);
         }
         catch (RpcException ex)
         {
-            throw Wrap(ex, $"Could not {(enabled ? "enable" : "disable")} '{name}'");
+            throw Wrap(ex: ex, action: $"Could not {(enabled ? "enable" : "disable")} '{name}'");
         }
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<PriceRefreshResult> RefreshAsync(CancellationToken cancellationToken = default)
     {
         try
         {
             var response = await Client
-                .RefreshPriceSourcesAsync(new Contract.RefreshPriceSourcesRequest(), cancellationToken: cancellationToken)
+                .RefreshPriceSourcesAsync(request: new Contract.RefreshPriceSourcesRequest(),
+                    cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             return MapRefreshResult(response);
         }
         catch (RpcException ex)
         {
-            throw Wrap(ex, "Could not refresh the price sources");
+            throw Wrap(ex: ex, action: "Could not refresh the price sources");
         }
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<PriceRefreshResult> ReorderAsync(
         IReadOnlyList<string> namesInPriorityOrder,
         CancellationToken cancellationToken = default)
@@ -174,13 +181,13 @@ public sealed class PriceSourceAdminClient
         try
         {
             var response = await Client
-                .ReorderPriceSourcesAsync(request, cancellationToken: cancellationToken)
+                .ReorderPriceSourcesAsync(request: request, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             return MapRefreshResult(response);
         }
         catch (RpcException ex)
         {
-            throw Wrap(ex, "Could not reorder the price sources");
+            throw Wrap(ex: ex, action: "Could not reorder the price sources");
         }
     }
 
@@ -192,47 +199,62 @@ public sealed class PriceSourceAdminClient
     {
         var outcomes = response.Outcomes
             .Select(o => new PriceRefreshOutcome(
-                o.Source,
-                o.Succeeded,
-                o.PriceCount,
-                o.HasError ? o.Error : null))
+                Source: o.Source,
+                Succeeded: o.Succeeded,
+                PriceCount: o.PriceCount,
+                Error: o.HasError ? o.Error : null))
             .ToList();
 
         return new PriceRefreshResult(
-            outcomes,
-            response.FreshPriceCount,
-            MapSources(response.Sources),
-            MapSchedule(response.Schedule));
+            Outcomes: outcomes,
+            FreshPriceCount: response.FreshPriceCount,
+            Sources: MapSources(response.Sources),
+            Schedule: MapSchedule(response.Schedule));
     }
 
     /// <summary>Converts gRPC-contract sources and schedule into the client's <see cref="PriceSourceList"/>.</summary>
     private static PriceSourceList MapList(
         IEnumerable<Contract.PriceSource> sources,
-        Contract.PriceSchedule? schedule) =>
-        new(MapSources(sources), MapSchedule(schedule));
+        Contract.PriceSchedule? schedule)
+    {
+        return new PriceSourceList(Sources: MapSources(sources), Schedule: MapSchedule(schedule));
+    }
 
     /// <summary>Converts gRPC-contract price sources into the client's <see cref="PriceSourceStatus"/> list.</summary>
-    private static IReadOnlyList<PriceSourceStatus> MapSources(IEnumerable<Contract.PriceSource> sources) =>
-        [.. sources.Select(s => new PriceSourceStatus(
-            s.Name,
-            s.Enabled,
-            s.PriorityScore,
-            s.PriceCount))];
+    private static IReadOnlyList<PriceSourceStatus> MapSources(IEnumerable<Contract.PriceSource> sources)
+    {
+        return
+        [
+            .. sources.Select(s => new PriceSourceStatus(
+                Name: s.Name,
+                Enabled: s.Enabled,
+                PriorityScore: s.PriorityScore,
+                PriceCount: s.PriceCount))
+        ];
+    }
 
     // A message field is absent on the wire when unset, so an older router - or a test fake that doesn't
     // populate it - lands here as null. Substituting the configured default rather than throwing keeps the
     // panel's source list, the part that matters, rendering; the countdown is the only thing that would be
     // off, and only against a router predating the field.
-    /// <summary>Converts a gRPC-contract schedule into the client's <see cref="PriceSourceSchedule"/>, substituting a default when the field is unset.</summary>
-    private static PriceSourceSchedule MapSchedule(Contract.PriceSchedule? schedule) =>
-        schedule is null
-            ? new PriceSourceSchedule(DefaultPollInterval, DateTimeOffset.UtcNow)
+    /// <summary>
+    /// Converts a gRPC-contract schedule into the client's <see cref="PriceSourceSchedule"/>, substituting a default
+    /// when the field is unset.
+    /// </summary>
+    private static PriceSourceSchedule MapSchedule(Contract.PriceSchedule? schedule)
+    {
+        return schedule is null
+            ? new PriceSourceSchedule(PollInterval: DefaultPollInterval, ScheduleAnchorUtc: DateTimeOffset.UtcNow)
             : new PriceSourceSchedule(
-                TimeSpan.FromSeconds(schedule.PollIntervalSeconds),
-                schedule.ScheduleAnchorUtc.ToDateTimeOffset());
+                PollInterval: TimeSpan.FromSeconds(schedule.PollIntervalSeconds),
+                ScheduleAnchorUtc: schedule.ScheduleAnchorUtc.ToDateTimeOffset());
+    }
 
-    /// <inheritdoc />
-    protected override PriceSourceAdminException CreateException(string message, Exception? innerException, bool isUnavailable) =>
-        new(message, innerException, isUnavailable);
+    /// <inheritdoc/>
+    protected override PriceSourceAdminException CreateException(string message, Exception? innerException,
+        bool isUnavailable)
+    {
+        return new PriceSourceAdminException(message: message, innerException: innerException,
+            isUnavailable: isUnavailable);
+    }
 }
-

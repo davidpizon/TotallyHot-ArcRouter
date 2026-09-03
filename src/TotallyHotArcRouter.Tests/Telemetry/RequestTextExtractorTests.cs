@@ -34,10 +34,10 @@ public class RequestTextExtractorTests
         var body = new JsonObject
         {
             ["messages"] = new JsonArray(
-                new JsonObject { ["role"] = "user", ["content"] = "Hello there" }),
+                new JsonObject { ["role"] = "user", ["content"] = "Hello there" })
         };
 
-        Assert.Equal("Hello there", RequestTextExtractor.ExtractNewestUserMessage(body));
+        Assert.Equal(expected: "Hello there", actual: RequestTextExtractor.ExtractNewestUserMessage(body));
     }
 
     [Fact]
@@ -49,10 +49,10 @@ public class RequestTextExtractorTests
                 new JsonObject { ["role"] = "system", ["content"] = "You are helpful." },
                 new JsonObject { ["role"] = "user", ["content"] = "First question" },
                 new JsonObject { ["role"] = "assistant", ["content"] = "First answer" },
-                new JsonObject { ["role"] = "user", ["content"] = "Second question" }),
+                new JsonObject { ["role"] = "user", ["content"] = "Second question" })
         };
 
-        Assert.Equal("Second question", RequestTextExtractor.ExtractNewestUserMessage(body));
+        Assert.Equal(expected: "Second question", actual: RequestTextExtractor.ExtractNewestUserMessage(body));
     }
 
     [Fact]
@@ -65,10 +65,10 @@ public class RequestTextExtractorTests
             ["messages"] = new JsonArray(
                 new JsonObject { ["role"] = "user", ["content"] = "Run the tests" },
                 new JsonObject { ["role"] = "assistant", ["content"] = null },
-                new JsonObject { ["role"] = "tool", ["content"] = "3 passed, 0 failed" }),
+                new JsonObject { ["role"] = "tool", ["content"] = "3 passed, 0 failed" })
         };
 
-        Assert.Equal("Run the tests", RequestTextExtractor.ExtractNewestUserMessage(body));
+        Assert.Equal(expected: "Run the tests", actual: RequestTextExtractor.ExtractNewestUserMessage(body));
     }
 
     [Fact]
@@ -77,7 +77,7 @@ public class RequestTextExtractorTests
         var body = new JsonObject
         {
             ["messages"] = new JsonArray(
-                new JsonObject { ["role"] = "system", ["content"] = "You are helpful." }),
+                new JsonObject { ["role"] = "system", ["content"] = "You are helpful." })
         };
 
         Assert.Null(RequestTextExtractor.ExtractNewestUserMessage(body));
@@ -89,7 +89,7 @@ public class RequestTextExtractorTests
         var body = new JsonObject
         {
             ["messages"] = new JsonArray(
-                new JsonObject { ["role"] = "user", ["content"] = "   " }),
+                new JsonObject { ["role"] = "user", ["content"] = "   " })
         };
 
         Assert.Null(RequestTextExtractor.ExtractNewestUserMessage(body));
@@ -106,12 +106,14 @@ public class RequestTextExtractorTests
                     ["role"] = "user",
                     ["content"] = new JsonArray(
                         new JsonObject { ["type"] = "text", ["text"] = "Look at this:" },
-                        new JsonObject { ["type"] = "image_url", ["image_url"] = new JsonObject { ["url"] = "data:..." } },
-                        new JsonObject { ["type"] = "text", ["text"] = "what is it?" }),
-                }),
+                        new JsonObject
+                            { ["type"] = "image_url", ["image_url"] = new JsonObject { ["url"] = "data:..." } },
+                        new JsonObject { ["type"] = "text", ["text"] = "what is it?" })
+                })
         };
 
-        Assert.Equal("Look at this: what is it?", RequestTextExtractor.ExtractNewestUserMessage(body));
+        Assert.Equal(expected: "Look at this: what is it?",
+            actual: RequestTextExtractor.ExtractNewestUserMessage(body));
     }
 
     [Fact]
@@ -124,11 +126,11 @@ public class RequestTextExtractorTests
                 {
                     ["role"] = "user",
                     ["content"] = new JsonArray(
-                        new JsonObject { ["type"] = "image_url", ["image_url"] = new JsonObject { ["url"] = "data:..." } }),
-                }),
+                        new JsonObject
+                            { ["type"] = "image_url", ["image_url"] = new JsonObject { ["url"] = "data:..." } })
+                })
         };
 
         Assert.Null(RequestTextExtractor.ExtractNewestUserMessage(body));
     }
 }
-

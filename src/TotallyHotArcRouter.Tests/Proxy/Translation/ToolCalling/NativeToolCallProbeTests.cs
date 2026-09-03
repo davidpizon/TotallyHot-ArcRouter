@@ -6,7 +6,6 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
 /// <summary>
 /// What a server does with a <c>tools</c> array it cannot render, measured rather than assumed
 /// (<see cref="RecordedNativeToolCallProbes"/>).
-///
 /// <para>
 /// These assert a <b>negative</b>, which is the awkward kind of test to write and the reason to write it
 /// carefully. "No tool call came back" is true of a model that has no tool support, and equally true of a
@@ -17,19 +16,20 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
 /// </summary>
 public class NativeToolCallProbeTests
 {
-    private static JsonElement Message(string body) =>
-        JsonDocument.Parse(body).RootElement.GetProperty("choices")[0].GetProperty("message");
+    private static JsonElement Message(string body)
+    {
+        return JsonDocument.Parse(body).RootElement.GetProperty("choices")[0].GetProperty("message");
+    }
 
-    private static int PromptTokens(string body) =>
-        JsonDocument.Parse(body).RootElement.GetProperty("usage").GetProperty("prompt_tokens").GetInt32();
+    private static int PromptTokens(string body)
+    {
+        return JsonDocument.Parse(body).RootElement.GetProperty("usage").GetProperty("prompt_tokens").GetInt32();
+    }
 
     public static TheoryData<string> Scenarios()
     {
         var data = new TheoryData<string>();
-        foreach (var scenario in ToolCallEmulationScenarios.All)
-        {
-            data.Add(scenario.Name);
-        }
+        foreach (var scenario in ToolCallEmulationScenarios.All) data.Add(scenario.Name);
 
         return data;
     }
@@ -45,11 +45,13 @@ public class NativeToolCallProbeTests
         //
         // Ratio rather than absolute numbers, so re-recording against a different tokenizer or a reworded
         // scenario does not require re-deriving a threshold. Anything remotely close to 1 fails.
-        var native = PromptTokens(RecordedNativeToolCallProbes.DeepSeekR1DistillQwen7B.ResponseByScenario[scenarioName]);
+        var native =
+            PromptTokens(RecordedNativeToolCallProbes.DeepSeekR1DistillQwen7B.ResponseByScenario[scenarioName]);
         var emulated = PromptTokens(RecordedModelTranscripts.DeepSeekR1DistillQwen7B.ResponseByScenario[scenarioName]);
 
         Assert.True(
-            native * 5 < emulated,
+            condition: native * 5 < emulated,
+            userMessage:
             $"{scenarioName}: native prompt_tokens {native} vs emulated {emulated}. The native request was "
             + "expected to carry no rendered tools at all; a comparable count means the server started "
             + "rendering them, which changes what these probes prove.");
@@ -65,9 +67,9 @@ public class NativeToolCallProbeTests
         var body = RecordedNativeToolCallProbes.DeepSeekR1DistillQwen7B.ResponseByScenario[scenarioName];
         var root = JsonDocument.Parse(body).RootElement;
 
-        Assert.Equal("stop", root.GetProperty("choices")[0].GetProperty("finish_reason").GetString());
-        Assert.False(root.TryGetProperty("error", out _));
-        Assert.NotEqual(0, Message(body).GetProperty("content").GetString()!.Length);
+        Assert.Equal(expected: "stop", actual: root.GetProperty("choices")[0].GetProperty("finish_reason").GetString());
+        Assert.False(root.TryGetProperty(propertyName: "error", value: out _));
+        Assert.NotEqual(0, actual: Message(body).GetProperty("content").GetString()!.Length);
     }
 
     [Theory]
@@ -82,7 +84,7 @@ public class NativeToolCallProbeTests
         var body = RecordedNativeToolCallProbes.DeepSeekR1DistillQwen7B.ResponseByScenario[scenarioName];
         var content = Message(body).GetProperty("content").GetString()!;
 
-        Assert.Null(DialectMatcher.MatchAny(content, ToolCallDialectRegistry.ScannableDialects));
+        Assert.Null(DialectMatcher.MatchAny(content: content, candidates: ToolCallDialectRegistry.ScannableDialects));
         Assert.Empty(Message(body).GetProperty("tool_calls").EnumerateArray());
     }
 
@@ -100,8 +102,8 @@ public class NativeToolCallProbeTests
         {
             var content = Message(body).GetProperty("content").GetString()!;
 
-            Assert.DoesNotContain('｜', content);
-            Assert.DoesNotContain('▁', content);
+            Assert.DoesNotContain('｜', collection: content);
+            Assert.DoesNotContain('▁', collection: content);
         }
     }
 
@@ -111,11 +113,8 @@ public class NativeToolCallProbeTests
         // Same reason the replay suite checks this: an omitted scenario reads as "not tested" rather than
         // "not recorded".
         foreach (var probe in RecordedNativeToolCallProbes.All)
-        {
             Assert.Equal(
-                ToolCallEmulationScenarios.All.Select(s => s.Name).Order(),
-                probe.ResponseByScenario.Keys.Order());
-        }
+                expected: ToolCallEmulationScenarios.All.Select(s => s.Name).Order(),
+                actual: probe.ResponseByScenario.Keys.Order());
     }
 }
-

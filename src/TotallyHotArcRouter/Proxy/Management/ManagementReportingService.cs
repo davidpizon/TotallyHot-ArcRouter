@@ -13,14 +13,20 @@ namespace TotallyHot.ArcRouter.Proxy.Management;
 /// </summary>
 public sealed class ManagementReportingService
 {
-    private readonly IUsageRollupStore? _rollupStore;
     private readonly ITaxonomyComparisonStore? _comparisonStore;
+    private readonly IUsageRollupStore? _rollupStore;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ManagementReportingService"/> class.
     /// </summary>
-    /// <param name="rollupStore">Optional usage-rollup store backing <see cref="GetUsageSummary"/> and <see cref="GetUsageRollup"/>. <see langword="null"/> makes both report <see cref="ManagementErrorType.Unavailable"/>.</param>
-    /// <param name="comparisonStore">Optional taxonomy-comparison store backing <see cref="GetRoutingRoiAsync"/>. <see langword="null"/> makes it report <see cref="ManagementErrorType.Unavailable"/>.</param>
+    /// <param name="rollupStore">
+    /// Optional usage-rollup store backing <see cref="GetUsageSummary"/> and
+    /// <see cref="GetUsageRollup"/>. <see langword="null"/> makes both report <see cref="ManagementErrorType.Unavailable"/>.
+    /// </param>
+    /// <param name="comparisonStore">
+    /// Optional taxonomy-comparison store backing <see cref="GetRoutingRoiAsync"/>.
+    /// <see langword="null"/> makes it report <see cref="ManagementErrorType.Unavailable"/>.
+    /// </param>
     public ManagementReportingService(IUsageRollupStore? rollupStore, ITaxonomyComparisonStore? comparisonStore)
     {
         _rollupStore = rollupStore;
@@ -35,16 +41,15 @@ public sealed class ManagementReportingService
     public ManagementResult<UsageSummary> GetUsageSummary(string window)
     {
         if (_rollupStore is null)
-        {
-            return ManagementResult<UsageSummary>.Fail(ManagementErrorType.Unavailable, "Usage rollups are not available.");
-        }
+            return ManagementResult<UsageSummary>.Fail(errorType: ManagementErrorType.Unavailable,
+                message: "Usage rollups are not available.");
 
         var now = DateTimeOffset.UtcNow;
 
         // Aligned to a UTC day boundary, not just "now minus N" - UsageRollupStore.Summary reads whole
         // P1D buckets keyed by bucket_start_utc, so an unaligned 'from' (e.g. now.AddDays(-1), which lands
         // mid-day) would fall after yesterday's bucket start and exclude that fully-elapsed bucket entirely.
-        var todayStartUtc = new DateTimeOffset(now.Date, TimeSpan.Zero);
+        var todayStartUtc = new DateTimeOffset(dateTime: now.Date, offset: TimeSpan.Zero);
         DateTimeOffset from;
         switch (window)
         {
@@ -61,10 +66,12 @@ public sealed class ManagementReportingService
                 from = DateTimeOffset.UnixEpoch;
                 break;
             default:
-                return ManagementResult<UsageSummary>.Fail(ManagementErrorType.InvalidRequest, "window must be 'day', 'week', 'month', or 'all'.");
+                return ManagementResult<UsageSummary>.Fail(errorType: ManagementErrorType.InvalidRequest,
+                    message: "window must be 'day', 'week', 'month', or 'all'.");
         }
 
-        return ManagementResultExecutor.TryExecute(() => _rollupStore.Summary(from, now), "Failed to read the usage summary.");
+        return ManagementResultExecutor.TryExecute(action: () => _rollupStore.Summary(from: from, to: now),
+            failureMessage: "Failed to read the usage summary.");
     }
 
     /// <summary>
@@ -75,17 +82,16 @@ public sealed class ManagementReportingService
     /// <param name="to">Exclusive range end; must be after <paramref name="from"/>.</param>
     /// <param name="width">Bucket width: <c>"hour"</c> or <c>"day"</c>.</param>
     /// <param name="groupBy"><c>"model"</c>, <c>"provider"</c>, or <c>"day"</c>.</param>
-    public ManagementResult<IReadOnlyList<UsageRollupBucket>> GetUsageRollup(DateTimeOffset from, DateTimeOffset to, string width, string groupBy)
+    public ManagementResult<IReadOnlyList<UsageRollupBucket>> GetUsageRollup(DateTimeOffset from, DateTimeOffset to,
+        string width, string groupBy)
     {
         if (_rollupStore is null)
-        {
-            return ManagementResult<IReadOnlyList<UsageRollupBucket>>.Fail(ManagementErrorType.Unavailable, "Usage rollups are not available.");
-        }
+            return ManagementResult<IReadOnlyList<UsageRollupBucket>>.Fail(errorType: ManagementErrorType.Unavailable,
+                message: "Usage rollups are not available.");
 
         if (to <= from)
-        {
-            return ManagementResult<IReadOnlyList<UsageRollupBucket>>.Fail(ManagementErrorType.InvalidRequest, "'to' must be after 'from'.");
-        }
+            return ManagementResult<IReadOnlyList<UsageRollupBucket>>.Fail(
+                errorType: ManagementErrorType.InvalidRequest, message: "'to' must be after 'from'.");
 
         string bucketWidth;
         switch (width)
@@ -97,17 +103,18 @@ public sealed class ManagementReportingService
                 bucketWidth = "P1D";
                 break;
             default:
-                return ManagementResult<IReadOnlyList<UsageRollupBucket>>.Fail(ManagementErrorType.InvalidRequest, "width must be 'hour' or 'day'.");
+                return ManagementResult<IReadOnlyList<UsageRollupBucket>>.Fail(
+                    errorType: ManagementErrorType.InvalidRequest, message: "width must be 'hour' or 'day'.");
         }
 
         if (groupBy is not ("model" or "provider" or "day"))
-        {
-            return ManagementResult<IReadOnlyList<UsageRollupBucket>>.Fail(ManagementErrorType.InvalidRequest, "groupBy must be 'model', 'provider', or 'day'.");
-        }
+            return ManagementResult<IReadOnlyList<UsageRollupBucket>>.Fail(
+                errorType: ManagementErrorType.InvalidRequest,
+                message: "groupBy must be 'model', 'provider', or 'day'.");
 
         return ManagementResultExecutor.TryExecute(
-            () => _rollupStore.Query(from, to, bucketWidth, groupBy),
-            "Failed to read usage rollups.");
+            action: () => _rollupStore.Query(from: from, to: to, bucketWidth: bucketWidth, groupBy: groupBy),
+            failureMessage: "Failed to read usage rollups.");
     }
 
     /// <summary>
@@ -132,34 +139,32 @@ public sealed class ManagementReportingService
         CancellationToken cancellationToken = default)
     {
         if (_comparisonStore is null)
-        {
             return ManagementResult<IReadOnlyList<RoutingRoiPoint>>.Fail(
-                ManagementErrorType.Unavailable, "Routing ROI comparisons are not available.");
-        }
+                errorType: ManagementErrorType.Unavailable, message: "Routing ROI comparisons are not available.");
 
         if (to <= from)
-        {
             return ManagementResult<IReadOnlyList<RoutingRoiPoint>>.Fail(
-                ManagementErrorType.InvalidRequest, "'to' must be after 'from'.");
-        }
+                errorType: ManagementErrorType.InvalidRequest, message: "'to' must be after 'from'.");
 
-        return await ManagementResultExecutor.TryExecuteAsync<IReadOnlyList<RoutingRoiPoint>>(async () =>
+        return await ManagementResultExecutor.TryExecuteAsync<IReadOnlyList<RoutingRoiPoint>>(action: async () =>
         {
-            var rows = await _comparisonStore.LoadSinceAsync(from, sessionId, cancellationToken).ConfigureAwait(false);
+            var rows = await _comparisonStore
+                .LoadSinceAsync(since: from, sessionId: sessionId, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
             return
             [
                 .. rows
                     .Where(r => r.ComparedAtUtc < to)
                     .Select(r => new RoutingRoiPoint(
-                        r.ComparedAtUtc,
-                        r.SessionId,
-                        r.RoutedModel,
-                        r.BaselineModel,
-                        r.ActualCostUsd,
-                        r.BaselineEstimatedCostUsd,
-                        r.EstimatedNetSavingsUsd,
-                        r.IsExploratory)),
+                        ComparedAtUtc: r.ComparedAtUtc,
+                        SessionId: r.SessionId,
+                        RoutedModel: r.RoutedModel,
+                        BaselineModel: r.BaselineModel,
+                        ActualCostUsd: r.ActualCostUsd,
+                        BaselineEstimatedCostUsd: r.BaselineEstimatedCostUsd,
+                        EstimatedNetSavingsUsd: r.EstimatedNetSavingsUsd,
+                        IsExploratory: r.IsExploratory))
             ];
-        }, "Failed to read routing ROI comparisons.");
+        }, failureMessage: "Failed to read routing ROI comparisons.");
     }
 }

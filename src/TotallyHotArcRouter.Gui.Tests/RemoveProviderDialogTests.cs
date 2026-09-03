@@ -2,6 +2,7 @@ using AwesomeAssertions;
 using Bunit;
 using Microsoft.AspNetCore.Components.Web;
 using TotallyHot.ArcRouter.Gui.Components;
+using IElement = AngleSharp.Dom.IElement;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
@@ -19,20 +20,26 @@ public sealed class RemoveProviderDialogTests
         BunitContext ctx,
         int modelCount = 0,
         Action? onConfirm = null,
-        Action? onCancel = null) =>
-        ctx.Render<RemoveProviderDialog>(parameters =>
+        Action? onCancel = null)
+    {
+        return ctx.Render<RemoveProviderDialog>(parameters =>
         {
-            parameters.Add(p => p.ProviderKey, Key);
-            parameters.Add(p => p.ModelCount, modelCount);
-            parameters.Add(p => p.OnConfirm, () => onConfirm?.Invoke());
-            parameters.Add(p => p.OnCancel, () => onCancel?.Invoke());
+            parameters.Add(parameterSelector: p => p.ProviderKey, value: Key);
+            parameters.Add(parameterSelector: p => p.ModelCount, value: modelCount);
+            parameters.Add(parameterSelector: p => p.OnConfirm, callback: () => onConfirm?.Invoke());
+            parameters.Add(parameterSelector: p => p.OnCancel, callback: () => onCancel?.Invoke());
         });
+    }
 
-    private static AngleSharp.Dom.IElement FindRemoveButton(IRenderedComponent<RemoveProviderDialog> cut) =>
-        cut.FindAll("button").Single(b => b.TextContent.Trim() == "Remove");
+    private static IElement FindRemoveButton(IRenderedComponent<RemoveProviderDialog> cut)
+    {
+        return cut.FindAll("button").Single(b => b.TextContent.Trim() == "Remove");
+    }
 
-    private static AngleSharp.Dom.IElement FindCancelButton(IRenderedComponent<RemoveProviderDialog> cut) =>
-        cut.FindAll("button").Single(b => b.TextContent.Trim() == "Cancel");
+    private static IElement FindCancelButton(IRenderedComponent<RemoveProviderDialog> cut)
+    {
+        return cut.FindAll("button").Single(b => b.TextContent.Trim() == "Cancel");
+    }
 
     [Fact]
     public void Remove_is_disabled_until_the_key_is_typed()
@@ -50,7 +57,7 @@ public sealed class RemoveProviderDialogTests
         using var ctx = new BunitContext();
         var confirmed = false;
 
-        var cut = Render(ctx, onConfirm: () => confirmed = true);
+        var cut = Render(ctx: ctx, onConfirm: () => confirmed = true);
         cut.Find("input").Input(Key);
 
         FindRemoveButton(cut).HasAttribute("disabled").Should().BeFalse();
@@ -65,7 +72,7 @@ public sealed class RemoveProviderDialogTests
         using var ctx = new BunitContext();
         var confirmed = false;
 
-        var cut = Render(ctx, onConfirm: () => confirmed = true);
+        var cut = Render(ctx: ctx, onConfirm: () => confirmed = true);
 
         // Provider keys match case-insensitively everywhere else, but a confirmation the user can
         // satisfy with the wrong case isn't much of a confirmation.
@@ -93,7 +100,7 @@ public sealed class RemoveProviderDialogTests
         var confirmed = false;
         var cancelled = false;
 
-        var cut = Render(ctx, onConfirm: () => confirmed = true, onCancel: () => cancelled = true);
+        var cut = Render(ctx: ctx, onConfirm: () => confirmed = true, onCancel: () => cancelled = true);
         FindCancelButton(cut).Click();
 
         cancelled.Should().BeTrue();
@@ -105,7 +112,7 @@ public sealed class RemoveProviderDialogTests
     {
         using var ctx = new BunitContext();
 
-        var cut = Render(ctx, modelCount: 3);
+        var cut = Render(ctx: ctx, 3);
 
         cut.Markup.Should().Contain("also remove");
         cut.Markup.Should().Contain("3");
@@ -117,7 +124,7 @@ public sealed class RemoveProviderDialogTests
     {
         using var ctx = new BunitContext();
 
-        var cut = Render(ctx, modelCount: 1);
+        var cut = Render(ctx: ctx, 1);
 
         cut.Markup.Should().Contain("configured model.");
         cut.Markup.Should().NotContain("configured models");
@@ -128,7 +135,7 @@ public sealed class RemoveProviderDialogTests
     {
         using var ctx = new BunitContext();
 
-        var cut = Render(ctx, modelCount: 0);
+        var cut = Render(ctx: ctx, 0);
 
         cut.Markup.Should().NotContain("also remove");
         // The irreversibility warning and the metrics reassurance still stand on their own.
@@ -141,7 +148,7 @@ public sealed class RemoveProviderDialogTests
     {
         using var ctx = new BunitContext();
 
-        var cut = Render(ctx, modelCount: 2);
+        var cut = Render(ctx: ctx, 2);
 
         cut.Markup.Should().Contain("Historical metrics are kept");
     }
@@ -152,7 +159,7 @@ public sealed class RemoveProviderDialogTests
         using var ctx = new BunitContext();
         var cancelled = false;
 
-        var cut = Render(ctx, onCancel: () => cancelled = true);
+        var cut = Render(ctx: ctx, onCancel: () => cancelled = true);
         cut.Find("input").KeyDown(new KeyboardEventArgs { Key = "Escape" });
 
         cancelled.Should().BeTrue();
@@ -164,7 +171,7 @@ public sealed class RemoveProviderDialogTests
         using var ctx = new BunitContext();
         var cancelled = false;
 
-        var cut = Render(ctx, onCancel: () => cancelled = true);
+        var cut = Render(ctx: ctx, onCancel: () => cancelled = true);
 
         // The regression this guards: Escape used to be bound on the input alone, so with focus on
         // Cancel/Remove/the close glyph it did nothing - contradicting OnCancel's documented contract.
@@ -180,7 +187,7 @@ public sealed class RemoveProviderDialogTests
         using var ctx = new BunitContext();
         var confirmed = false;
 
-        var cut = Render(ctx, onConfirm: () => confirmed = true);
+        var cut = Render(ctx: ctx, onConfirm: () => confirmed = true);
         cut.Find("input").Input(Key);
         cut.Find("input").KeyDown(new KeyboardEventArgs { Key = "Escape" });
 
@@ -193,7 +200,7 @@ public sealed class RemoveProviderDialogTests
         using var ctx = new BunitContext();
         var confirmCount = 0;
 
-        var cut = Render(ctx, onConfirm: () => confirmCount++);
+        var cut = Render(ctx: ctx, onConfirm: () => confirmCount++);
         cut.Find("input").Input(Key);
 
         // Enter is bound on the input only. If the panel handled it too, this single keypress would
@@ -209,7 +216,7 @@ public sealed class RemoveProviderDialogTests
         using var ctx = new BunitContext();
         var confirmed = false;
 
-        var cut = Render(ctx, onConfirm: () => confirmed = true);
+        var cut = Render(ctx: ctx, onConfirm: () => confirmed = true);
         cut.Find("input").KeyDown(new KeyboardEventArgs { Key = "Enter" });
 
         confirmed.Should().BeFalse();
@@ -241,4 +248,3 @@ public sealed class RemoveProviderDialogTests
         cut.Find(".overlay-panel").Should().NotBeNull();
     }
 }
-

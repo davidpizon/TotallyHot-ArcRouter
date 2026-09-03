@@ -40,7 +40,8 @@ public class MyClass
         var diagnostics = checkSyntax.Check(code);
 
         Assert.NotEmpty(diagnostics);
-        Assert.All(diagnostics, d => Assert.Equal(DiagnosticSeverity.Error, d.Severity));
+        Assert.All(collection: diagnostics,
+            action: d => Assert.Equal(expected: DiagnosticSeverity.Error, actual: d.Severity));
     }
 
     [Fact]
@@ -61,4 +62,3 @@ public class MyClass
         Assert.Throws<ArgumentNullException>(() => checkSyntax.Check(null!));
     }
 }
-

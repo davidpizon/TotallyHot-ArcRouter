@@ -4,7 +4,10 @@ using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Tests.Telemetry;
 
-/// <summary>Covers <see cref="DeferredTelemetryPublisher"/>: the lazy-resolution wrapper that avoids a circular DI dependency.</summary>
+/// <summary>
+/// Covers <see cref="DeferredTelemetryPublisher"/>: the lazy-resolution wrapper that avoids a circular DI
+/// dependency.
+/// </summary>
 public class DeferredTelemetryPublisherTests
 {
     [Fact]
@@ -27,15 +30,18 @@ public class DeferredTelemetryPublisherTests
         var provider = services.BuildServiceProvider();
 
         var deferred = new DeferredTelemetryPublisher(provider);
-        Assert.Equal(0, resolveCount);
+        Assert.Equal(0, actual: resolveCount);
 
         var telemetryEvent = new RoutingTelemetryEvent(
-            "sess-1", 1, false, "gpt-5.4", "gpt-5.4", "openai", false,
-            100, 20, 0.001m, false, 250, 800, 200, DateTimeOffset.UtcNow, "gpt-5.4");
-        await deferred.PublishAsync(telemetryEvent, TestContext.Current.CancellationToken);
+            SessionId: "sess-1", 1, false, RequestedModel: "gpt-5.4", ResolvedModel: "gpt-5.4", Provider: "openai",
+            false,
+            100, 20, 0.001m, false, 250, 800, 200, TimestampUtc: DateTimeOffset.UtcNow, RoutedModel: "gpt-5.4");
+        await deferred.PublishAsync(telemetryEvent: telemetryEvent,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(1, resolveCount);
-        innerMock.Verify(p => p.PublishAsync(telemetryEvent, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal(1, actual: resolveCount);
+        innerMock.Verify(expression: p => p.PublishAsync(telemetryEvent, It.IsAny<CancellationToken>()),
+            times: Times.Once);
     }
 
     [Fact]
@@ -52,12 +58,15 @@ public class DeferredTelemetryPublisherTests
         var provider = services.BuildServiceProvider();
 
         var deferred = new DeferredTelemetryPublisher(provider);
-        var logLine = new LogLineEvent(DateTimeOffset.UtcNow, "INFO", "first");
-        await deferred.PublishLogLineAsync(logLine, TestContext.Current.CancellationToken);
-        await deferred.PublishLogLineAsync(logLine with { Message = "second" }, TestContext.Current.CancellationToken);
+        var logLine = new LogLineEvent(TimestampUtc: DateTimeOffset.UtcNow, Level: "INFO", Message: "first");
+        await deferred.PublishLogLineAsync(logLine: logLine, cancellationToken: TestContext.Current.CancellationToken);
+        await deferred.PublishLogLineAsync(logLine: logLine with { Message = "second" },
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(1, resolveCount);
-        innerMock.Verify(p => p.PublishLogLineAsync(It.IsAny<LogLineEvent>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+        Assert.Equal(1, actual: resolveCount);
+        innerMock.Verify(
+            expression: p => p.PublishLogLineAsync(It.IsAny<LogLineEvent>(), It.IsAny<CancellationToken>()),
+            times: Times.Exactly(2));
     }
 
     [Fact]
@@ -70,11 +79,13 @@ public class DeferredTelemetryPublisherTests
 
         var deferred = new DeferredTelemetryPublisher(provider);
         var signal = new QualitySignalEvent(
-            "corr-1", "sess-1", "live:code_generation", "gpt-5.4", "CSharp",
-            true, true, 0.9, 0.8, 0.87, null, DateTimeOffset.UtcNow);
-        await deferred.PublishQualitySignalAsync(signal, TestContext.Current.CancellationToken);
+            CorrelationId: "corr-1", SessionId: "sess-1", Dimension: "live:code_generation", Model: "gpt-5.4",
+            Language: "CSharp",
+            true, true, 0.9, 0.8, 0.87, null, TimestampUtc: DateTimeOffset.UtcNow);
+        await deferred.PublishQualitySignalAsync(signal: signal,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        innerMock.Verify(p => p.PublishQualitySignalAsync(signal, It.IsAny<CancellationToken>()), Times.Once);
+        innerMock.Verify(expression: p => p.PublishQualitySignalAsync(signal, It.IsAny<CancellationToken>()),
+            times: Times.Once);
     }
 }
-

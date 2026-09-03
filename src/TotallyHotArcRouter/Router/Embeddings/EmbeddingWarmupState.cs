@@ -16,5 +16,8 @@ public sealed class EmbeddingWarmupState
     public bool IsWarm => _isWarm;
 
     /// <summary>Marks warm-up as complete. Idempotent.</summary>
-    public void MarkWarm() => _isWarm = true;
+    public void MarkWarm()
+    {
+        _isWarm = true;
+    }
 }

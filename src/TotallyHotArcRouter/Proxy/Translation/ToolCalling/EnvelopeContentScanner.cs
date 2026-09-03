@@ -4,10 +4,13 @@ using System.Text;
 namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 
 /// <summary>
-/// Pulls the <c>content</c> string out of a <c>{"content", "tool_calls"}</c> envelope <em>while it is still
-/// arriving</em>, decoding JSON escapes as it goes, so a constrained reply's prose can be streamed to the
+/// Pulls the <c>content</c> string out of a <c>{"content", "tool_calls"}</c> envelope
+/// <em>
+/// while it is still
+/// arriving
+/// </em>
+/// , decoding JSON escapes as it goes, so a constrained reply's prose can be streamed to the
 /// client token by token instead of appearing all at once when the envelope closes.
-///
 /// <para>
 /// This type is the reason constrained decoding does not cost the user a visibly worse chat experience.
 /// Under <see cref="ToolCallDialectRegistry.Constrained"/> the model emits JSON, not prose, so forwarding
@@ -16,7 +19,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// agent-mode clients attach tools to nearly every request - is most replies. Decoding the string
 /// incrementally gives the client ordinary prose deltas with no idea a grammar was involved.
 /// </para>
-///
 /// <para>
 /// A real JSON scanner rather than a search for <c>"content":</c>, because that substring can legitimately
 /// occur inside a tool argument. Only a string opened at depth 1 whose key was <c>content</c> is streamed,
@@ -26,19 +28,16 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// </summary>
 internal sealed class EnvelopeContentScanner
 {
-    // Text received but not yet consumable - a lone trailing backslash, or an incomplete \uXXXX, whose
-    // decoding needs bytes that have not arrived.
-    private readonly StringBuilder _pending = new();
-    private readonly StringBuilder _currentString = new();
-
     // Container nesting: true for an object, false for an array. Depth is the stack count, so a string
     // opened while exactly one object is open is a top-level property of the envelope.
     private readonly Stack<bool> _containers = new();
 
-    private bool _inString;
-    private bool _isKeyString;
+    private readonly StringBuilder _currentString = new();
+
+    // Text received but not yet consumable - a lone trailing backslash, or an incomplete \uXXXX, whose
+    // decoding needs bytes that have not arrived.
+    private readonly StringBuilder _pending = new();
     private bool _expectKey;
-    private string? _lastKey;
 
     // A high surrogate whose partner has not arrived. JSON writes a non-BMP character - any emoji - as two
     // consecutive \uXXXX escapes, and each decodes to one UTF-16 char. Emitting the first on its own would
@@ -46,6 +45,10 @@ internal sealed class EnvelopeContentScanner
     // U+FFFD, so the client renders a replacement character instead of the emoji. Observed live before this
     // was held back - a haiku came through as "moonlit sky<?>". The pair must cross the boundary together.
     private char? _heldHighSurrogate;
+
+    private bool _inString;
+    private bool _isKeyString;
+    private string? _lastKey;
 
     /// <summary>Whether the scanner is currently inside the envelope's <c>content</c> string.</summary>
     private bool _streamingContent;
@@ -96,19 +99,13 @@ internal sealed class EnvelopeContentScanner
                 {
                     // An escape needs at least one more character, and \u needs five. Stop rather than
                     // guess: the remainder stays pending until the rest of the sequence arrives.
-                    if (!TryReadEscape(buffer, consumed, out var decoded, out var escapeLength))
-                    {
-                        break;
-                    }
+                    if (!TryReadEscape(buffer: buffer, index: consumed, decoded: out var decoded,
+                            length: out var escapeLength)) break;
 
                     if (_streamingContent)
-                    {
                         emitted.Append(decoded);
-                    }
                     else
-                    {
                         _currentString.Append(decoded);
-                    }
 
                     consumed += escapeLength;
                     continue;
@@ -122,13 +119,9 @@ internal sealed class EnvelopeContentScanner
                 }
 
                 if (_streamingContent)
-                {
                     emitted.Append(c);
-                }
                 else
-                {
                     _currentString.Append(c);
-                }
 
                 consumed++;
                 continue;
@@ -148,10 +141,7 @@ internal sealed class EnvelopeContentScanner
                     _expectKey = false;
                     break;
                 case '}' or ']':
-                    if (_containers.Count > 0)
-                    {
-                        _containers.Pop();
-                    }
+                    if (_containers.Count > 0) _containers.Pop();
 
                     _expectKey = false;
                     break;
@@ -162,14 +152,12 @@ internal sealed class EnvelopeContentScanner
                 case ':':
                     _expectKey = false;
                     break;
-                default:
-                    break;
             }
 
             consumed++;
         }
 
-        _pending.Remove(0, consumed);
+        _pending.Remove(0, length: consumed);
 
         // Never end an emission on a lone high surrogate - hold it for the next call, which is where its
         // low half will arrive. Only the trailing char can be orphaned: any earlier one already has its
@@ -181,10 +169,7 @@ internal sealed class EnvelopeContentScanner
         }
 
         var result = emitted.ToString();
-        if (result.Length > 0)
-        {
-            HasEmitted = true;
-        }
+        if (result.Length > 0) HasEmitted = true;
 
         return result;
     }
@@ -199,9 +184,10 @@ internal sealed class EnvelopeContentScanner
         // Depth 1 means a direct property of the envelope object. A `content` key nested inside a tool
         // argument sits at depth 3 or deeper and must not hijack the stream.
         _streamingContent = !_isKeyString
-            && !ContentComplete
-            && _containers.Count == 1
-            && string.Equals(_lastKey, ToolCallEnvelopeSchema.ContentProperty, StringComparison.Ordinal);
+                            && !ContentComplete
+                            && _containers.Count == 1
+                            && string.Equals(a: _lastKey, b: ToolCallEnvelopeSchema.ContentProperty,
+                                comparisonType: StringComparison.Ordinal);
     }
 
     /// <summary>Closes a string, recording it as the current key or ending the streamed content.</summary>
@@ -242,24 +228,19 @@ internal sealed class EnvelopeContentScanner
         decoded = string.Empty;
         length = 0;
 
-        if (index + 1 >= buffer.Length)
-        {
-            return false;
-        }
+        if (index + 1 >= buffer.Length) return false;
 
         var escape = buffer[index + 1];
         if (escape == 'u')
         {
-            if (index + 5 >= buffer.Length)
-            {
-                return false;
-            }
+            if (index + 5 >= buffer.Length) return false;
 
-            var hex = buffer.Substring(index + 2, 4);
-            if (!ushort.TryParse(hex, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var code))
+            var hex = buffer.Substring(startIndex: index + 2, 4);
+            if (!ushort.TryParse(s: hex, style: NumberStyles.HexNumber, provider: CultureInfo.InvariantCulture,
+                    result: out var code))
             {
                 // Not a valid escape at all - pass it through verbatim rather than dropping it.
-                decoded = buffer.Substring(index, 6);
+                decoded = buffer.Substring(startIndex: index, 6);
                 length = 6;
                 return true;
             }
@@ -276,11 +257,10 @@ internal sealed class EnvelopeContentScanner
             'r' => "\r",
             'b' => "\b",
             'f' => "\f",
-            _ => escape.ToString(),
+            _ => escape.ToString()
         };
 
         length = 2;
         return true;
     }
 }
-

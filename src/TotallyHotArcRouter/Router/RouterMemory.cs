@@ -15,14 +15,17 @@ namespace TotallyHot.ArcRouter.Router;
 /// </remarks>
 public class RouterMemory
 {
-    /// <summary>The in-memory score aggregates, keyed by dimension then model. Reassigned wholesale by <see cref="InitializeAsync"/>, so callers must not cache a reference across that call.</summary>
-    private ConcurrentDictionary<string, ConcurrentDictionary<string, ScoreAggregate>> _scores;
+    /// <summary>The optional logger; <see langword="null"/> when logging is not configured for this instance.</summary>
+    private readonly ILogger<RouterMemory>? _logger;
 
     /// <summary>The optional persistence layer; <see langword="null"/> when this memory is in-memory-only (e.g. in tests).</summary>
     private readonly IRouterMemoryStore? _memoryStore;
 
-    /// <summary>The optional logger; <see langword="null"/> when logging is not configured for this instance.</summary>
-    private readonly ILogger<RouterMemory>? _logger;
+    /// <summary>
+    /// The in-memory score aggregates, keyed by dimension then model. Reassigned wholesale by
+    /// <see cref="InitializeAsync"/>, so callers must not cache a reference across that call.
+    /// </summary>
+    private ConcurrentDictionary<string, ConcurrentDictionary<string, ScoreAggregate>> _scores;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="RouterMemory"/> class.
@@ -64,19 +67,17 @@ public class RouterMemory
     public async Task AddScoreAsync(string dimension, string model, double score)
     {
         var dimensionScores = _scores.GetOrAdd(
-            dimension,
-            static _ => new ConcurrentDictionary<string, ScoreAggregate>());
+            key: dimension,
+            valueFactory: static _ => new ConcurrentDictionary<string, ScoreAggregate>());
 
         dimensionScores.AddOrUpdate(
-            model,
-            static (_, newScore) => new ScoreAggregate(newScore, 1),
-            static (_, existing, newScore) => existing.Add(newScore),
-            score);
+            key: model,
+            addValueFactory: static (_, newScore) => new ScoreAggregate(Sum: newScore, 1),
+            updateValueFactory: static (_, existing, newScore) => existing.Add(newScore),
+            factoryArgument: score);
 
         if (_memoryStore != null)
-        {
-            await _memoryStore.RecordScoreAsync(dimension, model, score).ConfigureAwait(false);
-        }
+            await _memoryStore.RecordScoreAsync(dimension: dimension, model: model, score: score).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -87,11 +88,9 @@ public class RouterMemory
     /// <returns>The average score, or null if no scores are available.</returns>
     public double? GetAverageScore(string dimension, string model)
     {
-        if (_scores.TryGetValue(dimension, out var dimensionScores) &&
-            dimensionScores.TryGetValue(model, out var aggregate))
-        {
+        if (_scores.TryGetValue(key: dimension, value: out var dimensionScores) &&
+            dimensionScores.TryGetValue(key: model, value: out var aggregate))
             return aggregate.Average;
-        }
 
         return null;
     }
@@ -113,11 +112,9 @@ public class RouterMemory
     /// </remarks>
     public int GetObservationCount(string dimension, string model)
     {
-        if (_scores.TryGetValue(dimension, out var dimensionScores) &&
-            dimensionScores.TryGetValue(model, out var aggregate))
-        {
+        if (_scores.TryGetValue(key: dimension, value: out var dimensionScores) &&
+            dimensionScores.TryGetValue(key: model, value: out var aggregate))
             return aggregate.Count;
-        }
 
         return 0;
     }
@@ -129,10 +126,7 @@ public class RouterMemory
     /// <returns>A collection of model names.</returns>
     public IEnumerable<string> GetModelsForDimension(string dimension)
     {
-        if (_scores.TryGetValue(dimension, out var dimensionScores))
-        {
-            return dimensionScores.Keys;
-        }
+        if (_scores.TryGetValue(key: dimension, value: out var dimensionScores)) return dimensionScores.Keys;
 
         return Enumerable.Empty<string>();
     }

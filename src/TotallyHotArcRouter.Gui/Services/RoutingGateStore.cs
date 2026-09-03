@@ -22,7 +22,7 @@ public enum RouterConnectionState
     /// The router answered but refused the call (authentication, permissions, or an internal error). It is
     /// running; something about this client's request is wrong.
     /// </summary>
-    Rejected,
+    Rejected
 }
 
 /// <summary>
@@ -41,22 +41,28 @@ public sealed class RoutingGateStore : IAsyncDisposable
     public static readonly TimeSpan DefaultPollInterval = TimeSpan.FromSeconds(3);
 
     private readonly IRoutingGateAdminClient _client;
-    private readonly IDisposable? _ownedClient;
     private readonly ILogger<RoutingGateStore>? _logger;
-    private readonly TimeSpan _pollInterval;
+    private readonly IDisposable? _ownedClient;
     private readonly CancellationTokenSource _pollCts = new();
+    private readonly TimeSpan _pollInterval;
     private readonly Task _pollTask;
 
     private readonly object _stateGate = new();
     private RouterConnectionState _connectionState = RouterConnectionState.Unreachable;
-    private string? _lastFailureMessage;
     private bool _isEnabled = true;
+    private string? _lastFailureMessage;
     private bool _wasUsable;
 
     /// <summary>Initializes a new instance of the <see cref="RoutingGateStore"/> class and starts polling.</summary>
     /// <param name="logger">Optional logger.</param>
-    /// <param name="serverAddress">The proxy's TLS gRPC endpoint; defaults to <see cref="TelemetryChannelFactory.DefaultServerAddress"/>.</param>
-    /// <param name="pollInterval">How often to re-poll the router; defaults to <see cref="DefaultPollInterval"/>. Overridable so a test can assert on the poll loop without waiting out the real cadence.</param>
+    /// <param name="serverAddress">
+    /// The proxy's TLS gRPC endpoint; defaults to
+    /// <see cref="TelemetryChannelFactory.DefaultServerAddress"/>.
+    /// </param>
+    /// <param name="pollInterval">
+    /// How often to re-poll the router; defaults to <see cref="DefaultPollInterval"/>. Overridable
+    /// so a test can assert on the poll loop without waiting out the real cadence.
+    /// </param>
     public RoutingGateStore(
         ILogger<RoutingGateStore>? logger = null,
         string serverAddress = TelemetryChannelFactory.DefaultServerAddress,
@@ -76,8 +82,12 @@ public sealed class RoutingGateStore : IAsyncDisposable
     /// </summary>
     /// <param name="client">The client this store polls and mutates through.</param>
     /// <param name="logger">Optional logger.</param>
-    /// <param name="pollInterval">How often to re-poll the router; defaults to <see cref="DefaultPollInterval"/>. Overridable so a test can assert on the poll loop without waiting out the real cadence.</param>
-    public RoutingGateStore(IRoutingGateAdminClient client, ILogger<RoutingGateStore>? logger = null, TimeSpan? pollInterval = null)
+    /// <param name="pollInterval">
+    /// How often to re-poll the router; defaults to <see cref="DefaultPollInterval"/>. Overridable
+    /// so a test can assert on the poll loop without waiting out the real cadence.
+    /// </param>
+    public RoutingGateStore(IRoutingGateAdminClient client, ILogger<RoutingGateStore>? logger = null,
+        TimeSpan? pollInterval = null)
     {
         ArgumentNullException.ThrowIfNull(client);
         _pollInterval = pollInterval ?? DefaultPollInterval;
@@ -90,7 +100,13 @@ public sealed class RoutingGateStore : IAsyncDisposable
     /// <summary>How the last poll turned out. Drives what the tray tells the user when the menu is unavailable.</summary>
     public RouterConnectionState ConnectionState
     {
-        get { lock (_stateGate) { return _connectionState; } }
+        get
+        {
+            lock (_stateGate)
+            {
+                return _connectionState;
+            }
+        }
     }
 
     /// <summary>
@@ -101,13 +117,28 @@ public sealed class RoutingGateStore : IAsyncDisposable
     /// </summary>
     public bool IsReachable
     {
-        get { lock (_stateGate) { return _connectionState != RouterConnectionState.Unreachable; } }
+        get
+        {
+            lock (_stateGate)
+            {
+                return _connectionState != RouterConnectionState.Unreachable;
+            }
+        }
     }
 
-    /// <summary>Whether the last poll succeeded outright, so <see cref="IsEnabled"/> is meaningful and the routing toggle would do something.</summary>
+    /// <summary>
+    /// Whether the last poll succeeded outright, so <see cref="IsEnabled"/> is meaningful and the routing toggle
+    /// would do something.
+    /// </summary>
     public bool IsUsable
     {
-        get { lock (_stateGate) { return _connectionState == RouterConnectionState.Connected; } }
+        get
+        {
+            lock (_stateGate)
+            {
+                return _connectionState == RouterConnectionState.Connected;
+            }
+        }
     }
 
     /// <summary>
@@ -118,7 +149,13 @@ public sealed class RoutingGateStore : IAsyncDisposable
     /// </summary>
     public string? LastFailureMessage
     {
-        get { lock (_stateGate) { return _lastFailureMessage; } }
+        get
+        {
+            lock (_stateGate)
+            {
+                return _lastFailureMessage;
+            }
+        }
     }
 
     /// <summary>
@@ -127,7 +164,29 @@ public sealed class RoutingGateStore : IAsyncDisposable
     /// </summary>
     public bool IsEnabled
     {
-        get { lock (_stateGate) { return _isEnabled; } }
+        get
+        {
+            lock (_stateGate)
+            {
+                return _isEnabled;
+            }
+        }
+    }
+
+    /// <inheritdoc/>
+    public async ValueTask DisposeAsync()
+    {
+        _pollCts.Cancel();
+        try
+        {
+            await _pollTask.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+
+        _pollCts.Dispose();
+        _ownedClient?.Dispose();
     }
 
     /// <summary>
@@ -144,16 +203,23 @@ public sealed class RoutingGateStore : IAsyncDisposable
 
     /// <summary>Enables routing, returning the confirmed post-mutation state.</summary>
     /// <exception cref="RoutingGateAdminException">The call failed or the router is unreachable.</exception>
-    public Task<bool> EnableAsync(CancellationToken cancellationToken = default) => SetAsync(true, cancellationToken);
+    public Task<bool> EnableAsync(CancellationToken cancellationToken = default)
+    {
+        return SetAsync(true, cancellationToken: cancellationToken);
+    }
 
     /// <summary>Disables routing, returning the confirmed post-mutation state.</summary>
     /// <exception cref="RoutingGateAdminException">The call failed or the router is unreachable.</exception>
-    public Task<bool> DisableAsync(CancellationToken cancellationToken = default) => SetAsync(false, cancellationToken);
+    public Task<bool> DisableAsync(CancellationToken cancellationToken = default)
+    {
+        return SetAsync(false, cancellationToken: cancellationToken);
+    }
 
     private async Task<bool> SetAsync(bool enabled, CancellationToken cancellationToken)
     {
-        var confirmed = await _client.SetAsync(enabled, cancellationToken).ConfigureAwait(false);
-        UpdateState(RouterConnectionState.Connected, failureMessage: null, isEnabled: confirmed);
+        var confirmed = await _client.SetAsync(enabled: enabled, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+        UpdateState(connectionState: RouterConnectionState.Connected, null, isEnabled: confirmed);
         return confirmed;
     }
 
@@ -169,7 +235,7 @@ public sealed class RoutingGateStore : IAsyncDisposable
             try
             {
                 var enabled = await _client.GetAsync(cancellationToken).ConfigureAwait(false);
-                UpdateState(RouterConnectionState.Connected, failureMessage: null, isEnabled: enabled);
+                UpdateState(connectionState: RouterConnectionState.Connected, null, isEnabled: enabled);
             }
             catch (RoutingGateAdminException ex)
             {
@@ -178,8 +244,9 @@ public sealed class RoutingGateStore : IAsyncDisposable
                 // error, an internal fault - means it answered, and reporting that as an outage is how
                 // the tray ended up telling users their running Windows service had stopped.
                 var state = ex.IsUnavailable ? RouterConnectionState.Unreachable : RouterConnectionState.Rejected;
-                _logger?.LogWarning(ex, "Failed to poll the routing gate from the router; classified as {State}.", state);
-                UpdateState(state, ex.Message, isEnabled: false);
+                _logger?.LogWarning(exception: ex,
+                    message: "Failed to poll the routing gate from the router; classified as {State}.", state);
+                UpdateState(connectionState: state, failureMessage: ex.Message, false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -188,7 +255,7 @@ public sealed class RoutingGateStore : IAsyncDisposable
 
             try
             {
-                await Task.Delay(_pollInterval, cancellationToken).ConfigureAwait(false);
+                await Task.Delay(delay: _pollInterval, cancellationToken: cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -203,7 +270,10 @@ public sealed class RoutingGateStore : IAsyncDisposable
     /// </summary>
     /// <param name="connectionState">How the poll (or mutation) that produced this update turned out.</param>
     /// <param name="failureMessage">The failure detail, or <see langword="null"/> on success.</param>
-    /// <param name="isEnabled">The gate's value; only recorded when <paramref name="connectionState"/> is <see cref="RouterConnectionState.Connected"/>.</param>
+    /// <param name="isEnabled">
+    /// The gate's value; only recorded when <paramref name="connectionState"/> is
+    /// <see cref="RouterConnectionState.Connected"/>.
+    /// </param>
     private void UpdateState(RouterConnectionState connectionState, string? failureMessage, bool isEnabled)
     {
         bool changed;
@@ -216,36 +286,11 @@ public sealed class RoutingGateStore : IAsyncDisposable
             _wasUsable = isUsable;
             _connectionState = connectionState;
             _lastFailureMessage = failureMessage;
-            if (isUsable)
-            {
-                _isEnabled = isEnabled;
-            }
+            if (isUsable) _isEnabled = isEnabled;
         }
 
-        if (becameUnusable)
-        {
-            BecameUnusable?.Invoke();
-        }
+        if (becameUnusable) BecameUnusable?.Invoke();
 
-        if (changed)
-        {
-            Changed?.Invoke();
-        }
-    }
-
-    /// <inheritdoc />
-    public async ValueTask DisposeAsync()
-    {
-        _pollCts.Cancel();
-        try
-        {
-            await _pollTask.ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-        }
-
-        _pollCts.Dispose();
-        _ownedClient?.Dispose();
+        if (changed) Changed?.Invoke();
     }
 }

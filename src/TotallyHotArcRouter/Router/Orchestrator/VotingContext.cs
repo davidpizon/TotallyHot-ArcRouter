@@ -8,8 +8,14 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// (<see cref="DimBestVoter"/>) simply never reads those two properties - no voter is forced to depend on
 /// signals it doesn't use.
 /// </summary>
-/// <param name="Dimension">The request's live <see cref="RouterMemory"/> dimension key, as in <see cref="RoutingContext.Dimension"/>.</param>
-/// <param name="Candidates">Every currently-eligible model a voter may pick, as in <see cref="RoutingContext.Candidates"/>.</param>
+/// <param name="Dimension">
+/// The request's live <see cref="RouterMemory"/> dimension key, as in
+/// <see cref="RoutingContext.Dimension"/>.
+/// </param>
+/// <param name="Candidates">
+/// Every currently-eligible model a voter may pick, as in <see cref="RoutingContext.Candidates"/>
+/// .
+/// </param>
 /// <param name="TaskEmbedding">
 /// The task's unit-normalized embedding vector, when the caller has computed one - <see langword="null"/>
 /// when unavailable. <see cref="MemoryKnnVoter"/> abstains without it; other voters ignore it.

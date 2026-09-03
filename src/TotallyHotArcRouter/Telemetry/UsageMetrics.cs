@@ -32,7 +32,7 @@ public static class UsageMetrics
     /// upstream bodies, providers with no usage block at all).
     /// </summary>
     public static readonly Counter<long> ExtractionFailedTotal = Meter.CreateCounter<long>(
-        "arcrouter.usage.extraction_failed",
+        name: "arcrouter.usage.extraction_failed",
         description: "Requests whose response usage could not be extracted by any parser.");
 
     /// <summary>
@@ -41,18 +41,21 @@ public static class UsageMetrics
     /// own four-dimension token model (§5.2/§5.4).
     /// </summary>
     public static readonly Counter<long> TokensTotal = Meter.CreateCounter<long>(
-        "arcrouter.usage.tokens",
+        name: "arcrouter.usage.tokens",
         unit: "{token}",
         description: "Tokens consumed, by provider/model/kind.");
 
-    /// <summary>Sums estimated USD cost - tagged <c>provider</c> and <c>model</c>. Unpriced requests contribute nothing (see <see cref="UnpricedRequestsTotal"/>).</summary>
+    /// <summary>
+    /// Sums estimated USD cost - tagged <c>provider</c> and <c>model</c>. Unpriced requests contribute nothing (see
+    /// <see cref="UnpricedRequestsTotal"/>).
+    /// </summary>
     public static readonly Counter<double> CostUsdTotal = Meter.CreateCounter<double>(
-        "arcrouter.usage.cost_usd",
+        name: "arcrouter.usage.cost_usd",
         unit: "{USD}",
         description: "Estimated USD cost, by provider/model.");
 
     /// <summary>Counts requests with extracted usage but no known price - tagged <c>provider</c>.</summary>
     public static readonly Counter<long> UnpricedRequestsTotal = Meter.CreateCounter<long>(
-        "arcrouter.usage.unpriced_requests",
+        name: "arcrouter.usage.unpriced_requests",
         description: "Requests whose cost could not be priced.");
 }

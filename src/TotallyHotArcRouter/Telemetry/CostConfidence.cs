@@ -26,5 +26,5 @@ public enum CostConfidence
     Catalog,
 
     /// <summary>The provider is operator-flagged free, so zero is a known price, not a missing one.</summary>
-    Exact,
+    Exact
 }

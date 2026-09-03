@@ -1,7 +1,7 @@
-using AwesomeAssertions;
-using Bunit;
 using System.Net;
 using System.Text;
+using AwesomeAssertions;
+using Bunit;
 using TotallyHot.ArcRouter.Gui.Components;
 using TotallyHot.ArcRouter.Gui.Services;
 
@@ -15,47 +15,38 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 public sealed class GovernanceModelCardsTests
 {
     private const string ProvidersJson = """
-        {
-          "providers": [
-            {
-              "key": "openai",
-              "name": "OpenAI",
-              "baseUrl": "https://api.openai.com/v1",
-              "authHeaderName": "Authorization",
-              "models": [
-                { "modelName": "gpt-5.4", "providerModelId": "gpt-5-4-provider-id", "enabled": true, "presentUpstream": true }
-              ],
-              "headers": []
-            }
-          ]
-        }
-        """;
+                                         {
+                                           "providers": [
+                                             {
+                                               "key": "openai",
+                                               "name": "OpenAI",
+                                               "baseUrl": "https://api.openai.com/v1",
+                                               "authHeaderName": "Authorization",
+                                               "models": [
+                                                 { "modelName": "gpt-5.4", "providerModelId": "gpt-5-4-provider-id", "enabled": true, "presentUpstream": true }
+                                               ],
+                                               "headers": []
+                                             }
+                                           ]
+                                         }
+                                         """;
 
     private const string RollupJson = """
-        [
-          {
-            "bucketStartUtc": "2026-08-01T00:00:00Z",
-            "bucketWidth": "P1D",
-            "groupKey": "gpt-5-4-provider-id",
-            "requests": 3,
-            "unpricedRequests": 0,
-            "promptTokens": 1000,
-            "completionTokens": 500,
-            "cacheCreationTokens": 0,
-            "cacheReadTokens": 0,
-            "costUsd": 4.82
-          }
-        ]
-        """;
-
-    private sealed class StaticJsonTransport(string json) : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(json, Encoding.UTF8, "application/json"),
-            });
-    }
+                                      [
+                                        {
+                                          "bucketStartUtc": "2026-08-01T00:00:00Z",
+                                          "bucketWidth": "P1D",
+                                          "groupKey": "gpt-5-4-provider-id",
+                                          "requests": 3,
+                                          "unpricedRequests": 0,
+                                          "promptTokens": 1000,
+                                          "completionTokens": 500,
+                                          "cacheCreationTokens": 0,
+                                          "cacheReadTokens": 0,
+                                          "costUsd": 4.82
+                                        }
+                                      ]
+                                      """;
 
     private static BunitContext NewContext(bool withData)
     {
@@ -85,13 +76,13 @@ public sealed class GovernanceModelCardsTests
 
         var cut = ctx.Render<GovernanceModelCards>();
 
-        cut.WaitForAssertion(() =>
+        cut.WaitForAssertion(assertion: () =>
         {
             cut.Markup.Should().Contain("gpt-5.4");
             cut.Markup.Should().Contain("openai");
             cut.Markup.Should().Contain("$4.82");
             cut.Markup.Should().Contain("Price unavailable");
-        }, TimeSpan.FromSeconds(4));
+        }, timeout: TimeSpan.FromSeconds(4));
     }
 
     [Fact]
@@ -104,10 +95,22 @@ public sealed class GovernanceModelCardsTests
         // Distinct from "No models configured." - an unreachable proxy must never render as if there
         // were genuinely zero configured models (see GovernanceModelCards' ProviderStore.IsReachable /
         // UsageStore.IsReachable branch).
-        cut.WaitForAssertion(() =>
+        cut.WaitForAssertion(assertion: () =>
         {
             cut.Markup.Should().Contain("Router unreachable");
             cut.Markup.Should().NotContain("No models configured.");
-        }, TimeSpan.FromSeconds(6));
+        }, timeout: TimeSpan.FromSeconds(6));
+    }
+
+    private sealed class StaticJsonTransport(string json) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(content: json, encoding: Encoding.UTF8, mediaType: "application/json")
+            });
+        }
     }
 }

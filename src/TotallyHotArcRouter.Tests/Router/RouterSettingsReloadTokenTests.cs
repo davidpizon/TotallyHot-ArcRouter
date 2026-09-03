@@ -5,7 +5,8 @@ namespace TotallyHot.ArcRouter.Tests.Router;
 /// <summary>
 /// Covers <see cref="RouterSettingsReloadToken"/>'s swap-and-signal contract
 /// (docs/router/self-organizing-classification-plan.md Phase T6): every change token handed out before a
-/// <see cref="RouterSettingsReloadToken.Trigger"/> call fires, and the next <see cref="RouterSettingsReloadToken.GetChangeToken"/>
+/// <see cref="RouterSettingsReloadToken.Trigger"/> call fires, and the next
+/// <see cref="RouterSettingsReloadToken.GetChangeToken"/>
 /// call returns a fresh, un-signaled token rather than the one that just fired.
 /// </summary>
 public sealed class RouterSettingsReloadTokenTests
@@ -16,7 +17,7 @@ public sealed class RouterSettingsReloadTokenTests
         var token = new RouterSettingsReloadToken();
         var changeToken = token.GetChangeToken();
         var fired = false;
-        using var subscription = changeToken.RegisterChangeCallback(_ => fired = true, null);
+        using var subscription = changeToken.RegisterChangeCallback(callback: _ => fired = true, null);
 
         token.Trigger();
 

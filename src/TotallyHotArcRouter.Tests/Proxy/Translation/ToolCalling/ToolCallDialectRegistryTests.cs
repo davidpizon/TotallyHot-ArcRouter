@@ -22,7 +22,8 @@ public class ToolCallDialectRegistryTests
     [Fact]
     public void EveryScannableDialect_HasAtLeastOneDelimiter()
     {
-        Assert.All(ToolCallDialectRegistry.ScannableDialects, dialect => Assert.True(dialect.IsScannable));
+        Assert.All(collection: ToolCallDialectRegistry.ScannableDialects,
+            action: dialect => Assert.True(dialect.IsScannable));
     }
 
     [Fact]
@@ -30,9 +31,9 @@ public class ToolCallDialectRegistryTests
     {
         var names = ToolCallDialectRegistry.ScannableDialects.Select(d => d.Name).ToList();
 
-        Assert.DoesNotContain("openai-native", names);
+        Assert.DoesNotContain(expected: "openai-native", collection: names);
         // Emulated shares Hermes framing; including both would make attribution a coin flip.
-        Assert.DoesNotContain("emulated", names);
+        Assert.DoesNotContain(expected: "emulated", collection: names);
     }
 
     [Fact]
@@ -40,7 +41,7 @@ public class ToolCallDialectRegistryTests
     {
         var names = ToolCallDialectRegistry.All.Select(d => d.Name).ToList();
 
-        Assert.Equal(names.Count, names.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Equal(expected: names.Count, actual: names.Distinct(StringComparer.OrdinalIgnoreCase).Count());
     }
 
     // These strings are written into model_tool_capabilities.dialect, so renaming one silently
@@ -55,30 +56,30 @@ public class ToolCallDialectRegistryTests
     [InlineData("emulated")]
     public void PersistedDialectNames_AreStable(string name)
     {
-        Assert.True(ToolCallDialectRegistry.TryGet(name, out var dialect));
-        Assert.Equal(name, dialect.Name);
+        Assert.True(ToolCallDialectRegistry.TryGet(name: name, dialect: out var dialect));
+        Assert.Equal(expected: name, actual: dialect.Name);
     }
 
     [Fact]
     public void TryGet_IsCaseInsensitive()
     {
-        Assert.True(ToolCallDialectRegistry.TryGet("HeRmEs", out var dialect));
-        Assert.Equal("hermes", dialect.Name);
+        Assert.True(ToolCallDialectRegistry.TryGet(name: "HeRmEs", dialect: out var dialect));
+        Assert.Equal(expected: "hermes", actual: dialect.Name);
     }
 
     [Fact]
     public void TryGet_UnknownName_ReturnsFalseAndFallsBackToNative_RatherThanThrowing()
     {
         // A capability row written by a newer build must degrade to "not scanned", not crash startup.
-        Assert.False(ToolCallDialectRegistry.TryGet("dialect-from-the-future", out var dialect));
-        Assert.Equal("openai-native", dialect.Name);
+        Assert.False(ToolCallDialectRegistry.TryGet(name: "dialect-from-the-future", dialect: out var dialect));
+        Assert.Equal(expected: "openai-native", actual: dialect.Name);
         Assert.False(dialect.IsScannable);
     }
 
     [Fact]
     public void TryGet_Null_ReturnsFalse()
     {
-        Assert.False(ToolCallDialectRegistry.TryGet(null, out _));
+        Assert.False(ToolCallDialectRegistry.TryGet(null, dialect: out _));
     }
 
     [Fact]
@@ -90,7 +91,7 @@ public class ToolCallDialectRegistryTests
             .Distinct()
             .OrderBy(c => c);
 
-        Assert.Equal(expected, ToolCallDialectRegistry.ScannableOpenerFirstChars.OrderBy(c => c));
+        Assert.Equal(expected: expected, actual: ToolCallDialectRegistry.ScannableOpenerFirstChars.OrderBy(c => c));
     }
 
     [Fact]
@@ -102,16 +103,10 @@ public class ToolCallDialectRegistryTests
         string[] imposed = ["emulated", "constrained"];
 
         foreach (var dialect in ToolCallDialectRegistry.All)
-        {
             if (imposed.Contains(dialect.Name))
-            {
                 Assert.NotNull(dialect.EmulationPrompt);
-            }
             else
-            {
                 Assert.Null(dialect.EmulationPrompt);
-            }
-        }
     }
 
     [Fact]
@@ -120,7 +115,8 @@ public class ToolCallDialectRegistryTests
         // Its reply is a whole JSON envelope parsed strictly, not a framed region found inside prose. If it
         // ever became scannable, every envelope would also be run through the delimiter matcher.
         Assert.False(ToolCallDialectRegistry.Constrained.IsScannable);
-        Assert.DoesNotContain(ToolCallDialectRegistry.Constrained, ToolCallDialectRegistry.ScannableDialects);
+        Assert.DoesNotContain(expected: ToolCallDialectRegistry.Constrained,
+            collection: ToolCallDialectRegistry.ScannableDialects);
     }
 
     [Fact]
@@ -130,9 +126,9 @@ public class ToolCallDialectRegistryTests
         // wrapper instead of a native tool_calls field or the Hermes tags its architecture tier predicts.
         var result = DialectMatcher.ExtractToolCalls(
             """<function-call>{"name": "get_weather", "arguments": {"city": "Paris"}}</function-call>""",
-            ToolCallDialectRegistry.FunctionCall);
+            dialect: ToolCallDialectRegistry.FunctionCall);
 
-        Assert.Equal("get_weather", Assert.Single(result.ToolCalls).Name);
+        Assert.Equal(expected: "get_weather", actual: Assert.Single(result.ToolCalls).Name);
     }
 
     [Fact]
@@ -142,9 +138,8 @@ public class ToolCallDialectRegistryTests
         // would teach models to reply in a form TotallyHot.ArcRouter cannot read back.
         var result = DialectMatcher.ExtractToolCalls(
             """<tool_call>{"name": "get_time", "arguments": {"tz": "UTC"}}</tool_call>""",
-            ToolCallDialectRegistry.Emulated);
+            dialect: ToolCallDialectRegistry.Emulated);
 
-        Assert.Equal("get_time", Assert.Single(result.ToolCalls).Name);
+        Assert.Equal(expected: "get_time", actual: Assert.Single(result.ToolCalls).Name);
     }
 }
-

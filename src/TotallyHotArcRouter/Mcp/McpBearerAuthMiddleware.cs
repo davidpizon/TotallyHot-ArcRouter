@@ -13,9 +13,9 @@ namespace TotallyHot.ArcRouter.Mcp;
 public sealed class McpBearerAuthMiddleware
 {
     private const string BearerPrefix = "Bearer ";
+    private readonly string _expectedToken;
 
     private readonly RequestDelegate _next;
-    private readonly string _expectedToken;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="McpBearerAuthMiddleware"/> class.
@@ -39,21 +39,20 @@ public sealed class McpBearerAuthMiddleware
         // The "Bearer" scheme name is case-insensitive per RFC 6750/9110, and a client may pad the token
         // with incidental whitespace - neither should cause a surprising 401.
         var header = context.Request.Headers.Authorization.ToString();
-        var presented = header.StartsWith(BearerPrefix, StringComparison.OrdinalIgnoreCase)
+        var presented = header.StartsWith(value: BearerPrefix, comparisonType: StringComparison.OrdinalIgnoreCase)
             ? header[BearerPrefix.Length..].Trim()
             : null;
 
-        if (!ManagementAccessToken.Verify(presented, _expectedToken))
+        if (!ManagementAccessToken.Verify(presented: presented, expected: _expectedToken))
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             context.Response.ContentType = "application/json";
             await context.Response.WriteAsync(
                 """{"error":{"message":"Missing or invalid bearer token.","type":"unauthorized","code":"401"}}""",
-                context.RequestAborted).ConfigureAwait(false);
+                cancellationToken: context.RequestAborted).ConfigureAwait(false);
             return;
         }
 
         await _next(context).ConfigureAwait(false);
     }
 }
-

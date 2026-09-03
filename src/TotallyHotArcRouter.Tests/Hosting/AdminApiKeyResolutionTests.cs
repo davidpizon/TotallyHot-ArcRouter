@@ -20,21 +20,22 @@ public sealed class AdminApiKeyResolutionTests
     {
         var options = new CostReconciliationOptions
         {
-            Providers = new(StringComparer.OrdinalIgnoreCase)
+            Providers = new Dictionary<string, ProviderReconciliationOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["anthropic"] = new ProviderReconciliationOptions { AdminApiKeyEnvVar = "ANTHROPIC_ADMIN_KEY" }
+                ["anthropic"] = new() { AdminApiKeyEnvVar = "ANTHROPIC_ADMIN_KEY" }
             }
         };
         var environment = new Mock<IEnvironmentVariableProvider>(MockBehavior.Strict);
         var secretReader = new Mock<ISecretReader>();
-        string stored = "sk-ant-admin-from-store";
+        var stored = "sk-ant-admin-from-store";
         secretReader.Setup(r => r.TryRead("reconciliation:anthropic:admin-key", out stored)).Returns(true);
 
         var resolved = PriceCatalogServiceCollectionExtensions.TryResolveAdminApiKey(
-            options, environment.Object, secretReader.Object, "anthropic", out var adminApiKey);
+            options: options, environment: environment.Object, secretReader: secretReader.Object, provider: "anthropic",
+            adminApiKey: out var adminApiKey);
 
         Assert.True(resolved);
-        Assert.Equal("sk-ant-admin-from-store", adminApiKey);
+        Assert.Equal(expected: "sk-ant-admin-from-store", actual: adminApiKey);
         // Strict mock: if the resolver had consulted the environment, this test would throw instead of
         // reaching here - proving the store takes priority.
     }
@@ -44,22 +45,23 @@ public sealed class AdminApiKeyResolutionTests
     {
         var options = new CostReconciliationOptions
         {
-            Providers = new(StringComparer.OrdinalIgnoreCase)
+            Providers = new Dictionary<string, ProviderReconciliationOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["openai"] = new ProviderReconciliationOptions { AdminApiKeyEnvVar = "OPENAI_ADMIN_KEY" }
+                ["openai"] = new() { AdminApiKeyEnvVar = "OPENAI_ADMIN_KEY" }
             }
         };
         var environment = new Mock<IEnvironmentVariableProvider>();
         environment.Setup(e => e.GetVariable("OPENAI_ADMIN_KEY")).Returns("sk-openai-from-env");
         var secretReader = new Mock<ISecretReader>();
-        string empty = string.Empty;
+        var empty = string.Empty;
         secretReader.Setup(r => r.TryRead("reconciliation:openai:admin-key", out empty)).Returns(false);
 
         var resolved = PriceCatalogServiceCollectionExtensions.TryResolveAdminApiKey(
-            options, environment.Object, secretReader.Object, "openai", out var adminApiKey);
+            options: options, environment: environment.Object, secretReader: secretReader.Object, provider: "openai",
+            adminApiKey: out var adminApiKey);
 
         Assert.True(resolved);
-        Assert.Equal("sk-openai-from-env", adminApiKey);
+        Assert.Equal(expected: "sk-openai-from-env", actual: adminApiKey);
     }
 
     [Fact]
@@ -67,19 +69,20 @@ public sealed class AdminApiKeyResolutionTests
     {
         var options = new CostReconciliationOptions
         {
-            Providers = new(StringComparer.OrdinalIgnoreCase)
+            Providers = new Dictionary<string, ProviderReconciliationOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["openai"] = new ProviderReconciliationOptions { AdminApiKeyEnvVar = "OPENAI_ADMIN_KEY" }
+                ["openai"] = new() { AdminApiKeyEnvVar = "OPENAI_ADMIN_KEY" }
             }
         };
         var environment = new Mock<IEnvironmentVariableProvider>();
         environment.Setup(e => e.GetVariable("OPENAI_ADMIN_KEY")).Returns("sk-openai-from-env");
 
         var resolved = PriceCatalogServiceCollectionExtensions.TryResolveAdminApiKey(
-            options, environment.Object, secretReader: null, "openai", out var adminApiKey);
+            options: options, environment: environment.Object, null, provider: "openai",
+            adminApiKey: out var adminApiKey);
 
         Assert.True(resolved);
-        Assert.Equal("sk-openai-from-env", adminApiKey);
+        Assert.Equal(expected: "sk-openai-from-env", actual: adminApiKey);
     }
 
     [Fact]
@@ -88,21 +91,22 @@ public sealed class AdminApiKeyResolutionTests
         var options = new CostReconciliationOptions();
         var environment = new Mock<IEnvironmentVariableProvider>();
         var secretReader = new Mock<ISecretReader>();
-        string empty = string.Empty;
+        var empty = string.Empty;
         secretReader.Setup(r => r.TryRead("reconciliation:anthropic:admin-key", out empty)).Returns(false);
 
         var resolved = PriceCatalogServiceCollectionExtensions.TryResolveAdminApiKey(
-            options, environment.Object, secretReader.Object, "anthropic", out var adminApiKey);
+            options: options, environment: environment.Object, secretReader: secretReader.Object, provider: "anthropic",
+            adminApiKey: out var adminApiKey);
 
         Assert.False(resolved);
-        Assert.Equal(string.Empty, adminApiKey);
+        Assert.Equal(expected: string.Empty, actual: adminApiKey);
     }
 
     [Fact]
     public void BuildCostReconcilers_NoKeysResolvable_ReturnsEmpty()
     {
         var reconcilers = PriceCatalogServiceCollectionExtensions.BuildCostReconcilers(BuildServiceProvider(
-            new CostReconciliationOptions(), secretReader: null));
+            options: new CostReconciliationOptions(), null));
 
         Assert.Empty(reconcilers);
     }
@@ -111,16 +115,16 @@ public sealed class AdminApiKeyResolutionTests
     public void BuildCostReconcilers_StoredAnthropicAdminKey_AddsAnthropicReconciler_WithNoEnvVarConfigured()
     {
         var secretReader = new Mock<ISecretReader>();
-        string stored = "sk-ant-admin-from-store";
+        var stored = "sk-ant-admin-from-store";
         secretReader.Setup(r => r.TryRead("reconciliation:anthropic:admin-key", out stored)).Returns(true);
-        string empty = string.Empty;
+        var empty = string.Empty;
         secretReader.Setup(r => r.TryRead("reconciliation:openai:admin-key", out empty)).Returns(false);
 
         var reconcilers = PriceCatalogServiceCollectionExtensions.BuildCostReconcilers(BuildServiceProvider(
-            new CostReconciliationOptions(), secretReader.Object));
+            options: new CostReconciliationOptions(), secretReader: secretReader.Object));
 
         var reconciler = Assert.Single(reconcilers);
-        Assert.Equal("anthropic", reconciler.Provider);
+        Assert.Equal(expected: "anthropic", actual: reconciler.Provider);
     }
 
     private static IServiceProvider BuildServiceProvider(CostReconciliationOptions options, ISecretReader? secretReader)
@@ -129,10 +133,7 @@ public sealed class AdminApiKeyResolutionTests
         services.AddSingleton(Options.Create(options));
         services.AddSingleton(Mock.Of<IEnvironmentVariableProvider>());
         services.AddSingleton<HttpClient>();
-        if (secretReader is not null)
-        {
-            services.AddSingleton(secretReader);
-        }
+        if (secretReader is not null) services.AddSingleton(secretReader);
 
         return services.BuildServiceProvider();
     }

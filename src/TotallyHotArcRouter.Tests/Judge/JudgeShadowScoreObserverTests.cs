@@ -17,17 +17,18 @@ public class JudgeShadowScoreObserverTests
     public async Task ObserveAsync_ValidResult_EnqueuesOneJobWithSnapshottedFields()
     {
         var queue = new JudgeShadowScoreQueue(Options.Create(new JudgeOptions { QueueCapacity = 10 }));
-        var observer = new JudgeShadowScoreObserver(queue, EnabledJudge(), NullLogger<JudgeShadowScoreObserver>.Instance);
+        var observer = new JudgeShadowScoreObserver(queue: queue, options: EnabledJudge(),
+            logger: NullLogger<JudgeShadowScoreObserver>.Instance);
 
         var result = new QualityResult
         {
             RequestCorrelationId = "corr-1",
             Dimension = "algorithm",
             Model = "claude-opus-4-6",
-            UnifiedScore = 0.75,
+            UnifiedScore = 0.75
         };
 
-        await observer.ObserveAsync(result, TestContext.Current.CancellationToken);
+        await observer.ObserveAsync(result: result, cancellationToken: TestContext.Current.CancellationToken);
 
         var jobs = new List<JudgeShadowScoringJob>();
         await foreach (var job in queue.DequeueAllAsync(TestContext.Current.CancellationToken))
@@ -37,40 +38,44 @@ public class JudgeShadowScoreObserverTests
         }
 
         var enqueued = Assert.Single(jobs);
-        Assert.Equal("corr-1", enqueued.CorrelationId);
-        Assert.Equal("algorithm", enqueued.Dimension);
-        Assert.Equal("claude-opus-4-6", enqueued.Model);
-        Assert.Equal(0.75, enqueued.StaticScore);
+        Assert.Equal(expected: "corr-1", actual: enqueued.CorrelationId);
+        Assert.Equal(expected: "algorithm", actual: enqueued.Dimension);
+        Assert.Equal(expected: "claude-opus-4-6", actual: enqueued.Model);
+        Assert.Equal(0.75, actual: enqueued.StaticScore);
     }
 
     [Fact]
     public async Task ObserveAsync_NoCorrelationId_EnqueuesNothing()
     {
         var queue = new JudgeShadowScoreQueue(Options.Create(new JudgeOptions { QueueCapacity = 10 }));
-        var observer = new JudgeShadowScoreObserver(queue, EnabledJudge(), NullLogger<JudgeShadowScoreObserver>.Instance);
+        var observer = new JudgeShadowScoreObserver(queue: queue, options: EnabledJudge(),
+            logger: NullLogger<JudgeShadowScoreObserver>.Instance);
 
         var result = new QualityResult { RequestCorrelationId = string.Empty, Model = "claude-opus-4-6" };
 
-        await observer.ObserveAsync(result, TestContext.Current.CancellationToken);
+        await observer.ObserveAsync(result: result, cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(0, queue.DroppedCount);
+        Assert.Equal(0, actual: queue.DroppedCount);
     }
 
     [Fact]
     public async Task ObserveAsync_ChannelFull_ReturnsPromptlyWithoutThrowing()
     {
         var queue = new JudgeShadowScoreQueue(Options.Create(new JudgeOptions { QueueCapacity = 1 }));
-        var observer = new JudgeShadowScoreObserver(queue, EnabledJudge(), NullLogger<JudgeShadowScoreObserver>.Instance);
+        var observer = new JudgeShadowScoreObserver(queue: queue, options: EnabledJudge(),
+            logger: NullLogger<JudgeShadowScoreObserver>.Instance);
 
-        await observer.ObserveAsync(MakeResult("corr-1"), TestContext.Current.CancellationToken);
+        await observer.ObserveAsync(result: MakeResult("corr-1"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         // The second observation finds the single-capacity channel already full; it must shed the job
         // rather than block the caller or throw.
-        var completed = observer.ObserveAsync(MakeResult("corr-2"), TestContext.Current.CancellationToken);
+        var completed = observer.ObserveAsync(result: MakeResult("corr-2"),
+            cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(completed.IsCompletedSuccessfully);
 
         await completed;
-        Assert.Equal(1, queue.DroppedCount);
+        Assert.Equal(1, actual: queue.DroppedCount);
     }
 
     /// <summary>
@@ -83,27 +88,38 @@ public class JudgeShadowScoreObserverTests
     {
         var queue = new JudgeShadowScoreQueue(Options.Create(new JudgeOptions { QueueCapacity = 10 }));
         var options = EnabledJudge();
-        var observer = new JudgeShadowScoreObserver(queue, options, NullLogger<JudgeShadowScoreObserver>.Instance);
+        var observer = new JudgeShadowScoreObserver(queue: queue, options: options,
+            logger: NullLogger<JudgeShadowScoreObserver>.Instance);
 
         options.Set(new JudgeOptions { Enabled = false });
-        await observer.ObserveAsync(MakeResult("corr-1"), TestContext.Current.CancellationToken);
+        await observer.ObserveAsync(result: MakeResult("corr-1"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         // Neither queued nor counted as shed - the observation was never attempted at all.
-        Assert.Equal(0, queue.DroppedCount);
+        Assert.Equal(0, actual: queue.DroppedCount);
         Assert.False(queue.DequeueAllAsync(TestContext.Current.CancellationToken)
             .GetAsyncEnumerator(TestContext.Current.CancellationToken)
             .MoveNextAsync()
             .IsCompleted);
     }
 
-    private static QualityResult MakeResult(string correlationId) => new()
+    private static QualityResult MakeResult(string correlationId)
     {
-        RequestCorrelationId = correlationId,
-        Dimension = "algorithm",
-        Model = "claude-opus-4-6",
-        UnifiedScore = 0.5,
-    };
+        return new QualityResult
+        {
+            RequestCorrelationId = correlationId,
+            Dimension = "algorithm",
+            Model = "claude-opus-4-6",
+            UnifiedScore = 0.5
+        };
+    }
 
-    /// <summary>An options monitor reporting the judge as switched on - the precondition for every test above bar the disabled one.</summary>
-    private static StaticOptionsMonitor<JudgeOptions> EnabledJudge() => new(new JudgeOptions { Enabled = true });
+    /// <summary>
+    /// An options monitor reporting the judge as switched on - the precondition for every test above bar the disabled
+    /// one.
+    /// </summary>
+    private static StaticOptionsMonitor<JudgeOptions> EnabledJudge()
+    {
+        return new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions { Enabled = true });
+    }
 }

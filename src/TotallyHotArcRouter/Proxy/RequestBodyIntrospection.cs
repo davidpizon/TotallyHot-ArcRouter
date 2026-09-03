@@ -27,11 +27,11 @@ internal static class RequestBodyIntrospection
         jsonObject["model"] = route.ProviderModelId;
         var rewrittenBody = Encoding.UTF8.GetBytes(jsonObject.ToJsonString());
         return new RouteCandidate(
-            route,
-            rewrittenBody,
-            CarriesTools(jsonObject),
-            CarriesToolHistory(jsonObject),
-            CarriesResponseFormat(jsonObject));
+            Route: route,
+            RewrittenBody: rewrittenBody,
+            CarriesTools: CarriesTools(jsonObject),
+            CarriesToolHistory: CarriesToolHistory(jsonObject),
+            CarriesResponseFormat: CarriesResponseFormat(jsonObject));
     }
 
     /// <summary>
@@ -46,8 +46,10 @@ internal static class RequestBodyIntrospection
     /// per-model arming exists to avoid.
     /// </remarks>
     /// <param name="jsonObject">The already-parsed request body.</param>
-    public static bool CarriesTools(JsonObject jsonObject) =>
-        jsonObject["tools"] is JsonArray { Count: > 0 };
+    public static bool CarriesTools(JsonObject jsonObject)
+    {
+        return jsonObject["tools"] is JsonArray { Count: > 0 };
+    }
 
     /// <summary>
     /// Whether the client set its own <c>response_format</c>, which makes constrained tool calling
@@ -59,8 +61,10 @@ internal static class RequestBodyIntrospection
     /// and the answer to that is yes for every value they could have sent.
     /// </remarks>
     /// <param name="jsonObject">The already-parsed request body.</param>
-    public static bool CarriesResponseFormat(JsonObject jsonObject) =>
-        jsonObject["response_format"] is not null;
+    public static bool CarriesResponseFormat(JsonObject jsonObject)
+    {
+        return jsonObject["response_format"] is not null;
+    }
 
     /// <summary>
     /// Whether the conversation already contains tool-calling turns, which an emulated model's chat
@@ -76,29 +80,18 @@ internal static class RequestBodyIntrospection
     /// <param name="jsonObject">The already-parsed request body.</param>
     public static bool CarriesToolHistory(JsonObject jsonObject)
     {
-        if (jsonObject["messages"] is not JsonArray messages)
-        {
-            return false;
-        }
+        if (jsonObject["messages"] is not JsonArray messages) return false;
 
         foreach (var node in messages)
         {
-            if (node is not JsonObject message)
-            {
-                continue;
-            }
+            if (node is not JsonObject message) continue;
 
-            if (message["tool_calls"] is JsonArray { Count: > 0 })
-            {
-                return true;
-            }
+            if (message["tool_calls"] is JsonArray { Count: > 0 }) return true;
 
             if (message["role"] is JsonValue role &&
                 role.TryGetValue<string>(out var value) &&
-                string.Equals(value, "tool", StringComparison.Ordinal))
-            {
+                string.Equals(a: value, b: "tool", comparisonType: StringComparison.Ordinal))
                 return true;
-            }
         }
 
         return false;

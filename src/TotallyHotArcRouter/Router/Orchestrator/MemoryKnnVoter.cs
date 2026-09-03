@@ -20,40 +20,32 @@ public sealed class MemoryKnnVoter : IRoutingVoter
         _embeddingMemory = embeddingMemory;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public string Name => VoterNames.MemoryKnn;
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public Task<VoterVote> VoteAsync(VotingContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (context.TaskEmbedding is null)
-        {
-            return Task.FromResult(VoterVote.Abstain(Name));
-        }
+        if (context.TaskEmbedding is null) return Task.FromResult(VoterVote.Abstain(Name));
 
         var neighbors = _embeddingMemory.FindNearest(context.TaskEmbedding);
-        if (neighbors.Count == 0)
-        {
-            return Task.FromResult(VoterVote.Abstain(Name));
-        }
+        if (neighbors.Count == 0) return Task.FromResult(VoterVote.Abstain(Name));
 
         var candidateNames = new HashSet<string>(
-            context.Candidates.Select(candidate => candidate.ModelName),
-            StringComparer.OrdinalIgnoreCase);
+            collection: context.Candidates.Select(candidate => candidate.ModelName),
+            comparer: StringComparer.OrdinalIgnoreCase);
 
         var weightedSums = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         var weightTotals = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         foreach (var (entry, similarity) in neighbors)
         {
-            if (!candidateNames.Contains(entry.ChosenModel) || similarity <= 0)
-            {
-                continue;
-            }
+            if (!candidateNames.Contains(entry.ChosenModel) || similarity <= 0) continue;
 
-            weightedSums[entry.ChosenModel] = weightedSums.GetValueOrDefault(entry.ChosenModel) + similarity * entry.Score;
+            weightedSums[entry.ChosenModel] =
+                weightedSums.GetValueOrDefault(entry.ChosenModel) + similarity * entry.Score;
             weightTotals[entry.ChosenModel] = weightTotals.GetValueOrDefault(entry.ChosenModel) + similarity;
         }
 
@@ -61,7 +53,8 @@ public sealed class MemoryKnnVoter : IRoutingVoter
         // deterministically (by model name) rather than by Dictionary's unspecified enumeration order.
         string? bestModel = null;
         var bestAverage = double.NegativeInfinity;
-        foreach (var (model, weightTotal) in weightTotals.OrderBy(entry => entry.Key, StringComparer.Ordinal))
+        foreach (var (model, weightTotal) in weightTotals.OrderBy(keySelector: entry => entry.Key,
+                     comparer: StringComparer.Ordinal))
         {
             var average = weightedSums[model] / weightTotal;
             if (average > bestAverage)
@@ -73,7 +66,7 @@ public sealed class MemoryKnnVoter : IRoutingVoter
 
         var vote = bestModel is null
             ? VoterVote.Abstain(Name)
-            : new VoterVote(Name, bestModel, Math.Clamp(bestAverage, 0d, 1d));
+            : new VoterVote(VoterName: Name, ModelName: bestModel, Confidence: Math.Clamp(value: bestAverage, 0d, 1d));
         return Task.FromResult(vote);
     }
 }

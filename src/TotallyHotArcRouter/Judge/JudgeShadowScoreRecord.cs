@@ -16,7 +16,10 @@ namespace TotallyHot.ArcRouter.Judge;
 /// <param name="CreatedAtUtc">When this row was written, in UTC.</param>
 /// <param name="Dimension">The inferred task dimension.</param>
 /// <param name="Model">The model that produced the evaluated response.</param>
-/// <param name="StaticScore">The static verifier's unified score for the same request, before the judge's grade was blended in.</param>
+/// <param name="StaticScore">
+/// The static verifier's unified score for the same request, before the judge's grade was
+/// blended in.
+/// </param>
 /// <param name="JudgeScore">The G-Eval judge's score, normalized to <c>[0, 1]</c>.</param>
 /// <param name="JudgeModel">
 /// The client-facing name of the model that actually judged this response, as
@@ -24,9 +27,15 @@ namespace TotallyHot.ArcRouter.Judge;
 /// configured - matters because the selector substitutes a fallback for an ineligible pick, and G2's
 /// agreement analysis has to segment on the backbone that produced each score.
 /// </param>
-/// <param name="JudgePromptVersion">The prompt-version tag (<see cref="JudgeOptions.PromptVersion"/> at scoring time), the auto-CoT cache guard equivalent.</param>
+/// <param name="JudgePromptVersion">
+/// The prompt-version tag (<see cref="JudgeOptions.PromptVersion"/> at scoring time), the
+/// auto-CoT cache guard equivalent.
+/// </param>
 /// <param name="JudgeLatencyMs">Wall-clock duration of the judge HTTP call, in milliseconds.</param>
-/// <param name="UsedLogprobs">Whether <see cref="JudgeScore"/> was computed via probability weighting rather than the single-sample fallback.</param>
+/// <param name="UsedLogprobs">
+/// Whether <see cref="JudgeScore"/> was computed via probability weighting rather than the
+/// single-sample fallback.
+/// </param>
 public sealed record JudgeShadowScoreRecord(
     long Id,
     string CorrelationId,

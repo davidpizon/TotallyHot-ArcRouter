@@ -6,7 +6,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// weak model sometimes blends the tag its system prompt uses to *document* the tool schema with the
 /// one it is supposed to *reply* with (see <c>docs/router/unified-api-translation.md</c> §4.5 for the
 /// live-observed case of exactly that).
-///
 /// <para>
 /// A <see langword="null"/> <see cref="Close"/> means "the call payload runs to the end of the
 /// message" rather than "this delimiter has no body". Some families genuinely have no closing token -
@@ -14,8 +13,14 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// the distinction is load-bearing, not a convenience default.
 /// </para>
 /// </summary>
-/// <param name="Open">The literal opening token, matched ordinally (never case-insensitively - these are template tokens, not prose).</param>
-/// <param name="Close">The literal closing token, or <see langword="null"/> when the payload runs to the end of the message.</param>
+/// <param name="Open">
+/// The literal opening token, matched ordinally (never case-insensitively - these are template tokens,
+/// not prose).
+/// </param>
+/// <param name="Close">
+/// The literal closing token, or <see langword="null"/> when the payload runs to the end of the
+/// message.
+/// </param>
 internal sealed record DialectDelimiter(string Open, string? Close)
 {
     // Validated here rather than left to callers: every built-in entry in ToolCallDialectRegistry
@@ -33,7 +38,8 @@ internal sealed record DialectDelimiter(string Open, string? Close)
     /// <summary>Gets the literal opening token, matched ordinally against the raw message text.</summary>
     public string Open { get; init; } = !string.IsNullOrEmpty(Open)
         ? Open
-        : throw new ArgumentException("A dialect delimiter's Open token must be non-empty.", nameof(Open));
+        : throw new ArgumentException(message: "A dialect delimiter's Open token must be non-empty.",
+            paramName: nameof(Open));
 
     /// <summary>
     /// Gets the literal closing token, or <see langword="null"/> when the payload runs to the end of the
@@ -41,6 +47,8 @@ internal sealed record DialectDelimiter(string Open, string? Close)
     /// </summary>
     public string? Close { get; init; } = Close is not { Length: 0 }
         ? Close
-        : throw new ArgumentException("A dialect delimiter's Close token must be null or non-empty - use null for \"runs to end of message\", never an empty string.", nameof(Close));
+        : throw new ArgumentException(
+            message:
+            "A dialect delimiter's Close token must be null or non-empty - use null for \"runs to end of message\", never an empty string.",
+            paramName: nameof(Close));
 }
-

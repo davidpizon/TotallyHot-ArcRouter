@@ -26,8 +26,8 @@ public class LogRegModelAdminClientTests
                 ArtifactPresent = false,
                 EntriesSinceLastRetrain = 42,
                 RetrainThreshold = 500,
-                LiveSampleWeight = 3.0,
-            },
+                LiveSampleWeight = 3.0
+            }
         };
         using var client = new LogRegModelAdminClient(stub);
 
@@ -44,7 +44,7 @@ public class LogRegModelAdminClientTests
     [Fact]
     public async Task GetStatusAsync_with_artifact_maps_provenance_and_trained_at()
     {
-        var trainedAt = new DateTimeOffset(2026, 7, 16, 12, 0, 0, TimeSpan.Zero);
+        var trainedAt = new DateTimeOffset(2026, 7, 16, 12, 0, 0, offset: TimeSpan.Zero);
         var stub = new StubClient
         {
             StatusResponse = new Contract.LogRegModelStatusResponse
@@ -58,8 +58,8 @@ public class LogRegModelAdminClientTests
                 ModelsRepresented = 8,
                 EntriesSinceLastRetrain = 3,
                 RetrainThreshold = 500,
-                LiveSampleWeight = 3.0,
-            },
+                LiveSampleWeight = 3.0
+            }
         };
         using var client = new LogRegModelAdminClient(stub);
 
@@ -81,11 +81,11 @@ public class LogRegModelAdminClientTests
             [
                 new Contract.LogRegRetrainStreamEvent
                 {
-                    BootstrapProgress = new Contract.LogRegRetrainBootstrapProgress { TasksEmbedded = 5 },
+                    BootstrapProgress = new Contract.LogRegRetrainBootstrapProgress { TasksEmbedded = 5 }
                 },
                 new Contract.LogRegRetrainStreamEvent
                 {
-                    BootstrapProgress = new Contract.LogRegRetrainBootstrapProgress { TasksEmbedded = 10 },
+                    BootstrapProgress = new Contract.LogRegRetrainBootstrapProgress { TasksEmbedded = 10 }
                 },
                 new Contract.LogRegRetrainStreamEvent
                 {
@@ -93,18 +93,16 @@ public class LogRegModelAdminClientTests
                     {
                         Kind = Contract.LogRegRetrainResultKind.Trained,
                         Message = "Trained 8 heads.",
-                        Status = new Contract.LogRegModelStatusResponse { ArtifactPresent = true, ModelsRepresented = 8 },
-                    },
-                },
-            ],
+                        Status = new Contract.LogRegModelStatusResponse
+                            { ArtifactPresent = true, ModelsRepresented = 8 }
+                    }
+                }
+            ]
         };
         using var client = new LogRegModelAdminClient(stub);
 
         var events = new List<LogRegRetrainEvent>();
-        await foreach (var e in client.RetrainAsync(TestContext.Current.CancellationToken))
-        {
-            events.Add(e);
-        }
+        await foreach (var e in client.RetrainAsync(TestContext.Current.CancellationToken)) events.Add(e);
 
         events.Should().HaveCount(3);
         events[0].BootstrapProgress!.TasksEmbedded.Should().Be(5);
@@ -130,18 +128,19 @@ public class LogRegModelAdminClientTests
     {
         var stub = new StubClient
         {
-            RetrainEvents = [new Contract.LogRegRetrainStreamEvent
-            {
-                Result = new Contract.LogRegRetrainResult { Kind = wireKind, Message = "m", Status = new Contract.LogRegModelStatusResponse() },
-            }],
+            RetrainEvents =
+            [
+                new Contract.LogRegRetrainStreamEvent
+                {
+                    Result = new Contract.LogRegRetrainResult
+                        { Kind = wireKind, Message = "m", Status = new Contract.LogRegModelStatusResponse() }
+                }
+            ]
         };
         using var client = new LogRegModelAdminClient(stub);
 
         var events = new List<LogRegRetrainEvent>();
-        await foreach (var e in client.RetrainAsync(TestContext.Current.CancellationToken))
-        {
-            events.Add(e);
-        }
+        await foreach (var e in client.RetrainAsync(TestContext.Current.CancellationToken)) events.Add(e);
 
         events.Single().Result!.Kind.Should().Be(expected);
     }
@@ -153,10 +152,7 @@ public class LogRegModelAdminClientTests
         using var client = new LogRegModelAdminClient(stub);
 
         var events = new List<LogRegRetrainEvent>();
-        await foreach (var e in client.RetrainAsync(TestContext.Current.CancellationToken))
-        {
-            events.Add(e);
-        }
+        await foreach (var e in client.RetrainAsync(TestContext.Current.CancellationToken)) events.Add(e);
 
         var single = events.Single();
         single.BootstrapProgress.Should().BeNull();
@@ -166,7 +162,8 @@ public class LogRegModelAdminClientTests
     [Fact]
     public async Task RetrainAsync_wraps_a_mid_stream_failure()
     {
-        var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.Unavailable, "failed to connect")) };
+        var stub = new StubClient
+            { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new LogRegModelAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<LogRegModelAdminException>(async () =>
@@ -183,10 +180,12 @@ public class LogRegModelAdminClientTests
     [Fact]
     public async Task Unavailable_becomes_a_plain_language_message()
     {
-        var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.Unavailable, "failed to connect")) };
+        var stub = new StubClient
+            { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new LogRegModelAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<LogRegModelAdminException>(() => client.GetStatusAsync(TestContext.Current.CancellationToken));
+        var ex = await Assert.ThrowsAsync<LogRegModelAdminException>(() =>
+            client.GetStatusAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read the logreg model status: the router is not reachable.");
         ex.IsUnavailable.Should().BeTrue();
@@ -195,10 +194,12 @@ public class LogRegModelAdminClientTests
     [Fact]
     public async Task A_server_rejection_keeps_the_servers_own_detail_and_is_not_flagged_unavailable()
     {
-        var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.Internal, "boom")) };
+        var stub = new StubClient
+            { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
         using var client = new LogRegModelAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<LogRegModelAdminException>(() => client.GetStatusAsync(TestContext.Current.CancellationToken));
+        var ex = await Assert.ThrowsAsync<LogRegModelAdminException>(() =>
+            client.GetStatusAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read the logreg model status: boom");
         ex.IsUnavailable.Should().BeFalse();
@@ -238,10 +239,7 @@ public class LogRegModelAdminClientTests
         public Task<bool> MoveNext(CancellationToken cancellationToken)
         {
             _index++;
-            if (_index >= messages.Count)
-            {
-                return Task.FromResult(false);
-            }
+            if (_index >= messages.Count) return Task.FromResult(false);
 
             Current = messages[_index];
             return Task.FromResult(true);
@@ -262,8 +260,10 @@ public class LogRegModelAdminClientTests
 
         public override AsyncUnaryCall<Contract.LogRegModelStatusResponse> GetLogRegModelStatusAsync(
             Contract.GetLogRegModelStatusRequest request,
-            CallOptions options) =>
-            Call(StatusResponse);
+            CallOptions options)
+        {
+            return Call(StatusResponse);
+        }
 
         public override AsyncServerStreamingCall<Contract.LogRegRetrainStreamEvent> RetrainLogRegModel(
             Contract.RetrainLogRegModelRequest request,
@@ -274,26 +274,32 @@ public class LogRegModelAdminClientTests
                 : new ThrowingStreamReader(Failure);
 
             return new AsyncServerStreamingCall<Contract.LogRegRetrainStreamEvent>(
-                reader,
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => [],
-                () => { });
+                responseStream: reader,
+                responseHeadersAsync: Task.FromResult(new Metadata()),
+                getStatusFunc: () => Status.DefaultSuccess,
+                getTrailersFunc: () => [],
+                disposeAction: () => { });
         }
 
-        private AsyncUnaryCall<T> Call<T>(T response) =>
-            new(
-                Failure is null ? Task.FromResult(response) : Task.FromException<T>(Failure),
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => [],
-                () => { });
+        private AsyncUnaryCall<T> Call<T>(T response)
+        {
+            return new AsyncUnaryCall<T>(
+                responseAsync: Failure is null ? Task.FromResult(response) : Task.FromException<T>(Failure),
+                responseHeadersAsync: Task.FromResult(new Metadata()),
+                getStatusFunc: () => Status.DefaultSuccess,
+                getTrailersFunc: () => [],
+                disposeAction: () => { });
+        }
 
-        private sealed class ThrowingStreamReader(RpcException failure) : IAsyncStreamReader<Contract.LogRegRetrainStreamEvent>
+        private sealed class ThrowingStreamReader(RpcException failure)
+            : IAsyncStreamReader<Contract.LogRegRetrainStreamEvent>
         {
             public Contract.LogRegRetrainStreamEvent Current => throw failure;
 
-            public Task<bool> MoveNext(CancellationToken cancellationToken) => Task.FromException<bool>(failure);
+            public Task<bool> MoveNext(CancellationToken cancellationToken)
+            {
+                return Task.FromException<bool>(failure);
+            }
         }
     }
 }

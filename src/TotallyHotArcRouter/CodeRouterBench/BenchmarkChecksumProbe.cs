@@ -49,7 +49,10 @@ internal sealed class HuggingFaceTreeEntryLfs
 /// a git blob SHA-1 for a regular file, or a content SHA-256 for a Git LFS-tracked one.
 /// </param>
 /// <param name="Size">The file's published size in bytes.</param>
-/// <param name="Algorithm">Which hash <paramref name="PublishedOid"/> is, and so which algorithm a downloaded/cached copy must be verified with.</param>
+/// <param name="Algorithm">
+/// Which hash <paramref name="PublishedOid"/> is, and so which algorithm a downloaded/cached copy
+/// must be verified with.
+/// </param>
 public sealed record BenchmarkPublishedFile(string PublishedOid, long Size, PublishedChecksumAlgorithm Algorithm);
 
 /// <summary>The result of one <see cref="BenchmarkChecksumProbe.FetchAsync"/> call.</summary>
@@ -107,10 +110,11 @@ public sealed class BenchmarkChecksumProbe
 
         var url = $"https://huggingface.co/api/datasets/{DatasetRepo}/tree/{Uri.EscapeDataString(datasetRef)}";
         using var httpClient = _httpClientFactory.CreateClient(HttpClientName);
-        using var response = await httpClient.GetAsync(url, cancellationToken).ConfigureAwait(false);
+        using var response = await httpClient.GetAsync(requestUri: url, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
 
-        var repoCommit = response.Headers.TryGetValues("X-Repo-Commit", out var values)
+        var repoCommit = response.Headers.TryGetValues(name: "X-Repo-Commit", values: out var values)
             ? values.FirstOrDefault() ?? datasetRef
             : datasetRef;
 
@@ -121,26 +125,26 @@ public sealed class BenchmarkChecksumProbe
         Dictionary<string, BenchmarkPublishedFile> files = [];
         foreach (var entry in entries)
         {
-            if (!string.Equals(entry.Type, "file", StringComparison.Ordinal) ||
+            if (!string.Equals(a: entry.Type, b: "file", comparisonType: StringComparison.Ordinal) ||
                 string.IsNullOrWhiteSpace(entry.Path) ||
                 string.IsNullOrWhiteSpace(entry.Oid))
-            {
                 continue;
-            }
 
             // An entry with a non-empty Lfs.Oid is Git LFS-tracked: the real content hash lives there
             // (SHA-256), not in the entry's own git-blob oid (which is only the small pointer file's
             // hash). Prefer Lfs.Size too - it's the real, LFS-resolved size a download actually transfers.
             files[entry.Path] = entry.Lfs is { Oid: { Length: > 0 } lfsOid } lfs
-                ? new BenchmarkPublishedFile(lfsOid, lfs.Size ?? entry.Size, PublishedChecksumAlgorithm.LfsSha256)
-                : new BenchmarkPublishedFile(entry.Oid, entry.Size, PublishedChecksumAlgorithm.GitBlobSha1);
+                ? new BenchmarkPublishedFile(PublishedOid: lfsOid, Size: lfs.Size ?? entry.Size,
+                    Algorithm: PublishedChecksumAlgorithm.LfsSha256)
+                : new BenchmarkPublishedFile(PublishedOid: entry.Oid, Size: entry.Size,
+                    Algorithm: PublishedChecksumAlgorithm.GitBlobSha1);
         }
 
         _logger.LogInformation(
-            "CodeRouterBench checksum probe found {FileCount} published file(s) at commit {RepoCommit}.",
+            message: "CodeRouterBench checksum probe found {FileCount} published file(s) at commit {RepoCommit}.",
             files.Count,
             repoCommit);
 
-        return new BenchmarkChecksumProbeResult(files, repoCommit);
+        return new BenchmarkChecksumProbeResult(Files: files, RepoCommit: repoCommit);
     }
 }

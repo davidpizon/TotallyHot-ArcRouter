@@ -19,19 +19,21 @@ public class CostReconciliationServiceTests
     private static CostReconciliationService BuildService(
         TempDatabase temp,
         IEnumerable<IProviderCostReconciler> reconcilers,
-        decimal deltaWarningPercent = 20m) =>
-        new(
-            reconcilers,
-            temp.CreateUsageLedger(),
-            temp.CreateCostReconciliationStore(),
-            Options.Create(new CostReconciliationOptions { DeltaWarningPercent = deltaWarningPercent }),
-            NullLogger<CostReconciliationService>.Instance);
+        decimal deltaWarningPercent = 20m)
+    {
+        return new CostReconciliationService(
+            reconcilers: reconcilers,
+            usageLedger: temp.CreateUsageLedger(),
+            store: temp.CreateCostReconciliationStore(),
+            options: Options.Create(new CostReconciliationOptions { DeltaWarningPercent = deltaWarningPercent }),
+            logger: NullLogger<CostReconciliationService>.Instance);
+    }
 
     [Fact]
     public async Task RunCycleAsync_NoReconcilers_DoesNothingAndDoesNotThrow()
     {
         using var temp = new TempDatabase();
-        var service = BuildService(temp, []);
+        var service = BuildService(temp: temp, reconcilers: []);
 
         await service.RunCycleAsync(Ct);
     }
@@ -40,35 +42,35 @@ public class CostReconciliationServiceTests
     public async Task RunCycleAsync_FirstRun_ReconcilesOnlyYesterday_AndAdvancesCheckpoint()
     {
         using var temp = new TempDatabase();
-        var reconciler = new FakeCostReconciler("openai", _ => 5m);
+        var reconciler = new FakeCostReconciler(provider: "openai", costForDay: _ => 5m);
         var store = temp.CreateCostReconciliationStore();
         var service = new CostReconciliationService(
-            [reconciler],
-            temp.CreateUsageLedger(),
-            store,
-            Options.Create(new CostReconciliationOptions()),
-            NullLogger<CostReconciliationService>.Instance);
+            reconcilers: [reconciler],
+            usageLedger: temp.CreateUsageLedger(),
+            store: store,
+            options: Options.Create(new CostReconciliationOptions()),
+            logger: NullLogger<CostReconciliationService>.Instance);
 
         await service.RunCycleAsync(Ct);
 
-        Assert.Equal(Yesterday, store.GetLastReconciledDay("openai"));
+        Assert.Equal(expected: Yesterday, actual: store.GetLastReconciledDay("openai"));
         Assert.Single(reconciler.CalledDays);
-        Assert.Equal(Yesterday, reconciler.CalledDays[0]);
+        Assert.Equal(expected: Yesterday, actual: reconciler.CalledDays[0]);
     }
 
     [Fact]
     public async Task RunCycleAsync_AlreadyCaughtUp_DoesNotCallReconcilerAgain()
     {
         using var temp = new TempDatabase();
-        var reconciler = new FakeCostReconciler("openai", _ => 5m);
+        var reconciler = new FakeCostReconciler(provider: "openai", costForDay: _ => 5m);
         var store = temp.CreateCostReconciliationStore();
-        store.SetLastReconciledDay("openai", Yesterday);
+        store.SetLastReconciledDay(provider: "openai", day: Yesterday);
         var service = new CostReconciliationService(
-            [reconciler],
-            temp.CreateUsageLedger(),
-            store,
-            Options.Create(new CostReconciliationOptions()),
-            NullLogger<CostReconciliationService>.Instance);
+            reconcilers: [reconciler],
+            usageLedger: temp.CreateUsageLedger(),
+            store: store,
+            options: Options.Create(new CostReconciliationOptions()),
+            logger: NullLogger<CostReconciliationService>.Instance);
 
         await service.RunCycleAsync(Ct);
 
@@ -79,40 +81,40 @@ public class CostReconciliationServiceTests
     public async Task RunCycleAsync_CheckpointTwoDaysBehind_ReconcilesBothMissingDaysInOrder()
     {
         using var temp = new TempDatabase();
-        var reconciler = new FakeCostReconciler("openai", _ => 1m);
+        var reconciler = new FakeCostReconciler(provider: "openai", costForDay: _ => 1m);
         var store = temp.CreateCostReconciliationStore();
-        store.SetLastReconciledDay("openai", Yesterday.AddDays(-2));
+        store.SetLastReconciledDay(provider: "openai", day: Yesterday.AddDays(-2));
         var service = new CostReconciliationService(
-            [reconciler],
-            temp.CreateUsageLedger(),
-            store,
-            Options.Create(new CostReconciliationOptions()),
-            NullLogger<CostReconciliationService>.Instance);
+            reconcilers: [reconciler],
+            usageLedger: temp.CreateUsageLedger(),
+            store: store,
+            options: Options.Create(new CostReconciliationOptions()),
+            logger: NullLogger<CostReconciliationService>.Instance);
 
         await service.RunCycleAsync(Ct);
 
-        Assert.Equal([Yesterday.AddDays(-1), Yesterday], reconciler.CalledDays);
-        Assert.Equal(Yesterday, store.GetLastReconciledDay("openai"));
+        Assert.Equal(expected: [Yesterday.AddDays(-1), Yesterday], actual: reconciler.CalledDays);
+        Assert.Equal(expected: Yesterday, actual: store.GetLastReconciledDay("openai"));
     }
 
     [Fact]
     public async Task RunCycleAsync_CheckpointFarBehind_CapsCatchUpAtMaxCatchUpDays()
     {
         using var temp = new TempDatabase();
-        var reconciler = new FakeCostReconciler("openai", _ => 1m);
+        var reconciler = new FakeCostReconciler(provider: "openai", costForDay: _ => 1m);
         var store = temp.CreateCostReconciliationStore();
-        store.SetLastReconciledDay("openai", Yesterday.AddDays(-100));
+        store.SetLastReconciledDay(provider: "openai", day: Yesterday.AddDays(-100));
         var service = new CostReconciliationService(
-            [reconciler],
-            temp.CreateUsageLedger(),
-            store,
-            Options.Create(new CostReconciliationOptions()),
-            NullLogger<CostReconciliationService>.Instance);
+            reconcilers: [reconciler],
+            usageLedger: temp.CreateUsageLedger(),
+            store: store,
+            options: Options.Create(new CostReconciliationOptions()),
+            logger: NullLogger<CostReconciliationService>.Instance);
 
         await service.RunCycleAsync(Ct);
 
-        Assert.Equal(CostReconciliationService.MaxCatchUpDays, reconciler.CalledDays.Count);
-        Assert.Equal(Yesterday, reconciler.CalledDays[^1]);
+        Assert.Equal(expected: CostReconciliationService.MaxCatchUpDays, actual: reconciler.CalledDays.Count);
+        Assert.Equal(expected: Yesterday, actual: reconciler.CalledDays[^1]);
     }
 
     [Fact]
@@ -120,21 +122,22 @@ public class CostReconciliationServiceTests
     {
         using var temp = new TempDatabase();
         var failDay = Yesterday;
-        var reconciler = new FakeCostReconciler("openai", day => day == failDay ? throw new HttpRequestException("boom") : 1m);
+        var reconciler = new FakeCostReconciler(provider: "openai",
+            costForDay: day => day == failDay ? throw new HttpRequestException("boom") : 1m);
         var store = temp.CreateCostReconciliationStore();
-        store.SetLastReconciledDay("openai", Yesterday.AddDays(-2));
+        store.SetLastReconciledDay(provider: "openai", day: Yesterday.AddDays(-2));
         var service = new CostReconciliationService(
-            [reconciler],
-            temp.CreateUsageLedger(),
-            store,
-            Options.Create(new CostReconciliationOptions()),
-            NullLogger<CostReconciliationService>.Instance);
+            reconcilers: [reconciler],
+            usageLedger: temp.CreateUsageLedger(),
+            store: store,
+            options: Options.Create(new CostReconciliationOptions()),
+            logger: NullLogger<CostReconciliationService>.Instance);
 
         await service.RunCycleAsync(Ct);
 
         // Day -1 succeeded and advanced the checkpoint; "yesterday" (failDay) threw, so the checkpoint
         // must stop at -1, not skip past the failure.
-        Assert.Equal(Yesterday.AddDays(-1), store.GetLastReconciledDay("openai"));
+        Assert.Equal(expected: Yesterday.AddDays(-1), actual: store.GetLastReconciledDay("openai"));
     }
 
     [Fact]
@@ -145,9 +148,10 @@ public class CostReconciliationServiceTests
         // reconciler on the second call - proving the fixed list is not what RunCycleAsync uses when a
         // factory is supplied.
         using var temp = new TempDatabase();
-        var reconciler = new FakeCostReconciler("anthropic", _ => 3m);
+        var reconciler = new FakeCostReconciler(provider: "anthropic", costForDay: _ => 3m);
         var store = temp.CreateCostReconciliationStore();
         var calls = 0;
+
         IReadOnlyList<IProviderCostReconciler> Factory()
         {
             calls++;
@@ -155,12 +159,12 @@ public class CostReconciliationServiceTests
         }
 
         var service = new CostReconciliationService(
-            [],
-            temp.CreateUsageLedger(),
-            store,
-            Options.Create(new CostReconciliationOptions()),
-            NullLogger<CostReconciliationService>.Instance,
-            Factory);
+            reconcilers: [],
+            usageLedger: temp.CreateUsageLedger(),
+            store: store,
+            options: Options.Create(new CostReconciliationOptions()),
+            logger: NullLogger<CostReconciliationService>.Instance,
+            reconcilerFactory: Factory);
 
         await service.RunCycleAsync(Ct);
         Assert.Empty(reconciler.CalledDays);
@@ -173,14 +177,14 @@ public class CostReconciliationServiceTests
     public async Task RunCycleAsync_NoReconcilerFactorySupplied_UsesTheFixedConstructorList()
     {
         using var temp = new TempDatabase();
-        var reconciler = new FakeCostReconciler("openai", _ => 5m);
+        var reconciler = new FakeCostReconciler(provider: "openai", costForDay: _ => 5m);
         var store = temp.CreateCostReconciliationStore();
         var service = new CostReconciliationService(
-            [reconciler],
-            temp.CreateUsageLedger(),
-            store,
-            Options.Create(new CostReconciliationOptions()),
-            NullLogger<CostReconciliationService>.Instance);
+            reconcilers: [reconciler],
+            usageLedger: temp.CreateUsageLedger(),
+            store: store,
+            options: Options.Create(new CostReconciliationOptions()),
+            logger: NullLogger<CostReconciliationService>.Instance);
 
         await service.RunCycleAsync(Ct);
 
@@ -191,45 +195,46 @@ public class CostReconciliationServiceTests
     public async Task RunCycleAsync_InsertsReconciliationRowWithReportedAndLocalCost()
     {
         using var temp = new TempDatabase();
-        var reconciler = new FakeCostReconciler("openai", _ => 42m);
+        var reconciler = new FakeCostReconciler(provider: "openai", costForDay: _ => 42m);
         var costStore = temp.CreateCostReconciliationStore();
         var service = new CostReconciliationService(
-            [reconciler],
-            temp.CreateUsageLedger(),
-            costStore,
-            Options.Create(new CostReconciliationOptions()),
-            NullLogger<CostReconciliationService>.Instance);
+            reconcilers: [reconciler],
+            usageLedger: temp.CreateUsageLedger(),
+            store: costStore,
+            options: Options.Create(new CostReconciliationOptions()),
+            logger: NullLogger<CostReconciliationService>.Instance);
 
         await service.RunCycleAsync(Ct);
 
         using var connection = temp.Database.OpenConnection();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT provider, provider_reported_cost_usd, local_estimated_cost_usd FROM provider_cost_reconciliation;";
+        command.CommandText =
+            "SELECT provider, provider_reported_cost_usd, local_estimated_cost_usd FROM provider_cost_reconciliation;";
         using var reader = command.ExecuteReader();
         Assert.True(reader.Read());
-        Assert.Equal("openai", reader.GetString(0));
-        Assert.Equal("42", reader.GetString(1));
-        Assert.Equal("0", reader.GetString(2)); // no local usage_ledger data seeded for this window
+        Assert.Equal(expected: "openai", actual: reader.GetString(0));
+        Assert.Equal(expected: "42", actual: reader.GetString(1));
+        Assert.Equal(expected: "0", actual: reader.GetString(2)); // no local usage_ledger data seeded for this window
     }
 
     [Fact]
     public async Task RunCycleAsync_MultipleReconcilers_EachTrackedIndependently()
     {
         using var temp = new TempDatabase();
-        var openAi = new FakeCostReconciler("openai", _ => 1m);
-        var anthropic = new FakeCostReconciler("anthropic", _ => 2m);
+        var openAi = new FakeCostReconciler(provider: "openai", costForDay: _ => 1m);
+        var anthropic = new FakeCostReconciler(provider: "anthropic", costForDay: _ => 2m);
         var store = temp.CreateCostReconciliationStore();
         var service = new CostReconciliationService(
-            [openAi, anthropic],
-            temp.CreateUsageLedger(),
-            store,
-            Options.Create(new CostReconciliationOptions()),
-            NullLogger<CostReconciliationService>.Instance);
+            reconcilers: [openAi, anthropic],
+            usageLedger: temp.CreateUsageLedger(),
+            store: store,
+            options: Options.Create(new CostReconciliationOptions()),
+            logger: NullLogger<CostReconciliationService>.Instance);
 
         await service.RunCycleAsync(Ct);
 
-        Assert.Equal(Yesterday, store.GetLastReconciledDay("openai"));
-        Assert.Equal(Yesterday, store.GetLastReconciledDay("anthropic"));
+        Assert.Equal(expected: Yesterday, actual: store.GetLastReconciledDay("openai"));
+        Assert.Equal(expected: Yesterday, actual: store.GetLastReconciledDay("anthropic"));
         Assert.Single(openAi.CalledDays);
         Assert.Single(anthropic.CalledDays);
     }
@@ -246,28 +251,29 @@ public class CostReconciliationServiceTests
         using var temp = new TempDatabase();
         _ = temp.CreateRollupStore(rollupTimezone: "America/New_York");
         var ledger = temp.CreateUsageLedger();
-        await ledger.RecordAsync(new UsageLedgerEntry(
-            SessionId: "s1",
-            TurnNumber: 1,
-            Provider: "openai",
-            RequestedModel: "gpt-5",
-            ResolvedModel: "gpt-5",
-            PromptTokens: 10,
-            CompletionTokens: 5,
-            CacheCreationTokens: 0,
-            CacheReadTokens: 0,
-            EstimatedCostUsd: 7.5m,
-            CostConfidence: CostConfidence.Catalog,
-            OccurredAtUtc: Yesterday.ToDateTime(new TimeOnly(12, 0), DateTimeKind.Utc)), Ct);
+        await ledger.RecordAsync(entry: new UsageLedgerEntry(
+                SessionId: "s1",
+                1,
+                Provider: "openai",
+                RequestedModel: "gpt-5",
+                ResolvedModel: "gpt-5",
+                10,
+                5,
+                0,
+                0,
+                7.5m,
+                CostConfidence: CostConfidence.Catalog,
+                OccurredAtUtc: Yesterday.ToDateTime(time: new TimeOnly(12, 0), kind: DateTimeKind.Utc)),
+            cancellationToken: Ct);
 
-        var reconciler = new FakeCostReconciler("openai", _ => 42m);
+        var reconciler = new FakeCostReconciler(provider: "openai", costForDay: _ => 42m);
         var costStore = temp.CreateCostReconciliationStore();
         var service = new CostReconciliationService(
-            [reconciler],
-            ledger,
-            costStore,
-            Options.Create(new CostReconciliationOptions()),
-            NullLogger<CostReconciliationService>.Instance);
+            reconcilers: [reconciler],
+            usageLedger: ledger,
+            store: costStore,
+            options: Options.Create(new CostReconciliationOptions()),
+            logger: NullLogger<CostReconciliationService>.Instance);
 
         await service.RunCycleAsync(Ct);
 
@@ -276,7 +282,7 @@ public class CostReconciliationServiceTests
         command.CommandText = "SELECT local_estimated_cost_usd FROM provider_cost_reconciliation;";
         using var reader = command.ExecuteReader();
         Assert.True(reader.Read());
-        Assert.Equal("7.5", reader.GetString(0));
+        Assert.Equal(expected: "7.5", actual: reader.GetString(0));
     }
 
     [Fact]
@@ -287,22 +293,23 @@ public class CostReconciliationServiceTests
         // deltaPercent against a zero local base would always read as a 100% difference and misfire a
         // "price table may be stale" warning on every occurrence of an expected scope mismatch.
         using var temp = new TempDatabase();
-        var reconciler = new FakeCostReconciler("openai", _ => 42m);
+        var reconciler = new FakeCostReconciler(provider: "openai", costForDay: _ => 42m);
         var logger = new CapturingLogger<CostReconciliationService>();
         var service = new CostReconciliationService(
-            [reconciler],
-            temp.CreateUsageLedger(),
-            temp.CreateCostReconciliationStore(),
-            Options.Create(new CostReconciliationOptions()),
-            logger);
+            reconcilers: [reconciler],
+            usageLedger: temp.CreateUsageLedger(),
+            store: temp.CreateCostReconciliationStore(),
+            options: Options.Create(new CostReconciliationOptions()),
+            logger: logger);
 
         await service.RunCycleAsync(Ct);
 
-        Assert.DoesNotContain(logger.Entries, e => e.Level == LogLevel.Warning);
-        Assert.Contains(logger.Entries, e => e.Level == LogLevel.Debug);
+        Assert.DoesNotContain(collection: logger.Entries, filter: e => e.Level == LogLevel.Warning);
+        Assert.Contains(collection: logger.Entries, filter: e => e.Level == LogLevel.Debug);
     }
 
-    private sealed class FakeCostReconciler(string provider, Func<DateOnly, decimal> costForDay) : IProviderCostReconciler
+    private sealed class FakeCostReconciler(string provider, Func<DateOnly, decimal> costForDay)
+        : IProviderCostReconciler
     {
         public List<DateOnly> CalledDays { get; } = [];
 
@@ -320,12 +327,21 @@ public class CostReconciliationServiceTests
     {
         public List<(LogLevel Level, string Message)> Entries { get; } = [];
 
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull
+        {
+            return null;
+        }
 
-        public bool IsEnabled(LogLevel logLevel) => true;
+        public bool IsEnabled(LogLevel logLevel)
+        {
+            return true;
+        }
 
         public void Log<TState>(
-            LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
-            Entries.Add((logLevel, formatter(state, exception)));
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Entries.Add((logLevel, formatter(arg1: state, arg2: exception)));
+        }
     }
 }

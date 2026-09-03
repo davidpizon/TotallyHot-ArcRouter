@@ -25,12 +25,13 @@ public class RouterCompositionTests
 
         var router = provider.GetRequiredService<AgentAsARouter>();
 
-        await router.ObserveAsync("code_gen", "gpt-5.4", 0.9);
-        await router.ObserveAsync("code_gen", "qwen3-max", 0.7);
+        await router.ObserveAsync(dimension: "code_gen", model: "gpt-5.4", 0.9);
+        await router.ObserveAsync(dimension: "code_gen", model: "qwen3-max", 0.7);
 
-        var decision = await router.SelectModelAsync("code_gen", TestContext.Current.CancellationToken);
+        var decision = await router.SelectModelAsync(dimension: "code_gen",
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("gpt-5.4", decision.SelectedModel);
+        Assert.Equal(expected: "gpt-5.4", actual: decision.SelectedModel);
     }
 
     [Fact]
@@ -44,10 +45,11 @@ public class RouterCompositionTests
 
         var router = provider.GetRequiredService<AgentAsARouter>();
 
-        var decision = await router.SelectModelAsync("unknown_dimension", TestContext.Current.CancellationToken);
+        var decision = await router.SelectModelAsync(dimension: "unknown_dimension",
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(RouterConstants.DefaultModel, decision.SelectedModel);
-        Assert.Equal(RouterConstants.FallbackReason, decision.Rationale);
+        Assert.Equal(expected: RouterConstants.DefaultModel, actual: decision.SelectedModel);
+        Assert.Equal(expected: RouterConstants.FallbackReason, actual: decision.Rationale);
     }
 
     [Fact]

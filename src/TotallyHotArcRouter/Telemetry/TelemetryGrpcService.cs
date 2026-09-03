@@ -1,8 +1,9 @@
+using System.Globalization;
+using System.Threading.Channels;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Microsoft.Extensions.Options;
-using System.Globalization;
-using System.Threading.Channels;
+using TotallyHot.ArcRouter.Telemetry.Contract;
 using TotallyHot.ArcRouter.Transcripts;
 
 namespace TotallyHot.ArcRouter.Telemetry;
@@ -13,15 +14,29 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// <c>TelemetryHub</c> - see docs/router/grpc-migration.md. Mapped by
 /// <see cref="TotallyHot.ArcRouter.Proxy.ProxyServer"/>.
 /// </summary>
-public sealed class TelemetryGrpcService : Contract.TelemetryService.TelemetryServiceBase
+public sealed class TelemetryGrpcService : TelemetryService.TelemetryServiceBase
 {
+    /// <summary>
+    /// Per-call channel capacity. Bounded (not unbounded) so a stalled or unusually slow client
+    /// can't make its buffered backlog grow without limit while <see cref="TelemetryBroadcaster"/>
+    /// keeps publishing - telemetry is explicitly best-effort (see
+    /// <see cref="ITelemetryPublisher.PublishAsync"/>'s contract), so <see cref="BoundedChannelFullMode.DropOldest"/>
+    /// discards the stalest buffered event to make room rather than blocking the publisher or
+    /// growing memory - a live dashboard cares about catching up to *current* state, not replaying
+    /// every dropped event once a slow client catches up.
+    /// </summary>
+    private const int ChannelCapacity = 1024;
+
     private readonly TelemetryBroadcaster _broadcaster;
-    private readonly ITranscriptStore _transcriptStore;
     private readonly IOptionsMonitor<TranscriptOptions> _transcriptOptions;
+    private readonly ITranscriptStore _transcriptStore;
 
     /// <param name="broadcaster">Registers/unregisters each call's channel writer and receives published events.</param>
     /// <param name="transcriptStore">Backs <see cref="ListPersistedSessions"/> with persisted <c>request_transcripts</c> rows.</param>
-    /// <param name="transcriptOptions">Supplies the live <see cref="TranscriptOptions.Enabled"/> gate for <see cref="ListPersistedSessions"/>'s response.</param>
+    /// <param name="transcriptOptions">
+    /// Supplies the live <see cref="TranscriptOptions.Enabled"/> gate for
+    /// <see cref="ListPersistedSessions"/>'s response.
+    /// </param>
     public TelemetryGrpcService(
         TelemetryBroadcaster broadcaster,
         ITranscriptStore transcriptStore,
@@ -36,17 +51,6 @@ public sealed class TelemetryGrpcService : Contract.TelemetryService.TelemetrySe
     }
 
     /// <summary>
-    /// Per-call channel capacity. Bounded (not unbounded) so a stalled or unusually slow client
-    /// can't make its buffered backlog grow without limit while <see cref="TelemetryBroadcaster"/>
-    /// keeps publishing - telemetry is explicitly best-effort (see
-    /// <see cref="ITelemetryPublisher.PublishAsync"/>'s contract), so <see cref="BoundedChannelFullMode.DropOldest"/>
-    /// discards the stalest buffered event to make room rather than blocking the publisher or
-    /// growing memory - a live dashboard cares about catching up to *current* state, not replaying
-    /// every dropped event once a slow client catches up.
-    /// </summary>
-    private const int ChannelCapacity = 1024;
-
-    /// <summary>
     /// Streams every event <see cref="TelemetryBroadcaster"/> publishes to this one connected client,
     /// for the lifetime of the call - the gRPC equivalent of SignalR's push-only hub connection.
     /// gRPC server-streaming has no built-in "broadcast to every call" primitive the way
@@ -54,19 +58,17 @@ public sealed class TelemetryGrpcService : Contract.TelemetryService.TelemetrySe
     /// <see cref="Channel{T}"/> with the shared <see cref="TelemetryBroadcaster"/> for its duration.
     /// </summary>
     public override async Task StreamEvents(
-        Contract.StreamEventsRequest request,
-        IServerStreamWriter<Contract.TelemetryEvent> responseStream,
+        StreamEventsRequest request,
+        IServerStreamWriter<TelemetryEvent> responseStream,
         ServerCallContext context)
     {
-        var channel = Channel.CreateBounded<Contract.TelemetryEvent>(
+        var channel = Channel.CreateBounded<TelemetryEvent>(
             new BoundedChannelOptions(ChannelCapacity) { FullMode = BoundedChannelFullMode.DropOldest });
         _broadcaster.Register(channel.Writer);
         try
         {
             await foreach (var telemetryEvent in channel.Reader.ReadAllAsync(context.CancellationToken))
-            {
                 await responseStream.WriteAsync(telemetryEvent);
-            }
         }
         finally
         {
@@ -82,19 +84,17 @@ public sealed class TelemetryGrpcService : Contract.TelemetryService.TelemetrySe
     /// <see cref="Contract.ListPersistedSessionsResponse.TranscriptCaptureEnabled"/> false means capture is
     /// off, not that no traffic has been persisted yet.
     /// </summary>
-    public override async Task<Contract.ListPersistedSessionsResponse> ListPersistedSessions(
-        Contract.ListPersistedSessionsRequest request,
+    public override async Task<ListPersistedSessionsResponse> ListPersistedSessions(
+        ListPersistedSessionsRequest request,
         ServerCallContext context)
     {
         var enabled = _transcriptOptions.CurrentValue.Enabled;
-        var response = new Contract.ListPersistedSessionsResponse { TranscriptCaptureEnabled = enabled };
+        var response = new ListPersistedSessionsResponse { TranscriptCaptureEnabled = enabled };
 
-        if (!enabled)
-        {
-            return response;
-        }
+        if (!enabled) return response;
 
-        var transcripts = await _transcriptStore.ListSessionsAsync(request.Limit, context.CancellationToken)
+        var transcripts = await _transcriptStore
+            .ListSessionsAsync(limit: request.Limit, cancellationToken: context.CancellationToken)
             .ConfigureAwait(false);
 
         response.Transcripts.AddRange(transcripts.Select(ToContract));
@@ -102,48 +102,29 @@ public sealed class TelemetryGrpcService : Contract.TelemetryService.TelemetrySe
     }
 
     /// <summary>Maps one <see cref="SessionTranscript"/> onto its wire representation.</summary>
-    private static Contract.PersistedTranscript ToContract(SessionTranscript transcript)
+    private static PersistedTranscript ToContract(SessionTranscript transcript)
     {
-        var contract = new Contract.PersistedTranscript
+        var contract = new PersistedTranscript
         {
             SessionId = transcript.SessionId,
             CorrelationId = transcript.CorrelationId,
             CreatedAtUtc = Timestamp.FromDateTimeOffset(transcript.CreatedAtUtc),
             RequestedModel = transcript.RequestedModel,
-            RoutedModel = transcript.RoutedModel,
+            RoutedModel = transcript.RoutedModel
         };
 
-        if (transcript.PromptText is { } promptText)
-        {
-            contract.PromptText = promptText;
-        }
+        if (transcript.PromptText is { } promptText) contract.PromptText = promptText;
 
-        if (transcript.ResponseText is { } responseText)
-        {
-            contract.ResponseText = responseText;
-        }
+        if (transcript.ResponseText is { } responseText) contract.ResponseText = responseText;
 
-        if (transcript.Cost is { } cost)
-        {
-            contract.CostUsd = cost.ToString(CultureInfo.InvariantCulture);
-        }
+        if (transcript.Cost is { } cost) contract.CostUsd = cost.ToString(CultureInfo.InvariantCulture);
 
-        if (transcript.InputTokens is { } inputTokens)
-        {
-            contract.InputTokens = inputTokens;
-        }
+        if (transcript.InputTokens is { } inputTokens) contract.InputTokens = inputTokens;
 
-        if (transcript.OutputTokens is { } outputTokens)
-        {
-            contract.OutputTokens = outputTokens;
-        }
+        if (transcript.OutputTokens is { } outputTokens) contract.OutputTokens = outputTokens;
 
-        if (transcript.MemoryEntryId is { } memoryEntryId)
-        {
-            contract.MemoryEntryId = memoryEntryId;
-        }
+        if (transcript.MemoryEntryId is { } memoryEntryId) contract.MemoryEntryId = memoryEntryId;
 
         return contract;
     }
 }
-

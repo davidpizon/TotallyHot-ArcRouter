@@ -50,26 +50,24 @@ public sealed class ProviderSpendRepository : PriceCatalogRepositoryBase
         using var connection = OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT provider_key, cost_usd, prompt_tokens, completion_tokens,
-                   cache_creation_tokens, cache_read_tokens, last_usage_at
-            FROM provider_spend
-            WHERE period = $period;
-            """;
-        command.Parameters.AddWithValue("$period", period);
+                              SELECT provider_key, cost_usd, prompt_tokens, completion_tokens,
+                                     cache_creation_tokens, cache_read_tokens, last_usage_at
+                              FROM provider_spend
+                              WHERE period = $period;
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$period", value: period);
 
         var rows = new List<ProviderSpendRow>();
         using var reader = command.ExecuteReader();
         while (reader.Read())
-        {
             rows.Add(new ProviderSpendRow(
                 ProviderKey: reader.GetString(0),
-                CostUsd: decimal.Parse(reader.GetString(1), CultureInfo.InvariantCulture),
+                CostUsd: decimal.Parse(s: reader.GetString(1), provider: CultureInfo.InvariantCulture),
                 PromptTokens: reader.GetInt64(2),
                 CompletionTokens: reader.GetInt64(3),
                 CacheCreationTokens: reader.GetInt64(4),
                 CacheReadTokens: reader.GetInt64(5),
                 LastUsageAtUtc: reader.IsDBNull(6) ? null : ParseTimestamp(reader.GetString(6))));
-        }
 
         return rows;
     }
@@ -102,43 +100,44 @@ public sealed class ProviderSpendRepository : PriceCatalogRepositoryBase
         using var connection = OpenConnection();
         using var transaction = connection.BeginTransaction();
 
-        decimal existingCost = 0m;
+        var existingCost = 0m;
         using (var read = connection.CreateCommand())
         {
             read.Transaction = transaction;
             read.CommandText = "SELECT cost_usd FROM provider_spend WHERE provider_key = $key AND period = $period;";
-            read.Parameters.AddWithValue("$key", providerKey);
-            read.Parameters.AddWithValue("$period", period);
+            read.Parameters.AddWithValue(parameterName: "$key", value: providerKey);
+            read.Parameters.AddWithValue(parameterName: "$period", value: period);
             if (read.ExecuteScalar() is string existing)
-            {
-                existingCost = decimal.Parse(existing, CultureInfo.InvariantCulture);
-            }
+                existingCost = decimal.Parse(s: existing, provider: CultureInfo.InvariantCulture);
         }
 
         using (var upsert = connection.CreateCommand())
         {
             upsert.Transaction = transaction;
             upsert.CommandText = """
-                INSERT INTO provider_spend (
-                    provider_key, period, cost_usd, prompt_tokens, completion_tokens,
-                    cache_creation_tokens, cache_read_tokens, last_usage_at)
-                VALUES ($key, $period, $cost, $prompt, $completion, $cacheCreation, $cacheRead, $usageAt)
-                ON CONFLICT(provider_key, period) DO UPDATE SET
-                    cost_usd              = $cost,
-                    prompt_tokens         = prompt_tokens + excluded.prompt_tokens,
-                    completion_tokens     = completion_tokens + excluded.completion_tokens,
-                    cache_creation_tokens = cache_creation_tokens + excluded.cache_creation_tokens,
-                    cache_read_tokens     = cache_read_tokens + excluded.cache_read_tokens,
-                    last_usage_at         = MAX(COALESCE(last_usage_at, ''), excluded.last_usage_at);
-                """;
-            upsert.Parameters.AddWithValue("$key", providerKey);
-            upsert.Parameters.AddWithValue("$period", period);
-            upsert.Parameters.AddWithValue("$cost", (existingCost + costUsd).ToString(CultureInfo.InvariantCulture));
-            upsert.Parameters.AddWithValue("$prompt", promptTokens);
-            upsert.Parameters.AddWithValue("$completion", completionTokens);
-            upsert.Parameters.AddWithValue("$cacheCreation", cacheCreationTokens);
-            upsert.Parameters.AddWithValue("$cacheRead", cacheReadTokens);
-            upsert.Parameters.AddWithValue("$usageAt", usageAtUtc.UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture));
+                                 INSERT INTO provider_spend (
+                                     provider_key, period, cost_usd, prompt_tokens, completion_tokens,
+                                     cache_creation_tokens, cache_read_tokens, last_usage_at)
+                                 VALUES ($key, $period, $cost, $prompt, $completion, $cacheCreation, $cacheRead, $usageAt)
+                                 ON CONFLICT(provider_key, period) DO UPDATE SET
+                                     cost_usd              = $cost,
+                                     prompt_tokens         = prompt_tokens + excluded.prompt_tokens,
+                                     completion_tokens     = completion_tokens + excluded.completion_tokens,
+                                     cache_creation_tokens = cache_creation_tokens + excluded.cache_creation_tokens,
+                                     cache_read_tokens     = cache_read_tokens + excluded.cache_read_tokens,
+                                     last_usage_at         = MAX(COALESCE(last_usage_at, ''), excluded.last_usage_at);
+                                 """;
+            upsert.Parameters.AddWithValue(parameterName: "$key", value: providerKey);
+            upsert.Parameters.AddWithValue(parameterName: "$period", value: period);
+            upsert.Parameters.AddWithValue(parameterName: "$cost",
+                value: (existingCost + costUsd).ToString(CultureInfo.InvariantCulture));
+            upsert.Parameters.AddWithValue(parameterName: "$prompt", value: promptTokens);
+            upsert.Parameters.AddWithValue(parameterName: "$completion", value: completionTokens);
+            upsert.Parameters.AddWithValue(parameterName: "$cacheCreation", value: cacheCreationTokens);
+            upsert.Parameters.AddWithValue(parameterName: "$cacheRead", value: cacheReadTokens);
+            upsert.Parameters.AddWithValue(parameterName: "$usageAt",
+                value: usageAtUtc.UtcDateTime.ToString(format: TimestampFormat,
+                    provider: CultureInfo.InvariantCulture));
             upsert.ExecuteNonQuery();
         }
 

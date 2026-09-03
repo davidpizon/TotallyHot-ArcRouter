@@ -16,7 +16,7 @@ public class ContentSha256HashTests
         // layer digest) - a stable vector with no external dependency.
         var hash = ContentSha256Hash.Compute([]);
 
-        Assert.Equal("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", hash);
+        Assert.Equal(expected: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", actual: hash);
     }
 
     [Fact]
@@ -24,8 +24,8 @@ public class ContentSha256HashTests
     {
         var hash = ContentSha256Hash.Compute(Encoding.UTF8.GetBytes("some content"));
 
-        Assert.Equal(64, hash.Length);
-        Assert.Equal(hash, hash.ToLowerInvariant(), StringComparer.Ordinal);
+        Assert.Equal(64, actual: hash.Length);
+        Assert.Equal(expected: hash, actual: hash.ToLowerInvariant(), comparer: StringComparer.Ordinal);
     }
 
     [Fact]
@@ -34,7 +34,7 @@ public class ContentSha256HashTests
         var a = ContentSha256Hash.Compute(Encoding.UTF8.GetBytes("a"));
         var b = ContentSha256Hash.Compute(Encoding.UTF8.GetBytes("b"));
 
-        Assert.NotEqual(a, b);
+        Assert.NotEqual(expected: a, actual: b);
     }
 
     [Fact]
@@ -46,7 +46,7 @@ public class ContentSha256HashTests
 
         var hash = ContentSha256Hash.Compute(content);
 
-        Assert.NotEqual(GitBlobHash.Compute(content), hash);
+        Assert.NotEqual(expected: GitBlobHash.Compute(content), actual: hash);
     }
 
     [Fact]
@@ -55,9 +55,10 @@ public class ContentSha256HashTests
         var content = Encoding.UTF8.GetBytes("hello\n");
         using var stream = new MemoryStream(content);
 
-        var streamed = ContentSha256Hash.Compute(stream, TestContext.Current.CancellationToken);
+        var streamed =
+            ContentSha256Hash.Compute(content: stream, cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(ContentSha256Hash.Compute(content), streamed);
+        Assert.Equal(expected: ContentSha256Hash.Compute(content), actual: streamed);
     }
 
     [Fact]
@@ -67,9 +68,10 @@ public class ContentSha256HashTests
         var content = Encoding.UTF8.GetBytes(new string('x', 200_000));
         using var stream = new MemoryStream(content);
 
-        var streamed = ContentSha256Hash.Compute(stream, TestContext.Current.CancellationToken);
+        var streamed =
+            ContentSha256Hash.Compute(content: stream, cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(ContentSha256Hash.Compute(content), streamed);
+        Assert.Equal(expected: ContentSha256Hash.Compute(content), actual: streamed);
     }
 
     [Fact]
@@ -80,6 +82,7 @@ public class ContentSha256HashTests
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        Assert.Throws<OperationCanceledException>(() => ContentSha256Hash.Compute(stream, cts.Token));
+        Assert.Throws<OperationCanceledException>(() =>
+            ContentSha256Hash.Compute(content: stream, cancellationToken: cts.Token));
     }
 }

@@ -13,11 +13,12 @@ public class UsageExtractorTests
     {
         var body = Encoding.UTF8.GetBytes("""{"usage":{"prompt_tokens":10,"completion_tokens":5}}""");
 
-        var result = _extractor.TryExtractUsage("openai", isStreaming: false, body, out var usage);
+        var result =
+            _extractor.TryExtractUsage(provider: "openai", false, bufferedResponseBody: body, usage: out var usage);
 
         Assert.True(result);
-        Assert.Equal(10, usage.PromptTokens);
-        Assert.Equal(5, usage.CompletionTokens);
+        Assert.Equal(10, actual: usage.PromptTokens);
+        Assert.Equal(5, actual: usage.CompletionTokens);
     }
 
     [Fact]
@@ -25,11 +26,12 @@ public class UsageExtractorTests
     {
         var body = Encoding.UTF8.GetBytes("""{"usage":{"input_tokens":20,"output_tokens":8}}""");
 
-        var result = _extractor.TryExtractUsage("anthropic", isStreaming: false, body, out var usage);
+        var result = _extractor.TryExtractUsage(provider: "anthropic", false, bufferedResponseBody: body,
+            usage: out var usage);
 
         Assert.True(result);
-        Assert.Equal(20, usage.PromptTokens);
-        Assert.Equal(8, usage.CompletionTokens);
+        Assert.Equal(20, actual: usage.PromptTokens);
+        Assert.Equal(8, actual: usage.CompletionTokens);
     }
 
     [Theory]
@@ -40,7 +42,7 @@ public class UsageExtractorTests
     {
         var body = Encoding.UTF8.GetBytes("""{"usage":{"prompt_tokens":1,"completion_tokens":1}}""");
 
-        var result = _extractor.TryExtractUsage(providerKey, isStreaming: false, body, out _);
+        var result = _extractor.TryExtractUsage(provider: providerKey, false, bufferedResponseBody: body, usage: out _);
 
         Assert.True(result);
     }
@@ -57,11 +59,12 @@ public class UsageExtractorTests
         // - this regression-tests the previously-missing dispatch branch for all three.
         var body = Encoding.UTF8.GetBytes("""{"usage":{"prompt_tokens":7,"completion_tokens":3}}""");
 
-        var result = _extractor.TryExtractUsage(providerKey, isStreaming: false, body, out var usage);
+        var result = _extractor.TryExtractUsage(provider: providerKey, false, bufferedResponseBody: body,
+            usage: out var usage);
 
         Assert.True(result);
-        Assert.Equal(7, usage.PromptTokens);
-        Assert.Equal(3, usage.CompletionTokens);
+        Assert.Equal(7, actual: usage.PromptTokens);
+        Assert.Equal(3, actual: usage.CompletionTokens);
     }
 
     [Fact]
@@ -69,7 +72,7 @@ public class UsageExtractorTests
     {
         var body = Encoding.UTF8.GetBytes("""{"usage":{"prompt_tokens":1,"completion_tokens":1}}""");
 
-        var result = _extractor.TryExtractUsage("alibaba", isStreaming: false, body, out _);
+        var result = _extractor.TryExtractUsage(provider: "alibaba", false, bufferedResponseBody: body, usage: out _);
 
         Assert.False(result);
     }
@@ -77,7 +80,8 @@ public class UsageExtractorTests
     [Fact]
     public void TryExtractUsage_EmptyBuffer_ReturnsFalse()
     {
-        var result = _extractor.TryExtractUsage("openai", isStreaming: false, ReadOnlyMemory<byte>.Empty, out _);
+        var result = _extractor.TryExtractUsage(provider: "openai", false,
+            bufferedResponseBody: ReadOnlyMemory<byte>.Empty, usage: out _);
 
         Assert.False(result);
     }
@@ -85,13 +89,15 @@ public class UsageExtractorTests
     [Fact]
     public void TryExtractUsage_StreamingFlag_UsesStreamingParsePath()
     {
-        var sse = Encoding.UTF8.GetBytes("data: {\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":4}}\n\ndata: [DONE]\n\n");
+        var sse = Encoding.UTF8.GetBytes(
+            "data: {\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":4}}\n\ndata: [DONE]\n\n");
 
-        var result = _extractor.TryExtractUsage("openai", isStreaming: true, sse, out var usage);
+        var result =
+            _extractor.TryExtractUsage(provider: "openai", true, bufferedResponseBody: sse, usage: out var usage);
 
         Assert.True(result);
-        Assert.Equal(3, usage.PromptTokens);
-        Assert.Equal(4, usage.CompletionTokens);
+        Assert.Equal(3, actual: usage.PromptTokens);
+        Assert.Equal(4, actual: usage.CompletionTokens);
     }
 
     [Theory]
@@ -105,7 +111,7 @@ public class UsageExtractorTests
     [InlineData("", false)]
     public void SupportsNativeShape_OnlyAnthropicHasARegisteredNativeParser(string? provider, bool expected)
     {
-        Assert.Equal(expected, UsageExtractor.SupportsNativeShape(provider!));
+        Assert.Equal(expected: expected, actual: UsageExtractor.SupportsNativeShape(provider!));
     }
 
     [Fact]
@@ -113,10 +119,10 @@ public class UsageExtractorTests
     {
         var body = Encoding.UTF8.GetBytes("{\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}");
 
-        var result = _extractor.TryExtractUsage(null!, isStreaming: false, body, out var usage);
+        var result =
+            _extractor.TryExtractUsage(provider: null!, false, bufferedResponseBody: body, usage: out var usage);
 
         Assert.False(result);
-        Assert.Equal(default, usage);
+        Assert.Equal(default, actual: usage);
     }
 }
-

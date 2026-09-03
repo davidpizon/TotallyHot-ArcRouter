@@ -1,7 +1,7 @@
-using Microsoft.Extensions.Logging;
-using Moq;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
+using Moq;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
@@ -10,7 +10,6 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
 /// Runs every recorded model in <see cref="RecordedModelTranscripts"/> through the whole emulation path -
 /// the real rewriter building the request, the real translator reading the reply - and asserts each
 /// scenario normalizes to the calls it should.
-///
 /// <para>
 /// <b>No server, no network, no clock.</b> This replaces an earlier probe that talked to a live LM Studio:
 /// a test that needs a particular model loaded is a test that reports the operator's environment rather
@@ -18,7 +17,6 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
 /// that mattered - the shipped prompt is what produced them, and the shipped scanner is what reads them -
 /// while making the result depend only on the repository.
 /// </para>
-///
 /// <para>
 /// What this can and cannot tell you is worth being precise about. It proves the code still handles what
 /// these models actually said, so a change to the prompt, the delimiters, the schema format, or the
@@ -33,12 +31,8 @@ public class ToolCallEmulationReplayTests
     {
         var data = new TheoryData<string, string>();
         foreach (var transcript in RecordedModelTranscripts.All)
-        {
-            foreach (var scenario in ToolCallEmulationScenarios.All)
-            {
-                data.Add(transcript.ModelName, scenario.Name);
-            }
-        }
+        foreach (var scenario in ToolCallEmulationScenarios.All)
+            data.Add(p1: transcript.ModelName, p2: scenario.Name);
 
         return data;
     }
@@ -53,71 +47,78 @@ public class ToolCallEmulationReplayTests
         // 1. The request half: the shipped rewriter turns the tools into instructions.
         var requestBody =
             $$"""
-            {"model":{{JsonSerializer.Serialize(modelName)}},"temperature":0,
-             "messages":[{"role":"user","content":{{JsonSerializer.Serialize(scenario.Question)}}}],
-             "tools":[{{string.Join(",", scenario.Tools)}}]}
-            """;
+              {"model":{{JsonSerializer.Serialize(modelName)}},"temperature":0,
+               "messages":[{"role":"user","content":{{JsonSerializer.Serialize(scenario.Question)}}}],
+               "tools":[{{string.Join(separator: ",", values: scenario.Tools)}}]}
+              """;
 
         var emulated = ToolCallEmulationRewriter.Rewrite(
-            Encoding.UTF8.GetBytes(requestBody), ToolCallDialectRegistry.Emulated, Mock.Of<ILogger>());
+            openAiShapedBody: Encoding.UTF8.GetBytes(requestBody), dialect: ToolCallDialectRegistry.Emulated,
+            logger: Mock.Of<ILogger>());
 
         var emulatedText = Encoding.UTF8.GetString(emulated);
-        Assert.DoesNotContain("\"tools\":", emulatedText, StringComparison.Ordinal);
+        Assert.DoesNotContain(expectedSubstring: "\"tools\":", actualString: emulatedText,
+            comparisonType: StringComparison.Ordinal);
 
         // Every tool offered must reach the model by name, or the recorded reply is being judged against a
         // prompt that no longer describes the same toolset.
         foreach (var tool in scenario.Tools)
         {
             var name = JsonDocument.Parse(tool).RootElement.GetProperty("function").GetProperty("name").GetString()!;
-            Assert.Contains(name, emulatedText, StringComparison.Ordinal);
+            Assert.Contains(expectedSubstring: name, actualString: emulatedText,
+                comparisonType: StringComparison.Ordinal);
         }
 
         // 2. The response half: the shipped translator reads what the model actually said.
-        var recorded = Assert.Contains(scenarioName, (IDictionary<string, string>)transcript.ResponseByScenario);
+        var recorded = Assert.Contains(expected: scenarioName,
+            collection: (IDictionary<string, string>)transcript.ResponseByScenario);
 
         var plan = new ToolCallNormalizationPlan(
-            "replay", modelName, [ToolCallDialectRegistry.Emulated], IsObserving: false, IsEmulating: true);
-        var normalized = new ToolCallNormalizingTranslator(plan, capabilityStore: null, Mock.Of<ILogger>())
+            ProviderKey: "replay", ModelName: modelName, Candidates: [ToolCallDialectRegistry.Emulated], false, true);
+        var normalized = new ToolCallNormalizingTranslator(plan: plan, null, logger: Mock.Of<ILogger>())
             .TranslateResponse(Encoding.UTF8.GetBytes(recorded));
 
         using var parsed = JsonDocument.Parse(normalized);
         var message = parsed.RootElement.GetProperty("choices")[0].GetProperty("message");
 
-        var actual = message.TryGetProperty("tool_calls", out var calls) && calls.ValueKind == JsonValueKind.Array
+        var actual = message.TryGetProperty(propertyName: "tool_calls", value: out var calls) &&
+                     calls.ValueKind == JsonValueKind.Array
             ? calls.EnumerateArray().Select(c => c.GetProperty("function").GetProperty("name").GetString()!).ToArray()
             : [];
 
-        var said = message.TryGetProperty("content", out var c) && c.ValueKind == JsonValueKind.String
+        var said = message.TryGetProperty(propertyName: "content", value: out var c) &&
+                   c.ValueKind == JsonValueKind.String
             ? c.GetString()
             : "(null)";
 
-        if (transcript.EmulationFailures?.TryGetValue(scenarioName, out var recordedFailure) == true)
+        if (transcript.EmulationFailures?.TryGetValue(key: scenarioName, value: out var recordedFailure) == true)
         {
             // A model recorded as failing this scenario must still fail it in exactly the recorded way.
             // Both halves are load-bearing. Asserting the observed result pins the behavior, so a change
             // that alters *how* it fails - yielding a wrong call where it used to yield none - surfaces
             // here rather than hiding under a blanket "expected to fail".
             Assert.True(
-                recordedFailure.SequenceEqual(actual),
-                $"{modelName} / {scenarioName} is recorded as failing emulation by yielding "
-                + $"[{string.Join(", ", recordedFailure)}], but it now yields [{string.Join(", ", actual)}]. "
-                + $"Re-record the transcript.{Environment.NewLine}Model said: {said}");
+                condition: recordedFailure.SequenceEqual(actual),
+                userMessage: $"{modelName} / {scenarioName} is recorded as failing emulation by yielding "
+                             + $"[{string.Join(separator: ", ", values: recordedFailure)}], but it now yields [{string.Join(separator: ", ", value: actual)}]. "
+                             + $"Re-record the transcript.{Environment.NewLine}Model said: {said}");
 
             // And asserting it still differs from the expectation is what stops the record going stale:
             // a prompt change that finally makes this model work breaks this line, forcing the entry to be
             // deleted rather than left behind claiming a failure that no longer happens.
             Assert.False(
-                scenario.ExpectedCalls.SequenceEqual(actual),
-                $"{modelName} / {scenarioName} is recorded as failing emulation, but it now produces the "
-                + "expected calls. Emulation improved - delete this entry from EmulationFailures.");
+                condition: scenario.ExpectedCalls.SequenceEqual(actual),
+                userMessage: $"{modelName} / {scenarioName} is recorded as failing emulation, but it now produces the "
+                             + "expected calls. Emulation improved - delete this entry from EmulationFailures.");
 
             return;
         }
 
         Assert.True(
-            scenario.ExpectedCalls.SequenceEqual(actual),
-            $"{modelName} / {scenarioName}: expected [{string.Join(", ", scenario.ExpectedCalls)}], "
-            + $"got [{string.Join(", ", actual)}].{Environment.NewLine}Model said: {said}");
+            condition: scenario.ExpectedCalls.SequenceEqual(actual),
+            userMessage:
+            $"{modelName} / {scenarioName}: expected [{string.Join(separator: ", ", values: scenario.ExpectedCalls)}], "
+            + $"got [{string.Join(separator: ", ", value: actual)}].{Environment.NewLine}Model said: {said}");
     }
 
     [Fact]
@@ -129,12 +130,8 @@ public class ToolCallEmulationReplayTests
         var known = ToolCallEmulationScenarios.All.Select(s => s.Name).ToHashSet(StringComparer.Ordinal);
 
         foreach (var transcript in RecordedModelTranscripts.All)
-        {
-            foreach (var name in transcript.EmulationFailures?.Keys ?? [])
-            {
-                Assert.Contains(name, known);
-            }
-        }
+        foreach (var name in transcript.EmulationFailures?.Keys ?? [])
+            Assert.Contains(expected: name, set: known);
     }
 
     [Fact]
@@ -144,11 +141,9 @@ public class ToolCallEmulationReplayTests
         // the omitted case reads as "not tested" rather than "not recorded", and a model that fails the
         // false-positive scenario is exactly the one whose transcript is tempting to leave incomplete.
         foreach (var transcript in RecordedModelTranscripts.All)
-        {
             Assert.Equal(
-                ToolCallEmulationScenarios.All.Select(s => s.Name).Order(),
-                transcript.ResponseByScenario.Keys.Order());
-        }
+                expected: ToolCallEmulationScenarios.All.Select(s => s.Name).Order(),
+                actual: transcript.ResponseByScenario.Keys.Order());
     }
 
     [Fact]
@@ -164,16 +159,13 @@ public class ToolCallEmulationReplayTests
         // a quirk of one model's template - and therefore something no future model's transcript may
         // silently lack.
         foreach (var transcript in RecordedModelTranscripts.All)
-        {
-            Assert.All(transcript.ResponseByScenario.Values, body =>
+            Assert.All(collection: transcript.ResponseByScenario.Values, action: body =>
             {
                 var toolCalls = JsonDocument.Parse(body).RootElement.GetProperty("choices")[0]
                     .GetProperty("message").GetProperty("tool_calls");
 
-                Assert.Equal(JsonValueKind.Array, toolCalls.ValueKind);
+                Assert.Equal(expected: JsonValueKind.Array, actual: toolCalls.ValueKind);
                 Assert.Empty(toolCalls.EnumerateArray());
             });
-        }
     }
 }
-

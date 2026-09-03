@@ -23,13 +23,13 @@ public sealed class LiveConversationMapperTests
     {
         var conversation = new LiveConversation(
             SessionId: "session-abcdef123",
-            IsSessionSynthesized: false,
-            FirstTimestampUtc: new DateTimeOffset(2026, 7, 16, 10, 0, 0, TimeSpan.Zero),
-            LastTimestampUtc: new DateTimeOffset(2026, 7, 16, 10, 5, 0, TimeSpan.Zero),
-            TotalCost: 1.5m,
-            TotalPromptTokens: 100,
-            TotalCompletionTokens: 50,
-            HasFallbackTurns: true,
+            false,
+            FirstTimestampUtc: new DateTimeOffset(2026, 7, 16, 10, 0, 0, offset: TimeSpan.Zero),
+            LastTimestampUtc: new DateTimeOffset(2026, 7, 16, 10, 5, 0, offset: TimeSpan.Zero),
+            1.5m,
+            100,
+            50,
+            true,
             Turns: []);
 
         var model = LiveConversationMapper.ToModel(conversation);
@@ -48,13 +48,13 @@ public sealed class LiveConversationMapperTests
     {
         var conversation = new LiveConversation(
             SessionId: "abc",
-            IsSessionSynthesized: true,
+            true,
             FirstTimestampUtc: DateTimeOffset.UtcNow,
             LastTimestampUtc: DateTimeOffset.UtcNow,
-            TotalCost: 0,
-            TotalPromptTokens: 0,
-            TotalCompletionTokens: 0,
-            HasFallbackTurns: false,
+            0,
+            0,
+            0,
+            false,
             Turns: []);
 
         var model = LiveConversationMapper.ToModel(conversation);
@@ -68,27 +68,27 @@ public sealed class LiveConversationMapperTests
     {
         var turn = new LiveConversationTurn(
             SessionId: "s1",
-            TurnNumber: 3,
+            3,
             Agent: "gpt-4o-mini",
             Model: "gpt-4o-mini",
-            PromptTokens: 200,
-            CompletionTokens: 80,
-            EstimatedCostUsd: 0.05m,
-            IsFallback: false,
-            LatencyToHeadersMs: 340,
-            TimestampUtc: new DateTimeOffset(2026, 7, 16, 9, 30, 15, TimeSpan.Zero),
+            200,
+            80,
+            0.05m,
+            false,
+            340,
+            TimestampUtc: new DateTimeOffset(2026, 7, 16, 9, 30, 15, offset: TimeSpan.Zero),
             RequestSummary: "Hello",
             ResponseSummary: "Hi there");
 
         var conversation = new LiveConversation(
             SessionId: "s1",
-            IsSessionSynthesized: false,
+            false,
             FirstTimestampUtc: turn.TimestampUtc,
             LastTimestampUtc: turn.TimestampUtc,
             TotalCost: turn.EstimatedCostUsd,
             TotalPromptTokens: turn.PromptTokens,
             TotalCompletionTokens: turn.CompletionTokens,
-            HasFallbackTurns: false,
+            false,
             Turns: [turn]);
 
         var model = LiveConversationMapper.ToModel(conversation);
@@ -123,27 +123,27 @@ public sealed class LiveConversationMapperTests
     {
         var turn = new LiveConversationTurn(
             SessionId: "s1",
-            TurnNumber: 1,
+            1,
             Agent: "claude-sonnet-5",
             Model: "claude-sonnet-5",
-            PromptTokens: 100,
-            CompletionTokens: 20,
-            EstimatedCostUsd: 0.02m,
-            IsFallback: false,
-            LatencyToHeadersMs: 200,
+            100,
+            20,
+            0.02m,
+            false,
+            200,
             TimestampUtc: DateTimeOffset.UtcNow,
-            CacheCreationTokens: 400,
-            CacheReadTokens: 500);
+            400,
+            500);
 
         var conversation = new LiveConversation(
             SessionId: "s1",
-            IsSessionSynthesized: false,
+            false,
             FirstTimestampUtc: turn.TimestampUtc,
             LastTimestampUtc: turn.TimestampUtc,
             TotalCost: turn.EstimatedCostUsd,
             TotalPromptTokens: turn.PromptTokens,
             TotalCompletionTokens: turn.CompletionTokens,
-            HasFallbackTurns: false,
+            false,
             Turns: [turn]);
 
         var model = LiveConversationMapper.ToModel(conversation);
@@ -158,25 +158,25 @@ public sealed class LiveConversationMapperTests
     {
         var turn = new LiveConversationTurn(
             SessionId: "s1",
-            TurnNumber: 1,
+            1,
             Agent: "local",
             Model: "local",
-            PromptTokens: 10,
-            CompletionTokens: 5,
-            EstimatedCostUsd: 0m,
-            IsFallback: true,
-            LatencyToHeadersMs: -5, // clamps to 0 below
+            10,
+            5,
+            0m,
+            true,
+            -5, // clamps to 0 below
             TimestampUtc: DateTimeOffset.UtcNow);
 
         var conversation = new LiveConversation(
             SessionId: "s1",
-            IsSessionSynthesized: false,
+            false,
             FirstTimestampUtc: turn.TimestampUtc,
             LastTimestampUtc: turn.TimestampUtc,
-            TotalCost: 0,
-            TotalPromptTokens: 10,
-            TotalCompletionTokens: 5,
-            HasFallbackTurns: true,
+            0,
+            10,
+            5,
+            true,
             Turns: [turn]);
 
         var model = LiveConversationMapper.ToModel(conversation);
@@ -199,14 +199,14 @@ public sealed class LiveConversationMapperTests
     {
         var turn = new LiveConversationTurn(
             SessionId: "s1",
-            TurnNumber: 1,
+            1,
             Agent: "claude-sonnet-5",
             Model: "claude-sonnet-5",
-            PromptTokens: 10,
-            CompletionTokens: 5,
-            EstimatedCostUsd: 0.01m,
-            IsFallback: false,
-            LatencyToHeadersMs: 100,
+            10,
+            5,
+            0.01m,
+            false,
+            100,
             TimestampUtc: DateTimeOffset.UtcNow,
             RequestedModel: "gpt-4o",
             RoutedModel: "claude-sonnet-5",
@@ -214,13 +214,13 @@ public sealed class LiveConversationMapperTests
 
         var conversation = new LiveConversation(
             SessionId: "s1",
-            IsSessionSynthesized: false,
+            false,
             FirstTimestampUtc: turn.TimestampUtc,
             LastTimestampUtc: turn.TimestampUtc,
             TotalCost: turn.EstimatedCostUsd,
             TotalPromptTokens: turn.PromptTokens,
             TotalCompletionTokens: turn.CompletionTokens,
-            HasFallbackTurns: false,
+            false,
             Turns: [turn]);
 
         var model = LiveConversationMapper.ToModel(conversation);
@@ -243,14 +243,14 @@ public sealed class LiveConversationMapperTests
     {
         var turn = new LiveConversationTurn(
             SessionId: "s1",
-            TurnNumber: 1,
+            1,
             Agent: "claude-sonnet-5",
             Model: "claude-sonnet-5",
-            PromptTokens: 10,
-            CompletionTokens: 5,
-            EstimatedCostUsd: 0.01m,
-            IsFallback: false,
-            LatencyToHeadersMs: 100,
+            10,
+            5,
+            0.01m,
+            false,
+            100,
             TimestampUtc: DateTimeOffset.UtcNow,
             RequestedModel: "auto",
             RoutedModel: "claude-sonnet-5",
@@ -258,13 +258,13 @@ public sealed class LiveConversationMapperTests
 
         var conversation = new LiveConversation(
             SessionId: "s1",
-            IsSessionSynthesized: false,
+            false,
             FirstTimestampUtc: turn.TimestampUtc,
             LastTimestampUtc: turn.TimestampUtc,
             TotalCost: turn.EstimatedCostUsd,
             TotalPromptTokens: turn.PromptTokens,
             TotalCompletionTokens: turn.CompletionTokens,
-            HasFallbackTurns: false,
+            false,
             Turns: [turn]);
 
         var model = LiveConversationMapper.ToModel(conversation);
@@ -274,4 +274,3 @@ public sealed class LiveConversationMapperTests
             .Which.Message.Should().Be("Route Confirmed: claude-sonnet-5");
     }
 }
-

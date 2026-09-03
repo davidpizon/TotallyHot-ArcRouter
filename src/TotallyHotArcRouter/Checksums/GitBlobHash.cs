@@ -23,8 +23,8 @@ public static class GitBlobHash
         var header = Encoding.ASCII.GetBytes($"blob {content.Length}\0");
 
         using var sha1 = SHA1.Create();
-        sha1.TransformBlock(header, 0, header.Length, outputBuffer: null, outputOffset: 0);
-        sha1.TransformFinalBlock(content, 0, content.Length);
+        sha1.TransformBlock(inputBuffer: header, 0, inputCount: header.Length, null, 0);
+        sha1.TransformFinalBlock(inputBuffer: content, 0, inputCount: content.Length);
 
         return Convert.ToHexStringLower(sha1.Hash!);
     }
@@ -52,10 +52,10 @@ public static class GitBlobHash
 
         var buffer = new byte[81920];
         int bytesRead;
-        while ((bytesRead = content.Read(buffer, 0, buffer.Length)) > 0)
+        while ((bytesRead = content.Read(buffer: buffer, 0, count: buffer.Length)) > 0)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            sha1.AppendData(buffer, 0, bytesRead);
+            sha1.AppendData(data: buffer, 0, count: bytesRead);
         }
 
         return Convert.ToHexStringLower(sha1.GetHashAndReset());

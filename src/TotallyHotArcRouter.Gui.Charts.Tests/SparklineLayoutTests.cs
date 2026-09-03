@@ -6,7 +6,7 @@ public class SparklineLayoutTests
     [Fact]
     public void Normalize_NullValues_Throws()
     {
-        Assert.Throws<ArgumentNullException>(() => SparklineLayout.Normalize(null!, 100, 24));
+        Assert.Throws<ArgumentNullException>(() => SparklineLayout.Normalize(values: null!, 100, 24));
     }
 
     [Theory]
@@ -16,19 +16,20 @@ public class SparklineLayoutTests
     [InlineData(100, -5)]
     public void Normalize_NonPositiveDimensions_Throws(double width, double height)
     {
-        Assert.Throws<ArgumentOutOfRangeException>(() => SparklineLayout.Normalize([1, 2, 3], width, height));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            SparklineLayout.Normalize(values: [1, 2, 3], width: width, height: height));
     }
 
     [Fact]
     public void Normalize_NegativePadding_Throws()
     {
-        Assert.Throws<ArgumentOutOfRangeException>(() => SparklineLayout.Normalize([1, 2, 3], 100, 24, padding: -1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => SparklineLayout.Normalize(values: [1, 2, 3], 100, 24, -1));
     }
 
     [Fact]
     public void Normalize_EmptyValues_ReturnsEmpty()
     {
-        var result = SparklineLayout.Normalize([], 100, 24);
+        var result = SparklineLayout.Normalize(values: [], 100, 24);
 
         Assert.Empty(result);
     }
@@ -36,19 +37,19 @@ public class SparklineLayoutTests
     [Fact]
     public void Normalize_SingleValue_ReturnsFlatLineAcrossFullWidth()
     {
-        var result = SparklineLayout.Normalize([42], 100, 24);
+        var result = SparklineLayout.Normalize(values: [42], 100, 24);
 
-        Assert.Equal(2, result.Count);
-        Assert.Equal((0, 12), result[0]);
-        Assert.Equal((100, 12), result[1]);
+        Assert.Equal(2, actual: result.Count);
+        Assert.Equal(expected: (0, 12), actual: result[0]);
+        Assert.Equal(expected: (100, 12), actual: result[1]);
     }
 
     [Fact]
     public void Normalize_AllEqualValues_PlotsFlatMidline()
     {
-        var result = SparklineLayout.Normalize([5, 5, 5], 100, 24);
+        var result = SparklineLayout.Normalize(values: [5, 5, 5], 100, 24);
 
-        Assert.All(result, p => Assert.Equal(12, p.Y));
+        Assert.All(collection: result, action: p => Assert.Equal(12, actual: p.Y));
     }
 
     [Fact]
@@ -56,10 +57,10 @@ public class SparklineLayoutTests
     {
         // SVG's Y axis grows downward, so the largest value (drawn at the top of the sparkline)
         // must have the smallest Y coordinate, and the smallest value the largest Y coordinate.
-        var result = SparklineLayout.Normalize([10, 20, 30], 100, 24, padding: 1);
+        var result = SparklineLayout.Normalize(values: [10, 20, 30], 100, 24, 1);
 
-        Assert.Equal(23, result[0].Y); // smallest value (10) -> bottom (height - padding)
-        Assert.Equal(1, result[2].Y);  // largest value (30) -> top (padding)
+        Assert.Equal(23, actual: result[0].Y); // smallest value (10) -> bottom (height - padding)
+        Assert.Equal(1, actual: result[2].Y); // largest value (30) -> top (padding)
         Assert.True(result[0].Y > result[1].Y);
         Assert.True(result[1].Y > result[2].Y);
     }
@@ -67,22 +68,21 @@ public class SparklineLayoutTests
     [Fact]
     public void Normalize_PointsAreEvenlySpacedAcrossFullWidth()
     {
-        var result = SparklineLayout.Normalize([1, 2, 3, 4, 5], 100, 24);
+        var result = SparklineLayout.Normalize(values: [1, 2, 3, 4, 5], 100, 24);
 
-        Assert.Equal(0, result[0].X);
-        Assert.Equal(25, result[1].X);
-        Assert.Equal(50, result[2].X);
-        Assert.Equal(75, result[3].X);
-        Assert.Equal(100, result[4].X);
+        Assert.Equal(0, actual: result[0].X);
+        Assert.Equal(25, actual: result[1].X);
+        Assert.Equal(50, actual: result[2].X);
+        Assert.Equal(75, actual: result[3].X);
+        Assert.Equal(100, actual: result[4].X);
     }
 
     [Fact]
     public void Normalize_RespectsCustomPadding()
     {
-        var result = SparklineLayout.Normalize([0, 100], 100, 24, padding: 4);
+        var result = SparklineLayout.Normalize(values: [0, 100], 100, 24, 4);
 
-        Assert.Equal(20, result[0].Y); // smallest value -> height - padding
-        Assert.Equal(4, result[1].Y);  // largest value -> padding
+        Assert.Equal(20, actual: result[0].Y); // smallest value -> height - padding
+        Assert.Equal(4, actual: result[1].Y); // largest value -> padding
     }
 }
-

@@ -7,7 +7,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// SQL access to the two tool-call capability tables (<c>provider_endpoint_capabilities</c> and
 /// <c>model_tool_capabilities</c>), which live in the same <c>agent_telemetry.db</c> the price catalog
 /// created (<c>docs/router/tool-call-normalization.md</c> Phase 1).
-///
 /// <para>
 /// Depends on <see cref="PriceCatalogDatabase"/> purely as the owner of the connection string and schema
 /// bootstrap - the naming is a historical artifact of that type being the repository's first database, and
@@ -39,15 +38,14 @@ public sealed class ToolCallCapabilityRepository
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT provider_key, openai_compatible, lmstudio_native, ollama_native,
-                   anthropic_compatible, json_schema_response_format, scanned_at_utc, scan_error
-            FROM provider_endpoint_capabilities;
-            """;
+                              SELECT provider_key, openai_compatible, lmstudio_native, ollama_native,
+                                     anthropic_compatible, json_schema_response_format, scanned_at_utc, scan_error
+                              FROM provider_endpoint_capabilities;
+                              """;
 
         var results = new List<ProviderEndpointCapabilities>();
         using var reader = command.ExecuteReader();
         while (reader.Read())
-        {
             results.Add(new ProviderEndpointCapabilities(
                 ProviderKey: reader.GetString(0),
                 OpenAiCompatible: reader.GetInt64(1) != 0,
@@ -57,7 +55,6 @@ public sealed class ToolCallCapabilityRepository
                 JsonSchemaResponseFormat: reader.GetInt64(5) != 0,
                 ScannedAtUtc: ParseTimestamp(reader.GetString(6)),
                 ScanError: reader.IsDBNull(7) ? null : reader.GetString(7)));
-        }
 
         return results;
     }
@@ -70,27 +67,29 @@ public sealed class ToolCallCapabilityRepository
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO provider_endpoint_capabilities
-                (provider_key, openai_compatible, lmstudio_native, ollama_native,
-                 anthropic_compatible, json_schema_response_format, scanned_at_utc, scan_error)
-            VALUES ($key, $openai, $lmstudio, $ollama, $anthropic, $jsonSchema, $scanned, $error)
-            ON CONFLICT(provider_key) DO UPDATE SET
-                openai_compatible           = excluded.openai_compatible,
-                lmstudio_native             = excluded.lmstudio_native,
-                ollama_native               = excluded.ollama_native,
-                anthropic_compatible        = excluded.anthropic_compatible,
-                json_schema_response_format = excluded.json_schema_response_format,
-                scanned_at_utc              = excluded.scanned_at_utc,
-                scan_error                  = excluded.scan_error;
-            """;
-        command.Parameters.AddWithValue("$key", capabilities.ProviderKey);
-        command.Parameters.AddWithValue("$openai", capabilities.OpenAiCompatible ? 1 : 0);
-        command.Parameters.AddWithValue("$lmstudio", capabilities.LmStudioNative ? 1 : 0);
-        command.Parameters.AddWithValue("$ollama", capabilities.OllamaNative ? 1 : 0);
-        command.Parameters.AddWithValue("$anthropic", capabilities.AnthropicCompatible ? 1 : 0);
-        command.Parameters.AddWithValue("$jsonSchema", capabilities.JsonSchemaResponseFormat ? 1 : 0);
-        command.Parameters.AddWithValue("$scanned", FormatTimestamp(capabilities.ScannedAtUtc));
-        command.Parameters.AddWithValue("$error", (object?)capabilities.ScanError ?? DBNull.Value);
+                              INSERT INTO provider_endpoint_capabilities
+                                  (provider_key, openai_compatible, lmstudio_native, ollama_native,
+                                   anthropic_compatible, json_schema_response_format, scanned_at_utc, scan_error)
+                              VALUES ($key, $openai, $lmstudio, $ollama, $anthropic, $jsonSchema, $scanned, $error)
+                              ON CONFLICT(provider_key) DO UPDATE SET
+                                  openai_compatible           = excluded.openai_compatible,
+                                  lmstudio_native             = excluded.lmstudio_native,
+                                  ollama_native               = excluded.ollama_native,
+                                  anthropic_compatible        = excluded.anthropic_compatible,
+                                  json_schema_response_format = excluded.json_schema_response_format,
+                                  scanned_at_utc              = excluded.scanned_at_utc,
+                                  scan_error                  = excluded.scan_error;
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$key", value: capabilities.ProviderKey);
+        command.Parameters.AddWithValue(parameterName: "$openai", value: capabilities.OpenAiCompatible ? 1 : 0);
+        command.Parameters.AddWithValue(parameterName: "$lmstudio", value: capabilities.LmStudioNative ? 1 : 0);
+        command.Parameters.AddWithValue(parameterName: "$ollama", value: capabilities.OllamaNative ? 1 : 0);
+        command.Parameters.AddWithValue(parameterName: "$anthropic", value: capabilities.AnthropicCompatible ? 1 : 0);
+        command.Parameters.AddWithValue(parameterName: "$jsonSchema",
+            value: capabilities.JsonSchemaResponseFormat ? 1 : 0);
+        command.Parameters.AddWithValue(parameterName: "$scanned", value: FormatTimestamp(capabilities.ScannedAtUtc));
+        command.Parameters.AddWithValue(parameterName: "$error",
+            value: (object?)capabilities.ScanError ?? DBNull.Value);
         command.ExecuteNonQuery();
     }
 
@@ -106,11 +105,11 @@ public sealed class ToolCallCapabilityRepository
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            DELETE FROM model_tool_capabilities
-            WHERE provider_key = $provider AND model_name = $model;
-            """;
-        command.Parameters.AddWithValue("$provider", providerKey);
-        command.Parameters.AddWithValue("$model", modelName);
+                              DELETE FROM model_tool_capabilities
+                              WHERE provider_key = $provider AND model_name = $model;
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$provider", value: providerKey);
+        command.Parameters.AddWithValue(parameterName: "$model", value: modelName);
         command.ExecuteNonQuery();
     }
 
@@ -120,15 +119,14 @@ public sealed class ToolCallCapabilityRepository
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT provider_key, model_name, dialect, confidence, evidence,
-                   observation_count, detected_at_utc
-            FROM model_tool_capabilities;
-            """;
+                              SELECT provider_key, model_name, dialect, confidence, evidence,
+                                     observation_count, detected_at_utc
+                              FROM model_tool_capabilities;
+                              """;
 
         var results = new List<ModelToolCapability>();
         using var reader = command.ExecuteReader();
         while (reader.Read())
-        {
             results.Add(new ModelToolCapability(
                 ProviderKey: reader.GetString(0),
                 ModelName: reader.GetString(1),
@@ -137,7 +135,6 @@ public sealed class ToolCallCapabilityRepository
                 Evidence: reader.IsDBNull(4) ? null : reader.GetString(4),
                 ObservationCount: ReadObservationCount(reader.GetInt64(5)),
                 DetectedAtUtc: ParseTimestamp(reader.GetString(6))));
-        }
 
         return results;
     }
@@ -170,8 +167,10 @@ public sealed class ToolCallCapabilityRepository
     /// </para>
     /// </remarks>
     /// <param name="capability">The classification to persist.</param>
-    /// <returns><see langword="true"/> when the row was written; <see langword="false"/> when an
-    /// existing, higher-confidence row was left untouched.</returns>
+    /// <returns>
+    /// <see langword="true"/> when the row was written; <see langword="false"/> when an
+    /// existing, higher-confidence row was left untouched.
+    /// </returns>
     public bool TryUpsertModelCapability(ModelToolCapability capability)
     {
         ArgumentNullException.ThrowIfNull(capability);
@@ -179,39 +178,40 @@ public sealed class ToolCallCapabilityRepository
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO model_tool_capabilities
-                (provider_key, model_name, dialect, confidence, evidence, observation_count, detected_at_utc)
-            VALUES ($provider, $model, $dialect, $confidence, $evidence, $count, $detected)
-            ON CONFLICT(provider_key, model_name) DO UPDATE SET
-                dialect           = excluded.dialect,
-                confidence        = excluded.confidence,
-                evidence          = excluded.evidence,
-                observation_count = model_tool_capabilities.observation_count + $increment,
-                detected_at_utc   = excluded.detected_at_utc
-            WHERE $rank >= (
-                SELECT CASE model_tool_capabilities.confidence
-                    WHEN 'operator'  THEN 3
-                    WHEN 'observed'  THEN 2
-                    WHEN 'template'  THEN 1
-                    WHEN 'heuristic' THEN 0
-                    ELSE 0
-                END);
-            """;
-        command.Parameters.AddWithValue("$provider", capability.ProviderKey);
-        command.Parameters.AddWithValue("$model", capability.ModelName);
-        command.Parameters.AddWithValue("$dialect", capability.Dialect);
-        command.Parameters.AddWithValue("$confidence", FormatConfidence(capability.Confidence));
-        command.Parameters.AddWithValue("$evidence", (object?)capability.Evidence ?? DBNull.Value);
-        command.Parameters.AddWithValue("$count", capability.ObservationCount);
-        command.Parameters.AddWithValue("$detected", FormatTimestamp(capability.DetectedAtUtc));
-        command.Parameters.AddWithValue("$rank", (int)capability.Confidence);
+                              INSERT INTO model_tool_capabilities
+                                  (provider_key, model_name, dialect, confidence, evidence, observation_count, detected_at_utc)
+                              VALUES ($provider, $model, $dialect, $confidence, $evidence, $count, $detected)
+                              ON CONFLICT(provider_key, model_name) DO UPDATE SET
+                                  dialect           = excluded.dialect,
+                                  confidence        = excluded.confidence,
+                                  evidence          = excluded.evidence,
+                                  observation_count = model_tool_capabilities.observation_count + $increment,
+                                  detected_at_utc   = excluded.detected_at_utc
+                              WHERE $rank >= (
+                                  SELECT CASE model_tool_capabilities.confidence
+                                      WHEN 'operator'  THEN 3
+                                      WHEN 'observed'  THEN 2
+                                      WHEN 'template'  THEN 1
+                                      WHEN 'heuristic' THEN 0
+                                      ELSE 0
+                                  END);
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$provider", value: capability.ProviderKey);
+        command.Parameters.AddWithValue(parameterName: "$model", value: capability.ModelName);
+        command.Parameters.AddWithValue(parameterName: "$dialect", value: capability.Dialect);
+        command.Parameters.AddWithValue(parameterName: "$confidence", value: FormatConfidence(capability.Confidence));
+        command.Parameters.AddWithValue(parameterName: "$evidence",
+            value: (object?)capability.Evidence ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$count", value: capability.ObservationCount);
+        command.Parameters.AddWithValue(parameterName: "$detected", value: FormatTimestamp(capability.DetectedAtUtc));
+        command.Parameters.AddWithValue(parameterName: "$rank", value: (int)capability.Confidence);
 
         // Only a live response bumps the counter, and SQLite - not the caller - does the bumping. See this
         // method's remarks; DetectionConfidence.Observed is produced by exactly one writer,
         // ToolCallObservationRecorder, and only ever from a response that actually carried a tool call.
         command.Parameters.AddWithValue(
-            "$increment",
-            capability.Confidence == DetectionConfidence.Observed ? 1 : 0);
+            parameterName: "$increment",
+            value: capability.Confidence == DetectionConfidence.Observed ? 1 : 0);
 
         return command.ExecuteNonQuery() > 0;
     }
@@ -229,19 +229,16 @@ public sealed class ToolCallCapabilityRepository
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT provider_key, model_name, context_length, architecture, evidence, detected_at_utc
-            FROM model_context_windows;
-            """;
+                              SELECT provider_key, model_name, context_length, architecture, evidence, detected_at_utc
+                              FROM model_context_windows;
+                              """;
 
         var results = new List<ModelContextWindow>();
         using var reader = command.ExecuteReader();
         while (reader.Read())
         {
             var length = ReadContextLength(reader.GetInt64(2));
-            if (length is null)
-            {
-                continue;
-            }
+            if (length is null) continue;
 
             results.Add(new ModelContextWindow(
                 ProviderKey: reader.GetString(0),
@@ -280,21 +277,22 @@ public sealed class ToolCallCapabilityRepository
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO model_context_windows
-                (provider_key, model_name, context_length, architecture, evidence, detected_at_utc)
-            VALUES ($provider, $model, $length, $architecture, $evidence, $detected)
-            ON CONFLICT(provider_key, model_name) DO UPDATE SET
-                context_length  = excluded.context_length,
-                architecture    = excluded.architecture,
-                evidence        = excluded.evidence,
-                detected_at_utc = excluded.detected_at_utc;
-            """;
-        command.Parameters.AddWithValue("$provider", window.ProviderKey);
-        command.Parameters.AddWithValue("$model", window.ModelName);
-        command.Parameters.AddWithValue("$length", window.ContextLength);
-        command.Parameters.AddWithValue("$architecture", (object?)window.Architecture ?? DBNull.Value);
-        command.Parameters.AddWithValue("$evidence", (object?)window.Evidence ?? DBNull.Value);
-        command.Parameters.AddWithValue("$detected", FormatTimestamp(window.DetectedAtUtc));
+                              INSERT INTO model_context_windows
+                                  (provider_key, model_name, context_length, architecture, evidence, detected_at_utc)
+                              VALUES ($provider, $model, $length, $architecture, $evidence, $detected)
+                              ON CONFLICT(provider_key, model_name) DO UPDATE SET
+                                  context_length  = excluded.context_length,
+                                  architecture    = excluded.architecture,
+                                  evidence        = excluded.evidence,
+                                  detected_at_utc = excluded.detected_at_utc;
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$provider", value: window.ProviderKey);
+        command.Parameters.AddWithValue(parameterName: "$model", value: window.ModelName);
+        command.Parameters.AddWithValue(parameterName: "$length", value: window.ContextLength);
+        command.Parameters.AddWithValue(parameterName: "$architecture",
+            value: (object?)window.Architecture ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$evidence", value: (object?)window.Evidence ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$detected", value: FormatTimestamp(window.DetectedAtUtc));
 
         command.ExecuteNonQuery();
     }
@@ -303,12 +301,15 @@ public sealed class ToolCallCapabilityRepository
     /// Reads a stored context length, or <see langword="null"/> when it is not a usable positive
     /// <see cref="int"/>. See <see cref="GetModelContextWindows"/> for why this rejects rather than clamps.
     /// </summary>
-    private static int? ReadContextLength(long stored) => stored switch
+    private static int? ReadContextLength(long stored)
     {
-        <= 0 => null,
-        > int.MaxValue => null,
-        _ => (int)stored,
-    };
+        return stored switch
+        {
+            <= 0 => null,
+            > int.MaxValue => null,
+            _ => (int)stored
+        };
+    }
 
     /// <summary>
     /// Clamps a stored observation count into the non-negative <see cref="int"/> range.
@@ -321,42 +322,52 @@ public sealed class ToolCallCapabilityRepository
     /// this consistent with how <see cref="ParseTimestamp"/> and <see cref="ParseConfidence"/> already treat
     /// unparseable stored values: degrade to something sane rather than take the proxy down on a read.
     /// </remarks>
-    private static int ReadObservationCount(long stored) => stored switch
+    private static int ReadObservationCount(long stored)
     {
-        < 0 => 0,
-        > int.MaxValue => int.MaxValue,
-        _ => (int)stored,
-    };
+        return stored switch
+        {
+            < 0 => 0,
+            > int.MaxValue => int.MaxValue,
+            _ => (int)stored
+        };
+    }
 
     /// <summary>Formats a timestamp into the sortable invariant UTC form the schema stores.</summary>
-    private static string FormatTimestamp(DateTimeOffset value) =>
-        value.UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture);
+    private static string FormatTimestamp(DateTimeOffset value)
+    {
+        return value.UtcDateTime.ToString(format: TimestampFormat, provider: CultureInfo.InvariantCulture);
+    }
 
     /// <summary>
     /// Parses a stored timestamp back to UTC. Falls back to <see cref="DateTimeOffset.MinValue"/> rather
     /// than throwing on an unparseable value: a hand-edited row should degrade to "very old" (and so be
     /// rescanned) rather than take the proxy down on its first read.
     /// </summary>
-    private static DateTimeOffset ParseTimestamp(string value) =>
-        DateTimeOffset.TryParse(
-            value,
-            CultureInfo.InvariantCulture,
-            DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal,
-            out var parsed)
+    private static DateTimeOffset ParseTimestamp(string value)
+    {
+        return DateTimeOffset.TryParse(
+            input: value,
+            formatProvider: CultureInfo.InvariantCulture,
+            styles: DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal,
+            result: out var parsed)
             ? parsed
             : DateTimeOffset.MinValue;
+    }
 
     /// <summary>Formats a confidence as the lowercase token the schema stores.</summary>
-    private static string FormatConfidence(DetectionConfidence confidence) =>
-        confidence.ToString().ToLowerInvariant();
+    private static string FormatConfidence(DetectionConfidence confidence)
+    {
+        return confidence.ToString().ToLowerInvariant();
+    }
 
     /// <summary>
     /// Parses a stored confidence token. An unrecognized value degrades to the weakest tier so any real
     /// detection can correct it, rather than reading as an unoverwritable <c>operator</c> by accident.
     /// </summary>
-    private static DetectionConfidence ParseConfidence(string value) =>
-        Enum.TryParse<DetectionConfidence>(value, ignoreCase: true, out var parsed)
+    private static DetectionConfidence ParseConfidence(string value)
+    {
+        return Enum.TryParse<DetectionConfidence>(value: value, true, result: out var parsed)
             ? parsed
             : DetectionConfidence.Heuristic;
+    }
 }
-

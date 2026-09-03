@@ -24,4 +24,3 @@ public sealed record QualityIngestContext(
     string Model,
     string CorrelationId,
     string SessionId);
-

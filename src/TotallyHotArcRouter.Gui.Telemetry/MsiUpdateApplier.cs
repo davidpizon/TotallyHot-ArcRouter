@@ -1,6 +1,6 @@
-using Microsoft.Extensions.Logging;
 using System.Diagnostics;
 using System.Security.Cryptography;
+using Microsoft.Extensions.Logging;
 
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
 
@@ -21,10 +21,13 @@ public interface IElevatedProcessLauncher
     void Launch(string fileName, IReadOnlyList<string> arguments);
 }
 
-/// <summary>Production <see cref="IElevatedProcessLauncher"/>, wrapping <see cref="Process.Start(ProcessStartInfo)"/> directly.</summary>
+/// <summary>
+/// Production <see cref="IElevatedProcessLauncher"/>, wrapping <see cref="Process.Start(ProcessStartInfo)"/>
+/// directly.
+/// </summary>
 public sealed class ElevatedProcessLauncher : IElevatedProcessLauncher
 {
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public void Launch(string fileName, IReadOnlyList<string> arguments)
     {
         ArgumentNullException.ThrowIfNull(fileName);
@@ -34,19 +37,13 @@ public sealed class ElevatedProcessLauncher : IElevatedProcessLauncher
         {
             FileName = fileName,
             UseShellExecute = true,
-            Verb = "runas",
+            Verb = "runas"
         };
 
-        foreach (var argument in arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
+        foreach (var argument in arguments) startInfo.ArgumentList.Add(argument);
 
         using var process = Process.Start(startInfo);
-        if (process is null)
-        {
-            throw new InvalidOperationException($"Process.Start returned null for '{fileName}'.");
-        }
+        if (process is null) throw new InvalidOperationException($"Process.Start returned null for '{fileName}'.");
     }
 }
 
@@ -62,10 +59,19 @@ public sealed class ElevatedProcessLauncher : IElevatedProcessLauncher
 public sealed record MsiApplyResult(bool Succeeded, string Message)
 {
     /// <summary>Builds a successful-launch result.</summary>
-    public static MsiApplyResult Launched(string message) => new(true, message);
+    public static MsiApplyResult Launched(string message)
+    {
+        return new MsiApplyResult(true, Message: message);
+    }
 
-    /// <summary>Builds a failure result - the download or checksum failed, or the installer could not be launched. Nothing was touched.</summary>
-    public static MsiApplyResult Failure(string message) => new(false, message);
+    /// <summary>
+    /// Builds a failure result - the download or checksum failed, or the installer could not be launched. Nothing was
+    /// touched.
+    /// </summary>
+    public static MsiApplyResult Failure(string message)
+    {
+        return new MsiApplyResult(false, Message: message);
+    }
 }
 
 /// <summary>
@@ -87,8 +93,8 @@ public sealed record MsiApplyResult(bool Succeeded, string Message)
 public sealed class MsiUpdateApplier : IMsiUpdateApplier
 {
     private readonly HttpClient _httpClient;
-    private readonly ILogger<MsiUpdateApplier> _logger;
     private readonly IElevatedProcessLauncher _launcher;
+    private readonly ILogger<MsiUpdateApplier> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="MsiUpdateApplier"/> class.</summary>
     /// <param name="httpClient">The HTTP client used to download the installer asset.</param>
@@ -98,7 +104,8 @@ public sealed class MsiUpdateApplier : IMsiUpdateApplier
     /// registered in DI, so this parameter exists purely as the test seam - unit tests construct
     /// <see cref="MsiUpdateApplier"/> with a fake here instead of ever triggering a UAC prompt.
     /// </param>
-    public MsiUpdateApplier(HttpClient httpClient, ILogger<MsiUpdateApplier> logger, IElevatedProcessLauncher? launcher = null)
+    public MsiUpdateApplier(HttpClient httpClient, ILogger<MsiUpdateApplier> logger,
+        IElevatedProcessLauncher? launcher = null)
     {
         ArgumentNullException.ThrowIfNull(httpClient);
         ArgumentNullException.ThrowIfNull(logger);
@@ -108,7 +115,7 @@ public sealed class MsiUpdateApplier : IMsiUpdateApplier
         _launcher = launcher ?? new ElevatedProcessLauncher();
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<MsiApplyResult> ApplyAsync(
         string assetDownloadUrl,
         string assetSha256,
@@ -119,29 +126,35 @@ public sealed class MsiUpdateApplier : IMsiUpdateApplier
         ArgumentException.ThrowIfNullOrWhiteSpace(assetSha256);
         ArgumentException.ThrowIfNullOrWhiteSpace(latestVersion);
 
-        var msiPath = Path.Combine(Path.GetTempPath(), $"totallyhotarcrouter-update-{Guid.NewGuid():N}.msi");
-        var logPath = Path.Combine(Path.GetTempPath(), $"totallyhotarcrouter-update-{Guid.NewGuid():N}.log");
+        var msiPath = Path.Combine(path1: Path.GetTempPath(),
+            path2: $"totallyhotarcrouter-update-{Guid.NewGuid():N}.msi");
+        var logPath = Path.Combine(path1: Path.GetTempPath(),
+            path2: $"totallyhotarcrouter-update-{Guid.NewGuid():N}.log");
 
         try
         {
-            await DownloadAsync(assetDownloadUrl, msiPath, cancellationToken).ConfigureAwait(false);
+            await DownloadAsync(url: assetDownloadUrl, destinationPath: msiPath, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogError(ex, "Update apply failed: could not download the installer.");
+            _logger.LogError(exception: ex, message: "Update apply failed: could not download the installer.");
             TryDelete(msiPath);
             return MsiApplyResult.Failure($"Download failed: {ex.Message}");
         }
 
-        var actualSha256 = await ComputeSha256Async(msiPath, cancellationToken).ConfigureAwait(false);
-        if (!string.Equals(actualSha256, assetSha256, StringComparison.OrdinalIgnoreCase))
+        var actualSha256 = await ComputeSha256Async(path: msiPath, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+        if (!string.Equals(a: actualSha256, b: assetSha256, comparisonType: StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogError(
+                message:
                 "Update apply aborted: installer checksum mismatch (expected {Expected}, got {Actual}). Nothing was touched.",
                 assetSha256,
                 actualSha256);
             TryDelete(msiPath);
-            return MsiApplyResult.Failure("The downloaded installer failed checksum verification. No files were touched.");
+            return MsiApplyResult.Failure(
+                "The downloaded installer failed checksum verification. No files were touched.");
         }
 
         // TODO(signing): once a code-signing certificate exists (docs/router/packaging-and-distribution.md
@@ -152,18 +165,18 @@ public sealed class MsiUpdateApplier : IMsiUpdateApplier
         try
         {
             _launcher.Launch(
-                "msiexec.exe",
-                ["/i", msiPath, "/qn", "REBOOT=ReallySuppress", "/l*v", logPath]);
+                fileName: "msiexec.exe",
+                arguments: ["/i", msiPath, "/qn", "REBOOT=ReallySuppress", "/l*v", logPath]);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Update apply failed: could not launch the installer.");
+            _logger.LogError(exception: ex, message: "Update apply failed: could not launch the installer.");
             TryDelete(msiPath);
             return MsiApplyResult.Failure($"Could not launch the installer: {ex.Message}");
         }
 
         _logger.LogInformation(
-            "Installer launched for version {LatestVersion}; exiting so the file swap can proceed.",
+            message: "Installer launched for version {LatestVersion}; exiting so the file swap can proceed.",
             latestVersion);
 
         // The downloaded MSI is intentionally not deleted here - msiexec is still reading it in the
@@ -173,24 +186,29 @@ public sealed class MsiUpdateApplier : IMsiUpdateApplier
             $"Installer launched for version {latestVersion}. Approve the administrator prompt to continue - this application will close and restart.");
     }
 
-    /// <summary>Downloads <paramref name="url"/> to <paramref name="destinationPath"/>, streaming rather than buffering the whole asset in memory.</summary>
+    /// <summary>
+    /// Downloads <paramref name="url"/> to <paramref name="destinationPath"/>, streaming rather than buffering the
+    /// whole asset in memory.
+    /// </summary>
     private async Task DownloadAsync(string url, string destinationPath, CancellationToken cancellationToken)
     {
         using var response = await _httpClient
-            .GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+            .GetAsync(requestUri: url, completionOption: HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken: cancellationToken)
             .ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
 
         await using var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         await using var destination = File.Create(destinationPath);
-        await source.CopyToAsync(destination, cancellationToken).ConfigureAwait(false);
+        await source.CopyToAsync(destination: destination, cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Computes the lowercase-hex SHA256 of the file at <paramref name="path"/>.</summary>
     private static async Task<string> ComputeSha256Async(string path, CancellationToken cancellationToken)
     {
         await using var stream = File.OpenRead(path);
-        var hash = await SHA256.HashDataAsync(stream, cancellationToken).ConfigureAwait(false);
+        var hash = await SHA256.HashDataAsync(source: stream, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
         return Convert.ToHexStringLower(hash);
     }
 
@@ -199,10 +217,7 @@ public sealed class MsiUpdateApplier : IMsiUpdateApplier
     {
         try
         {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
+            if (File.Exists(path)) File.Delete(path);
         }
         catch (IOException)
         {
@@ -230,6 +245,10 @@ public interface IMsiUpdateApplier
     /// <param name="assetDownloadUrl">The release's MSI asset direct download URL.</param>
     /// <param name="assetSha256">The MSI's published SHA256 (lowercase hex).</param>
     /// <param name="latestVersion">The version being installed, for logging.</param>
-    /// <param name="cancellationToken">Cancels the download only; once the installer is launched, applying is out of this process's hands.</param>
-    Task<MsiApplyResult> ApplyAsync(string assetDownloadUrl, string assetSha256, string latestVersion, CancellationToken cancellationToken = default);
+    /// <param name="cancellationToken">
+    /// Cancels the download only; once the installer is launched, applying is out of this
+    /// process's hands.
+    /// </param>
+    Task<MsiApplyResult> ApplyAsync(string assetDownloadUrl, string assetSha256, string latestVersion,
+        CancellationToken cancellationToken = default);
 }

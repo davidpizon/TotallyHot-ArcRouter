@@ -36,10 +36,10 @@ public static class ContentSha256Hash
 
         var buffer = new byte[81920];
         int bytesRead;
-        while ((bytesRead = content.Read(buffer, 0, buffer.Length)) > 0)
+        while ((bytesRead = content.Read(buffer: buffer, 0, count: buffer.Length)) > 0)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            sha256.AppendData(buffer, 0, bytesRead);
+            sha256.AppendData(data: buffer, 0, count: bytesRead);
         }
 
         return Convert.ToHexStringLower(sha256.GetHashAndReset());

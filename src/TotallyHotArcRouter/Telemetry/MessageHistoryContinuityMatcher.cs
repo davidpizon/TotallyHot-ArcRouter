@@ -18,7 +18,10 @@ public interface IConversationContinuityMatcher
     /// Always returns a usable session id - this owns id synthesis for the "no explicit session id
     /// found" path, so callers should use this instead of generating their own fallback GUID.
     /// </summary>
-    /// <param name="messages">The parsed "messages" array from the request body, or <see langword="null"/> if absent/not an array.</param>
+    /// <param name="messages">
+    /// The parsed "messages" array from the request body, or <see langword="null"/> if absent/not an
+    /// array.
+    /// </param>
     string MatchOrTrack(JsonArray? messages);
 }
 
@@ -34,12 +37,16 @@ public interface IConversationContinuityMatcher
 /// explicit identifier the client actually sent) is always tried first and takes priority over this.
 /// Known limitations:
 /// <list type="bullet">
-/// <item>False positive: two genuinely unrelated conversations that happen to open with an identical
+/// <item>
+/// False positive: two genuinely unrelated conversations that happen to open with an identical
 /// exchange (e.g. the same fixed system prompt and a coincidentally identical first message) would be
-/// merged into one tracked session.</item>
-/// <item>False negative: a client that edits or regenerates earlier messages, rather than only ever
+/// merged into one tracked session.
+/// </item>
+/// <item>
+/// False negative: a client that edits or regenerates earlier messages, rather than only ever
 /// appending new ones, won't match its own prior turns (the prefix no longer matches exactly) and
-/// starts a new tracked conversation instead.</item>
+/// starts a new tracked conversation instead.
+/// </item>
 /// </list>
 /// Each message is fingerprinted as a SHA-256 hash of its canonical JSON, rather than storing the
 /// message content itself, so full prompt/response text isn't retained in memory beyond what the
@@ -49,27 +56,20 @@ public sealed class MessageHistoryContinuityMatcher : IConversationContinuityMat
 {
     private static readonly TimeSpan StalenessWindow = TimeSpan.FromMinutes(30);
 
-    /// <summary>
-    /// A single tracked conversation: the synthesized session id assigned to it, the SHA-256
-    /// fingerprints of its messages seen so far, and when it was last matched, used to evict stale
-    /// entries after <see cref="StalenessWindow"/>.
-    /// </summary>
-    /// <param name="SessionId">The synthesized session id for this conversation.</param>
-    /// <param name="MessageFingerprints">The SHA-256 fingerprints of the conversation's messages, in order.</param>
-    /// <param name="LastSeenUtc">The UTC timestamp of the last request matched to this conversation.</param>
-    private sealed record TrackedConversation(string SessionId, IReadOnlyList<string> MessageFingerprints, DateTimeOffset LastSeenUtc);
-
     private readonly object _lock = new();
-    private readonly List<TrackedConversation> _tracked = [];
     private readonly TimeProvider _timeProvider;
+    private readonly List<TrackedConversation> _tracked = [];
 
-    /// <param name="timeProvider">Optional; defaults to <see cref="TimeProvider.System"/>. Overridable in tests to control staleness-window expiry.</param>
+    /// <param name="timeProvider">
+    /// Optional; defaults to <see cref="TimeProvider.System"/>. Overridable in tests to control
+    /// staleness-window expiry.
+    /// </param>
     public MessageHistoryContinuityMatcher(TimeProvider? timeProvider = null)
     {
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public string MatchOrTrack(JsonArray? messages)
     {
         var now = _timeProvider.GetUtcNow();
@@ -81,15 +81,11 @@ public sealed class MessageHistoryContinuityMatcher : IConversationContinuityMat
 
             TrackedConversation? bestMatch = null;
             foreach (var candidate in _tracked)
-            {
                 if (candidate.MessageFingerprints.Count > 0 &&
                     candidate.MessageFingerprints.Count < fingerprints.Count &&
-                    IsPrefix(candidate.MessageFingerprints, fingerprints) &&
+                    IsPrefix(prefix: candidate.MessageFingerprints, full: fingerprints) &&
                     (bestMatch is null || candidate.MessageFingerprints.Count > bestMatch.MessageFingerprints.Count))
-                {
                     bestMatch = candidate;
-                }
-            }
 
             if (bestMatch is not null)
             {
@@ -100,9 +96,8 @@ public sealed class MessageHistoryContinuityMatcher : IConversationContinuityMat
 
             var sessionId = Guid.NewGuid().ToString("N");
             if (fingerprints.Count > 0)
-            {
-                _tracked.Add(new TrackedConversation(sessionId, fingerprints, now));
-            }
+                _tracked.Add(new TrackedConversation(SessionId: sessionId, MessageFingerprints: fingerprints,
+                    LastSeenUtc: now));
 
             return sessionId;
         }
@@ -115,12 +110,8 @@ public sealed class MessageHistoryContinuityMatcher : IConversationContinuityMat
     private static bool IsPrefix(IReadOnlyList<string> prefix, IReadOnlyList<string> full)
     {
         for (var i = 0; i < prefix.Count; i++)
-        {
-            if (!string.Equals(prefix[i], full[i], StringComparison.Ordinal))
-            {
+            if (!string.Equals(a: prefix[i], b: full[i], comparisonType: StringComparison.Ordinal))
                 return false;
-            }
-        }
 
         return true;
     }
@@ -131,10 +122,7 @@ public sealed class MessageHistoryContinuityMatcher : IConversationContinuityMat
     /// </summary>
     private static List<string> Fingerprint(JsonArray? messages)
     {
-        if (messages is null)
-        {
-            return [];
-        }
+        if (messages is null) return [];
 
         var fingerprints = new List<string>(messages.Count);
         foreach (var message in messages)
@@ -145,5 +133,17 @@ public sealed class MessageHistoryContinuityMatcher : IConversationContinuityMat
 
         return fingerprints;
     }
-}
 
+    /// <summary>
+    /// A single tracked conversation: the synthesized session id assigned to it, the SHA-256
+    /// fingerprints of its messages seen so far, and when it was last matched, used to evict stale
+    /// entries after <see cref="StalenessWindow"/>.
+    /// </summary>
+    /// <param name="SessionId">The synthesized session id for this conversation.</param>
+    /// <param name="MessageFingerprints">The SHA-256 fingerprints of the conversation's messages, in order.</param>
+    /// <param name="LastSeenUtc">The UTC timestamp of the last request matched to this conversation.</param>
+    private sealed record TrackedConversation(
+        string SessionId,
+        IReadOnlyList<string> MessageFingerprints,
+        DateTimeOffset LastSeenUtc);
+}

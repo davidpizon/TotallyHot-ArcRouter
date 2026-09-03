@@ -62,12 +62,10 @@ public sealed class OodBootstrapSampleSource
         CancellationToken cancellationToken = default)
     {
         if (!File.Exists(_database.DatabasePath))
-        {
             // Mirrors DimBestVoter/CodeRouterBenchTable10ReconciliationTests' idiom: check existence before
             // ever opening a connection, since SQLite would otherwise create an empty file as a side effect.
             throw new InvalidOperationException(
                 $"The CodeRouterBench corpus database was not found at '{_database.DatabasePath}' - is the corpus synced?");
-        }
 
         Dictionary<string, string> taskPrompts;
         Dictionary<string, List<(string Model, bool Resolved)>> taskResults;
@@ -84,10 +82,7 @@ public sealed class OodBootstrapSampleSource
                 {
                     var taskId = reader.GetString(0);
                     var text = LogRegTrainer.TryExtractPrompt(reader.GetString(1));
-                    if (text is not null)
-                    {
-                        taskPrompts[taskId] = text;
-                    }
+                    if (text is not null) taskPrompts[taskId] = text;
                 }
             }
 
@@ -102,7 +97,7 @@ public sealed class OodBootstrapSampleSource
                     var model = ModelNameCanonicalizer.Canonicalize(reader.GetString(1));
                     var resolved = !reader.IsDBNull(2) && reader.GetInt32(2) != 0;
 
-                    if (!taskResults.TryGetValue(taskId, out var rows))
+                    if (!taskResults.TryGetValue(key: taskId, value: out var rows))
                     {
                         rows = [];
                         taskResults[taskId] = rows;
@@ -115,7 +110,8 @@ public sealed class OodBootstrapSampleSource
         catch (SqliteException ex)
         {
             throw new InvalidOperationException(
-                $"Failed to read the CodeRouterBench OOD split from '{_database.DatabasePath}'.", ex);
+                message: $"Failed to read the CodeRouterBench OOD split from '{_database.DatabasePath}'.",
+                innerException: ex);
         }
 
         var samples = new List<LogRegTrainingSample>();
@@ -124,22 +120,20 @@ public sealed class OodBootstrapSampleSource
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (!taskResults.TryGetValue(taskId, out var results) || results.Count == 0)
-            {
-                continue;
-            }
+            if (!taskResults.TryGetValue(key: taskId, value: out var results) || results.Count == 0) continue;
 
-            var embedding = await _embeddingClient.EmbedAsync(prompt, cancellationToken).ConfigureAwait(false);
+            var embedding = await _embeddingClient.EmbedAsync(text: prompt, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
             foreach (var (model, resolved) in results)
-            {
-                samples.Add(new LogRegTrainingSample(embedding.Vector, model, resolved ? 1.0 : 0.0, Weight: 1.0));
-            }
+                samples.Add(new LogRegTrainingSample(Embedding: embedding.Vector, ModelKey: model,
+                    Score: resolved ? 1.0 : 0.0, 1.0));
 
             embeddedTaskCount++;
             progress?.Report(embeddedTaskCount);
         }
 
         _logger.LogInformation(
+            message:
             "OOD bootstrap source produced {SampleCount} training sample(s) from {TaskCount} embedded task(s).",
             samples.Count,
             embeddedTaskCount);

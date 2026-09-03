@@ -1,7 +1,8 @@
-using Microsoft.Extensions.Options;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
+using TotallyHot.ArcRouter.Router.Embeddings;
 
 namespace TotallyHot.ArcRouter.Router.Orchestrator;
 
@@ -19,7 +20,8 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// publishes no task text for the ID splits it was meant to train from
 /// (docs/router/live-feedback-learning-plan.md's "What we are actually able to train on"). The embedding
 /// is always available once Phase 2 computes one, so this voter scores that instead;
-/// <see cref="CodeRouterBench.Evaluation.LogRegModelArtifact"/>/<see cref="CodeRouterBench.Evaluation.LogRegTextTokenizer"/>/
+/// <see cref="CodeRouterBench.Evaluation.LogRegModelArtifact"/>/
+/// <see cref="CodeRouterBench.Evaluation.LogRegTextTokenizer"/>/
 /// <see cref="CodeRouterBench.Evaluation.LogRegTrainer"/> now live in <see cref="CodeRouterBench.Evaluation"/>
 /// as Phase N's static comparison baseline, relocated out of this namespace per Phase 6.
 /// </para>
@@ -32,10 +34,10 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// </remarks>
 public sealed class LogRegVoter : IRoutingVoter
 {
-    private readonly Embeddings.IEmbeddingClient? _embeddingClient;
+    private readonly IEmbeddingClient? _embeddingClient;
+    private readonly object _loadLock = new();
     private readonly ILogger<LogRegVoter> _logger;
     private readonly string _modelPath;
-    private readonly object _loadLock = new();
 
     private bool _loadAttempted;
     private EmbeddingLogRegModelArtifact? _model;
@@ -55,7 +57,7 @@ public sealed class LogRegVoter : IRoutingVoter
     public LogRegVoter(
         ILogger<LogRegVoter> logger,
         IOptions<StorageOptions> storageOptions,
-        Embeddings.IEmbeddingClient embeddingClient)
+        IEmbeddingClient embeddingClient)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(storageOptions);
@@ -90,7 +92,7 @@ public sealed class LogRegVoter : IRoutingVoter
     public LogRegVoter(
         ILogger<LogRegVoter> logger,
         EmbeddingLogRegModelArtifact model,
-        Embeddings.IEmbeddingClient? embeddingClient = null)
+        IEmbeddingClient? embeddingClient = null)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(model);
@@ -103,25 +105,19 @@ public sealed class LogRegVoter : IRoutingVoter
         _loadAttempted = true;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public string Name => VoterNames.LogReg;
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public Task<VoterVote> VoteAsync(VotingContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
         cancellationToken.ThrowIfCancellationRequested();
 
         var model = GetModel();
-        if (model is null)
-        {
-            return Task.FromResult(VoterVote.Abstain(Name));
-        }
+        if (model is null) return Task.FromResult(VoterVote.Abstain(Name));
 
-        if (context.TaskEmbedding is null)
-        {
-            return Task.FromResult(VoterVote.Abstain(Name));
-        }
+        if (context.TaskEmbedding is null) return Task.FromResult(VoterVote.Abstain(Name));
 
         if (context.TaskEmbedding.Length != model.EmbeddingDimension)
         {
@@ -129,6 +125,7 @@ public sealed class LogRegVoter : IRoutingVoter
             // worse than an abstention - see the type-level remarks on why this artifact is never a
             // placeholder someone might trust anyway.
             _logger.LogWarning(
+                message:
                 "logreg voter received a {ActualDimension}-dimensional embedding but its model was trained at {ExpectedDimension}; abstaining.",
                 context.TaskEmbedding.Length,
                 model.EmbeddingDimension);
@@ -137,13 +134,15 @@ public sealed class LogRegVoter : IRoutingVoter
 
         if (_embeddingClient is not null &&
             model.EmbeddingModel is not null &&
-            !string.Equals(model.EmbeddingModel, _embeddingClient.ModelIdentity, StringComparison.Ordinal))
+            !string.Equals(a: model.EmbeddingModel, b: _embeddingClient.ModelIdentity,
+                comparisonType: StringComparison.Ordinal))
         {
             // The same-dimension model swap the length check above structurally cannot see: the weights
             // were fitted in a coordinate space the current client no longer produces, so scoring against
             // them is arithmetic on unrelated numbers. A null EmbeddingModel is a pre-provenance artifact
             // and is trusted, on the same reasoning MemoryEntry.MatchesEmbeddingModel documents.
             _logger.LogWarning(
+                message:
                 "logreg voter model was trained against embedding model {TrainedModel} but the current client is {CurrentModel}; abstaining until retrained.",
                 model.EmbeddingModel,
                 _embeddingClient.ModelIdentity);
@@ -157,25 +156,16 @@ public sealed class LogRegVoter : IRoutingVoter
             // Passing candidate.Provider strips only that candidate's own provider prefix, so a
             // legitimately slashed model id is never mistaken for an unprefixed one and mapped to the
             // wrong class-weight entry - the same convention the TF-IDF predecessor used.
-            var key = ModelNameCanonicalizer.Canonicalize(candidate.ModelName, candidate.Provider);
-            if (!model.ClassWeights.TryGetValue(key, out var weights))
-            {
-                continue;
-            }
+            var key = ModelNameCanonicalizer.Canonicalize(modelId: candidate.ModelName, provider: candidate.Provider);
+            if (!model.ClassWeights.TryGetValue(key: key, value: out var weights)) continue;
 
             var score = weights[0]; // bias
-            for (var i = 0; i < embedding.Length; i++)
-            {
-                score += weights[i + 1] * embedding[i];
-            }
+            for (var i = 0; i < embedding.Length; i++) score += weights[i + 1] * embedding[i];
 
             scored.Add((candidate.ModelName, score));
         }
 
-        if (scored.Count == 0)
-        {
-            return Task.FromResult(VoterVote.Abstain(Name));
-        }
+        if (scored.Count == 0) return Task.FromResult(VoterVote.Abstain(Name));
 
         // Softmax over the restricted candidate scores turns raw logits into a [0, 1] confidence without
         // changing the argmax - softmax is monotonic in its inputs.
@@ -185,15 +175,12 @@ public sealed class LogRegVoter : IRoutingVoter
 
         var bestIndex = 0;
         for (var i = 1; i < scored.Count; i++)
-        {
             if (expScores[i] > expScores[bestIndex])
-            {
                 bestIndex = i;
-            }
-        }
 
         var confidence = sumExp > 0 ? expScores[bestIndex] / sumExp : 1d / scored.Count;
-        return Task.FromResult(new VoterVote(Name, scored[bestIndex].Model, Math.Clamp(confidence, 0d, 1d)));
+        return Task.FromResult(new VoterVote(VoterName: Name, ModelName: scored[bestIndex].Model,
+            Confidence: Math.Clamp(value: confidence, 0d, 1d)));
     }
 
     /// <summary>
@@ -205,10 +192,7 @@ public sealed class LogRegVoter : IRoutingVoter
     /// </summary>
     public void Reload()
     {
-        if (string.IsNullOrEmpty(_modelPath))
-        {
-            return;
-        }
+        if (string.IsNullOrEmpty(_modelPath)) return;
 
         lock (_loadLock)
         {
@@ -223,10 +207,7 @@ public sealed class LogRegVoter : IRoutingVoter
     {
         lock (_loadLock)
         {
-            if (_loadAttempted)
-            {
-                return _model;
-            }
+            if (_loadAttempted) return _model;
 
             _loadAttempted = true;
             _model = TryLoadFromDisk();
@@ -234,13 +215,17 @@ public sealed class LogRegVoter : IRoutingVoter
         }
     }
 
-    /// <summary>Reads and deserializes the model artifact from <see cref="_modelPath"/>, tolerating a missing or unreadable file by returning <see langword="null"/> so the voter degrades to an abstention instead of throwing.</summary>
+    /// <summary>
+    /// Reads and deserializes the model artifact from <see cref="_modelPath"/>, tolerating a missing or unreadable
+    /// file by returning <see langword="null"/> so the voter degrades to an abstention instead of throwing.
+    /// </summary>
     /// <returns>The deserialized model artifact, or <see langword="null"/> if the file is absent or could not be loaded.</returns>
     private EmbeddingLogRegModelArtifact? TryLoadFromDisk()
     {
         if (!File.Exists(_modelPath))
         {
-            _logger.LogDebug("No logreg voter model found at {Path}; voter will abstain until one is trained.", _modelPath);
+            _logger.LogDebug(message: "No logreg voter model found at {Path}; voter will abstain until one is trained.",
+                _modelPath);
             return null;
         }
 
@@ -249,12 +234,14 @@ public sealed class LogRegVoter : IRoutingVoter
             var json = File.ReadAllText(_modelPath);
             var model = EmbeddingLogRegModelArtifactSerializer.Deserialize(json);
             _logger.LogInformation(
-                "Loaded logreg voter model from {Path} (trained from: {TrainedFrom}).", _modelPath, model.TrainedFrom);
+                message: "Loaded logreg voter model from {Path} (trained from: {TrainedFrom}).", _modelPath,
+                model.TrainedFrom);
             return model;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException or JsonException)
         {
-            _logger.LogWarning(ex, "Failed to load logreg voter model from {Path}; voter will abstain.", _modelPath);
+            _logger.LogWarning(exception: ex,
+                message: "Failed to load logreg voter model from {Path}; voter will abstain.", _modelPath);
             return null;
         }
     }

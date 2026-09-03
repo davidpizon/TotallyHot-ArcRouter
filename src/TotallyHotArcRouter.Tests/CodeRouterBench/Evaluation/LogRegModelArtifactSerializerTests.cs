@@ -14,9 +14,9 @@ public class LogRegModelArtifactSerializerTests
         InverseDocumentFrequency: [1.0, 1.0],
         ClassWeights: new Dictionary<string, double[]>
         {
-            ["model-a"] = [0.0, 5.0, 0.0],
+            ["model-a"] = [0.0, 5.0, 0.0]
         },
-        IsPlaceholder: true,
+        true,
         TrainedFrom: "unit test fixture");
 
     [Fact]
@@ -26,8 +26,8 @@ public class LogRegModelArtifactSerializerTests
 
         var artifact = LogRegModelArtifactSerializer.Deserialize(json);
 
-        Assert.Equal(ValidModel.Vocabulary, artifact.Vocabulary);
-        Assert.Equal(ValidModel.InverseDocumentFrequency, artifact.InverseDocumentFrequency);
+        Assert.Equal(expected: ValidModel.Vocabulary, actual: artifact.Vocabulary);
+        Assert.Equal(expected: ValidModel.InverseDocumentFrequency, actual: artifact.InverseDocumentFrequency);
     }
 
     // System.Text.Json rejects a literal `NaN`/`Infinity` JSON token outright (JsonException, before our
@@ -38,8 +38,8 @@ public class LogRegModelArtifactSerializerTests
     public void Deserialize_InverseDocumentFrequencyOverflowsToInfinity_Throws()
     {
         var json = """
-            {"vocabulary":["bug","algorithm"],"inverseDocumentFrequency":[1.0,1e400],"classWeights":{"model-a":[0.0,5.0,0.0]},"isPlaceholder":true,"trainedFrom":"x"}
-            """;
+                   {"vocabulary":["bug","algorithm"],"inverseDocumentFrequency":[1.0,1e400],"classWeights":{"model-a":[0.0,5.0,0.0]},"isPlaceholder":true,"trainedFrom":"x"}
+                   """;
 
         Assert.Throws<FormatException>(() => LogRegModelArtifactSerializer.Deserialize(json));
     }
@@ -50,8 +50,8 @@ public class LogRegModelArtifactSerializerTests
     public void Deserialize_ClassWeightsOverflowToInfinity_Throws(string overflowingLiteral)
     {
         var json = $$"""
-            {"vocabulary":["bug","algorithm"],"inverseDocumentFrequency":[1.0,1.0],"classWeights":{"model-a":[0.0,{{overflowingLiteral}},0.0]},"isPlaceholder":true,"trainedFrom":"x"}
-            """;
+                     {"vocabulary":["bug","algorithm"],"inverseDocumentFrequency":[1.0,1.0],"classWeights":{"model-a":[0.0,{{overflowingLiteral}},0.0]},"isPlaceholder":true,"trainedFrom":"x"}
+                     """;
 
         Assert.Throws<FormatException>(() => LogRegModelArtifactSerializer.Deserialize(json));
     }
@@ -60,8 +60,8 @@ public class LogRegModelArtifactSerializerTests
     public void Deserialize_DuplicateVocabularyTerms_Throws()
     {
         var json = """
-            {"vocabulary":["bug","bug"],"inverseDocumentFrequency":[1.0,1.0],"classWeights":{},"isPlaceholder":true,"trainedFrom":"x"}
-            """;
+                   {"vocabulary":["bug","bug"],"inverseDocumentFrequency":[1.0,1.0],"classWeights":{},"isPlaceholder":true,"trainedFrom":"x"}
+                   """;
 
         Assert.Throws<FormatException>(() => LogRegModelArtifactSerializer.Deserialize(json));
     }
@@ -70,8 +70,8 @@ public class LogRegModelArtifactSerializerTests
     public void Deserialize_InverseDocumentFrequencyLengthMismatch_Throws()
     {
         var json = """
-            {"vocabulary":["bug","algorithm"],"inverseDocumentFrequency":[1.0],"classWeights":{},"isPlaceholder":true,"trainedFrom":"x"}
-            """;
+                   {"vocabulary":["bug","algorithm"],"inverseDocumentFrequency":[1.0],"classWeights":{},"isPlaceholder":true,"trainedFrom":"x"}
+                   """;
 
         Assert.Throws<FormatException>(() => LogRegModelArtifactSerializer.Deserialize(json));
     }
@@ -86,8 +86,8 @@ public class LogRegModelArtifactSerializerTests
         // LogRegVoter's vocabulary index - null throws ArgumentNullException, blank silently collides with
         // every other blank entry - so it must be rejected here as a format error instead.
         var json = $$"""
-            {"vocabulary":["bug",{{vocabularyTermLiteral}}],"inverseDocumentFrequency":[1.0,1.0],"classWeights":{},"isPlaceholder":true,"trainedFrom":"x"}
-            """;
+                     {"vocabulary":["bug",{{vocabularyTermLiteral}}],"inverseDocumentFrequency":[1.0,1.0],"classWeights":{},"isPlaceholder":true,"trainedFrom":"x"}
+                     """;
 
         Assert.Throws<FormatException>(() => LogRegModelArtifactSerializer.Deserialize(json));
     }
@@ -96,8 +96,8 @@ public class LogRegModelArtifactSerializerTests
     public void Deserialize_ClassWeightsEntryIsNull_ThrowsFormatExceptionRatherThanNullReferenceException()
     {
         var json = """
-            {"vocabulary":["bug","algorithm"],"inverseDocumentFrequency":[1.0,1.0],"classWeights":{"model-a":null},"isPlaceholder":true,"trainedFrom":"x"}
-            """;
+                   {"vocabulary":["bug","algorithm"],"inverseDocumentFrequency":[1.0,1.0],"classWeights":{"model-a":null},"isPlaceholder":true,"trainedFrom":"x"}
+                   """;
 
         Assert.Throws<FormatException>(() => LogRegModelArtifactSerializer.Deserialize(json));
     }

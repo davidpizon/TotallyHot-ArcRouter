@@ -7,4 +7,3 @@ namespace TotallyHot.ArcRouter.Tests.Integration;
 public sealed class IntegrationTestCollection
 {
 }
-

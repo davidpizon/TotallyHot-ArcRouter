@@ -1,10 +1,12 @@
-using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
+using TotallyHot.ArcRouter.Tests.PriceCatalog;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy.Management;
 
@@ -16,34 +18,41 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Management;
 /// live in <c>/v1/models</c> without a restart.
 /// </summary>
 [Collection("ProxyLifecycle")]
-[Trait("Category", "Integration")]
+[Trait(name: "Category", value: "Integration")]
 public sealed class ProviderAdminEndpointsTests
 {
-    private static ModelRoutingOptions SeedOptions() => new()
+    private static ModelRoutingOptions SeedOptions()
     {
-        Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+        return new ModelRoutingOptions
         {
-            ["openai"] = new ProviderOptions { BaseUrl = "https://api.openai.com", AuthHeaderName = "Authorization" }
-        },
-        ModelList = [new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "openai", ProviderModelId = "gpt-5.4" }]
-    };
+            Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["openai"] = new() { BaseUrl = "https://api.openai.com", AuthHeaderName = "Authorization" }
+            },
+            ModelList =
+            [
+                new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "openai", ProviderModelId = "gpt-5.4" }
+            ]
+        };
+    }
 
     private static ProxyServer BuildServer(
         IProviderConfigStore store,
         HttpClient? managementHttpClient = null,
         string? managementToken = null,
-        TotallyHot.ArcRouter.PriceCatalog.ProviderBudgetStore? budgetStore = null)
+        ProviderBudgetStore? budgetStore = null)
     {
         var environment = Mock.Of<IEnvironmentVariableProvider>();
-        var resolver = new ModelRouteResolver(store, environment);
-        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver);
-        var middleware = new ProxyMiddleware(NullLogger<ProxyMiddleware>.Instance, interceptor);
+        var resolver = new ModelRouteResolver(store: store, environment: environment);
+        var interceptor =
+            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
+        var middleware = new ProxyMiddleware(logger: NullLogger<ProxyMiddleware>.Instance, interceptor: interceptor);
 
         return new ProxyServer(
-            NullLogger<ProxyServer>.Instance,
-            middleware,
-            port: 0,
-            grpcPort: 0,
+            logger: NullLogger<ProxyServer>.Instance,
+            proxyMiddleware: middleware,
+            0,
+            0,
             dependencies: new ProxyServerDependencies
             {
                 ManagementToken = managementToken,
@@ -51,13 +60,16 @@ public sealed class ProviderAdminEndpointsTests
                 {
                     Environment = environment,
                     HttpClient = managementHttpClient,
-                    BudgetStore = budgetStore,
-                },
+                    BudgetStore = budgetStore
+                }
             });
     }
 
-    private static string BaseAddress(ProxyServer server) =>
-        server.Addresses.Single(a => a.StartsWith("http://", StringComparison.Ordinal)).TrimEnd('/');
+    private static string BaseAddress(ProxyServer server)
+    {
+        return server.Addresses.Single(a => a.StartsWith(value: "http://", comparisonType: StringComparison.Ordinal))
+            .TrimEnd('/');
+    }
 
     [Fact]
     public async Task GetProviders_ReturnsProvidersWithModels()
@@ -68,14 +80,16 @@ public sealed class ProviderAdminEndpointsTests
         try
         {
             using var client = new HttpClient();
-            var json = await client.GetStringAsync($"{BaseAddress(server)}/admin/providers", TestContext.Current.CancellationToken);
+            var json = await client.GetStringAsync(requestUri: $"{BaseAddress(server)}/admin/providers",
+                cancellationToken: TestContext.Current.CancellationToken);
 
             using var document = JsonDocument.Parse(json);
             var provider = document.RootElement.GetProperty("providers").EnumerateArray().Single();
 
-            Assert.Equal("openai", provider.GetProperty("key").GetString());
-            Assert.Equal("https://api.openai.com", provider.GetProperty("baseUrl").GetString());
-            Assert.Equal("gpt-5.4", provider.GetProperty("models").EnumerateArray().Single().GetProperty("modelName").GetString());
+            Assert.Equal(expected: "openai", actual: provider.GetProperty("key").GetString());
+            Assert.Equal(expected: "https://api.openai.com", actual: provider.GetProperty("baseUrl").GetString());
+            Assert.Equal(expected: "gpt-5.4",
+                actual: provider.GetProperty("models").EnumerateArray().Single().GetProperty("modelName").GetString());
         }
         finally
         {
@@ -93,9 +107,10 @@ public sealed class ProviderAdminEndpointsTests
         {
             using var client = new HttpClient();
             var response = await client.GetAsync(
-                $"{BaseAddress(server)}/admin/providers/openai/rate-limit-history", TestContext.Current.CancellationToken);
+                requestUri: $"{BaseAddress(server)}/admin/providers/openai/rate-limit-history",
+                cancellationToken: TestContext.Current.CancellationToken);
 
-            Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+            Assert.Equal(expected: HttpStatusCode.ServiceUnavailable, actual: response.StatusCode);
         }
         finally
         {
@@ -113,9 +128,10 @@ public sealed class ProviderAdminEndpointsTests
         {
             using var client = new HttpClient();
             var response = await client.GetAsync(
-                $"{BaseAddress(server)}/admin/providers/does-not-exist/rate-limit-history", TestContext.Current.CancellationToken);
+                requestUri: $"{BaseAddress(server)}/admin/providers/does-not-exist/rate-limit-history",
+                cancellationToken: TestContext.Current.CancellationToken);
 
-            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+            Assert.Equal(expected: HttpStatusCode.NotFound, actual: response.StatusCode);
         }
         finally
         {
@@ -135,22 +151,24 @@ public sealed class ProviderAdminEndpointsTests
             var baseAddress = BaseAddress(server);
 
             var putProvider = await client.PutAsync(
-                $"{baseAddress}/admin/providers/ollama",
-                JsonBody(new { baseUrl = "http://localhost:11434/v1", authHeaderName = "Authorization" }),
-                TestContext.Current.CancellationToken);
-            Assert.Equal(HttpStatusCode.OK, putProvider.StatusCode);
+                requestUri: $"{baseAddress}/admin/providers/ollama",
+                content: JsonBody(new { baseUrl = "http://localhost:11434/v1", authHeaderName = "Authorization" }),
+                cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Equal(expected: HttpStatusCode.OK, actual: putProvider.StatusCode);
 
             var putModel = await client.PutAsync(
-                $"{baseAddress}/admin/providers/ollama/models/llama3",
-                JsonBody(new { providerModelId = "llama3" }),
-                TestContext.Current.CancellationToken);
-            Assert.Equal(HttpStatusCode.OK, putModel.StatusCode);
+                requestUri: $"{baseAddress}/admin/providers/ollama/models/llama3",
+                content: JsonBody(new { providerModelId = "llama3" }),
+                cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Equal(expected: HttpStatusCode.OK, actual: putModel.StatusCode);
 
             // The forwarding resolver shares the same store, so /v1/models reflects the edit with no restart.
-            var models = await client.GetStringAsync($"{baseAddress}/v1/models", TestContext.Current.CancellationToken);
+            var models = await client.GetStringAsync(requestUri: $"{baseAddress}/v1/models",
+                cancellationToken: TestContext.Current.CancellationToken);
             using var document = JsonDocument.Parse(models);
-            var ids = document.RootElement.GetProperty("data").EnumerateArray().Select(e => e.GetProperty("id").GetString()).ToList();
-            Assert.Contains("llama3", ids);
+            var ids = document.RootElement.GetProperty("data").EnumerateArray()
+                .Select(e => e.GetProperty("id").GetString()).ToList();
+            Assert.Contains(expected: "llama3", collection: ids);
         }
         finally
         {
@@ -169,20 +187,22 @@ public sealed class ProviderAdminEndpointsTests
             using var client = new HttpClient();
 
             var set = await client.PutAsync(
-                $"{BaseAddress(server)}/admin/providers/openai",
-                JsonBody(new { baseUrl = "https://api.openai.com", isFree = true }),
-                TestContext.Current.CancellationToken);
-            Assert.Equal(HttpStatusCode.OK, set.StatusCode);
+                requestUri: $"{BaseAddress(server)}/admin/providers/openai",
+                content: JsonBody(new { baseUrl = "https://api.openai.com", isFree = true }),
+                cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Equal(expected: HttpStatusCode.OK, actual: set.StatusCode);
             Assert.True(store.Snapshot.Options.Providers["openai"].IsFree);
 
-            var read = await client.GetStringAsync($"{BaseAddress(server)}/admin/providers", TestContext.Current.CancellationToken);
-            Assert.Contains("\"isFree\":true", read, StringComparison.Ordinal);
+            var read = await client.GetStringAsync(requestUri: $"{BaseAddress(server)}/admin/providers",
+                cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Contains(expectedSubstring: "\"isFree\":true", actualString: read,
+                comparisonType: StringComparison.Ordinal);
 
             var clear = await client.PutAsync(
-                $"{BaseAddress(server)}/admin/providers/openai",
-                JsonBody(new { baseUrl = "https://api.openai.com", isFree = false }),
-                TestContext.Current.CancellationToken);
-            Assert.Equal(HttpStatusCode.OK, clear.StatusCode);
+                requestUri: $"{BaseAddress(server)}/admin/providers/openai",
+                content: JsonBody(new { baseUrl = "https://api.openai.com", isFree = false }),
+                cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Equal(expected: HttpStatusCode.OK, actual: clear.StatusCode);
             Assert.False(store.Snapshot.Options.Providers["openai"].IsFree);
         }
         finally
@@ -207,13 +227,13 @@ public sealed class ProviderAdminEndpointsTests
             using var client = new HttpClient();
 
             var response = await client.PutAsync(
-                $"{BaseAddress(server)}/admin/providers/openai",
-                JsonBody(new { baseUrl = "https://api.openai.com/v2" }),
-                TestContext.Current.CancellationToken);
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                requestUri: $"{BaseAddress(server)}/admin/providers/openai",
+                content: JsonBody(new { baseUrl = "https://api.openai.com/v2" }),
+                cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Equal(expected: HttpStatusCode.OK, actual: response.StatusCode);
 
             var stored = store.Snapshot.Options.Providers["openai"];
-            Assert.Equal("https://api.openai.com/v2", stored.BaseUrl);
+            Assert.Equal(expected: "https://api.openai.com/v2", actual: stored.BaseUrl);
             Assert.True(stored.IsFree);
         }
         finally
@@ -236,7 +256,7 @@ public sealed class ProviderAdminEndpointsTests
             var url = $"{BaseAddress(server)}/admin/providers/openai";
 
             // Store two headers - one literal, one env-var-backed.
-            var put = await client.PutAsync(url, JsonBody(new
+            var put = await client.PutAsync(requestUri: url, content: JsonBody(new
             {
                 baseUrl = "https://api.openai.com",
                 headers = new object[]
@@ -244,27 +264,38 @@ public sealed class ProviderAdminEndpointsTests
                     new { name = "anthropic-version", value = "2023-06-01" },
                     new { name = "X-Secret", valueEnvVar = "SECRET_VAR" }
                 }
-            }), TestContext.Current.CancellationToken);
-            Assert.Equal(HttpStatusCode.OK, put.StatusCode);
+            }), cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Equal(expected: HttpStatusCode.OK, actual: put.StatusCode);
 
             var stored = store.Snapshot.Options.Providers["openai"].Headers;
-            Assert.Equal(2, stored.Count);
-            Assert.Equal("2023-06-01", stored.Single(h => h.Name == "anthropic-version").Value);
-            Assert.Equal("SECRET_VAR", stored.Single(h => h.Name == "X-Secret").ValueEnvVar);
+            Assert.Equal(2, actual: stored.Count);
+            Assert.Equal(expected: "2023-06-01", actual: stored.Single(h => h.Name == "anthropic-version").Value);
+            Assert.Equal(expected: "SECRET_VAR", actual: stored.Single(h => h.Name == "X-Secret").ValueEnvVar);
 
             // A GET returns them (literal value included; env-var header carries only the var name).
-            var get = await client.GetAsync($"{BaseAddress(server)}/admin/providers", TestContext.Current.CancellationToken);
-            using var doc = JsonDocument.Parse(await get.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
-            var openai = doc.RootElement.GetProperty("providers").EnumerateArray().Single(p => p.GetProperty("key").GetString() == "openai");
-            Assert.Equal(2, openai.GetProperty("headers").GetArrayLength());
+            var get = await client.GetAsync(requestUri: $"{BaseAddress(server)}/admin/providers",
+                cancellationToken: TestContext.Current.CancellationToken);
+            using var doc =
+                JsonDocument.Parse(await get.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+            var openai = doc.RootElement.GetProperty("providers").EnumerateArray()
+                .Single(p => p.GetProperty("key").GetString() == "openai");
+            Assert.Equal(2, actual: openai.GetProperty("headers").GetArrayLength());
 
             // A headers array replaces the whole set.
-            await client.PutAsync(url, JsonBody(new { baseUrl = "https://api.openai.com", headers = new object[] { new { name = "Only-One", value = "1" } } }), TestContext.Current.CancellationToken);
-            Assert.Equal("Only-One", Assert.Single(store.Snapshot.Options.Providers["openai"].Headers).Name);
+            await client.PutAsync(requestUri: url,
+                content: JsonBody(new
+                {
+                    baseUrl = "https://api.openai.com",
+                    headers = new object[] { new { name = "Only-One", value = "1" } }
+                }), cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Equal(expected: "Only-One",
+                actual: Assert.Single(store.Snapshot.Options.Providers["openai"].Headers).Name);
 
             // Omitting headers keeps the existing set (legacy callers).
-            await client.PutAsync(url, JsonBody(new { baseUrl = "https://api.openai.com/v2" }), TestContext.Current.CancellationToken);
-            Assert.Equal("Only-One", Assert.Single(store.Snapshot.Options.Providers["openai"].Headers).Name);
+            await client.PutAsync(requestUri: url, content: JsonBody(new { baseUrl = "https://api.openai.com/v2" }),
+                cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Equal(expected: "Only-One",
+                actual: Assert.Single(store.Snapshot.Options.Providers["openai"].Headers).Name);
         }
         finally
         {
@@ -286,13 +317,15 @@ public sealed class ProviderAdminEndpointsTests
 
             // "%20" decodes to a whitespace key, which the store rejects with ArgumentException.
             var response = await client.PutAsync(
-                $"{BaseAddress(server)}/admin/providers/%20",
-                JsonBody(new { baseUrl = "https://example.com" }),
-                TestContext.Current.CancellationToken);
+                requestUri: $"{BaseAddress(server)}/admin/providers/%20",
+                content: JsonBody(new { baseUrl = "https://example.com" }),
+                cancellationToken: TestContext.Current.CancellationToken);
 
-            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
-            Assert.Equal("invalid_request_error", document.RootElement.GetProperty("error").GetProperty("type").GetString());
+            Assert.Equal(expected: HttpStatusCode.BadRequest, actual: response.StatusCode);
+            using var document =
+                JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+            Assert.Equal(expected: "invalid_request_error",
+                actual: document.RootElement.GetProperty("error").GetProperty("type").GetString());
         }
         finally
         {
@@ -312,11 +345,12 @@ public sealed class ProviderAdminEndpointsTests
 
             // "openai" still owns the "gpt-5.4" model. The removal cascades to it rather than being
             // rejected, so the caller gets a success and no orphaned model is left in the config.
-            var response = await client.DeleteAsync($"{BaseAddress(server)}/admin/providers/openai", TestContext.Current.CancellationToken);
+            var response = await client.DeleteAsync(requestUri: $"{BaseAddress(server)}/admin/providers/openai",
+                cancellationToken: TestContext.Current.CancellationToken);
 
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal(expected: HttpStatusCode.OK, actual: response.StatusCode);
             Assert.False(store.Snapshot.Options.Providers.ContainsKey("openai"));
-            Assert.DoesNotContain(store.Snapshot.Options.ModelList, m => m.ModelName == "gpt-5.4");
+            Assert.DoesNotContain(collection: store.Snapshot.Options.ModelList, filter: m => m.ModelName == "gpt-5.4");
         }
         finally
         {
@@ -330,31 +364,33 @@ public sealed class ProviderAdminEndpointsTests
         var store = new InMemoryProviderConfigStore(SeedOptions());
         var stub = new DelegatingHandlerStub(request =>
         {
-            Assert.Equal("https://api.openai.com/v1/models", request.RequestUri!.ToString());
+            Assert.Equal(expected: "https://api.openai.com/v1/models", actual: request.RequestUri!.ToString());
             // openai has no custom headers configured, so none are sent (no provider-specific defaults).
             Assert.False(request.Headers.Contains("anthropic-version"));
             const string body = """{ "object": "list", "data": [ { "id": "gpt-5.4" }, { "id": "gpt-4o" } ] }""";
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(body, Encoding.UTF8, "application/json")
+                Content = new StringContent(content: body, encoding: Encoding.UTF8, mediaType: "application/json")
             });
         });
 
-        using var server = BuildServer(store, managementHttpClient: new HttpClient(stub));
+        using var server = BuildServer(store: store, managementHttpClient: new HttpClient(stub));
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
             using var client = new HttpClient();
             var response = await client.PostAsync(
-                $"{BaseAddress(server)}/admin/providers/openai/discover-models",
-                content: null,
-                TestContext.Current.CancellationToken);
+                requestUri: $"{BaseAddress(server)}/admin/providers/openai/discover-models",
+                null,
+                cancellationToken: TestContext.Current.CancellationToken);
 
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+            Assert.Equal(expected: HttpStatusCode.OK, actual: response.StatusCode);
+            using var document =
+                JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
             Assert.True(document.RootElement.GetProperty("supported").GetBoolean());
-            var models = document.RootElement.GetProperty("models").EnumerateArray().Select(e => e.GetString()).ToList();
-            Assert.Equal(["gpt-5.4", "gpt-4o"], models);
+            var models = document.RootElement.GetProperty("models").EnumerateArray().Select(e => e.GetString())
+                .ToList();
+            Assert.Equal(expected: ["gpt-5.4", "gpt-4o"], actual: models);
         }
         finally
         {
@@ -369,18 +405,19 @@ public sealed class ProviderAdminEndpointsTests
         var stub = new DelegatingHandlerStub(_ =>
             Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)));
 
-        using var server = BuildServer(store, managementHttpClient: new HttpClient(stub));
+        using var server = BuildServer(store: store, managementHttpClient: new HttpClient(stub));
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
             using var client = new HttpClient();
             var response = await client.PostAsync(
-                $"{BaseAddress(server)}/admin/providers/openai/discover-models",
-                content: null,
-                TestContext.Current.CancellationToken);
+                requestUri: $"{BaseAddress(server)}/admin/providers/openai/discover-models",
+                null,
+                cancellationToken: TestContext.Current.CancellationToken);
 
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+            Assert.Equal(expected: HttpStatusCode.OK, actual: response.StatusCode);
+            using var document =
+                JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
             Assert.False(document.RootElement.GetProperty("supported").GetBoolean());
         }
         finally
@@ -398,7 +435,7 @@ public sealed class ProviderAdminEndpointsTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["anthropic"] = new ProviderOptions
+                ["anthropic"] = new()
                 {
                     BaseUrl = "https://api.anthropic.com",
                     AuthHeaderName = "x-api-key",
@@ -414,31 +451,34 @@ public sealed class ProviderAdminEndpointsTests
         var store = new InMemoryProviderConfigStore(options);
         var stub = new DelegatingHandlerStub(request =>
         {
-            Assert.Equal("https://api.anthropic.com/v1/models", request.RequestUri!.ToString());
-            Assert.Equal("2023-06-01", Assert.Single(request.Headers.GetValues("anthropic-version")));
+            Assert.Equal(expected: "https://api.anthropic.com/v1/models", actual: request.RequestUri!.ToString());
+            Assert.Equal(expected: "2023-06-01", actual: Assert.Single(request.Headers.GetValues("anthropic-version")));
             Assert.True(request.Headers.Contains("x-api-key"));
-            const string body = """{ "data": [ { "id": "claude-opus-4-6", "type": "model" }, { "id": "claude-sonnet-4-6", "type": "model" } ] }""";
+            const string body =
+                """{ "data": [ { "id": "claude-opus-4-6", "type": "model" }, { "id": "claude-sonnet-4-6", "type": "model" } ] }""";
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(body, Encoding.UTF8, "application/json")
+                Content = new StringContent(content: body, encoding: Encoding.UTF8, mediaType: "application/json")
             });
         });
 
-        using var server = BuildServer(store, managementHttpClient: new HttpClient(stub));
+        using var server = BuildServer(store: store, managementHttpClient: new HttpClient(stub));
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
             using var client = new HttpClient();
             var response = await client.PostAsync(
-                $"{BaseAddress(server)}/admin/providers/anthropic/discover-models",
-                content: null,
-                TestContext.Current.CancellationToken);
+                requestUri: $"{BaseAddress(server)}/admin/providers/anthropic/discover-models",
+                null,
+                cancellationToken: TestContext.Current.CancellationToken);
 
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+            Assert.Equal(expected: HttpStatusCode.OK, actual: response.StatusCode);
+            using var document =
+                JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
             Assert.True(document.RootElement.GetProperty("supported").GetBoolean());
-            var models = document.RootElement.GetProperty("models").EnumerateArray().Select(e => e.GetString()).ToList();
-            Assert.Equal(["claude-opus-4-6", "claude-sonnet-4-6"], models);
+            var models = document.RootElement.GetProperty("models").EnumerateArray().Select(e => e.GetString())
+                .ToList();
+            Assert.Equal(expected: ["claude-opus-4-6", "claude-sonnet-4-6"], actual: models);
         }
         finally
         {
@@ -450,20 +490,23 @@ public sealed class ProviderAdminEndpointsTests
     public async Task ManagementToken_WhenConfigured_GatesAdminRequests()
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store, managementToken: "s3cret");
+        using var server = BuildServer(store: store, managementToken: "s3cret");
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
             using var client = new HttpClient();
             var baseAddress = BaseAddress(server);
 
-            var unauthorized = await client.GetAsync($"{baseAddress}/admin/providers", TestContext.Current.CancellationToken);
-            Assert.Equal(HttpStatusCode.Unauthorized, unauthorized.StatusCode);
+            var unauthorized = await client.GetAsync(requestUri: $"{baseAddress}/admin/providers",
+                cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Equal(expected: HttpStatusCode.Unauthorized, actual: unauthorized.StatusCode);
 
-            using var authorizedRequest = new HttpRequestMessage(HttpMethod.Get, $"{baseAddress}/admin/providers");
-            authorizedRequest.Headers.Add("X-Admin-Token", "s3cret");
-            var authorized = await client.SendAsync(authorizedRequest, TestContext.Current.CancellationToken);
-            Assert.Equal(HttpStatusCode.OK, authorized.StatusCode);
+            using var authorizedRequest =
+                new HttpRequestMessage(method: HttpMethod.Get, requestUri: $"{baseAddress}/admin/providers");
+            authorizedRequest.Headers.Add(name: "X-Admin-Token", value: "s3cret");
+            var authorized = await client.SendAsync(request: authorizedRequest,
+                cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Equal(expected: HttpStatusCode.OK, actual: authorized.StatusCode);
         }
         finally
         {
@@ -479,14 +522,15 @@ public sealed class ProviderAdminEndpointsTests
     public async Task ManagementToken_WhitespaceOnly_IsTreatedAsNotConfigured()
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store, managementToken: "   ");
+        using var server = BuildServer(store: store, managementToken: "   ");
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
             using var client = new HttpClient();
-            var response = await client.GetAsync($"{BaseAddress(server)}/admin/providers", TestContext.Current.CancellationToken);
+            var response = await client.GetAsync(requestUri: $"{BaseAddress(server)}/admin/providers",
+                cancellationToken: TestContext.Current.CancellationToken);
 
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal(expected: HttpStatusCode.OK, actual: response.StatusCode);
         }
         finally
         {
@@ -501,7 +545,7 @@ public sealed class ProviderAdminEndpointsTests
     public async Task ManagementToken_WhenConfigured_DoesNotGateForwardingEndpoints()
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store, managementToken: "s3cret");
+        using var server = BuildServer(store: store, managementToken: "s3cret");
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
@@ -509,12 +553,14 @@ public sealed class ProviderAdminEndpointsTests
             var baseAddress = BaseAddress(server);
 
             // No X-Admin-Token header sent, yet /v1/models (answered locally, not proxied) still succeeds.
-            var models = await client.GetAsync($"{baseAddress}/v1/models", TestContext.Current.CancellationToken);
-            Assert.Equal(HttpStatusCode.OK, models.StatusCode);
+            var models = await client.GetAsync(requestUri: $"{baseAddress}/v1/models",
+                cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Equal(expected: HttpStatusCode.OK, actual: models.StatusCode);
 
             // Meanwhile /admin/* still requires the token.
-            var admin = await client.GetAsync($"{baseAddress}/admin/providers", TestContext.Current.CancellationToken);
-            Assert.Equal(HttpStatusCode.Unauthorized, admin.StatusCode);
+            var admin = await client.GetAsync(requestUri: $"{baseAddress}/admin/providers",
+                cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Equal(expected: HttpStatusCode.Unauthorized, actual: admin.StatusCode);
         }
         finally
         {
@@ -531,7 +577,7 @@ public sealed class ProviderAdminEndpointsTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["openai"] = new ProviderOptions
+                ["openai"] = new()
                 {
                     BaseUrl = "https://api.openai.com",
                     Headers = [new ProviderHeader { Name = "X-Literal", Value = "literal-header-secret" }]
@@ -545,14 +591,16 @@ public sealed class ProviderAdminEndpointsTests
         try
         {
             using var client = new HttpClient();
-            var json = await client.GetStringAsync($"{BaseAddress(server)}/admin/providers", TestContext.Current.CancellationToken);
+            var json = await client.GetStringAsync(requestUri: $"{BaseAddress(server)}/admin/providers",
+                cancellationToken: TestContext.Current.CancellationToken);
 
-            Assert.DoesNotContain("literal-header-secret", json, StringComparison.Ordinal);
+            Assert.DoesNotContain(expectedSubstring: "literal-header-secret", actualString: json,
+                comparisonType: StringComparison.Ordinal);
 
             using var document = JsonDocument.Parse(json);
             var header = document.RootElement.GetProperty("providers").EnumerateArray().Single()
                 .GetProperty("headers").EnumerateArray().Single();
-            Assert.Equal("literal", header.GetProperty("source").GetString());
+            Assert.Equal(expected: "literal", actual: header.GetProperty("source").GetString());
         }
         finally
         {
@@ -564,9 +612,9 @@ public sealed class ProviderAdminEndpointsTests
     public async Task PutBudget_PersistsCaps_AndGetSurfacesCapsAndCurrentMonthSpend()
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var temp = new TotallyHot.ArcRouter.Tests.PriceCatalog.TempDatabase();
+        using var temp = new TempDatabase();
         var budgetStore = temp.CreateBudgetStore();
-        using var server = BuildServer(store, budgetStore: budgetStore);
+        using var server = BuildServer(store: store, budgetStore: budgetStore);
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
@@ -574,23 +622,25 @@ public sealed class ProviderAdminEndpointsTests
             var baseAddress = BaseAddress(server);
 
             var put = await client.PutAsync(
-                $"{baseAddress}/admin/providers/openai/budget",
-                JsonBody(new { dollarCap = 500m, tokenCap = 1_000_000L }),
-                TestContext.Current.CancellationToken);
-            Assert.Equal(HttpStatusCode.OK, put.StatusCode);
+                requestUri: $"{baseAddress}/admin/providers/openai/budget",
+                content: JsonBody(new { dollarCap = 500m, tokenCap = 1_000_000L }),
+                cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Equal(expected: HttpStatusCode.OK, actual: put.StatusCode);
 
             // Simulate a served request billing this provider, as ProxyMiddleware would post-response.
-            await budgetStore.RecordUsageAsync("openai", 12.50m, promptTokens: 300, completionTokens: 200, cacheCreationTokens: null, cacheReadTokens: null, usageAtUtc: DateTimeOffset.UtcNow, cancellationToken: TestContext.Current.CancellationToken);
+            await budgetStore.RecordUsageAsync(providerKey: "openai", 12.50m, 300, 200, null, null,
+                usageAtUtc: DateTimeOffset.UtcNow, cancellationToken: TestContext.Current.CancellationToken);
 
-            var get = await client.GetStringAsync($"{baseAddress}/admin/providers", TestContext.Current.CancellationToken);
+            var get = await client.GetStringAsync(requestUri: $"{baseAddress}/admin/providers",
+                cancellationToken: TestContext.Current.CancellationToken);
             using var document = JsonDocument.Parse(get);
             var openai = document.RootElement.GetProperty("providers").EnumerateArray()
                 .Single(p => p.GetProperty("key").GetString() == "openai");
 
-            Assert.Equal(500m, openai.GetProperty("dollarCap").GetDecimal());
-            Assert.Equal(1_000_000L, openai.GetProperty("tokenCap").GetInt64());
-            Assert.Equal(12.50m, openai.GetProperty("dollarSpent").GetDecimal());
-            Assert.Equal(500L, openai.GetProperty("tokensUsed").GetInt64());
+            Assert.Equal(500m, actual: openai.GetProperty("dollarCap").GetDecimal());
+            Assert.Equal(1_000_000L, actual: openai.GetProperty("tokenCap").GetInt64());
+            Assert.Equal(12.50m, actual: openai.GetProperty("dollarSpent").GetDecimal());
+            Assert.Equal(500L, actual: openai.GetProperty("tokensUsed").GetInt64());
         }
         finally
         {
@@ -611,22 +661,22 @@ public sealed class ProviderAdminEndpointsTests
 
             // A provider seeded without the flag reads as enabled - the default is what keeps an existing
             // model-routing.json from coming back with every provider silently stopped.
-            Assert.True(await ReadEnabledAsync(client, baseAddress, "openai"));
+            Assert.True(await ReadEnabledAsync(client: client, baseAddress: baseAddress, key: "openai"));
 
             var off = await client.PutAsync(
-                $"{baseAddress}/admin/providers/openai/enabled",
-                JsonBody(new { enabled = false }),
-                TestContext.Current.CancellationToken);
-            Assert.Equal(HttpStatusCode.OK, off.StatusCode);
+                requestUri: $"{baseAddress}/admin/providers/openai/enabled",
+                content: JsonBody(new { enabled = false }),
+                cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Equal(expected: HttpStatusCode.OK, actual: off.StatusCode);
             Assert.False(store.Snapshot.Options.Providers["openai"].Enabled);
-            Assert.False(await ReadEnabledAsync(client, baseAddress, "openai"));
+            Assert.False(await ReadEnabledAsync(client: client, baseAddress: baseAddress, key: "openai"));
 
             var on = await client.PutAsync(
-                $"{baseAddress}/admin/providers/openai/enabled",
-                JsonBody(new { enabled = true }),
-                TestContext.Current.CancellationToken);
-            Assert.Equal(HttpStatusCode.OK, on.StatusCode);
-            Assert.True(await ReadEnabledAsync(client, baseAddress, "openai"));
+                requestUri: $"{baseAddress}/admin/providers/openai/enabled",
+                content: JsonBody(new { enabled = true }),
+                cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Equal(expected: HttpStatusCode.OK, actual: on.StatusCode);
+            Assert.True(await ReadEnabledAsync(client: client, baseAddress: baseAddress, key: "openai"));
         }
         finally
         {
@@ -644,7 +694,7 @@ public sealed class ProviderAdminEndpointsTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["bedrock"] = new ProviderOptions
+                ["bedrock"] = new()
                 {
                     BaseUrl = "https://bedrock-runtime.us-east-1.amazonaws.com",
                     AuthHeaderName = "Authorization",
@@ -667,20 +717,20 @@ public sealed class ProviderAdminEndpointsTests
             using var client = new HttpClient();
 
             var response = await client.PutAsync(
-                $"{BaseAddress(server)}/admin/providers/bedrock/enabled",
-                JsonBody(new { enabled = false }),
-                TestContext.Current.CancellationToken);
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                requestUri: $"{BaseAddress(server)}/admin/providers/bedrock/enabled",
+                content: JsonBody(new { enabled = false }),
+                cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Equal(expected: HttpStatusCode.OK, actual: response.StatusCode);
 
             var stored = store.Snapshot.Options.Providers["bedrock"];
             Assert.False(stored.Enabled);
-            Assert.Equal("https://bedrock-runtime.us-east-1.amazonaws.com", stored.BaseUrl);
+            Assert.Equal(expected: "https://bedrock-runtime.us-east-1.amazonaws.com", actual: stored.BaseUrl);
             Assert.True(stored.IsFree);
-            Assert.Equal("anthropic-version", Assert.Single(stored.Headers).Name);
-            Assert.Equal("us-east-1", stored.AwsRegion);
-            Assert.Equal("AWS_ACCESS_KEY_ID", stored.AwsAccessKeyIdEnvVar);
-            Assert.Equal("AWS_SECRET_ACCESS_KEY", stored.AwsSecretAccessKeyEnvVar);
-            Assert.Equal("AWS_SESSION_TOKEN", stored.AwsSessionTokenEnvVar);
+            Assert.Equal(expected: "anthropic-version", actual: Assert.Single(stored.Headers).Name);
+            Assert.Equal(expected: "us-east-1", actual: stored.AwsRegion);
+            Assert.Equal(expected: "AWS_ACCESS_KEY_ID", actual: stored.AwsAccessKeyIdEnvVar);
+            Assert.Equal(expected: "AWS_SECRET_ACCESS_KEY", actual: stored.AwsSecretAccessKeyEnvVar);
+            Assert.Equal(expected: "AWS_SESSION_TOKEN", actual: stored.AwsSessionTokenEnvVar);
         }
         finally
         {
@@ -699,11 +749,11 @@ public sealed class ProviderAdminEndpointsTests
             using var client = new HttpClient();
 
             var response = await client.PutAsync(
-                $"{BaseAddress(server)}/admin/providers/nope/enabled",
-                JsonBody(new { enabled = false }),
-                TestContext.Current.CancellationToken);
+                requestUri: $"{BaseAddress(server)}/admin/providers/nope/enabled",
+                content: JsonBody(new { enabled = false }),
+                cancellationToken: TestContext.Current.CancellationToken);
 
-            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+            Assert.Equal(expected: HttpStatusCode.NotFound, actual: response.StatusCode);
         }
         finally
         {
@@ -725,18 +775,19 @@ public sealed class ProviderAdminEndpointsTests
             var baseAddress = BaseAddress(server);
 
             await client.PutAsync(
-                $"{baseAddress}/admin/providers/openai/enabled",
-                JsonBody(new { enabled = false }),
-                TestContext.Current.CancellationToken);
+                requestUri: $"{baseAddress}/admin/providers/openai/enabled",
+                content: JsonBody(new { enabled = false }),
+                cancellationToken: TestContext.Current.CancellationToken);
 
             var response = await client.PutAsync(
-                $"{baseAddress}/admin/providers/openai",
-                JsonBody(new { baseUrl = "https://api.openai.com/v2" }),
-                TestContext.Current.CancellationToken);
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                requestUri: $"{baseAddress}/admin/providers/openai",
+                content: JsonBody(new { baseUrl = "https://api.openai.com/v2" }),
+                cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Equal(expected: HttpStatusCode.OK, actual: response.StatusCode);
 
             Assert.False(store.Snapshot.Options.Providers["openai"].Enabled);
-            Assert.Equal("https://api.openai.com/v2", store.Snapshot.Options.Providers["openai"].BaseUrl);
+            Assert.Equal(expected: "https://api.openai.com/v2",
+                actual: store.Snapshot.Options.Providers["openai"].BaseUrl);
         }
         finally
         {
@@ -746,7 +797,8 @@ public sealed class ProviderAdminEndpointsTests
 
     private static async Task<bool> ReadEnabledAsync(HttpClient client, string baseAddress, string key)
     {
-        var json = await client.GetStringAsync($"{baseAddress}/admin/providers", TestContext.Current.CancellationToken);
+        var json = await client.GetStringAsync(requestUri: $"{baseAddress}/admin/providers",
+            cancellationToken: TestContext.Current.CancellationToken);
         using var document = JsonDocument.Parse(json);
         return document.RootElement.GetProperty("providers").EnumerateArray()
             .Single(p => p.GetProperty("key").GetString() == key)
@@ -757,19 +809,19 @@ public sealed class ProviderAdminEndpointsTests
     public async Task PutBudget_NegativeCap_ReturnsBadRequest()
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var temp = new TotallyHot.ArcRouter.Tests.PriceCatalog.TempDatabase();
-        using var server = BuildServer(store, budgetStore: temp.CreateBudgetStore());
+        using var temp = new TempDatabase();
+        using var server = BuildServer(store: store, budgetStore: temp.CreateBudgetStore());
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
             using var client = new HttpClient();
 
             var response = await client.PutAsync(
-                $"{BaseAddress(server)}/admin/providers/openai/budget",
-                JsonBody(new { dollarCap = -1m, tokenCap = (long?)null }),
-                TestContext.Current.CancellationToken);
+                requestUri: $"{BaseAddress(server)}/admin/providers/openai/budget",
+                content: JsonBody(new { dollarCap = -1m, tokenCap = (long?)null }),
+                cancellationToken: TestContext.Current.CancellationToken);
 
-            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Equal(expected: HttpStatusCode.BadRequest, actual: response.StatusCode);
         }
         finally
         {
@@ -781,19 +833,19 @@ public sealed class ProviderAdminEndpointsTests
     public async Task PutBudget_UnknownProvider_ReturnsNotFound()
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var temp = new TotallyHot.ArcRouter.Tests.PriceCatalog.TempDatabase();
-        using var server = BuildServer(store, budgetStore: temp.CreateBudgetStore());
+        using var temp = new TempDatabase();
+        using var server = BuildServer(store: store, budgetStore: temp.CreateBudgetStore());
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
             using var client = new HttpClient();
 
             var response = await client.PutAsync(
-                $"{BaseAddress(server)}/admin/providers/nope/budget",
-                JsonBody(new { dollarCap = 10m, tokenCap = (long?)null }),
-                TestContext.Current.CancellationToken);
+                requestUri: $"{BaseAddress(server)}/admin/providers/nope/budget",
+                content: JsonBody(new { dollarCap = 10m, tokenCap = (long?)null }),
+                cancellationToken: TestContext.Current.CancellationToken);
 
-            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+            Assert.Equal(expected: HttpStatusCode.NotFound, actual: response.StatusCode);
         }
         finally
         {
@@ -801,17 +853,25 @@ public sealed class ProviderAdminEndpointsTests
         }
     }
 
-    private static StringContent JsonBody(object value) =>
-        new(JsonSerializer.Serialize(value), Encoding.UTF8, "application/json");
+    private static StringContent JsonBody(object value)
+    {
+        return new StringContent(content: JsonSerializer.Serialize(value), encoding: Encoding.UTF8,
+            mediaType: "application/json");
+    }
 
     private sealed class DelegatingHandlerStub : HttpMessageHandler
     {
         private readonly Func<HttpRequestMessage, Task<HttpResponseMessage>> _handler;
 
-        public DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler) => _handler = handler;
+        public DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler)
+        {
+            _handler = handler;
+        }
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => _handler(request);
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            return _handler(request);
+        }
     }
 }
-

@@ -8,8 +8,8 @@ namespace TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 /// </summary>
 public sealed class LinThompsonSamplingBaseline : CategoricalContextBanditBaselineBase
 {
-    private readonly double _v;
     private readonly Random _random;
+    private readonly double _v;
 
     /// <summary>Initializes a new instance of the <see cref="LinThompsonSamplingBaseline"/> class.</summary>
     /// <param name="v">The posterior-variance scale. Canonical value <c>0.5</c>.</param>
@@ -25,15 +25,18 @@ public sealed class LinThompsonSamplingBaseline : CategoricalContextBanditBaseli
         _random = new Random(seed);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public override string Name => "lints";
 
-    /// <inheritdoc />
-    /// <remarks>Draws one sample from <c>N(θ_d, v²/(λ+n_d))</c> per candidate and lets the draw itself pick the arm — Thompson sampling's exploration, not an explicit bonus term.</remarks>
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Draws one sample from <c>N(θ_d, v²/(λ+n_d))</c> per candidate and lets the draw itself pick the arm — Thompson
+    /// sampling's exploration, not an explicit bonus term.
+    /// </remarks>
     protected override double ScoreArm(double mean, double denominator)
     {
         var standardDeviation = _v * Math.Sqrt(1d / denominator);
-        return mean + (standardDeviation * SampleStandardNormal());
+        return mean + standardDeviation * SampleStandardNormal();
     }
 
     private double SampleStandardNormal()

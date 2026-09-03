@@ -29,4 +29,3 @@ public sealed record SignalExtractionContext(
     string Model,
     string CorrelationId,
     string SessionId);
-

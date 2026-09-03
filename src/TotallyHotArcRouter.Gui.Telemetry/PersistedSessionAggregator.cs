@@ -1,8 +1,13 @@
+using System.Globalization;
+
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
 
 /// <summary>One transcript row within a session reconstructed from persisted history.</summary>
 /// <param name="CorrelationId">The row's full correlation id, <c>"{SessionId}:{turnNumber}"</c>.</param>
-/// <param name="TurnNumber">Parsed from the suffix of <paramref name="CorrelationId"/>; see <see cref="PersistedSessionAggregator.TurnNumberOf"/>.</param>
+/// <param name="TurnNumber">
+/// Parsed from the suffix of <paramref name="CorrelationId"/>; see
+/// <see cref="PersistedSessionAggregator.TurnNumberOf"/>.
+/// </param>
 /// <param name="RequestedModel">The client's literal requested model name.</param>
 /// <param name="RoutedModel">The model that actually served the request.</param>
 /// <param name="PromptText">The captured prompt text, or <see langword="null"/> when unavailable.</param>
@@ -11,7 +16,10 @@ namespace TotallyHot.ArcRouter.Gui.Telemetry;
 /// <param name="InputTokens">The prompt token count, or <see langword="null"/> when unknown.</param>
 /// <param name="OutputTokens">The completion token count, or <see langword="null"/> when unknown.</param>
 /// <param name="TimestampUtc">When this row was written, in UTC.</param>
-/// <param name="MemoryEntryId">The linked <c>memory_entries</c> row id, or <see langword="null"/> if never folded into the live-learning corpus.</param>
+/// <param name="MemoryEntryId">
+/// The linked <c>memory_entries</c> row id, or <see langword="null"/> if never folded into the
+/// live-learning corpus.
+/// </param>
 public sealed record PersistedConversationTurn(
     string CorrelationId,
     int TurnNumber,
@@ -33,7 +41,10 @@ public sealed record PersistedConversationTurn(
 /// <param name="TotalInputTokens">The sum of every turn's known input tokens.</param>
 /// <param name="TotalOutputTokens">The sum of every turn's known output tokens.</param>
 /// <param name="Turns">This session's turns, oldest first.</param>
-/// <param name="IsUsedForTraining">Whether any turn's transcript was folded into the live-learning corpus (<see cref="PersistedConversationTurn.MemoryEntryId"/> set).</param>
+/// <param name="IsUsedForTraining">
+/// Whether any turn's transcript was folded into the live-learning corpus (
+/// <see cref="PersistedConversationTurn.MemoryEntryId"/> set).
+/// </param>
 public sealed record PersistedConversation(
     string SessionId,
     DateTimeOffset FirstTimestampUtc,
@@ -63,13 +74,16 @@ public static class PersistedSessionAggregator
         ArgumentNullException.ThrowIfNull(transcripts);
 
         return transcripts
-            .GroupBy(t => t.SessionId, StringComparer.Ordinal)
+            .GroupBy(keySelector: t => t.SessionId, comparer: StringComparer.Ordinal)
             .Select(BuildConversation)
             .OrderByDescending(c => c.LastTimestampUtc)
             .ToList();
     }
 
-    /// <summary>Builds one <see cref="PersistedConversation"/> from a single session's grouped rows, ordering its turns by parsed turn number.</summary>
+    /// <summary>
+    /// Builds one <see cref="PersistedConversation"/> from a single session's grouped rows, ordering its turns by
+    /// parsed turn number.
+    /// </summary>
     private static PersistedConversation BuildConversation(IGrouping<string, PersistedTranscriptDto> group)
     {
         var turns = group
@@ -109,12 +123,11 @@ public static class PersistedSessionAggregator
     private static int TurnNumberOf(string correlationId)
     {
         var lastSeparator = correlationId.LastIndexOf(':');
-        if (lastSeparator < 0 || lastSeparator == correlationId.Length - 1)
-        {
-            return 1;
-        }
+        if (lastSeparator < 0 || lastSeparator == correlationId.Length - 1) return 1;
 
         var suffix = correlationId[(lastSeparator + 1)..];
-        return int.TryParse(suffix, System.Globalization.CultureInfo.InvariantCulture, out var turnNumber) ? turnNumber : 1;
+        return int.TryParse(s: suffix, provider: CultureInfo.InvariantCulture, result: out var turnNumber)
+            ? turnNumber
+            : 1;
     }
 }

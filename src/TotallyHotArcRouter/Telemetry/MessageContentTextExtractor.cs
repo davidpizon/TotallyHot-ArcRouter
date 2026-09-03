@@ -18,31 +18,24 @@ public static class MessageContentTextExtractor
     public static string? ExtractText(JsonNode? content)
     {
         if (content is JsonValue stringValue && stringValue.TryGetValue<string>(out var text))
-        {
             return string.IsNullOrWhiteSpace(text) ? null : text;
-        }
 
         if (content is JsonArray parts)
         {
             var textParts = new List<string>();
             foreach (var part in parts)
-            {
                 if (part is JsonObject partObj &&
                     partObj["type"] is JsonValue typeValue &&
                     typeValue.TryGetValue<string>(out var type) &&
-                    string.Equals(type, "text", StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(a: type, b: "text", comparisonType: StringComparison.OrdinalIgnoreCase) &&
                     partObj["text"] is JsonValue textValue &&
                     textValue.TryGetValue<string>(out var partText) &&
                     !string.IsNullOrWhiteSpace(partText))
-                {
                     textParts.Add(partText);
-                }
-            }
 
-            return textParts.Count == 0 ? null : string.Join(' ', textParts);
+            return textParts.Count == 0 ? null : string.Join(' ', values: textParts);
         }
 
         return null;
     }
 }
-

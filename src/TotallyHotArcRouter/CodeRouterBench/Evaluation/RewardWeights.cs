@@ -17,7 +17,7 @@ public sealed record RewardWeights(double ScoreWeight, double CostWeight)
     /// <summary>
     /// The canonical weights from research-doc §A.2: <c>ε1 = 1</c>, <c>ε2 = -0.1</c>.
     /// </summary>
-    public static RewardWeights Canonical { get; } = new(ScoreWeight: 1d, CostWeight: -0.1d);
+    public static RewardWeights Canonical { get; } = new(1d, -0.1d);
 
     /// <summary>
     /// Computes <c>r = ε1·s + ε2·κ</c> for one outcome cell.
@@ -26,6 +26,6 @@ public sealed record RewardWeights(double ScoreWeight, double CostWeight)
     public double Reward(RegretOutcomeCell cell)
     {
         ArgumentNullException.ThrowIfNull(cell);
-        return (ScoreWeight * cell.Score) + (CostWeight * cell.CostUsd);
+        return ScoreWeight * cell.Score + CostWeight * cell.CostUsd;
     }
 }

@@ -27,54 +27,40 @@ public sealed class QualityScorer : IQualityScorer
         _options = options.Value;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public double Score(QualityResult result, string dimension)
     {
         ArgumentNullException.ThrowIfNull(result);
 
         var weights = _options.ResolveWeights(dimension);
 
-        double wSyntax = weights.Syntax;
-        double wAnalysis = weights.Analysis;
-        double wJudge = weights.Judge;
+        var wSyntax = weights.Syntax;
+        var wAnalysis = weights.Analysis;
+        var wJudge = weights.Judge;
 
-        double sSyntax = result.SyntaxValid ? 1.0 : 0.0;
+        var sSyntax = result.SyntaxValid ? 1.0 : 0.0;
 
         // A heuristic verdict is a guess, not a compiler's answer, so it carries half the weight a real
         // parser's would. Halving the weight rather than the score is deliberate: a confident-but-cheap
         // "this looks fine" should move the total less, not report a worse snippet than it saw.
-        if (!result.SyntaxAuthoritative)
-        {
-            wSyntax *= 0.5;
-        }
+        if (!result.SyntaxAuthoritative) wSyntax *= 0.5;
 
-        double sAnalysis = 0.0;
+        var sAnalysis = 0.0;
         if (result.AnalysisScore is { } analysis)
-        {
-            sAnalysis = Math.Clamp(analysis, 0.0, 1.0);
-        }
+            sAnalysis = Math.Clamp(value: analysis, 0.0, 1.0);
         else
-        {
             wAnalysis = 0.0;
-        }
 
-        double sJudge = 0.0;
+        var sJudge = 0.0;
         if (result.JudgeScore is { } judge)
-        {
-            sJudge = Math.Clamp(judge, 0.0, 1.0);
-        }
+            sJudge = Math.Clamp(value: judge, 0.0, 1.0);
         else
-        {
             wJudge = 0.0;
-        }
 
-        double total = wSyntax + wAnalysis + wJudge;
-        if (total <= 0.0)
-        {
-            return 0.0;
-        }
+        var total = wSyntax + wAnalysis + wJudge;
+        if (total <= 0.0) return 0.0;
 
-        double u = ((wSyntax * sSyntax) + (wAnalysis * sAnalysis) + (wJudge * sJudge)) / total;
-        return Math.Clamp(u, 0.0, 1.0);
+        var u = (wSyntax * sSyntax + wAnalysis * sAnalysis + wJudge * sJudge) / total;
+        return Math.Clamp(value: u, 0.0, 1.0);
     }
 }

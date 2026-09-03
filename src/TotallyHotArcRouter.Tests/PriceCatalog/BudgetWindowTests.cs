@@ -12,15 +12,16 @@ public class BudgetWindowTests
     public void Monthly_PeriodKey_FormatsAsYearDashMonth()
     {
         var window = new BudgetWindow.Monthly();
-        Assert.Equal("2026-08", window.PeriodKey(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero)));
+        Assert.Equal(expected: "2026-08",
+            actual: window.PeriodKey(new DateTimeOffset(2026, 8, 7, 12, 0, 0, offset: TimeSpan.Zero)));
     }
 
     [Fact]
     public void Monthly_NextResetUtc_IsFirstOfNextMonth()
     {
         var window = new BudgetWindow.Monthly();
-        var next = window.NextResetUtc(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
-        Assert.Equal(new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero), next);
+        var next = window.NextResetUtc(new DateTimeOffset(2026, 8, 7, 12, 0, 0, offset: TimeSpan.Zero));
+        Assert.Equal(expected: new DateTimeOffset(2026, 9, 1, 0, 0, 0, offset: TimeSpan.Zero), actual: next);
     }
 
     [Fact]
@@ -28,16 +29,17 @@ public class BudgetWindowTests
     {
         var window = new BudgetWindow.Weekly();
         // 2026-08-07 is a Friday in ISO week 32 of 2026.
-        Assert.Equal("2026-W32", window.PeriodKey(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero)));
+        Assert.Equal(expected: "2026-W32",
+            actual: window.PeriodKey(new DateTimeOffset(2026, 8, 7, 12, 0, 0, offset: TimeSpan.Zero)));
     }
 
     [Fact]
     public void Weekly_NextResetUtc_IsFollowingMonday()
     {
         var window = new BudgetWindow.Weekly();
-        var next = window.NextResetUtc(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
-        Assert.Equal(DayOfWeek.Monday, next.DayOfWeek);
-        Assert.True(next > new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
+        var next = window.NextResetUtc(new DateTimeOffset(2026, 8, 7, 12, 0, 0, offset: TimeSpan.Zero));
+        Assert.Equal(expected: DayOfWeek.Monday, actual: next.DayOfWeek);
+        Assert.True(next > new DateTimeOffset(2026, 8, 7, 12, 0, 0, offset: TimeSpan.Zero));
     }
 
     [Fact]
@@ -49,8 +51,8 @@ public class BudgetWindowTests
         var withinBlock = window.PeriodKey(start.AddHours(2));
         var nextBlock = window.PeriodKey(start.AddHours(5));
 
-        Assert.Equal(window.PeriodKey(start), withinBlock);
-        Assert.NotEqual(withinBlock, nextBlock);
+        Assert.Equal(expected: window.PeriodKey(start), actual: withinBlock);
+        Assert.NotEqual(expected: withinBlock, actual: nextBlock);
     }
 
     [Fact]
@@ -64,7 +66,7 @@ public class BudgetWindowTests
     [MemberData(nameof(WindowKinds))]
     public void PeriodKey_IsLexicographicallyOrderedWithTime(BudgetWindow window)
     {
-        var start = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var start = new DateTimeOffset(2026, 1, 1, 0, 0, 0, offset: TimeSpan.Zero);
         var keys = Enumerable.Range(0, 40)
             .Select(days => window.PeriodKey(start.AddDays(days)))
             .ToList();
@@ -72,16 +74,19 @@ public class BudgetWindowTests
         // The property that matters: deduplicated keys, taken in chronological order, already come out
         // lexicographically sorted - no date parsing is ever needed to compare freshness or detect rollover.
         var chronological = keys.Distinct().ToList();
-        var lexicographic = chronological.OrderBy(k => k, StringComparer.Ordinal).ToList();
-        Assert.Equal(lexicographic, chronological);
+        var lexicographic = chronological.OrderBy(keySelector: k => k, comparer: StringComparer.Ordinal).ToList();
+        Assert.Equal(expected: lexicographic, actual: chronological);
     }
 
-    public static TheoryData<BudgetWindow> WindowKinds() => new()
+    public static TheoryData<BudgetWindow> WindowKinds()
     {
-        new BudgetWindow.Monthly(),
-        new BudgetWindow.Weekly(),
-        new BudgetWindow.RollingHours(5),
-    };
+        return new TheoryData<BudgetWindow>
+        {
+            new BudgetWindow.Monthly(),
+            new BudgetWindow.Weekly(),
+            new BudgetWindow.RollingHours(5)
+        };
+    }
 
     [Theory]
     [InlineData("Monthly", null)]
@@ -93,22 +98,22 @@ public class BudgetWindowTests
         {
             "Monthly" => (BudgetWindow)new BudgetWindow.Monthly(),
             "Weekly" => new BudgetWindow.Weekly(),
-            _ => new BudgetWindow.RollingHours(hours!.Value),
+            _ => new BudgetWindow.RollingHours(hours!.Value)
         };
 
         var (encodedKind, encodedHours) = BudgetWindowCodec.Encode(window);
-        Assert.Equal(kind, encodedKind);
-        Assert.Equal(hours, encodedHours);
+        Assert.Equal(expected: kind, actual: encodedKind);
+        Assert.Equal(expected: hours, actual: encodedHours);
 
-        var decoded = BudgetWindowCodec.Decode(encodedKind, encodedHours);
-        Assert.Equal(window, decoded);
+        var decoded = BudgetWindowCodec.Decode(kind: encodedKind, hours: encodedHours);
+        Assert.Equal(expected: window, actual: decoded);
     }
 
     [Fact]
     public void Codec_Decode_UnrecognizedKind_DefaultsToMonthly()
     {
-        Assert.Equal(new BudgetWindow.Monthly(), BudgetWindowCodec.Decode("Nonsense", null));
-        Assert.Equal(new BudgetWindow.Monthly(), BudgetWindowCodec.Decode(null, null));
-        Assert.Equal(new BudgetWindow.Monthly(), BudgetWindowCodec.Decode("RollingHours", 0));
+        Assert.Equal(expected: new BudgetWindow.Monthly(), actual: BudgetWindowCodec.Decode(kind: "Nonsense", null));
+        Assert.Equal(expected: new BudgetWindow.Monthly(), actual: BudgetWindowCodec.Decode(null, null));
+        Assert.Equal(expected: new BudgetWindow.Monthly(), actual: BudgetWindowCodec.Decode(kind: "RollingHours", 0));
     }
 }

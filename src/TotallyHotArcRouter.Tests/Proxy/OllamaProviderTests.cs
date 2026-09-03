@@ -1,9 +1,9 @@
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging;
-using Moq;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
+using Moq;
 using TotallyHot.ArcRouter.Proxy;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
@@ -25,7 +25,8 @@ public class OllamaProviderTests
     private const string OllamaBaseUrl = "http://localhost:11434/v1";
 
     [Fact]
-    public async Task InvokeAsync_OllamaProvider_NonStreamingResponse_ForwardsUnmodified_AndPreservesBaseUrlPathSegment()
+    public async Task
+        InvokeAsync_OllamaProvider_NonStreamingResponse_ForwardsUnmodified_AndPreservesBaseUrlPathSegment()
     {
         var resolver = ModelRouteResolverTestFactory.Create(
             modelName: "llama3",
@@ -33,7 +34,8 @@ public class OllamaProviderTests
             baseUrl: OllamaBaseUrl,
             providerName: "ollama",
             apiKey: null);
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
 
         var handler = new DelegatingHandlerStub(async request =>
         {
@@ -47,36 +49,39 @@ public class OllamaProviderTests
             // where the *same* base must instead collapse against it rather than forward "/v1/v1/...";
             // that half is covered by ProxyMiddlewareTests'
             // InvokeAsync_PassthroughProviderWithVersionedBaseUrl_DoesNotForwardTheVersionSegmentTwice.
-            Assert.Equal("http://localhost:11434/v1/chat/completions", request.RequestUri!.ToString());
+            Assert.Equal(expected: "http://localhost:11434/v1/chat/completions",
+                actual: request.RequestUri!.ToString());
 
             // No auth header configured for "ollama" - no Authorization header should ever be injected.
             Assert.False(request.Headers.Contains("Authorization"));
 
             var body = await request.Content!.ReadAsStringAsync();
             using var document = JsonDocument.Parse(body);
-            Assert.Equal("llama3", document.RootElement.GetProperty("model").GetString());
+            Assert.Equal(expected: "llama3", actual: document.RootElement.GetProperty("model").GetString());
 
             // Ollama's own OpenAI-compatible response shape (docs.ollama.com/api/openai-compatibility):
             // choices[].message + usage.prompt_tokens/completion_tokens - identical to OpenAI's own shape.
             const string ollamaResponse = """
-                {
-                  "id": "chatcmpl-123",
-                  "object": "chat.completion",
-                  "model": "llama3",
-                  "choices": [
-                    { "index": 0, "message": { "role": "assistant", "content": "Hi from Ollama." }, "finish_reason": "stop" }
-                  ],
-                  "usage": { "prompt_tokens": 12, "completion_tokens": 5, "total_tokens": 17 }
-                }
-                """;
+                                          {
+                                            "id": "chatcmpl-123",
+                                            "object": "chat.completion",
+                                            "model": "llama3",
+                                            "choices": [
+                                              { "index": 0, "message": { "role": "assistant", "content": "Hi from Ollama." }, "finish_reason": "stop" }
+                                            ],
+                                            "usage": { "prompt_tokens": 12, "completion_tokens": 5, "total_tokens": 17 }
+                                          }
+                                          """;
 
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(ollamaResponse, Encoding.UTF8, "application/json")
+                Content = new StringContent(content: ollamaResponse, encoding: Encoding.UTF8,
+                    mediaType: "application/json")
             };
         });
 
-        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+        var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
@@ -88,17 +93,18 @@ public class OllamaProviderTests
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
 
         context.Response.Body.Position = 0;
-        using var reader = new StreamReader(context.Response.Body, Encoding.UTF8);
+        using var reader = new StreamReader(stream: context.Response.Body, encoding: Encoding.UTF8);
         var responseBody = await reader.ReadToEndAsync(TestContext.Current.CancellationToken);
         using var responseJson = JsonDocument.Parse(responseBody);
         Assert.Equal(
-            "Hi from Ollama.",
-            responseJson.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString());
+            expected: "Hi from Ollama.",
+            actual: responseJson.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content")
+                .GetString());
     }
 
     [Fact]
@@ -110,7 +116,8 @@ public class OllamaProviderTests
             baseUrl: OllamaBaseUrl,
             providerName: "ollama",
             apiKey: null);
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
 
         // Ollama's OpenAI-compatible streaming shape: SSE "data: {...}" chunks framed exactly like
         // OpenAI's chat.completion.chunk stream, terminated by "data: [DONE]".
@@ -123,35 +130,37 @@ public class OllamaProviderTests
         {
             var response = new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(sseBody, Encoding.UTF8, "text/event-stream")
+                Content = new StringContent(content: sseBody, encoding: Encoding.UTF8, mediaType: "text/event-stream")
             };
             return Task.FromResult(response);
         });
 
-        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+        var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
         context.Request.Scheme = "http";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat/completions";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"llama3","messages":[{"role":"user","content":"hi"}],"stream":true}""");
+        var requestBody =
+            Encoding.UTF8.GetBytes("""{"model":"llama3","messages":[{"role":"user","content":"hi"}],"stream":true}""");
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
 
         context.Response.Body.Position = 0;
-        using var reader = new StreamReader(context.Response.Body, Encoding.UTF8);
+        using var reader = new StreamReader(stream: context.Response.Body, encoding: Encoding.UTF8);
         var responseBody = await reader.ReadToEndAsync(TestContext.Current.CancellationToken);
 
         // No translation happens (nothing consults IPayloadTranslator yet), so every SSE byte Ollama
         // sent must reach the client completely unmodified - this is what "no translator needed"
         // actually means in practice, not just an assertion about the JSON content.
-        Assert.Equal(sseBody, responseBody);
+        Assert.Equal(expected: sseBody, actual: responseBody);
     }
 
     [Fact]
@@ -170,7 +179,8 @@ public class OllamaProviderTests
             baseUrl: OllamaBaseUrl,
             providerName: "ollama",
             apiKey: null);
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
 
         var handler = new DelegatingHandlerStub(_ =>
         {
@@ -179,41 +189,54 @@ public class OllamaProviderTests
                 Content = new MultiChunkContent(
                     "data: {\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}\n\n",
                     "data: {\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}\n\n",
-                    "data: [DONE]\n\n"),
+                    "data: [DONE]\n\n")
             };
             return Task.FromResult(response);
         });
 
-        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+        var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
         context.Request.Scheme = "http";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat/completions";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"llama3","messages":[{"role":"user","content":"hi"}],"stream":true}""");
+        var requestBody =
+            Encoding.UTF8.GetBytes("""{"model":"llama3","messages":[{"role":"user","content":"hi"}],"stream":true}""");
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         var flushCounting = new FlushCountingStream(new MemoryStream());
         context.Response.Body = flushCounting;
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
-        Assert.Equal(3, flushCounting.FlushCount);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
+        Assert.Equal(3, actual: flushCounting.FlushCount);
     }
 
-    /// <summary>Simulates an upstream body delivered across several discrete reads (one per constructor argument), unlike <see cref="StringContent"/> which always hands back its whole payload in a single read.</summary>
+    /// <summary>
+    /// Simulates an upstream body delivered across several discrete reads (one per constructor argument), unlike
+    /// <see cref="StringContent"/> which always hands back its whole payload in a single read.
+    /// </summary>
     private sealed class MultiChunkContent : HttpContent
     {
         private readonly byte[][] _chunks;
 
-        public MultiChunkContent(params string[] chunks) => _chunks = chunks.Select(Encoding.UTF8.GetBytes).ToArray();
+        public MultiChunkContent(params string[] chunks)
+        {
+            _chunks = chunks.Select(Encoding.UTF8.GetBytes).ToArray();
+        }
 
-        protected override Task<Stream> CreateContentReadStreamAsync() => Task.FromResult<Stream>(new ChunkedReadStream(_chunks));
+        protected override Task<Stream> CreateContentReadStreamAsync()
+        {
+            return Task.FromResult<Stream>(new ChunkedReadStream(_chunks));
+        }
 
-        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) =>
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+        {
             throw new NotSupportedException("This stub is only read via CreateContentReadStreamAsync.");
+        }
 
         protected override bool TryComputeLength(out long length)
         {
@@ -229,32 +252,53 @@ public class OllamaProviderTests
             public override bool CanSeek => false;
             public override bool CanWrite => false;
             public override long Length => throw new NotSupportedException();
-            public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
 
-            public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+            public override long Position
             {
-                if (_index >= chunks.Length)
-                {
-                    return Task.FromResult(0);
-                }
+                get => throw new NotSupportedException();
+                set => throw new NotSupportedException();
+            }
+
+            public override Task<int> ReadAsync(byte[] buffer, int offset, int count,
+                CancellationToken cancellationToken)
+            {
+                if (_index >= chunks.Length) return Task.FromResult(0);
 
                 var chunk = chunks[_index++];
-                Buffer.BlockCopy(chunk, 0, buffer, offset, chunk.Length);
+                Buffer.BlockCopy(src: chunk, 0, dst: buffer, dstOffset: offset, count: chunk.Length);
                 return Task.FromResult(chunk.Length);
             }
 
-            public override int Read(byte[] buffer, int offset, int count) => ReadAsync(buffer, offset, count, default).GetAwaiter().GetResult();
+            public override int Read(byte[] buffer, int offset, int count)
+            {
+                return ReadAsync(buffer: buffer, offset: offset, count: count, default).GetAwaiter().GetResult();
+            }
+
             public override void Flush()
             {
             }
 
-            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
-            public override void SetLength(long value) => throw new NotSupportedException();
-            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+            public override long Seek(long offset, SeekOrigin origin)
+            {
+                throw new NotSupportedException();
+            }
+
+            public override void SetLength(long value)
+            {
+                throw new NotSupportedException();
+            }
+
+            public override void Write(byte[] buffer, int offset, int count)
+            {
+                throw new NotSupportedException();
+            }
         }
     }
 
-    /// <summary>Wraps a stream and counts <see cref="FlushAsync(CancellationToken)"/> calls, to prove the proxy actually flushes each streamed write rather than letting it sit buffered.</summary>
+    /// <summary>
+    /// Wraps a stream and counts <see cref="FlushAsync(CancellationToken)"/> calls, to prove the proxy actually
+    /// flushes each streamed write rather than letting it sit buffered.
+    /// </summary>
     private sealed class FlushCountingStream(Stream inner) : Stream
     {
         public int FlushCount { get; private set; }
@@ -263,7 +307,12 @@ public class OllamaProviderTests
         public override bool CanSeek => inner.CanSeek;
         public override bool CanWrite => inner.CanWrite;
         public override long Length => inner.Length;
-        public override long Position { get => inner.Position; set => inner.Position = value; }
+
+        public override long Position
+        {
+            get => inner.Position;
+            set => inner.Position = value;
+        }
 
         public override void Flush()
         {
@@ -277,16 +326,35 @@ public class OllamaProviderTests
             return inner.FlushAsync(cancellationToken);
         }
 
-        public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
-        public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
-        public override void SetLength(long value) => inner.SetLength(value);
-        public override void Write(byte[] buffer, int offset, int count) => inner.Write(buffer, offset, count);
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            return inner.Read(buffer: buffer, offset: offset, count: count);
+        }
 
-        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
-            inner.WriteAsync(buffer, offset, count, cancellationToken);
+        public override long Seek(long offset, SeekOrigin origin)
+        {
+            return inner.Seek(offset: offset, origin: origin);
+        }
 
-        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) =>
-            inner.WriteAsync(buffer, cancellationToken);
+        public override void SetLength(long value)
+        {
+            inner.SetLength(value);
+        }
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            inner.Write(buffer: buffer, offset: offset, count: count);
+        }
+
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            return inner.WriteAsync(buffer: buffer, offset: offset, count: count, cancellationToken: cancellationToken);
+        }
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            return inner.WriteAsync(buffer: buffer, cancellationToken: cancellationToken);
+        }
     }
 
     private sealed class DelegatingHandlerStub : HttpMessageHandler
@@ -298,8 +366,10 @@ public class OllamaProviderTests
             _handler = handler;
         }
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => _handler(request);
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            return _handler(request);
+        }
     }
 }
-

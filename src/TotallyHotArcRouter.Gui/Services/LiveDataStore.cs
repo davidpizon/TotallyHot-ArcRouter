@@ -1,3 +1,4 @@
+using System.Globalization;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
@@ -43,19 +44,23 @@ public sealed class LiveDataStore : IAsyncDisposable
     /// </summary>
     public const string DefaultServerAddress = TelemetryChannelFactory.DefaultServerAddress;
 
-    /// <summary>Fixed delay between reconnect attempts. See "Known gap: no built-in reconnect" in docs/router/grpc-migration.md.</summary>
+    /// <summary>
+    /// Fixed delay between reconnect attempts. See "Known gap: no built-in reconnect" in
+    /// docs/router/grpc-migration.md.
+    /// </summary>
     private static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(2);
 
-    private readonly object _lock = new();
-    private readonly List<RoutingTelemetryEventDto> _events = [];
-    private readonly LogBuffer _logBuffer = new();
     private readonly GrpcChannel _channel;
     private readonly Contract.TelemetryService.TelemetryServiceClient _client;
+    private readonly List<RoutingTelemetryEventDto> _events = [];
+
+    private readonly object _lock = new();
+    private readonly LogBuffer _logBuffer = new();
     private readonly ILogger<LiveDataStore>? _logger;
     private readonly string _serverAddress;
+    private volatile IReadOnlyList<Conversation> _conversations = [];
 
     private CancellationTokenSource? _streamCts;
-    private volatile IReadOnlyList<Conversation> _conversations = [];
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LiveDataStore"/> class.
@@ -87,6 +92,26 @@ public sealed class LiveDataStore : IAsyncDisposable
         WriteDiagnosticLog($"LiveDataStore constructed. serverAddress={serverAddress}");
     }
 
+    /// <summary>Conversations reconstructed from telemetry received so far. Empty until the proxy sends events.</summary>
+    public IReadOnlyList<Conversation> Conversations => _conversations;
+
+    /// <summary>Log lines received so far for the Console tab, oldest first, bounded by <see cref="LogBuffer.Capacity"/>.</summary>
+    public IReadOnlyList<LogLineDto> LogLines => _logBuffer.Snapshot();
+
+    /// <summary>Cancels the live telemetry stream and releases the gRPC channel.</summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (_streamCts is not null)
+        {
+            await _streamCts.CancelAsync();
+            _streamCts.Dispose();
+        }
+
+        // GrpcChannel (Grpc.Net.Client) doesn't expose ShutdownAsync - disposing is sufficient
+        // to tear down active calls once the CTS is cancelled.
+        _channel.Dispose();
+    }
+
     /// <summary>
     /// Temporary diagnostic aid for the live-telemetry-not-arriving investigation: appends a
     /// timestamped line to a per-user log file, independent of <see cref="ILogger{TCategoryName}"/>
@@ -98,23 +123,19 @@ public sealed class LiveDataStore : IAsyncDisposable
     {
         try
         {
-            var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TotallyHotArcRouter");
+            var directory =
+                Path.Combine(path1: Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    path2: "TotallyHotArcRouter");
             Directory.CreateDirectory(directory);
             File.AppendAllText(
-                Path.Combine(directory, "gui-telemetry-debug.log"),
-                $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff} {message}{Environment.NewLine}");
+                path: Path.Combine(path1: directory, path2: "gui-telemetry-debug.log"),
+                contents: $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff} {message}{Environment.NewLine}");
         }
         catch
         {
             // Best-effort diagnostic logging only - never let a failure to write it affect anything.
         }
     }
-
-    /// <summary>Conversations reconstructed from telemetry received so far. Empty until the proxy sends events.</summary>
-    public IReadOnlyList<Conversation> Conversations => _conversations;
-
-    /// <summary>Log lines received so far for the Console tab, oldest first, bounded by <see cref="LogBuffer.Capacity"/>.</summary>
-    public IReadOnlyList<LogLineDto> LogLines => _logBuffer.Snapshot();
 
     /// <summary>
     /// Raised after a new telemetry event has been folded in, on whatever thread the gRPC stream
@@ -164,11 +185,11 @@ public sealed class LiveDataStore : IAsyncDisposable
         try
         {
             while (!cancellationToken.IsCancellationRequested)
-            {
                 try
                 {
                     WriteDiagnosticLog($"Calling StreamEvents against {_serverAddress}...");
-                    using var call = _client.StreamEvents(new Contract.StreamEventsRequest(), cancellationToken: cancellationToken);
+                    using var call = _client.StreamEvents(request: new Contract.StreamEventsRequest(),
+                        cancellationToken: cancellationToken);
                     WriteDiagnosticLog("StreamEvents call started; awaiting first event.");
                     await foreach (var telemetryEvent in call.ResponseStream.ReadAllAsync(cancellationToken))
                     {
@@ -183,7 +204,8 @@ public sealed class LiveDataStore : IAsyncDisposable
                         }
                         catch (Exception ex)
                         {
-                            _logger?.LogWarning(ex, "Failed to process a telemetry event; skipping it.");
+                            _logger?.LogWarning(exception: ex,
+                                message: "Failed to process a telemetry event; skipping it.");
                             WriteDiagnosticLog($"Failed to process event: {ex.GetType().Name}: {ex.Message}");
                         }
                     }
@@ -198,16 +220,17 @@ public sealed class LiveDataStore : IAsyncDisposable
                     // the very first attempt - no retry, no log, and the dashboard just stays on
                     // "waiting for data" forever with no indication anything went wrong.
                     _logger?.LogWarning(
-                        ex,
+                        exception: ex,
+                        message:
                         "Telemetry stream to {ServerAddress} disconnected ({ExceptionType}: {ExceptionMessage}); retrying in {DelaySeconds}s.",
                         _serverAddress,
                         ex.GetType().Name,
                         ex.Message,
                         ReconnectDelay.TotalSeconds);
-                    WriteDiagnosticLog($"StreamEvents failed: {ex.GetType().FullName}: {ex.Message}{Environment.NewLine}{ex}");
-                    await Task.Delay(ReconnectDelay, cancellationToken);
+                    WriteDiagnosticLog(
+                        $"StreamEvents failed: {ex.GetType().FullName}: {ex.Message}{Environment.NewLine}{ex}");
+                    await Task.Delay(delay: ReconnectDelay, cancellationToken: cancellationToken);
                 }
-            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -232,50 +255,66 @@ public sealed class LiveDataStore : IAsyncDisposable
         }
     }
 
-    /// <summary>Converts a gRPC-contract <see cref="Contract.RoutingTelemetryEvent"/> into the store's <see cref="RoutingTelemetryEventDto"/>.</summary>
-    private static RoutingTelemetryEventDto MapToDto(Contract.RoutingTelemetryEvent e) => new(
-        SessionId: e.SessionId,
-        TurnNumber: e.TurnNumber,
-        IsSessionSynthesized: e.IsSessionSynthesized,
-        RequestedModel: e.RequestedModel,
-        ResolvedModel: e.ResolvedModel,
-        RoutedModel: e.RoutedModel,
-        Provider: e.Provider,
-        IsFallback: e.IsFallback,
-        PromptTokens: e.HasPromptTokens ? e.PromptTokens : null,
-        CompletionTokens: e.HasCompletionTokens ? e.CompletionTokens : null,
-        // Decimal-as-string, not double: see "Decimal encoding" in docs/router/grpc-migration.md.
-        EstimatedCostUsd: e.HasEstimatedCostUsd ? decimal.Parse(e.EstimatedCostUsd, System.Globalization.CultureInfo.InvariantCulture) : null,
-        IsStreaming: e.IsStreaming,
-        LatencyToHeadersMs: e.LatencyToHeadersMs,
-        TotalDurationMs: e.TotalDurationMs,
-        StatusCode: e.StatusCode,
-        TimestampUtc: e.TimestampUtc.ToDateTimeOffset(),
-        CacheCreationTokens: e.HasCacheCreationTokens ? e.CacheCreationTokens : null,
-        CacheReadTokens: e.HasCacheReadTokens ? e.CacheReadTokens : null,
-        RequestSummary: e.HasRequestSummary ? e.RequestSummary : null,
-        ResponseSummary: e.HasResponseSummary ? e.ResponseSummary : null,
-        CostConfidence: e.HasCostConfidence ? e.CostConfidence : null,
-        // Absent means an older proxy that predates router-cost accounting, which is reported as zero
-        // overhead rather than as an unknown - the same value a current proxy sends when it computed no
-        // embedding for the request.
-        RouterTokens: e.HasRouterTokens ? e.RouterTokens : 0,
-        // TryParse, not Parse: a malformed value from a mixed-version or non-router writer on the
-        // telemetry stream must degrade to 0m rather than take down live rendering for every event.
-        RouterCostUsd: e.HasRouterCostUsd && decimal.TryParse(e.RouterCostUsd, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var routerCostUsd)
-            ? routerCostUsd
-            : 0m,
-        // Plain (not optional) proto3 field, like RoutedModel above: an older writer that predates this
-        // phase sends neither, decoding as "" - degrade that to null rather than a fabricated reason.
-        SubstitutionReason: string.IsNullOrEmpty(e.SubstitutionReason) ? null : e.SubstitutionReason);
+    /// <summary>
+    /// Converts a gRPC-contract <see cref="Contract.RoutingTelemetryEvent"/> into the store's
+    /// <see cref="RoutingTelemetryEventDto"/>.
+    /// </summary>
+    private static RoutingTelemetryEventDto MapToDto(Contract.RoutingTelemetryEvent e)
+    {
+        return new RoutingTelemetryEventDto(
+            SessionId: e.SessionId,
+            TurnNumber: e.TurnNumber,
+            IsSessionSynthesized: e.IsSessionSynthesized,
+            RequestedModel: e.RequestedModel,
+            ResolvedModel: e.ResolvedModel,
+            RoutedModel: e.RoutedModel,
+            Provider: e.Provider,
+            IsFallback: e.IsFallback,
+            PromptTokens: e.HasPromptTokens ? e.PromptTokens : null,
+            CompletionTokens: e.HasCompletionTokens ? e.CompletionTokens : null,
+            // Decimal-as-string, not double: see "Decimal encoding" in docs/router/grpc-migration.md.
+            EstimatedCostUsd: e.HasEstimatedCostUsd
+                ? decimal.Parse(s: e.EstimatedCostUsd, provider: CultureInfo.InvariantCulture)
+                : null,
+            IsStreaming: e.IsStreaming,
+            LatencyToHeadersMs: e.LatencyToHeadersMs,
+            TotalDurationMs: e.TotalDurationMs,
+            StatusCode: e.StatusCode,
+            TimestampUtc: e.TimestampUtc.ToDateTimeOffset(),
+            CacheCreationTokens: e.HasCacheCreationTokens ? e.CacheCreationTokens : null,
+            CacheReadTokens: e.HasCacheReadTokens ? e.CacheReadTokens : null,
+            RequestSummary: e.HasRequestSummary ? e.RequestSummary : null,
+            ResponseSummary: e.HasResponseSummary ? e.ResponseSummary : null,
+            CostConfidence: e.HasCostConfidence ? e.CostConfidence : null,
+            // Absent means an older proxy that predates router-cost accounting, which is reported as zero
+            // overhead rather than as an unknown - the same value a current proxy sends when it computed no
+            // embedding for the request.
+            RouterTokens: e.HasRouterTokens ? e.RouterTokens : 0,
+            // TryParse, not Parse: a malformed value from a mixed-version or non-router writer on the
+            // telemetry stream must degrade to 0m rather than take down live rendering for every event.
+            RouterCostUsd: e.HasRouterCostUsd && decimal.TryParse(s: e.RouterCostUsd,
+                style: NumberStyles.Number,
+                provider: CultureInfo.InvariantCulture, result: out var routerCostUsd)
+                ? routerCostUsd
+                : 0m,
+            // Plain (not optional) proto3 field, like RoutedModel above: an older writer that predates this
+            // phase sends neither, decoding as "" - degrade that to null rather than a fabricated reason.
+            SubstitutionReason: string.IsNullOrEmpty(e.SubstitutionReason) ? null : e.SubstitutionReason);
+    }
 
     /// <summary>Converts a gRPC-contract <see cref="Contract.LogLineEvent"/> into the store's <see cref="LogLineDto"/>.</summary>
-    private static LogLineDto MapToDto(Contract.LogLineEvent e) => new(
-        e.TimestampUtc.ToDateTimeOffset(),
-        e.Level,
-        e.Message);
+    private static LogLineDto MapToDto(Contract.LogLineEvent e)
+    {
+        return new LogLineDto(
+            TimestampUtc: e.TimestampUtc.ToDateTimeOffset(),
+            Level: e.Level,
+            Message: e.Message);
+    }
 
-    /// <summary>Appends a routing telemetry event, rebuilds the aggregated conversation list, and raises <see cref="Changed"/>.</summary>
+    /// <summary>
+    /// Appends a routing telemetry event, rebuilds the aggregated conversation list, and raises <see cref="Changed"/>
+    /// .
+    /// </summary>
     private void OnRoutingTelemetryReceived(RoutingTelemetryEventDto dto)
     {
         lock (_lock)
@@ -321,19 +360,4 @@ public sealed class LiveDataStore : IAsyncDisposable
 
         Changed?.Invoke();
     }
-
-    /// <summary>Cancels the live telemetry stream and releases the gRPC channel.</summary>
-    public async ValueTask DisposeAsync()
-    {
-        if (_streamCts is not null)
-        {
-            await _streamCts.CancelAsync();
-            _streamCts.Dispose();
-        }
-
-        // GrpcChannel (Grpc.Net.Client) doesn't expose ShutdownAsync - disposing is sufficient
-        // to tear down active calls once the CTS is cancelled.
-        _channel.Dispose();
-    }
 }
-

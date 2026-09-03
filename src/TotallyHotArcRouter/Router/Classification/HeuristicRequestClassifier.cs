@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using TotallyHot.ArcRouter.Quality;
+using TotallyHot.ArcRouter.Quality.Extraction;
 using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Router.Classification;
@@ -13,64 +14,75 @@ namespace TotallyHot.ArcRouter.Router.Classification;
 /// </summary>
 public sealed class HeuristicRequestClassifier : IRequestClassifier
 {
-    /// <summary>The <c>max_tokens</c> (or <c>max_completion_tokens</c>) ceiling at or below which a
+    /// <summary>
+    /// The <c>max_tokens</c> (or <c>max_completion_tokens</c>) ceiling at or below which a
     /// request is treated as utility traffic - <c>docs/router/utility-model-routing.md</c> B2's "small
     /// max_tokens" signal. A chat-title or intent-detection call needs a handful of tokens; a normal
-    /// chat turn does not cap itself this low.</summary>
+    /// chat turn does not cap itself this low.
+    /// </summary>
     private const int UtilityMaxTokensCeiling = 64;
 
-    /// <summary>The prompt-length ceiling (characters) below which a request is eligible to be treated
-    /// as utility traffic on shape alone - B2's "short ... prompt" signal.</summary>
+    /// <summary>
+    /// The prompt-length ceiling (characters) below which a request is eligible to be treated
+    /// as utility traffic on shape alone - B2's "short ... prompt" signal.
+    /// </summary>
     private const int UtilityPromptLengthCeiling = 200;
 
-    /// <summary>The prompt-length floor (characters) above which a request is treated as
-    /// <see cref="RouterDifficulty.Hard"/> on shape alone, absent any other signal.</summary>
+    /// <summary>
+    /// The prompt-length floor (characters) above which a request is treated as
+    /// <see cref="RouterDifficulty.Hard"/> on shape alone, absent any other signal.
+    /// </summary>
     private const int HardPromptLengthFloor = 1500;
 
-    /// <summary>The prompt-length ceiling (characters) below which a request is treated as
-    /// <see cref="RouterDifficulty.Easy"/> on shape alone, absent any other signal.</summary>
+    /// <summary>
+    /// The prompt-length ceiling (characters) below which a request is treated as
+    /// <see cref="RouterDifficulty.Easy"/> on shape alone, absent any other signal.
+    /// </summary>
     private const int EasyPromptLengthCeiling = 200;
 
     private static readonly string[] UtilityPromptSignals =
     [
         "generate a title", "generate a short", "one-line summary", "summarize this conversation",
-        "commit message", "chat title", "intent detection",
+        "commit message", "chat title", "intent detection"
     ];
 
     private static readonly string[] HardPromptSignals =
     [
         "edge case", "edge-case", "complex", "multi-step", "multi step", "large-scale", "large scale",
         "performance-critical", "performance critical", "concurrency", "concurrent", "race condition",
-        "distributed system", "thread-safe", "thread safe",
+        "distributed system", "thread-safe", "thread safe"
     ];
 
-    private static readonly Regex FenceLanguageHint = new(@"```[ \t]*([A-Za-z0-9_+#.-]+)", RegexOptions.Compiled);
+    private static readonly Regex FenceLanguageHint =
+        new(pattern: @"```[ \t]*([A-Za-z0-9_+#.-]+)", options: RegexOptions.Compiled);
 
     private readonly IDimensionInferrer _dimensionInferrer;
 
     /// <summary>Initializes a new instance of the <see cref="HeuristicRequestClassifier"/> class.</summary>
     /// <param name="dimensionInferrer">
-    /// The shared dimension inferrer - defaults to a fresh <see cref="TotallyHot.ArcRouter.Quality.Extraction.KeywordDimensionInferrer"/>
+    /// The shared dimension inferrer - defaults to a fresh
+    /// <see cref="TotallyHot.ArcRouter.Quality.Extraction.KeywordDimensionInferrer"/>
     /// when omitted, the same default <see cref="TotallyHot.ArcRouter.Proxy.RequestInterceptor"/> uses, so the two stay
     /// classified identically without either side hand-picking an instance.
     /// </param>
     public HeuristicRequestClassifier(IDimensionInferrer? dimensionInferrer = null)
     {
-        _dimensionInferrer = dimensionInferrer ?? new TotallyHot.ArcRouter.Quality.Extraction.KeywordDimensionInferrer();
+        _dimensionInferrer = dimensionInferrer ?? new KeywordDimensionInferrer();
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public RequestClassification Classify(JsonObject requestBody)
     {
         ArgumentNullException.ThrowIfNull(requestBody);
 
         var prompt = RequestTextExtractor.ExtractNewestUserMessage(requestBody) ?? string.Empty;
         var language = InferLanguage(prompt);
-        var dimension = _dimensionInferrer.Infer(prompt, language);
+        var dimension = _dimensionInferrer.Infer(prompt: prompt, language: language);
         var difficulty = InferDifficulty(prompt);
-        var isUtility = InferIsUtility(requestBody, prompt);
+        var isUtility = InferIsUtility(requestBody: requestBody, prompt: prompt);
 
-        return new RequestClassification(dimension, difficulty, LanguageName(language), isUtility);
+        return new RequestClassification(Dimension: dimension, Difficulty: difficulty, Language: LanguageName(language),
+            IsUtility: isUtility);
     }
 
     /// <summary>Detects the language of the first recognized fenced code block in the prompt, if any.</summary>
@@ -83,14 +95,17 @@ public sealed class HeuristicRequestClassifier : IRequestClassifier
     /// <summary>Maps a <see cref="CodeLanguage"/> to the lowercase name used in <see cref="RequestClassification.Language"/>.</summary>
     /// <param name="language">The detected snippet language.</param>
     /// <returns>The lowercase language name, or <c>"unknown"</c> when <paramref name="language"/> has no known mapping.</returns>
-    private static string LanguageName(CodeLanguage language) => language switch
+    private static string LanguageName(CodeLanguage language)
     {
-        CodeLanguage.CSharp => "csharp",
-        CodeLanguage.Python => "python",
-        CodeLanguage.JavaScript => "javascript",
-        CodeLanguage.Shell => "shell",
-        _ => "unknown",
-    };
+        return language switch
+        {
+            CodeLanguage.CSharp => "csharp",
+            CodeLanguage.Python => "python",
+            CodeLanguage.JavaScript => "javascript",
+            CodeLanguage.Shell => "shell",
+            _ => "unknown"
+        };
+    }
 
     /// <summary>
     /// A short prompt with no hard signal is <see cref="RouterDifficulty.Easy"/>; a long prompt or one
@@ -102,15 +117,10 @@ public sealed class HeuristicRequestClassifier : IRequestClassifier
     {
         var lower = prompt.ToLowerInvariant();
 
-        if (prompt.Length >= HardPromptLengthFloor || ContainsAny(lower, HardPromptSignals))
-        {
+        if (prompt.Length >= HardPromptLengthFloor || ContainsAny(haystack: lower, needles: HardPromptSignals))
             return RouterDifficulty.Hard;
-        }
 
-        if (prompt.Length <= EasyPromptLengthCeiling)
-        {
-            return RouterDifficulty.Easy;
-        }
+        if (prompt.Length <= EasyPromptLengthCeiling) return RouterDifficulty.Easy;
 
         return RouterDifficulty.Medium;
     }
@@ -126,28 +136,25 @@ public sealed class HeuristicRequestClassifier : IRequestClassifier
             maxTokensValue.TryGetValue<int>(out var maxTokens) &&
             maxTokens > 0 &&
             maxTokens <= UtilityMaxTokensCeiling)
-        {
             return true;
-        }
 
         return prompt.Length > 0 &&
-            prompt.Length <= UtilityPromptLengthCeiling &&
-            ContainsAny(prompt.ToLowerInvariant(), UtilityPromptSignals);
+               prompt.Length <= UtilityPromptLengthCeiling &&
+               ContainsAny(haystack: prompt.ToLowerInvariant(), needles: UtilityPromptSignals);
     }
 
-    /// <summary>Checks whether any of the given substrings occurs in <paramref name="haystack"/>, using an ordinal comparison so results don't shift with locale.</summary>
+    /// <summary>
+    /// Checks whether any of the given substrings occurs in <paramref name="haystack"/>, using an ordinal comparison
+    /// so results don't shift with locale.
+    /// </summary>
     /// <param name="haystack">The text to search.</param>
     /// <param name="needles">The candidate substrings to look for.</param>
     /// <returns><see langword="true"/> if at least one needle is found; otherwise <see langword="false"/>.</returns>
     private static bool ContainsAny(string haystack, IReadOnlyList<string> needles)
     {
         foreach (var needle in needles)
-        {
-            if (haystack.Contains(needle, StringComparison.Ordinal))
-            {
+            if (haystack.Contains(value: needle, comparisonType: StringComparison.Ordinal))
                 return true;
-            }
-        }
 
         return false;
     }

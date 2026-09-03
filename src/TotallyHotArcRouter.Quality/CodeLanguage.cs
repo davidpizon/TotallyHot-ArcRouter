@@ -18,7 +18,7 @@ public enum CodeLanguage
     JavaScript,
 
     /// <summary>POSIX shell. Checked heuristically.</summary>
-    Shell,
+    Shell
 }
 
 /// <summary>
@@ -34,10 +34,7 @@ public static class CodeLanguages
     /// <returns>The matched language, or <see cref="CodeLanguage.Unknown"/> when unrecognized.</returns>
     public static CodeLanguage FromHint(string? hint)
     {
-        if (string.IsNullOrWhiteSpace(hint))
-        {
-            return CodeLanguage.Unknown;
-        }
+        if (string.IsNullOrWhiteSpace(hint)) return CodeLanguage.Unknown;
 
         return hint.Trim().ToLowerInvariant() switch
         {
@@ -48,7 +45,7 @@ public static class CodeLanguages
             // JS parser tolerates most type annotations it meets in practice.
             "ts" or "typescript" => CodeLanguage.JavaScript,
             "sh" or "shell" or "bash" or "zsh" or "console" => CodeLanguage.Shell,
-            _ => CodeLanguage.Unknown,
+            _ => CodeLanguage.Unknown
         };
     }
 
@@ -59,7 +56,8 @@ public static class CodeLanguages
     /// </summary>
     /// <param name="language">The language to test.</param>
     /// <returns><see langword="true"/> for C# and JavaScript; otherwise <see langword="false"/>.</returns>
-    public static bool HasAuthoritativeParser(CodeLanguage language) =>
-        language is CodeLanguage.CSharp or CodeLanguage.JavaScript;
+    public static bool HasAuthoritativeParser(CodeLanguage language)
+    {
+        return language is CodeLanguage.CSharp or CodeLanguage.JavaScript;
+    }
 }
-

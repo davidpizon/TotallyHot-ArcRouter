@@ -12,18 +12,21 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 public sealed class PersistedSessionStoreTests
 {
     private static PersistedTranscriptDto CreateTranscript(
-        string sessionId = "sess-1", int turnNumber = 1, long? memoryEntryId = null) => new(
-        SessionId: sessionId,
-        CorrelationId: $"{sessionId}:{turnNumber}",
-        CreatedAtUtc: DateTimeOffset.UtcNow,
-        RequestedModel: "gpt-5.4",
-        RoutedModel: "kimi-k2.5",
-        PromptText: "hello",
-        ResponseText: "hi",
-        CostUsd: 0.01m,
-        InputTokens: 10,
-        OutputTokens: 5,
-        MemoryEntryId: memoryEntryId);
+        string sessionId = "sess-1", int turnNumber = 1, long? memoryEntryId = null)
+    {
+        return new PersistedTranscriptDto(
+            SessionId: sessionId,
+            CorrelationId: $"{sessionId}:{turnNumber}",
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            RequestedModel: "gpt-5.4",
+            RoutedModel: "kimi-k2.5",
+            PromptText: "hello",
+            ResponseText: "hi",
+            0.01m,
+            10,
+            5,
+            MemoryEntryId: memoryEntryId);
+    }
 
     [Fact]
     public void Constructor_NullClient_Throws()
@@ -38,8 +41,8 @@ public sealed class PersistedSessionStoreTests
         var client = new FakePersistedSessionsClient
         {
             Result = new PersistedSessionsResult(
-                TranscriptCaptureEnabled: true,
-                Transcripts: [CreateTranscript(memoryEntryId: 7)]),
+                true,
+                Transcripts: [CreateTranscript(memoryEntryId: 7)])
         };
         var store = new PersistedSessionStore(client);
 
@@ -58,7 +61,7 @@ public sealed class PersistedSessionStoreTests
     {
         var client = new FakePersistedSessionsClient
         {
-            Result = new PersistedSessionsResult(TranscriptCaptureEnabled: false, Transcripts: []),
+            Result = new PersistedSessionsResult(false, Transcripts: [])
         };
         var store = new PersistedSessionStore(client);
 
@@ -74,7 +77,7 @@ public sealed class PersistedSessionStoreTests
     {
         var client = new FakePersistedSessionsClient
         {
-            Failure = new PersistedSessionsClientException("router is gone", isUnavailable: true),
+            Failure = new PersistedSessionsClientException(message: "router is gone", isUnavailable: true)
         };
         var store = new PersistedSessionStore(client);
 
@@ -90,7 +93,7 @@ public sealed class PersistedSessionStoreTests
     {
         var client = new FakePersistedSessionsClient
         {
-            Result = new PersistedSessionsResult(TranscriptCaptureEnabled: true, Transcripts: []),
+            Result = new PersistedSessionsResult(true, Transcripts: [])
         };
         var store = new PersistedSessionStore(client);
         var changedCount = 0;
@@ -114,15 +117,20 @@ public sealed class PersistedSessionStoreTests
 
     private sealed class FakePersistedSessionsClient : IPersistedSessionsClient, IDisposable
     {
-        public PersistedSessionsResult Result { get; set; } = new(true, []);
+        public PersistedSessionsResult Result { get; set; } = new(true, Transcripts: []);
 
         public Exception? Failure { get; set; }
 
         public bool Disposed { get; private set; }
 
-        public Task<PersistedSessionsResult> ListAsync(int limit, CancellationToken cancellationToken = default) =>
-            Failure is not null ? Task.FromException<PersistedSessionsResult>(Failure) : Task.FromResult(Result);
+        public void Dispose()
+        {
+            Disposed = true;
+        }
 
-        public void Dispose() => Disposed = true;
+        public Task<PersistedSessionsResult> ListAsync(int limit, CancellationToken cancellationToken = default)
+        {
+            return Failure is not null ? Task.FromException<PersistedSessionsResult>(Failure) : Task.FromResult(Result);
+        }
     }
 }

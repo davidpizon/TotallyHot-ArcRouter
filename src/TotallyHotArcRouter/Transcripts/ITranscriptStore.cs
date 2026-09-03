@@ -149,7 +149,8 @@ public interface ITranscriptStore
     /// </summary>
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <returns>A map from <c>memory_entry_id</c> to that row's prompt text.</returns>
-    Task<IReadOnlyDictionary<long, string>> LoadPromptTextByMemoryEntryIdAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyDictionary<long, string>> LoadPromptTextByMemoryEntryIdAsync(
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Returns each model's observed mean prompt and completion token counts across every captured row
@@ -164,7 +165,8 @@ public interface ITranscriptStore
     /// one. A model with no captured rows is absent from the map rather than defaulted, so a caller states
     /// "no estimate" instead of pricing an invented token count.
     /// </remarks>
-    Task<IReadOnlyDictionary<string, ModelTokenAverage>> LoadObservedTokenAveragesAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyDictionary<string, ModelTokenAverage>> LoadObservedTokenAveragesAsync(
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Loads up to <paramref name="limit"/> of the most recent transcript rows, newest first, for the
@@ -186,7 +188,9 @@ public interface ITranscriptStore
     /// should override it too rather than relying on this default.
     /// </remarks>
     Task<IReadOnlyList<SessionTranscript>> ListSessionsAsync(int limit, CancellationToken cancellationToken = default)
-        => Task.FromResult<IReadOnlyList<SessionTranscript>>(Array.Empty<SessionTranscript>());
+    {
+        return Task.FromResult<IReadOnlyList<SessionTranscript>>(Array.Empty<SessionTranscript>());
+    }
 }
 
 /// <summary>
@@ -196,7 +200,10 @@ public interface ITranscriptStore
 /// grouped into sessions without a second parse in every caller.
 /// </summary>
 /// <param name="Id">The store-assigned row id.</param>
-/// <param name="SessionId">The session portion of <paramref name="CorrelationId"/> - see <see cref="CorrelationIdParser.SessionIdOf"/>.</param>
+/// <param name="SessionId">
+/// The session portion of <paramref name="CorrelationId"/> - see
+/// <see cref="CorrelationIdParser.SessionIdOf"/>.
+/// </param>
 /// <param name="CorrelationId">The full per-request correlation id, <c>"{SessionId}:{turnNumber}"</c>.</param>
 /// <param name="CreatedAtUtc">When this row was written, in UTC.</param>
 /// <param name="RequestedModel">The client's literal requested model name.</param>

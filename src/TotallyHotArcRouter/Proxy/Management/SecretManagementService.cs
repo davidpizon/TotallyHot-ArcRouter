@@ -20,7 +20,10 @@ internal sealed class SecretManagementService
     /// <summary>
     /// Initializes a new instance of the <see cref="SecretManagementService"/> class.
     /// </summary>
-    /// <param name="dependencies">The same optional collaborators bag <see cref="ManagementFacade"/> was constructed with; only <see cref="ManagementFacadeDependencies.SecretWriter"/> is used here.</param>
+    /// <param name="dependencies">
+    /// The same optional collaborators bag <see cref="ManagementFacade"/> was constructed with;
+    /// only <see cref="ManagementFacadeDependencies.SecretWriter"/> is used here.
+    /// </param>
     public SecretManagementService(ManagementFacadeDependencies? dependencies)
     {
         _secretWriter = dependencies?.SecretWriter;
@@ -37,76 +40,76 @@ internal sealed class SecretManagementService
     public ManagementResult<object?> SetSecret(string name, string value)
     {
         if (_secretWriter is null)
-        {
-            return ManagementResult<object?>.Fail(ManagementErrorType.Unavailable, "The protected secret store is unavailable on this platform.");
-        }
+            return ManagementResult<object?>.Fail(errorType: ManagementErrorType.Unavailable,
+                message: "The protected secret store is unavailable on this platform.");
 
-        if (!TryParseAdminKeySecretName(name, out var provider))
-        {
-            return ManagementResult<object?>.Fail(ManagementErrorType.InvalidRequest, $"Unsupported secret name '{name}'.");
-        }
+        if (!TryParseAdminKeySecretName(name: name, provider: out var provider))
+            return ManagementResult<object?>.Fail(errorType: ManagementErrorType.InvalidRequest,
+                message: $"Unsupported secret name '{name}'.");
 
         if (string.IsNullOrWhiteSpace(value))
-        {
-            return ManagementResult<object?>.Fail(ManagementErrorType.InvalidRequest, "value must not be blank.");
-        }
+            return ManagementResult<object?>.Fail(errorType: ManagementErrorType.InvalidRequest,
+                message: "value must not be blank.");
 
         try
         {
-            _secretWriter.Write(AdminKeySecretName(provider), value);
+            _secretWriter.Write(name: AdminKeySecretName(provider), value: value);
             return ManagementResult<object?>.Ok(null);
         }
         catch (PlatformNotSupportedException)
         {
-            return ManagementResult<object?>.Fail(ManagementErrorType.Unavailable, "The protected secret store is unavailable on this platform.");
+            return ManagementResult<object?>.Fail(errorType: ManagementErrorType.Unavailable,
+                message: "The protected secret store is unavailable on this platform.");
         }
     }
 
-    /// <summary>Clears a stored secret by name - the only counterpart to <see cref="SetSecret"/>, same name restriction. There is deliberately no read counterpart (docs/router/secrets-at-rest-plan.md §4).</summary>
+    /// <summary>
+    /// Clears a stored secret by name - the only counterpart to <see cref="SetSecret"/>, same name restriction. There
+    /// is deliberately no read counterpart (docs/router/secrets-at-rest-plan.md §4).
+    /// </summary>
     public ManagementResult<object?> DeleteSecret(string name)
     {
         if (_secretWriter is null)
-        {
-            return ManagementResult<object?>.Fail(ManagementErrorType.Unavailable, "The protected secret store is unavailable on this platform.");
-        }
+            return ManagementResult<object?>.Fail(errorType: ManagementErrorType.Unavailable,
+                message: "The protected secret store is unavailable on this platform.");
 
-        if (!TryParseAdminKeySecretName(name, out var provider))
-        {
-            return ManagementResult<object?>.Fail(ManagementErrorType.InvalidRequest, $"Unsupported secret name '{name}'.");
-        }
+        if (!TryParseAdminKeySecretName(name: name, provider: out var provider))
+            return ManagementResult<object?>.Fail(errorType: ManagementErrorType.InvalidRequest,
+                message: $"Unsupported secret name '{name}'.");
 
         _secretWriter.Delete(AdminKeySecretName(provider));
         return ManagementResult<object?>.Ok(null);
     }
 
-    /// <summary>Parses a secret name as <c>reconciliation:{provider}:admin-key</c> for a recognized provider, the only shape <see cref="SetSecret"/>/<see cref="DeleteSecret"/> accept.</summary>
+    /// <summary>
+    /// Parses a secret name as <c>reconciliation:{provider}:admin-key</c> for a recognized provider, the only shape
+    /// <see cref="SetSecret"/>/<see cref="DeleteSecret"/> accept.
+    /// </summary>
     private static bool TryParseAdminKeySecretName(string name, out string provider)
     {
         provider = string.Empty;
 
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            return false;
-        }
+        if (string.IsNullOrWhiteSpace(name)) return false;
 
         var parts = name.Split(':');
-        if (parts.Length != 3 || parts[0] != "reconciliation" || parts[2] != "admin-key")
-        {
-            return false;
-        }
+        if (parts.Length != 3 || parts[0] != "reconciliation" || parts[2] != "admin-key") return false;
 
         foreach (var candidate in RecognizedReconciliationProviders)
-        {
-            if (string.Equals(candidate, parts[1], StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(a: candidate, b: parts[1], comparisonType: StringComparison.OrdinalIgnoreCase))
             {
                 provider = candidate;
                 return true;
             }
-        }
 
         return false;
     }
 
-    /// <summary>The protected-store name for a provider's reconciliation Admin API key (docs/router/secrets-at-rest-plan.md §3's naming convention), matching <c>PriceCatalog.PriceCatalogServiceCollectionExtensions.AdminApiKeySecretName</c>.</summary>
-    private static string AdminKeySecretName(string provider) => $"reconciliation:{provider}:admin-key";
+    /// <summary>
+    /// The protected-store name for a provider's reconciliation Admin API key (docs/router/secrets-at-rest-plan.md
+    /// §3's naming convention), matching <c>PriceCatalog.PriceCatalogServiceCollectionExtensions.AdminApiKeySecretName</c>.
+    /// </summary>
+    private static string AdminKeySecretName(string provider)
+    {
+        return $"reconciliation:{provider}:admin-key";
+    }
 }

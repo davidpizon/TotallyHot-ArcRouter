@@ -16,8 +16,8 @@ namespace TotallyHot.ArcRouter.Quality.Extraction;
 public sealed class CodeBlockSignalExtractor : ISignalExtractor
 {
     private readonly IDimensionInferrer _dimensionInferrer;
-    private readonly QualityOptions _options;
     private readonly ILogger<CodeBlockSignalExtractor> _logger;
+    private readonly QualityOptions _options;
 
     /// <summary>Initializes a new instance of the <see cref="CodeBlockSignalExtractor"/> class.</summary>
     /// <param name="dimensionInferrer">Infers the task dimension from the prompt and language.</param>
@@ -37,24 +37,18 @@ public sealed class CodeBlockSignalExtractor : ISignalExtractor
         _logger = logger;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public QualityRequest? Extract(SignalExtractionContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        if (string.IsNullOrWhiteSpace(context.ResponseText))
-        {
-            return null;
-        }
+        if (string.IsNullOrWhiteSpace(context.ResponseText)) return null;
 
-        var blocks = FencedCodeBlockParser.Parse(context.ResponseText, _options.MaxCodeBlocks);
-        if (blocks.Count == 0)
-        {
-            return null;
-        }
+        var blocks = FencedCodeBlockParser.Parse(text: context.ResponseText, maxBlocks: _options.MaxCodeBlocks);
+        if (blocks.Count == 0) return null;
 
         // Prefer the first block whose language we recognize; otherwise fall back to the first block.
-        FencedCodeBlock chosen = blocks[0];
+        var chosen = blocks[0];
         var language = CodeLanguage.Unknown;
         foreach (var block in blocks)
         {
@@ -68,14 +62,12 @@ public sealed class CodeBlockSignalExtractor : ISignalExtractor
         }
 
         var code = chosen.Code;
-        if (code.Length > _options.MaxCodeBytes)
-        {
-            code = code[.._options.MaxCodeBytes];
-        }
+        if (code.Length > _options.MaxCodeBytes) code = code[.._options.MaxCodeBytes];
 
-        var dimension = _dimensionInferrer.Infer(context.Prompt, language);
+        var dimension = _dimensionInferrer.Infer(prompt: context.Prompt, language: language);
 
         _logger.LogDebug(
+            message:
             "Extracted {Language} code block ({Length} chars) for dimension {Dimension} (correlation {CorrelationId}).",
             language,
             code.Length,
@@ -92,4 +84,3 @@ public sealed class CodeBlockSignalExtractor : ISignalExtractor
             SessionId: context.SessionId);
     }
 }
-

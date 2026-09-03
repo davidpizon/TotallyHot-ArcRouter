@@ -14,8 +14,8 @@ public class LlmRouterVoterTests
 {
     private static readonly RoutingCandidate[] Candidates =
     [
-        new RoutingCandidate("model-a", "openai", IsFree: false),
-        new RoutingCandidate("model-b", "anthropic", IsFree: false),
+        new(ModelName: "model-a", Provider: "openai", false),
+        new(ModelName: "model-b", Provider: "anthropic", false)
     ];
 
     [Fact]
@@ -24,23 +24,24 @@ public class LlmRouterVoterTests
         var voter = CreateVoter("""{"model": "model-a", "reasoning": "cheapest that clears the bar"}""");
         var context = NewContext();
 
-        var vote = await voter.VoteAsync(context, TestContext.Current.CancellationToken);
+        var vote = await voter.VoteAsync(context: context, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(vote.IsAbstain);
-        Assert.Equal("model-a", vote.ModelName);
-        Assert.Equal("llm_router", voter.Name);
+        Assert.Equal(expected: "model-a", actual: vote.ModelName);
+        Assert.Equal(expected: "llm_router", actual: voter.Name);
     }
 
     [Fact]
     public async Task VoteAsync_FencedJsonCodeBlock_FallsBackToRegexExtraction()
     {
-        var voter = CreateVoter("Here is my pick:\n```json\n{\"model\": \"model-b\", \"reasoning\": \"needs more care\"}\n```\n");
+        var voter = CreateVoter(
+            "Here is my pick:\n```json\n{\"model\": \"model-b\", \"reasoning\": \"needs more care\"}\n```\n");
         var context = NewContext();
 
-        var vote = await voter.VoteAsync(context, TestContext.Current.CancellationToken);
+        var vote = await voter.VoteAsync(context: context, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(vote.IsAbstain);
-        Assert.Equal("model-b", vote.ModelName);
+        Assert.Equal(expected: "model-b", actual: vote.ModelName);
     }
 
     [Fact]
@@ -49,22 +50,23 @@ public class LlmRouterVoterTests
         var voter = CreateVoter("I think model-a is the best fit here, no JSON today.");
         var context = NewContext();
 
-        var vote = await voter.VoteAsync(context, TestContext.Current.CancellationToken);
+        var vote = await voter.VoteAsync(context: context, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(vote.IsAbstain);
-        Assert.Equal("model-a", vote.ModelName);
+        Assert.Equal(expected: "model-a", actual: vote.ModelName);
     }
 
     [Fact]
     public async Task VoteAsync_TextMentionsMultipleCandidates_PicksLastMentioned()
     {
-        var voter = CreateVoter("Between model-a and model-b, I'll restate: model-a first, but model-b is the better fit.");
+        var voter = CreateVoter(
+            "Between model-a and model-b, I'll restate: model-a first, but model-b is the better fit.");
         var context = NewContext();
 
-        var vote = await voter.VoteAsync(context, TestContext.Current.CancellationToken);
+        var vote = await voter.VoteAsync(context: context, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(vote.IsAbstain);
-        Assert.Equal("model-b", vote.ModelName);
+        Assert.Equal(expected: "model-b", actual: vote.ModelName);
     }
 
     [Fact]
@@ -72,16 +74,17 @@ public class LlmRouterVoterTests
     {
         RoutingCandidate[] candidates =
         [
-            new RoutingCandidate("llama3", "bedrock", IsFree: false),
-            new RoutingCandidate("llama3-70b-bedrock", "bedrock", IsFree: false),
+            new(ModelName: "llama3", Provider: "bedrock", false),
+            new(ModelName: "llama3-70b-bedrock", Provider: "bedrock", false)
         ];
         var voter = CreateVoter("I'll go with llama3-70b-bedrock for this task, no JSON today.");
-        var context = new VotingContext("live:code_generation", candidates, TaskText: "Fix the bug.");
+        var context = new VotingContext(Dimension: "live:code_generation", Candidates: candidates,
+            TaskText: "Fix the bug.");
 
-        var vote = await voter.VoteAsync(context, TestContext.Current.CancellationToken);
+        var vote = await voter.VoteAsync(context: context, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(vote.IsAbstain);
-        Assert.Equal("llama3-70b-bedrock", vote.ModelName);
+        Assert.Equal(expected: "llama3-70b-bedrock", actual: vote.ModelName);
     }
 
     [Fact]
@@ -91,10 +94,10 @@ public class LlmRouterVoterTests
             "Here is my pick:\n```json\n{\"model\": \"model-b\", \"reasoning\": \"handles {edge} cases well\"}\n```\n");
         var context = NewContext();
 
-        var vote = await voter.VoteAsync(context, TestContext.Current.CancellationToken);
+        var vote = await voter.VoteAsync(context: context, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(vote.IsAbstain);
-        Assert.Equal("model-b", vote.ModelName);
+        Assert.Equal(expected: "model-b", actual: vote.ModelName);
     }
 
     [Fact]
@@ -109,11 +112,11 @@ public class LlmRouterVoterTests
             "Unrelated second block:\n```json\n{\"model\": \"model-b\"}\n```\n");
         var context = NewContext();
 
-        var vote = await voter.VoteAsync(context, TestContext.Current.CancellationToken);
+        var vote = await voter.VoteAsync(context: context, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(vote.IsAbstain);
-        Assert.Equal("model-a", vote.ModelName);
-        Assert.Equal(0.75, vote.Confidence);
+        Assert.Equal(expected: "model-a", actual: vote.ModelName);
+        Assert.Equal(0.75, actual: vote.Confidence);
     }
 
     [Fact]
@@ -122,7 +125,7 @@ public class LlmRouterVoterTests
         var voter = CreateVoter("I would pick gpt-5.4, which is not in the candidate list.");
         var context = NewContext();
 
-        var vote = await voter.VoteAsync(context, TestContext.Current.CancellationToken);
+        var vote = await voter.VoteAsync(context: context, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(vote.IsAbstain);
     }
@@ -133,7 +136,7 @@ public class LlmRouterVoterTests
         var voter = CreateVoter("""{"model": "not-a-real-candidate", "reasoning": "oops"}""");
         var context = NewContext();
 
-        var vote = await voter.VoteAsync(context, TestContext.Current.CancellationToken);
+        var vote = await voter.VoteAsync(context: context, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(vote.IsAbstain);
     }
@@ -142,10 +145,10 @@ public class LlmRouterVoterTests
     public async Task VoteAsync_NoTaskText_Abstains()
     {
         var generationClient = new FakeTextGenerationClient("""{"model": "model-a"}""");
-        var voter = new LlmRouterVoter(generationClient, NullLogger<LlmRouterVoter>.Instance);
-        var context = new VotingContext("live:code_generation", Candidates, TaskText: null);
+        var voter = new LlmRouterVoter(generationClient: generationClient, logger: NullLogger<LlmRouterVoter>.Instance);
+        var context = new VotingContext(Dimension: "live:code_generation", Candidates: Candidates, TaskText: null);
 
-        var vote = await voter.VoteAsync(context, TestContext.Current.CancellationToken);
+        var vote = await voter.VoteAsync(context: context, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(vote.IsAbstain);
         Assert.False(generationClient.WasCalled);
@@ -155,10 +158,10 @@ public class LlmRouterVoterTests
     public async Task VoteAsync_BlankTaskText_Abstains()
     {
         var generationClient = new FakeTextGenerationClient("""{"model": "model-a"}""");
-        var voter = new LlmRouterVoter(generationClient, NullLogger<LlmRouterVoter>.Instance);
-        var context = new VotingContext("live:code_generation", Candidates, TaskText: "   ");
+        var voter = new LlmRouterVoter(generationClient: generationClient, logger: NullLogger<LlmRouterVoter>.Instance);
+        var context = new VotingContext(Dimension: "live:code_generation", Candidates: Candidates, TaskText: "   ");
 
-        var vote = await voter.VoteAsync(context, TestContext.Current.CancellationToken);
+        var vote = await voter.VoteAsync(context: context, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(vote.IsAbstain);
         Assert.False(generationClient.WasCalled);
@@ -167,11 +170,12 @@ public class LlmRouterVoterTests
     [Fact]
     public async Task VoteAsync_GenerationClientThrows_Abstains()
     {
-        var generationClient = new FakeTextGenerationClient(exception: new InvalidOperationException("model not loaded"));
-        var voter = new LlmRouterVoter(generationClient, NullLogger<LlmRouterVoter>.Instance);
+        var generationClient =
+            new FakeTextGenerationClient(exception: new InvalidOperationException("model not loaded"));
+        var voter = new LlmRouterVoter(generationClient: generationClient, logger: NullLogger<LlmRouterVoter>.Instance);
         var context = NewContext();
 
-        var vote = await voter.VoteAsync(context, TestContext.Current.CancellationToken);
+        var vote = await voter.VoteAsync(context: context, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(vote.IsAbstain);
     }
@@ -184,19 +188,26 @@ public class LlmRouterVoterTests
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();
 
-        await Assert.ThrowsAsync<OperationCanceledException>(() => voter.VoteAsync(context, cts.Token));
+        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+            voter.VoteAsync(context: context, cancellationToken: cts.Token));
     }
 
-    private static VotingContext NewContext() =>
-        new("live:code_generation", Candidates, TaskText: "Fix the null reference exception in Foo.cs.");
+    private static VotingContext NewContext()
+    {
+        return new VotingContext(Dimension: "live:code_generation", Candidates: Candidates,
+            TaskText: "Fix the null reference exception in Foo.cs.");
+    }
 
-    private static LlmRouterVoter CreateVoter(string generatedResponse) =>
-        new(new FakeTextGenerationClient(generatedResponse), NullLogger<LlmRouterVoter>.Instance);
+    private static LlmRouterVoter CreateVoter(string generatedResponse)
+    {
+        return new LlmRouterVoter(generationClient: new FakeTextGenerationClient(generatedResponse),
+            logger: NullLogger<LlmRouterVoter>.Instance);
+    }
 
     private sealed class FakeTextGenerationClient : ITextGenerationClient
     {
-        private readonly string? _response;
         private readonly Exception? _exception;
+        private readonly string? _response;
 
         public FakeTextGenerationClient(string? response = null, Exception? exception = null)
         {

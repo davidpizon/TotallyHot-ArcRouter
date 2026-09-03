@@ -33,5 +33,5 @@ public enum RoutingSubstitutionReason
     /// The primary candidate was attempted and failed at the transport layer (outage, timeout, 5xx); a
     /// later candidate in the fallback chain served the request instead.
     /// </summary>
-    Failover,
+    Failover
 }

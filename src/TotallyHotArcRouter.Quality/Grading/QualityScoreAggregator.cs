@@ -22,13 +22,10 @@ namespace TotallyHot.ArcRouter.Quality.Grading;
 /// </remarks>
 public sealed class QualityScoreAggregator : IQualityScoreAggregator
 {
-    /// <summary>One held static result and the instant its judge wait expires.</summary>
-    /// <param name="Result">The static result awaiting a judge grade.</param>
-    /// <param name="ExpiresAtUtc">The UTC instant after which the wait is abandoned.</param>
-    private sealed record Entry(QualityResult Result, DateTimeOffset ExpiresAtUtc);
-
-    private readonly Dictionary<string, Entry> _pending = new(StringComparer.Ordinal);
+    private readonly int _capacity;
     private readonly Queue<string> _insertionOrder = new();
+    private readonly TimeSpan _joinTimeout;
+    private readonly IJudgeAvailability _judgeAvailability;
 
     /// <summary>
     /// Guards <see cref="_pending"/> and <see cref="_insertionOrder"/>. All five public methods
@@ -41,13 +38,13 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
     /// </summary>
     private readonly object _lock = new();
 
-    private readonly IQualityScoreObserver _observer;
-    private readonly IQualityScorer _scorer;
-    private readonly IJudgeAvailability _judgeAvailability;
     private readonly ILogger<QualityScoreAggregator> _logger;
+
+    private readonly IQualityScoreObserver _observer;
+
+    private readonly Dictionary<string, Entry> _pending = new(StringComparer.Ordinal);
+    private readonly IQualityScorer _scorer;
     private readonly TimeProvider _timeProvider;
-    private readonly TimeSpan _joinTimeout;
-    private readonly int _capacity;
 
     /// <summary>Initializes a new instance of the <see cref="QualityScoreAggregator"/> class.</summary>
     /// <param name="observer">The observer that receives the single score per request.</param>
@@ -55,7 +52,10 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
     /// <param name="judgeAvailability">Decides whether a result is held for a judge grade.</param>
     /// <param name="options">Supplies the join timeout and held-result capacity.</param>
     /// <param name="logger">The logger.</param>
-    /// <param name="timeProvider">Clock used for expiry; defaults to <see cref="TimeProvider.System"/>. Overridable for deterministic tests.</param>
+    /// <param name="timeProvider">
+    /// Clock used for expiry; defaults to <see cref="TimeProvider.System"/>. Overridable for
+    /// deterministic tests.
+    /// </param>
     public QualityScoreAggregator(
         IQualityScoreObserver observer,
         IQualityScorer scorer,
@@ -91,7 +91,7 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
         }
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task SubmitAsync(QualityResult result, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(result);
@@ -100,7 +100,7 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
         // timeout later. Write it now.
         if (string.IsNullOrEmpty(result.RequestCorrelationId) || !_judgeAvailability.WillJudge(result))
         {
-            await WriteAsync(result, cancellationToken).ConfigureAwait(false);
+            await WriteAsync(result: result, cancellationToken: cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -108,24 +108,25 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
         lock (_lock)
         {
             if (!_pending.ContainsKey(result.RequestCorrelationId))
-            {
                 _insertionOrder.Enqueue(result.RequestCorrelationId);
-            }
 
-            _pending[result.RequestCorrelationId] = new Entry(result, _timeProvider.GetUtcNow() + _joinTimeout);
+            _pending[result.RequestCorrelationId] =
+                new Entry(Result: result, ExpiresAtUtc: _timeProvider.GetUtcNow() + _joinTimeout);
             evicted = TrimToCapacityLocked();
         }
 
         foreach (var stale in evicted)
         {
             _logger.LogDebug(
+                message:
                 "Judge join table at capacity; writing the static score for correlation {CorrelationId} without a judge grade.",
                 stale.RequestCorrelationId);
-            await WriteAsync(stale with { DegradedReason = "judge-join-evicted" }, cancellationToken).ConfigureAwait(false);
+            await WriteAsync(result: stale with { DegradedReason = "judge-join-evicted" },
+                cancellationToken: cancellationToken).ConfigureAwait(false);
         }
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<bool> CompleteWithJudgeAsync(
         string correlationId,
         double judgeScore,
@@ -144,19 +145,19 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
             // Already written by a sweep or an eviction. Not an error: the judge simply lost the race, and
             // the router already has an observation for this request.
             _logger.LogDebug(
-                "Judge grade for correlation {CorrelationId} arrived after the join closed; discarding it.",
+                message: "Judge grade for correlation {CorrelationId} arrived after the join closed; discarding it.",
                 correlationId);
             return false;
         }
 
-        var blended = held with { JudgeScore = Math.Clamp(judgeScore, 0.0, 1.0) };
-        blended = blended with { UnifiedScore = _scorer.Score(blended, blended.Dimension) };
+        var blended = held with { JudgeScore = Math.Clamp(value: judgeScore, 0.0, 1.0) };
+        blended = blended with { UnifiedScore = _scorer.Score(result: blended, dimension: blended.Dimension) };
 
-        await WriteAsync(blended, cancellationToken).ConfigureAwait(false);
+        await WriteAsync(result: blended, cancellationToken: cancellationToken).ConfigureAwait(false);
         return true;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<bool> AbandonJudgeAsync(
         string correlationId,
         string reason,
@@ -171,21 +172,19 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
             held = TakeLocked(correlationId);
         }
 
-        if (held is null)
-        {
-            return false;
-        }
+        if (held is null) return false;
 
         _logger.LogDebug(
-            "Releasing correlation {CorrelationId} with its static score alone: {Reason}.",
+            message: "Releasing correlation {CorrelationId} with its static score alone: {Reason}.",
             correlationId,
             reason);
 
-        await WriteAsync(held with { DegradedReason = reason }, cancellationToken).ConfigureAwait(false);
+        await WriteAsync(result: held with { DegradedReason = reason }, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
         return true;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<int> SweepExpiredAsync(CancellationToken cancellationToken = default)
     {
         List<QualityResult> expired;
@@ -195,20 +194,18 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
         {
             expired = [];
             foreach (var key in _pending.Where(kv => kv.Value.ExpiresAtUtc <= now).Select(kv => kv.Key).ToList())
-            {
                 if (TakeLocked(key) is { } result)
-                {
                     expired.Add(result);
-                }
-            }
         }
 
         foreach (var result in expired)
         {
             _logger.LogDebug(
+                message:
                 "Judge grade for correlation {CorrelationId} did not arrive within the join window; writing the static score alone.",
                 result.RequestCorrelationId);
-            await WriteAsync(result with { DegradedReason = "judge-join-timeout" }, cancellationToken).ConfigureAwait(false);
+            await WriteAsync(result: result with { DegradedReason = "judge-join-timeout" },
+                cancellationToken: cancellationToken).ConfigureAwait(false);
         }
 
         return expired.Count;
@@ -218,10 +215,7 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
     /// <remarks>Must be called under <c>_lock</c>: winning this removal is what grants the right to write.</remarks>
     private QualityResult? TakeLocked(string correlationId)
     {
-        if (!_pending.Remove(correlationId, out var entry))
-        {
-            return null;
-        }
+        if (!_pending.Remove(key: correlationId, value: out var entry)) return null;
 
         return entry.Result;
     }
@@ -235,10 +229,7 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
         while (_pending.Count > _capacity && _insertionOrder.Count > 0)
         {
             var oldest = _insertionOrder.Dequeue();
-            if (TakeLocked(oldest) is { } result)
-            {
-                evicted.Add(result);
-            }
+            if (TakeLocked(oldest) is { } result) evicted.Add(result);
         }
 
         return evicted;
@@ -249,14 +240,20 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
     {
         try
         {
-            await _observer.ObserveAsync(result, cancellationToken).ConfigureAwait(false);
+            await _observer.ObserveAsync(result: result, cancellationToken: cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(
-                ex,
+                exception: ex,
+                message:
                 "Observing the quality score for correlation {CorrelationId} failed; the routed response was unaffected.",
                 result.RequestCorrelationId);
         }
     }
+
+    /// <summary>One held static result and the instant its judge wait expires.</summary>
+    /// <param name="Result">The static result awaiting a judge grade.</param>
+    /// <param name="ExpiresAtUtc">The UTC instant after which the wait is abandoned.</param>
+    private sealed record Entry(QualityResult Result, DateTimeOffset ExpiresAtUtc);
 }

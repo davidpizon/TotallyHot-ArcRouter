@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.Router.Embeddings;
 
 namespace TotallyHot.ArcRouter.Router;
 
@@ -21,19 +22,22 @@ namespace TotallyHot.ArcRouter.Router;
 /// </remarks>
 public sealed class EmbeddingMemory : IDisposable
 {
-    private readonly IMemoryEntryStore _store;
-    private readonly IOptionsMonitor<RoutingOptions> _optionsMonitor;
-    private readonly Embeddings.IEmbeddingClient _embeddingClient;
-    private readonly ILogger<EmbeddingMemory> _logger;
-    private readonly object _syncLock = new();
-    private readonly List<MemoryEntry> _entries = [];
     private readonly IDisposable? _changeSubscription;
+    private readonly IEmbeddingClient _embeddingClient;
+    private readonly List<MemoryEntry> _entries = [];
+    private readonly ILogger<EmbeddingMemory> _logger;
+    private readonly IOptionsMonitor<RoutingOptions> _optionsMonitor;
+    private readonly IMemoryEntryStore _store;
+    private readonly object _syncLock = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="EmbeddingMemory"/> class.
     /// </summary>
     /// <param name="store">The persistence layer.</param>
-    /// <param name="optionsMonitor">The routing options monitor, providing the similarity threshold, neighbor count, and FIFO capacity - read live so a runtime capacity change (Phase T6) takes effect without a restart.</param>
+    /// <param name="optionsMonitor">
+    /// The routing options monitor, providing the similarity threshold, neighbor count, and FIFO
+    /// capacity - read live so a runtime capacity change (Phase T6) takes effect without a restart.
+    /// </param>
     /// <param name="embeddingClient">
     /// Supplies <see cref="Embeddings.IEmbeddingClient.ModelIdentity"/> - stamped onto every entry written
     /// here and compared against on every retrieval. Only the identity property is read; no inference is
@@ -43,7 +47,7 @@ public sealed class EmbeddingMemory : IDisposable
     public EmbeddingMemory(
         IMemoryEntryStore store,
         IOptionsMonitor<RoutingOptions> optionsMonitor,
-        Embeddings.IEmbeddingClient embeddingClient,
+        IEmbeddingClient embeddingClient,
         ILogger<EmbeddingMemory> logger)
     {
         ArgumentNullException.ThrowIfNull(store);
@@ -63,6 +67,12 @@ public sealed class EmbeddingMemory : IDisposable
         _changeSubscription = _optionsMonitor.OnChange(OnOptionsChanged);
     }
 
+    /// <summary>Unsubscribes from <see cref="IOptionsMonitor{TOptions}.OnChange"/>.</summary>
+    public void Dispose()
+    {
+        _changeSubscription?.Dispose();
+    }
+
     /// <summary>
     /// The <see cref="IOptionsMonitor{TOptions}.OnChange"/> callback: fires <see cref="TrimToCurrentCapacityAsync"/>
     /// without awaiting it, since the callback itself is synchronous and must not block the options
@@ -70,8 +80,10 @@ public sealed class EmbeddingMemory : IDisposable
     /// proceeds (e.g. <see cref="RouterSettingsAdminGrpcService"/> reporting the post-mutation state) calls
     /// <see cref="TrimToCurrentCapacityAsync"/> directly and awaits it instead of relying on this path.
     /// </summary>
-    private void OnOptionsChanged(RoutingOptions changedOptions, string? name) =>
+    private void OnOptionsChanged(RoutingOptions changedOptions, string? name)
+    {
         _ = TrimToCurrentCapacityAsync(CancellationToken.None);
+    }
 
     /// <summary>
     /// Loads the working set from the store. Must be called once before <see cref="FindNearest"/>
@@ -92,7 +104,7 @@ public sealed class EmbeddingMemory : IDisposable
 
         await TrimToCurrentCapacityAsync(cancellationToken).ConfigureAwait(false);
 
-        _logger.LogInformation("Initialized embedding memory with {EntryCount} entries.", _entries.Count);
+        _logger.LogInformation(message: "Initialized embedding memory with {EntryCount} entries.", _entries.Count);
     }
 
     /// <summary>
@@ -146,10 +158,12 @@ public sealed class EmbeddingMemory : IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(chosenModel);
 
         var persisted = await _store.AppendAsync(
-            new MemoryEntry(
-                0, taskEmbedding, chosenModel, score, cost, verifierTrace, DateTimeOffset.UtcNow,
-                isExploratory, propensity, dimension, isJudgeScored, _embeddingClient.ModelIdentity),
-            cancellationToken).ConfigureAwait(false);
+            entry: new MemoryEntry(
+                0, TaskEmbedding: taskEmbedding, ChosenModel: chosenModel, Score: score, Cost: cost,
+                VerifierTrace: verifierTrace, CreatedAtUtc: DateTimeOffset.UtcNow,
+                IsExploratory: isExploratory, Propensity: propensity, Dimension: dimension,
+                IsJudgeScored: isJudgeScored, EmbeddingModel: _embeddingClient.ModelIdentity),
+            cancellationToken: cancellationToken).ConfigureAwait(false);
 
         lock (_syncLock)
         {
@@ -178,21 +192,17 @@ public sealed class EmbeddingMemory : IDisposable
         lock (_syncLock)
         {
             var overflow = _entries.Count - capacity;
-            if (overflow <= 0)
-            {
-                return;
-            }
+            if (overflow <= 0) return;
 
-            evicted = _entries.GetRange(0, overflow);
-            _entries.RemoveRange(0, overflow);
+            evicted = _entries.GetRange(0, count: overflow);
+            _entries.RemoveRange(0, count: overflow);
         }
 
         foreach (var evictedEntry in evicted)
-        {
-            await _store.DeleteAsync(evictedEntry.Id, cancellationToken).ConfigureAwait(false);
-        }
+            await _store.DeleteAsync(id: evictedEntry.Id, cancellationToken: cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation(
+            message:
             "Trimmed {EvictedCount} oldest embedding memory entries to stay within the {Capacity}-entry FIFO bound.",
             evicted.Count,
             capacity);
@@ -252,16 +262,16 @@ public sealed class EmbeddingMemory : IDisposable
         // working set is skipped at once, and logging each would recreate the very flood this filter
         // exists to stop.
         if (comparable.Count != snapshot.Count)
-        {
             _logger.LogDebug(
+                message:
                 "Skipped {SkippedCount} of {TotalCount} embedding memory entries not comparable to the current embedding model {ModelIdentity}.",
                 snapshot.Count - comparable.Count,
                 snapshot.Count,
                 modelIdentity);
-        }
 
         return comparable
-            .Select(entry => (Entry: entry, Similarity: CosineSimilarity(queryEmbedding, entry.TaskEmbedding)))
+            .Select(entry => (Entry: entry,
+                Similarity: CosineSimilarity(left: queryEmbedding, right: entry.TaskEmbedding)))
             .Where(candidate => candidate.Similarity >= options.EmbeddingSimilarityThreshold)
             .OrderByDescending(candidate => candidate.Similarity)
             .Take(options.MaxNeighborCount)
@@ -276,9 +286,8 @@ public sealed class EmbeddingMemory : IDisposable
     private static double CosineSimilarity(float[] left, float[] right)
     {
         if (left.Length != right.Length)
-        {
-            throw new ArgumentException("Vectors must be the same length to compute cosine similarity.", nameof(right));
-        }
+            throw new ArgumentException(message: "Vectors must be the same length to compute cosine similarity.",
+                paramName: nameof(right));
 
         double dot = 0, leftMagnitude = 0, rightMagnitude = 0;
         for (var i = 0; i < left.Length; i++)
@@ -288,14 +297,8 @@ public sealed class EmbeddingMemory : IDisposable
             rightMagnitude += (double)right[i] * right[i];
         }
 
-        if (leftMagnitude <= 0 || rightMagnitude <= 0)
-        {
-            return 0;
-        }
+        if (leftMagnitude <= 0 || rightMagnitude <= 0) return 0;
 
         return dot / (Math.Sqrt(leftMagnitude) * Math.Sqrt(rightMagnitude));
     }
-
-    /// <summary>Unsubscribes from <see cref="IOptionsMonitor{TOptions}.OnChange"/>.</summary>
-    public void Dispose() => _changeSubscription?.Dispose();
 }

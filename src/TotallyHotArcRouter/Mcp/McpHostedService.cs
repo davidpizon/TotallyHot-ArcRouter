@@ -10,24 +10,25 @@ namespace TotallyHot.ArcRouter.Mcp;
 /// <summary>
 /// A hosted service that manages the lifecycle of the MCP management endpoint (<see cref="McpServer"/>),
 /// mirroring <see cref="TotallyHot.ArcRouter.Hosting.ProxyHostedService"/>'s role for the proxy. Registered after
-/// <c>ProxyHostedService</c> in <see cref="TotallyHot.ArcRouter.Hosting.ServiceCollectionExtensions.AddTotallyHotArcRouter"/>;
+/// <c>ProxyHostedService</c> in
+/// <see cref="TotallyHot.ArcRouter.Hosting.ServiceCollectionExtensions.AddTotallyHotArcRouter"/>;
 /// registration order isn't load-bearing here the way it is for the startup health check, since MCP has no
 /// dependency on Kestrel having bound yet.
 /// </summary>
 public sealed class McpHostedService : IHostedService, IAsyncDisposable
 {
+    private readonly BenchmarkDataStatusService _benchmarkDataStatusService;
+    private readonly BenchmarkSyncOptions _benchmarkSyncOptions;
+    private readonly BenchmarkSyncService _benchmarkSyncService;
     private readonly ILogger<McpHostedService> _logger;
+    private readonly ManagementFacade _managementFacade;
     private readonly ILogger<McpServer> _mcpServerLogger;
     private readonly McpOptions _options;
-    private readonly ManagementFacade _managementFacade;
-    private readonly PriceSourceToggleStore _priceSourceToggleStore;
     private readonly PriceCatalogIngestionService _priceCatalogIngestionService;
     private readonly IModelPriceLookup _priceLookup;
+    private readonly PriceSourceToggleStore _priceSourceToggleStore;
     private readonly ProviderBudgetStore _providerBudgetStore;
     private readonly ISpendTracker _spendTracker;
-    private readonly BenchmarkDataStatusService _benchmarkDataStatusService;
-    private readonly BenchmarkSyncService _benchmarkSyncService;
-    private readonly BenchmarkSyncOptions _benchmarkSyncOptions;
 
     private McpServer? _server;
 
@@ -81,6 +82,14 @@ public sealed class McpHostedService : IHostedService, IAsyncDisposable
     /// </summary>
     public IReadOnlyCollection<string> Addresses => _server?.Addresses ?? [];
 
+    /// <summary>Disposes the underlying <see cref="McpServer"/>, if it was created.</summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (_server is not null) await _server.DisposeAsync().ConfigureAwait(false);
+
+        GC.SuppressFinalize(this);
+    }
+
     /// <summary>
     /// Generates/loads the shared management token and starts the MCP endpoint, unless
     /// <see cref="McpOptions.Enabled"/> is <see langword="false"/>. Failures are logged and swallowed
@@ -100,24 +109,25 @@ public sealed class McpHostedService : IHostedService, IAsyncDisposable
             // (ManagementAccessToken's default path) so they share exactly one token.
             var accessToken = ManagementAccessToken.GetOrCreate();
             _server = new McpServer(
-                _mcpServerLogger,
-                _managementFacade,
-                _priceSourceToggleStore,
-                _priceCatalogIngestionService,
-                _priceLookup,
-                _providerBudgetStore,
-                _spendTracker,
-                _benchmarkDataStatusService,
-                _benchmarkSyncService,
-                _benchmarkSyncOptions,
-                accessToken,
-                _options.Port);
+                logger: _mcpServerLogger,
+                managementFacade: _managementFacade,
+                priceSourceToggleStore: _priceSourceToggleStore,
+                priceCatalogIngestionService: _priceCatalogIngestionService,
+                priceLookup: _priceLookup,
+                providerBudgetStore: _providerBudgetStore,
+                spendTracker: _spendTracker,
+                benchmarkDataStatusService: _benchmarkDataStatusService,
+                benchmarkSyncService: _benchmarkSyncService,
+                benchmarkSyncOptions: _benchmarkSyncOptions,
+                accessToken: accessToken,
+                port: _options.Port);
 
             await _server.StartAsync(cancellationToken).ConfigureAwait(false);
             // Log the actual bound address(es) rather than the configured port: when Port is 0 (an
             // ephemeral port, which McpServer explicitly supports), the configured value is never the
             // real listening port.
-            _logger.LogInformation("MCP endpoint listening on {Addresses}.", string.Join(", ", _server.Addresses));
+            _logger.LogInformation(message: "MCP endpoint listening on {Addresses}.",
+                string.Join(separator: ", ", values: _server.Addresses));
         }
         catch (IOException ex) when (ex.InnerException is AddressInUseException)
         {
@@ -126,15 +136,22 @@ public sealed class McpHostedService : IHostedService, IAsyncDisposable
             // none of which say anything the operator can act on. ex.Message names the address, which is
             // more precise than the configured port (McpOptions.Port may be 0, an ephemeral port).
             _logger.LogWarning(
+                message:
                 "The MCP endpoint could not start: {Reason} The router continues without it; set Mcp:Port to a free port, or Mcp:Enabled=false to stop trying.",
                 ex.Message);
             await DisposeServerAsync().ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to start the MCP endpoint; it will be unavailable.");
+            _logger.LogWarning(exception: ex, message: "Failed to start the MCP endpoint; it will be unavailable.");
             await DisposeServerAsync().ConfigureAwait(false);
         }
+    }
+
+    /// <summary>Stops the MCP endpoint, if it started.</summary>
+    public async Task StopAsync(CancellationToken cancellationToken)
+    {
+        if (_server is not null) await _server.StopAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -150,25 +167,4 @@ public sealed class McpHostedService : IHostedService, IAsyncDisposable
             _server = null;
         }
     }
-
-    /// <summary>Stops the MCP endpoint, if it started.</summary>
-    public async Task StopAsync(CancellationToken cancellationToken)
-    {
-        if (_server is not null)
-        {
-            await _server.StopAsync(cancellationToken).ConfigureAwait(false);
-        }
-    }
-
-    /// <summary>Disposes the underlying <see cref="McpServer"/>, if it was created.</summary>
-    public async ValueTask DisposeAsync()
-    {
-        if (_server is not null)
-        {
-            await _server.DisposeAsync().ConfigureAwait(false);
-        }
-
-        GC.SuppressFinalize(this);
-    }
 }
-

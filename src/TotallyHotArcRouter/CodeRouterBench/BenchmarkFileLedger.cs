@@ -1,5 +1,5 @@
-using Microsoft.Data.Sqlite;
 using System.Globalization;
+using Microsoft.Data.Sqlite;
 
 namespace TotallyHot.ArcRouter.CodeRouterBench;
 
@@ -25,17 +25,14 @@ public sealed class BenchmarkFileLedger
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT file_name, published_oid, size_bytes, row_count, repo_commit, synced_at_utc
-            FROM benchmark_files
-            ORDER BY file_name;
-            """;
+                              SELECT file_name, published_oid, size_bytes, row_count, repo_commit, synced_at_utc
+                              FROM benchmark_files
+                              ORDER BY file_name;
+                              """;
 
         List<BenchmarkFileLedgerEntry> entries = [];
         using var reader = command.ExecuteReader();
-        while (reader.Read())
-        {
-            entries.Add(ReadEntry(reader));
-        }
+        while (reader.Read()) entries.Add(ReadEntry(reader));
 
         return entries;
     }
@@ -48,11 +45,11 @@ public sealed class BenchmarkFileLedger
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT file_name, published_oid, size_bytes, row_count, repo_commit, synced_at_utc
-            FROM benchmark_files
-            WHERE file_name = $fileName;
-            """;
-        command.Parameters.AddWithValue("$fileName", fileName);
+                              SELECT file_name, published_oid, size_bytes, row_count, repo_commit, synced_at_utc
+                              FROM benchmark_files
+                              WHERE file_name = $fileName;
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$fileName", value: fileName);
 
         using var reader = command.ExecuteReader();
         return reader.Read() ? ReadEntry(reader) : null;
@@ -66,7 +63,7 @@ public sealed class BenchmarkFileLedger
     public void Upsert(BenchmarkFileLedgerEntry entry)
     {
         using var connection = _database.OpenConnection();
-        Upsert(entry, connection, transaction: null);
+        Upsert(entry: entry, connection: connection, null);
     }
 
     /// <summary>
@@ -80,42 +77,46 @@ public sealed class BenchmarkFileLedger
         ArgumentNullException.ThrowIfNull(entry);
         ArgumentNullException.ThrowIfNull(connection);
         if (entry.SyncedAtUtc.Offset != TimeSpan.Zero)
-        {
             throw new ArgumentException(
+                message:
                 $"{nameof(entry.SyncedAtUtc)} must have a UTC (zero) offset, but was {entry.SyncedAtUtc.Offset}.",
-                nameof(entry));
-        }
+                paramName: nameof(entry));
 
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            INSERT INTO benchmark_files (file_name, published_oid, size_bytes, row_count, repo_commit, synced_at_utc)
-            VALUES ($fileName, $publishedOid, $sizeBytes, $rowCount, $repoCommit, $syncedAtUtc)
-            ON CONFLICT(file_name) DO UPDATE SET
-                published_oid = excluded.published_oid,
-                size_bytes    = excluded.size_bytes,
-                row_count     = excluded.row_count,
-                repo_commit   = excluded.repo_commit,
-                synced_at_utc = excluded.synced_at_utc;
-            """;
-        command.Parameters.AddWithValue("$fileName", entry.FileName);
-        command.Parameters.AddWithValue("$publishedOid", entry.PublishedOid);
-        command.Parameters.AddWithValue("$sizeBytes", entry.SizeBytes);
-        command.Parameters.AddWithValue("$rowCount", entry.RowCount);
-        command.Parameters.AddWithValue("$repoCommit", entry.RepoCommit);
-        command.Parameters.AddWithValue("$syncedAtUtc", entry.SyncedAtUtc.ToString("O", CultureInfo.InvariantCulture));
+                              INSERT INTO benchmark_files (file_name, published_oid, size_bytes, row_count, repo_commit, synced_at_utc)
+                              VALUES ($fileName, $publishedOid, $sizeBytes, $rowCount, $repoCommit, $syncedAtUtc)
+                              ON CONFLICT(file_name) DO UPDATE SET
+                                  published_oid = excluded.published_oid,
+                                  size_bytes    = excluded.size_bytes,
+                                  row_count     = excluded.row_count,
+                                  repo_commit   = excluded.repo_commit,
+                                  synced_at_utc = excluded.synced_at_utc;
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$fileName", value: entry.FileName);
+        command.Parameters.AddWithValue(parameterName: "$publishedOid", value: entry.PublishedOid);
+        command.Parameters.AddWithValue(parameterName: "$sizeBytes", value: entry.SizeBytes);
+        command.Parameters.AddWithValue(parameterName: "$rowCount", value: entry.RowCount);
+        command.Parameters.AddWithValue(parameterName: "$repoCommit", value: entry.RepoCommit);
+        command.Parameters.AddWithValue(parameterName: "$syncedAtUtc",
+            value: entry.SyncedAtUtc.ToString(format: "O", formatProvider: CultureInfo.InvariantCulture));
         command.ExecuteNonQuery();
     }
 
     /// <summary>Maps the current row of a <c>benchmark_files</c> reader onto a <see cref="BenchmarkFileLedgerEntry"/>.</summary>
     /// <param name="reader">A reader positioned on a row selecting the ledger's six columns in order.</param>
     /// <returns>The row's entry.</returns>
-    private static BenchmarkFileLedgerEntry ReadEntry(SqliteDataReader reader) => new(
-        FileName: reader.GetString(0),
-        PublishedOid: reader.GetString(1),
-        SizeBytes: reader.GetInt64(2),
-        RowCount: reader.GetInt32(3),
-        RepoCommit: reader.GetString(4),
-        SyncedAtUtc: DateTimeOffset.Parse(
-            reader.GetString(5), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind));
+    private static BenchmarkFileLedgerEntry ReadEntry(SqliteDataReader reader)
+    {
+        return new BenchmarkFileLedgerEntry(
+            FileName: reader.GetString(0),
+            PublishedOid: reader.GetString(1),
+            SizeBytes: reader.GetInt64(2),
+            RowCount: reader.GetInt32(3),
+            RepoCommit: reader.GetString(4),
+            SyncedAtUtc: DateTimeOffset.Parse(
+                input: reader.GetString(5), formatProvider: CultureInfo.InvariantCulture,
+                styles: DateTimeStyles.RoundtripKind));
+    }
 }

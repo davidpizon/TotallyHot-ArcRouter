@@ -5,7 +5,6 @@ namespace TotallyHot.ArcRouter.Tests.Models;
 
 /// <summary>
 /// Guards the <c>ToString()</c> consequence of <see cref="ProviderOptions"/> becoming a <c>record</c>.
-///
 /// <para>
 /// As a class its <c>ToString()</c> was the type name and carried nothing. The synthesized record printer
 /// prints every property verbatim, so without the type's <c>PrintMembers</c> override a secret stored in
@@ -14,7 +13,6 @@ namespace TotallyHot.ArcRouter.Tests.Models;
 /// needs a test rather than a comment - the leak would arrive with whichever future log statement first
 /// interpolates a provider, far from the change that made it possible.
 /// </para>
-///
 /// <para>
 /// Only <see cref="EveryPublicProperty_IsAccountedForInPrintMembers"/> reflects over the type; it is what
 /// makes this file self-maintaining, by failing when a property is added to
@@ -29,27 +27,32 @@ public sealed class ProviderOptionsRedactionTests
 {
     private const string Secret = "sk-live-must-never-be-printed";
 
-    private static ProviderOptions FullyPopulated() => new()
+    private static ProviderOptions FullyPopulated()
     {
-        BaseUrl = "https://api.example.invalid/v1",
-        ProviderType = "Anthropic",
-        AuthHeaderName = "x-api-key",
-        Headers = [new ProviderHeader { Name = "anthropic-version", Value = Secret }],
-        IsFree = true,
-        Enabled = false,
-        AwsRegion = "us-east-1",
-        AwsAccessKeyIdEnvVar = "AWS_ACCESS_KEY_ID",
-        AwsSecretAccessKeyEnvVar = "AWS_SECRET_ACCESS_KEY",
-        AwsSessionTokenEnvVar = "AWS_SESSION_TOKEN",
-    };
+        return new ProviderOptions
+        {
+            BaseUrl = "https://api.example.invalid/v1",
+            ProviderType = "Anthropic",
+            AuthHeaderName = "x-api-key",
+            Headers = [new ProviderHeader { Name = "anthropic-version", Value = Secret }],
+            IsFree = true,
+            Enabled = false,
+            AwsRegion = "us-east-1",
+            AwsAccessKeyIdEnvVar = "AWS_ACCESS_KEY_ID",
+            AwsSecretAccessKeyEnvVar = "AWS_SECRET_ACCESS_KEY",
+            AwsSessionTokenEnvVar = "AWS_SESSION_TOKEN"
+        };
+    }
 
     [Fact]
     public void ToString_NeverContainsASecretValue()
     {
         var rendered = FullyPopulated().ToString();
 
-        Assert.DoesNotContain(Secret, rendered, StringComparison.Ordinal);
-        Assert.Contains("<redacted>", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain(expectedSubstring: Secret, actualString: rendered,
+            comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "<redacted>", actualString: rendered,
+            comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
@@ -60,10 +63,14 @@ public sealed class ProviderOptionsRedactionTests
         // one, and are the first thing to check when a credential problem is being diagnosed.
         var rendered = FullyPopulated().ToString();
 
-        Assert.Contains("https://api.example.invalid/v1", rendered, StringComparison.Ordinal);
-        Assert.Contains("x-api-key", rendered, StringComparison.Ordinal);
-        Assert.Contains("AWS_SECRET_ACCESS_KEY", rendered, StringComparison.Ordinal);
-        Assert.Contains("anthropic-version", rendered, StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "https://api.example.invalid/v1", actualString: rendered,
+            comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "x-api-key", actualString: rendered,
+            comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "AWS_SECRET_ACCESS_KEY", actualString: rendered,
+            comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "anthropic-version", actualString: rendered,
+            comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
@@ -79,13 +86,13 @@ public sealed class ProviderOptionsRedactionTests
         var missing = typeof(ProviderOptions)
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Select(property => property.Name)
-            .Where(name => !rendered.Contains(name, StringComparison.Ordinal))
+            .Where(name => !rendered.Contains(value: name, comparisonType: StringComparison.Ordinal))
             .ToList();
 
         Assert.True(
-            missing.Count == 0,
-            $"ProviderOptions.PrintMembers omits: {string.Join(", ", missing)}. Add each to PrintMembers - "
-                + "redacted via Redacted(...) if it carries a secret, verbatim if it is diagnostic context.");
+            condition: missing.Count == 0,
+            userMessage:
+            $"ProviderOptions.PrintMembers omits: {string.Join(separator: ", ", values: missing)}. Add each to PrintMembers - "
+            + "redacted via Redacted(...) if it carries a secret, verbatim if it is diagnostic context.");
     }
 }
-

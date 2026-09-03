@@ -22,13 +22,15 @@ public sealed class RoutingGateAdminGrpcService : Contract.RoutingGateAdminServi
         _gate = gate;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public override Task<Contract.RoutingGateResponse> GetRoutingGate(
         Contract.GetRoutingGateRequest request,
-        ServerCallContext context) =>
-        Task.FromResult(new Contract.RoutingGateResponse { Enabled = _gate.IsEnabled });
+        ServerCallContext context)
+    {
+        return Task.FromResult(new Contract.RoutingGateResponse { Enabled = _gate.IsEnabled });
+    }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public override Task<Contract.RoutingGateResponse> SetRoutingGate(
         Contract.SetRoutingGateRequest request,
         ServerCallContext context)

@@ -11,10 +11,13 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// </summary>
 public static class ClusterModelArtifactSerializer
 {
-    /// <summary>Serializer options shared by <see cref="Serialize"/> and <see cref="Deserialize"/>: indented so a manually inspected artifact file stays human-readable.</summary>
+    /// <summary>
+    /// Serializer options shared by <see cref="Serialize"/> and <see cref="Deserialize"/>: indented so a manually
+    /// inspected artifact file stays human-readable.
+    /// </summary>
     private static readonly JsonSerializerOptions Options = new()
     {
-        WriteIndented = true,
+        WriteIndented = true
     };
 
     /// <summary>Serializes <paramref name="artifact"/> to indented JSON.</summary>
@@ -31,14 +34,15 @@ public static class ClusterModelArtifactSerializer
             ChosenK = artifact.ChosenK,
             TrainedAtUtc = artifact.TrainedAtUtc,
             ClusterSizes = [.. artifact.ClusterSizes],
-            ClusterDimensionHistograms = [.. artifact.ClusterDimensionHistograms.Select(h => new Dictionary<string, int>(h))],
+            ClusterDimensionHistograms =
+                [.. artifact.ClusterDimensionHistograms.Select(h => new Dictionary<string, int>(h))],
             ClusterTopTerms = [.. artifact.ClusterTopTerms.Select(t => (List<string>)[.. t])],
             TrainedFrom = artifact.TrainedFrom,
             BootstrapTaskCount = artifact.BootstrapTaskCount,
-            MemoryEntryCount = artifact.MemoryEntryCount,
+            MemoryEntryCount = artifact.MemoryEntryCount
         };
 
-        return JsonSerializer.Serialize(dto, Options);
+        return JsonSerializer.Serialize(value: dto, options: Options);
     }
 
     /// <summary>Deserializes an artifact previously produced by <see cref="Serialize"/>.</summary>
@@ -48,21 +52,22 @@ public static class ClusterModelArtifactSerializer
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
 
-        var dto = JsonSerializer.Deserialize<Dto>(json, Options)
-            ?? throw new FormatException("The cluster model document deserialized to null.");
+        var dto = JsonSerializer.Deserialize<Dto>(json: json, options: Options)
+                  ?? throw new FormatException("The cluster model document deserialized to null.");
 
         var artifact = new ClusterModelArtifact(
-            dto.EmbeddingDimension,
-            dto.Centroids,
-            dto.ChosenK,
-            dto.TrainedAtUtc,
-            dto.ClusterSizes,
+            EmbeddingDimension: dto.EmbeddingDimension,
+            Centroids: dto.Centroids,
+            ChosenK: dto.ChosenK,
+            TrainedAtUtc: dto.TrainedAtUtc,
+            ClusterSizes: dto.ClusterSizes,
+            ClusterDimensionHistograms:
             [.. dto.ClusterDimensionHistograms.Select(h => (IReadOnlyDictionary<string, int>)h)],
-            [.. dto.ClusterTopTerms.Select(t => (IReadOnlyList<string>)t)],
-            dto.TrainedFrom,
-            dto.BootstrapTaskCount,
-            dto.MemoryEntryCount,
-            dto.EmbeddingModel);
+            ClusterTopTerms: [.. dto.ClusterTopTerms.Select(t => (IReadOnlyList<string>)t)],
+            TrainedFrom: dto.TrainedFrom,
+            BootstrapTaskCount: dto.BootstrapTaskCount,
+            MemoryEntryCount: dto.MemoryEntryCount,
+            EmbeddingModel: dto.EmbeddingModel);
         Validate(artifact);
         return artifact;
     }
@@ -83,53 +88,37 @@ public static class ClusterModelArtifactSerializer
         ArgumentNullException.ThrowIfNull(artifact);
 
         if (artifact.EmbeddingDimension <= 0)
-        {
             throw new FormatException(
                 $"The cluster model document's embeddingDimension is {artifact.EmbeddingDimension}, must be positive.");
-        }
 
         if (artifact.Centroids is null || artifact.Centroids.Count == 0)
-        {
             throw new FormatException("The cluster model document's centroids is null or empty.");
-        }
 
         foreach (var centroid in artifact.Centroids)
         {
-            if (centroid is null)
-            {
-                throw new FormatException("The cluster model document contains a null centroid.");
-            }
+            if (centroid is null) throw new FormatException("The cluster model document contains a null centroid.");
 
             if (centroid.Length != artifact.EmbeddingDimension)
-            {
                 throw new FormatException(
                     $"A centroid has length {centroid.Length}, expected {artifact.EmbeddingDimension}.");
-            }
 
             if (centroid.Any(value => !float.IsFinite(value)))
-            {
-                throw new FormatException("The cluster model document contains a non-finite centroid value (NaN or Infinity).");
-            }
+                throw new FormatException(
+                    "The cluster model document contains a non-finite centroid value (NaN or Infinity).");
         }
 
         var k = artifact.Centroids.Count;
         if (artifact.ClusterSizes is null || artifact.ClusterSizes.Count != k)
-        {
             throw new FormatException(
                 $"clusterSizes has {artifact.ClusterSizes?.Count ?? 0} entr(y/ies), expected {k} to match centroids.");
-        }
 
         if (artifact.ClusterDimensionHistograms is null || artifact.ClusterDimensionHistograms.Count != k)
-        {
             throw new FormatException(
                 $"clusterDimensionHistograms has {artifact.ClusterDimensionHistograms?.Count ?? 0} entr(y/ies), expected {k} to match centroids.");
-        }
 
         if (artifact.ClusterTopTerms is null || artifact.ClusterTopTerms.Count != k)
-        {
             throw new FormatException(
                 $"clusterTopTerms has {artifact.ClusterTopTerms?.Count ?? 0} entr(y/ies), expected {k} to match centroids.");
-        }
     }
 
     /// <summary>The wire shape for <see cref="ClusterModelArtifact"/>.</summary>
@@ -175,7 +164,10 @@ public static class ClusterModelArtifactSerializer
         [JsonPropertyName("memoryEntryCount")]
         public int MemoryEntryCount { get; set; }
 
-        /// <summary>Gets or sets the identity of the embedding model this artifact was fitted against, or null for a pre-provenance artifact.</summary>
+        /// <summary>
+        /// Gets or sets the identity of the embedding model this artifact was fitted against, or null for a
+        /// pre-provenance artifact.
+        /// </summary>
         [JsonPropertyName("embeddingModel")]
         public string? EmbeddingModel { get; set; }
     }

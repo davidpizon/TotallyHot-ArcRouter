@@ -9,10 +9,12 @@ namespace TotallyHot.ArcRouter.Update;
 /// </summary>
 public sealed class NullReleaseCheckClient : IReleaseCheckClient
 {
-    /// <inheritdoc />
-    public Task<ReleaseCheckResult> CheckAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult(ReleaseCheckResult.Unavailable(
+    /// <inheritdoc/>
+    public Task<ReleaseCheckResult> CheckAsync(CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(ReleaseCheckResult.Unavailable(
             currentVersion: "0.0.0",
-            ReleaseCheckUnavailableReason.NetworkOrApiFailure,
-            "Update checking was not configured for this server instance."));
+            reason: ReleaseCheckUnavailableReason.NetworkOrApiFailure,
+            detail: "Update checking was not configured for this server instance."));
+    }
 }

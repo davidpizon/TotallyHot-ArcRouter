@@ -17,19 +17,21 @@ public class BenchmarkOodResultsCsvImporterTests
 
         using var connection = temp.Database.OpenConnection();
         using var transaction = connection.BeginTransaction();
-        var rowCount = BenchmarkOodResultsCsvImporter.Import(new StringReader(csv), connection, transaction);
+        var rowCount = BenchmarkOodResultsCsvImporter.Import(reader: new StringReader(csv), connection: connection,
+            transaction: transaction);
         transaction.Commit();
 
-        Assert.Equal(1, rowCount);
+        Assert.Equal(1, actual: rowCount);
 
         using var readCommand = connection.CreateCommand();
-        readCommand.CommandText = "SELECT resolved, apply_ok, graded, model FROM benchmark_ood_results WHERE task_id = 't1';";
+        readCommand.CommandText =
+            "SELECT resolved, apply_ok, graded, model FROM benchmark_ood_results WHERE task_id = 't1';";
         using var reader = readCommand.ExecuteReader();
         Assert.True(reader.Read());
-        Assert.Equal(1L, reader.GetInt64(0));
-        Assert.Equal(0L, reader.GetInt64(1));
-        Assert.Equal(1L, reader.GetInt64(2));
-        Assert.Equal("claude-opus-4-6", reader.GetString(3));
+        Assert.Equal(1L, actual: reader.GetInt64(0));
+        Assert.Equal(0L, actual: reader.GetInt64(1));
+        Assert.Equal(1L, actual: reader.GetInt64(2));
+        Assert.Equal(expected: "claude-opus-4-6", actual: reader.GetString(3));
     }
 
     [Fact]
@@ -38,10 +40,10 @@ public class BenchmarkOodResultsCsvImporterTests
         using var temp = new TempBenchmarkDatabase();
         temp.Database.EnsureCreated();
 
-        Import(temp, $"{Header}\nt1,ood,swebench,code_generation,claude-opus-4-6,1,1,1,0.01\n");
-        Import(temp, $"{Header}\nt2,ood,swebench,code_generation,claude-opus-4-6,1,1,1,0.01\n");
+        Import(temp: temp, csv: $"{Header}\nt1,ood,swebench,code_generation,claude-opus-4-6,1,1,1,0.01\n");
+        Import(temp: temp, csv: $"{Header}\nt2,ood,swebench,code_generation,claude-opus-4-6,1,1,1,0.01\n");
 
-        Assert.Equal(1, CountRows(temp));
+        Assert.Equal(1, actual: CountRows(temp));
     }
 
     [Fact]
@@ -55,15 +57,18 @@ public class BenchmarkOodResultsCsvImporterTests
 
         var ex = Assert.Throws<FormatException>(() =>
             BenchmarkOodResultsCsvImporter.Import(
-                new StringReader("task_id,bench,dimension,model\nt1,swebench,code_generation,m\n"), connection, transaction));
-        Assert.Contains("source_split", ex.Message, StringComparison.OrdinalIgnoreCase);
+                reader: new StringReader("task_id,bench,dimension,model\nt1,swebench,code_generation,m\n"),
+                connection: connection, transaction: transaction));
+        Assert.Contains(expectedSubstring: "source_split", actualString: ex.Message,
+            comparisonType: StringComparison.OrdinalIgnoreCase);
     }
 
     private static void Import(TempBenchmarkDatabase temp, string csv)
     {
         using var connection = temp.Database.OpenConnection();
         using var transaction = connection.BeginTransaction();
-        BenchmarkOodResultsCsvImporter.Import(new StringReader(csv), connection, transaction);
+        BenchmarkOodResultsCsvImporter.Import(reader: new StringReader(csv), connection: connection,
+            transaction: transaction);
         transaction.Commit();
     }
 

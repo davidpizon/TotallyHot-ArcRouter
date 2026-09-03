@@ -15,11 +15,11 @@ public class PendingResponseTextCacheTests
     {
         var cache = Create();
 
-        cache.Set("corr-1", "hello world");
+        cache.Set(correlationId: "corr-1", text: "hello world");
 
-        Assert.True(cache.TryTake("corr-1", out var taken));
-        Assert.Equal("hello world", taken);
-        Assert.False(cache.TryTake("corr-1", out _));
+        Assert.True(cache.TryTake(correlationId: "corr-1", text: out var taken));
+        Assert.Equal(expected: "hello world", actual: taken);
+        Assert.False(cache.TryTake(correlationId: "corr-1", text: out _));
     }
 
     [Fact]
@@ -27,7 +27,7 @@ public class PendingResponseTextCacheTests
     {
         var cache = Create();
 
-        Assert.False(cache.TryTake("never-set", out var text));
+        Assert.False(cache.TryTake(correlationId: "never-set", text: out var text));
         Assert.Null(text);
     }
 
@@ -37,10 +37,10 @@ public class PendingResponseTextCacheTests
         var clock = new ManualTimeProvider(DateTimeOffset.UtcNow);
         var cache = Create(ttlSeconds: 10, timeProvider: clock);
 
-        cache.Set("corr-1", "text");
+        cache.Set(correlationId: "corr-1", text: "text");
         clock.Advance(TimeSpan.FromSeconds(11));
 
-        Assert.False(cache.TryTake("corr-1", out _));
+        Assert.False(cache.TryTake(correlationId: "corr-1", text: out _));
     }
 
     [Fact]
@@ -49,10 +49,10 @@ public class PendingResponseTextCacheTests
         var clock = new ManualTimeProvider(DateTimeOffset.UtcNow);
         var cache = Create(ttlSeconds: 10, timeProvider: clock);
 
-        cache.Set("corr-1", "text");
+        cache.Set(correlationId: "corr-1", text: "text");
         clock.Advance(TimeSpan.FromSeconds(9));
 
-        Assert.True(cache.TryTake("corr-1", out _));
+        Assert.True(cache.TryTake(correlationId: "corr-1", text: out _));
     }
 
     [Fact]
@@ -60,14 +60,14 @@ public class PendingResponseTextCacheTests
     {
         var cache = Create(capacity: 2);
 
-        cache.Set("corr-1", "one");
-        cache.Set("corr-2", "two");
-        cache.Set("corr-3", "three");
+        cache.Set(correlationId: "corr-1", text: "one");
+        cache.Set(correlationId: "corr-2", text: "two");
+        cache.Set(correlationId: "corr-3", text: "three");
 
-        Assert.Equal(2, cache.Count);
-        Assert.False(cache.TryTake("corr-1", out _));
-        Assert.True(cache.TryTake("corr-2", out _));
-        Assert.True(cache.TryTake("corr-3", out _));
+        Assert.Equal(2, actual: cache.Count);
+        Assert.False(cache.TryTake(correlationId: "corr-1", text: out _));
+        Assert.True(cache.TryTake(correlationId: "corr-2", text: out _));
+        Assert.True(cache.TryTake(correlationId: "corr-3", text: out _));
     }
 
     [Fact]
@@ -75,10 +75,10 @@ public class PendingResponseTextCacheTests
     {
         var cache = Create(maxTextChars: 10);
 
-        cache.Set("corr-1", "this text is definitely longer than ten characters");
+        cache.Set(correlationId: "corr-1", text: "this text is definitely longer than ten characters");
 
-        Assert.True(cache.TryTake("corr-1", out var taken));
-        Assert.Equal(10, taken!.Length);
+        Assert.True(cache.TryTake(correlationId: "corr-1", text: out var taken));
+        Assert.Equal(10, actual: taken!.Length);
     }
 
     [Fact]
@@ -86,12 +86,12 @@ public class PendingResponseTextCacheTests
     {
         var cache = Create(capacity: 1);
 
-        cache.Set("corr-1", "first");
-        cache.Set("corr-1", "second");
+        cache.Set(correlationId: "corr-1", text: "first");
+        cache.Set(correlationId: "corr-1", text: "second");
 
-        Assert.Equal(1, cache.Count);
-        Assert.True(cache.TryTake("corr-1", out var text));
-        Assert.Equal("second", text);
+        Assert.Equal(1, actual: cache.Count);
+        Assert.True(cache.TryTake(correlationId: "corr-1", text: out var text));
+        Assert.Equal(expected: "second", actual: text);
     }
 
     private static PendingResponseTextCache Create(
@@ -104,18 +104,24 @@ public class PendingResponseTextCacheTests
         {
             CacheCapacity = capacity,
             CacheTtlSeconds = ttlSeconds,
-            MaxCachedTextChars = maxTextChars,
+            MaxCachedTextChars = maxTextChars
         });
 
-        return new PendingResponseTextCache(options, timeProvider);
+        return new PendingResponseTextCache(options: options, timeProvider: timeProvider);
     }
 
     private sealed class ManualTimeProvider(DateTimeOffset start) : TimeProvider
     {
         private DateTimeOffset _now = start;
 
-        public override DateTimeOffset GetUtcNow() => _now;
+        public override DateTimeOffset GetUtcNow()
+        {
+            return _now;
+        }
 
-        public void Advance(TimeSpan by) => _now += by;
+        public void Advance(TimeSpan by)
+        {
+            _now += by;
+        }
     }
 }

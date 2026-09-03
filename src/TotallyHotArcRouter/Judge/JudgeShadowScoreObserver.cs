@@ -18,9 +18,9 @@ namespace TotallyHot.ArcRouter.Judge;
 /// </summary>
 public sealed class JudgeShadowScoreObserver : IQualityScoreObserver
 {
-    private readonly IJudgeShadowScoreQueue _queue;
-    private readonly IOptionsMonitor<JudgeOptions> _options;
     private readonly ILogger<JudgeShadowScoreObserver> _logger;
+    private readonly IOptionsMonitor<JudgeOptions> _options;
+    private readonly IJudgeShadowScoreQueue _queue;
 
     /// <summary>Initializes a new instance of the <see cref="JudgeShadowScoreObserver"/> class.</summary>
     /// <param name="queue">The bounded queue the drain worker reads from.</param>
@@ -40,15 +40,12 @@ public sealed class JudgeShadowScoreObserver : IQualityScoreObserver
         _logger = logger;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public Task ObserveAsync(QualityResult result, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(result);
 
-        if (!_options.CurrentValue.Enabled)
-        {
-            return Task.CompletedTask;
-        }
+        if (!_options.CurrentValue.Enabled) return Task.CompletedTask;
 
         if (string.IsNullOrEmpty(result.RequestCorrelationId))
         {
@@ -57,17 +54,15 @@ public sealed class JudgeShadowScoreObserver : IQualityScoreObserver
         }
 
         var job = new JudgeShadowScoringJob(
-            result.RequestCorrelationId,
-            result.Dimension,
-            result.Model,
-            result.UnifiedScore);
+            CorrelationId: result.RequestCorrelationId,
+            Dimension: result.Dimension,
+            Model: result.Model,
+            StaticScore: result.UnifiedScore);
 
         if (!_queue.TryEnqueue(job))
-        {
             _logger.LogDebug(
-                "Shadow-judge queue is full; dropped job for correlation {CorrelationId}.",
+                message: "Shadow-judge queue is full; dropped job for correlation {CorrelationId}.",
                 result.RequestCorrelationId);
-        }
 
         return Task.CompletedTask;
     }

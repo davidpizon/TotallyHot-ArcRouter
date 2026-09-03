@@ -32,8 +32,11 @@ public interface IRoutingPolicy
     /// <param name="signals">Out-of-band signals about the request, or <see langword="null"/> if none are available.</param>
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <returns>The selected candidate's <see cref="RoutingCandidate.ModelName"/>.</returns>
-    Task<string> SelectModelAsync(RoutingContext context, RoutingSignals? signals, CancellationToken cancellationToken = default) =>
-        SelectModelAsync(context, cancellationToken);
+    Task<string> SelectModelAsync(RoutingContext context, RoutingSignals? signals,
+        CancellationToken cancellationToken = default)
+    {
+        return SelectModelAsync(context: context, cancellationToken: cancellationToken);
+    }
 
     /// <summary>
     /// Chooses a model for the given routing context and returns the full outcome, including
@@ -50,16 +53,18 @@ public interface IRoutingPolicy
     /// <param name="signals">Out-of-band signals about the request, or <see langword="null"/> if none are available.</param>
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <returns>The full routing decision, including provenance.</returns>
-    async Task<RoutingDecision> DecideOutcomeAsync(RoutingContext context, RoutingSignals? signals, CancellationToken cancellationToken = default)
+    async Task<RoutingDecision> DecideOutcomeAsync(RoutingContext context, RoutingSignals? signals,
+        CancellationToken cancellationToken = default)
     {
-        var model = await SelectModelAsync(context, signals, cancellationToken).ConfigureAwait(false);
+        var model = await SelectModelAsync(context: context, signals: signals, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
         return new RoutingDecision(
-            model,
-            confidence: 0,
+            selectedModel: model,
+            0,
             rationale: "Wrapped from SelectModelAsync by the IRoutingPolicy.DecideOutcomeAsync default implementation.",
             timestampUtc: DateTimeOffset.UtcNow,
-            candidateScores: null,
-            isExploratory: false,
-            propensity: 1.0);
+            null,
+            false,
+            1.0);
     }
 }

@@ -2,6 +2,7 @@ using AwesomeAssertions;
 using Bunit;
 using Microsoft.AspNetCore.Components.Web;
 using TotallyHot.ArcRouter.Gui.Components;
+using IElement = AngleSharp.Dom.IElement;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
@@ -18,19 +19,25 @@ public sealed class UnlockSecretFieldDialogTests
         BunitContext ctx,
         string? testId = null,
         Action? onConfirm = null,
-        Action? onCancel = null) =>
-        ctx.Render<UnlockSecretFieldDialog>(parameters =>
+        Action? onCancel = null)
+    {
+        return ctx.Render<UnlockSecretFieldDialog>(parameters =>
         {
-            parameters.Add(p => p.TestId, testId);
-            parameters.Add(p => p.OnConfirm, () => onConfirm?.Invoke());
-            parameters.Add(p => p.OnCancel, () => onCancel?.Invoke());
+            parameters.Add(parameterSelector: p => p.TestId, value: testId);
+            parameters.Add(parameterSelector: p => p.OnConfirm, callback: () => onConfirm?.Invoke());
+            parameters.Add(parameterSelector: p => p.OnCancel, callback: () => onCancel?.Invoke());
         });
+    }
 
-    private static AngleSharp.Dom.IElement FindContinueButton(IRenderedComponent<UnlockSecretFieldDialog> cut) =>
-        cut.FindAll("button").Single(b => b.TextContent.Trim() == "Continue");
+    private static IElement FindContinueButton(IRenderedComponent<UnlockSecretFieldDialog> cut)
+    {
+        return cut.FindAll("button").Single(b => b.TextContent.Trim() == "Continue");
+    }
 
-    private static AngleSharp.Dom.IElement FindCancelButton(IRenderedComponent<UnlockSecretFieldDialog> cut) =>
-        cut.FindAll("button").Single(b => b.TextContent.Trim() == "Cancel");
+    private static IElement FindCancelButton(IRenderedComponent<UnlockSecretFieldDialog> cut)
+    {
+        return cut.FindAll("button").Single(b => b.TextContent.Trim() == "Cancel");
+    }
 
     [Fact]
     public void Renders_the_title_and_warning()
@@ -49,7 +56,7 @@ public sealed class UnlockSecretFieldDialogTests
         using var ctx = new BunitContext();
         var confirmed = false;
 
-        var cut = Render(ctx, onConfirm: () => confirmed = true);
+        var cut = Render(ctx: ctx, onConfirm: () => confirmed = true);
         FindContinueButton(cut).Click();
 
         confirmed.Should().BeTrue();
@@ -62,7 +69,7 @@ public sealed class UnlockSecretFieldDialogTests
         var confirmed = false;
         var cancelled = false;
 
-        var cut = Render(ctx, onConfirm: () => confirmed = true, onCancel: () => cancelled = true);
+        var cut = Render(ctx: ctx, onConfirm: () => confirmed = true, onCancel: () => cancelled = true);
         FindCancelButton(cut).Click();
 
         cancelled.Should().BeTrue();
@@ -75,7 +82,7 @@ public sealed class UnlockSecretFieldDialogTests
         using var ctx = new BunitContext();
         var cancelled = false;
 
-        var cut = Render(ctx, onCancel: () => cancelled = true);
+        var cut = Render(ctx: ctx, onCancel: () => cancelled = true);
 
         // DialogShell's EnableEscapeToClose handles Escape on the panel, so it fires regardless of which
         // focusable descendant is focused - here, the Continue button rather than a text input.
@@ -90,7 +97,7 @@ public sealed class UnlockSecretFieldDialogTests
         using var ctx = new BunitContext();
         var confirmed = false;
 
-        var cut = Render(ctx, onConfirm: () => confirmed = true);
+        var cut = Render(ctx: ctx, onConfirm: () => confirmed = true);
         FindContinueButton(cut).KeyDown(new KeyboardEventArgs { Key = "Escape" });
 
         confirmed.Should().BeFalse();
@@ -127,7 +134,7 @@ public sealed class UnlockSecretFieldDialogTests
     {
         using var ctx = new BunitContext();
 
-        var cut = Render(ctx, testId: "api-key");
+        var cut = Render(ctx: ctx, testId: "api-key");
 
         cut.Find("[data-testid='api-key-cancel']").TextContent.Trim().Should().Be("Cancel");
         cut.Find("[data-testid='api-key-continue']").TextContent.Trim().Should().Be("Continue");

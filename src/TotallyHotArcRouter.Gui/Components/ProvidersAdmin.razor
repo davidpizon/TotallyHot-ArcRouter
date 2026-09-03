@@ -3,158 +3,156 @@
    injected ProviderAdminStore. *@
 @implements IDisposable
 @inject ProviderAdminStore Store
-@using System.Linq
-@using TotallyHot.ArcRouter.Gui.Admin
 
 <div class="h-full overflow-y-auto pr-1">
-    @if (!Store.IsLoaded)
-    {
-        <div class="text-sm text-slate-500 p-4">Loading providers…</div>
-    }
-    else if (!Store.IsReachable)
-    {
-        <div class="rounded-lg p-4 space-y-2 ds-surface-card-critical">
-            <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
-                <Icon Name="alert-triangle" Size="20" /> Proxy management API unreachable
-            </div>
-            <div class="text-xs text-slate-400">
-                Could not reach <span class="font-mono">@ProviderAdminStore.DefaultManagementAddress</span>. Is the proxy running?
-            </div>
-            @if (!string.IsNullOrEmpty(Store.LastError))
-            {
-                <div class="text-xs text-slate-500 font-mono">@Store.LastError</div>
-            }
-            <button @onclick="Reload"
-                    class="btn btn-ghost">
-                Retry
-            </button>
+@if (!Store.IsLoaded)
+{
+    <div class="text-sm text-slate-500 p-4">Loading providers…</div>
+}
+else if (!Store.IsReachable)
+{
+    <div class="rounded-lg p-4 space-y-2 ds-surface-card-critical">
+        <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
+            <Icon Name="alert-triangle" Size="20"/> Proxy management API unreachable
         </div>
-    }
-    else
-    {
-        <div class="flex items-center justify-between mb-3">
-            <span class="text-xs text-slate-500 uppercase tracking-widest">Configured Providers</span>
-            <button @onclick="OpenAdd"
-                    class="btn btn-secondary flex items-center gap-1.5">
-                <Icon Name="plus" Size="20" /> Add Provider
-            </button>
+        <div class="text-xs text-slate-400">
+            Could not reach <span class="font-mono">@ProviderAdminStore.DefaultManagementAddress</span>. Is the proxy running?
         </div>
-
-        @if (!string.IsNullOrEmpty(_opError))
+        @if (!string.IsNullOrEmpty(Store.LastError))
         {
-            <div class="rounded px-3 py-2 mb-3 text-xs ds-step-critical">
-                @_opError
-            </div>
+            <div class="text-xs text-slate-500 font-mono">@Store.LastError</div>
         }
+        <button @onclick="Reload"
+                class="btn btn-ghost">
+            Retry
+        </button>
+    </div>
+}
+else
+{
+    <div class="flex items-center justify-between mb-3">
+        <span class="text-xs text-slate-500 uppercase tracking-widest">Configured Providers</span>
+        <button @onclick="OpenAdd"
+                class="btn btn-secondary flex items-center gap-1.5">
+            <Icon Name="plus" Size="20"/> Add Provider
+        </button>
+    </div>
 
-        <div class="ds-card-stack">
-            @foreach (var provider in Store.Providers)
-            {
-                @* A stopped provider dims its border and title, matching PriceSourcesAdmin's disabled
+    @if (!string.IsNullOrEmpty(_opError))
+    {
+        <div class="rounded px-3 py-2 mb-3 text-xs ds-step-critical">
+            @_opError
+        </div>
+    }
+
+    <div class="ds-card-stack">
+    @foreach (var provider in Store.Providers)
+    {
+        @* A stopped provider dims its border and title, matching PriceSourcesAdmin's disabled
                    cards. The proxy's routing path skips a stopped provider on the very next request. *@
-                <div @key="provider.Key" class="rounded-lg p-3 @(provider.Enabled ? "ds-surface-card-bordered" : "ds-surface-card-bordered-dim")">
-                    @* Header: key + endpoint + actions *@
-                    <div class="flex items-start justify-between gap-2">
-                        <div class="min-w-0">
-                            <div class="flex items-center gap-2 flex-wrap">
-                                <Icon Name="server" Size="20" />
-                                <span class="text-sm font-semibold @(provider.Enabled ? "state-enabled" : "state-disabled")">@(string.IsNullOrWhiteSpace(provider.Name) ? provider.Key : provider.Name)</span>
-                                @* One pill per API flavor the last endpoint scan detected. Absent entirely
+        <div @key="provider.Key" class="rounded-lg p-3 @(provider.Enabled ? "ds-surface-card-bordered" : "ds-surface-card-bordered-dim")">
+        @* Header: key + endpoint + actions *@
+        <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <Icon Name="server" Size="20"/>
+                    <span class="text-sm font-semibold @(provider.Enabled ? "state-enabled" : "state-disabled")">@(string.IsNullOrWhiteSpace(provider.Name) ? provider.Key : provider.Name)</span>
+                    @* One pill per API flavor the last endpoint scan detected. Absent entirely
                                    until "Refresh" has run at least once (EndpointCapabilities is null until
                                    then), distinguishing "never scanned" from "scanned, nothing detected". *@
-                                @foreach (var api in DetectedApis(provider.EndpointCapabilities))
-                                {
-                                    <span class="rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider font-semibold ds-badge-success">@api</span>
-                                }
-                                @* Persists until the next successful admin interaction with this provider
+                    @foreach (var api in DetectedApis(provider.EndpointCapabilities))
+                    {
+                        <span class="rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider font-semibold ds-badge-success">@api</span>
+                    }
+                    @* Persists until the next successful admin interaction with this provider
                                    (refresh, scan, or save) - see ManagementFacade.RefreshFromEndpointAsync's
                                    RecordRefreshOutcome. Reuses the shared floating tooltip rather than
                                    title= for the same clipping/keyboard reasons as the action buttons below. *@
-                                @if (provider.AdminAction is { Ok: false } adminFailure)
-                                {
-                                    <span data-tip="@AdminActionTip(adminFailure)" aria-describedby="ls-tooltip" class="text-amber-400 flex items-center">
-                                        <Icon Name="alert-triangle" Size="16" />
-                                    </span>
-                                }
-                                @* Independent of AdminAction above (docs/adr/0004-surface-out-of-credits-
+                    @if (provider.AdminAction is { Ok: false } adminFailure)
+                    {
+                        <span data-tip="@AdminActionTip(adminFailure)" aria-describedby="ls-tooltip" class="text-amber-400 flex items-center">
+                            <Icon Name="alert-triangle" Size="16"/>
+                        </span>
+                    }
+                    @* Independent of AdminAction above (docs/adr/0004-surface-out-of-credits-
                                    provider-failures-on-the-providers-tab.md) - persists until the next
                                    successful forwarded request to this provider, regardless of whether any
                                    admin action has run. A provider can show both warnings at once, since they
                                    answer different questions. Distinct color (rose, not amber) so the two are
                                    visually distinguishable at a glance. *@
-                                @if (provider.LiveTraffic is { Ok: false } liveFailure)
-                                {
-                                    <span data-tip="@LiveTrafficTip(liveFailure)" aria-describedby="ls-tooltip" class="text-rose-400 flex items-center">
-                                        <Icon Name="alert-triangle" Size="16" />
-                                    </span>
-                                }
-                            </div>
-                            <div class="text-xs text-slate-500 mt-0.5 font-mono truncate">@provider.BaseUrl</div>
-                        </div>
-                        <div class="flex items-center gap-1 shrink-0">
-                            <button title="Config" @onclick="() => OpenEdit(provider)"
-                                    class="rounded p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700 transition-colors">
-                                <Icon Name="sliders" Size="20" />
-                            </button>
-                            @* Refreshes models and re-scans API capabilities in one call - see
+                    @if (provider.LiveTraffic is { Ok: false } liveFailure)
+                    {
+                        <span data-tip="@LiveTrafficTip(liveFailure)" aria-describedby="ls-tooltip" class="text-rose-400 flex items-center">
+                            <Icon Name="alert-triangle" Size="16"/>
+                        </span>
+                    }
+                </div>
+                <div class="text-xs text-slate-500 mt-0.5 font-mono truncate">@provider.BaseUrl</div>
+            </div>
+            <div class="flex items-center gap-1 shrink-0">
+                <button title="Config" @onclick="() => OpenEdit(provider)"
+                        class="rounded p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700 transition-colors">
+                    <Icon Name="sliders" Size="20"/>
+                </button>
+                @* Refreshes models and re-scans API capabilities in one call - see
                                RefreshFromEndpoint below. Shares the Stop/Play/Remove tooltip pattern rather
                                than title= for the same clipping/keyboard reasons. *@
-                            <button @onclick="() => RefreshFromEndpoint(provider.Key)"
-                                    data-tip="Refresh"
-                                    aria-label="@($"Refresh provider {provider.Key}")"
-                                    aria-describedby="ls-tooltip"
-                                    class="rounded p-1.5 flex items-center justify-center ls-card-action">
-                                <Icon Name="refresh" Size="20" />
-                            </button>
-                            @* Stop/Play and Remove use the shared floating tooltip (js/tooltips.js) rather
+                <button @onclick="() => RefreshFromEndpoint(provider.Key)"
+                        data-tip="Refresh"
+                        aria-label="@($"Refresh provider {provider.Key}")"
+                        aria-describedby="ls-tooltip"
+                        class="rounded p-1.5 flex items-center justify-center ls-card-action">
+                    <Icon Name="refresh" Size="20"/>
+                </button>
+                @* Stop/Play and Remove use the shared floating tooltip (js/tooltips.js) rather
                                than title=, so the label isn't clipped by this pane's scroll container and
                                is reachable by keyboard. aria-label carries the accessible *name* - the
                                tooltip is only a description, and these buttons have no text. *@
-                            <button @onclick="() => ToggleEnabled(provider)"
-                                    data-tip="@(provider.Enabled ? "Stop" : "Play")"
-                                    aria-label="@(provider.Enabled ? $"Stop provider {provider.Key}" : $"Start provider {provider.Key}")"
-                                    aria-describedby="ls-tooltip"
-                                    class="rounded p-1.5 flex items-center justify-center ls-card-action @(provider.Enabled ? "ls-card-action-stop" : "ls-card-action-play")">
-                                <Icon Name="@(provider.Enabled ? "stop" : "play")" Size="20" />
-                            </button>
-                            <button @onclick="() => RemoveProvider(provider)"
-                                    data-tip="Remove"
-                                    aria-label="@($"Remove provider {provider.Key}")"
-                                    aria-describedby="ls-tooltip"
-                                    class="rounded p-1.5 flex items-center justify-center ls-card-action ls-card-action-remove">
-                                <Icon Name="trash" Size="20" />
-                            </button>
-                        </div>
-                    </div>
+                <button @onclick="() => ToggleEnabled(provider)"
+                        data-tip="@(provider.Enabled ? "Stop" : "Play")"
+                        aria-label="@(provider.Enabled ? $"Stop provider {provider.Key}" : $"Start provider {provider.Key}")"
+                        aria-describedby="ls-tooltip"
+                        class="rounded p-1.5 flex items-center justify-center ls-card-action @(provider.Enabled ? "ls-card-action-stop" : "ls-card-action-play")">
+                    <Icon Name="@(provider.Enabled ? "stop" : "play")" Size="20"/>
+                </button>
+                <button @onclick="() => RemoveProvider(provider)"
+                        data-tip="Remove"
+                        aria-label="@($"Remove provider {provider.Key}")"
+                        aria-describedby="ls-tooltip"
+                        class="rounded p-1.5 flex items-center justify-center ls-card-action ls-card-action-remove">
+                    <Icon Name="trash" Size="20"/>
+                </button>
+            </div>
+        </div>
 
-                    @* Models *@
-                    <div class="mt-3 border-t border-slate-700/60 pt-2">
-                        <div class="flex items-center justify-between mb-1.5">
-                            <span class="text-xs text-slate-500 uppercase tracking-wider">Models</span>
-                        </div>
+        @* Models *@
+        <div class="mt-3 border-t border-slate-700/60 pt-2">
+            <div class="flex items-center justify-between mb-1.5">
+                <span class="text-xs text-slate-500 uppercase tracking-wider">Models</span>
+            </div>
 
-                        @if (provider.Models.Count == 0)
-                        {
-                            <div class="text-xs text-slate-600 mb-1.5">No models configured.</div>
-                        }
-                        else
-                        {
-                            <div class="space-y-1 mb-1.5">
-                                @foreach (var model in provider.Models)
-                                {
-                                    @* A model that's stopped (operator toggle) or not currently reported by
+            @if (provider.Models.Count == 0)
+            {
+                <div class="text-xs text-slate-600 mb-1.5">No models configured.</div>
+            }
+            else
+            {
+                <div class="space-y-1 mb-1.5">
+                    @foreach (var model in provider.Models)
+                    {
+                        @* A model that's stopped (operator toggle) or not currently reported by
                                        the last "Refresh from endpoint" scan dims the same way a stopped
                                        provider does; "not detected" distinguishes the latter from a
                                        deliberate stop, mirroring the provider-level "stopped vs. unhealthy"
                                        distinction ProxyMiddleware already logs separately. *@
-                                    <div @key="model.ModelName" class="flex items-center justify-between text-xs">
-                                        <span class="font-mono @(model.Enabled && model.PresentUpstream ? "state-enabled subtle" : "state-disabled")">@model.ModelName</span>
-                                        <div class="flex items-center gap-2">
-                                            @if (!model.PresentUpstream)
-                                            {
-                                                <span class="text-[10px] uppercase tracking-wider text-amber-500">not detected</span>
-                                            }
-                                            @* How this model expresses tool calls. Empty until "Refresh from
+                        <div @key="model.ModelName" class="flex items-center justify-between text-xs">
+                            <span class="font-mono @(model.Enabled && model.PresentUpstream ? "state-enabled subtle" : "state-disabled")">@model.ModelName</span>
+                            <div class="flex items-center gap-2">
+                                @if (!model.PresentUpstream)
+                                {
+                                    <span class="text-[10px] uppercase tracking-wider text-amber-500">not detected</span>
+                                }
+                                @* How this model expresses tool calls. Empty until "Refresh from
                                                endpoint" has run, or the model has answered a real
                                                tools-carrying request. Editable because automatic detection
                                                can settle on a wrong answer that never self-corrects: an
@@ -162,261 +160,263 @@
                                                first lucky reply, after which nothing re-inspects it. Picking
                                                a value here pins it at operator confidence, which no scan may
                                                overwrite; "auto-detect" clears the pin. *@
-                                            <select value="@(model.Dialect ?? string.Empty)"
-                                                    @onchange="e => SetModelDialect(provider.Key, model.ModelName, e.Value?.ToString())"
-                                                    aria-label="@($"Tool-call dialect for {model.ModelName}")"
-                                                    title="@($"Tool-call dialect{(string.IsNullOrEmpty(model.Confidence) ? string.Empty : $" (confidence: {model.Confidence})")}")"
-                                                    class="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-mono uppercase tracking-wider text-slate-400 border border-slate-600">
-                                                <option value="">auto-detect</option>
-                                                @foreach (var dialect in ToolDialects)
-                                                {
-                                                    <option value="@dialect">@dialect</option>
-                                                }
-                                            </select>
-                                            <span class="font-mono text-slate-500">@model.ProviderModelId</span>
-                                            @* Start/Stop and Remove use the shared floating tooltip, mirroring the
+                                <select value="@(model.Dialect ?? string.Empty)"
+                                        @onchange="e => SetModelDialect(key: provider.Key, modelName: model.ModelName, dialect: e.Value?.ToString())"
+                                        aria-label="@($"Tool-call dialect for {model.ModelName}")"
+                                        title="@($"Tool-call dialect{(string.IsNullOrEmpty(model.Confidence) ? string.Empty : $" (confidence: {model.Confidence})")}")"
+                                        class="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-mono uppercase tracking-wider text-slate-400 border border-slate-600">
+                                    <option value="">auto-detect</option>
+                                    @foreach (var dialect in ToolDialects)
+                                    {
+                                        <option value="@dialect">@dialect</option>
+                                    }
+                                </select>
+                                <span class="font-mono text-slate-500">@model.ProviderModelId</span>
+                                @* Start/Stop and Remove use the shared floating tooltip, mirroring the
                                                provider card's own Stop/Play + Trash pattern above. *@
-                                            <button @onclick="() => ToggleModelEnabled(provider, model)"
-                                                    data-tip="@(model.Enabled ? "Stop" : "Start")"
-                                                    aria-label="@(model.Enabled ? $"Stop model {model.ModelName}" : $"Start model {model.ModelName}")"
-                                                    aria-describedby="ls-tooltip"
-                                                    class="rounded p-1 flex items-center justify-center ls-card-action @(model.Enabled ? "ls-card-action-stop" : "ls-card-action-play")">
-                                                <Icon Name="@(model.Enabled ? "stop" : "play")" Size="16" />
-                                            </button>
-                                            <button title="Remove model" @onclick="() => RemoveModel(provider.Key, model.ModelName)"
-                                                    class="text-red-400 hover:text-red-300 transition-colors">
-                                                <Icon Name="x" Size="16" />
-                                            </button>
-                                        </div>
-                                    </div>
-                                }
+                                <button @onclick="() => ToggleModelEnabled(provider: provider, model: model)"
+                                        data-tip="@(model.Enabled ? "Stop" : "Start")"
+                                        aria-label="@(model.Enabled ? $"Stop model {model.ModelName}" : $"Start model {model.ModelName}")"
+                                        aria-describedby="ls-tooltip"
+                                        class="rounded p-1 flex items-center justify-center ls-card-action @(model.Enabled ? "ls-card-action-stop" : "ls-card-action-play")">
+                                    <Icon Name="@(model.Enabled ? "stop" : "play")" Size="16"/>
+                                </button>
+                                <button title="Remove model" @onclick="() => RemoveModel(key: provider.Key, modelName: model.ModelName)"
+                                        class="text-red-400 hover:text-red-300 transition-colors">
+                                    <Icon Name="x" Size="16"/>
+                                </button>
                             </div>
-                        }
+                        </div>
+                    }
+                </div>
+            }
 
-                        @* Manual add, for a provider "Refresh from endpoint" can't reach (no OpenAI-shaped
+            @* Manual add, for a provider "Refresh from endpoint" can't reach (no OpenAI-shaped
                            /v1/models - hosted Anthropic, Bedrock) or as a plain override. Collapsed by
                            default now that reconciliation adds most models automatically; mirrors the
                            expand/collapse pattern in TurnCard.razor (a per-key toggle + chevron glyph). *@
-                        <button @onclick="() => ToggleAddModelPane(provider.Key)"
-                                aria-expanded="@IsAddModelPaneOpen(provider.Key)"
-                                aria-label="Add model manually"
-                                class="w-full flex items-center justify-center text-xs text-slate-500 hover:text-slate-300 transition-colors">
-                            <span aria-hidden="true">@(IsAddModelPaneOpen(provider.Key) ? "▴" : "▾")</span>
-                        </button>
+            <button @onclick="() => ToggleAddModelPane(provider.Key)"
+                    aria-expanded="@IsAddModelPaneOpen(provider.Key)"
+                    aria-label="Add model manually"
+                    class="w-full flex items-center justify-center text-xs text-slate-500 hover:text-slate-300 transition-colors">
+                <span aria-hidden="true">@(IsAddModelPaneOpen(provider.Key) ? "▴" : "▾")</span>
+            </button>
 
-                        @* Always mounted so the pane can animate shut as well as open (the @if this
+            @* Always mounted so the pane can animate shut as well as open (the @if this
                            replaced unmounted it instantly). `inert` matters more here than on a
                            read-only disclosure: without it Tab would land in the two inputs and the
                            Add button while the pane is visually collapsed. *@
-                        <div class="ls-disclosure @(IsAddModelPaneOpen(provider.Key) ? "open" : null)"
-                             inert="@(!IsAddModelPaneOpen(provider.Key))">
-                            <div>
-                                <div class="flex items-center gap-1.5 mt-1.5">
-                                    <input type="text" value="@GetDraft(_draftName, provider.Key)"
-                                           @oninput="e => _draftName[provider.Key] = AsString(e.Value)"
-                                           placeholder="model name"
-                                           class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input" />
-                                    <input type="text" value="@GetDraft(_draftId, provider.Key)"
-                                           @oninput="e => _draftId[provider.Key] = AsString(e.Value)"
-                                           placeholder="provider model id (optional)"
-                                           class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input" />
-                                    <button @onclick="() => AddModel(provider.Key)"
-                                            class="btn-small-action shrink-0">
-                                        Add
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
+            <div class="ls-disclosure @(IsAddModelPaneOpen(provider.Key) ? "open" : null)"
+                 inert="@(!IsAddModelPaneOpen(provider.Key))">
+                <div>
+                    <div class="flex items-center gap-1.5 mt-1.5">
+                        <input type="text" value="@GetDraft(drafts: _draftName, key: provider.Key)"
+                               @oninput="e => _draftName[provider.Key] = AsString(e.Value)"
+                               placeholder="model name"
+                               class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input"/>
+                        <input type="text" value="@GetDraft(drafts: _draftId, key: provider.Key)"
+                               @oninput="e => _draftId[provider.Key] = AsString(e.Value)"
+                               placeholder="provider model id (optional)"
+                               class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input"/>
+                        <button @onclick="() => AddModel(provider.Key)"
+                                class="btn-small-action shrink-0">
+                            Add
+                        </button>
                     </div>
+                </div>
+            </div>
+        </div>
 
-                    @* Budget: optional monthly $ / token caps, current-month spend, and two utilization
+        @* Budget: optional monthly $ / token caps, current-month spend, and two utilization
                        bar charts (rendered only for a dimension that has a cap). *@
-                    <div class="mt-3 border-t border-slate-700/60 pt-2">
-                        <div class="flex items-center justify-between mb-1.5">
-                            <span class="text-xs text-slate-500 uppercase tracking-wider">Monthly Budget</span>
-                            <button @onclick="() => SaveBudget(provider.Key)"
-                                    class="btn-small-action">
-                                Save
-                            </button>
-                        </div>
+        <div class="mt-3 border-t border-slate-700/60 pt-2">
+            <div class="flex items-center justify-between mb-1.5">
+                <span class="text-xs text-slate-500 uppercase tracking-wider">Monthly Budget</span>
+                <button @onclick="() => SaveBudget(provider.Key)"
+                        class="btn-small-action">
+                    Save
+                </button>
+            </div>
 
-                        <div class="flex items-center gap-1.5 mb-2">
-                            <span class="text-xs font-mono text-slate-400">$</span>
-                            <input type="text" value="@GetBudgetDraft(_draftDollarCap, provider.Key, provider.DollarCap?.ToString(CultureInfo.InvariantCulture))"
-                                   @oninput="e => _draftDollarCap[provider.Key] = AsString(e.Value)"
-                                   placeholder="monthly $ cap (optional)"
-                                   class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input" />
-                            <input type="text" value="@GetBudgetDraft(_draftTokenCap, provider.Key, provider.TokenCap?.ToString(CultureInfo.InvariantCulture))"
-                                   @oninput="e => _draftTokenCap[provider.Key] = AsString(e.Value)"
-                                   placeholder="monthly token cap (optional)"
-                                   class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input" />
-                        </div>
+            <div class="flex items-center gap-1.5 mb-2">
+                <span class="text-xs font-mono text-slate-400">$</span>
+                <input type="text" value="@GetBudgetDraft(drafts: _draftDollarCap, key: provider.Key, current: provider.DollarCap?.ToString(CultureInfo.InvariantCulture))"
+                       @oninput="e => _draftDollarCap[provider.Key] = AsString(e.Value)"
+                       placeholder="monthly $ cap (optional)"
+                       class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input"/>
+                <input type="text" value="@GetBudgetDraft(drafts: _draftTokenCap, key: provider.Key, current: provider.TokenCap?.ToString(CultureInfo.InvariantCulture))"
+                       @oninput="e => _draftTokenCap[provider.Key] = AsString(e.Value)"
+                       placeholder="monthly token cap (optional)"
+                       class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input"/>
+            </div>
 
-                        @if (provider.DollarCap is null && provider.TokenCap is null)
+            @if (provider.DollarCap is null && provider.TokenCap is null)
+            {
+                <div class="text-xs text-slate-600">No budget set — this provider is unlimited.</div>
+            }
+            else
+            {
+                <div class="grid grid-cols-2 gap-3">
+                    @* Dollar utilization *@
+                    <div>
+                        @if (provider.DollarCap is { } dollarCap)
                         {
-                            <div class="text-xs text-slate-600">No budget set — this provider is unlimited.</div>
+                            var dollarPct = UtilizationPercent(spent: provider.DollarSpent, cap: dollarCap);
+                            <div class="flex justify-between text-xs font-mono text-slate-500 mb-1">
+                                <span>% $ spent</span>
+                                <span>$@Money2(provider.DollarSpent) / $@Money2(dollarCap)</span>
+                            </div>
+                            <div class="ls-provider-budget-chart">
+                                <EChart ModelJson="@BudgetBarJson(label: "% $ spent", pct: dollarPct)"/>
+                            </div>
                         }
                         else
                         {
-                            <div class="grid grid-cols-2 gap-3">
-                                @* Dollar utilization *@
-                                <div>
-                                    @if (provider.DollarCap is { } dollarCap)
-                                    {
-                                        var dollarPct = UtilizationPercent(provider.DollarSpent, dollarCap);
-                                        <div class="flex justify-between text-xs font-mono text-slate-500 mb-1">
-                                            <span>% $ spent</span>
-                                            <span>$@Money2(provider.DollarSpent) / $@Money2(dollarCap)</span>
-                                        </div>
-                                        <div class="ls-provider-budget-chart">
-                                            <EChart ModelJson="@BudgetBarJson("% $ spent", dollarPct)" />
-                                        </div>
-                                    }
-                                    else
-                                    {
-                                        <div class="text-xs text-slate-600">No $ cap · $@Money2(provider.DollarSpent) spent</div>
-                                    }
-                                </div>
-
-                                @* Token utilization *@
-                                <div>
-                                    @if (provider.TokenCap is { } tokenCap)
-                                    {
-                                        var tokenPct = UtilizationPercent(provider.TokensUsed, tokenCap);
-                                        <div class="flex justify-between text-xs font-mono text-slate-500 mb-1">
-                                            <span>% tokens utilized</span>
-                                            <span>@provider.TokensUsed.ToString("N0", CultureInfo.InvariantCulture) / @tokenCap.ToString("N0", CultureInfo.InvariantCulture)</span>
-                                        </div>
-                                        <div class="ls-provider-budget-chart">
-                                            <EChart ModelJson="@BudgetBarJson("% tokens utilized", tokenPct)" />
-                                        </div>
-                                    }
-                                    else
-                                    {
-                                        <div class="text-xs text-slate-600">No token cap · @provider.TokensUsed.ToString("N0", CultureInfo.InvariantCulture) tokens used</div>
-                                    }
-                                </div>
-                            </div>
+                            <div class="text-xs text-slate-600">No $ cap · $@Money2(provider.DollarSpent) spent</div>
                         }
                     </div>
 
-                    @* Usage: two sub-blocks with different provenance - estimated cost/tokens from
+                    @* Token utilization *@
+                    <div>
+                        @if (provider.TokenCap is { } tokenCap)
+                        {
+                            var tokenPct = UtilizationPercent(used: provider.TokensUsed, cap: tokenCap);
+                            <div class="flex justify-between text-xs font-mono text-slate-500 mb-1">
+                                <span>% tokens utilized</span>
+                                <span>@provider.TokensUsed.ToString(format: "N0", provider: CultureInfo.InvariantCulture) / @tokenCap.ToString(format: "N0", provider: CultureInfo.InvariantCulture)</span>
+                            </div>
+                            <div class="ls-provider-budget-chart">
+                                <EChart ModelJson="@BudgetBarJson(label: "% tokens utilized", pct: tokenPct)"/>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="text-xs text-slate-600">No token cap · @provider.TokensUsed.ToString(format: "N0", provider: CultureInfo.InvariantCulture) tokens used</div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+
+        @* Usage: two sub-blocks with different provenance - estimated cost/tokens from
                        intercepted traffic (the cache-aware ledger) vs. the provider's own server-reported
                        rate-limit headers - kept visually distinct so the card never conflates the two
                        (docs/router/anthropic-reported-usage-plan.md §6). Anthropic- and OpenAI-typed
                        providers only (docs/router/openai-format-usage-accuracy-plan.md §6.2 generalizes
                        this beyond Anthropic); no IsEnterprise gate, since both data sources work for any
                        non-enterprise account. *@
-                    @if (string.Equals(provider.ProviderType, "Anthropic", StringComparison.OrdinalIgnoreCase) ||
-                         string.Equals(provider.ProviderType, "OpenAI", StringComparison.OrdinalIgnoreCase))
+        @if (string.Equals(a: provider.ProviderType, b: "Anthropic", comparisonType: StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(a: provider.ProviderType, b: "OpenAI", comparisonType: StringComparison.OrdinalIgnoreCase))
+        {
+            <div class="mt-3 border-t border-slate-700/60 pt-2 space-y-2.5">
+                <span class="text-xs text-slate-500 uppercase tracking-wider">@provider.ProviderType Usage</span>
+
+                <div>
+                    <div class="text-[10px] text-slate-600 uppercase tracking-wider mb-1">Estimated from intercepted traffic</div>
+                    <div class="text-xs font-mono text-slate-400">
+                        $@Money2(provider.DollarSpent) spent · @provider.TokensUsed.ToString(format: "N0", provider: CultureInfo.InvariantCulture) tokens used
+                    </div>
+                    <div class="text-[10px] text-slate-600 mt-0.5">@FormatLastRecorded(provider.UsageLastRecordedAtUtc)</div>
+                </div>
+
+                <div>
+                    <div class="text-[10px] text-slate-600 uppercase tracking-wider mb-1">Reported by @provider.ProviderType</div>
+                    @if (provider.RateLimit is { } rateLimit)
                     {
-                        <div class="mt-3 border-t border-slate-700/60 pt-2 space-y-2.5">
-                            <span class="text-xs text-slate-500 uppercase tracking-wider">@provider.ProviderType Usage</span>
+                        @foreach (var (dimensionName, dimension) in rateLimit.Snapshot.StandardDimensions.OrderBy(keySelector: kvp => kvp.Key, comparer: StringComparer.Ordinal))
+                        {
+                            <div class="text-xs font-mono text-slate-400">@FormatDimension(dimensionName: dimensionName, dimension: dimension)</div>
+                            @if (rateLimit.Projections is not null && rateLimit.Projections.TryGetValue(key: dimensionName, value: out var projection))
+                            {
+                                <div class="text-[10px] text-sky-400/80 font-mono pl-2">@FormatBurnRate(projection)</div>
+                            }
+                        }
 
-                            <div>
-                                <div class="text-[10px] text-slate-600 uppercase tracking-wider mb-1">Estimated from intercepted traffic</div>
-                                <div class="text-xs font-mono text-slate-400">
-                                    $@Money2(provider.DollarSpent) spent · @provider.TokensUsed.ToString("N0", CultureInfo.InvariantCulture) tokens used
+                        @foreach (var (windowName, window) in rateLimit.Snapshot.UnifiedWindows.OrderBy(keySelector: kvp => kvp.Key, comparer: StringComparer.Ordinal))
+                        {
+                            <div class="text-xs font-mono text-slate-400">@FormatWindow(windowName: windowName, window: window)</div>
+                        }
+
+                        <div class="text-[10px] mt-0.5 @(rateLimit.IsStale ? "text-slate-700" : "text-slate-600")">
+                            As of @FormatUtc(rateLimit.ObservedAtUtc)@(rateLimit.IsStale ? " · stale" : "")
+                        </div>
+
+                        @if (Store.RateLimitHistory.TryGetValue(key: provider.Key, value: out var history) && history.Dimensions is { Count: > 0 })
+                        {
+                            @foreach (var (dimensionName, points) in history.Dimensions.OrderBy(keySelector: kvp => kvp.Key, comparer: StringComparer.Ordinal))
+                            {
+                                <div class="ls-provider-trend-chart">
+                                    <EChart ModelJson="@RateLimitTrendJson(dimensionName: dimensionName, points: points)"/>
                                 </div>
-                                <div class="text-[10px] text-slate-600 mt-0.5">@FormatLastRecorded(provider.UsageLastRecordedAtUtc)</div>
-                            </div>
+                            }
+                        }
+                    }
+                    else
+                    {
+                        <div class="text-xs text-slate-600">No rate-limit data observed yet</div>
+                    }
+                </div>
 
-                            <div>
-                                <div class="text-[10px] text-slate-600 uppercase tracking-wider mb-1">Reported by @provider.ProviderType</div>
-                                @if (provider.RateLimit is { } rateLimit)
-                                {
-                                    @foreach (var (dimensionName, dimension) in rateLimit.Snapshot.StandardDimensions.OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
-                                    {
-                                        <div class="text-xs font-mono text-slate-400">@FormatDimension(dimensionName, dimension)</div>
-                                        @if (rateLimit.Projections is not null && rateLimit.Projections.TryGetValue(dimensionName, out var projection))
-                                        {
-                                            <div class="text-[10px] text-sky-400/80 font-mono pl-2">@FormatBurnRate(projection)</div>
-                                        }
-                                    }
-                                    @foreach (var (windowName, window) in rateLimit.Snapshot.UnifiedWindows.OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
-                                    {
-                                        <div class="text-xs font-mono text-slate-400">@FormatWindow(windowName, window)</div>
-                                    }
-                                    <div class="text-[10px] mt-0.5 @(rateLimit.IsStale ? "text-slate-700" : "text-slate-600")">
-                                        As of @FormatUtc(rateLimit.ObservedAtUtc)@(rateLimit.IsStale ? " · stale" : "")
-                                    </div>
-
-                                    @if (Store.RateLimitHistory.TryGetValue(provider.Key, out var history) && history.Dimensions is { Count: > 0 })
-                                    {
-                                        @foreach (var (dimensionName, points) in history.Dimensions.OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
-                                        {
-                                            <div class="ls-provider-trend-chart">
-                                                <EChart ModelJson="@RateLimitTrendJson(dimensionName, points)" />
-                                            </div>
-                                        }
-                                    }
-                                }
-                                else
-                                {
-                                    <div class="text-xs text-slate-600">No rate-limit data observed yet</div>
-                                }
-                            </div>
-
-                            @* Admin API key for provider cost reconciliation and reported usage
+                @* Admin API key for provider cost reconciliation and reported usage
                                (docs/router/secrets-at-rest-plan.md §4/§7) - a distinct, more privileged
                                credential than the per-request inference key above. Optional: a Claude Pro/Max
                                or plain OpenAI account has no such key, and the rest of this card (and the
                                rest of the app) works fully without one. Only openai/anthropic are recognized,
                                matching BuildCostReconcilers/ManagementFacade.SetSecret. *@
-                            @if (IsRecognizedReconciliationProvider(provider.Key))
-                            {
-                                <div>
-                                    <div class="text-[10px] text-slate-600 uppercase tracking-wider mb-1">Admin API Key (cost reconciliation, optional)</div>
-                                    @if (provider.HasStoredAdminKey)
-                                    {
-                                        <div class="flex items-center gap-1.5">
-                                            <span class="text-xs font-mono text-slate-400">•••••••• stored</span>
-                                            <button @onclick="() => ClearAdminApiKey(provider.Key)" class="btn-small-action">Clear</button>
-                                        </div>
-                                    }
-                                    else
-                                    {
-                                        <div class="flex items-center gap-1.5">
-                                            <input type="password"
-                                                   value="@GetAdminKeyDraft(provider.Key)"
-                                                   @oninput="e => _draftAdminKey[provider.Key] = AsString(e.Value)"
-                                                   placeholder="sk-ant-admin01-… or Admin API key"
-                                                   class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input" />
-                                            <button @onclick="() => SaveAdminApiKey(provider.Key)" class="btn-small-action">Save</button>
-                                        </div>
-                                    }
-                                </div>
-                            }
+                @if (IsRecognizedReconciliationProvider(provider.Key))
+                {
+                    <div>
+                        <div class="text-[10px] text-slate-600 uppercase tracking-wider mb-1">Admin API Key (cost reconciliation, optional)</div>
+                        @if (provider.HasStoredAdminKey)
+                        {
+                            <div class="flex items-center gap-1.5">
+                                <span class="text-xs font-mono text-slate-400">•••••••• stored</span>
+                                <button @onclick="() => ClearAdminApiKey(provider.Key)" class="btn-small-action">Clear</button>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="flex items-center gap-1.5">
+                                <input type="password"
+                                       value="@GetAdminKeyDraft(provider.Key)"
+                                       @oninput="e => _draftAdminKey[provider.Key] = AsString(e.Value)"
+                                       placeholder="sk-ant-admin01-… or Admin API key"
+                                       class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input"/>
+                                <button @onclick="() => SaveAdminApiKey(provider.Key)" class="btn-small-action">Save</button>
+                            </div>
+                        }
+                    </div>
+                }
 
-                            @* Anthropic's own reported per-model daily token usage
+                @* Anthropic's own reported per-model daily token usage
                                (docs/router/secrets-at-rest-plan.md §8.1/§8.2), refreshed on the same hourly
                                cycle as cost reconciliation - never on card load, per Anthropic's caching
                                guidance. Anthropic-typed providers only: this is a Console/Enterprise Admin-key
                                feature, so an account without one (Claude Pro/Max) simply sees the empty state
                                below and nothing else on this card is affected. *@
-                            @if (string.Equals(provider.ProviderType, "Anthropic", StringComparison.OrdinalIgnoreCase))
-                            {
-                                <div class="mt-1">
-                                    <div class="text-[10px] text-slate-600 uppercase tracking-wider mb-1">Reported Usage (Anthropic)</div>
-                                    @if (provider.ReportedUsage is { Rows.Count: > 0 } reportedUsage)
-                                    {
-                                        <div class="ls-provider-budget-chart">
-                                            <EChart ModelJson="@ReportedUsageJson(reportedUsage)" />
-                                        </div>
-                                        <div class="text-[10px] text-slate-600 mt-0.5">Fetched @FormatUtc(reportedUsage.FetchedAtUtc)</div>
-                                    }
-                                    else
-                                    {
-                                        <div class="text-xs text-slate-600">No reported usage fetched yet</div>
-                                    }
-                                </div>
-                            }
-                        </div>
-                    }
-                </div>
-            }
+                @if (string.Equals(a: provider.ProviderType, b: "Anthropic", comparisonType: StringComparison.OrdinalIgnoreCase))
+                {
+                    <div class="mt-1">
+                        <div class="text-[10px] text-slate-600 uppercase tracking-wider mb-1">Reported Usage (Anthropic)</div>
+                        @if (provider.ReportedUsage is { Rows.Count: > 0 } reportedUsage)
+                        {
+                            <div class="ls-provider-budget-chart">
+                                <EChart ModelJson="@ReportedUsageJson(reportedUsage)"/>
+                            </div>
+                            <div class="text-[10px] text-slate-600 mt-0.5">Fetched @FormatUtc(reportedUsage.FetchedAtUtc)</div>
+                        }
+                        else
+                        {
+                            <div class="text-xs text-slate-600">No reported usage fetched yet</div>
+                        }
+                    </div>
+                }
+            </div>
+        }
         </div>
     }
+    </div>
+}
 </div>
 
 @if (_showDialog)
@@ -424,7 +424,7 @@
     <ProviderEditDialog Model="@_dialogModel"
                         Error="@_dialogError"
                         OnSave="SaveDialog"
-                        OnCancel="CancelDialog" />
+                        OnCancel="CancelDialog"/>
 }
 
 @if (_removeKey is not null)
@@ -432,6 +432,5 @@
     <RemoveProviderDialog ProviderKey="@_removeKey"
                           ModelCount="@_removeModelCount"
                           OnConfirm="ConfirmRemove"
-                          OnCancel="CancelRemove" />
+                          OnCancel="CancelRemove"/>
 }
-

@@ -42,7 +42,8 @@ public static class TokenCompoundingSeries
         {
             cumulativePrompt += turn.PromptTokens;
             cumulativeCompletion += turn.CompletionTokens;
-            points.Add(new CompoundingPoint(turn.TurnNumber, cumulativePrompt, cumulativeCompletion));
+            points.Add(new CompoundingPoint(TurnNumber: turn.TurnNumber, CumulativePromptTokens: cumulativePrompt,
+                CumulativeCompletionTokens: cumulativeCompletion));
         }
 
         return points;
@@ -64,4 +65,3 @@ public static class TokenCompoundingSeries
             .ToList();
     }
 }
-

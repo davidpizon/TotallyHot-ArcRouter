@@ -19,10 +19,16 @@ public sealed class LinUcbBaseline : CategoricalContextBanditBaselineBase
         _alpha = alpha;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public override string Name => "linucb";
 
-    /// <inheritdoc />
-    /// <remarks>The UCB score <c>θ_d + α·√(1/(λ+n_d))</c> — posterior mean plus an exploration bonus that shrinks as a pair accumulates pulls.</remarks>
-    protected override double ScoreArm(double mean, double denominator) => mean + (_alpha * Math.Sqrt(1d / denominator));
+    /// <inheritdoc/>
+    /// <remarks>
+    /// The UCB score <c>θ_d + α·√(1/(λ+n_d))</c> — posterior mean plus an exploration bonus that shrinks as a pair
+    /// accumulates pulls.
+    /// </remarks>
+    protected override double ScoreArm(double mean, double denominator)
+    {
+        return mean + _alpha * Math.Sqrt(1d / denominator);
+    }
 }

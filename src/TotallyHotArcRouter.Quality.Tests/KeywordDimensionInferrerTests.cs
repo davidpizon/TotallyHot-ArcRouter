@@ -25,13 +25,13 @@ public class KeywordDimensionInferrerTests
     [InlineData("Rewrite this function in place to avoid the extra allocation", "code_generation")]
     public void Infer_ReturnsExpectedDimension(string prompt, string expected)
     {
-        Assert.Equal(expected, _inferrer.Infer(prompt, CodeLanguage.Python));
+        Assert.Equal(expected: expected, actual: _inferrer.Infer(prompt: prompt, language: CodeLanguage.Python));
     }
 
     [Fact]
     public void Infer_NullPrompt_DefaultsToCodeGeneration()
     {
-        Assert.Equal("code_generation", _inferrer.Infer(null!, CodeLanguage.Unknown));
+        Assert.Equal(expected: "code_generation",
+            actual: _inferrer.Infer(prompt: null!, language: CodeLanguage.Unknown));
     }
 }
-

@@ -74,18 +74,11 @@ public static class TaxonomyPromotionCriterion
         ArgumentNullException.ThrowIfNull(windows);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(consecutiveWindows);
 
-        if (windows.Count < consecutiveWindows)
-        {
-            return false;
-        }
+        if (windows.Count < consecutiveWindows) return false;
 
         for (var i = windows.Count - consecutiveWindows; i < windows.Count; i++)
-        {
-            if (!Qualifies(windows[i], minimumCoverage))
-            {
+            if (!Qualifies(window: windows[i], minimumCoverage: minimumCoverage))
                 return false;
-            }
-        }
 
         return true;
     }
@@ -102,7 +95,7 @@ public static class TaxonomyPromotionCriterion
         ArgumentNullException.ThrowIfNull(window);
 
         return window is { DimensionMeanAbsoluteError: { } dimensionError, ClusterMeanAbsoluteError: { } clusterError }
-            && clusterError < dimensionError
-            && window.ClusterCoverage >= minimumCoverage;
+               && clusterError < dimensionError
+               && window.ClusterCoverage >= minimumCoverage;
     }
 }

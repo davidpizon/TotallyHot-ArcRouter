@@ -14,9 +14,9 @@ namespace TotallyHot.ArcRouter.Hosting;
 public sealed class CostReconciliationHostedService : BackgroundService
 {
     private readonly ILogger<CostReconciliationHostedService> _logger;
+    private readonly TimeSpan _pollInterval;
     private readonly CostReconciliationService _reconciliationService;
     private readonly AnthropicUsageReportService? _usageReportService;
-    private readonly TimeSpan _pollInterval;
 
     /// <summary>Initializes a new instance of the <see cref="CostReconciliationHostedService"/> class.</summary>
     /// <param name="logger">Logs pool-loop start and any unexpected per-cycle failure.</param>
@@ -45,11 +45,11 @@ public sealed class CostReconciliationHostedService : BackgroundService
         _pollInterval = TimeSpan.FromHours(options.Value.PollIntervalHours);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation(
-            "Cost reconciliation poll loop starting; interval {IntervalHours}h.", _pollInterval.TotalHours);
+            message: "Cost reconciliation poll loop starting; interval {IntervalHours}h.", _pollInterval.TotalHours);
 
         using var timer = new PeriodicTimer(_pollInterval);
 
@@ -69,11 +69,11 @@ public sealed class CostReconciliationHostedService : BackgroundService
                 {
                     // A cycle should already swallow per-provider/per-day failures; this guards the
                     // unexpected so a single bad tick never tears down the loop.
-                    _logger.LogError(ex, "Cost reconciliation cycle threw unexpectedly; continuing.");
+                    _logger.LogError(exception: ex,
+                        message: "Cost reconciliation cycle threw unexpectedly; continuing.");
                 }
 
                 if (_usageReportService is not null)
-                {
                     // A separate try/catch: a reconciliation failure above must not skip the usage-report
                     // refresh, and vice versa - the two are independent optional features sharing one timer.
                     try
@@ -82,11 +82,10 @@ public sealed class CostReconciliationHostedService : BackgroundService
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {
-                        _logger.LogError(ex, "Anthropic usage report refresh threw unexpectedly; continuing.");
+                        _logger.LogError(exception: ex,
+                            message: "Anthropic usage report refresh threw unexpectedly; continuing.");
                     }
-                }
-            }
-            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
+            } while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
         }
         catch (OperationCanceledException)
         {

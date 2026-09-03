@@ -25,7 +25,8 @@ namespace TotallyHot.ArcRouter.Router;
 /// </param>
 /// <param name="Dimension">
 /// The heuristic classifier's dimension label for this entry's request
-/// (<see cref="TotallyHot.ArcRouter.Router.Classification.RequestClassification.Dimension"/>), or <see langword="null"/> for an entry
+/// (<see cref="TotallyHot.ArcRouter.Router.Classification.RequestClassification.Dimension"/>), or <see langword="null"/>
+/// for an entry
 /// written before this label existed (docs/router/self-organizing-classification-plan.md Phase T2e). Feeds
 /// the cluster model's per-cluster heuristic-dimension histogram independently of whether transcript
 /// capture is enabled.
@@ -85,7 +86,13 @@ public sealed record MemoryEntry(
     /// model swap), which no length comparison can detect.
     /// </para>
     /// </remarks>
-    /// <param name="currentModelIdentity">The identity reported by the live <see cref="Embeddings.IEmbeddingClient.ModelIdentity"/>.</param>
-    public bool MatchesEmbeddingModel(string currentModelIdentity) =>
-        EmbeddingModel is null || string.Equals(EmbeddingModel, currentModelIdentity, StringComparison.Ordinal);
+    /// <param name="currentModelIdentity">
+    /// The identity reported by the live
+    /// <see cref="Embeddings.IEmbeddingClient.ModelIdentity"/>.
+    /// </param>
+    public bool MatchesEmbeddingModel(string currentModelIdentity)
+    {
+        return EmbeddingModel is null || string.Equals(a: EmbeddingModel, b: currentModelIdentity,
+            comparisonType: StringComparison.Ordinal);
+    }
 }

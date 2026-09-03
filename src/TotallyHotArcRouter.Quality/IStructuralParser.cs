@@ -13,4 +13,3 @@ public interface IStructuralParser
     /// <returns>The validity verdict.</returns>
     SyntaxVerdict Check(string code, CodeLanguage language);
 }
-

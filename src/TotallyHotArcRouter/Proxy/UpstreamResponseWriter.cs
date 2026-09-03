@@ -29,8 +29,14 @@ internal readonly record struct RoutingResponseHeaders(
 /// never happened. Only the buffered-translation path can produce this, since it is the one path that
 /// can fail before any byte reaches the client.
 /// </param>
-/// <param name="CapturedResponseBytes">A capped copy of what actually reached the client, for telemetry's usage/text parsers.</param>
-/// <param name="NativeResponseBytes">A capped copy of the pre-translation upstream body, for providers whose native shape telemetry can read directly; otherwise <see langword="null"/>.</param>
+/// <param name="CapturedResponseBytes">
+/// A capped copy of what actually reached the client, for telemetry's usage/text
+/// parsers.
+/// </param>
+/// <param name="NativeResponseBytes">
+/// A capped copy of the pre-translation upstream body, for providers whose native shape
+/// telemetry can read directly; otherwise <see langword="null"/>.
+/// </param>
 /// <param name="TailScanner">The trailing-window usage scanner, when one was allocated.</param>
 /// <param name="IsStreaming">Whether the upstream answered with <c>text/event-stream</c>.</param>
 internal readonly record struct UpstreamResponseResult(
@@ -44,7 +50,6 @@ internal readonly record struct UpstreamResponseResult(
 /// Commits one upstream response to the client: copies the forwardable headers, decides between the
 /// three body paths (a decoded embedded error, a raw pre-read error body, or a live copy/translation of
 /// the upstream stream), and captures a capped copy of what was sent for telemetry.
-///
 /// <para>
 /// Extracted from <see cref="ProxyMiddleware.InvokeCoreAsync"/>'s candidate loop together with the
 /// capture machinery it drives (<see cref="CopyAndCaptureAsync"/>,
@@ -54,9 +59,18 @@ internal readonly record struct UpstreamResponseResult(
 /// dependency (a logger), not part of the middleware's request-routing job.
 /// </para>
 /// </summary>
-/// <param name="logger">Used only to report interrupted or truncated forwards; every capture path fails open rather than throwing.</param>
+/// <param name="logger">
+/// Used only to report interrupted or truncated forwards; every capture path fails open rather than
+/// throwing.
+/// </param>
 internal sealed class UpstreamResponseWriter(ILogger logger)
 {
+    // Cap on how much of the response body telemetry captures for usage parsing (see CopyAndCaptureAsync).
+    // Real chat/completion responses are almost always well under this; a response that exceeds it just
+    // means usage parsing has less to work with (a truncated/partial buffer that the usage parsers already
+    // handle gracefully by finding nothing), never a failure of the actual client-facing forward, which is
+    // unaffected by this cap - every byte is still copied to the client regardless.
+    internal const int MaxCapturedResponseBytes = 4 * 1024 * 1024;
     private readonly ILogger _logger = logger;
 
     /// <summary>
@@ -66,7 +80,10 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
     /// <param name="responseMessage">The upstream response. Not disposed here - the caller owns it.</param>
     /// <param name="translator">The provider's translator, or <see langword="null"/> for a passthrough provider.</param>
     /// <param name="routingHeaders">The ArcRouter-authored headers to set before the first body byte.</param>
-    /// <param name="preReadErrorBody">The error body already buffered during classification, when one was; otherwise <see langword="null"/>.</param>
+    /// <param name="preReadErrorBody">
+    /// The error body already buffered during classification, when one was; otherwise
+    /// <see langword="null"/>.
+    /// </param>
     /// <param name="embeddedErrorMessage">The translator-decoded error message, when one was extracted.</param>
     /// <param name="statusCode">The upstream status, used as the <c>code</c> of a synthesized error envelope.</param>
     internal async Task<UpstreamResponseResult> WriteAsync(
@@ -78,7 +95,8 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
         string? embeddedErrorMessage,
         int statusCode)
     {
-        var isStreaming = CopyStatusAndHeaders(context, responseMessage, translator, routingHeaders, statusCode);
+        var isStreaming = CopyStatusAndHeaders(context: context, responseMessage: responseMessage,
+            translator: translator, routingHeaders: routingHeaders, statusCode: statusCode);
 
         if (preReadErrorBody is not null && embeddedErrorMessage is not null)
         {
@@ -96,11 +114,12 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
                     message = embeddedErrorMessage,
                     type = "invalid_request_error",
                     param = (string?)null,
-                    code = statusCode.ToString(),
-                },
+                    code = statusCode.ToString()
+                }
             });
-            await context.Response.Body.WriteAsync(errorPayload, context.RequestAborted);
-            return new UpstreamResponseResult(true, errorPayload, null, null, isStreaming);
+            await context.Response.Body.WriteAsync(buffer: errorPayload, cancellationToken: context.RequestAborted);
+            return new UpstreamResponseResult(true, CapturedResponseBytes: errorPayload, null, null,
+                IsStreaming: isStreaming);
         }
 
         if (preReadErrorBody is not null)
@@ -108,8 +127,9 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
             // Pre-read, but no recognizable embedded error object - per TryExtractEmbeddedError's contract,
             // forward the raw body unchanged rather than losing it behind a synthetic generic message.
             context.Response.Headers.Remove("Content-Length");
-            await context.Response.Body.WriteAsync(preReadErrorBody, context.RequestAborted);
-            return new UpstreamResponseResult(true, preReadErrorBody, null, null, isStreaming);
+            await context.Response.Body.WriteAsync(buffer: preReadErrorBody, cancellationToken: context.RequestAborted);
+            return new UpstreamResponseResult(true, CapturedResponseBytes: preReadErrorBody, null, null,
+                IsStreaming: isStreaming);
         }
 
         using var upstreamBody = await responseMessage.Content.ReadAsStreamAsync(context.RequestAborted);
@@ -118,20 +138,26 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
             if (translator is null)
             {
                 var (captured, tailScanner) = await CopyAndCaptureAsync(
-                    upstreamBody, context.Response.Body, MaxCapturedResponseBytes, context.RequestAborted);
-                return new UpstreamResponseResult(true, captured, null, tailScanner, isStreaming);
+                    source: upstreamBody, destination: context.Response.Body, captureCap: MaxCapturedResponseBytes,
+                    cancellationToken: context.RequestAborted);
+                return new UpstreamResponseResult(true, CapturedResponseBytes: captured, null, TailScanner: tailScanner,
+                    IsStreaming: isStreaming);
             }
 
             var translated = isStreaming
-                ? await TranslateAndCaptureStreamAsync(translator, upstreamBody, context.Response.Body, MaxCapturedResponseBytes, context.RequestAborted)
-                : await TranslateAndCaptureBufferedAsync(translator, upstreamBody, context.Response.Body, MaxCapturedResponseBytes, context.RequestAborted);
+                ? await TranslateAndCaptureStreamAsync(translator: translator, source: upstreamBody,
+                    destination: context.Response.Body, captureCap: MaxCapturedResponseBytes,
+                    cancellationToken: context.RequestAborted)
+                : await TranslateAndCaptureBufferedAsync(translator: translator, source: upstreamBody,
+                    destination: context.Response.Body, captureCap: MaxCapturedResponseBytes,
+                    cancellationToken: context.RequestAborted);
 
             return new UpstreamResponseResult(
                 true,
-                translated.ClientShapeBytes,
-                translated.NativeBytes,
-                translated.TailScanner,
-                isStreaming);
+                CapturedResponseBytes: translated.ClientShapeBytes,
+                NativeResponseBytes: translated.NativeBytes,
+                TailScanner: translated.TailScanner,
+                IsStreaming: isStreaming);
         }
         catch (Exception ex) when (!context.Response.HasStarted && ProxyMiddleware.IsStreamAbort(ex))
         {
@@ -142,9 +168,12 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
             // throwing, since they write incrementally and so have necessarily already started the response
             // by the time anything could go wrong. Nothing has been committed yet, so this can still become
             // a clean 502 instead of silently returning a 200 with an empty body.
-            _logger.LogWarning(ex, "Buffered upstream read failed before any response bytes were sent to the client; reporting an upstream error instead of an empty success.");
-            await ProxyMiddleware.WriteUpstreamErrorResponseAsync(context, "The upstream provider closed the connection unexpectedly.");
-            return new UpstreamResponseResult(false, [], null, null, isStreaming);
+            _logger.LogWarning(exception: ex,
+                message:
+                "Buffered upstream read failed before any response bytes were sent to the client; reporting an upstream error instead of an empty success.");
+            await ProxyMiddleware.WriteUpstreamErrorResponseAsync(context: context,
+                errorMessage: "The upstream provider closed the connection unexpectedly.");
+            return new UpstreamResponseResult(false, CapturedResponseBytes: [], null, null, IsStreaming: isStreaming);
         }
     }
 
@@ -168,28 +197,22 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
 
         foreach (var header in responseMessage.Headers)
         {
-            if (responseHopByHopHeaders.Contains(header.Key))
-            {
-                continue;
-            }
+            if (responseHopByHopHeaders.Contains(header.Key)) continue;
 
             context.Response.Headers[header.Key] = header.Value.ToArray();
         }
 
         foreach (var header in responseMessage.Content.Headers)
         {
-            if (responseHopByHopHeaders.Contains(header.Key))
-            {
-                continue;
-            }
+            if (responseHopByHopHeaders.Contains(header.Key)) continue;
 
             context.Response.Headers[header.Key] = header.Value.ToArray();
         }
 
         var isStreaming = string.Equals(
-            responseMessage.Content.Headers.ContentType?.MediaType,
-            "text/event-stream",
-            StringComparison.OrdinalIgnoreCase);
+            a: responseMessage.Content.Headers.ContentType?.MediaType,
+            b: "text/event-stream",
+            comparisonType: StringComparison.OrdinalIgnoreCase);
 
         // A translated body no longer matches the upstream's own Content-Length (or, for streaming, its
         // Content-Type framing is re-emitted by us): drop the copied Content-Length so Kestrel sizes the
@@ -214,12 +237,187 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
         return isStreaming;
     }
 
-    // Cap on how much of the response body telemetry captures for usage parsing (see CopyAndCaptureAsync).
-    // Real chat/completion responses are almost always well under this; a response that exceeds it just
-    // means usage parsing has less to work with (a truncated/partial buffer that the usage parsers already
-    // handle gracefully by finding nothing), never a failure of the actual client-facing forward, which is
-    // unaffected by this cap - every byte is still copied to the client regardless.
-    internal const int MaxCapturedResponseBytes = 4 * 1024 * 1024;
+    /// <summary>
+    /// Reads the entire native (non-streaming) upstream body, runs it through the translator into
+    /// OpenAI's shape, writes the translated bytes to the client, and returns both the translated bytes
+    /// (capped, for the client-shape parsers) and - for a provider <see cref="UsageExtractor.SupportsNativeShape"/>
+    /// recognizes - a second capped copy of the pre-translation native body, for the native telemetry tap
+    /// (<c>docs/router/openai-format-usage-accuracy-plan.md</c> §4.1). The native body was already fully
+    /// materialized in memory to call <see cref="IPayloadTranslator.TranslateResponse"/>, so capturing it
+    /// costs nothing extra beyond the capped copy.
+    /// </summary>
+    private async Task<CapturedResponse> TranslateAndCaptureBufferedAsync(IPayloadTranslator translator, Stream source,
+        Stream destination, int captureCap, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var upstream = new MemoryStream();
+            await source.CopyToAsync(destination: upstream, cancellationToken: cancellationToken);
+            var nativeBytes = upstream.ToArray();
+
+            var translated = translator.TranslateResponse(nativeBytes);
+            await destination.WriteAsync(buffer: translated, cancellationToken: cancellationToken);
+
+            // Deliberately not routed through ResponseCaptureAccumulator: unlike the two loop-based capture
+            // methods below, this is a single, already-fully-materialized buffer, and the common case (a
+            // response that fits within captureCap) can return the translated array directly instead of
+            // paying for a MemoryStream copy the accumulator's chunk-oriented API would otherwise force.
+            var clientShapeBytes = translated.Length <= captureCap ? translated : translated[..captureCap];
+            var capturedNativeBytes = UsageExtractor.SupportsNativeShape(translator.Provider)
+                ? nativeBytes.Length <= captureCap ? nativeBytes : nativeBytes[..captureCap]
+                : null;
+
+            // Only worth the ~64KB tail-window allocation when the head-capped clientShapeBytes above
+            // actually lost data - a response that fits within captureCap is already fully captured, so
+            // TryExtractUsage's primary parse never needs the tail fallback.
+            IncrementalUsageScanner? tailScanner = null;
+            if (translated.Length > captureCap)
+            {
+                tailScanner = new IncrementalUsageScanner();
+                tailScanner.Append(translated);
+            }
+
+            return new CapturedResponse(ClientShapeBytes: clientShapeBytes, NativeBytes: capturedNativeBytes,
+                TailScanner: tailScanner);
+        }
+        catch (Exception ex) when (ProxyMiddleware.IsStreamAbort(ex) && cancellationToken.IsCancellationRequested)
+        {
+            // Unlike TranslateAndCaptureStreamAsync, nothing has necessarily reached the client yet here -
+            // the whole upstream body is read into memory before the one translated write - so this only
+            // fails open (swallows and reports an empty capture) for a genuine client abort, where there is
+            // truly no one left to answer. An upstream I/O failure that is NOT the client leaving (checked
+            // via cancellationToken.IsCancellationRequested, mirroring IsTransportOutage's identical
+            // distinction for the SendAsync case) is deliberately left to propagate, so the caller can still
+            // turn it into a real 502 instead of silently committing a 200 with an empty body.
+            _logger.LogWarning(exception: ex,
+                message:
+                "Buffered response to the client was interrupted by a client disconnect; the forward was terminated early.");
+            return new CapturedResponse(ClientShapeBytes: [], null, null);
+        }
+    }
+
+    /// <summary>
+    /// Streams the native SSE upstream through a per-request <see cref="IStreamTranslator"/>, writing
+    /// each translated OpenAI-shaped chunk to the client as it is produced and capturing up to
+    /// <paramref name="captureCap"/> bytes of the translated stream for telemetry - plus, for a provider
+    /// <see cref="UsageExtractor.SupportsNativeShape"/> recognizes, a second capped accumulation of the raw
+    /// upstream SSE bytes (before they enter the stream translator), for the native telemetry tap
+    /// (<c>docs/router/openai-format-usage-accuracy-plan.md</c> §4.1) - the one genuinely new buffer this
+    /// plan adds, capped like every other capture here. An embedded provider error throws
+    /// <see cref="GeminiStreamException"/> mid-stream (mirroring LiteLLM): the forward is then terminated -
+    /// the client sees a truncated stream with no <c>[DONE]</c>, since a 200 OK and earlier chunks have
+    /// already been committed to the wire and the status can no longer change.
+    /// </summary>
+    private async Task<CapturedResponse> TranslateAndCaptureStreamAsync(IPayloadTranslator translator, Stream source,
+        Stream destination, int captureCap, CancellationToken cancellationToken)
+    {
+        var streamTranslator = translator.CreateStreamTranslator();
+        var captureNativeBytes = UsageExtractor.SupportsNativeShape(translator.Provider);
+        using var capture = new ResponseCaptureAccumulator(captureCap);
+        using var nativeCapture =
+            captureNativeBytes ? new ResponseCaptureAccumulator(captureCap: captureCap, false) : null;
+        var buffer = ArrayPool<byte>.Shared.Rent(81920);
+
+        async Task EmitAsync(byte[] translated)
+        {
+            if (translated.Length == 0) return;
+
+            await destination.WriteAsync(buffer: translated, cancellationToken: cancellationToken);
+            await destination.FlushAsync(cancellationToken);
+
+            await capture.AddAsync(chunk: translated, cancellationToken: cancellationToken);
+        }
+
+        try
+        {
+            int bytesRead;
+            while ((bytesRead = await source.ReadAsync(buffer: buffer.AsMemory(0, length: buffer.Length),
+                       cancellationToken: cancellationToken)) > 0)
+            {
+                if (nativeCapture is not null)
+                    await nativeCapture.AddAsync(chunk: buffer.AsMemory(0, length: bytesRead),
+                        cancellationToken: cancellationToken);
+
+                await EmitAsync(streamTranslator.Push(buffer.AsSpan(0, length: bytesRead)));
+            }
+
+            await EmitAsync(streamTranslator.Flush());
+        }
+        catch (GeminiStreamException ex)
+        {
+            _logger.LogWarning(exception: ex,
+                message:
+                "Gemini streaming response terminated by an embedded provider error; the client stream was truncated.");
+        }
+        catch (AnthropicStreamException ex)
+        {
+            _logger.LogWarning(exception: ex,
+                message: "Anthropic streaming response terminated by an error event; the client stream was truncated.");
+        }
+        catch (Exception ex) when (ProxyMiddleware.IsStreamAbort(ex))
+        {
+            _logger.LogWarning(exception: ex,
+                message:
+                "Streaming response to the client was interrupted (client disconnected, or the connection was aborted); the forward was terminated early.");
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+
+        return new CapturedResponse(ClientShapeBytes: capture.ToArray(), NativeBytes: nativeCapture?.ToArray(),
+            TailScanner: capture.TailScanner);
+    }
+
+    /// <summary>
+    /// Copies <paramref name="source"/> to <paramref name="destination"/> unchanged (the client-facing
+    /// forward), while also capturing up to <paramref name="captureCap"/> bytes for telemetry usage
+    /// parsing, plus a trailing <see cref="IncrementalUsageScanner"/> window independent of that cap
+    /// (§5.11). The capture never delays or alters what reaches <paramref name="destination"/> - it's an
+    /// in-memory side copy of each chunk immediately after (not instead of) writing it downstream.
+    /// </summary>
+    private async Task<(byte[] Captured, IncrementalUsageScanner? TailScanner)> CopyAndCaptureAsync(Stream source,
+        Stream destination, int captureCap, CancellationToken cancellationToken)
+    {
+        using var capture = new ResponseCaptureAccumulator(captureCap);
+        var buffer = ArrayPool<byte>.Shared.Rent(81920);
+        try
+        {
+            int bytesRead;
+            while ((bytesRead = await source.ReadAsync(buffer: buffer.AsMemory(0, length: buffer.Length),
+                       cancellationToken: cancellationToken)) > 0)
+            {
+                await destination.WriteAsync(buffer: buffer.AsMemory(0, length: bytesRead),
+                    cancellationToken: cancellationToken);
+
+                // Unlike a translated response (whose EmitAsync helper flushes every emitted chunk), this
+                // is the raw pass-through path for a provider with no translator (Ollama, raw OpenAI, an
+                // OpenAI-compatible local server). Without an explicit flush, Kestrel can hold small,
+                // infrequent writes - exactly what a slow local model's token-by-token SSE stream produces
+                // - in its internal buffer instead of pushing them to the client promptly, so the client
+                // sees no bytes at all until the connection eventually closes (or times out first).
+                await destination.FlushAsync(cancellationToken);
+
+                await capture.AddAsync(chunk: buffer.AsMemory(0, length: bytesRead),
+                    cancellationToken: cancellationToken);
+            }
+        }
+        catch (Exception ex) when (ProxyMiddleware.IsStreamAbort(ex))
+        {
+            // Mirrors TranslateAndCaptureStreamAsync's identical fail-open handling: the response has
+            // already started, so there is nothing left to do but stop copying and return whatever was
+            // captured so far.
+            _logger.LogWarning(exception: ex,
+                message:
+                "Streaming response to the client was interrupted (client disconnected, or the connection was aborted); the forward was terminated early.");
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+
+        return (capture.ToArray(), capture.TailScanner);
+    }
 
     /// <summary>
     /// The result of capturing a translated response for telemetry: the OpenAI-shaped bytes actually sent
@@ -232,7 +430,10 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
     /// consulted by <see cref="RequestTelemetryPublisher.PublishAsync"/> only when usage extraction fails against both the
     /// head-capped and native captures (§5.11).
     /// </summary>
-    private readonly record struct CapturedResponse(byte[] ClientShapeBytes, byte[]? NativeBytes, IncrementalUsageScanner? TailScanner);
+    private readonly record struct CapturedResponse(
+        byte[] ClientShapeBytes,
+        byte[]? NativeBytes,
+        IncrementalUsageScanner? TailScanner);
 
     /// <summary>
     /// Owns the "cap the captured bytes, and once the cap is exceeded, lazily allocate an
@@ -250,7 +451,6 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
         private readonly MemoryStream _capture = new();
         private readonly int _captureCap;
         private readonly bool _trackTail;
-        private IncrementalUsageScanner? _tailScanner;
 
         public ResponseCaptureAccumulator(int captureCap, bool trackTail = true)
         {
@@ -258,8 +458,17 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
             _trackTail = trackTail;
         }
 
-        /// <summary>The tail scanner allocated once a chunk first exceeded the cap, or <see langword="null"/> if none has (yet), or if this accumulator does not track one.</summary>
-        public IncrementalUsageScanner? TailScanner => _tailScanner;
+        /// <summary>
+        /// The tail scanner allocated once a chunk first exceeded the cap, or <see langword="null"/> if none has (yet),
+        /// or if this accumulator does not track one.
+        /// </summary>
+        public IncrementalUsageScanner? TailScanner { get; private set; }
+
+        /// <inheritdoc/>
+        public void Dispose()
+        {
+            _capture.Dispose();
+        }
 
         /// <summary>
         /// Writes up to the remaining cap of <paramref name="chunk"/> into the capture buffer, and - when
@@ -269,195 +478,24 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
         /// </summary>
         public async Task AddAsync(ReadOnlyMemory<byte> chunk, CancellationToken cancellationToken)
         {
-            if (chunk.IsEmpty)
-            {
-                return;
-            }
+            if (chunk.IsEmpty) return;
 
             var remainingCapacity = _captureCap - (int)_capture.Length;
             if (remainingCapacity > 0)
-            {
-                await _capture.WriteAsync(chunk[..Math.Min(chunk.Length, remainingCapacity)], cancellationToken);
-            }
+                await _capture.WriteAsync(buffer: chunk[..Math.Min(val1: chunk.Length, val2: remainingCapacity)],
+                    cancellationToken: cancellationToken);
 
             if (_trackTail && remainingCapacity < chunk.Length)
             {
-                _tailScanner ??= new IncrementalUsageScanner();
-                _tailScanner.Append(chunk.Span);
+                TailScanner ??= new IncrementalUsageScanner();
+                TailScanner.Append(chunk.Span);
             }
         }
 
         /// <summary>Returns the bytes captured so far, up to the configured cap.</summary>
-        public byte[] ToArray() => _capture.ToArray();
-
-        /// <inheritdoc />
-        public void Dispose() => _capture.Dispose();
-    }
-
-    /// <summary>
-    /// Reads the entire native (non-streaming) upstream body, runs it through the translator into
-    /// OpenAI's shape, writes the translated bytes to the client, and returns both the translated bytes
-    /// (capped, for the client-shape parsers) and - for a provider <see cref="UsageExtractor.SupportsNativeShape"/>
-    /// recognizes - a second capped copy of the pre-translation native body, for the native telemetry tap
-    /// (<c>docs/router/openai-format-usage-accuracy-plan.md</c> §4.1). The native body was already fully
-    /// materialized in memory to call <see cref="IPayloadTranslator.TranslateResponse"/>, so capturing it
-    /// costs nothing extra beyond the capped copy.
-    /// </summary>
-    private async Task<CapturedResponse> TranslateAndCaptureBufferedAsync(IPayloadTranslator translator, Stream source, Stream destination, int captureCap, CancellationToken cancellationToken)
-    {
-        try
+        public byte[] ToArray()
         {
-            using var upstream = new MemoryStream();
-            await source.CopyToAsync(upstream, cancellationToken);
-            var nativeBytes = upstream.ToArray();
-
-            var translated = translator.TranslateResponse(nativeBytes);
-            await destination.WriteAsync(translated, cancellationToken);
-
-            // Deliberately not routed through ResponseCaptureAccumulator: unlike the two loop-based capture
-            // methods below, this is a single, already-fully-materialized buffer, and the common case (a
-            // response that fits within captureCap) can return the translated array directly instead of
-            // paying for a MemoryStream copy the accumulator's chunk-oriented API would otherwise force.
-            var clientShapeBytes = translated.Length <= captureCap ? translated : translated[..captureCap];
-            byte[]? capturedNativeBytes = UsageExtractor.SupportsNativeShape(translator.Provider)
-                ? (nativeBytes.Length <= captureCap ? nativeBytes : nativeBytes[..captureCap])
-                : null;
-
-            // Only worth the ~64KB tail-window allocation when the head-capped clientShapeBytes above
-            // actually lost data - a response that fits within captureCap is already fully captured, so
-            // TryExtractUsage's primary parse never needs the tail fallback.
-            IncrementalUsageScanner? tailScanner = null;
-            if (translated.Length > captureCap)
-            {
-                tailScanner = new IncrementalUsageScanner();
-                tailScanner.Append(translated);
-            }
-
-            return new CapturedResponse(clientShapeBytes, capturedNativeBytes, tailScanner);
+            return _capture.ToArray();
         }
-        catch (Exception ex) when (ProxyMiddleware.IsStreamAbort(ex) && cancellationToken.IsCancellationRequested)
-        {
-            // Unlike TranslateAndCaptureStreamAsync, nothing has necessarily reached the client yet here -
-            // the whole upstream body is read into memory before the one translated write - so this only
-            // fails open (swallows and reports an empty capture) for a genuine client abort, where there is
-            // truly no one left to answer. An upstream I/O failure that is NOT the client leaving (checked
-            // via cancellationToken.IsCancellationRequested, mirroring IsTransportOutage's identical
-            // distinction for the SendAsync case) is deliberately left to propagate, so the caller can still
-            // turn it into a real 502 instead of silently committing a 200 with an empty body.
-            _logger.LogWarning(ex, "Buffered response to the client was interrupted by a client disconnect; the forward was terminated early.");
-            return new CapturedResponse([], null, null);
-        }
-    }
-
-    /// <summary>
-    /// Streams the native SSE upstream through a per-request <see cref="IStreamTranslator"/>, writing
-    /// each translated OpenAI-shaped chunk to the client as it is produced and capturing up to
-    /// <paramref name="captureCap"/> bytes of the translated stream for telemetry - plus, for a provider
-    /// <see cref="UsageExtractor.SupportsNativeShape"/> recognizes, a second capped accumulation of the raw
-    /// upstream SSE bytes (before they enter the stream translator), for the native telemetry tap
-    /// (<c>docs/router/openai-format-usage-accuracy-plan.md</c> §4.1) - the one genuinely new buffer this
-    /// plan adds, capped like every other capture here. An embedded provider error throws
-    /// <see cref="GeminiStreamException"/> mid-stream (mirroring LiteLLM): the forward is then terminated -
-    /// the client sees a truncated stream with no <c>[DONE]</c>, since a 200 OK and earlier chunks have
-    /// already been committed to the wire and the status can no longer change.
-    /// </summary>
-    private async Task<CapturedResponse> TranslateAndCaptureStreamAsync(IPayloadTranslator translator, Stream source, Stream destination, int captureCap, CancellationToken cancellationToken)
-    {
-        var streamTranslator = translator.CreateStreamTranslator();
-        var captureNativeBytes = UsageExtractor.SupportsNativeShape(translator.Provider);
-        using var capture = new ResponseCaptureAccumulator(captureCap);
-        using var nativeCapture = captureNativeBytes ? new ResponseCaptureAccumulator(captureCap, trackTail: false) : null;
-        var buffer = ArrayPool<byte>.Shared.Rent(81920);
-
-        async Task EmitAsync(byte[] translated)
-        {
-            if (translated.Length == 0)
-            {
-                return;
-            }
-
-            await destination.WriteAsync(translated, cancellationToken);
-            await destination.FlushAsync(cancellationToken);
-
-            await capture.AddAsync(translated, cancellationToken);
-        }
-
-        try
-        {
-            int bytesRead;
-            while ((bytesRead = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)) > 0)
-            {
-                if (nativeCapture is not null)
-                {
-                    await nativeCapture.AddAsync(buffer.AsMemory(0, bytesRead), cancellationToken);
-                }
-
-                await EmitAsync(streamTranslator.Push(buffer.AsSpan(0, bytesRead)));
-            }
-
-            await EmitAsync(streamTranslator.Flush());
-        }
-        catch (GeminiStreamException ex)
-        {
-            _logger.LogWarning(ex, "Gemini streaming response terminated by an embedded provider error; the client stream was truncated.");
-        }
-        catch (AnthropicStreamException ex)
-        {
-            _logger.LogWarning(ex, "Anthropic streaming response terminated by an error event; the client stream was truncated.");
-        }
-        catch (Exception ex) when (ProxyMiddleware.IsStreamAbort(ex))
-        {
-            _logger.LogWarning(ex, "Streaming response to the client was interrupted (client disconnected, or the connection was aborted); the forward was terminated early.");
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(buffer);
-        }
-
-        return new CapturedResponse(capture.ToArray(), nativeCapture?.ToArray(), capture.TailScanner);
-    }
-
-    /// <summary>
-    /// Copies <paramref name="source"/> to <paramref name="destination"/> unchanged (the client-facing
-    /// forward), while also capturing up to <paramref name="captureCap"/> bytes for telemetry usage
-    /// parsing, plus a trailing <see cref="IncrementalUsageScanner"/> window independent of that cap
-    /// (§5.11). The capture never delays or alters what reaches <paramref name="destination"/> - it's an
-    /// in-memory side copy of each chunk immediately after (not instead of) writing it downstream.
-    /// </summary>
-    private async Task<(byte[] Captured, IncrementalUsageScanner? TailScanner)> CopyAndCaptureAsync(Stream source, Stream destination, int captureCap, CancellationToken cancellationToken)
-    {
-        using var capture = new ResponseCaptureAccumulator(captureCap);
-        var buffer = ArrayPool<byte>.Shared.Rent(81920);
-        try
-        {
-            int bytesRead;
-            while ((bytesRead = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)) > 0)
-            {
-                await destination.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken);
-
-                // Unlike a translated response (whose EmitAsync helper flushes every emitted chunk), this
-                // is the raw pass-through path for a provider with no translator (Ollama, raw OpenAI, an
-                // OpenAI-compatible local server). Without an explicit flush, Kestrel can hold small,
-                // infrequent writes - exactly what a slow local model's token-by-token SSE stream produces
-                // - in its internal buffer instead of pushing them to the client promptly, so the client
-                // sees no bytes at all until the connection eventually closes (or times out first).
-                await destination.FlushAsync(cancellationToken);
-
-                await capture.AddAsync(buffer.AsMemory(0, bytesRead), cancellationToken);
-            }
-        }
-        catch (Exception ex) when (ProxyMiddleware.IsStreamAbort(ex))
-        {
-            // Mirrors TranslateAndCaptureStreamAsync's identical fail-open handling: the response has
-            // already started, so there is nothing left to do but stop copying and return whatever was
-            // captured so far.
-            _logger.LogWarning(ex, "Streaming response to the client was interrupted (client disconnected, or the connection was aborted); the forward was terminated early.");
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(buffer);
-        }
-
-        return (capture.ToArray(), capture.TailScanner);
     }
 }

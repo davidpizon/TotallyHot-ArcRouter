@@ -16,12 +16,13 @@ namespace TotallyHot.ArcRouter.Gui;
 public sealed class App : Application
 {
     /// <summary>Creates the single dashboard window hosting <see cref="MainPage"/>.</summary>
-    protected override Window CreateWindow(IActivationState? activationState) =>
-        new(new MainPage())
+    protected override Window CreateWindow(IActivationState? activationState)
+    {
+        return new Window(new MainPage())
         {
             Title = "TotallyHot Arc Router Dashboard",
             Width = 1440,
-            Height = 900,
+            Height = 900
         };
+    }
 }
-

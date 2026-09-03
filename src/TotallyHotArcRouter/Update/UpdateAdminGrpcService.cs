@@ -21,9 +21,9 @@ namespace TotallyHot.ArcRouter.Update;
 /// </remarks>
 public sealed class UpdateAdminGrpcService : Contract.UpdateAdminService.UpdateAdminServiceBase
 {
-    private readonly IUpdateStateStore _stateStore;
-    private readonly IReleaseCheckClient _releaseCheckClient;
     private readonly ILogger<UpdateAdminGrpcService> _logger;
+    private readonly IReleaseCheckClient _releaseCheckClient;
+    private readonly IUpdateStateStore _stateStore;
 
     /// <summary>Initializes a new instance of the <see cref="UpdateAdminGrpcService"/> class.</summary>
     /// <param name="stateStore">The last-known check outcome <see cref="GetUpdateStatus"/> reads.</param>
@@ -43,13 +43,15 @@ public sealed class UpdateAdminGrpcService : Contract.UpdateAdminService.UpdateA
         _logger = logger;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public override Task<Contract.UpdateStatusResponse> GetUpdateStatus(
         Contract.GetUpdateStatusRequest request,
-        ServerCallContext context) =>
-        Task.FromResult(MapSnapshot(_stateStore.Current));
+        ServerCallContext context)
+    {
+        return Task.FromResult(MapSnapshot(_stateStore.Current));
+    }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public override async Task<Contract.UpdateStatusResponse> CheckForUpdatesNow(
         Contract.CheckForUpdatesNowRequest request,
         ServerCallContext context)
@@ -58,20 +60,20 @@ public sealed class UpdateAdminGrpcService : Contract.UpdateAdminService.UpdateA
         _stateStore.Record(result);
 
         _logger.LogInformation(
-            "Manual update check requested: UpdateAvailable={UpdateAvailable} LatestVersion={LatestVersion}",
+            message: "Manual update check requested: UpdateAvailable={UpdateAvailable} LatestVersion={LatestVersion}",
             result.IsUpdateAvailable,
             result.LatestVersion);
 
         return MapSnapshot(_stateStore.Current);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public override Task<Contract.NotifyApplyStartingResponse> NotifyApplyStarting(
         Contract.NotifyApplyStartingRequest request,
         ServerCallContext context)
     {
         _logger.LogInformation(
-            "GUI reports it is about to apply update to version {Version}; this service will restart shortly.",
+            message: "GUI reports it is about to apply update to version {Version}; this service will restart shortly.",
             request.Version);
 
         return Task.FromResult(new Contract.NotifyApplyStartingResponse { Acknowledged = true });
@@ -89,43 +91,35 @@ public sealed class UpdateAdminGrpcService : Contract.UpdateAdminService.UpdateA
             // no check has ever completed yet, so nothing is known - the wire enum's zero value.
             UnavailableReason = snapshot.Result is null
                 ? Contract.UpdateUnavailableReason.Unspecified
-                : MapReason(snapshot.Result.UnavailableReason),
+                : MapReason(snapshot.Result.UnavailableReason)
         };
 
-        if (snapshot.CheckedAtUtc is { } checkedAt)
-        {
-            response.CheckedAtUtc = Timestamp.FromDateTimeOffset(checkedAt);
-        }
+        if (snapshot.CheckedAtUtc is { } checkedAt) response.CheckedAtUtc = Timestamp.FromDateTimeOffset(checkedAt);
 
-        if (snapshot.Result?.UnavailableDetail is { } detail)
-        {
-            response.UnavailableDetail = detail;
-        }
+        if (snapshot.Result?.UnavailableDetail is { } detail) response.UnavailableDetail = detail;
 
         if (snapshot.Result?.IsUpdateAvailable == true)
         {
-            if (snapshot.Result.AssetDownloadUrl is { } assetDownloadUrl)
-            {
-                response.AssetDownloadUrl = assetDownloadUrl;
-            }
+            if (snapshot.Result.AssetDownloadUrl is { } assetDownloadUrl) response.AssetDownloadUrl = assetDownloadUrl;
 
-            if (snapshot.Result.AssetSha256 is { } assetSha256)
-            {
-                response.AssetSha256 = assetSha256;
-            }
+            if (snapshot.Result.AssetSha256 is { } assetSha256) response.AssetSha256 = assetSha256;
         }
 
         return response;
     }
 
     /// <summary>Maps the domain reason enum onto the wire enum.</summary>
-    private static Contract.UpdateUnavailableReason MapReason(ReleaseCheckUnavailableReason reason) => reason switch
+    private static Contract.UpdateUnavailableReason MapReason(ReleaseCheckUnavailableReason reason)
     {
-        ReleaseCheckUnavailableReason.None => Contract.UpdateUnavailableReason.None,
-        ReleaseCheckUnavailableReason.NoReleasesPublished => Contract.UpdateUnavailableReason.NoReleasesPublished,
-        ReleaseCheckUnavailableReason.MalformedTag => Contract.UpdateUnavailableReason.MalformedTag,
-        ReleaseCheckUnavailableReason.AssetOrChecksumMissing => Contract.UpdateUnavailableReason.AssetOrChecksumMissing,
-        ReleaseCheckUnavailableReason.NetworkOrApiFailure => Contract.UpdateUnavailableReason.NetworkOrApiFailure,
-        _ => Contract.UpdateUnavailableReason.Unspecified,
-    };
+        return reason switch
+        {
+            ReleaseCheckUnavailableReason.None => Contract.UpdateUnavailableReason.None,
+            ReleaseCheckUnavailableReason.NoReleasesPublished => Contract.UpdateUnavailableReason.NoReleasesPublished,
+            ReleaseCheckUnavailableReason.MalformedTag => Contract.UpdateUnavailableReason.MalformedTag,
+            ReleaseCheckUnavailableReason.AssetOrChecksumMissing => Contract.UpdateUnavailableReason
+                .AssetOrChecksumMissing,
+            ReleaseCheckUnavailableReason.NetworkOrApiFailure => Contract.UpdateUnavailableReason.NetworkOrApiFailure,
+            _ => Contract.UpdateUnavailableReason.Unspecified
+        };
+    }
 }

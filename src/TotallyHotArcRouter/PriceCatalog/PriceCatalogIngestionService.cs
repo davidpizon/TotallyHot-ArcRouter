@@ -15,10 +15,6 @@ namespace TotallyHot.ArcRouter.PriceCatalog;
 /// </remarks>
 public sealed class PriceCatalogIngestionService
 {
-    // The 24h freshness floor (D1/D4). Not derived from PollIntervalHours: it is how often the underlying
-    // prices can move, a different fact from how often we wake up to check.
-    private static readonly TimeSpan FreshnessFloor = TimeSpan.FromHours(24);
-
     /// <summary>
     /// The <see cref="SourceOutcome.Error"/> recorded when a source is switched off mid-fetch. A distinct,
     /// stable string rather than an exception message: this is the operator's own action reported back, not
@@ -26,20 +22,26 @@ public sealed class PriceCatalogIngestionService
     /// </summary>
     public const string DisabledDuringFetch = "disabled during fetch";
 
-    private readonly IPriceSourceRegistry _registry;
-    private readonly PriceRepository _repository;
-    // CountFreshPrices is a source-toggle-CRUD concern (it joins on aggregator_sources.enabled), not a
-    // price upsert/read one - see PriceSourceRepository's remarks - so this service needs both narrow
-    // repositories rather than one, the same cross-concern shape ManagementFacade needs for its own reads.
-    private readonly PriceSourceRepository _sourceRepository;
-    private readonly PriceSourceToggleStore _toggleStore;
-    private readonly ILogger<PriceCatalogIngestionService> _logger;
-    private readonly IModelPriceCatalog? _priceCatalog;
+    // The 24h freshness floor (D1/D4). Not derived from PollIntervalHours: it is how often the underlying
+    // prices can move, a different fact from how often we wake up to check.
+    private static readonly TimeSpan FreshnessFloor = TimeSpan.FromHours(24);
 
     // Single-flight gate. The background poll loop and the Governance panel's "Pull Now" both land here, and
     // two concurrent cycles would double-fetch every source and race their upserts against each other. A
     // manual pull that collides with a scheduled tick waits for it rather than duplicating it.
     private readonly SemaphoreSlim _cycleGate = new(1, 1);
+    private readonly ILogger<PriceCatalogIngestionService> _logger;
+    private readonly IModelPriceCatalog? _priceCatalog;
+
+    private readonly IPriceSourceRegistry _registry;
+
+    private readonly PriceRepository _repository;
+
+    // CountFreshPrices is a source-toggle-CRUD concern (it joins on aggregator_sources.enabled), not a
+    // price upsert/read one - see PriceSourceRepository's remarks - so this service needs both narrow
+    // repositories rather than one, the same cross-concern shape ManagementFacade needs for its own reads.
+    private readonly PriceSourceRepository _sourceRepository;
+    private readonly PriceSourceToggleStore _toggleStore;
 
     // UTC ticks of the current interval's anchor. Read by the poll loop to decide when it is next due and by
     // the admin service to report the schedule, both off-thread from the cycle that writes it - hence
@@ -109,7 +111,7 @@ public sealed class PriceCatalogIngestionService
     /// </para>
     /// </remarks>
     public DateTimeOffset ScheduleAnchorUtc =>
-        new(Interlocked.Read(ref _scheduleAnchorTicks), TimeSpan.Zero);
+        new(ticks: Interlocked.Read(ref _scheduleAnchorTicks), offset: TimeSpan.Zero);
 
     /// <summary>
     /// Fetches and upserts every enabled source, then evaluates the zero-fresh-prices condition. Serialized:
@@ -128,7 +130,7 @@ public sealed class PriceCatalogIngestionService
             // when it started - a slow cycle should not shorten the gap before the next one. In the finally
             // so a cycle that threw still counts: it consumed the interval either way, and an anchor that
             // only moved on success would leave a persistently failing feed being retried in a tight loop.
-            Interlocked.Exchange(ref _scheduleAnchorTicks, DateTimeOffset.UtcNow.UtcTicks);
+            Interlocked.Exchange(location1: ref _scheduleAnchorTicks, value: DateTimeOffset.UtcNow.UtcTicks);
             _cycleGate.Release();
         }
     }
@@ -147,13 +149,10 @@ public sealed class PriceCatalogIngestionService
         try
         {
             var changed = _repository.RecomputeWinners();
-            if (changed > 0)
-            {
-                _priceCatalog?.Invalidate();
-            }
+            if (changed > 0) _priceCatalog?.Invalidate();
 
             var freshPriceCount = _sourceRepository.CountFreshPrices(FreshnessFloor);
-            return new IngestionCycleSummary(freshPriceCount, Outcomes: []);
+            return new IngestionCycleSummary(FreshPriceCount: freshPriceCount, Outcomes: []);
         }
         finally
         {
@@ -178,8 +177,8 @@ public sealed class PriceCatalogIngestionService
             // Linking the caller's token with the source's toggle token is what lets a disable abort a fetch
             // already in flight, rather than only taking effect from the next cycle (D6).
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(
-                cancellationToken,
-                _toggleStore.GetSourceToken(client.Name));
+                token1: cancellationToken,
+                token2: _toggleStore.GetSourceToken(client.Name));
 
             try
             {
@@ -190,8 +189,9 @@ public sealed class PriceCatalogIngestionService
                 // the operator just switched off a fresh last_updated_utc.
                 if (!_toggleStore.IsEnabled(client.Name))
                 {
-                    outcomes.Add(new SourceOutcome(client.Name, Succeeded: false, PriceCount: 0, Error: DisabledDuringFetch));
+                    outcomes.Add(new SourceOutcome(Source: client.Name, false, 0, Error: DisabledDuringFetch));
                     _logger.LogInformation(
+                        message:
                         "Discarded {Count} prices from {Source}: it was disabled while the fetch was in flight.",
                         prices.Count,
                         client.Name);
@@ -203,25 +203,27 @@ public sealed class PriceCatalogIngestionService
                 // source is seeded into aggregator_sources at startup (PriceCatalogDatabase.EnsureCreated),
                 // so by the time ingestion runs, the row - and its operator-set rank - already exists, and the
                 // priority gate below reads that stored rank, not this parameter.
-                var written = _repository.UpsertPrices(client.Name, priorityScore: 0, prices, DateTimeOffset.UtcNow);
+                var written = _repository.UpsertPrices(sourceName: client.Name, 0, prices: prices,
+                    asOfUtc: DateTimeOffset.UtcNow);
                 wroteAnyPrices |= written > 0;
 
-                outcomes.Add(new SourceOutcome(client.Name, Succeeded: true, PriceCount: written, Error: null));
+                outcomes.Add(new SourceOutcome(Source: client.Name, true, PriceCount: written, null));
                 _logger.LogInformation(
-                    "Price source {Source} refreshed {Count} prices.", client.Name, written);
+                    message: "Price source {Source} refreshed {Count} prices.", client.Name, written);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
                 // Only the source's own token fired, so this is a user disabling the source mid-fetch: a
                 // recorded outcome, and the loop moves on. The guard matters - without it the catch below
                 // would let a toggle tear down the whole cycle, taking every other source's refresh with it.
-                outcomes.Add(new SourceOutcome(client.Name, Succeeded: false, PriceCount: 0, Error: DisabledDuringFetch));
-                _logger.LogInformation("Price source {Source} was disabled while its fetch was in flight.", client.Name);
+                outcomes.Add(new SourceOutcome(Source: client.Name, false, 0, Error: DisabledDuringFetch));
+                _logger.LogInformation(message: "Price source {Source} was disabled while its fetch was in flight.",
+                    client.Name);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                outcomes.Add(new SourceOutcome(client.Name, Succeeded: false, PriceCount: 0, Error: ex.Message));
-                _logger.LogWarning(ex, "Price source {Source} failed to refresh.", client.Name);
+                outcomes.Add(new SourceOutcome(Source: client.Name, false, 0, Error: ex.Message));
+                _logger.LogWarning(exception: ex, message: "Price source {Source} failed to refresh.", client.Name);
             }
 
             // An OperationCanceledException with the caller's token cancelled falls through both catches and
@@ -231,24 +233,20 @@ public sealed class PriceCatalogIngestionService
         // Phase 4's eviction signal: drop the read-side cache only when a source actually wrote rows, so a
         // cycle where every source failed - or returned nothing - leaves the cache serving the last prices
         // that were known good rather than forcing every reader back to SQLite for the same answers.
-        if (wroteAnyPrices)
-        {
-            _priceCatalog?.Invalidate();
-        }
+        if (wroteAnyPrices) _priceCatalog?.Invalidate();
 
         var freshPriceCount = _sourceRepository.CountFreshPrices(FreshnessFloor);
-        var summary = new IngestionCycleSummary(freshPriceCount, outcomes);
+        var summary = new IngestionCycleSummary(FreshPriceCount: freshPriceCount, Outcomes: outcomes);
 
         // Per D4: a cycle that ran at least one source but ended with zero fresh prices is an Error, not
         // silence - naming each source attempted and how it failed. Guarded on "had sources" so the
         // no-sources-enabled case is left to the startup check's Warning (D6), which owns that message.
         if (outcomes.Count > 0 && freshPriceCount == 0)
-        {
             _logger.LogError(
+                message:
                 "Price ingestion cycle produced zero prices fresher than {FreshnessHours}h. Sources attempted: {Outcomes}.",
                 FreshnessFloor.TotalHours,
                 summary.DescribeOutcomes());
-        }
 
         return summary;
     }
@@ -267,13 +265,14 @@ public sealed record SourceOutcome(string Source, bool Succeeded, int PriceCount
 public sealed record IngestionCycleSummary(int FreshPriceCount, IReadOnlyList<SourceOutcome> Outcomes)
 {
     /// <summary>Renders the per-source outcomes as a compact, log-friendly string.</summary>
-    public string DescribeOutcomes() =>
-        Outcomes.Count == 0
+    public string DescribeOutcomes()
+    {
+        return Outcomes.Count == 0
             ? "(none)"
             : string.Join(
-                ", ",
-                Outcomes.Select(o => o.Succeeded
+                separator: ", ",
+                values: Outcomes.Select(o => o.Succeeded
                     ? $"{o.Source}=ok({o.PriceCount})"
                     : $"{o.Source}=failed({o.Error})"));
+    }
 }
-

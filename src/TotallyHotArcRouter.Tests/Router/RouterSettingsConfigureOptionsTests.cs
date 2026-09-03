@@ -23,14 +23,14 @@ public sealed class RouterSettingsConfigureOptionsTests
         configure.Configure(options);
 
         Assert.False(options.EnableAdaptiveRouting);
-        Assert.Equal(20_000, options.EmbeddingMemoryCapacity);
+        Assert.Equal(20_000, actual: options.EmbeddingMemoryCapacity);
     }
 
     [Fact]
     public void Configure_StoredAdaptiveRoutingOverride_BeatsWhateverWasAlreadyBound()
     {
         var store = CreateStore();
-        store.SetBool(RouterSettingsStore.AdaptiveRoutingEnabledKey, true);
+        store.SetBool(key: RouterSettingsStore.AdaptiveRoutingEnabledKey, true);
         var configure = new RouterSettingsConfigureOptions(store);
         // Simulates the appsettings.json-bound value the preceding Configure<IConfiguration> step already
         // produced - false, the coded default - which this step must overwrite.
@@ -45,7 +45,7 @@ public sealed class RouterSettingsConfigureOptionsTests
     public void Configure_StoredCapacityOverride_BeatsWhateverWasAlreadyBound()
     {
         var store = CreateStore();
-        store.SetInt(RouterSettingsStore.EmbeddingMemoryCapacityKey, 5_000);
+        store.SetInt(key: RouterSettingsStore.EmbeddingMemoryCapacityKey, 5_000);
         var configure = new RouterSettingsConfigureOptions(store);
         // Simulates an appsettings.json-bound value of 20000 (the coded default) that the stored 5000
         // override must beat.
@@ -53,14 +53,14 @@ public sealed class RouterSettingsConfigureOptionsTests
 
         configure.Configure(options);
 
-        Assert.Equal(5_000, options.EmbeddingMemoryCapacity);
+        Assert.Equal(5_000, actual: options.EmbeddingMemoryCapacity);
     }
 
     [Fact]
     public void Configure_OnlyAdaptiveRoutingStored_LeavesCapacityAtWhateverWasAlreadyBound()
     {
         var store = CreateStore();
-        store.SetBool(RouterSettingsStore.AdaptiveRoutingEnabledKey, true);
+        store.SetBool(key: RouterSettingsStore.AdaptiveRoutingEnabledKey, true);
         var configure = new RouterSettingsConfigureOptions(store);
         // Simulates an appsettings.json-bound capacity of 7500 - no stored override exists for this key,
         // so it must survive untouched rather than being reset to the coded default (20000).
@@ -69,7 +69,7 @@ public sealed class RouterSettingsConfigureOptionsTests
         configure.Configure(options);
 
         Assert.True(options.EnableAdaptiveRouting);
-        Assert.Equal(7_500, options.EmbeddingMemoryCapacity);
+        Assert.Equal(7_500, actual: options.EmbeddingMemoryCapacity);
     }
 
     [Fact]
@@ -80,9 +80,11 @@ public sealed class RouterSettingsConfigureOptionsTests
 
     private static RouterSettingsStore CreateStore()
     {
-        var tempDirectory = Path.Combine(Path.GetTempPath(), "arcrouter-tests", Guid.NewGuid().ToString("N"));
-        var dbPath = Path.Combine(tempDirectory, "router_embedding_memory.db");
-        var database = new RouterMemoryDatabase(Options.Create(new RoutingOptions { EmbeddingMemoryDatabasePath = dbPath }));
-        return new RouterSettingsStore(database, NullLogger<RouterSettingsStore>.Instance);
+        var tempDirectory = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
+            path3: Guid.NewGuid().ToString("N"));
+        var dbPath = Path.Combine(path1: tempDirectory, path2: "router_embedding_memory.db");
+        var database =
+            new RouterMemoryDatabase(Options.Create(new RoutingOptions { EmbeddingMemoryDatabasePath = dbPath }));
+        return new RouterSettingsStore(database: database, logger: NullLogger<RouterSettingsStore>.Instance);
     }
 }

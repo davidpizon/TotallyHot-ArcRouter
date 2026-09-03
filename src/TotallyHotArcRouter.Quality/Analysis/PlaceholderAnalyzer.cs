@@ -26,68 +26,60 @@ public sealed partial class PlaceholderAnalyzer : IStaticAnalyzer
     /// <summary>The lowest score this analyzer will report, so a placeholder alone cannot zero a snippet.</summary>
     private const double Floor = 0.1;
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public string Name => "placeholder";
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public StaticAnalysisFinding? Analyze(string code, CodeLanguage language)
     {
         ArgumentNullException.ThrowIfNull(code);
 
-        if (string.IsNullOrWhiteSpace(code))
-        {
-            return null;
-        }
+        if (string.IsNullOrWhiteSpace(code)) return null;
 
         var notes = new List<string>();
 
-        CountInto(notes, TodoMarker(), code, "TODO/FIXME marker");
-        CountInto(notes, ElisionComment(), code, "elision comment standing in for code");
-        CountInto(notes, NotImplemented(), code, "explicit not-implemented throw");
+        CountInto(notes: notes, pattern: TodoMarker(), code: code, description: "TODO/FIXME marker");
+        CountInto(notes: notes, pattern: ElisionComment(), code: code,
+            description: "elision comment standing in for code");
+        CountInto(notes: notes, pattern: NotImplemented(), code: code, description: "explicit not-implemented throw");
 
         if (language is CodeLanguage.Python)
-        {
-            CountInto(notes, BarePass(), code, "bare 'pass' body");
-        }
+            CountInto(notes: notes, pattern: BarePass(), code: code, description: "bare 'pass' body");
 
-        if (notes.Count == 0)
-        {
-            return new StaticAnalysisFinding(Name, 1.0, []);
-        }
+        if (notes.Count == 0) return new StaticAnalysisFinding(Analyzer: Name, 1.0, Notes: []);
 
-        var score = StaticAnalyzerScoring.ClampScore(Floor, PenaltyPerHit * notes.Count);
-        return new StaticAnalysisFinding(Name, score, notes);
+        var score = StaticAnalyzerScoring.ClampScore(floor: Floor, penalty: PenaltyPerHit * notes.Count);
+        return new StaticAnalysisFinding(Analyzer: Name, Score: score, Notes: notes);
     }
 
     /// <summary>Adds one note per pattern that matched, recording how many times it did.</summary>
     private static void CountInto(List<string> notes, Regex pattern, string code, string description)
     {
         var count = pattern.Matches(code).Count;
-        if (count > 0)
-        {
-            notes.Add($"{count} x {description}");
-        }
+        if (count > 0) notes.Add($"{count} x {description}");
     }
 
-    [GeneratedRegex(@"\b(TODO|FIXME|XXX)\b", RegexOptions.IgnoreCase, matchTimeoutMilliseconds: 1000)]
+    [GeneratedRegex(pattern: @"\b(TODO|FIXME|XXX)\b", options: RegexOptions.IgnoreCase, 1000)]
     private static partial Regex TodoMarker();
 
     // Matches a comment whose entire content is an ellipsis or an "implementation goes here" phrase - the
     // shapes a model reaches for when it declines to write the body. A bare "..." outside a comment is
     // deliberately not matched: it is legal Python (Ellipsis) and legal TypeScript (rest/spread).
     [GeneratedRegex(
+        pattern:
         @"(//|#)\s*(\.\.\.|(\.\.\.\s*)?(rest of|remainder of|implementation|rest is|your code|code here|fill in|omitted|unchanged|same as)\b.*)$",
-        RegexOptions.IgnoreCase | RegexOptions.Multiline,
-        matchTimeoutMilliseconds: 1000)]
+        options: RegexOptions.IgnoreCase | RegexOptions.Multiline,
+        1000)]
     private static partial Regex ElisionComment();
 
     [GeneratedRegex(
+        pattern:
         @"\b(NotImplementedException|NotImplementedError|raise\s+NotImplemented|throw\s+new\s+Error\(\s*['""]not implemented)",
-        RegexOptions.IgnoreCase,
-        matchTimeoutMilliseconds: 1000)]
+        options: RegexOptions.IgnoreCase,
+        1000)]
     private static partial Regex NotImplemented();
 
     // A 'pass' on its own line, which in a generated answer almost always marks an unwritten body.
-    [GeneratedRegex(@"^\s*pass\s*$", RegexOptions.Multiline, matchTimeoutMilliseconds: 1000)]
+    [GeneratedRegex(pattern: @"^\s*pass\s*$", options: RegexOptions.Multiline, 1000)]
     private static partial Regex BarePass();
 }

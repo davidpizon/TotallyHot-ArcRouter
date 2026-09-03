@@ -16,12 +16,12 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// </summary>
 public sealed class ClusterModelAdminGrpcService : Contract.ClusterModelAdminService.ClusterModelAdminServiceBase
 {
-    private readonly IClusterTrainingService _trainingService;
-    private readonly IMemoryEntryStore _memoryEntryStore;
-    private readonly ITranscriptStore _transcriptStore;
-    private readonly TranscriptOptions _transcriptOptions;
-    private readonly string _modelPath;
     private readonly ILogger<ClusterModelAdminGrpcService> _logger;
+    private readonly IMemoryEntryStore _memoryEntryStore;
+    private readonly string _modelPath;
+    private readonly IClusterTrainingService _trainingService;
+    private readonly TranscriptOptions _transcriptOptions;
+    private readonly ITranscriptStore _transcriptStore;
 
     /// <summary>Initializes a new instance of the <see cref="ClusterModelAdminGrpcService"/> class.</summary>
     /// <param name="trainingService">Runs the guarded retrain sequence for the panel's retrain button.</param>
@@ -53,20 +53,24 @@ public sealed class ClusterModelAdminGrpcService : Contract.ClusterModelAdminSer
         _logger = logger;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public override async Task<Contract.ClusterModelStatusResponse> GetClusterModelStatus(
         Contract.GetClusterModelStatusRequest request,
-        ServerCallContext context) =>
-        await BuildStatusAsync(context.CancellationToken).ConfigureAwait(false);
+        ServerCallContext context)
+    {
+        return await BuildStatusAsync(context.CancellationToken).ConfigureAwait(false);
+    }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public override async Task RetrainClusterModel(
         Contract.RetrainClusterModelRequest request,
         IServerStreamWriter<Contract.ClusterRetrainStreamEvent> responseStream,
         ServerCallContext context)
     {
         var progress = new StreamingBootstrapProgress(responseStream);
-        var outcome = await _trainingService.RetrainAsync(progress, context.CancellationToken).ConfigureAwait(false);
+        var outcome = await _trainingService
+            .RetrainAsync(bootstrapProgress: progress, cancellationToken: context.CancellationToken)
+            .ConfigureAwait(false);
 
         // Re-read from disk rather than deriving the response from the outcome alone, mirroring
         // SyncBenchmarkData's "report the true post-mutation state" convention - the panel's cards reflect
@@ -79,8 +83,8 @@ public sealed class ClusterModelAdminGrpcService : Contract.ClusterModelAdminSer
             {
                 Kind = MapResultKind(outcome.Kind),
                 Message = outcome.Message,
-                Status = status,
-            },
+                Status = status
+            }
         }).ConfigureAwait(false);
     }
 
@@ -90,7 +94,8 @@ public sealed class ClusterModelAdminGrpcService : Contract.ClusterModelAdminSer
     /// </summary>
     private async Task<Contract.ClusterModelStatusResponse> BuildStatusAsync(CancellationToken cancellationToken)
     {
-        var artifact = ClusterModelArtifactLoader.TryLoad(_modelPath, _logger, "cluster model admin");
+        var artifact =
+            ClusterModelArtifactLoader.TryLoad(path: _modelPath, logger: _logger, consumer: "cluster model admin");
         var currentEntryCount = (await _memoryEntryStore.LoadAllAsync(cancellationToken).ConfigureAwait(false)).Count;
         var transcriptRowCount = await _transcriptStore.GetRowCountAsync(cancellationToken).ConfigureAwait(false);
 
@@ -99,7 +104,7 @@ public sealed class ClusterModelAdminGrpcService : Contract.ClusterModelAdminSer
             ArtifactPresent = artifact is not null,
             RetentionDays = _transcriptOptions.RetentionDays,
             MaxTranscriptRows = _transcriptOptions.MaxRows,
-            CurrentTranscriptRowCount = transcriptRowCount,
+            CurrentTranscriptRowCount = transcriptRowCount
         };
 
         if (artifact is null)
@@ -115,21 +120,24 @@ public sealed class ClusterModelAdminGrpcService : Contract.ClusterModelAdminSer
         response.TrainedFrom = artifact.TrainedFrom;
         response.BootstrapTaskCount = artifact.BootstrapTaskCount;
         response.MemoryEntryCount = artifact.MemoryEntryCount;
-        response.EntriesSinceLastRetrain = Math.Max(0, currentEntryCount - artifact.MemoryEntryCount);
+        response.EntriesSinceLastRetrain = Math.Max(0, val2: currentEntryCount - artifact.MemoryEntryCount);
         response.ClusterSizes.AddRange(artifact.ClusterSizes);
-        response.ClusterNames.AddRange(Enumerable.Range(0, artifact.ChosenK).Select(artifact.DescribeCluster));
+        response.ClusterNames.AddRange(Enumerable.Range(0, count: artifact.ChosenK).Select(artifact.DescribeCluster));
 
         return response;
     }
 
     /// <summary>Maps the domain retrain result category onto its wire enum.</summary>
-    private static Contract.ClusterRetrainResultKind MapResultKind(ClusterTrainingResultKind kind) => kind switch
+    private static Contract.ClusterRetrainResultKind MapResultKind(ClusterTrainingResultKind kind)
     {
-        ClusterTrainingResultKind.Trained => Contract.ClusterRetrainResultKind.Trained,
-        ClusterTrainingResultKind.Declined => Contract.ClusterRetrainResultKind.Declined,
-        ClusterTrainingResultKind.AlreadyRunning => Contract.ClusterRetrainResultKind.AlreadyRunning,
-        _ => Contract.ClusterRetrainResultKind.Unspecified,
-    };
+        return kind switch
+        {
+            ClusterTrainingResultKind.Trained => Contract.ClusterRetrainResultKind.Trained,
+            ClusterTrainingResultKind.Declined => Contract.ClusterRetrainResultKind.Declined,
+            ClusterTrainingResultKind.AlreadyRunning => Contract.ClusterRetrainResultKind.AlreadyRunning,
+            _ => Contract.ClusterRetrainResultKind.Unspecified
+        };
+    }
 
     /// <summary>
     /// Bridges <see cref="IClusterTrainingService.RetrainAsync"/>'s synchronous <see cref="IProgress{T}"/>
@@ -146,13 +154,18 @@ public sealed class ClusterModelAdminGrpcService : Contract.ClusterModelAdminSer
 
         /// <summary>Initializes a new instance of the <see cref="StreamingBootstrapProgress"/> class.</summary>
         /// <param name="stream">The gRPC response stream to write each progress event to.</param>
-        public StreamingBootstrapProgress(IServerStreamWriter<Contract.ClusterRetrainStreamEvent> stream) => _stream = stream;
+        public StreamingBootstrapProgress(IServerStreamWriter<Contract.ClusterRetrainStreamEvent> stream)
+        {
+            _stream = stream;
+        }
 
         /// <inheritdoc/>
-        public void Report(int tasksEmbedded) =>
+        public void Report(int tasksEmbedded)
+        {
             _stream.WriteAsync(new Contract.ClusterRetrainStreamEvent
             {
-                BootstrapProgress = new Contract.ClusterRetrainBootstrapProgress { TasksEmbedded = tasksEmbedded },
+                BootstrapProgress = new Contract.ClusterRetrainBootstrapProgress { TasksEmbedded = tasksEmbedded }
             }).GetAwaiter().GetResult();
+        }
     }
 }

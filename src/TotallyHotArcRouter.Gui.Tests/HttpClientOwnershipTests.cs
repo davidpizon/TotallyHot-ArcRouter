@@ -1,3 +1,5 @@
+using System.Net;
+using System.Text;
 using AwesomeAssertions;
 using TotallyHot.ArcRouter.Gui.Services;
 
@@ -6,7 +8,6 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 /// <summary>
 /// Pins the HTTP-client ownership contract the GUI singleton stores follow: a store disposes the
 /// <see cref="HttpClient"/> it built for itself, and never the transport it was handed.
-///
 /// <para>
 /// Both halves matter and they pull in opposite directions. Leaking is what these stores used to do -
 /// each built an <see cref="HttpClient"/> and implemented no <see cref="IDisposable"/> at all, unlike
@@ -19,27 +20,6 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 /// </summary>
 public sealed class HttpClientOwnershipTests
 {
-    /// <summary>
-    /// A transport that records whether it was disposed. Answers every request with 200/empty-JSON so a
-    /// store constructed over it is usable, though these tests never send through it.
-    /// </summary>
-    private sealed class TrackingHandler : HttpMessageHandler
-    {
-        internal bool Disposed { get; private set; }
-
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
-            {
-                Content = new StringContent("{}", System.Text.Encoding.UTF8, "application/json"),
-            });
-
-        protected override void Dispose(bool disposing)
-        {
-            Disposed = true;
-            base.Dispose(disposing);
-        }
-    }
-
     [Fact]
     public void UsageStore_Dispose_LeavesACallerSuppliedTransportAlone()
     {
@@ -76,5 +56,30 @@ public sealed class HttpClientOwnershipTests
     public void ProviderAdminStore_IsDisposable_SoTheDiContainerReclaimsItsHttpClient()
     {
         new ProviderAdminStore(transport: new TrackingHandler()).Should().BeAssignableTo<IDisposable>();
+    }
+
+    /// <summary>
+    /// A transport that records whether it was disposed. Answers every request with 200/empty-JSON so a
+    /// store constructed over it is usable, though these tests never send through it.
+    /// </summary>
+    private sealed class TrackingHandler : HttpMessageHandler
+    {
+        internal bool Disposed { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(content: "{}", encoding: Encoding.UTF8,
+                    mediaType: "application/json")
+            });
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            Disposed = true;
+            base.Dispose(disposing);
+        }
     }
 }

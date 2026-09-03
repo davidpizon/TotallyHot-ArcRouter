@@ -1,13 +1,17 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Bedrock;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Proxy.Translation;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
+using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Proxy;
@@ -18,9 +22,19 @@ namespace TotallyHot.ArcRouter.Proxy;
 /// before this became data-driven, so re-expressing the sequence as a list changes nothing observable
 /// - same conditions, same log templates and arguments, same order.
 /// </summary>
-/// <param name="Name">Short identifier for the gate, used only for readability at the call site (e.g. in a debugger or future diagnostics) - never logged or compared against.</param>
-/// <param name="Predicate">Returns <see langword="true"/> when this gate blocks <paramref name="Predicate"/>'s candidate. Takes the owning <see cref="ProxyMiddleware"/> explicitly (an open instance delegate) because the six underlying checks are instance methods; the <see cref="CircuitBreakerTargetKey"/> parameter is unused by the gates that do not need it.</param>
-/// <param name="LogBlocked">Emits the gate's specific "why this candidate was skipped" log entry. Invoked only when <see cref="Predicate"/> returned <see langword="true"/>.</param>
+/// <param name="Name">
+/// Short identifier for the gate, used only for readability at the call site (e.g. in a debugger or
+/// future diagnostics) - never logged or compared against.
+/// </param>
+/// <param name="Predicate">
+/// Returns <see langword="true"/> when this gate blocks <paramref name="Predicate"/>'s candidate.
+/// Takes the owning <see cref="ProxyMiddleware"/> explicitly (an open instance delegate) because the six underlying checks
+/// are instance methods; the <see cref="CircuitBreakerTargetKey"/> parameter is unused by the gates that do not need it.
+/// </param>
+/// <param name="LogBlocked">
+/// Emits the gate's specific "why this candidate was skipped" log entry. Invoked only when
+/// <see cref="Predicate"/> returned <see langword="true"/>.
+/// </param>
 internal readonly record struct GateCheck(
     string Name,
     Func<ProxyMiddleware, ResolvedModelRoute, CircuitBreakerTargetKey, bool> Predicate,
@@ -31,6 +45,21 @@ internal readonly record struct GateCheck(
 /// </summary>
 public class ProxyMiddleware : IMiddleware, IDisposable
 {
+    /// <summary>
+    /// Response header carrying the client's literal requested model (docs/router/orchestrator-live-path-plan.md
+    /// §M2.2).
+    /// </summary>
+    internal const string RequestedModelHeaderName = "X-ArcRouter-Requested-Model";
+
+    /// <summary>Response header carrying the model that actually served the request.</summary>
+    internal const string RoutedModelHeaderName = "X-ArcRouter-Routed-Model";
+
+    /// <summary>
+    /// Response header carrying the <see cref="RoutingSubstitutionReason"/> for why the two headers above differ, if
+    /// they do.
+    /// </summary>
+    internal const string SubstitutionReasonHeaderName = "X-ArcRouter-Substitution-Reason";
+
     /// <summary>
     /// The per-candidate pre-flight gate sequence <see cref="InvokeCoreAsync"/> walks, in this exact
     /// order, for every candidate before attempting it. The order is load-bearing, not incidental: gate
@@ -49,46 +78,47 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     private static readonly IReadOnlyList<GateCheck> CandidateGates =
     [
         new(
-            "budget",
-            static (middleware, route, _) => middleware.IsBudgetGateBlocked(route),
-            static (middleware, route) => middleware._logger.LogInformation(
-                "Skipping provider {Provider} for model {Model}: monthly budget exhausted.",
+            Name: "budget",
+            Predicate: static (middleware, route, _) => middleware.IsBudgetGateBlocked(route),
+            LogBlocked: static (middleware, route) => middleware._logger.LogInformation(
+                message: "Skipping provider {Provider} for model {Model}: monthly budget exhausted.",
                 LogRedaction.Sanitize(route.Provider),
                 LogRedaction.Sanitize(route.ModelName))),
         new(
-            "provider-disabled",
-            static (middleware, route, _) => middleware.IsProviderDisabledGateBlocked(route),
-            static (middleware, route) => middleware._logger.LogInformation(
-                "Bypassing provider {Provider} for model {Model}: provider is stopped.",
+            Name: "provider-disabled",
+            Predicate: static (middleware, route, _) => middleware.IsProviderDisabledGateBlocked(route),
+            LogBlocked: static (middleware, route) => middleware._logger.LogInformation(
+                message: "Bypassing provider {Provider} for model {Model}: provider is stopped.",
                 LogRedaction.Sanitize(route.Provider),
                 LogRedaction.Sanitize(route.ModelName))),
         new(
-            "model-disabled",
-            static (middleware, route, _) => middleware.IsModelDisabledGateBlocked(route),
-            static (middleware, route) => middleware._logger.LogInformation(
-                "Bypassing model {Model}: stopped or not currently reported by its provider's endpoint.",
+            Name: "model-disabled",
+            Predicate: static (middleware, route, _) => middleware.IsModelDisabledGateBlocked(route),
+            LogBlocked: static (middleware, route) => middleware._logger.LogInformation(
+                message: "Bypassing model {Model}: stopped or not currently reported by its provider's endpoint.",
                 LogRedaction.Sanitize(route.ModelName))),
         new(
-            "circuit-open-precheck",
-            static (middleware, route, circuitTarget) => middleware.IsCircuitOpenPreCheckGateBlocked(route, circuitTarget),
-            static (middleware, route) => middleware._logger.LogInformation(
-                "Bypassing provider {Provider} for model {Model}: circuit breaker is open.",
+            Name: "circuit-open-precheck",
+            Predicate: static (middleware, route, circuitTarget) =>
+                middleware.IsCircuitOpenPreCheckGateBlocked(route: route, circuitTarget: circuitTarget),
+            LogBlocked: static (middleware, route) => middleware._logger.LogInformation(
+                message: "Bypassing provider {Provider} for model {Model}: circuit breaker is open.",
                 LogRedaction.Sanitize(route.Provider),
                 LogRedaction.Sanitize(route.ModelName))),
         new(
-            "circuit-bypass-target",
-            static (middleware, _, circuitTarget) => middleware.IsCircuitBypassGateBlocked(circuitTarget),
-            static (middleware, route) => middleware._logger.LogInformation(
-                "Bypassing provider {Provider} for model {Model}: circuit breaker is open.",
+            Name: "circuit-bypass-target",
+            Predicate: static (middleware, _, circuitTarget) => middleware.IsCircuitBypassGateBlocked(circuitTarget),
+            LogBlocked: static (middleware, route) => middleware._logger.LogInformation(
+                message: "Bypassing provider {Provider} for model {Model}: circuit breaker is open.",
                 LogRedaction.Sanitize(route.Provider),
                 LogRedaction.Sanitize(route.ModelName))),
         new(
-            "circuit-bypass-provider",
-            static (middleware, route, _) => middleware.IsCircuitBypassProviderGateBlocked(route),
-            static (middleware, route) => middleware._logger.LogInformation(
-                "Bypassing provider {Provider} for model {Model}: provider-wide circuit breaker is open.",
+            Name: "circuit-bypass-provider",
+            Predicate: static (middleware, route, _) => middleware.IsCircuitBypassProviderGateBlocked(route),
+            LogBlocked: static (middleware, route) => middleware._logger.LogInformation(
+                message: "Bypassing provider {Provider} for model {Model}: provider-wide circuit breaker is open.",
                 LogRedaction.Sanitize(route.Provider),
-                LogRedaction.Sanitize(route.ModelName))),
+                LogRedaction.Sanitize(route.ModelName)))
     ];
 
     // RFC 7230 Section 6.1 hop-by-hop headers: meaningful only for a single transport-level connection,
@@ -105,31 +135,26 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         "Upgrade"
     ];
 
-    private readonly ILogger<ProxyMiddleware> _logger;
-    private readonly HttpClient _httpClient;
-    private readonly RequestInterceptor _interceptor;
-    private readonly IReadOnlyDictionary<string, IPayloadTranslator> _translators;
+    private static readonly IReadOnlyDictionary<string, IPayloadTranslator> NoTranslators =
+        new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase);
+
     private readonly IBedrockRuntimeClientFactory _bedrockClientFactory;
-    private readonly PriceCatalog.IBudgetEnforcer? _budgetStore;
-    private readonly IRateLimitHeaderCapture _rateLimitCapture;
-    private readonly ICircuitBreaker _circuitBreaker;
-    private readonly IProviderInteractionStatusStore? _interactionStatusStore;
-    private readonly ToolCallNormalizerFactory _toolCallNormalizerFactory;
-    private readonly InFlightRequestGauge? _inFlightGauge;
-    private readonly Router.IRoutingGate? _routingGate;
-
-    // Answers the three self-contained local endpoints (/v1/models, /api/tags, /api/show) - see
-    // LocalEndpointResponder's own remarks for why this was the first cut out of this class.
-    private readonly LocalEndpointResponder _localEndpointResponder;
-    private readonly UpstreamResponseWriter _upstreamResponseWriter;
-
-    // Resolves session/turn identity, extracts usage/cost, and publishes telemetry for a served request -
-    // see RequestTelemetryPublisher's own remarks for why this was the second cut out of this class.
-    private readonly RequestTelemetryPublisher _requestTelemetryPublisher;
 
     // Invokes Bedrock directly via its SDK, mirroring the HTTP forwarding path - see
     // BedrockInvocationHandler's own remarks for why this was the third cut out of this class.
     private readonly BedrockInvocationHandler _bedrockInvocationHandler;
+    private readonly IBudgetEnforcer? _budgetStore;
+    private readonly ICircuitBreaker _circuitBreaker;
+    private readonly HttpClient _httpClient;
+    private readonly InFlightRequestGauge? _inFlightGauge;
+    private readonly IProviderInteractionStatusStore? _interactionStatusStore;
+    private readonly RequestInterceptor _interceptor;
+
+    // Answers the three self-contained local endpoints (/v1/models, /api/tags, /api/show) - see
+    // LocalEndpointResponder's own remarks for why this was the first cut out of this class.
+    private readonly LocalEndpointResponder _localEndpointResponder;
+
+    private readonly ILogger<ProxyMiddleware> _logger;
 
     // True only when no factory was supplied and this instance built its own fallback - in that case
     // ProxyMiddleware is the sole owner of that factory's lifetime and must dispose it (it caches AWS SDK
@@ -143,18 +168,15 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     // in the real app that is the DI container, and in tests it is usually a client wrapping a stub
     // handler the test still uses afterward - so disposing it here would pull it out from under its owner.
     private readonly bool _ownsHttpClient;
+    private readonly IRateLimitHeaderCapture _rateLimitCapture;
 
-    private static readonly IReadOnlyDictionary<string, IPayloadTranslator> NoTranslators =
-        new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase);
-
-    /// <summary>Response header carrying the client's literal requested model (docs/router/orchestrator-live-path-plan.md §M2.2).</summary>
-    internal const string RequestedModelHeaderName = "X-ArcRouter-Requested-Model";
-
-    /// <summary>Response header carrying the model that actually served the request.</summary>
-    internal const string RoutedModelHeaderName = "X-ArcRouter-Routed-Model";
-
-    /// <summary>Response header carrying the <see cref="RoutingSubstitutionReason"/> for why the two headers above differ, if they do.</summary>
-    internal const string SubstitutionReasonHeaderName = "X-ArcRouter-Substitution-Reason";
+    // Resolves session/turn identity, extracts usage/cost, and publishes telemetry for a served request -
+    // see RequestTelemetryPublisher's own remarks for why this was the second cut out of this class.
+    private readonly RequestTelemetryPublisher _requestTelemetryPublisher;
+    private readonly IRoutingGate? _routingGate;
+    private readonly ToolCallNormalizerFactory _toolCallNormalizerFactory;
+    private readonly IReadOnlyDictionary<string, IPayloadTranslator> _translators;
+    private readonly UpstreamResponseWriter _upstreamResponseWriter;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ProxyMiddleware"/> class.
@@ -189,30 +211,32 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         _toolCallNormalizerFactory = dependencies?.ToolCallNormalizerFactory ?? new ToolCallNormalizerFactory();
         _inFlightGauge = dependencies?.InFlightGauge;
         _routingGate = dependencies?.RoutingGate;
-        _localEndpointResponder = new LocalEndpointResponder(logger, interceptor, dependencies?.CapabilityStore, dependencies?.ContextWindowStore);
+        _localEndpointResponder = new LocalEndpointResponder(logger: logger, interceptor: interceptor,
+            capabilityStore: dependencies?.CapabilityStore, contextWindowStore: dependencies?.ContextWindowStore);
         _upstreamResponseWriter = new UpstreamResponseWriter(logger);
         _interactionStatusStore = dependencies?.InteractionStatusStore;
         _requestTelemetryPublisher = new RequestTelemetryPublisher(
-            logger,
-            dependencies?.SessionIdResolver ?? new SessionIdResolver(),
-            dependencies?.ContinuityMatcher ?? new MessageHistoryContinuityMatcher(),
-            dependencies?.TurnTracker ?? new ConversationTurnTracker(),
-            dependencies?.UsageExtractor ?? new UsageExtractor(),
-            dependencies?.ResponseTextExtractor ?? new ResponseTextExtractor(),
-            dependencies?.TelemetryPublisher ?? new TelemetryPublisher(new TelemetryBroadcaster()),
-            dependencies?.QualityIngress,
-            dependencies?.SpendTracker ?? NullSpendTracker.Instance,
-            dependencies?.PriceLookup,
-            dependencies?.BudgetStore,
-            dependencies?.UsageLedger,
-            dependencies?.PendingTaskEmbeddingCache,
-            dependencies?.PendingRequestCostCache,
-            dependencies?.PendingRequestProvenanceCache,
-            dependencies?.PendingResponseTextCache,
-            dependencies?.TranscriptStore,
-            dependencies?.RoutingOptionsMonitor,
-            dependencies?.JudgeOptionsMonitor,
-            dependencies?.RoutingOptions?.Value.SelfHostedRouterPricePerMillionTokens ?? new Models.RoutingOptions().SelfHostedRouterPricePerMillionTokens);
+            logger: logger,
+            sessionIdResolver: dependencies?.SessionIdResolver ?? new SessionIdResolver(),
+            continuityMatcher: dependencies?.ContinuityMatcher ?? new MessageHistoryContinuityMatcher(),
+            turnTracker: dependencies?.TurnTracker ?? new ConversationTurnTracker(),
+            usageExtractor: dependencies?.UsageExtractor ?? new UsageExtractor(),
+            responseTextExtractor: dependencies?.ResponseTextExtractor ?? new ResponseTextExtractor(),
+            telemetryPublisher: dependencies?.TelemetryPublisher ?? new TelemetryPublisher(new TelemetryBroadcaster()),
+            qualityIngress: dependencies?.QualityIngress,
+            spendTracker: dependencies?.SpendTracker ?? NullSpendTracker.Instance,
+            priceLookup: dependencies?.PriceLookup,
+            budgetStore: dependencies?.BudgetStore,
+            usageLedger: dependencies?.UsageLedger,
+            pendingTaskEmbeddingCache: dependencies?.PendingTaskEmbeddingCache,
+            pendingRequestCostCache: dependencies?.PendingRequestCostCache,
+            pendingRequestProvenanceCache: dependencies?.PendingRequestProvenanceCache,
+            pendingResponseTextCache: dependencies?.PendingResponseTextCache,
+            transcriptStore: dependencies?.TranscriptStore,
+            routingOptionsMonitor: dependencies?.RoutingOptionsMonitor,
+            judgeOptionsMonitor: dependencies?.JudgeOptionsMonitor,
+            selfHostedRouterPricePerMillionTokens: dependencies?.RoutingOptions?.Value
+                .SelfHostedRouterPricePerMillionTokens ?? new RoutingOptions().SelfHostedRouterPricePerMillionTokens);
 
         if (dependencies?.BedrockClientFactory is null)
         {
@@ -224,7 +248,9 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             _bedrockClientFactory = dependencies.BedrockClientFactory;
         }
 
-        _bedrockInvocationHandler = new BedrockInvocationHandler(logger, _bedrockClientFactory, _circuitBreaker, _requestTelemetryPublisher);
+        _bedrockInvocationHandler = new BedrockInvocationHandler(logger: logger,
+            bedrockClientFactory: _bedrockClientFactory, circuitBreaker: _circuitBreaker,
+            requestTelemetryPublisher: _requestTelemetryPublisher);
     }
 
     /// <summary>
@@ -238,25 +264,19 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// </summary>
     public void Dispose()
     {
-        if (_ownsBedrockClientFactory && _bedrockClientFactory is IDisposable disposable)
-        {
-            disposable.Dispose();
-        }
+        if (_ownsBedrockClientFactory && _bedrockClientFactory is IDisposable disposable) disposable.Dispose();
 
-        if (_ownsHttpClient)
-        {
-            _httpClient.Dispose();
-        }
+        if (_ownsHttpClient) _httpClient.Dispose();
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task InvokeAsync(HttpContext context, RequestDelegate next)
     {
         // The gauge scope spans the entire request - routing, upstream call, and response streaming -
         // because background work pausing on "in flight" (see InFlightRequestGauge) must stay paused
         // for exactly as long as a client could feel the contention.
         using var _ = _inFlightGauge?.Track();
-        await InvokeCoreAsync(context, next);
+        await InvokeCoreAsync(context: context, next: next);
     }
 
     /// <summary>
@@ -268,7 +288,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// <param name="next">The next middleware delegate (unused; the proxy is terminal).</param>
     private async Task InvokeCoreAsync(HttpContext context, RequestDelegate next)
     {
-        _logger.LogInformation("Proxy middleware caught request to {Path}", LogRedaction.Sanitize(context.Request.Path.ToString()));
+        _logger.LogInformation(message: "Proxy middleware caught request to {Path}",
+            LogRedaction.Sanitize(context.Request.Path.ToString()));
 
         if (LocalEndpointResponder.IsModelsListRequest(context.Request))
         {
@@ -302,11 +323,12 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
         await _interceptor.InterceptRequestAsync(context);
 
-        var resolution = await _interceptor.ResolveModelRouteAsync(context, context.RequestAborted);
+        var resolution =
+            await _interceptor.ResolveModelRouteAsync(context: context, cancellationToken: context.RequestAborted);
 
         if (!resolution.IsSuccess)
         {
-            await WriteModelNotFoundResponseAsync(context, resolution.ErrorMessage!);
+            await WriteModelNotFoundResponseAsync(context: context, errorMessage: resolution.ErrorMessage!);
             return;
         }
 
@@ -317,7 +339,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         // silently substituting away from - a target everyone already knows is untrustworthy.
         if (resolution.ExplicitCircuitTripBlockMessage is { } blockedMessage)
         {
-            await WriteCircuitTripBlockedResponseAsync(context, blockedMessage);
+            await WriteCircuitTripBlockedResponseAsync(context: context, message: blockedMessage);
             return;
         }
 
@@ -338,9 +360,9 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         if (_budgetStore is not null && candidates.All(c => _budgetStore.IsBreached(c.Route.Provider)))
         {
             _logger.LogWarning(
-                "All candidate providers for model {Model} are over their monthly budget; rejecting with 402.",
+                message: "All candidate providers for model {Model} are over their monthly budget; rejecting with 402.",
                 LogRedaction.Sanitize(requestedModelName));
-            await WriteBudgetExhaustedResponseAsync(context, requestedModelName);
+            await WriteBudgetExhaustedResponseAsync(context: context, requestedModel: requestedModelName);
             return;
         }
 
@@ -374,19 +396,14 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
             var candidateGateBlocked = false;
             foreach (var gate in CandidateGates)
-            {
-                if (gate.Predicate(this, route, circuitTarget))
+                if (gate.Predicate(arg1: this, arg2: route, arg3: circuitTarget))
                 {
-                    gate.LogBlocked(this, route);
+                    gate.LogBlocked(arg1: this, arg2: route);
                     candidateGateBlocked = true;
                     break;
                 }
-            }
 
-            if (candidateGateBlocked)
-            {
-                continue;
-            }
+            if (candidateGateBlocked) continue;
 
             var rewrittenBody = candidates[i].RewrittenBody;
             var isFallback = i > 0;
@@ -396,6 +413,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // logged at Debug (not Information, unlike the skip/bypass messages above) since it fires on
             // every single attempt, including the common case of a primary succeeding on the first try.
             _logger.LogDebug(
+                message:
                 "Attempting candidate {Index}/{Total}: provider={Provider} model={Model} providerModelId={ProviderModelId} baseUrl={BaseUrl} isFallback={IsFallback}",
                 i + 1,
                 candidates.Count,
@@ -413,12 +431,13 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // in between gets skipped harmlessly by the provider-wide circuit-breaker bypass check above
             // once this failure trips it (see RecordProviderFailure), so it's never actually attempted.
             var nextProviderDiffers = hasNextCandidate &&
-                candidates.Skip(i + 1).Any(c => !string.Equals(c.Route.Provider, route.Provider, StringComparison.OrdinalIgnoreCase));
+                                      candidates.Skip(i + 1).Any(c => !string.Equals(a: c.Route.Provider,
+                                          b: route.Provider, comparisonType: StringComparison.OrdinalIgnoreCase));
 
             // A provider whose native API shape differs from OpenAI's has an IPayloadTranslator registered
             // (Gemini, Anthropic, and the Bedrock providers today); every other provider has none and keeps
             // the byte-for-byte pass-through path below unchanged.
-            _translators.TryGetValue(route.Provider, out var translator);
+            _translators.TryGetValue(key: route.Provider, value: out var translator);
 
             // A provider with no registered translator can still need its *response* normalized, when the
             // model it serves expresses tool calls as text rather than as an OpenAI tool_calls delta
@@ -428,10 +447,10 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // rewriting and one that must never be scanned. Returning null - the common case - keeps the
             // byte-for-byte pass-through path below exactly as it was.
             translator ??= _toolCallNormalizerFactory.TryCreate(
-                route,
-                candidates[i].CarriesTools,
-                candidates[i].CarriesToolHistory,
-                candidates[i].CarriesResponseFormat);
+                route: route,
+                requestCarriesTools: candidates[i].CarriesTools,
+                requestCarriesToolHistory: candidates[i].CarriesToolHistory,
+                requestCarriesResponseFormat: candidates[i].CarriesResponseFormat);
 
             // Bedrock providers are invoked through the AWS SDK (SigV4 signing, endpoint resolution, and -
             // for streaming - AWS's binary event-stream decoding are all the SDK's job, not a forwarded
@@ -445,10 +464,14 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // exactly like an HTTP outage does.
             if (translator is IBedrockPayloadTranslator bedrockTranslator)
             {
-                if (await _bedrockInvocationHandler.InvokeAsync(context, route, bedrockTranslator, rewrittenBody, requestedModelName, isFallback, hasNextCandidate, nextProviderDiffers, resolution.TaskEmbedding, resolution.RouterTokens, resolution.SubstitutionReason, resolution.IsExploratory, resolution.Propensity, resolution.Classification, resolution.TaskText, resolution.DimBestModel))
-                {
-                    return;
-                }
+                if (await _bedrockInvocationHandler.InvokeAsync(context: context, route: route,
+                        translator: bedrockTranslator, rewrittenBody: rewrittenBody,
+                        requestedModelName: requestedModelName, isFallback: isFallback,
+                        hasNextCandidate: hasNextCandidate, nextProviderDiffers: nextProviderDiffers,
+                        taskEmbedding: resolution.TaskEmbedding, routerTokens: resolution.RouterTokens,
+                        resolutionReason: resolution.SubstitutionReason, isExploratory: resolution.IsExploratory,
+                        propensity: resolution.Propensity, classification: resolution.Classification,
+                        taskText: resolution.TaskText, dimBestModel: resolution.DimBestModel)) return;
 
                 continue;
             }
@@ -458,23 +481,23 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // dual-mode: the same provider key also carries real Claude Code traffic that is already
             // Anthropic-native, so ShouldTranslate can veto translation for this specific request (by path)
             // even though a translator is registered for the provider.
-            if (translator is not null && !translator.ShouldTranslate(context.Request))
-            {
-                translator = null;
-            }
+            if (translator is not null && !translator.ShouldTranslate(context.Request)) translator = null;
 
             // Target URL, translated body, and the forwarded header set are all UpstreamRequestBuilder's.
             // A fresh message per candidate is mandatory, not incidental: an HttpRequestMessage cannot be
             // sent twice, so the failover path below must rebuild rather than retry this instance.
-            var requestMessage = UpstreamRequestBuilder.Build(context, route, translator, rewrittenBody);
+            var requestMessage = UpstreamRequestBuilder.Build(context: context, route: route, translator: translator,
+                rewrittenBody: rewrittenBody);
 
             var stopwatch = Stopwatch.StartNew();
             HttpResponseMessage responseMessage;
             try
             {
-                responseMessage = await _httpClient.SendAsync(requestMessage, HttpCompletionOption.ResponseHeadersRead, context.RequestAborted);
+                responseMessage = await _httpClient.SendAsync(request: requestMessage,
+                    completionOption: HttpCompletionOption.ResponseHeadersRead,
+                    cancellationToken: context.RequestAborted);
             }
-            catch (Exception ex) when (IsTransportOutage(ex, context.RequestAborted))
+            catch (Exception ex) when (IsTransportOutage(ex: ex, requestAborted: context.RequestAborted))
             {
                 // Connection refused/reset, DNS failure, or the HttpClient timeout (not a client abort):
                 // the upstream is effectively down. Fail over to the next backup if one remains; otherwise
@@ -483,18 +506,22 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 requestMessage.Dispose();
                 if (hasNextCandidate)
                 {
-                    _logger.LogWarning(ex, "Upstream provider {Provider} unreachable for model {Model}; failing over to the next backup.", LogRedaction.Sanitize(route.Provider), LogRedaction.Sanitize(route.ModelName));
+                    _logger.LogWarning(exception: ex,
+                        message:
+                        "Upstream provider {Provider} unreachable for model {Model}; failing over to the next backup.",
+                        LogRedaction.Sanitize(route.Provider), LogRedaction.Sanitize(route.ModelName));
                     continue;
                 }
 
-                _logger.LogWarning(ex, "Upstream provider {Provider} unreachable for model {Model}; no backup remains.", LogRedaction.Sanitize(route.Provider), LogRedaction.Sanitize(route.ModelName));
+                _logger.LogWarning(exception: ex,
+                    message: "Upstream provider {Provider} unreachable for model {Model}; no backup remains.",
+                    LogRedaction.Sanitize(route.Provider), LogRedaction.Sanitize(route.ModelName));
                 if (!context.Response.HasStarted)
-                {
                     // Deliberately a generic message, not ex.Message: transport-exception text can carry
                     // internal hostnames, DNS/socket details, or configured base URLs. The full exception
                     // is already logged above for operators; the client only needs "upstream unavailable."
-                    await WriteUpstreamErrorResponseAsync(context, "The upstream provider is unavailable.");
-                }
+                    await WriteUpstreamErrorResponseAsync(context: context,
+                        errorMessage: "The upstream provider is unavailable.");
 
                 return;
             }
@@ -509,7 +536,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // awaited here so the SQLite write it eventually does can never delay emitting the response
             // already back from upstream. Errors are caught and logged inside the capture implementation
             // itself, so there is nothing for an unobserved-task-exception handler to catch.
-            _ = _rateLimitCapture.CaptureAsync(route.Provider, responseMessage.Headers, CancellationToken.None);
+            _ = _rateLimitCapture.CaptureAsync(providerKey: route.Provider, headers: responseMessage.Headers,
+                cancellationToken: CancellationToken.None);
 
             // Gemini reports an invalid/expired API key as a 400 (the key travels as a "key=" query
             // parameter, not an Authorization header, so Google's gateway treats it as a malformed
@@ -550,7 +578,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             if (shouldPreReadErrorBody)
             {
                 preReadErrorBody = await responseMessage.Content.ReadAsByteArrayAsync(context.RequestAborted);
-                if (translator is not null && translator.TryExtractEmbeddedError(preReadErrorBody, out var embedded))
+                if (translator is not null &&
+                    translator.TryExtractEmbeddedError(body: preReadErrorBody, error: out var embedded))
                 {
                     embeddedErrorMessage = embedded.Message;
                     isProviderAuthFailure = embedded.IsAuthFailure;
@@ -563,20 +592,23 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // cheap to test exhaustively if evaluating them needs no HttpContext, no circuit breaker, and no
             // upstream at all. ApplyHealthSignal below is the half that logs and mutates.
             var verdict = UpstreamFailureClassifier.Classify(
-                statusCode,
-                preReadErrorBody,
-                embeddedErrorMessage,
-                isProviderAuthFailure,
-                nextProviderDiffers,
+                statusCode: statusCode,
+                preReadErrorBody: preReadErrorBody,
+                embeddedErrorMessage: embeddedErrorMessage,
+                isProviderAuthFailure: isProviderAuthFailure,
+                nextProviderDiffers: nextProviderDiffers,
                 isExplicitPrimary: !isFallback && resolution.SubstitutionReason == RoutingSubstitutionReason.None);
 
-            ApplyHealthSignal(verdict, route, circuitTarget, statusCode);
+            ApplyHealthSignal(verdict: verdict, route: route, circuitTarget: circuitTarget, statusCode: statusCode);
 
             var shouldRetryThisCandidate = verdict.ShouldRetry;
 
             if (hasNextCandidate && shouldRetryThisCandidate)
             {
-                _logger.LogWarning("Upstream provider {Provider} returned {Status} for model {Model}; failing over to the next backup.", LogRedaction.Sanitize(route.Provider), statusCode, LogRedaction.Sanitize(route.ModelName));
+                _logger.LogWarning(
+                    message:
+                    "Upstream provider {Provider} returned {Status} for model {Model}; failing over to the next backup.",
+                    LogRedaction.Sanitize(route.Provider), statusCode, LogRedaction.Sanitize(route.ModelName));
                 responseMessage.Dispose();
                 requestMessage.Dispose();
                 continue;
@@ -588,23 +620,22 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             using (requestMessage)
             {
                 var written = await _upstreamResponseWriter.WriteAsync(
-                    context,
-                    responseMessage,
-                    translator,
-                    new RoutingResponseHeaders(
-                        requestedModelName,
-                        route.ModelName,
-                        RequestTelemetryPublisher.ResolveSubstitutionReason(isFallback, resolution.SubstitutionReason).ToString()),
-                    preReadErrorBody,
-                    embeddedErrorMessage,
-                    statusCode);
+                    context: context,
+                    responseMessage: responseMessage,
+                    translator: translator,
+                    routingHeaders: new RoutingResponseHeaders(
+                        RequestedModel: requestedModelName,
+                        RoutedModel: route.ModelName,
+                        SubstitutionReason: RequestTelemetryPublisher.ResolveSubstitutionReason(isFallback: isFallback,
+                            resolutionReason: resolution.SubstitutionReason).ToString()),
+                    preReadErrorBody: preReadErrorBody,
+                    embeddedErrorMessage: embeddedErrorMessage,
+                    statusCode: statusCode);
 
                 if (!written.Committed)
-                {
                     // The writer already sent an error envelope in place of a forward that never happened,
                     // so there is nothing to publish telemetry about.
                     return;
-                }
 
                 var capturedResponseBytes = written.CapturedResponseBytes;
                 var nativeResponseBytes = written.NativeResponseBytes;
@@ -614,7 +645,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 var totalDurationMs = stopwatch.ElapsedMilliseconds;
 
                 _logger.LogDebug(
-                    "[INTERCEPTOR] Intercepted agent response message: {ResponseBody}",
+                    message: "[INTERCEPTOR] Intercepted agent response message: {ResponseBody}",
                     LogRedaction.Truncate(LogRedaction.Sanitize(Encoding.UTF8.GetString(capturedResponseBytes))));
 
                 await _interceptor.InterceptResponseAsync(context);
@@ -633,11 +664,23 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                     // ResponseTextExtractor pick the right parser per request instead of assuming one shape per
                     // provider, which broke once "anthropic" became dual-mode.
                     var telemetryShapeProvider = translator is not null ? "openai" : route.Provider;
-                    await _requestTelemetryPublisher.PublishAsync(context, route, requestedModelName, isFallback, telemetryShapeProvider, rewrittenBody, capturedResponseBytes, nativeResponseBytes, isStreaming, latencyToHeadersMs, totalDurationMs, statusCode, context.RequestAborted, responseMessage.Headers, tailScanner, resolution.TaskEmbedding, resolution.RouterTokens, resolution.SubstitutionReason, resolution.IsExploratory, resolution.Propensity, resolution.Classification, resolution.TaskText, resolution.DimBestModel);
+                    await _requestTelemetryPublisher.PublishAsync(context: context, route: route,
+                        requestedModelName: requestedModelName, isFallback: isFallback,
+                        telemetryShapeProvider: telemetryShapeProvider, rewrittenRequestBody: rewrittenBody,
+                        capturedResponseBytes: capturedResponseBytes, nativeResponseBytes: nativeResponseBytes,
+                        isStreaming: isStreaming, latencyToHeadersMs: latencyToHeadersMs,
+                        totalDurationMs: totalDurationMs, statusCode: statusCode,
+                        cancellationToken: context.RequestAborted, upstreamHeaders: responseMessage.Headers,
+                        tailScanner: tailScanner, taskEmbedding: resolution.TaskEmbedding,
+                        routerTokens: resolution.RouterTokens, resolutionReason: resolution.SubstitutionReason,
+                        isExploratory: resolution.IsExploratory, propensity: resolution.Propensity,
+                        classification: resolution.Classification, taskText: resolution.TaskText,
+                        dimBestModel: resolution.DimBestModel);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogDebug(ex, "Failed to publish routing telemetry; the forwarded response was unaffected.");
+                    _logger.LogDebug(exception: ex,
+                        message: "Failed to publish routing telemetry; the forwarded response was unaffected.");
                 }
             }
 
@@ -657,26 +700,31 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             if (_budgetStore is not null && candidates.All(c => _budgetStore.IsBreached(c.Route.Provider)))
             {
                 _logger.LogWarning(
+                    message:
                     "All candidate providers for model {Model} became over budget mid-request; rejecting with 402.",
                     LogRedaction.Sanitize(requestedModelName));
-                await WriteBudgetExhaustedResponseAsync(context, requestedModelName);
+                await WriteBudgetExhaustedResponseAsync(context: context, requestedModel: requestedModelName);
             }
-            else if (candidates.All(c => !_interceptor.IsProviderEnabled(c.Route.Provider) || !_interceptor.IsModelEnabled(c.Route.ModelName)))
+            else if (candidates.All(c =>
+                         !_interceptor.IsProviderEnabled(c.Route.Provider) ||
+                         !_interceptor.IsModelEnabled(c.Route.ModelName)))
             {
                 _logger.LogWarning(
+                    message:
                     "All candidate routes for model {Model} are stopped (provider stopped, model stopped, or not currently reported by its provider's endpoint); rejecting with 503.",
                     LogRedaction.Sanitize(requestedModelName));
                 await WriteUpstreamErrorResponseAsync(
-                    context,
-                    "All configured routes for this model are currently stopped.",
-                    StatusCodes.Status503ServiceUnavailable);
+                    context: context,
+                    errorMessage: "All configured routes for this model are currently stopped.",
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
             }
             else
             {
                 _logger.LogWarning(
-                    "All candidate routes for model {Model} are currently circuit-broken; rejecting with 502.",
+                    message: "All candidate routes for model {Model} are currently circuit-broken; rejecting with 502.",
                     LogRedaction.Sanitize(requestedModelName));
-                await WriteUpstreamErrorResponseAsync(context, "All configured routes for this model are currently unavailable.");
+                await WriteUpstreamErrorResponseAsync(context: context,
+                    errorMessage: "All configured routes for this model are currently unavailable.");
             }
         }
     }
@@ -689,12 +737,15 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// request). A genuine client abort (<paramref name="requestAborted"/> already cancelled) is not an
     /// outage - the client went away, so there is nothing to fail over to - and is left to propagate.
     /// </summary>
-    private static bool IsTransportOutage(Exception ex, CancellationToken requestAborted) => ex switch
+    private static bool IsTransportOutage(Exception ex, CancellationToken requestAborted)
     {
-        HttpRequestException => true,
-        OperationCanceledException => !requestAborted.IsCancellationRequested,
-        _ => false,
-    };
+        return ex switch
+        {
+            HttpRequestException => true,
+            OperationCanceledException => !requestAborted.IsCancellationRequested,
+            _ => false
+        };
+    }
 
     /// <summary>
     /// Classifies an exception raised while streaming an already-200-OK response body to the client as a
@@ -707,7 +758,10 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// existing <see cref="GeminiStreamException"/>/<see cref="AnthropicStreamException"/> handling - there
     /// is nothing to do but stop forwarding and log it; the status can no longer change.
     /// </summary>
-    internal static bool IsStreamAbort(Exception ex) => ex is OperationCanceledException or IOException or SocketException;
+    internal static bool IsStreamAbort(Exception ex)
+    {
+        return ex is OperationCanceledException or IOException or SocketException;
+    }
 
     /// <summary>
     /// Applies an <see cref="UpstreamFailureClassifier"/> verdict: records the circuit-breaker signal, logs
@@ -715,7 +769,6 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// half of what used to be one ~130-line if/else chain inside <see cref="InvokeCoreAsync"/> - the
     /// decisions themselves are in <see cref="UpstreamFailureClassifier.Classify"/>, which is pure and
     /// separately tested.
-    ///
     /// <para>
     /// A provider-wide cause trips every model on the provider at once
     /// (<see cref="ICircuitBreaker.RecordProviderFailure"/>) rather than just this target, because a bad
@@ -737,16 +790,14 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         switch (verdict.HealthSignal)
         {
             case ProviderHealthSignal.ProviderWideOutage:
-                LogProviderWideOutage(verdict.ProviderWideCause, route, statusCode);
+                LogProviderWideOutage(cause: verdict.ProviderWideCause, route: route, statusCode: statusCode);
                 _circuitBreaker.RecordProviderFailure(route.Provider);
 
                 if (verdict.ProviderWideCause is ProviderWideOutageCause.OutOfCredits)
-                {
                     _interactionStatusStore?.RecordLiveTrafficFailure(
-                        route.Provider,
-                        ProviderInteractionKind.OutOfCredits,
-                        verdict.OutOfCreditsMessage);
-                }
+                        providerKey: route.Provider,
+                        kind: ProviderInteractionKind.OutOfCredits,
+                        message: verdict.OutOfCreditsMessage);
 
                 break;
 
@@ -762,9 +813,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 // malformed request succeeding at the transport layer is not evidence the provider "works"
                 // in the billing sense LiveTraffic tracks, so it must not clear a live out-of-credits warning.
                 if (verdict.IsSuccessStatus)
-                {
-                    _interactionStatusStore?.RecordLiveTrafficSuccess(route.Provider, "Live traffic");
-                }
+                    _interactionStatusStore?.RecordLiveTrafficSuccess(providerKey: route.Provider,
+                        operation: "Live traffic");
 
                 break;
         }
@@ -789,6 +839,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         {
             case ProviderWideOutageCause.Unauthorized:
                 _logger.LogError(
+                    message:
                     "Upstream provider {Provider} returned 401 Unauthorized for model {Model}; treating as a provider-wide outage (likely an invalid or expired credential) and bypassing every model on this provider until it recovers.",
                     provider,
                     model);
@@ -796,6 +847,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
             case ProviderWideOutageCause.EmbeddedCredentialError:
                 _logger.LogError(
+                    message:
                     "Upstream provider {Provider} returned an embedded credential error for model {Model} on a non-401 status (Gemini, for example, reports an invalid API key as a 400); treating as a provider-wide outage and bypassing every model on this provider until it recovers.",
                     provider,
                     model);
@@ -803,6 +855,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
             case ProviderWideOutageCause.Forbidden:
                 _logger.LogError(
+                    message:
                     "Upstream provider {Provider} returned 403 Forbidden for model {Model}; treating as a provider-wide outage (likely a permission or API-key-scope problem) and bypassing every model on this provider until it recovers.",
                     provider,
                     model);
@@ -813,6 +866,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 // not a real API error) served instead of reaching the model API at all - a gateway-level
                 // rejection of this request, not evidence about the request's actual validity.
                 _logger.LogError(
+                    message:
                     "Upstream provider {Provider} returned 405 Method Not Allowed for model {Model}; treating as a provider-wide gateway/WAF block and bypassing every model on this provider until it recovers.",
                     provider,
                     model);
@@ -820,6 +874,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
             case ProviderWideOutageCause.OutOfCredits:
                 _logger.LogError(
+                    message:
                     "Upstream provider {Provider} is out of credits for model {Model} (status {Status}); treating as a provider-wide outage and bypassing every model on this provider until it recovers.",
                     provider,
                     model,
@@ -828,36 +883,71 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         }
     }
 
-    /// <summary>Gate (1) of <see cref="InvokeCoreAsync"/>'s candidate pre-flight sequence: <see langword="true"/> when <paramref name="route"/>'s provider is over its monthly budget.</summary>
-    private bool IsBudgetGateBlocked(ResolvedModelRoute route) =>
-        _budgetStore is not null && _budgetStore.IsBreached(route.Provider);
+    /// <summary>
+    /// Gate (1) of <see cref="InvokeCoreAsync"/>'s candidate pre-flight sequence: <see langword="true"/> when
+    /// <paramref name="route"/>'s provider is over its monthly budget.
+    /// </summary>
+    private bool IsBudgetGateBlocked(ResolvedModelRoute route)
+    {
+        return _budgetStore is not null && _budgetStore.IsBreached(route.Provider);
+    }
 
-    /// <summary>Gate (2) of <see cref="InvokeCoreAsync"/>'s candidate pre-flight sequence: <see langword="true"/> when <paramref name="route"/>'s provider is stopped (Governance &gt; Providers).</summary>
-    private bool IsProviderDisabledGateBlocked(ResolvedModelRoute route) =>
-        !_interceptor.IsProviderEnabled(route.Provider);
+    /// <summary>
+    /// Gate (2) of <see cref="InvokeCoreAsync"/>'s candidate pre-flight sequence: <see langword="true"/> when
+    /// <paramref name="route"/>'s provider is stopped (Governance &gt; Providers).
+    /// </summary>
+    private bool IsProviderDisabledGateBlocked(ResolvedModelRoute route)
+    {
+        return !_interceptor.IsProviderEnabled(route.Provider);
+    }
 
-    /// <summary>Gate (3) of <see cref="InvokeCoreAsync"/>'s candidate pre-flight sequence: <see langword="true"/> when <paramref name="route"/>'s model is stopped or no longer reported by its provider's endpoint.</summary>
-    private bool IsModelDisabledGateBlocked(ResolvedModelRoute route) =>
-        !_interceptor.IsModelEnabled(route.ModelName);
+    /// <summary>
+    /// Gate (3) of <see cref="InvokeCoreAsync"/>'s candidate pre-flight sequence: <see langword="true"/> when
+    /// <paramref name="route"/>'s model is stopped or no longer reported by its provider's endpoint.
+    /// </summary>
+    private bool IsModelDisabledGateBlocked(ResolvedModelRoute route)
+    {
+        return !_interceptor.IsModelEnabled(route.ModelName);
+    }
 
     /// <summary>
     /// Gate (4) of <see cref="InvokeCoreAsync"/>'s candidate pre-flight sequence: the read-only circuit
     /// pre-check that MUST run before gates (5)/(6) - see the ordering note above the loop in
     /// <see cref="InvokeCoreAsync"/> for why.
     /// </summary>
-    private bool IsCircuitOpenPreCheckGateBlocked(ResolvedModelRoute route, CircuitBreakerTargetKey circuitTarget) =>
-        _circuitBreaker.IsOpen(circuitTarget) || _circuitBreaker.IsProviderOpen(route.Provider);
+    private bool IsCircuitOpenPreCheckGateBlocked(ResolvedModelRoute route, CircuitBreakerTargetKey circuitTarget)
+    {
+        return _circuitBreaker.IsOpen(circuitTarget) || _circuitBreaker.IsProviderOpen(route.Provider);
+    }
 
-    /// <summary>Gate (5) of <see cref="InvokeCoreAsync"/>'s candidate pre-flight sequence: the target-level circuit breaker, which may claim a half-open probe slot - see gate (4)'s remarks.</summary>
-    private bool IsCircuitBypassGateBlocked(CircuitBreakerTargetKey circuitTarget) =>
-        _circuitBreaker.ShouldBypass(circuitTarget);
+    /// <summary>
+    /// Gate (5) of <see cref="InvokeCoreAsync"/>'s candidate pre-flight sequence: the target-level circuit breaker,
+    /// which may claim a half-open probe slot - see gate (4)'s remarks.
+    /// </summary>
+    private bool IsCircuitBypassGateBlocked(CircuitBreakerTargetKey circuitTarget)
+    {
+        return _circuitBreaker.ShouldBypass(circuitTarget);
+    }
 
-    /// <summary>Gate (6) of <see cref="InvokeCoreAsync"/>'s candidate pre-flight sequence: the provider-wide circuit breaker, which may claim a half-open probe slot - see gate (4)'s remarks.</summary>
-    private bool IsCircuitBypassProviderGateBlocked(ResolvedModelRoute route) =>
-        _circuitBreaker.ShouldBypassProvider(route.Provider);
+    /// <summary>
+    /// Gate (6) of <see cref="InvokeCoreAsync"/>'s candidate pre-flight sequence: the provider-wide circuit breaker,
+    /// which may claim a half-open probe slot - see gate (4)'s remarks.
+    /// </summary>
+    private bool IsCircuitBypassProviderGateBlocked(ResolvedModelRoute route)
+    {
+        return _circuitBreaker.ShouldBypassProvider(route.Provider);
+    }
 
-    /// <summary>Writes a client-facing error envelope for a failed upstream call (a Bedrock SDK failure, or an exhausted transport-outage cascade), matching <see cref="WriteModelNotFoundResponseAsync"/>'s shape. Defaults to 502 (the request was valid; the upstream call failed) rather than 400 (a malformed/unknown-model client request); <paramref name="statusCode"/> lets a caller override this - e.g. 401 for a Bedrock credential-resolution failure treated like the HTTP path's 401 handling. Callers pass a client-safe <paramref name="errorMessage"/> - never a raw transport-exception message, which can leak infrastructure detail.</summary>
-    internal static async Task WriteUpstreamErrorResponseAsync(HttpContext context, string errorMessage, int statusCode = StatusCodes.Status502BadGateway)
+    /// <summary>
+    /// Writes a client-facing error envelope for a failed upstream call (a Bedrock SDK failure, or an exhausted
+    /// transport-outage cascade), matching <see cref="WriteModelNotFoundResponseAsync"/>'s shape. Defaults to 502 (the request
+    /// was valid; the upstream call failed) rather than 400 (a malformed/unknown-model client request);
+    /// <paramref name="statusCode"/> lets a caller override this - e.g. 401 for a Bedrock credential-resolution failure
+    /// treated like the HTTP path's 401 handling. Callers pass a client-safe <paramref name="errorMessage"/> - never a raw
+    /// transport-exception message, which can leak infrastructure detail.
+    /// </summary>
+    internal static async Task WriteUpstreamErrorResponseAsync(HttpContext context, string errorMessage,
+        int statusCode = StatusCodes.Status502BadGateway)
     {
         context.Response.StatusCode = statusCode;
         context.Response.ContentType = "application/json";
@@ -873,7 +963,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             }
         };
 
-        await context.Response.WriteAsync(JsonSerializer.Serialize(payload), context.RequestAborted);
+        await context.Response.WriteAsync(text: JsonSerializer.Serialize(payload),
+            cancellationToken: context.RequestAborted);
     }
 
     /// <summary>
@@ -886,9 +977,9 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         try
         {
             return JsonNode.Parse(requestBody) is JsonObject obj &&
-                obj["stream"] is JsonValue value &&
-                value.TryGetValue<bool>(out var stream) &&
-                stream;
+                   obj["stream"] is JsonValue value &&
+                   value.TryGetValue<bool>(out var stream) &&
+                   stream;
         }
         catch (JsonException)
         {
@@ -902,20 +993,14 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// </summary>
     internal static HashSet<string> GetHopByHopHeaderNames(IEnumerable<string>? connectionHeaderValues)
     {
-        var names = new HashSet<string>(HopByHopHeaders, StringComparer.OrdinalIgnoreCase);
+        var names = new HashSet<string>(collection: HopByHopHeaders, comparer: StringComparer.OrdinalIgnoreCase);
 
-        if (connectionHeaderValues is null)
-        {
-            return names;
-        }
+        if (connectionHeaderValues is null) return names;
 
         foreach (var value in connectionHeaderValues)
-        {
-            foreach (var token in value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
-            {
-                names.Add(token);
-            }
-        }
+        foreach (var token in value.Split(',',
+                     options: StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+            names.Add(token);
 
         return names;
     }
@@ -927,31 +1012,25 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// <see cref="ErrorDetail.Param"/>'s <c>WhenWritingNull</c> condition). <paramref name="statusCode"/> is
     /// echoed back as the envelope's string <c>code</c> field, matching every existing call site.
     /// </summary>
-    private static async Task WriteErrorResponseAsync(HttpContext context, int statusCode, string type, string message, string? param = null)
+    private static async Task WriteErrorResponseAsync(HttpContext context, int statusCode, string type, string message,
+        string? param = null)
     {
         context.Response.StatusCode = statusCode;
         context.Response.ContentType = "application/json";
 
-        var payload = new ErrorEnvelope(new ErrorDetail(message, type, param, statusCode.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        var payload = new ErrorEnvelope(new ErrorDetail(Message: message, Type: type, Param: param,
+            Code: statusCode.ToString(CultureInfo.InvariantCulture)));
 
-        await context.Response.WriteAsync(JsonSerializer.Serialize(payload), context.RequestAborted);
+        await context.Response.WriteAsync(text: JsonSerializer.Serialize(payload),
+            cancellationToken: context.RequestAborted);
     }
 
-    /// <summary>The top-level <c>{"error": {...}}</c> envelope <see cref="WriteErrorResponseAsync"/> writes.</summary>
-    private sealed record ErrorEnvelope([property: JsonPropertyName("error")] ErrorDetail Error);
-
-    /// <summary>The body of an OpenAI-shaped error envelope written by <see cref="WriteErrorResponseAsync"/>.</summary>
-    private sealed record ErrorDetail(
-        [property: JsonPropertyName("message")] string Message,
-        [property: JsonPropertyName("type")] string Type,
-        [property: JsonPropertyName("param")]
-        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        string? Param,
-        [property: JsonPropertyName("code")] string Code);
-
     /// <summary>Writes a 400 response in an OpenAI-shaped error envelope for a request whose model could not be resolved.</summary>
-    private static Task WriteModelNotFoundResponseAsync(HttpContext context, string errorMessage) =>
-        WriteErrorResponseAsync(context, StatusCodes.Status400BadRequest, "invalid_request_error", errorMessage, param: "model");
+    private static Task WriteModelNotFoundResponseAsync(HttpContext context, string errorMessage)
+    {
+        return WriteErrorResponseAsync(context: context, statusCode: StatusCodes.Status400BadRequest,
+            type: "invalid_request_error", message: errorMessage, param: "model");
+    }
 
     /// <summary>
     /// Writes a 503 response in an OpenAI-shaped error envelope when the GUI system tray's kill switch
@@ -959,8 +1038,11 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// <see cref="WriteModelNotFoundResponseAsync"/>'s envelope shape but as 503 (Service Unavailable): the
     /// request itself may be perfectly valid, it was refused solely because an operator paused routing.
     /// </summary>
-    private static Task WriteRoutingDisabledResponseAsync(HttpContext context) =>
-        WriteErrorResponseAsync(context, StatusCodes.Status503ServiceUnavailable, "routing_disabled", "Routing is currently disabled.");
+    private static Task WriteRoutingDisabledResponseAsync(HttpContext context)
+    {
+        return WriteErrorResponseAsync(context: context, statusCode: StatusCodes.Status503ServiceUnavailable,
+            type: "routing_disabled", message: "Routing is currently disabled.");
+    }
 
     /// <summary>
     /// Writes a client-facing 402 error envelope when every candidate provider for a request is over its
@@ -969,13 +1051,15 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// operator's spend cap is exhausted, which is a distinct, retriable-next-month condition, not a
     /// malformed request or an upstream outage.
     /// </summary>
-    private static Task WriteBudgetExhaustedResponseAsync(HttpContext context, string requestedModel) =>
-        WriteErrorResponseAsync(
-            context,
-            StatusCodes.Status402PaymentRequired,
-            "budget_exhausted",
-            $"model '{requestedModel}' and all its fallbacks are over their configured monthly budget.",
+    private static Task WriteBudgetExhaustedResponseAsync(HttpContext context, string requestedModel)
+    {
+        return WriteErrorResponseAsync(
+            context: context,
+            statusCode: StatusCodes.Status402PaymentRequired,
+            type: "budget_exhausted",
+            message: $"model '{requestedModel}' and all its fallbacks are over their configured monthly budget.",
             param: "model");
+    }
 
     /// <summary>
     /// Writes a client-facing 503 error envelope for an explicit selection whose target or provider is
@@ -986,7 +1070,22 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// valid, the router simply already knows this specific target or provider isn't answering right now
     /// and never made a network call to find out again.
     /// </summary>
-    private static Task WriteCircuitTripBlockedResponseAsync(HttpContext context, string message) =>
-        WriteErrorResponseAsync(context, StatusCodes.Status503ServiceUnavailable, "invalid_request_error", message);
-}
+    private static Task WriteCircuitTripBlockedResponseAsync(HttpContext context, string message)
+    {
+        return WriteErrorResponseAsync(context: context, statusCode: StatusCodes.Status503ServiceUnavailable,
+            type: "invalid_request_error", message: message);
+    }
 
+    /// <summary>The top-level <c>{"error": {...}}</c> envelope <see cref="WriteErrorResponseAsync"/> writes.</summary>
+    private sealed record ErrorEnvelope([property: JsonPropertyName("error")] ErrorDetail Error);
+
+    /// <summary>The body of an OpenAI-shaped error envelope written by <see cref="WriteErrorResponseAsync"/>.</summary>
+    private sealed record ErrorDetail(
+        [property: JsonPropertyName("message")]
+        string Message,
+        [property: JsonPropertyName("type")] string Type,
+        [property: JsonPropertyName("param")]
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? Param,
+        [property: JsonPropertyName("code")] string Code);
+}

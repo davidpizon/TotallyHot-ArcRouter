@@ -1,9 +1,9 @@
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging;
-using Moq;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
+using Moq;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 
@@ -12,7 +12,6 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
 /// <summary>
 /// Coverage for tool-call emulation (<c>docs/router/tool-call-normalization.md</c> Phase 5): teaching a
 /// model with no native tool calling a syntax on the way out, and reading it back on the way in.
-///
 /// <para>
 /// The response half is deliberately thin here - it is
 /// <c>ToolCallNormalizingTranslator</c> unchanged, already covered by
@@ -37,15 +36,17 @@ public class ToolCallEmulationTests
 
         // An emulated model's template cannot render a tools array, and some servers reject one outright
         // for a model they know has no tool support.
-        Assert.False(rewritten.RootElement.TryGetProperty("tools", out _));
+        Assert.False(rewritten.RootElement.TryGetProperty(propertyName: "tools", value: out _));
 
         var system = Messages(rewritten)[0];
-        Assert.Equal("system", system.GetProperty("role").GetString());
+        Assert.Equal(expected: "system", actual: system.GetProperty("role").GetString());
 
         var content = system.GetProperty("content").GetString()!;
-        Assert.Contains("<tool_call>", content, StringComparison.Ordinal);
-        Assert.Contains("get_time", content, StringComparison.Ordinal);
-        Assert.Contains("Gets the time", content, StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "<tool_call>", actualString: content,
+            comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "get_time", actualString: content, comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "Gets the time", actualString: content,
+            comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
@@ -62,7 +63,8 @@ public class ToolCallEmulationTests
             """);
 
         var content = Messages(rewritten)[0].GetProperty("content").GetString()!;
-        Assert.Contains("""{"type":"function","function":{"name":"get_time"}}""", content, StringComparison.Ordinal);
+        Assert.Contains("""{"type":"function","function":{"name":"get_time"}}""", actualString: content,
+            comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
@@ -73,7 +75,7 @@ public class ToolCallEmulationTests
         // same blending the Hermes entry documents from the original incident. Registering only
         // <tool_call> here takes emulation from every probe case passing to almost none.
         var store = Emulated();
-        var translator = (ToolCallEmulatingTranslator)Factory(store).TryCreate(Route(), requestCarriesTools: true)!;
+        var translator = (ToolCallEmulatingTranslator)Factory(store).TryCreate(route: Route(), true)!;
 
         var response = translator.TranslateResponse(Encoding.UTF8.GetBytes(
             """{"choices":[{"index":0,"message":{"role":"assistant","content":"<tools>{\"name\":\"get_time\",\"arguments\":{\"timezone\":\"Asia/Tokyo\"}}</tools>"},"finish_reason":"stop"}]}"""));
@@ -82,8 +84,9 @@ public class ToolCallEmulationTests
         var call = parsed.RootElement.GetProperty("choices")[0].GetProperty("message")
             .GetProperty("tool_calls")[0].GetProperty("function");
 
-        Assert.Equal("get_time", call.GetProperty("name").GetString());
-        Assert.Contains("Asia/Tokyo", call.GetProperty("arguments").GetString()!, StringComparison.Ordinal);
+        Assert.Equal(expected: "get_time", actual: call.GetProperty("name").GetString());
+        Assert.Contains(expectedSubstring: "Asia/Tokyo", actualString: call.GetProperty("arguments").GetString()!,
+            comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
@@ -93,14 +96,15 @@ public class ToolCallEmulationTests
         // is wrapped in those tags, so a model echoing it back lands in a scanned region. The shape check
         // is what makes that safe - a schema entry has no top-level "name", only a nested one.
         var store = Emulated();
-        var translator = (ToolCallEmulatingTranslator)Factory(store).TryCreate(Route(), requestCarriesTools: true)!;
+        var translator = (ToolCallEmulatingTranslator)Factory(store).TryCreate(route: Route(), true)!;
 
-        var body = """{"choices":[{"index":0,"message":{"role":"assistant","content":"<tools>{\"type\":\"function\",\"function\":{\"name\":\"get_time\"}}</tools>"},"finish_reason":"stop"}]}""";
+        var body =
+            """{"choices":[{"index":0,"message":{"role":"assistant","content":"<tools>{\"type\":\"function\",\"function\":{\"name\":\"get_time\"}}</tools>"},"finish_reason":"stop"}]}""";
         var response = translator.TranslateResponse(Encoding.UTF8.GetBytes(body));
 
         using var parsed = JsonDocument.Parse(response);
         var message = parsed.RootElement.GetProperty("choices")[0].GetProperty("message");
-        Assert.False(message.TryGetProperty("tool_calls", out _));
+        Assert.False(message.TryGetProperty(propertyName: "tool_calls", value: out _));
     }
 
     [Fact]
@@ -112,8 +116,8 @@ public class ToolCallEmulationTests
              "tools":[{"type":"function","function":{"name":"get_time"}}]}
             """);
 
-        Assert.False(rewritten.RootElement.TryGetProperty("tool_choice", out _));
-        Assert.False(rewritten.RootElement.TryGetProperty("parallel_tool_calls", out _));
+        Assert.False(rewritten.RootElement.TryGetProperty(propertyName: "tool_choice", value: out _));
+        Assert.False(rewritten.RootElement.TryGetProperty(propertyName: "parallel_tool_calls", value: out _));
     }
 
     [Fact]
@@ -128,11 +132,12 @@ public class ToolCallEmulationTests
             """);
 
         var messages = Messages(rewritten);
-        Assert.Single(messages, m => m.GetProperty("role").GetString() == "system");
+        Assert.Single(collection: messages, predicate: m => m.GetProperty("role").GetString() == "system");
 
         var content = messages[0].GetProperty("content").GetString()!;
-        Assert.StartsWith("You are terse.", content, StringComparison.Ordinal);
-        Assert.Contains("get_time", content, StringComparison.Ordinal);
+        Assert.StartsWith(expectedStartString: "You are terse.", actualString: content,
+            comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "get_time", actualString: content, comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
@@ -142,7 +147,7 @@ public class ToolCallEmulationTests
 
         var messages = Messages(rewritten);
         Assert.Single(messages);
-        Assert.Equal("user", messages[0].GetProperty("role").GetString());
+        Assert.Equal(expected: "user", actual: messages[0].GetProperty("role").GetString());
     }
 
     [Fact]
@@ -151,9 +156,10 @@ public class ToolCallEmulationTests
         // Fail-open: RequestInterceptor already parsed this body, so reaching here means something upstream
         // changed. The request may still work; throwing would turn a heuristic into an outage.
         var original = Encoding.UTF8.GetBytes("not json at all");
-        var result = ToolCallEmulationRewriter.Rewrite(original, ToolCallDialectRegistry.Emulated, Mock.Of<ILogger>());
+        var result = ToolCallEmulationRewriter.Rewrite(openAiShapedBody: original,
+            dialect: ToolCallDialectRegistry.Emulated, logger: Mock.Of<ILogger>());
 
-        Assert.Equal(original, result);
+        Assert.Equal(expected: original, actual: result);
     }
 
     [Fact]
@@ -163,11 +169,12 @@ public class ToolCallEmulationTests
         // loses tool calling and gains nothing in its place - the silent drop this workstream exists to
         // prevent. Everything the rewriter can do lives in `messages`, so without it the safe rewrite is
         // none.
-        var original = """{"model":"tiny","prompt":"time?","tools":[{"type":"function","function":{"name":"get_time"}}]}""";
+        var original =
+            """{"model":"tiny","prompt":"time?","tools":[{"type":"function","function":{"name":"get_time"}}]}""";
         var rewritten = Rewrite(original);
 
-        Assert.True(rewritten.RootElement.TryGetProperty("tools", out var tools));
-        Assert.Equal("get_time", tools[0].GetProperty("function").GetProperty("name").GetString());
+        Assert.True(rewritten.RootElement.TryGetProperty(propertyName: "tools", value: out var tools));
+        Assert.Equal(expected: "get_time", actual: tools[0].GetProperty("function").GetProperty("name").GetString());
     }
 
     [Fact]
@@ -175,7 +182,7 @@ public class ToolCallEmulationTests
     {
         var rewritten = Rewrite("""{"model":"tiny","messages":"not an array","tool_choice":"auto"}""");
 
-        Assert.True(rewritten.RootElement.TryGetProperty("tool_choice", out _));
+        Assert.True(rewritten.RootElement.TryGetProperty(propertyName: "tool_choice", value: out _));
     }
 
     // ----- Multi-turn: the part that makes emulation survive past one turn -----
@@ -194,15 +201,18 @@ public class ToolCallEmulationTests
         var assistant = Messages(rewritten)[1];
 
         // The model must be able to read its own previous turn in the syntax it was told to write.
-        Assert.False(assistant.TryGetProperty("tool_calls", out _));
+        Assert.False(assistant.TryGetProperty(propertyName: "tool_calls", value: out _));
 
         var content = assistant.GetProperty("content").GetString()!;
-        Assert.Contains("<tool_call>", content, StringComparison.Ordinal);
-        Assert.Contains("</tool_call>", content, StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "<tool_call>", actualString: content,
+            comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "</tool_call>", actualString: content,
+            comparisonType: StringComparison.Ordinal);
 
         // Arguments arrive as a serialized string and are re-parsed into a real object, so the model sees
         // the shape it was taught rather than a string of escaped quotes.
-        Assert.Contains("\"arguments\":{\"tz\":\"UTC\"}", content, StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "\"arguments\":{\"tz\":\"UTC\"}", actualString: content,
+            comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
@@ -216,8 +226,10 @@ public class ToolCallEmulationTests
             """);
 
         var content = Messages(rewritten)[0].GetProperty("content").GetString()!;
-        Assert.StartsWith("Let me check.", content, StringComparison.Ordinal);
-        Assert.Contains("<tool_call>", content, StringComparison.Ordinal);
+        Assert.StartsWith(expectedStartString: "Let me check.", actualString: content,
+            comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "<tool_call>", actualString: content,
+            comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
@@ -236,11 +248,14 @@ public class ToolCallEmulationTests
             """);
 
         var content = Messages(rewritten)[0].GetProperty("content").GetString()!;
-        Assert.StartsWith("Let me check the clock.", content, StringComparison.Ordinal);
-        Assert.Contains("<tool_call>", content, StringComparison.Ordinal);
+        Assert.StartsWith(expectedStartString: "Let me check the clock.", actualString: content,
+            comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "<tool_call>", actualString: content,
+            comparisonType: StringComparison.Ordinal);
 
         // Rendered as prose, not as its raw JSON - protocol noise where the model expects text.
-        Assert.DoesNotContain("\"type\"", content, StringComparison.Ordinal);
+        Assert.DoesNotContain(expectedSubstring: "\"type\"", actualString: content,
+            comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
@@ -254,7 +269,8 @@ public class ToolCallEmulationTests
             ]}
             """);
 
-        Assert.Equal("Tool result for get_time:\n12:00 UTC", Messages(rewritten)[1].GetProperty("content").GetString());
+        Assert.Equal(expected: "Tool result for get_time:\n12:00 UTC",
+            actual: Messages(rewritten)[1].GetProperty("content").GetString());
     }
 
     [Fact]
@@ -272,8 +288,10 @@ public class ToolCallEmulationTests
             """);
 
         var content = Messages(rewritten)[0].GetProperty("content").GetString()!;
-        Assert.Contains("image_url", content, StringComparison.Ordinal);
-        Assert.Contains("<tool_call>", content, StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "image_url", actualString: content,
+            comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "<tool_call>", actualString: content,
+            comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
@@ -287,8 +305,8 @@ public class ToolCallEmulationTests
             """);
 
         var content = Messages(rewritten)[0].GetProperty("content").GetString()!;
-        Assert.Contains("get_time", content, StringComparison.Ordinal);
-        Assert.Contains("not json", content, StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "get_time", actualString: content, comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "not json", actualString: content, comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
@@ -305,11 +323,13 @@ public class ToolCallEmulationTests
             """);
 
         var result = Messages(rewritten)[1];
-        Assert.Equal("user", result.GetProperty("role").GetString());
+        Assert.Equal(expected: "user", actual: result.GetProperty("role").GetString());
 
         var content = result.GetProperty("content").GetString()!;
-        Assert.Contains("Tool result for get_time:", content, StringComparison.Ordinal);
-        Assert.Contains("12:00 UTC", content, StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "Tool result for get_time:", actualString: content,
+            comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "12:00 UTC", actualString: content,
+            comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
@@ -319,7 +339,7 @@ public class ToolCallEmulationTests
             """{"model":"tiny","messages":[{"role":"tool","tool_call_id":"orphan","content":"42"}]}""");
 
         var content = Messages(rewritten)[0].GetProperty("content").GetString()!;
-        Assert.Equal("Tool result:\n42", content);
+        Assert.Equal(expected: "Tool result:\n42", actual: content);
     }
 
     [Fact]
@@ -339,11 +359,13 @@ public class ToolCallEmulationTests
             """);
 
         var messages = Messages(rewritten);
-        Assert.Equal(2, messages.Count);
+        Assert.Equal(2, actual: messages.Count);
 
         var content = messages[1].GetProperty("content").GetString()!;
-        Assert.Contains("Tool result for get_time:\n12:00", content, StringComparison.Ordinal);
-        Assert.Contains("Tool result for get_date:\nTuesday", content, StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "Tool result for get_time:\n12:00", actualString: content,
+            comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "Tool result for get_date:\nTuesday", actualString: content,
+            comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
@@ -356,8 +378,8 @@ public class ToolCallEmulationTests
             """{"model":"tiny","messages":[{"role":"user","content":"hi"},"not-a-message",{"role":"user","content":"bye"}]}""");
 
         var messages = Messages(rewritten);
-        Assert.Equal(3, messages.Count);
-        Assert.Equal("not-a-message", messages[1].GetString());
+        Assert.Equal(3, actual: messages.Count);
+        Assert.Equal(expected: "not-a-message", actual: messages[1].GetString());
     }
 
     [Fact]
@@ -379,11 +401,13 @@ public class ToolCallEmulationTests
             """);
 
         var messages = Messages(rewritten);
-        Assert.Equal(4, messages.Count);
+        Assert.Equal(4, actual: messages.Count);
 
-        Assert.Equal("Tool result for get_time:\n12:00", messages[1].GetProperty("content").GetString());
-        Assert.Equal(42, messages[2].GetInt32());
-        Assert.Equal("Tool result for get_date:\nTuesday", messages[3].GetProperty("content").GetString());
+        Assert.Equal(expected: "Tool result for get_time:\n12:00",
+            actual: messages[1].GetProperty("content").GetString());
+        Assert.Equal(42, actual: messages[2].GetInt32());
+        Assert.Equal(expected: "Tool result for get_date:\nTuesday",
+            actual: messages[3].GetProperty("content").GetString());
     }
 
     [Fact]
@@ -399,7 +423,8 @@ public class ToolCallEmulationTests
             ]}
             """);
 
-        Assert.DoesNotContain(Messages(rewritten), m => m.GetProperty("role").GetString() == "tool");
+        Assert.DoesNotContain(collection: Messages(rewritten),
+            filter: m => m.GetProperty("role").GetString() == "tool");
     }
 
     // ----- Bounded overhead -----
@@ -414,18 +439,20 @@ public class ToolCallEmulationTests
         var tools = JsonSerializer.Serialize(Enumerable.Range(0, 8).Select(i => new
         {
             type = "function",
-            function = new { name = $"tool_{i}", description = padding },
+            function = new { name = $"tool_{i}", description = padding }
         }));
 
         var rewritten = Rewrite(
-            $$"""{"model":"tiny","messages":[{"role":"user","content":"hi"}],"tools":{{tools}}}""",
-            logger);
+            requestBody: $$"""{"model":"tiny","messages":[{"role":"user","content":"hi"}],"tools":{{tools}}}""",
+            logger: logger);
 
         var content = Messages(rewritten)[0].GetProperty("content").GetString()!;
         Assert.True(content.Length < ToolCallInstructionInjector.MaxToolSchemaChars * 2);
-        Assert.Contains("tool_0", content, StringComparison.Ordinal);
-        Assert.DoesNotContain("tool_7", content, StringComparison.Ordinal);
-        Assert.Contains(messages, m => m.Contains("injection budget", StringComparison.Ordinal));
+        Assert.Contains(expectedSubstring: "tool_0", actualString: content, comparisonType: StringComparison.Ordinal);
+        Assert.DoesNotContain(expectedSubstring: "tool_7", actualString: content,
+            comparisonType: StringComparison.Ordinal);
+        Assert.Contains(collection: messages,
+            filter: m => m.Contains(value: "injection budget", comparisonType: StringComparison.Ordinal));
     }
 
     [Fact]
@@ -437,15 +464,17 @@ public class ToolCallEmulationTests
         var (messages, logger) = CapturingLogger();
 
         var rewritten = ToolCallEmulationRewriter.Rewrite(
-            Encoding.UTF8.GetBytes(OversizedToolsetRequestBody()),
-            ToolCallDialectRegistry.Emulated,
-            logger,
-            new ModelContextWindow("lmstudio", "tiny", ContextLength: 8192));
+            openAiShapedBody: Encoding.UTF8.GetBytes(OversizedToolsetRequestBody()),
+            dialect: ToolCallDialectRegistry.Emulated,
+            logger: logger,
+            contextWindow: new ModelContextWindow(ProviderKey: "lmstudio", ModelName: "tiny", 8192));
 
         var content = Messages(JsonDocument.Parse(rewritten))[0].GetProperty("content").GetString()!;
-        Assert.DoesNotContain("tool_39", content, StringComparison.Ordinal);
-        Assert.Contains(messages, m => m.Contains(
-            $"{ToolCallInstructionInjector.MaxToolSchemaChars}-character injection budget", StringComparison.Ordinal));
+        Assert.DoesNotContain(expectedSubstring: "tool_39", actualString: content,
+            comparisonType: StringComparison.Ordinal);
+        Assert.Contains(collection: messages, filter: m => m.Contains(
+            value: $"{ToolCallInstructionInjector.MaxToolSchemaChars}-character injection budget",
+            comparisonType: StringComparison.Ordinal));
     }
 
     [Fact]
@@ -456,16 +485,18 @@ public class ToolCallEmulationTests
         var (messages, logger) = CapturingLogger();
 
         var rewritten = ToolCallEmulationRewriter.Rewrite(
-            Encoding.UTF8.GetBytes(OversizedToolsetRequestBody()),
-            ToolCallDialectRegistry.Emulated,
-            logger,
-            new ModelContextWindow("lmstudio", "tiny", ContextLength: 1_000_000));
+            openAiShapedBody: Encoding.UTF8.GetBytes(OversizedToolsetRequestBody()),
+            dialect: ToolCallDialectRegistry.Emulated,
+            logger: logger,
+            contextWindow: new ModelContextWindow(ProviderKey: "lmstudio", ModelName: "tiny", 1_000_000));
 
         var content = Messages(JsonDocument.Parse(rewritten))[0].GetProperty("content").GetString()!;
-        Assert.Contains("tool_0", content, StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "tool_0", actualString: content, comparisonType: StringComparison.Ordinal);
 
         // Clamped at the sanity ceiling rather than scaling without bound from a million-token window.
-        Assert.Contains(messages, m => m.Contains("131072-character injection budget", StringComparison.Ordinal));
+        Assert.Contains(collection: messages,
+            filter: m =>
+                m.Contains(value: "131072-character injection budget", comparisonType: StringComparison.Ordinal));
     }
 
     [Fact]
@@ -476,16 +507,19 @@ public class ToolCallEmulationTests
         var (messages, logger) = CapturingLogger();
 
         var rewritten = ToolCallEmulationRewriter.Rewrite(
-            Encoding.UTF8.GetBytes(OversizedToolsetRequestBody()),
-            ToolCallDialectRegistry.Emulated,
-            logger,
-            new ModelContextWindow("lmstudio", "tiny", ContextLength: 512));
+            openAiShapedBody: Encoding.UTF8.GetBytes(OversizedToolsetRequestBody()),
+            dialect: ToolCallDialectRegistry.Emulated,
+            logger: logger,
+            contextWindow: new ModelContextWindow(ProviderKey: "lmstudio", ModelName: "tiny", 512));
 
         var content = Messages(JsonDocument.Parse(rewritten))[0].GetProperty("content").GetString()!;
-        Assert.DoesNotContain("tool_1", content, StringComparison.Ordinal);
+        Assert.DoesNotContain(expectedSubstring: "tool_1", actualString: content,
+            comparisonType: StringComparison.Ordinal);
 
         // Clamped at the floor rather than shrinking to a budget too small to describe even one tool.
-        Assert.Contains(messages, m => m.Contains("4096-character injection budget", StringComparison.Ordinal));
+        Assert.Contains(collection: messages,
+            filter: m =>
+                m.Contains(value: "4096-character injection budget", comparisonType: StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -499,7 +533,7 @@ public class ToolCallEmulationTests
         var tools = JsonSerializer.Serialize(Enumerable.Range(0, 40).Select(i => new
         {
             type = "function",
-            function = new { name = $"tool_{i}", description = padding },
+            function = new { name = $"tool_{i}", description = padding }
         }));
 
         return $$"""{"model":"tiny","messages":[{"role":"user","content":"hi"}],"tools":{{tools}}}""";
@@ -511,22 +545,24 @@ public class ToolCallEmulationTests
         // End-to-end through the same construction path production DI uses: TryCreate must pass the store
         // down so the translator actually looks the window up, not just that Rewrite honors one when handed
         // it directly (covered above).
-        var store = Emulated().SeedContextWindow("lmstudio", "tiny", contextLength: 1_000_000);
-        var factory = new ToolCallNormalizerFactory(store, contextWindowStore: store);
-        var translator = (ToolCallEmulatingTranslator)factory.TryCreate(Route(), requestCarriesTools: true)!;
+        var store = Emulated().SeedContextWindow(providerKey: "lmstudio", modelName: "tiny", 1_000_000);
+        var factory = new ToolCallNormalizerFactory(capabilityStore: store, contextWindowStore: store);
+        var translator = (ToolCallEmulatingTranslator)factory.TryCreate(route: Route(), true)!;
 
         // tool_20 fits inside the ~128 KiB ceiling a million-token window scales to, but not inside the
         // fixed 16 KiB fallback (~3 tools' worth of these 4 KiB descriptions) - so its presence proves the
         // factory actually threaded the store through, not just that Rewrite honors a window when handed one
         // directly (covered above).
         var withWindow = Messages(JsonDocument.Parse(
-            translator.TranslateRequest(Encoding.UTF8.GetBytes(OversizedToolsetRequestBody()))))[0]
+                translator.TranslateRequest(Encoding.UTF8.GetBytes(OversizedToolsetRequestBody()))))[0]
             .GetProperty("content").GetString()!;
-        Assert.Contains("tool_20", withWindow, StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "tool_20", actualString: withWindow,
+            comparisonType: StringComparison.Ordinal);
 
         var withoutWindow = Messages(Rewrite(OversizedToolsetRequestBody()))[0]
             .GetProperty("content").GetString()!;
-        Assert.DoesNotContain("tool_20", withoutWindow, StringComparison.Ordinal);
+        Assert.DoesNotContain(expectedSubstring: "tool_20", actualString: withoutWindow,
+            comparisonType: StringComparison.Ordinal);
     }
 
     // ----- Selection, and the classification that must not eat itself -----
@@ -534,24 +570,24 @@ public class ToolCallEmulationTests
     [Fact]
     public void AnEmulatedCapabilityRow_SelectsTheEmulatingTranslator()
     {
-        var translator = Factory(Emulated()).TryCreate(Route(), requestCarriesTools: true);
+        var translator = Factory(Emulated()).TryCreate(route: Route(), true);
 
         var emulator = Assert.IsType<ToolCallEmulatingTranslator>(translator);
-        Assert.Equal("emulated", emulator.Dialect.Name);
+        Assert.Equal(expected: "emulated", actual: emulator.Dialect.Name);
         Assert.True(emulator.Plan.IsEmulating);
     }
 
     [Fact]
     public void AnEmulatedModel_IsNotArmed_WhenTheRequestHasNeitherToolsNorHistory()
     {
-        Assert.Null(Factory(Emulated()).TryCreate(Route(), requestCarriesTools: false));
+        Assert.Null(Factory(Emulated()).TryCreate(route: Route(), false));
     }
 
     [Fact]
     public void AnEmulatedModel_IsArmed_ForAFollowUpTurnCarryingOnlyHistory()
     {
         var translator = Factory(Emulated())
-            .TryCreate(Route(), requestCarriesTools: false, requestCarriesToolHistory: true);
+            .TryCreate(route: Route(), false, true);
 
         Assert.IsType<ToolCallEmulatingTranslator>(translator);
     }
@@ -564,7 +600,7 @@ public class ToolCallEmulationTests
         // request, remove the instructions, and leave the model emitting nothing - a classification that
         // erases the reason it was made.
         var store = Emulated();
-        var translator = (ToolCallEmulatingTranslator)Factory(store).TryCreate(Route(), requestCarriesTools: true)!;
+        var translator = (ToolCallEmulatingTranslator)Factory(store).TryCreate(route: Route(), true)!;
 
         var response = translator.TranslateResponse(Encoding.UTF8.GetBytes(
             """{"choices":[{"index":0,"message":{"role":"assistant","content":"<tool_call>{\"name\":\"get_time\",\"arguments\":{}}</tool_call>"},"finish_reason":"stop"}]}"""));
@@ -572,7 +608,8 @@ public class ToolCallEmulationTests
         // The call is still normalized - emulation works.
         using var parsed = JsonDocument.Parse(response);
         var message = parsed.RootElement.GetProperty("choices")[0].GetProperty("message");
-        Assert.Equal("get_time", message.GetProperty("tool_calls")[0].GetProperty("function").GetProperty("name").GetString());
+        Assert.Equal(expected: "get_time",
+            actual: message.GetProperty("tool_calls")[0].GetProperty("function").GetProperty("name").GetString());
 
         // ...but nothing was learned from it.
         Assert.Empty(store.Recorded);
@@ -584,14 +621,14 @@ public class ToolCallEmulationTests
         // The one piece of evidence an emulated request cannot manufacture, and the signal that this model
         // should never have been emulated - so it is exactly what breaks out of the classification.
         var store = Emulated();
-        var translator = (ToolCallEmulatingTranslator)Factory(store).TryCreate(Route(), requestCarriesTools: true)!;
+        var translator = (ToolCallEmulatingTranslator)Factory(store).TryCreate(route: Route(), true)!;
 
         translator.TranslateResponse(Encoding.UTF8.GetBytes(
             """{"choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"get_time","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"""));
 
         var recorded = Assert.Single(store.Recorded);
-        Assert.Equal("openai-native", recorded.Dialect);
-        Assert.Equal(DetectionConfidence.Observed, recorded.Confidence);
+        Assert.Equal(expected: "openai-native", actual: recorded.Dialect);
+        Assert.Equal(expected: DetectionConfidence.Observed, actual: recorded.Confidence);
     }
 
     [Fact]
@@ -599,10 +636,12 @@ public class ToolCallEmulationTests
     {
         // A dialect that can be recognized but not taught would produce a request stripped of its tools
         // with nothing put back in their place - silently removing tool calling instead of emulating it.
-        var plan = new ToolCallNormalizationPlan("lmstudio", "tiny", [ToolCallDialectRegistry.Hermes], IsObserving: true, IsEmulating: true);
+        var plan = new ToolCallNormalizationPlan(ProviderKey: "lmstudio", ModelName: "tiny",
+            Candidates: [ToolCallDialectRegistry.Hermes], true, true);
 
         Assert.Throws<ArgumentException>(() =>
-            new ToolCallEmulatingTranslator(plan, ToolCallDialectRegistry.Hermes, capabilityStore: null, Mock.Of<ILogger>()));
+            new ToolCallEmulatingTranslator(plan: plan, dialect: ToolCallDialectRegistry.Hermes, null,
+                logger: Mock.Of<ILogger>()));
     }
 
     // ----- End to end, through the real middleware -----
@@ -617,13 +656,15 @@ public class ToolCallEmulationTests
             """);
 
         using var body = JsonDocument.Parse(forwarded);
-        Assert.False(body.RootElement.TryGetProperty("tools", out _));
-        Assert.Contains("get_time", Messages(body)[0].GetProperty("content").GetString()!, StringComparison.Ordinal);
+        Assert.False(body.RootElement.TryGetProperty(propertyName: "tools", value: out _));
+        Assert.Contains(expectedSubstring: "get_time",
+            actualString: Messages(body)[0].GetProperty("content").GetString()!,
+            comparisonType: StringComparison.Ordinal);
 
         // IClientPathTranslator: the body is rewritten, but the upstream URL is still the client's own path
         // against the provider's base URL - BuildRequestUri never sees that path, so routing this through
         // the request-reshaping branch would have silently dropped "/v1".
-        Assert.Equal("http://127.0.0.1:1234/v1/chat/completions", forwardedPath);
+        Assert.Equal(expected: "http://127.0.0.1:1234/v1/chat/completions", actual: forwardedPath);
     }
 
     [Fact]
@@ -638,8 +679,10 @@ public class ToolCallEmulationTests
             """);
 
         // Turn 1: the taught text came back as a real tool_calls delta, which is the only shape VS Code has.
-        Assert.Contains("\"tool_calls\"", clientResponse, StringComparison.Ordinal);
-        Assert.Contains("get_time", clientResponse, StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "\"tool_calls\"", actualString: clientResponse,
+            comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "get_time", actualString: clientResponse,
+            comparisonType: StringComparison.Ordinal);
 
         // Turn 2: the client replies with the result, in the shapes an emulated model cannot read.
         var (forwarded, _, _) = await RunThroughMiddlewareAsync(
@@ -655,46 +698,62 @@ public class ToolCallEmulationTests
         using var body = JsonDocument.Parse(forwarded);
         var roles = Messages(body).Select(m => m.GetProperty("role").GetString()).ToList();
 
-        Assert.DoesNotContain("tool", roles);
-        Assert.DoesNotContain(Messages(body), m => m.TryGetProperty("tool_calls", out _));
+        Assert.DoesNotContain(expected: "tool", collection: roles);
+        Assert.DoesNotContain(collection: Messages(body),
+            filter: m => m.TryGetProperty(propertyName: "tool_calls", value: out _));
 
         var assistant = Messages(body).Single(m => m.GetProperty("role").GetString() == "assistant");
-        Assert.Contains("<tool_call>", assistant.GetProperty("content").GetString()!, StringComparison.Ordinal);
-        Assert.Contains("12:00 UTC", forwarded, StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "<tool_call>", actualString: assistant.GetProperty("content").GetString()!,
+            comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "12:00 UTC", actualString: forwarded,
+            comparisonType: StringComparison.Ordinal);
     }
 
     // ----- Test helpers -----
 
-    private static JsonDocument Rewrite(string requestBody, ILogger? logger = null) =>
-        JsonDocument.Parse(ToolCallEmulationRewriter.Rewrite(
-            Encoding.UTF8.GetBytes(requestBody),
-            ToolCallDialectRegistry.Emulated,
-            logger ?? Mock.Of<ILogger>()));
+    private static JsonDocument Rewrite(string requestBody, ILogger? logger = null)
+    {
+        return JsonDocument.Parse(ToolCallEmulationRewriter.Rewrite(
+            openAiShapedBody: Encoding.UTF8.GetBytes(requestBody),
+            dialect: ToolCallDialectRegistry.Emulated,
+            logger: logger ?? Mock.Of<ILogger>()));
+    }
 
-    private static List<JsonElement> Messages(JsonDocument body) =>
-        [.. body.RootElement.GetProperty("messages").EnumerateArray()];
+    private static List<JsonElement> Messages(JsonDocument body)
+    {
+        return [.. body.RootElement.GetProperty("messages").EnumerateArray()];
+    }
 
-    private static FakeToolCallCapabilityStore Emulated() =>
-        new FakeToolCallCapabilityStore().Seed(
-            new ModelToolCapability("lmstudio", "tiny", "emulated", DetectionConfidence.Template));
+    private static FakeToolCallCapabilityStore Emulated()
+    {
+        return new FakeToolCallCapabilityStore().Seed(
+            new ModelToolCapability(ProviderKey: "lmstudio", ModelName: "tiny", Dialect: "emulated",
+                Confidence: DetectionConfidence.Template));
+    }
 
-    private static ToolCallNormalizerFactory Factory(IToolCallCapabilityStore store) => new(store);
+    private static ToolCallNormalizerFactory Factory(IToolCallCapabilityStore store)
+    {
+        return new ToolCallNormalizerFactory(store);
+    }
 
-    private static ResolvedModelRoute Route() =>
-        new(
+    private static ResolvedModelRoute Route()
+    {
+        return new ResolvedModelRoute(
             ModelName: "tiny",
             Provider: "lmstudio",
             ProviderModelId: "tiny",
             UpstreamBaseUrl: new Uri("http://127.0.0.1:1234/v1"),
             AuthHeaderName: "Authorization",
             ExtraHeaders: []);
+    }
 
     /// <summary>
     /// Drives one request through the real middleware against a stub upstream that replies with the taught
     /// syntax, returning what was actually forwarded upstream and what the client received.
     /// </summary>
-    private static async Task<(string ForwardedBody, string ForwardedUrl, string ClientResponse)> RunThroughMiddlewareAsync(
-        string requestBody)
+    private static async Task<(string ForwardedBody, string ForwardedUrl, string ClientResponse)>
+        RunThroughMiddlewareAsync(
+            string requestBody)
     {
         var resolver = ModelRouteResolverTestFactory.Create(
             modelName: "tiny",
@@ -703,7 +762,8 @@ public class ToolCallEmulationTests
             providerName: "lmstudio");
 
         var store = new FakeToolCallCapabilityStore().Seed(
-            new ModelToolCapability("lmstudio", "tiny", "emulated", DetectionConfidence.Template));
+            new ModelToolCapability(ProviderKey: "lmstudio", ModelName: "tiny", Dialect: "emulated",
+                Confidence: DetectionConfidence.Template));
 
         const string taughtReply =
             """{"choices":[{"index":0,"message":{"role":"assistant","content":"<tool_call>{\"name\": \"get_time\", \"arguments\": {}}</tool_call>"},"finish_reason":"stop"}]}""";
@@ -720,14 +780,16 @@ public class ToolCallEmulationTests
 
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(taughtReply, Encoding.UTF8, "application/json"),
+                Content = new StringContent(content: taughtReply, encoding: Encoding.UTF8,
+                    mediaType: "application/json")
             };
         });
 
         using var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(),
-            new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver),
-            new HttpClient(handler),
+            logger: Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor: new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(),
+                modelRouteResolver: resolver),
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 ToolCallNormalizerFactory = new ToolCallNormalizerFactory(store)
@@ -744,10 +806,10 @@ public class ToolCallEmulationTests
         context.Request.ContentLength = requestBytes.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
         context.Response.Body.Position = 0;
-        var clientResponse = await new StreamReader(context.Response.Body, Encoding.UTF8)
+        var clientResponse = await new StreamReader(stream: context.Response.Body, encoding: Encoding.UTF8)
             .ReadToEndAsync(TestContext.Current.CancellationToken);
 
         return (forwardedBody, forwardedUrl, clientResponse);
@@ -766,7 +828,8 @@ public class ToolCallEmulationTests
                 It.IsAny<It.IsAnyType>(),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()))
-            .Callback(new InvocationAction(invocation => messages.Add(invocation.Arguments[2]?.ToString() ?? string.Empty)));
+            .Callback(new InvocationAction(invocation =>
+                messages.Add(invocation.Arguments[2]?.ToString() ?? string.Empty)));
 
         return (messages, loggerMock.Object);
     }
@@ -775,10 +838,15 @@ public class ToolCallEmulationTests
     {
         private readonly Func<HttpRequestMessage, Task<HttpResponseMessage>> _handler;
 
-        public DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler) => _handler = handler;
+        public DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler)
+        {
+            _handler = handler;
+        }
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            _handler(request);
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            return _handler(request);
+        }
     }
 }
-

@@ -18,10 +18,10 @@
         </div>
         <div class="ml-auto flex items-center gap-2">
             <input type="text" @bind="_fromText" @bind:event="oninput" @bind:after="ApplyCustomRangeAsync"
-                   placeholder="YYYY-MM-DD" class="px-2 py-1.5 text-xs font-mono w-24 ds-input ds-input-muted" />
+                   placeholder="YYYY-MM-DD" class="px-2 py-1.5 text-xs font-mono w-24 ds-input ds-input-muted"/>
             <span class="text-slate-600 text-xs">—</span>
             <input type="text" @bind="_toText" @bind:event="oninput" @bind:after="ApplyCustomRangeAsync"
-                   placeholder="YYYY-MM-DD" class="px-2 py-1.5 text-xs font-mono w-24 ds-input ds-input-muted" />
+                   placeholder="YYYY-MM-DD" class="px-2 py-1.5 text-xs font-mono w-24 ds-input ds-input-muted"/>
         </div>
     </div>
 
@@ -41,7 +41,7 @@
                 </div>
             </div>
             <div class="flex-1 min-h-0">
-                <EChart ModelJson="@_histogramJson" />
+                <EChart ModelJson="@_histogramJson"/>
             </div>
         </div>
 
@@ -52,7 +52,7 @@
                 <div class="text-xs text-slate-600 mt-0.5">By execution volume</div>
             </div>
             <div class="flex-1 min-h-0">
-                <EChart ModelJson="@_donutJson" />
+                <EChart ModelJson="@_donutJson"/>
             </div>
             @* Custom legend matching the original design (the chart's own legend is hidden). *@
             <div class="flex flex-wrap gap-x-4 gap-y-1 mt-2 justify-center shrink-0">
@@ -79,7 +79,10 @@
     private string _donutJson = "{}";
     private IReadOnlyList<ModelShare> _modelShares = [];
 
-    protected override async Task OnInitializedAsync() => await ReloadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+    }
 
     /// <summary>Switches the active time filter, clears any custom range, and reloads both charts.</summary>
     private async Task SetFilterAsync(string filter)
@@ -98,14 +101,14 @@
     /// <summary>Reloads both charts against the typed From/To dates once both parse to a valid (To after From) range.</summary>
     private async Task ApplyCustomRangeAsync()
     {
-        if (DateOnly.TryParseExact(_fromText, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var fromDate) &&
-            DateOnly.TryParseExact(_toText, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var toDate))
+        if (DateOnly.TryParseExact(s: _fromText, format: "yyyy-MM-dd", provider: CultureInfo.InvariantCulture, style: DateTimeStyles.None, result: out var fromDate) &&
+            DateOnly.TryParseExact(s: _toText, format: "yyyy-MM-dd", provider: CultureInfo.InvariantCulture, style: DateTimeStyles.None, result: out var toDate))
         {
-            var from = new DateTimeOffset(fromDate.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
-            var to = new DateTimeOffset(toDate.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+            var from = new DateTimeOffset(dateTime: fromDate.ToDateTime(TimeOnly.MinValue), offset: TimeSpan.Zero);
+            var to = new DateTimeOffset(dateTime: toDate.ToDateTime(TimeOnly.MinValue), offset: TimeSpan.Zero);
             if (to > from)
             {
-                await ReloadAsync(from, to);
+                await ReloadAsync(explicitFrom: from, explicitTo: to);
             }
         }
     }
@@ -125,13 +128,13 @@
         }
         else
         {
-            (from, to, width) = RangeFor(_activeFilter, DateTimeOffset.UtcNow);
+            (from, to, width) = RangeFor(filter: _activeFilter, now: DateTimeOffset.UtcNow);
         }
 
         // Concurrent, not sequential: these are two independent queries, and awaiting them one after the
         // other would double the wait on a slow or unreachable proxy for no benefit.
-        var dayTask = UsageStore.LoadRollupAsync(from, to, width, "day");
-        var modelTask = UsageStore.LoadRollupAsync(from, to, width, "model");
+        var dayTask = UsageStore.LoadRollupAsync(from: from, to: to, width: width, groupBy: "day");
+        var modelTask = UsageStore.LoadRollupAsync(from: from, to: to, width: width, groupBy: "model");
         await Task.WhenAll(dayTask, modelTask);
         var dayBuckets = dayTask.Result;
         var modelBuckets = modelTask.Result;
@@ -140,31 +143,34 @@
         {
             // No live data yet (proxy unreachable, rollups unavailable, or genuinely no traffic in range) -
             // fall back to the offline/no-proxy demo, matching the plan's stated policy for this tab.
-            BuildCharts(MockData.TokenBuckets, MockData.ModelShares);
+            BuildCharts(tokenBuckets: MockData.TokenBuckets, modelShares: MockData.ModelShares);
         }
         else
         {
             var tokenBuckets = dayBuckets
                 .OrderBy(b => b.BucketStartUtc)
-                .Select(b => new TokenBucket(FormatSlot(b.BucketStartUtc, width), b.PromptTokens, b.CompletionTokens))
+                .Select(b => new TokenBucket(Slot: FormatSlot(bucketStartUtc: b.BucketStartUtc, width: width), Prompt: b.PromptTokens, Completion: b.CompletionTokens))
                 .ToList();
 
             var totalRequests = modelBuckets.Sum(b => b.Requests);
             var modelShares = modelBuckets
                 .OrderByDescending(b => b.Requests)
                 .Select(b => new ModelShare(
-                    b.GroupKey,
-                    totalRequests == 0 ? 0m : Math.Round((decimal)b.Requests / totalRequests * 100m, 1),
-                    ChartPalette.ColorFor(b.GroupKey)))
+                    Model: b.GroupKey,
+                    Value: totalRequests == 0 ? 0m : Math.Round(d: (decimal)b.Requests / totalRequests * 100m, 1),
+                    Color: ChartPalette.ColorFor(b.GroupKey)))
                 .ToList();
 
-            BuildCharts(tokenBuckets, modelShares);
+            BuildCharts(tokenBuckets: tokenBuckets, modelShares: modelShares);
         }
 
         StateHasChanged();
     }
 
-    /// <summary>Serializes the given buckets/shares into the histogram and donut chart-model JSON the <c>EChart</c> hosts render.</summary>
+    /// <summary>
+    /// Serializes the given buckets/shares into the histogram and donut chart-model JSON the <c>EChart</c> hosts
+    /// render.
+    /// </summary>
     private void BuildCharts(IReadOnlyList<TokenBucket> tokenBuckets, IReadOnlyList<ModelShare> modelShares)
     {
         _modelShares = modelShares;
@@ -172,36 +178,43 @@
         var yMax = GroupedBarsModel.DynamicYMax(
         [
             tokenBuckets.Select(b => b.Prompt).ToList(),
-            tokenBuckets.Select(b => b.Completion).ToList(),
+            tokenBuckets.Select(b => b.Completion).ToList()
         ]);
         var histogram = new GroupedBarsModel(
-            "Token Volume Histogram",
-            tokenBuckets.Select(b => b.Slot).ToList(),
-            yMax,
+            title: "Token Volume Histogram",
+            categories: tokenBuckets.Select(b => b.Slot).ToList(),
+            yMax: yMax,
+            series:
             [
-                new DistributionSeries("Prompt", "#1ed760", tokenBuckets.Select(b => b.Prompt).ToList()),
-                new DistributionSeries("Completion", "#10b981", tokenBuckets.Select(b => b.Completion).ToList()),
+                new DistributionSeries(Name: "Prompt", Color: "#1ed760", Data: tokenBuckets.Select(b => b.Prompt).ToList()),
+                new DistributionSeries(Name: "Completion", Color: "#10b981", Data: tokenBuckets.Select(b => b.Completion).ToList())
             ]);
         _histogramJson = ChartJson.Serialize(histogram);
 
         var donut = new DonutModel(
-            "Model Market Share",
-            modelShares.Select(s => new DistributionSlice(s.Model, s.Value, s.Color)).ToList());
+            title: "Model Market Share",
+            slices: modelShares.Select(s => new DistributionSlice(Model: s.Model, Value: s.Value, Color: s.Color)).ToList());
         _donutJson = ChartJson.Serialize(donut);
     }
 
     /// <summary>Maps a time-filter button to its (From, To, bucket width) query range anchored at <paramref name="now"/>.</summary>
-    private static (DateTimeOffset From, DateTimeOffset To, string Width) RangeFor(string filter, DateTimeOffset now) => filter switch
+    private static (DateTimeOffset From, DateTimeOffset To, string Width) RangeFor(string filter, DateTimeOffset now)
     {
-        "Day" => (now.AddDays(-1), now, "hour"),
-        "Month" => (now.AddMonths(-1), now, "day"),
-        "3-Month" => (now.AddMonths(-3), now, "day"),
-        "6-Month" => (now.AddMonths(-6), now, "day"),
-        "Year" => (now.AddYears(-1), now, "day"),
-        _ => (now.AddMonths(-1), now, "day"),
-    };
+        return filter switch
+        {
+            "Day" => (now.AddDays(-1), now, "hour"),
+            "Month" => (now.AddMonths(-1), now, "day"),
+            "3-Month" => (now.AddMonths(-3), now, "day"),
+            "6-Month" => (now.AddMonths(-6), now, "day"),
+            "Year" => (now.AddYears(-1), now, "day"),
+            _ => (now.AddMonths(-1), now, "day")
+        };
+    }
 
     /// <summary>Formats a bucket's local start time for the histogram's x-axis: "HH:mm" for hourly buckets, "MM/dd" otherwise.</summary>
-    private static string FormatSlot(DateTimeOffset bucketStartUtc, string width) =>
-        width == "hour" ? bucketStartUtc.ToLocalTime().ToString("HH:mm") : bucketStartUtc.ToLocalTime().ToString("MM/dd");
+    private static string FormatSlot(DateTimeOffset bucketStartUtc, string width)
+    {
+        return width == "hour" ? bucketStartUtc.ToLocalTime().ToString("HH:mm") : bucketStartUtc.ToLocalTime().ToString("MM/dd");
+    }
+
 }

@@ -54,8 +54,11 @@ public static class GuiLogging
     /// that configuration is missing or unusable.
     /// </summary>
     /// <returns>A configured logger; never one without a sink.</returns>
-    public static Logger CreateDefaultLogger() =>
-        CreateLogger(BuildConfiguration(AppContext.BaseDirectory), FallbackLogPath());
+    public static Logger CreateDefaultLogger()
+    {
+        return CreateLogger(configuration: BuildConfiguration(AppContext.BaseDirectory),
+            fallbackPath: FallbackLogPath());
+    }
 
     /// <summary>
     /// The built-in log path used when configuration names none:
@@ -64,11 +67,14 @@ public static class GuiLogging
     /// environment variable so it still resolves for an identity that has no such variable set.
     /// </summary>
     /// <returns>The absolute path of the fallback rolling log file.</returns>
-    public static string FallbackLogPath() => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "TotallyHotArcRouter",
-        "logs",
-        "arcrouter-gui-.log");
+    public static string FallbackLogPath()
+    {
+        return Path.Combine(
+            path1: Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            path2: "TotallyHotArcRouter",
+            path3: "logs",
+            path4: "arcrouter-gui-.log");
+    }
 
     /// <summary>
     /// Reads <see cref="ConfigurationFileName"/> from <paramref name="basePath"/> and layers the expanded
@@ -84,7 +90,7 @@ public static class GuiLogging
     {
         var configured = new ConfigurationBuilder()
             .SetBasePath(basePath)
-            .AddJsonFile(ConfigurationFileName, optional: true, reloadOnChange: false)
+            .AddJsonFile(path: ConfigurationFileName, true, false)
             .Build();
 
         var expandedPaths = ResolveFileSinkPaths(configured);
@@ -117,9 +123,7 @@ public static class GuiLogging
         {
             var path = sink.GetSection("Args:path");
             if (!string.IsNullOrWhiteSpace(path.Value))
-            {
-                overrides.Add(new KeyValuePair<string, string?>(path.Path, ExpandLogPath(path.Value)));
-            }
+                overrides.Add(new KeyValuePair<string, string?>(key: path.Path, value: ExpandLogPath(path.Value)));
         }
 
         return overrides;
@@ -139,14 +143,11 @@ public static class GuiLogging
     /// <returns>The absolute path the file sink should write to.</returns>
     public static string ExpandLogPath(string? configuredPath)
     {
-        if (string.IsNullOrWhiteSpace(configuredPath))
-        {
-            return FallbackLogPath();
-        }
+        if (string.IsNullOrWhiteSpace(configuredPath)) return FallbackLogPath();
 
         var expanded = Environment.ExpandEnvironmentVariables(configuredPath);
 
-        return expanded.Contains('%', StringComparison.Ordinal)
+        return expanded.Contains('%', comparisonType: StringComparison.Ordinal)
             ? FallbackLogPath()
             : Path.GetFullPath(expanded);
     }
@@ -167,9 +168,10 @@ public static class GuiLogging
         {
             var withoutConfiguration = CreateFallbackLogger(fallbackPath);
             withoutConfiguration.Warning(
+                messageTemplate:
                 "No Serilog sinks are configured in {ConfigurationFile}; logging to the built-in file sink at {LogPath} instead.",
-                ConfigurationFileName,
-                fallbackPath);
+                propertyValue0: ConfigurationFileName,
+                propertyValue1: fallbackPath);
             return withoutConfiguration;
         }
 
@@ -190,10 +192,11 @@ public static class GuiLogging
         {
             var withBrokenConfiguration = CreateFallbackLogger(fallbackPath);
             withBrokenConfiguration.Error(
-                ex,
+                exception: ex,
+                messageTemplate:
                 "Serilog configuration in {ConfigurationFile} could not be applied; logging to the built-in file sink at {LogPath} instead.",
-                ConfigurationFileName,
-                fallbackPath);
+                propertyValue0: ConfigurationFileName,
+                propertyValue1: fallbackPath);
             return withBrokenConfiguration;
         }
     }
@@ -205,14 +208,16 @@ public static class GuiLogging
     /// </summary>
     /// <param name="path">The absolute rolling log file path to write to.</param>
     /// <returns>A logger writing to <paramref name="path"/>.</returns>
-    private static Logger CreateFallbackLogger(string path) =>
-        new LoggerConfiguration()
+    private static Logger CreateFallbackLogger(string path)
+    {
+        return new LoggerConfiguration()
             .MinimumLevel.Debug()
             .Enrich.FromLogContext()
             .WriteTo.File(
-                path,
+                path: path,
                 rollingInterval: RollingInterval.Day,
                 retainedFileCountLimit: 30,
                 outputTemplate: FallbackOutputTemplate)
             .CreateLogger();
+    }
 }

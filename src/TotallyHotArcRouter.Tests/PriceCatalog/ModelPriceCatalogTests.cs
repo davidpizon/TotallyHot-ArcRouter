@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.PriceCatalog.Sources;
@@ -14,22 +15,26 @@ public class ModelPriceCatalogTests
 {
     private static readonly TimeSpan Floor = TimeSpan.FromHours(24);
 
-    private static ModelPriceCatalog CreateCatalog(PriceRepository repository) =>
-        new(repository, NullLogger<ModelPriceCatalog>.Instance);
+    private static ModelKey Key => new(ModelName: "claude-opus", Provider: "anthropic");
+
+    private static ModelPriceCatalog CreateCatalog(PriceRepository repository)
+    {
+        return new ModelPriceCatalog(repository: repository, logger: NullLogger<ModelPriceCatalog>.Instance);
+    }
 
     [Fact]
     public void GetBestPriceForModel_StandardContext_ReportsStandardRatesUntouched()
     {
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
-        WriteFullyTieredRow(repository, DateTimeOffset.UtcNow);
+        WriteFullyTieredRow(repository: repository, fetchedAt: DateTimeOffset.UtcNow);
         var catalog = CreateCatalog(repository);
 
-        var price = catalog.GetBestPriceForModel(Key, PriceContext.Standard);
+        var price = catalog.GetBestPriceForModel(key: Key, context: PriceContext.Standard);
 
         Assert.NotNull(price);
-        Assert.Equal(15.00m, price!.InputPerMillionTokens);
-        Assert.Equal(75.00m, price.OutputPerMillionTokens);
+        Assert.Equal(15.00m, actual: price!.InputPerMillionTokens);
+        Assert.Equal(75.00m, actual: price.OutputPerMillionTokens);
     }
 
     [Fact]
@@ -37,14 +42,14 @@ public class ModelPriceCatalogTests
     {
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
-        WriteFullyTieredRow(repository, DateTimeOffset.UtcNow);
+        WriteFullyTieredRow(repository: repository, fetchedAt: DateTimeOffset.UtcNow);
         var catalog = CreateCatalog(repository);
 
-        var price = catalog.GetBestPriceForModel(Key, new PriceContext(IsBatchRequest: true, RepeatsCachedContext: false));
+        var price = catalog.GetBestPriceForModel(key: Key, context: new PriceContext(true, false));
 
         Assert.NotNull(price);
-        Assert.Equal(7.50m, price!.InputPerMillionTokens);
-        Assert.Equal(37.50m, price.OutputPerMillionTokens);
+        Assert.Equal(7.50m, actual: price!.InputPerMillionTokens);
+        Assert.Equal(37.50m, actual: price.OutputPerMillionTokens);
     }
 
     [Fact]
@@ -55,14 +60,14 @@ public class ModelPriceCatalogTests
         // any discount at all - would under-report spend, the one direction budget enforcement must not err.
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
-        WriteRow(repository, DateTimeOffset.UtcNow, cachedInput: null, batchInput: null, batchOutput: null);
+        WriteRow(repository: repository, fetchedAt: DateTimeOffset.UtcNow, null, null, null);
         var catalog = CreateCatalog(repository);
 
-        var price = catalog.GetBestPriceForModel(Key, new PriceContext(IsBatchRequest: true, RepeatsCachedContext: false));
+        var price = catalog.GetBestPriceForModel(key: Key, context: new PriceContext(true, false));
 
         Assert.NotNull(price);
-        Assert.Equal(15.00m, price!.InputPerMillionTokens);
-        Assert.Equal(75.00m, price.OutputPerMillionTokens);
+        Assert.Equal(15.00m, actual: price!.InputPerMillionTokens);
+        Assert.Equal(75.00m, actual: price.OutputPerMillionTokens);
     }
 
     [Fact]
@@ -70,17 +75,17 @@ public class ModelPriceCatalogTests
     {
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
-        WriteFullyTieredRow(repository, DateTimeOffset.UtcNow);
+        WriteFullyTieredRow(repository: repository, fetchedAt: DateTimeOffset.UtcNow);
         var catalog = CreateCatalog(repository);
 
-        var price = catalog.GetBestPriceForModel(Key, new PriceContext(IsBatchRequest: false, RepeatsCachedContext: true));
+        var price = catalog.GetBestPriceForModel(key: Key, context: new PriceContext(false, true));
 
         Assert.NotNull(price);
-        Assert.Equal(1.50m, price!.InputPerMillionTokens);
+        Assert.Equal(1.50m, actual: price!.InputPerMillionTokens);
 
         // Output is unaffected: caching discounts input tokens only, and a regression that discounted
         // generation too would silently halve every projected cost.
-        Assert.Equal(75.00m, price.OutputPerMillionTokens);
+        Assert.Equal(75.00m, actual: price.OutputPerMillionTokens);
     }
 
     [Fact]
@@ -88,13 +93,13 @@ public class ModelPriceCatalogTests
     {
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
-        WriteRow(repository, DateTimeOffset.UtcNow, cachedInput: null, batchInput: null, batchOutput: null);
+        WriteRow(repository: repository, fetchedAt: DateTimeOffset.UtcNow, null, null, null);
         var catalog = CreateCatalog(repository);
 
-        var price = catalog.GetBestPriceForModel(Key, new PriceContext(IsBatchRequest: false, RepeatsCachedContext: true));
+        var price = catalog.GetBestPriceForModel(key: Key, context: new PriceContext(false, true));
 
         Assert.NotNull(price);
-        Assert.Equal(15.00m, price!.InputPerMillionTokens);
+        Assert.Equal(15.00m, actual: price!.InputPerMillionTokens);
     }
 
     [Fact]
@@ -105,14 +110,14 @@ public class ModelPriceCatalogTests
         // discount because caching says nothing about generation.
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
-        WriteFullyTieredRow(repository, DateTimeOffset.UtcNow);
+        WriteFullyTieredRow(repository: repository, fetchedAt: DateTimeOffset.UtcNow);
         var catalog = CreateCatalog(repository);
 
-        var price = catalog.GetBestPriceForModel(Key, new PriceContext(IsBatchRequest: true, RepeatsCachedContext: true));
+        var price = catalog.GetBestPriceForModel(key: Key, context: new PriceContext(true, true));
 
         Assert.NotNull(price);
-        Assert.Equal(1.50m, price!.InputPerMillionTokens);
-        Assert.Equal(37.50m, price.OutputPerMillionTokens);
+        Assert.Equal(1.50m, actual: price!.InputPerMillionTokens);
+        Assert.Equal(37.50m, actual: price.OutputPerMillionTokens);
     }
 
     [Fact]
@@ -123,16 +128,16 @@ public class ModelPriceCatalogTests
         // clobbered them, a batch request's real cache reads would be repriced at the batch input rate.
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
-        WriteFullyTieredRow(repository, DateTimeOffset.UtcNow);
+        WriteFullyTieredRow(repository: repository, fetchedAt: DateTimeOffset.UtcNow);
         var catalog = CreateCatalog(repository);
 
-        var price = catalog.GetBestPriceForModel(Key, new PriceContext(IsBatchRequest: true, RepeatsCachedContext: true));
+        var price = catalog.GetBestPriceForModel(key: Key, context: new PriceContext(true, true));
 
         Assert.NotNull(price);
-        Assert.Equal(1.50m, price!.CacheReadPerMillionTokens);
-        Assert.Equal(18.75m, price.CacheWritePerMillionTokens);
-        Assert.Equal(7.50m, price.BatchInputPerMillionTokens);
-        Assert.Equal(37.50m, price.BatchOutputPerMillionTokens);
+        Assert.Equal(1.50m, actual: price!.CacheReadPerMillionTokens);
+        Assert.Equal(18.75m, actual: price.CacheWritePerMillionTokens);
+        Assert.Equal(7.50m, actual: price.BatchInputPerMillionTokens);
+        Assert.Equal(37.50m, actual: price.BatchOutputPerMillionTokens);
     }
 
     [Fact]
@@ -142,11 +147,11 @@ public class ModelPriceCatalogTests
         // nothing, and routing would rather decline to rank than steer on a price that may have moved.
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
-        WriteFullyTieredRow(repository, DateTimeOffset.UtcNow.AddDays(-30));
+        WriteFullyTieredRow(repository: repository, fetchedAt: DateTimeOffset.UtcNow.AddDays(-30));
         var catalog = CreateCatalog(repository);
 
-        Assert.NotNull(catalog.GetBestPriceForModel(Key, PriceContext.Standard));
-        Assert.Null(catalog.GetFreshPriceForRouting(Key, PriceContext.Standard, Floor));
+        Assert.NotNull(catalog.GetBestPriceForModel(key: Key, context: PriceContext.Standard));
+        Assert.Null(catalog.GetFreshPriceForRouting(key: Key, context: PriceContext.Standard, maxAge: Floor));
     }
 
     [Fact]
@@ -154,13 +159,13 @@ public class ModelPriceCatalogTests
     {
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
-        WriteFullyTieredRow(repository, DateTimeOffset.UtcNow.AddHours(-1));
+        WriteFullyTieredRow(repository: repository, fetchedAt: DateTimeOffset.UtcNow.AddHours(-1));
         var catalog = CreateCatalog(repository);
 
-        var price = catalog.GetFreshPriceForRouting(Key, new PriceContext(IsBatchRequest: true, RepeatsCachedContext: false), Floor);
+        var price = catalog.GetFreshPriceForRouting(key: Key, context: new PriceContext(true, false), maxAge: Floor);
 
         Assert.NotNull(price);
-        Assert.Equal(7.50m, price!.InputPerMillionTokens);
+        Assert.Equal(7.50m, actual: price!.InputPerMillionTokens);
     }
 
     [Fact]
@@ -171,7 +176,7 @@ public class ModelPriceCatalogTests
         // take the caller down.
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
-        WriteFullyTieredRow(repository, DateTimeOffset.UtcNow);
+        WriteFullyTieredRow(repository: repository, fetchedAt: DateTimeOffset.UtcNow);
         var catalog = CreateCatalog(repository);
 
         // Pooled connections keep the file handle open even after the row above is committed, so the
@@ -181,12 +186,12 @@ public class ModelPriceCatalogTests
         // native sqlite3 handle out from under a completely different test's in-flight query.
         using (var connection = temp.Database.OpenConnection())
         {
-            Microsoft.Data.Sqlite.SqliteConnection.ClearPool(connection);
+            SqliteConnection.ClearPool(connection);
         }
 
-        Directory.Delete(Path.GetDirectoryName(temp.Path_)!, recursive: true);
+        Directory.Delete(path: Path.GetDirectoryName(temp.Path_)!, true);
 
-        Assert.Null(catalog.GetBestPriceForModel(Key, PriceContext.Standard));
+        Assert.Null(catalog.GetBestPriceForModel(key: Key, context: PriceContext.Standard));
     }
 
     [Fact]
@@ -196,10 +201,10 @@ public class ModelPriceCatalogTests
         var repository = temp.CreateRepository();
         var catalog = CreateCatalog(repository);
 
-        var missing = new ModelKey("never-heard-of-it", "nowhere");
+        var missing = new ModelKey(ModelName: "never-heard-of-it", Provider: "nowhere");
 
-        Assert.Null(catalog.GetBestPriceForModel(missing, PriceContext.Standard));
-        Assert.Null(catalog.GetFreshPriceForRouting(missing, PriceContext.Standard, Floor));
+        Assert.Null(catalog.GetBestPriceForModel(key: missing, context: PriceContext.Standard));
+        Assert.Null(catalog.GetFreshPriceForRouting(key: missing, context: PriceContext.Standard, maxAge: Floor));
     }
 
     [Fact]
@@ -210,18 +215,21 @@ public class ModelPriceCatalogTests
         // Invalidate is what the ingestion service calls once a cycle has actually committed rows.
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
-        WriteFullyTieredRow(repository, DateTimeOffset.UtcNow);
+        WriteFullyTieredRow(repository: repository, fetchedAt: DateTimeOffset.UtcNow);
         var catalog = CreateCatalog(repository);
 
-        Assert.Equal(15.00m, catalog.GetBestPriceForModel(Key, PriceContext.Standard)!.InputPerMillionTokens);
+        Assert.Equal(15.00m,
+            actual: catalog.GetBestPriceForModel(key: Key, context: PriceContext.Standard)!.InputPerMillionTokens);
 
-        WriteRow(repository, DateTimeOffset.UtcNow, cachedInput: 1.50m, batchInput: 7.50m, batchOutput: 37.50m, input: 99.00m);
+        WriteRow(repository: repository, fetchedAt: DateTimeOffset.UtcNow, 1.50m, 7.50m, 37.50m, 99.00m);
 
-        Assert.Equal(15.00m, catalog.GetBestPriceForModel(Key, PriceContext.Standard)!.InputPerMillionTokens);
+        Assert.Equal(15.00m,
+            actual: catalog.GetBestPriceForModel(key: Key, context: PriceContext.Standard)!.InputPerMillionTokens);
 
         catalog.Invalidate();
 
-        Assert.Equal(99.00m, catalog.GetBestPriceForModel(Key, PriceContext.Standard)!.InputPerMillionTokens);
+        Assert.Equal(99.00m,
+            actual: catalog.GetBestPriceForModel(key: Key, context: PriceContext.Standard)!.InputPerMillionTokens);
     }
 
     [Fact]
@@ -233,19 +241,20 @@ public class ModelPriceCatalogTests
         var repository = temp.CreateRepository();
         var catalog = CreateCatalog(repository);
 
-        Assert.Null(catalog.GetBestPriceForModel(Key, PriceContext.Standard));
+        Assert.Null(catalog.GetBestPriceForModel(key: Key, context: PriceContext.Standard));
 
-        WriteFullyTieredRow(repository, DateTimeOffset.UtcNow);
-        Assert.Null(catalog.GetBestPriceForModel(Key, PriceContext.Standard));
+        WriteFullyTieredRow(repository: repository, fetchedAt: DateTimeOffset.UtcNow);
+        Assert.Null(catalog.GetBestPriceForModel(key: Key, context: PriceContext.Standard));
 
         catalog.Invalidate();
-        Assert.NotNull(catalog.GetBestPriceForModel(Key, PriceContext.Standard));
+        Assert.NotNull(catalog.GetBestPriceForModel(key: Key, context: PriceContext.Standard));
     }
 
-    private static ModelKey Key => new("claude-opus", "anthropic");
-
-    private static void WriteFullyTieredRow(PriceRepository repository, DateTimeOffset fetchedAt) =>
-        WriteRow(repository, fetchedAt, cachedInput: 1.50m, batchInput: 7.50m, batchOutput: 37.50m);
+    private static void WriteFullyTieredRow(PriceRepository repository, DateTimeOffset fetchedAt)
+    {
+        WriteRow(repository: repository, fetchedAt: fetchedAt, 1.50m, 7.50m,
+            37.50m);
+    }
 
     private static void WriteRow(
         PriceRepository repository,
@@ -253,21 +262,23 @@ public class ModelPriceCatalogTests
         decimal? cachedInput,
         decimal? batchInput,
         decimal? batchOutput,
-        decimal input = 15.00m) =>
+        decimal input = 15.00m)
+    {
         repository.UpsertPrices(
-            "litellm",
-            priorityScore: 0,
-            new[]
+            sourceName: "litellm",
+            0,
+            prices: new[]
             {
                 new NormalizedPrice(
-                    "claude-opus",
-                    "anthropic",
+                    ModelIdentifier: "claude-opus",
+                    Provider: "anthropic",
                     StandardInputPrice: input,
-                    StandardOutputPrice: 75.00m,
+                    75.00m,
                     CachedInputPrice: cachedInput,
                     BatchInputPrice: batchInput,
                     BatchOutputPrice: batchOutput,
-                    CacheWriteInputPrice: 18.75m),
+                    18.75m)
             },
-            fetchedAt);
+            asOfUtc: fetchedAt);
+    }
 }

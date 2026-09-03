@@ -30,47 +30,35 @@ internal static class ProviderCredentialResolver
     public static IReadOnlyList<KeyValuePair<string, string>> ResolveExtraHeaders(
         ProviderOptions provider, IEnvironmentVariableProvider environment, ISecretReader? secretReader = null)
     {
-        if (provider.Headers.Count == 0)
-        {
-            return [];
-        }
+        if (provider.Headers.Count == 0) return [];
 
         var resolved = new List<KeyValuePair<string, string>>(provider.Headers.Count);
         foreach (var header in provider.Headers)
         {
-            if (string.IsNullOrWhiteSpace(header.Name))
-            {
-                continue;
-            }
+            if (string.IsNullOrWhiteSpace(header.Name)) continue;
 
-            var value = ResolveHeaderValue(header, environment, secretReader);
-            if (value is not null)
-            {
-                resolved.Add(new KeyValuePair<string, string>(header.Name, value));
-            }
+            var value = ResolveHeaderValue(header: header, environment: environment, secretReader: secretReader);
+            if (value is not null) resolved.Add(new KeyValuePair<string, string>(key: header.Name, value: value));
         }
 
         return resolved;
     }
 
-    /// <summary>Resolves a single header's value through the literal → env-var → secret-store precedence documented on <see cref="ResolveExtraHeaders"/>.</summary>
-    private static string? ResolveHeaderValue(ProviderHeader header, IEnvironmentVariableProvider environment, ISecretReader? secretReader)
+    /// <summary>
+    /// Resolves a single header's value through the literal → env-var → secret-store precedence documented on
+    /// <see cref="ResolveExtraHeaders"/>.
+    /// </summary>
+    private static string? ResolveHeaderValue(ProviderHeader header, IEnvironmentVariableProvider environment,
+        ISecretReader? secretReader)
     {
-        if (!string.IsNullOrWhiteSpace(header.Value))
-        {
-            return header.Value;
-        }
+        if (!string.IsNullOrWhiteSpace(header.Value)) return header.Value;
 
-        if (!string.IsNullOrWhiteSpace(header.ValueEnvVar))
-        {
-            return environment.GetVariable(header.ValueEnvVar);
-        }
+        if (!string.IsNullOrWhiteSpace(header.ValueEnvVar)) return environment.GetVariable(header.ValueEnvVar);
 
         if (!string.IsNullOrWhiteSpace(header.ValueSecretRef) && secretReader is not null
-            && secretReader.TryRead(header.ValueSecretRef, out var secretValue))
-        {
+                                                              && secretReader.TryRead(name: header.ValueSecretRef,
+                                                                  value: out var secretValue))
             return secretValue;
-        }
 
         return null;
     }
@@ -102,13 +90,10 @@ internal static class ProviderCredentialResolver
     {
         List<string>? rejected = null;
 
-        foreach (var (headerName, headerValue) in ResolveExtraHeaders(provider, environment, secretReader))
-        {
-            if (!request.Headers.TryAddWithoutValidation(headerName, headerValue))
-            {
+        foreach (var (headerName, headerValue) in ResolveExtraHeaders(provider: provider, environment: environment,
+                     secretReader: secretReader))
+            if (!request.Headers.TryAddWithoutValidation(name: headerName, value: headerValue))
                 (rejected ??= []).Add(headerName);
-            }
-        }
 
         return rejected ?? (IReadOnlyList<string>)[];
     }
@@ -120,32 +105,26 @@ internal static class ProviderCredentialResolver
     /// Returns all-null when access key id or secret key isn't configured/resolvable, signaling "use the
     /// AWS SDK's own default credential chain" rather than a partially-resolved, broken override.
     /// </summary>
-    public static (string? AccessKeyId, string? SecretAccessKey, string? SessionToken) ResolveAwsCredentials(ProviderOptions provider, IEnvironmentVariableProvider environment)
+    public static (string? AccessKeyId, string? SecretAccessKey, string? SessionToken) ResolveAwsCredentials(
+        ProviderOptions provider, IEnvironmentVariableProvider environment)
     {
-        var accessKeyId = ResolveEnvVar(provider.AwsAccessKeyIdEnvVar, environment);
-        var secretAccessKey = ResolveEnvVar(provider.AwsSecretAccessKeyEnvVar, environment);
+        var accessKeyId = ResolveEnvVar(envVarName: provider.AwsAccessKeyIdEnvVar, environment: environment);
+        var secretAccessKey = ResolveEnvVar(envVarName: provider.AwsSecretAccessKeyEnvVar, environment: environment);
 
         // Both halves are required; a blank one - the env var unset, or set to an empty/whitespace value -
         // means "not resolvable" and must fall back to the SDK's default credential chain rather than
         // produce a half-configured override that only fails at call time.
-        if (accessKeyId is null || secretAccessKey is null)
-        {
-            return (null, null, null);
-        }
+        if (accessKeyId is null || secretAccessKey is null) return (null, null, null);
 
-        var sessionToken = ResolveEnvVar(provider.AwsSessionTokenEnvVar, environment);
+        var sessionToken = ResolveEnvVar(envVarName: provider.AwsSessionTokenEnvVar, environment: environment);
         return (accessKeyId, secretAccessKey, sessionToken);
 
         static string? ResolveEnvVar(string? envVarName, IEnvironmentVariableProvider environment)
         {
-            if (string.IsNullOrWhiteSpace(envVarName))
-            {
-                return null;
-            }
+            if (string.IsNullOrWhiteSpace(envVarName)) return null;
 
             var value = environment.GetVariable(envVarName);
             return string.IsNullOrWhiteSpace(value) ? null : value;
         }
     }
 }
-

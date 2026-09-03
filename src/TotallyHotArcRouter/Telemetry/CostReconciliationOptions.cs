@@ -15,23 +15,6 @@ public sealed class CostReconciliationOptions
     public int PollIntervalHours { get; init; } = 1;
 
     /// <summary>
-    /// Performs domain-level validation that is not fully expressible through data annotations, mirroring
-    /// <see cref="TotallyHot.ArcRouter.Models.CircuitBreakerOptions.EnsureValid"/>'s eager-validation pattern -
-    /// fail at startup, not when <see cref="System.Threading.PeriodicTimer"/> rejects a non-positive period.
-    /// </summary>
-    /// <exception cref="OptionsValidationException">Thrown when <see cref="PollIntervalHours"/> is not positive.</exception>
-    public void EnsureValid()
-    {
-        if (PollIntervalHours < 1)
-        {
-            throw new OptionsValidationException(
-                nameof(CostReconciliationOptions),
-                typeof(CostReconciliationOptions),
-                [$"PollIntervalHours must be at least 1 (was {PollIntervalHours})."]);
-        }
-    }
-
-    /// <summary>
     /// Gets the percentage difference between a provider's reported cost and the local estimate above
     /// which the delta is logged at Warning instead of Debug - a persistently large gap likely means the
     /// local price table is wrong for that provider's models, not that anything is broken. Default 20%.
@@ -44,7 +27,23 @@ public sealed class CostReconciliationOptions
     /// <see cref="ProviderReconciliationOptions.AdminApiKeyEnvVar"/> resolving to a non-empty value, has no
     /// reconciler registered - reconciliation is optional per provider, per §5.8.
     /// </summary>
-    public Dictionary<string, ProviderReconciliationOptions> Providers { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, ProviderReconciliationOptions> Providers { get; init; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Performs domain-level validation that is not fully expressible through data annotations, mirroring
+    /// <see cref="TotallyHot.ArcRouter.Models.CircuitBreakerOptions.EnsureValid"/>'s eager-validation pattern -
+    /// fail at startup, not when <see cref="System.Threading.PeriodicTimer"/> rejects a non-positive period.
+    /// </summary>
+    /// <exception cref="OptionsValidationException">Thrown when <see cref="PollIntervalHours"/> is not positive.</exception>
+    public void EnsureValid()
+    {
+        if (PollIntervalHours < 1)
+            throw new OptionsValidationException(
+                optionsName: nameof(CostReconciliationOptions),
+                optionsType: typeof(CostReconciliationOptions),
+                failureMessages: [$"PollIntervalHours must be at least 1 (was {PollIntervalHours})."]);
+    }
 }
 
 /// <summary>Per-provider reconciliation configuration.</summary>

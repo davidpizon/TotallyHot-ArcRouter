@@ -5,8 +5,14 @@ namespace TotallyHot.ArcRouter.Update;
 /// <c>UpdateAdminGrpcService.GetUpdateStatus</c> - ephemeral, in-memory, operational state rather than
 /// data that needs to survive a restart (a restarted Router simply checks again).
 /// </summary>
-/// <param name="Result">The most recent <see cref="ReleaseCheckResult"/>, or <see langword="null"/> before the first check has completed.</param>
-/// <param name="CheckedAtUtc">When <paramref name="Result"/> was recorded, or <see langword="null"/> before the first check.</param>
+/// <param name="Result">
+/// The most recent <see cref="ReleaseCheckResult"/>, or <see langword="null"/> before the first check
+/// has completed.
+/// </param>
+/// <param name="CheckedAtUtc">
+/// When <paramref name="Result"/> was recorded, or <see langword="null"/> before the first
+/// check.
+/// </param>
 public sealed record UpdateStateSnapshot(ReleaseCheckResult? Result, DateTimeOffset? CheckedAtUtc);
 
 /// <summary>
@@ -16,7 +22,10 @@ public sealed record UpdateStateSnapshot(ReleaseCheckResult? Result, DateTimeOff
 /// </summary>
 public interface IUpdateStateStore
 {
-    /// <summary>Gets the current snapshot. Never <see langword="null"/>; before the first check, both members of the snapshot are <see langword="null"/>.</summary>
+    /// <summary>
+    /// Gets the current snapshot. Never <see langword="null"/>; before the first check, both members of the snapshot
+    /// are <see langword="null"/>.
+    /// </summary>
     UpdateStateSnapshot Current { get; }
 
     /// <summary>Records a fresh check outcome, timestamped now.</summary>

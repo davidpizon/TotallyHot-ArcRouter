@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.PriceCatalog;
@@ -14,14 +15,45 @@ internal sealed class TempDatabase : IDisposable
 {
     public TempDatabase()
     {
-        var directory = Path.Combine(Path.GetTempPath(), "arcrouter-tests", Guid.NewGuid().ToString("N"));
-        Path_ = Path.Combine(directory, "agent_telemetry.db");
+        var directory = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
+            path3: Guid.NewGuid().ToString("N"));
+        Path_ = Path.Combine(path1: directory, path2: "agent_telemetry.db");
         Database = new PriceCatalogDatabase(Options.Create(new StorageOptions { DatabasePath = Path_ }));
     }
 
     public string Path_ { get; }
 
     public PriceCatalogDatabase Database { get; }
+
+    public void Dispose()
+    {
+        // ClearPool (scoped to this test's own connection string), not the process-global ClearAllPools:
+        // under xUnit's parallel test execution, ClearAllPools can tear down a pooled native sqlite3
+        // handle out from under a completely different test's in-flight query, surfacing as a spurious
+        // ObjectDisposedException there. Guarded on the file already existing - a test that never called
+        // EnsureCreated() never opened a pooled connection (and its directory may not even exist), so
+        // there's nothing to clear.
+        if (File.Exists(Path_))
+            try
+            {
+                using var connection = Database.OpenConnection();
+                SqliteConnection.ClearPool(connection);
+            }
+            catch (SqliteException)
+            {
+                // Best-effort cleanup; a database mid-teardown on a busy CI box is not a test failure.
+            }
+
+        var directory = Path.GetDirectoryName(Path_);
+        try
+        {
+            if (directory is not null && Directory.Exists(directory)) Directory.Delete(path: directory, true);
+        }
+        catch (IOException)
+        {
+            // Best-effort cleanup; a locked file on a busy CI box is not a test failure.
+        }
+    }
 
     /// <summary>Creates the schema (seeding the known sources) and returns a price repository over it.</summary>
     public PriceRepository CreateRepository()
@@ -80,15 +112,15 @@ internal sealed class TempDatabase : IDisposable
         // DO UPDATE, unlike the production seed's DO NOTHING: this helper's whole job is to force a state,
         // and EnsureCreated has already seeded litellm by the time it runs.
         command.CommandText = """
-            INSERT INTO aggregator_sources (source_name, priority_score, enabled)
-            VALUES ($name, $priority, $enabled)
-            ON CONFLICT(source_name) DO UPDATE SET
-                enabled        = excluded.enabled,
-                priority_score = excluded.priority_score;
-            """;
-        command.Parameters.AddWithValue("$name", name);
-        command.Parameters.AddWithValue("$priority", priorityScore);
-        command.Parameters.AddWithValue("$enabled", enabled ? 1 : 0);
+                              INSERT INTO aggregator_sources (source_name, priority_score, enabled)
+                              VALUES ($name, $priority, $enabled)
+                              ON CONFLICT(source_name) DO UPDATE SET
+                                  enabled        = excluded.enabled,
+                                  priority_score = excluded.priority_score;
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$name", value: name);
+        command.Parameters.AddWithValue(parameterName: "$priority", value: priorityScore);
+        command.Parameters.AddWithValue(parameterName: "$enabled", value: enabled ? 1 : 0);
         command.ExecuteNonQuery();
     }
 
@@ -100,8 +132,8 @@ internal sealed class TempDatabase : IDisposable
     public PriceSourceToggleStore CreateToggleStore(PriceSourceRepository? repository = null)
     {
         var store = new PriceSourceToggleStore(
-            repository ?? CreateSourceRepository(),
-            NullLogger<PriceSourceToggleStore>.Instance);
+            repository: repository ?? CreateSourceRepository(),
+            logger: NullLogger<PriceSourceToggleStore>.Instance);
         store.Reload();
         return store;
     }
@@ -115,9 +147,9 @@ internal sealed class TempDatabase : IDisposable
         ProviderSpendRepository? spendRepository = null)
     {
         var store = new ProviderBudgetStore(
-            budgetRepository ?? CreateBudgetRepository(),
-            spendRepository ?? CreateSpendRepository(),
-            NullLogger<ProviderBudgetStore>.Instance);
+            budgetRepository: budgetRepository ?? CreateBudgetRepository(),
+            spendRepository: spendRepository ?? CreateSpendRepository(),
+            logger: NullLogger<ProviderBudgetStore>.Instance);
         store.Reload();
         return store;
     }
@@ -130,8 +162,8 @@ internal sealed class TempDatabase : IDisposable
     {
         Database.EnsureCreated();
         var store = new ToolCallCapabilityStore(
-            new ToolCallCapabilityRepository(Database),
-            NullLogger<ToolCallCapabilityStore>.Instance);
+            repository: new ToolCallCapabilityRepository(Database),
+            logger: NullLogger<ToolCallCapabilityStore>.Instance);
         store.Reload();
         return store;
     }
@@ -140,7 +172,7 @@ internal sealed class TempDatabase : IDisposable
     public UsageLedger CreateUsageLedger(IUsageRollupStore? rollupStore = null)
     {
         Database.EnsureCreated();
-        return new UsageLedger(Database, rollupStore, NullLogger<UsageLedger>.Instance);
+        return new UsageLedger(database: Database, rollupStore: rollupStore, logger: NullLogger<UsageLedger>.Instance);
     }
 
     /// <summary>Creates the schema and returns a <see cref="UsageRollupStore"/> over it.</summary>
@@ -148,9 +180,10 @@ internal sealed class TempDatabase : IDisposable
     {
         Database.EnsureCreated();
         return new UsageRollupStore(
-            Database,
-            Options.Create(new StorageOptions { DatabasePath = Path_, RollupTimezone = rollupTimezone }),
-            NullLogger<UsageRollupStore>.Instance);
+            database: Database,
+            storageOptions: Options.Create(new StorageOptions
+                { DatabasePath = Path_, RollupTimezone = rollupTimezone }),
+            logger: NullLogger<UsageRollupStore>.Instance);
     }
 
     /// <summary>Creates the schema and returns a <see cref="ModelAliasOverrideStore"/> over it.</summary>
@@ -166,40 +199,4 @@ internal sealed class TempDatabase : IDisposable
         Database.EnsureCreated();
         return new ProviderCostReconciliationStore(Database);
     }
-
-    public void Dispose()
-    {
-        // ClearPool (scoped to this test's own connection string), not the process-global ClearAllPools:
-        // under xUnit's parallel test execution, ClearAllPools can tear down a pooled native sqlite3
-        // handle out from under a completely different test's in-flight query, surfacing as a spurious
-        // ObjectDisposedException there. Guarded on the file already existing - a test that never called
-        // EnsureCreated() never opened a pooled connection (and its directory may not even exist), so
-        // there's nothing to clear.
-        if (File.Exists(Path_))
-        {
-            try
-            {
-                using var connection = Database.OpenConnection();
-                Microsoft.Data.Sqlite.SqliteConnection.ClearPool(connection);
-            }
-            catch (Microsoft.Data.Sqlite.SqliteException)
-            {
-                // Best-effort cleanup; a database mid-teardown on a busy CI box is not a test failure.
-            }
-        }
-
-        var directory = System.IO.Path.GetDirectoryName(Path_);
-        try
-        {
-            if (directory is not null && Directory.Exists(directory))
-            {
-                Directory.Delete(directory, recursive: true);
-            }
-        }
-        catch (IOException)
-        {
-            // Best-effort cleanup; a locked file on a busy CI box is not a test failure.
-        }
-    }
 }
-

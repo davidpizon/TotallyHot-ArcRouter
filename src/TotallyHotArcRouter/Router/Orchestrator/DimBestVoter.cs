@@ -36,10 +36,10 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 public sealed class DimBestVoter : IRoutingVoter
 {
     private readonly BenchmarkDatabase _database;
-    private readonly RouterMemory _routerMemory;
-    private readonly ILogger<DimBestVoter> _logger;
     private readonly string _liveMemoryPrefix;
+    private readonly ILogger<DimBestVoter> _logger;
     private readonly object _matrixLock = new();
+    private readonly RouterMemory _routerMemory;
     private DimensionLedger? _ledger;
     private bool _matrixLoadAttempted;
 
@@ -71,10 +71,10 @@ public sealed class DimBestVoter : IRoutingVoter
         _liveMemoryPrefix = qualityOptions.Value.LiveMemoryPrefix;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public string Name => VoterNames.DimBest;
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     /// <remarks>
     /// <see cref="VotingContext.Dimension"/> is the <em>live</em> <see cref="RouterMemory"/> key (typically
     /// <c>"live:" + dimension</c>, via <see cref="RouterDimension.ToLiveKey"/>), which is exactly what the
@@ -95,11 +95,8 @@ public sealed class DimBestVoter : IRoutingVoter
         var bestScore = double.NegativeInfinity;
         foreach (var candidate in context.Candidates)
         {
-            var blended = ledger.Predict(context.Dimension, candidate.ModelName);
-            if (blended is null)
-            {
-                continue;
-            }
+            var blended = ledger.Predict(dimension: context.Dimension, model: candidate.ModelName);
+            if (blended is null) continue;
 
             if (blended.Value > bestScore)
             {
@@ -110,7 +107,7 @@ public sealed class DimBestVoter : IRoutingVoter
 
         var vote = bestModel is null
             ? VoterVote.Abstain(Name)
-            : new VoterVote(Name, bestModel, Math.Clamp(bestScore, 0d, 1d));
+            : new VoterVote(VoterName: Name, ModelName: bestModel, Confidence: Math.Clamp(value: bestScore, 0d, 1d));
         return Task.FromResult(vote);
     }
 
@@ -124,13 +121,11 @@ public sealed class DimBestVoter : IRoutingVoter
     {
         lock (_matrixLock)
         {
-            if (_matrixLoadAttempted)
-            {
-                return _ledger!;
-            }
+            if (_matrixLoadAttempted) return _ledger!;
 
             _matrixLoadAttempted = true;
-            _ledger = new DimensionLedger(_routerMemory, LoadPriorMatrix(), _liveMemoryPrefix);
+            _ledger = new DimensionLedger(routerMemory: _routerMemory, priorMatrix: LoadPriorMatrix(),
+                liveMemoryPrefix: _liveMemoryPrefix);
             return _ledger;
         }
     }
@@ -145,6 +140,7 @@ public sealed class DimBestVoter : IRoutingVoter
         if (!File.Exists(_database.DatabasePath))
         {
             _logger.LogInformation(
+                message:
                 "dim_best voter found no synced CodeRouterBench corpus at {DatabasePath}; scoring from live RouterMemory only.",
                 _database.DatabasePath);
             return null;
@@ -152,12 +148,13 @@ public sealed class DimBestVoter : IRoutingVoter
 
         try
         {
-            return DimensionModelScoreMatrix.FromDatabase(_database, "probing");
+            return DimensionModelScoreMatrix.FromDatabase(database: _database, split: "probing");
         }
         catch (SqliteException ex)
         {
             _logger.LogWarning(
-                ex,
+                exception: ex,
+                message:
                 "dim_best voter could not read the CodeRouterBench corpus; scoring from live RouterMemory only.");
             return null;
         }

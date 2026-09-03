@@ -15,7 +15,7 @@ public class TranscriptRetentionServiceTests
     public async Task CheckAndPurgeAsync_UnderBothLimits_NoDeletes()
     {
         var store = new FakeTranscriptStore(rowCount: 30_000);
-        var service = CreateService(store, retentionDays: 30, maxRows: 50_000, enabled: true);
+        var service = CreateService(store: store, 30, 50_000, true);
 
         await service.CheckAndPurgeAsync(TestContext.Current.CancellationToken);
 
@@ -27,26 +27,26 @@ public class TranscriptRetentionServiceTests
     public async Task CheckAndPurgeAsync_ExceedsMaxRows_DeletesOldestFirst()
     {
         var store = new FakeTranscriptStore(rowCount: 60_000);
-        var service = CreateService(store, retentionDays: 30, maxRows: 50_000, enabled: true);
+        var service = CreateService(store: store, 30, 50_000, true);
 
         await service.CheckAndPurgeAsync(TestContext.Current.CancellationToken);
 
         // Should delete by overage and age
         Assert.True(store.DeleteOldestWasCalled);
         Assert.True(store.DeleteBeforeWasCalled);
-        Assert.Equal(10_000, store.LastDeleteOldestArgument);
+        Assert.Equal(10_000, actual: store.LastDeleteOldestArgument);
     }
 
     [Fact]
     public async Task CheckAndPurgeAsync_Disabled_NoOp()
     {
         var store = new FakeTranscriptStore(rowCount: 100_000);
-        var service = CreateService(store, retentionDays: 30, maxRows: 50_000, enabled: false);
+        var service = CreateService(store: store, 30, 50_000, false);
 
         await service.CheckAndPurgeAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(0, store.DeleteOldestCount);
-        Assert.Equal(0, store.DeleteBeforeCount);
+        Assert.Equal(0, actual: store.DeleteOldestCount);
+        Assert.Equal(0, actual: store.DeleteBeforeCount);
     }
 
     private static TranscriptRetentionService CreateService(
@@ -56,9 +56,9 @@ public class TranscriptRetentionServiceTests
         bool enabled)
     {
         return new TranscriptRetentionService(
-            NullLogger<TranscriptRetentionService>.Instance,
-            store,
-            Options.Create(new TranscriptOptions
+            logger: NullLogger<TranscriptRetentionService>.Instance,
+            transcriptStore: store,
+            options: Options.Create(new TranscriptOptions
             {
                 Enabled = enabled,
                 RetentionDays = retentionDays,
@@ -70,34 +70,49 @@ public class TranscriptRetentionServiceTests
     {
         private readonly int _rowCount;
 
+        public FakeTranscriptStore(int rowCount)
+        {
+            _rowCount = rowCount;
+        }
+
         public int DeleteOldestCount { get; private set; }
         public int LastDeleteOldestArgument { get; private set; }
         public int DeleteBeforeCount { get; private set; }
         public bool DeleteOldestWasCalled => DeleteOldestCount > 0;
         public bool DeleteBeforeWasCalled => DeleteBeforeCount > 0;
 
-        public FakeTranscriptStore(int rowCount)
+        public Task<long?> InsertAsync(TranscriptRecord record, CancellationToken cancellationToken = default)
         {
-            _rowCount = rowCount;
+            throw new NotSupportedException();
         }
 
-        public Task<long?> InsertAsync(TranscriptRecord record, CancellationToken cancellationToken = default) =>
+        public Task UpdateOutcomeAsync(string correlationId, double? score,
+            CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
 
-        public Task UpdateOutcomeAsync(string correlationId, double? score, CancellationToken cancellationToken = default) =>
+        public Task<IReadOnlyList<long>> LoadUnembeddedScoredAsync(int limit,
+            CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
 
-        public Task<IReadOnlyList<long>> LoadUnembeddedScoredAsync(int limit, CancellationToken cancellationToken = default) =>
+        public Task<TranscriptRecord?> GetTranscriptAsync(long id, CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
 
-        public Task<TranscriptRecord?> GetTranscriptAsync(long id, CancellationToken cancellationToken = default) =>
+        public Task LinkMemoryEntryAsync(long transcriptId, long memoryEntryId,
+            CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
 
-        public Task LinkMemoryEntryAsync(long transcriptId, long memoryEntryId, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
-        public Task<int> GetRowCountAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult(_rowCount);
+        public Task<int> GetRowCountAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(_rowCount);
+        }
 
         public Task<int> DeleteOldestAsync(int count, CancellationToken cancellationToken = default)
         {
@@ -112,19 +127,34 @@ public class TranscriptRetentionServiceTests
             return Task.FromResult(1000);
         }
 
-        public Task<int> DeleteAllAsync(CancellationToken cancellationToken = default) =>
+        public Task<int> DeleteAllAsync(CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
 
-        public Task<IReadOnlyDictionary<long, string>> LoadPromptTextByMemoryEntryIdAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyDictionary<long, string>>(new Dictionary<long, string>());
+        public Task<IReadOnlyDictionary<long, string>> LoadPromptTextByMemoryEntryIdAsync(
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<IReadOnlyDictionary<long, string>>(new Dictionary<long, string>());
+        }
 
-        public Task<IReadOnlyDictionary<string, ModelTokenAverage>> LoadObservedTokenAveragesAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyDictionary<string, ModelTokenAverage>>(new Dictionary<string, ModelTokenAverage>());
+        public Task<IReadOnlyDictionary<string, ModelTokenAverage>> LoadObservedTokenAveragesAsync(
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<IReadOnlyDictionary<string, ModelTokenAverage>>(
+                new Dictionary<string, ModelTokenAverage>());
+        }
 
-        public Task<IReadOnlyList<long>> LoadPendingQualityRescanAsync(string scorerVersion, int limit, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<long>>([]);
+        public Task<IReadOnlyList<long>> LoadPendingQualityRescanAsync(string scorerVersion, int limit,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<IReadOnlyList<long>>([]);
+        }
 
-        public Task MarkQualityRescannedAsync(long transcriptId, string scorerVersion, double? score, CancellationToken cancellationToken = default) =>
-            Task.CompletedTask;
+        public Task MarkQualityRescannedAsync(long transcriptId, string scorerVersion, double? score,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
     }
 }

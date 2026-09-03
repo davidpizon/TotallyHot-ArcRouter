@@ -31,22 +31,25 @@ public class ToolCallHistoryRendererTests
                         ["function"] = new JsonObject
                         {
                             ["name"] = "get_weather",
-                            ["arguments"] = """{"city":"Paris"}""",
-                        },
-                    },
-                },
+                            ["arguments"] = """{"city":"Paris"}"""
+                        }
+                    }
+                }
             },
-            new JsonObject { ["role"] = "tool", ["tool_call_id"] = "call_1", ["content"] = "17C" },
+            new JsonObject { ["role"] = "tool", ["tool_call_id"] = "call_1", ["content"] = "17C" }
         };
 
-        var rendered = ToolCallHistoryRenderer.Render(messages, ToolCallDialectRegistry.Llama3Json, ToolCallHistoryStyle.Delimited);
+        var rendered = ToolCallHistoryRenderer.Render(messages: messages, dialect: ToolCallDialectRegistry.Llama3Json,
+            style: ToolCallHistoryStyle.Delimited);
 
         var assistant = Assert.IsType<JsonObject>(rendered[1]);
         var content = assistant["content"]!.GetValue<string>();
 
-        Assert.Contains("get_weather", content, StringComparison.Ordinal);
-        Assert.Contains("Paris", content, StringComparison.Ordinal);
-        Assert.Contains("\"parameters\":{\"city\":\"Paris\"}", content, StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "get_weather", actualString: content,
+            comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "Paris", actualString: content, comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "\"parameters\":{\"city\":\"Paris\"}", actualString: content,
+            comparisonType: StringComparison.Ordinal);
     }
 
     [Theory]
@@ -74,22 +77,24 @@ public class ToolCallHistoryRendererTests
                         ["function"] = new JsonObject
                         {
                             ["name"] = "get_weather",
-                            ["arguments"] = """{"city":"Paris"}""",
-                        },
-                    },
-                },
-            },
+                            ["arguments"] = """{"city":"Paris"}"""
+                        }
+                    }
+                }
+            }
         };
 
         var style = dialect == ToolCallDialectRegistry.Constrained
             ? ToolCallHistoryStyle.JsonEnvelope
             : ToolCallHistoryStyle.Delimited;
 
-        var rendered = ToolCallHistoryRenderer.Render(messages, dialect, style);
+        var rendered = ToolCallHistoryRenderer.Render(messages: messages, dialect: dialect, style: style);
 
         var content = Assert.IsType<JsonObject>(rendered[0])["content"]!.GetValue<string>();
 
-        Assert.Contains("get_weather", content, StringComparison.Ordinal);
-        Assert.Contains("\"arguments\":{\"city\":\"Paris\"}", content, StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "get_weather", actualString: content,
+            comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "\"arguments\":{\"city\":\"Paris\"}", actualString: content,
+            comparisonType: StringComparison.Ordinal);
     }
 }

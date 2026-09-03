@@ -3,7 +3,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// <summary>
 /// The read surface for probed per-model context windows, consulted when answering Ollama's
 /// <c>POST /api/show</c> (<c>docs/router/ollama-show-capabilities-plan.md</c>).
-///
 /// <para>
 /// Deliberately separate from <see cref="IToolCallCapabilityStore"/> even though
 /// <see cref="ToolCallCapabilityStore"/> implements both. That interface is documented as the surface the

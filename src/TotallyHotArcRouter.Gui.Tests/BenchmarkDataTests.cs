@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using AwesomeAssertions;
 using Bunit;
 using TotallyHot.ArcRouter.Gui.Components;
@@ -13,12 +14,14 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 /// </summary>
 public sealed class BenchmarkDataTests
 {
-    private static Bunit.BunitContext NewContext(IBenchmarkDataAdminClient client) =>
-        NewContext(client, new FakeVoterClient());
-
-    private static Bunit.BunitContext NewContext(IBenchmarkDataAdminClient client, ILlmRouterModelAdminClient voterClient)
+    private static BunitContext NewContext(IBenchmarkDataAdminClient client)
     {
-        var ctx = new Bunit.BunitContext();
+        return NewContext(client: client, voterClient: new FakeVoterClient());
+    }
+
+    private static BunitContext NewContext(IBenchmarkDataAdminClient client, ILlmRouterModelAdminClient voterClient)
+    {
+        var ctx = new BunitContext();
         ctx.Services.AddSingleton(new BenchmarkDataStore(client));
         ctx.Services.AddSingleton(new LlmRouterModelStore(voterClient));
         return ctx;
@@ -27,8 +30,8 @@ public sealed class BenchmarkDataTests
     [Fact]
     public void Section_header_reads_task_matrix()
     {
-        using var ctx = NewContext(new FakeClient(BenchmarkDataAdminState.Current,
-            new BenchmarkFileStatusInfo("models.json", Synced: true, SizeBytes: 1_400, RowCount: 3, DateTimeOffset.UtcNow)));
+        using var ctx = NewContext(new FakeClient(state: BenchmarkDataAdminState.Current,
+            new BenchmarkFileStatusInfo(FileName: "models.json", true, 1_400, 3, SyncedAtUtc: DateTimeOffset.UtcNow)));
 
         var cut = ctx.Render<BenchmarkData>();
 
@@ -40,9 +43,10 @@ public sealed class BenchmarkDataTests
     public void Exactly_one_task_matrix_card_renders_regardless_of_file_count()
     {
         var files = Enumerable.Range(1, 8)
-            .Select(i => new BenchmarkFileStatusInfo($"file{i}.json", Synced: true, SizeBytes: 10, RowCount: 1, DateTimeOffset.UtcNow))
+            .Select(i =>
+                new BenchmarkFileStatusInfo(FileName: $"file{i}.json", true, 10, 1, SyncedAtUtc: DateTimeOffset.UtcNow))
             .ToArray();
-        using var ctx = NewContext(new FakeClient(BenchmarkDataAdminState.Current, files));
+        using var ctx = NewContext(new FakeClient(state: BenchmarkDataAdminState.Current, files: files));
 
         var cut = ctx.Render<BenchmarkData>();
 
@@ -55,24 +59,26 @@ public sealed class BenchmarkDataTests
     public void Current_state_renders_a_disabled_update_button_and_the_file_is_hidden_behind_the_disclosure()
     {
         var syncedAt = DateTimeOffset.UtcNow.AddHours(-1);
-        using var ctx = NewContext(new FakeClient(BenchmarkDataAdminState.Current,
-            new BenchmarkFileStatusInfo("models.json", Synced: true, SizeBytes: 1_400, RowCount: 3, syncedAt)));
+        using var ctx = NewContext(new FakeClient(state: BenchmarkDataAdminState.Current,
+            new BenchmarkFileStatusInfo(FileName: "models.json", true, 1_400, 3, SyncedAtUtc: syncedAt)));
 
         var cut = ctx.Render<BenchmarkData>();
 
         // Collapsed no longer means "absent from the DOM": the pane stays mounted so it can animate
         // shut as well as open, so the state to assert is the wrapper's (no .open, plus inert).
         var disclosure = cut.FindAll(".ls-disclosure")
-            .Single(d => d.InnerHtml.Contains("models.json", StringComparison.Ordinal));
+            .Single(d => d.InnerHtml.Contains(value: "models.json", comparisonType: StringComparison.Ordinal));
         disclosure.ClassList.Should().NotContain("open");
         disclosure.HasAttribute("inert").Should().BeTrue();
 
         // The per-card button is disabled once current - there is nothing for it to update - and
         // re-verifying against Hugging Face is now the top-of-page Resync button's job.
-        var button = cut.FindAll("button").First(b => b.TextContent.Contains("Update", StringComparison.Ordinal));
+        var button = cut.FindAll("button").First(b =>
+            b.TextContent.Contains(value: "Update", comparisonType: StringComparison.Ordinal));
         button.HasAttribute("disabled").Should().BeTrue();
 
-        cut.FindAll("button").First(b => b.TextContent.Contains("Show", StringComparison.Ordinal)).Click();
+        cut.FindAll("button")
+            .First(b => b.TextContent.Contains(value: "Show", comparisonType: StringComparison.Ordinal)).Click();
 
         cut.Markup.Should().Contain("models.json");
         cut.Markup.Should().Contain("3 rows");
@@ -81,14 +87,16 @@ public sealed class BenchmarkDataTests
     [Fact]
     public void Update_state_renders_an_enabled_update_button()
     {
-        using var ctx = NewContext(new FakeClient(BenchmarkDataAdminState.Update,
-            new BenchmarkFileStatusInfo("models.json", Synced: false, SizeBytes: 0, RowCount: 0, SyncedAtUtc: null)));
+        using var ctx = NewContext(new FakeClient(state: BenchmarkDataAdminState.Update,
+            new BenchmarkFileStatusInfo(FileName: "models.json", false, 0, 0, null)));
 
         var cut = ctx.Render<BenchmarkData>();
-        var button = cut.FindAll("button").First(b => b.TextContent.Contains("Update", StringComparison.Ordinal));
+        var button = cut.FindAll("button").First(b =>
+            b.TextContent.Contains(value: "Update", comparisonType: StringComparison.Ordinal));
         button.HasAttribute("disabled").Should().BeFalse();
 
-        cut.FindAll("button").First(b => b.TextContent.Contains("Show", StringComparison.Ordinal)).Click();
+        cut.FindAll("button")
+            .First(b => b.TextContent.Contains(value: "Show", comparisonType: StringComparison.Ordinal)).Click();
 
         cut.Markup.Should().Contain("Never synced");
     }
@@ -97,55 +105,57 @@ public sealed class BenchmarkDataTests
     public void The_disclosure_starts_collapsed_and_reveals_every_file_when_toggled()
     {
         var files = Enumerable.Range(1, 8)
-            .Select(i => new BenchmarkFileStatusInfo($"file{i}.json", Synced: true, SizeBytes: 10, RowCount: 1, DateTimeOffset.UtcNow))
+            .Select(i =>
+                new BenchmarkFileStatusInfo(FileName: $"file{i}.json", true, 10, 1, SyncedAtUtc: DateTimeOffset.UtcNow))
             .ToArray();
-        using var ctx = NewContext(new FakeClient(BenchmarkDataAdminState.Current, files));
+        using var ctx = NewContext(new FakeClient(state: BenchmarkDataAdminState.Current, files: files));
 
         var cut = ctx.Render<BenchmarkData>();
 
-        var toggle = cut.FindAll("button").First(b => b.TextContent.Contains("Show 8 files", StringComparison.Ordinal));
+        var toggle = cut.FindAll("button").First(b =>
+            b.TextContent.Contains(value: "Show 8 files", comparisonType: StringComparison.Ordinal));
         toggle.GetAttribute("aria-expanded").Should().Be("false");
 
         // The rows are rendered while collapsed - that is what lets the pane animate shut instead of
         // vanishing - so "collapsed" is the wrapper being closed and inert, not the rows being absent.
         var disclosure = cut.FindAll(".ls-disclosure")
-            .Single(d => d.InnerHtml.Contains("file1.json", StringComparison.Ordinal));
+            .Single(d => d.InnerHtml.Contains(value: "file1.json", comparisonType: StringComparison.Ordinal));
         disclosure.ClassList.Should().NotContain("open");
         disclosure.HasAttribute("inert").Should().BeTrue();
 
         toggle.Click();
 
-        cut.FindAll("button").First(b => b.TextContent.Contains("Hide files", StringComparison.Ordinal))
+        cut.FindAll("button").First(b =>
+                b.TextContent.Contains(value: "Hide files", comparisonType: StringComparison.Ordinal))
             .GetAttribute("aria-expanded").Should().Be("true");
         disclosure = cut.FindAll(".ls-disclosure")
-            .Single(d => d.InnerHtml.Contains("file1.json", StringComparison.Ordinal));
+            .Single(d => d.InnerHtml.Contains(value: "file1.json", comparisonType: StringComparison.Ordinal));
         disclosure.ClassList.Should().Contain("open");
         disclosure.HasAttribute("inert").Should().BeFalse();
-        foreach (var file in files)
-        {
-            cut.Markup.Should().Contain(file.FileName);
-        }
+        foreach (var file in files) cut.Markup.Should().Contain(file.FileName);
     }
 
     [Fact]
     public async Task Two_progress_bars_render_only_while_syncing_and_the_lower_one_names_the_current_file()
     {
         var tcs = new TaskCompletionSource();
-        var client = new FakeClient(BenchmarkDataAdminState.Update,
-            new BenchmarkFileStatusInfo("models.json", Synced: false, SizeBytes: 0, RowCount: 0, SyncedAtUtc: null))
+        var client = new FakeClient(state: BenchmarkDataAdminState.Update,
+            new BenchmarkFileStatusInfo(FileName: "models.json", false, 0, 0, null))
         {
             SyncEvents =
             [
                 new BenchmarkSyncEvent(
-                    Plan: new BenchmarkSyncPlanInfo([new BenchmarkSyncPlanFileInfo("models.json", 100)], TotalBytes: 100),
-                    Progress: null,
-                    FinalStatus: null),
+                    Plan: new BenchmarkSyncPlanInfo(
+                        Files: [new BenchmarkSyncPlanFileInfo(FileName: "models.json", 100)], 100),
+                    null,
+                    null),
                 new BenchmarkSyncEvent(
-                    Plan: null,
-                    Progress: new BenchmarkSyncProgressInfo("models.json", BenchmarkSyncStageInfo.Downloading, 40, null, null, TotalBytes: 100),
-                    FinalStatus: null),
+                    null,
+                    Progress: new BenchmarkSyncProgressInfo(FileName: "models.json",
+                        Stage: BenchmarkSyncStageInfo.Downloading, 40, null, null, 100),
+                    null)
             ],
-            HoldBeforeFinalStatus = tcs.Task,
+            HoldBeforeFinalStatus = tcs.Task
         };
         using var ctx = NewContext(client);
         var cut = ctx.Render<BenchmarkData>();
@@ -156,7 +166,8 @@ public sealed class BenchmarkDataTests
         // HoldBeforeFinalStatus below) keeps running after Click() returns, so the two progress bars
         // and their later disappearance are asserted via WaitForAssertion rather than by awaiting Click().
         await cut.InvokeAsync(() =>
-            cut.FindAll("button").First(b => b.TextContent.Contains("Update", StringComparison.Ordinal)).Click());
+            cut.FindAll("button")
+                .First(b => b.TextContent.Contains(value: "Update", comparisonType: StringComparison.Ordinal)).Click());
 
         cut.WaitForAssertion(() => cut.FindAll("[role=progressbar]").Should().HaveCount(2));
         cut.Markup.Should().Contain("models.json");
@@ -169,7 +180,8 @@ public sealed class BenchmarkDataTests
     [Fact]
     public void CheckFailed_state_renders_the_reason_and_a_disabled_button()
     {
-        using var ctx = NewContext(new FakeClient(BenchmarkDataAdminState.CheckFailed, Reason: "failed to connect"));
+        using var ctx =
+            NewContext(new FakeClient(state: BenchmarkDataAdminState.CheckFailed, Reason: "failed to connect"));
 
         var cut = ctx.Render<BenchmarkData>();
 
@@ -177,24 +189,27 @@ public sealed class BenchmarkDataTests
         cut.Markup.Should().Contain("failed to connect");
         // The per-card button stays disabled (an unknown freshness is not "an update is available"); the
         // label still surfaces "Check Failed" rather than a plain "Update" so the reason is visible.
-        var button = cut.FindAll("button").First(b => b.TextContent.Contains("Check Failed", StringComparison.Ordinal));
+        var button = cut.FindAll("button").First(b =>
+            b.TextContent.Contains(value: "Check Failed", comparisonType: StringComparison.Ordinal));
         button.HasAttribute("disabled").Should().BeTrue();
     }
 
     [Fact]
     public void Clicking_update_runs_a_sync_and_becomes_current()
     {
-        var client = new FakeClient(BenchmarkDataAdminState.Update,
-            new BenchmarkFileStatusInfo("models.json", Synced: false, SizeBytes: 0, RowCount: 0, SyncedAtUtc: null));
+        var client = new FakeClient(state: BenchmarkDataAdminState.Update,
+            new BenchmarkFileStatusInfo(FileName: "models.json", false, 0, 0, null));
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<BenchmarkData>();
-        cut.FindAll("button").First(b => b.TextContent.Contains("Update", StringComparison.Ordinal)).Click();
+        cut.FindAll("button")
+            .First(b => b.TextContent.Contains(value: "Update", comparisonType: StringComparison.Ordinal)).Click();
 
         client.SyncCount.Should().Be(1);
         // Once current, the button keeps its "Update" label but disables itself rather than exposing a
         // clickable "Re-verify"/"Current" affordance.
-        var button = cut.FindAll("button").First(b => b.TextContent.Contains("Update", StringComparison.Ordinal));
+        var button = cut.FindAll("button").First(b =>
+            b.TextContent.Contains(value: "Update", comparisonType: StringComparison.Ordinal));
         button.HasAttribute("disabled").Should().BeTrue();
     }
 
@@ -204,12 +219,13 @@ public sealed class BenchmarkDataTests
         // The individual per-card button disables itself once current, so this "Current -> sync, not
         // recheck" behavior (re-running the sync is the only way to confirm the ledger's recorded
         // checksums still match what's on disk) is now only reachable through the top Resync button.
-        var client = new FakeClient(BenchmarkDataAdminState.Current,
-            new BenchmarkFileStatusInfo("models.json", Synced: true, SizeBytes: 1_400, RowCount: 3, DateTimeOffset.UtcNow));
+        var client = new FakeClient(state: BenchmarkDataAdminState.Current,
+            new BenchmarkFileStatusInfo(FileName: "models.json", true, 1_400, 3, SyncedAtUtc: DateTimeOffset.UtcNow));
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<BenchmarkData>();
-        cut.FindAll("button").First(b => b.TextContent.Contains("Resync", StringComparison.Ordinal)).Click();
+        cut.FindAll("button")
+            .First(b => b.TextContent.Contains(value: "Resync", comparisonType: StringComparison.Ordinal)).Click();
 
         client.SyncCount.Should().Be(1);
         client.RecheckCount.Should().Be(0);
@@ -220,11 +236,12 @@ public sealed class BenchmarkDataTests
     {
         // Same reasoning as Resyncing_a_current_corpus_runs_a_sync_rather_than_a_recheck: the per-card
         // button is disabled in CheckFailed, so retrying the check now goes through Resync.
-        var client = new FakeClient(BenchmarkDataAdminState.CheckFailed, Reason: "boom");
+        var client = new FakeClient(state: BenchmarkDataAdminState.CheckFailed, Reason: "boom");
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<BenchmarkData>();
-        cut.FindAll("button").First(b => b.TextContent.Contains("Resync", StringComparison.Ordinal)).Click();
+        cut.FindAll("button")
+            .First(b => b.TextContent.Contains(value: "Resync", comparisonType: StringComparison.Ordinal)).Click();
 
         client.RecheckCount.Should().Be(1);
         client.SyncCount.Should().Be(0);
@@ -233,16 +250,17 @@ public sealed class BenchmarkDataTests
     [Fact]
     public void Resync_runs_both_cards_operations_together()
     {
-        var client = new FakeClient(BenchmarkDataAdminState.Update,
-            new BenchmarkFileStatusInfo("models.json", Synced: false, SizeBytes: 0, RowCount: 0, SyncedAtUtc: null));
+        var client = new FakeClient(state: BenchmarkDataAdminState.Update,
+            new BenchmarkFileStatusInfo(FileName: "models.json", false, 0, 0, null));
         var voterClient = new FakeVoterClient
         {
-            Files = [new LlmRouterModelFileStatusInfo("model.onnx", Synced: false, SizeBytes: 0, SyncedAtUtc: null, ChecksumVerified: false, IsOptional: false)],
+            Files = [new LlmRouterModelFileStatusInfo(FileName: "model.onnx", false, 0, null, false, false)]
         };
-        using var ctx = NewContext(client, voterClient);
+        using var ctx = NewContext(client: client, voterClient: voterClient);
 
         var cut = ctx.Render<BenchmarkData>();
-        cut.FindAll("button").First(b => b.TextContent.Contains("Resync", StringComparison.Ordinal)).Click();
+        cut.FindAll("button")
+            .First(b => b.TextContent.Contains(value: "Resync", comparisonType: StringComparison.Ordinal)).Click();
 
         client.SyncCount.Should().Be(1);
         voterClient.SyncCount.Should().Be(1);
@@ -252,50 +270,56 @@ public sealed class BenchmarkDataTests
     public async Task Resync_is_disabled_while_either_card_is_syncing()
     {
         var tcs = new TaskCompletionSource();
-        var client = new FakeClient(BenchmarkDataAdminState.Update,
-            new BenchmarkFileStatusInfo("models.json", Synced: false, SizeBytes: 0, RowCount: 0, SyncedAtUtc: null))
+        var client = new FakeClient(state: BenchmarkDataAdminState.Update,
+            new BenchmarkFileStatusInfo(FileName: "models.json", false, 0, 0, null))
         {
-            HoldBeforeFinalStatus = tcs.Task,
+            HoldBeforeFinalStatus = tcs.Task
         };
         using var ctx = NewContext(client);
         var cut = ctx.Render<BenchmarkData>();
 
         await cut.InvokeAsync(() =>
-            cut.FindAll("button").First(b => b.TextContent.Contains("Update", StringComparison.Ordinal)).Click());
+            cut.FindAll("button")
+                .First(b => b.TextContent.Contains(value: "Update", comparisonType: StringComparison.Ordinal)).Click());
 
         cut.WaitForAssertion(() =>
-            cut.FindAll("button").First(b => b.TextContent.Contains("Resync", StringComparison.Ordinal))
+            cut.FindAll("button").First(b =>
+                    b.TextContent.Contains(value: "Resync", comparisonType: StringComparison.Ordinal))
                 .HasAttribute("disabled").Should().BeTrue());
 
         tcs.SetResult();
 
         cut.WaitForAssertion(() =>
-            cut.FindAll("button").First(b => b.TextContent.Contains("Resync", StringComparison.Ordinal))
+            cut.FindAll("button").First(b =>
+                    b.TextContent.Contains(value: "Resync", comparisonType: StringComparison.Ordinal))
                 .HasAttribute("disabled").Should().BeFalse());
     }
 
     [Fact]
     public void A_failed_files_error_is_rendered_on_its_card()
     {
-        var client = new FakeClient(BenchmarkDataAdminState.Update,
-            new BenchmarkFileStatusInfo("models.json", Synced: false, SizeBytes: 0, RowCount: 0, SyncedAtUtc: null))
+        var client = new FakeClient(state: BenchmarkDataAdminState.Update,
+            new BenchmarkFileStatusInfo(FileName: "models.json", false, 0, 0, null))
         {
             SyncEvents =
             [
                 new BenchmarkSyncEvent(
-                    Plan: null,
-                    Progress: new BenchmarkSyncProgressInfo("models.json", BenchmarkSyncStageInfo.Failed, null, null, "checksum mismatch"),
-                    FinalStatus: null),
-                new BenchmarkSyncEvent(Plan: null, Progress: null, FinalStatus: new BenchmarkDataStatusInfo(
-                    BenchmarkDataAdminState.Update, null, DateTimeOffset.UtcNow,
-                    [new BenchmarkFileStatusInfo("models.json", Synced: false, SizeBytes: 0, RowCount: 0, SyncedAtUtc: null)])),
-            ],
+                    null,
+                    Progress: new BenchmarkSyncProgressInfo(FileName: "models.json",
+                        Stage: BenchmarkSyncStageInfo.Failed, null, null, Error: "checksum mismatch"),
+                    null),
+                new BenchmarkSyncEvent(null, null, FinalStatus: new BenchmarkDataStatusInfo(
+                    State: BenchmarkDataAdminState.Update, null, CheckedAtUtc: DateTimeOffset.UtcNow,
+                    Files: [new BenchmarkFileStatusInfo(FileName: "models.json", false, 0, 0, null)]))
+            ]
         };
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<BenchmarkData>();
-        cut.FindAll("button").First(b => b.TextContent.Contains("Update", StringComparison.Ordinal)).Click();
-        cut.FindAll("button").First(b => b.TextContent.Contains("Show", StringComparison.Ordinal)).Click();
+        cut.FindAll("button")
+            .First(b => b.TextContent.Contains(value: "Update", comparisonType: StringComparison.Ordinal)).Click();
+        cut.FindAll("button")
+            .First(b => b.TextContent.Contains(value: "Show", comparisonType: StringComparison.Ordinal)).Click();
 
         cut.Markup.Should().Contain("checksum mismatch");
     }
@@ -305,7 +329,7 @@ public sealed class BenchmarkDataTests
     {
         using var ctx = NewContext(new FakeClient
         {
-            StatusError = new BenchmarkDataAdminException("the router is not reachable.", isUnavailable: true),
+            StatusError = new BenchmarkDataAdminException(message: "the router is not reachable.", isUnavailable: true)
         });
 
         var cut = ctx.Render<BenchmarkData>();
@@ -321,7 +345,7 @@ public sealed class BenchmarkDataTests
         // address would assert an endpoint this client may never have been pointed at.
         using var ctx = NewContext(new FakeClient
         {
-            StatusError = new BenchmarkDataAdminException("the router is not reachable.", isUnavailable: true),
+            StatusError = new BenchmarkDataAdminException(message: "the router is not reachable.", isUnavailable: true)
         });
 
         var cut = ctx.Render<BenchmarkData>();
@@ -335,7 +359,7 @@ public sealed class BenchmarkDataTests
     {
         // Constructing a channel does not connect, so this stays offline; the panel reads this property to
         // name the address it actually failed to reach.
-        using var store = new BenchmarkDataStore(logger: null, serverAddress: "https://localhost:65111");
+        using var store = new BenchmarkDataStore(null, serverAddress: "https://localhost:65111");
 
         store.ServerAddress.Should().Be("https://localhost:65111");
     }
@@ -348,16 +372,17 @@ public sealed class BenchmarkDataTests
         // covers the Retry affordance rather than the address text, which the corpus test already covers.
         var voterClient = new FakeVoterClient
         {
-            StatusError = new LlmRouterModelAdminException("the router is not reachable.", isUnavailable: true),
+            StatusError = new LlmRouterModelAdminException(message: "the router is not reachable.", isUnavailable: true)
         };
-        using var ctx = NewContext(new FakeClient(BenchmarkDataAdminState.Current), voterClient);
+        using var ctx = NewContext(client: new FakeClient(BenchmarkDataAdminState.Current), voterClient: voterClient);
 
         var cut = ctx.Render<BenchmarkData>();
 
         cut.Markup.Should().Contain("Router unreachable");
         cut.Markup.Should().Contain("Could not reach the router.");
 
-        cut.FindAll("button").First(b => b.TextContent.Contains("Retry", StringComparison.Ordinal)).Click();
+        cut.FindAll("button")
+            .First(b => b.TextContent.Contains(value: "Retry", comparisonType: StringComparison.Ordinal)).Click();
 
         voterClient.GetStatusCount.Should().Be(2);
     }
@@ -370,11 +395,12 @@ public sealed class BenchmarkDataTests
         // re-verify already-cached files (checksum verification is in-memory only and doesn't survive a
         // process restart) is now the top Resync button's job.
         var voterClient = new FakeVoterClient();
-        using var ctx = NewContext(new FakeClient(BenchmarkDataAdminState.Current), voterClient);
+        using var ctx = NewContext(client: new FakeClient(BenchmarkDataAdminState.Current), voterClient: voterClient);
 
         var cut = ctx.Render<BenchmarkData>();
 
-        var button = cut.FindAll("button").Last(b => b.TextContent.Contains("Update", StringComparison.Ordinal));
+        var button = cut.FindAll("button")
+            .Last(b => b.TextContent.Contains(value: "Update", comparisonType: StringComparison.Ordinal));
         button.HasAttribute("disabled").Should().BeTrue();
     }
 
@@ -382,10 +408,11 @@ public sealed class BenchmarkDataTests
     public void Resyncing_a_current_voter_model_reruns_sync()
     {
         var voterClient = new FakeVoterClient();
-        using var ctx = NewContext(new FakeClient(BenchmarkDataAdminState.Current), voterClient);
+        using var ctx = NewContext(client: new FakeClient(BenchmarkDataAdminState.Current), voterClient: voterClient);
 
         var cut = ctx.Render<BenchmarkData>();
-        cut.FindAll("button").First(b => b.TextContent.Contains("Resync", StringComparison.Ordinal)).Click();
+        cut.FindAll("button")
+            .First(b => b.TextContent.Contains(value: "Resync", comparisonType: StringComparison.Ordinal)).Click();
 
         voterClient.SyncCount.Should().Be(1);
     }
@@ -394,10 +421,11 @@ public sealed class BenchmarkDataTests
     public void Exactly_one_voter_card_renders_regardless_of_file_count()
     {
         var files = Enumerable.Range(1, 5)
-            .Select(i => new LlmRouterModelFileStatusInfo($"file{i}.bin", Synced: true, SizeBytes: 10, DateTimeOffset.UtcNow, ChecksumVerified: true, IsOptional: false))
+            .Select(i => new LlmRouterModelFileStatusInfo(FileName: $"file{i}.bin", true, 10,
+                SyncedAtUtc: DateTimeOffset.UtcNow, true, false))
             .ToArray();
         var voterClient = new FakeVoterClient { Files = files };
-        using var ctx = NewContext(new FakeClient(BenchmarkDataAdminState.Current), voterClient);
+        using var ctx = NewContext(client: new FakeClient(BenchmarkDataAdminState.Current), voterClient: voterClient);
 
         var cut = ctx.Render<BenchmarkData>();
 
@@ -410,9 +438,13 @@ public sealed class BenchmarkDataTests
     {
         var voterClient = new FakeVoterClient
         {
-            Files = [new LlmRouterModelFileStatusInfo("model.onnx", Synced: true, SizeBytes: 10, DateTimeOffset.UtcNow, ChecksumVerified: true, IsOptional: false)],
+            Files =
+            [
+                new LlmRouterModelFileStatusInfo(FileName: "model.onnx", true, 10, SyncedAtUtc: DateTimeOffset.UtcNow,
+                    true, false)
+            ]
         };
-        using var ctx = NewContext(new FakeClient(BenchmarkDataAdminState.Current), voterClient);
+        using var ctx = NewContext(client: new FakeClient(BenchmarkDataAdminState.Current), voterClient: voterClient);
 
         var cut = ctx.Render<BenchmarkData>();
 
@@ -426,21 +458,23 @@ public sealed class BenchmarkDataTests
         var tcs = new TaskCompletionSource();
         var voterClient = new FakeVoterClient
         {
-            Files = [new LlmRouterModelFileStatusInfo("model.onnx", Synced: false, SizeBytes: 0, SyncedAtUtc: null, ChecksumVerified: false, IsOptional: false)],
+            Files = [new LlmRouterModelFileStatusInfo(FileName: "model.onnx", false, 0, null, false, false)],
             SyncEvents =
             [
                 new LlmRouterModelSyncEvent(
-                    Plan: new LlmRouterModelSyncPlanInfo([new LlmRouterModelSyncPlanFileInfo("model.onnx", 100)], TotalBytes: 100),
-                    Progress: null,
-                    FinalStatus: null),
+                    Plan: new LlmRouterModelSyncPlanInfo(
+                        Files: [new LlmRouterModelSyncPlanFileInfo(FileName: "model.onnx", 100)], 100),
+                    null,
+                    null),
                 new LlmRouterModelSyncEvent(
-                    Plan: null,
-                    Progress: new LlmRouterModelSyncProgressInfo("model.onnx", LlmRouterModelSyncStageInfo.Downloading, 40, null, TotalBytes: 100),
-                    FinalStatus: null),
+                    null,
+                    Progress: new LlmRouterModelSyncProgressInfo(FileName: "model.onnx",
+                        Stage: LlmRouterModelSyncStageInfo.Downloading, 40, null, 100),
+                    null)
             ],
-            HoldBeforeFinalStatus = tcs.Task,
+            HoldBeforeFinalStatus = tcs.Task
         };
-        using var ctx = NewContext(new FakeClient(BenchmarkDataAdminState.Current), voterClient);
+        using var ctx = NewContext(client: new FakeClient(BenchmarkDataAdminState.Current), voterClient: voterClient);
         var cut = ctx.Render<BenchmarkData>();
 
         cut.FindAll("[role=progressbar]").Should().BeEmpty();
@@ -448,7 +482,8 @@ public sealed class BenchmarkDataTests
         // The Task Matrix panel's own "Update" button is disabled here (its corpus is Current), so
         // Last(), not First(), reaches the voter section's enabled one.
         await cut.InvokeAsync(() =>
-            cut.FindAll("button").Last(b => b.TextContent.Contains("Update", StringComparison.Ordinal)).Click());
+            cut.FindAll("button")
+                .Last(b => b.TextContent.Contains(value: "Update", comparisonType: StringComparison.Ordinal)).Click());
 
         cut.WaitForAssertion(() => cut.FindAll("[role=progressbar]").Should().HaveCount(2));
         cut.Markup.Should().Contain("model.onnx");
@@ -462,34 +497,34 @@ public sealed class BenchmarkDataTests
     public void The_voter_disclosure_starts_collapsed_and_reveals_every_file_when_toggled()
     {
         var files = Enumerable.Range(1, 5)
-            .Select(i => new LlmRouterModelFileStatusInfo($"file{i}.bin", Synced: true, SizeBytes: 10, DateTimeOffset.UtcNow, ChecksumVerified: true, IsOptional: false))
+            .Select(i => new LlmRouterModelFileStatusInfo(FileName: $"file{i}.bin", true, 10,
+                SyncedAtUtc: DateTimeOffset.UtcNow, true, false))
             .ToArray();
         var voterClient = new FakeVoterClient { Files = files };
-        using var ctx = NewContext(new FakeClient(BenchmarkDataAdminState.Current), voterClient);
+        using var ctx = NewContext(client: new FakeClient(BenchmarkDataAdminState.Current), voterClient: voterClient);
 
         var cut = ctx.Render<BenchmarkData>();
 
-        var toggle = cut.FindAll("button").First(b => b.TextContent.Contains("Show 5 files", StringComparison.Ordinal));
+        var toggle = cut.FindAll("button").First(b =>
+            b.TextContent.Contains(value: "Show 5 files", comparisonType: StringComparison.Ordinal));
         toggle.GetAttribute("aria-expanded").Should().Be("false");
 
         // Same collapsed-but-mounted contract as the Task Matrix disclosure above.
         var disclosure = cut.FindAll(".ls-disclosure")
-            .Single(d => d.InnerHtml.Contains("file1.bin", StringComparison.Ordinal));
+            .Single(d => d.InnerHtml.Contains(value: "file1.bin", comparisonType: StringComparison.Ordinal));
         disclosure.ClassList.Should().NotContain("open");
         disclosure.HasAttribute("inert").Should().BeTrue();
 
         toggle.Click();
 
-        cut.FindAll("button").First(b => b.TextContent.Contains("Hide files", StringComparison.Ordinal))
+        cut.FindAll("button").First(b =>
+                b.TextContent.Contains(value: "Hide files", comparisonType: StringComparison.Ordinal))
             .GetAttribute("aria-expanded").Should().Be("true");
         disclosure = cut.FindAll(".ls-disclosure")
-            .Single(d => d.InnerHtml.Contains("file1.bin", StringComparison.Ordinal));
+            .Single(d => d.InnerHtml.Contains(value: "file1.bin", comparisonType: StringComparison.Ordinal));
         disclosure.ClassList.Should().Contain("open");
         disclosure.HasAttribute("inert").Should().BeFalse();
-        foreach (var file in files)
-        {
-            cut.Markup.Should().Contain(file.FileName);
-        }
+        foreach (var file in files) cut.Markup.Should().Contain(file.FileName);
     }
 
     [Fact]
@@ -499,7 +534,8 @@ public sealed class BenchmarkDataTests
         // and replace the panel that has to carry the actual reason.
         using var ctx = NewContext(new FakeClient
         {
-            StatusError = new BenchmarkDataAdminException("Could not read the benchmark data status: database is locked."),
+            StatusError =
+                new BenchmarkDataAdminException("Could not read the benchmark data status: database is locked.")
         });
 
         var cut = ctx.Render<BenchmarkData>();
@@ -511,15 +547,16 @@ public sealed class BenchmarkDataTests
     [Fact]
     public void A_rejected_recheck_keeps_the_panel_on_screen()
     {
-        var client = new FakeClient(BenchmarkDataAdminState.CheckFailed, Reason: "boom")
+        var client = new FakeClient(state: BenchmarkDataAdminState.CheckFailed, Reason: "boom")
         {
-            RecheckError = new BenchmarkDataAdminException("Could not recheck the benchmark data: boom"),
+            RecheckError = new BenchmarkDataAdminException("Could not recheck the benchmark data: boom")
         };
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<BenchmarkData>();
         // The per-card button is disabled in CheckFailed, so this now goes through Resync.
-        cut.FindAll("button").First(b => b.TextContent.Contains("Resync", StringComparison.Ordinal)).Click();
+        cut.FindAll("button")
+            .First(b => b.TextContent.Contains(value: "Resync", comparisonType: StringComparison.Ordinal)).Click();
 
         cut.Markup.Should().NotContain("Router unreachable");
         cut.Markup.Should().Contain("Could not recheck the benchmark data");
@@ -527,12 +564,12 @@ public sealed class BenchmarkDataTests
 
     private sealed class FakeClient : IBenchmarkDataAdminClient
     {
+        private readonly IReadOnlyList<BenchmarkFileStatusInfo> _files;
         private readonly BenchmarkDataAdminState _initialState;
         private readonly string? _reason;
-        private readonly IReadOnlyList<BenchmarkFileStatusInfo> _files;
 
         public FakeClient(BenchmarkDataAdminState state, params BenchmarkFileStatusInfo[] files)
-            : this(state, Reason: null, files)
+            : this(state: state, null, files: files)
         {
         }
 
@@ -567,40 +604,43 @@ public sealed class BenchmarkDataTests
 
         public int SyncCount { get; private set; }
 
-        public Task<BenchmarkDataStatusInfo> GetStatusAsync(CancellationToken cancellationToken = default) =>
-            StatusError is not null
+        public Task<BenchmarkDataStatusInfo> GetStatusAsync(CancellationToken cancellationToken = default)
+        {
+            return StatusError is not null
                 ? Task.FromException<BenchmarkDataStatusInfo>(StatusError)
-                : Task.FromResult(new BenchmarkDataStatusInfo(_initialState, _reason, DateTimeOffset.UtcNow, _files));
+                : Task.FromResult(new BenchmarkDataStatusInfo(State: _initialState, Reason: _reason,
+                    CheckedAtUtc: DateTimeOffset.UtcNow, Files: _files));
+        }
 
         public Task<BenchmarkDataStatusInfo> RecheckAsync(CancellationToken cancellationToken = default)
         {
             RecheckCount++;
             return RecheckError is not null
                 ? Task.FromException<BenchmarkDataStatusInfo>(RecheckError)
-                : Task.FromResult(new BenchmarkDataStatusInfo(BenchmarkDataAdminState.Current, null, DateTimeOffset.UtcNow, _files));
+                : Task.FromResult(new BenchmarkDataStatusInfo(State: BenchmarkDataAdminState.Current, null,
+                    CheckedAtUtc: DateTimeOffset.UtcNow, Files: _files));
         }
 
         public async IAsyncEnumerable<BenchmarkSyncEvent> SyncAsync(
-            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             SyncCount++;
             var events = SyncEvents.Count > 0
                 ? SyncEvents
-                : [new BenchmarkSyncEvent(Plan: null, Progress: null, FinalStatus: new BenchmarkDataStatusInfo(BenchmarkDataAdminState.Current, null, DateTimeOffset.UtcNow, _files))];
+                :
+                [
+                    new BenchmarkSyncEvent(null, null,
+                        FinalStatus: new BenchmarkDataStatusInfo(State: BenchmarkDataAdminState.Current, null,
+                            CheckedAtUtc: DateTimeOffset.UtcNow, Files: _files))
+                ];
 
             // Task.CompletedTask, not Task.Yield: this satisfies CS1998 without introducing a real
             // asynchronous gap, so the events publish synchronously within the test's Click() call rather
             // than racing bUnit's render against a threadpool continuation.
             await Task.CompletedTask;
-            foreach (var e in events)
-            {
-                yield return e;
-            }
+            foreach (var e in events) yield return e;
 
-            if (HoldBeforeFinalStatus is { } hold)
-            {
-                await hold;
-            }
+            if (HoldBeforeFinalStatus is { } hold) await hold;
         }
     }
 
@@ -631,31 +671,34 @@ public sealed class BenchmarkDataTests
             GetStatusCount++;
             return StatusError is not null
                 ? Task.FromException<LlmRouterModelStatusInfo>(StatusError)
-                : Task.FromResult(new LlmRouterModelStatusInfo(string.Empty, Files, Current: Files.All(f => f.Synced)));
+                : Task.FromResult(new LlmRouterModelStatusInfo(BaseUrl: string.Empty, Files: Files,
+                    Current: Files.All(f => f.Synced)));
         }
 
-        public Task<LlmRouterModelStatusInfo> SetBaseUrlAsync(string baseUrl, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new LlmRouterModelStatusInfo(baseUrl, Files, Current: Files.All(f => f.Synced)));
+        public Task<LlmRouterModelStatusInfo> SetBaseUrlAsync(string baseUrl,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(new LlmRouterModelStatusInfo(BaseUrl: baseUrl, Files: Files,
+                Current: Files.All(f => f.Synced)));
+        }
 
         public async IAsyncEnumerable<LlmRouterModelSyncEvent> SyncAsync(
-            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             SyncCount++;
             var events = SyncEvents.Count > 0
                 ? SyncEvents
-                : [new LlmRouterModelSyncEvent(Plan: null, Progress: null, FinalStatus: new LlmRouterModelStatusInfo(string.Empty, Files, Current: true))];
+                :
+                [
+                    new LlmRouterModelSyncEvent(null, null,
+                        FinalStatus: new LlmRouterModelStatusInfo(BaseUrl: string.Empty, Files: Files, true))
+                ];
 
             // Same synchronous-yield reasoning as FakeClient.SyncAsync.
             await Task.CompletedTask;
-            foreach (var e in events)
-            {
-                yield return e;
-            }
+            foreach (var e in events) yield return e;
 
-            if (HoldBeforeFinalStatus is { } hold)
-            {
-                await hold;
-            }
+            if (HoldBeforeFinalStatus is { } hold) await hold;
         }
     }
 }

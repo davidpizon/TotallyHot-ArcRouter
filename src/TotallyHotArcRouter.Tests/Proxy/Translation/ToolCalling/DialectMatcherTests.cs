@@ -7,7 +7,6 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
 /// §3.1, Phase 0). These are pure string-in/result-out tests with no I/O and no streaming harness -
 /// which is the point of keeping <see cref="DialectMatcher"/> message-shaped rather than folding it
 /// into the stateful SSE translator.
-///
 /// <para>
 /// The cases that matter most are the ones the shipping single-dialect echo guard gets wrong: a
 /// Llama-family payload keyed <c>parameters</c> instead of <c>arguments</c>, a Mistral payload with no
@@ -23,12 +22,12 @@ public class DialectMatcherTests
     {
         var result = DialectMatcher.ExtractToolCalls(
             """<tool_call>{"name": "get_time", "arguments": {"tz": "UTC"}}</tool_call>""",
-            ToolCallDialectRegistry.Hermes);
+            dialect: ToolCallDialectRegistry.Hermes);
 
         var call = Assert.Single(result.ToolCalls);
-        Assert.Equal("get_time", call.Name);
-        Assert.Equal("""{"tz":"UTC"}""", call.ArgumentsJson);
-        Assert.Equal(string.Empty, result.ResidualContent);
+        Assert.Equal(expected: "get_time", actual: call.Name);
+        Assert.Equal("""{"tz":"UTC"}""", actual: call.ArgumentsJson);
+        Assert.Equal(expected: string.Empty, actual: result.ResidualContent);
     }
 
     [Fact]
@@ -36,10 +35,10 @@ public class DialectMatcherTests
     {
         var result = DialectMatcher.ExtractToolCalls(
             """<tools>{"name": "get_time", "arguments": {}}</tools>""",
-            ToolCallDialectRegistry.Hermes);
+            dialect: ToolCallDialectRegistry.Hermes);
 
         Assert.Single(result.ToolCalls);
-        Assert.Equal("get_time", result.ToolCalls[0].Name);
+        Assert.Equal(expected: "get_time", actual: result.ToolCalls[0].Name);
     }
 
     [Fact]
@@ -47,11 +46,11 @@ public class DialectMatcherTests
     {
         var result = DialectMatcher.ExtractToolCalls(
             """[TOOL_CALLS] [{"name": "search", "arguments": {"q": "cats"}}]""",
-            ToolCallDialectRegistry.Mistral);
+            dialect: ToolCallDialectRegistry.Mistral);
 
         var call = Assert.Single(result.ToolCalls);
-        Assert.Equal("search", call.Name);
-        Assert.Equal("""{"q":"cats"}""", call.ArgumentsJson);
+        Assert.Equal(expected: "search", actual: call.Name);
+        Assert.Equal("""{"q":"cats"}""", actual: call.ArgumentsJson);
     }
 
     [Fact]
@@ -59,11 +58,11 @@ public class DialectMatcherTests
     {
         var result = DialectMatcher.ExtractToolCalls(
             """[TOOL_CALLS] [{"name": "first", "arguments": {}}, {"name": "second", "arguments": {}}]""",
-            ToolCallDialectRegistry.Mistral);
+            dialect: ToolCallDialectRegistry.Mistral);
 
-        Assert.Equal(2, result.ToolCalls.Count);
-        Assert.Equal("first", result.ToolCalls[0].Name);
-        Assert.Equal("second", result.ToolCalls[1].Name);
+        Assert.Equal(2, actual: result.ToolCalls.Count);
+        Assert.Equal(expected: "first", actual: result.ToolCalls[0].Name);
+        Assert.Equal(expected: "second", actual: result.ToolCalls[1].Name);
     }
 
     // This is the case a hardcoded "arguments" lookup silently drops: the region is found, the JSON
@@ -73,11 +72,11 @@ public class DialectMatcherTests
     {
         var result = DialectMatcher.ExtractToolCalls(
             """<|python_tag|>{"name": "get_weather", "parameters": {"city": "Oslo"}}""",
-            ToolCallDialectRegistry.Llama3Json);
+            dialect: ToolCallDialectRegistry.Llama3Json);
 
         var call = Assert.Single(result.ToolCalls);
-        Assert.Equal("get_weather", call.Name);
-        Assert.Equal("""{"city":"Oslo"}""", call.ArgumentsJson);
+        Assert.Equal(expected: "get_weather", actual: call.Name);
+        Assert.Equal("""{"city":"Oslo"}""", actual: call.ArgumentsJson);
     }
 
     [Fact]
@@ -85,7 +84,7 @@ public class DialectMatcherTests
     {
         var result = DialectMatcher.ExtractToolCalls(
             """<|python_tag|>{"name": "get_weather", "arguments": {"city": "Oslo"}}""",
-            ToolCallDialectRegistry.Llama3Json);
+            dialect: ToolCallDialectRegistry.Llama3Json);
 
         Assert.Empty(result.ToolCalls);
     }
@@ -97,9 +96,9 @@ public class DialectMatcherTests
     {
         var result = DialectMatcher.ExtractToolCalls(
             """<tool_call>{"name": "get_time", "arguments": "{\"tz\":\"UTC\"}"}</tool_call>""",
-            ToolCallDialectRegistry.Hermes);
+            dialect: ToolCallDialectRegistry.Hermes);
 
-        Assert.Equal("""{"tz":"UTC"}""", Assert.Single(result.ToolCalls).ArgumentsJson);
+        Assert.Equal("""{"tz":"UTC"}""", actual: Assert.Single(result.ToolCalls).ArgumentsJson);
     }
 
     [Fact]
@@ -107,9 +106,9 @@ public class DialectMatcherTests
     {
         var result = DialectMatcher.ExtractToolCalls(
             """<tool_call>{"name": "write", "arguments": {"file": {"path": "a.txt", "mode": "w"}}}</tool_call>""",
-            ToolCallDialectRegistry.Hermes);
+            dialect: ToolCallDialectRegistry.Hermes);
 
-        Assert.Equal("""{"file":{"path":"a.txt","mode":"w"}}""", Assert.Single(result.ToolCalls).ArgumentsJson);
+        Assert.Equal("""{"file":{"path":"a.txt","mode":"w"}}""", actual: Assert.Single(result.ToolCalls).ArgumentsJson);
     }
 
     [Fact]
@@ -117,9 +116,9 @@ public class DialectMatcherTests
     {
         var result = DialectMatcher.ExtractToolCalls(
             """<tool_call>{"name": "echo", "arguments": {"text": "a } b { c"}}</tool_call>""",
-            ToolCallDialectRegistry.Hermes);
+            dialect: ToolCallDialectRegistry.Hermes);
 
-        Assert.Equal("""{"text":"a } b { c"}""", Assert.Single(result.ToolCalls).ArgumentsJson);
+        Assert.Equal("""{"text":"a } b { c"}""", actual: Assert.Single(result.ToolCalls).ArgumentsJson);
     }
 
     // ----- Residual content -----
@@ -129,10 +128,10 @@ public class DialectMatcherTests
     {
         var result = DialectMatcher.ExtractToolCalls(
             """Let me check. <tool_call>{"name": "get_time", "arguments": {}}</tool_call> Done.""",
-            ToolCallDialectRegistry.Hermes);
+            dialect: ToolCallDialectRegistry.Hermes);
 
         Assert.Single(result.ToolCalls);
-        Assert.Equal("Let me check.  Done.", result.ResidualContent);
+        Assert.Equal(expected: "Let me check.  Done.", actual: result.ResidualContent);
     }
 
     [Fact]
@@ -140,11 +139,11 @@ public class DialectMatcherTests
     {
         var result = DialectMatcher.ExtractToolCalls(
             """<tool_call>{"name": "a", "arguments": {}}</tool_call><tool_call>{"name": "b", "arguments": {}}</tool_call>""",
-            ToolCallDialectRegistry.Hermes);
+            dialect: ToolCallDialectRegistry.Hermes);
 
-        Assert.Equal(2, result.ToolCalls.Count);
-        Assert.Equal("a", result.ToolCalls[0].Name);
-        Assert.Equal("b", result.ToolCalls[1].Name);
+        Assert.Equal(2, actual: result.ToolCalls.Count);
+        Assert.Equal(expected: "a", actual: result.ToolCalls[0].Name);
+        Assert.Equal(expected: "b", actual: result.ToolCalls[1].Name);
     }
 
     // ----- Fail-open paths: nothing is ever dropped or thrown on -----
@@ -155,10 +154,10 @@ public class DialectMatcherTests
         // The shape the <tools> tag documents in the system prompt has no top-level name/arguments.
         const string content = """<tools>{"type": "function", "function": {"name": "get_time"}}</tools>""";
 
-        var result = DialectMatcher.ExtractToolCalls(content, ToolCallDialectRegistry.Hermes);
+        var result = DialectMatcher.ExtractToolCalls(content: content, dialect: ToolCallDialectRegistry.Hermes);
 
         Assert.Empty(result.ToolCalls);
-        Assert.Equal(content, result.ResidualContent);
+        Assert.Equal(expected: content, actual: result.ResidualContent);
     }
 
     [Fact]
@@ -166,10 +165,10 @@ public class DialectMatcherTests
     {
         const string content = """<tool_call>{"name": "broken", "arguments":</tool_call>""";
 
-        var result = DialectMatcher.ExtractToolCalls(content, ToolCallDialectRegistry.Hermes);
+        var result = DialectMatcher.ExtractToolCalls(content: content, dialect: ToolCallDialectRegistry.Hermes);
 
         Assert.Empty(result.ToolCalls);
-        Assert.Equal(content, result.ResidualContent);
+        Assert.Equal(expected: content, actual: result.ResidualContent);
     }
 
     [Fact]
@@ -177,10 +176,10 @@ public class DialectMatcherTests
     {
         const string content = """Here goes <tool_call>{"name": "cut_off", "arg""";
 
-        var result = DialectMatcher.ExtractToolCalls(content, ToolCallDialectRegistry.Hermes);
+        var result = DialectMatcher.ExtractToolCalls(content: content, dialect: ToolCallDialectRegistry.Hermes);
 
         Assert.Empty(result.ToolCalls);
-        Assert.Equal(content, result.ResidualContent);
+        Assert.Equal(expected: content, actual: result.ResidualContent);
     }
 
     [Fact]
@@ -188,7 +187,7 @@ public class DialectMatcherTests
     {
         var result = DialectMatcher.ExtractToolCalls(
             """<tool_call>{"name": "", "arguments": {}}</tool_call>""",
-            ToolCallDialectRegistry.Hermes);
+            dialect: ToolCallDialectRegistry.Hermes);
 
         Assert.Empty(result.ToolCalls);
     }
@@ -198,7 +197,7 @@ public class DialectMatcherTests
     {
         var result = DialectMatcher.ExtractToolCalls(
             """<tool_call>{"name": "get_time"}</tool_call>""",
-            ToolCallDialectRegistry.Hermes);
+            dialect: ToolCallDialectRegistry.Hermes);
 
         Assert.Empty(result.ToolCalls);
     }
@@ -208,19 +207,19 @@ public class DialectMatcherTests
     {
         const string content = "Just a normal answer with no tool call in it.";
 
-        var result = DialectMatcher.ExtractToolCalls(content, ToolCallDialectRegistry.Hermes);
+        var result = DialectMatcher.ExtractToolCalls(content: content, dialect: ToolCallDialectRegistry.Hermes);
 
         Assert.Empty(result.ToolCalls);
-        Assert.Equal(content, result.ResidualContent);
+        Assert.Equal(expected: content, actual: result.ResidualContent);
     }
 
     [Fact]
     public void EmptyContent_IsHandled()
     {
-        var result = DialectMatcher.ExtractToolCalls(string.Empty, ToolCallDialectRegistry.Hermes);
+        var result = DialectMatcher.ExtractToolCalls(content: string.Empty, dialect: ToolCallDialectRegistry.Hermes);
 
         Assert.Empty(result.ToolCalls);
-        Assert.Equal(string.Empty, result.ResidualContent);
+        Assert.Equal(expected: string.Empty, actual: result.ResidualContent);
     }
 
     // ----- The native sentinel is never scanned -----
@@ -230,10 +229,10 @@ public class DialectMatcherTests
     {
         const string content = """<tool_call>{"name": "get_time", "arguments": {}}</tool_call>""";
 
-        var result = DialectMatcher.ExtractToolCalls(content, ToolCallDialectRegistry.OpenAiNative);
+        var result = DialectMatcher.ExtractToolCalls(content: content, dialect: ToolCallDialectRegistry.OpenAiNative);
 
         Assert.Empty(result.ToolCalls);
-        Assert.Equal(content, result.ResidualContent);
+        Assert.Equal(expected: content, actual: result.ResidualContent);
     }
 
     // ----- MatchAny: the union scan Phase 4 arms for an unclassified model -----
@@ -244,19 +243,19 @@ public class DialectMatcherTests
     [InlineData("""<|python_tag|>{"name": "t", "parameters": {}}""", "llama3-json")]
     public void MatchAny_AttributesEachDialectCorrectly(string content, string expectedDialect)
     {
-        var result = DialectMatcher.MatchAny(content, ToolCallDialectRegistry.ScannableDialects);
+        var result = DialectMatcher.MatchAny(content: content, candidates: ToolCallDialectRegistry.ScannableDialects);
 
         Assert.NotNull(result);
-        Assert.Equal(expectedDialect, result.Dialect.Name);
-        Assert.Equal("t", Assert.Single(result.ToolCalls).Name);
+        Assert.Equal(expected: expectedDialect, actual: result.Dialect.Name);
+        Assert.Equal(expected: "t", actual: Assert.Single(result.ToolCalls).Name);
     }
 
     [Fact]
     public void MatchAny_ReturnsNull_WhenNoDialectMatches()
     {
         var result = DialectMatcher.MatchAny(
-            "A perfectly ordinary sentence.",
-            ToolCallDialectRegistry.ScannableDialects);
+            content: "A perfectly ordinary sentence.",
+            candidates: ToolCallDialectRegistry.ScannableDialects);
 
         Assert.Null(result);
     }
@@ -268,7 +267,7 @@ public class DialectMatcherTests
         // a tag would be permanently mislabeled and scanned forever after.
         var result = DialectMatcher.MatchAny(
             """<tools>{"type": "function", "function": {"name": "x"}}</tools>""",
-            ToolCallDialectRegistry.ScannableDialects);
+            candidates: ToolCallDialectRegistry.ScannableDialects);
 
         Assert.Null(result);
     }
@@ -281,11 +280,10 @@ public class DialectMatcherTests
         // <tools> is declared second in the Hermes dialect but appears first in the text.
         var result = DialectMatcher.ExtractToolCalls(
             """<tools>{"name": "first", "arguments": {}}</tools><tool_call>{"name": "second", "arguments": {}}</tool_call>""",
-            ToolCallDialectRegistry.Hermes);
+            dialect: ToolCallDialectRegistry.Hermes);
 
-        Assert.Equal(2, result.ToolCalls.Count);
-        Assert.Equal("first", result.ToolCalls[0].Name);
-        Assert.Equal("second", result.ToolCalls[1].Name);
+        Assert.Equal(2, actual: result.ToolCalls.Count);
+        Assert.Equal(expected: "first", actual: result.ToolCalls[0].Name);
+        Assert.Equal(expected: "second", actual: result.ToolCalls[1].Name);
     }
 }
-

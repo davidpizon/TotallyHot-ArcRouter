@@ -19,8 +19,8 @@ namespace TotallyHot.ArcRouter.Judge;
 /// </remarks>
 public sealed class JudgeAvailability : IJudgeAvailability
 {
-    private readonly IOptionsMonitor<JudgeOptions> _options;
     private readonly JudgeModelSelector _modelSelector;
+    private readonly IOptionsMonitor<JudgeOptions> _options;
 
     /// <summary>Initializes a new instance of the <see cref="JudgeAvailability"/> class.</summary>
     /// <param name="options">Supplies the live <see cref="JudgeOptions.Enabled"/> gate, read per call rather than captured.</param>
@@ -34,15 +34,12 @@ public sealed class JudgeAvailability : IJudgeAvailability
         _modelSelector = modelSelector;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public bool WillJudge(QualityResult result)
     {
         ArgumentNullException.ThrowIfNull(result);
 
-        if (!_options.CurrentValue.Enabled)
-        {
-            return false;
-        }
+        if (!_options.CurrentValue.Enabled) return false;
 
         return _modelSelector.Resolve() is not null;
     }

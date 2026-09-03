@@ -13,12 +13,13 @@ public sealed class OutOfCreditsClassifierTests
     [Fact]
     public void IsOutOfCredits_TypedInsufficientQuotaCode_ClassifiesTrue()
     {
-        var body = Encoding.UTF8.GetBytes("""{"error":{"message":"You exceeded your quota.","code":"insufficient_quota"}}""");
+        var body = Encoding.UTF8.GetBytes(
+            """{"error":{"message":"You exceeded your quota.","code":"insufficient_quota"}}""");
 
-        var result = OutOfCreditsClassifier.IsOutOfCredits(body, null, out var message);
+        var result = OutOfCreditsClassifier.IsOutOfCredits(body: body, null, message: out var message);
 
         Assert.True(result);
-        Assert.Equal("You exceeded your quota.", message);
+        Assert.Equal(expected: "You exceeded your quota.", actual: message);
     }
 
     [Fact]
@@ -26,10 +27,10 @@ public sealed class OutOfCreditsClassifierTests
     {
         var body = Encoding.UTF8.GetBytes("""{"error":{"message":"Your credit balance is too low."}}""");
 
-        var result = OutOfCreditsClassifier.IsOutOfCredits(body, null, out var message);
+        var result = OutOfCreditsClassifier.IsOutOfCredits(body: body, null, message: out var message);
 
         Assert.True(result);
-        Assert.Equal("Your credit balance is too low.", message);
+        Assert.Equal(expected: "Your credit balance is too low.", actual: message);
     }
 
     [Fact]
@@ -37,10 +38,10 @@ public sealed class OutOfCreditsClassifierTests
     {
         var body = Encoding.UTF8.GetBytes("""{"error":{"message":"model not found"}}""");
 
-        var result = OutOfCreditsClassifier.IsOutOfCredits(body, null, out var message);
+        var result = OutOfCreditsClassifier.IsOutOfCredits(body: body, null, message: out var message);
 
         Assert.False(result);
-        Assert.Equal(string.Empty, message);
+        Assert.Equal(expected: string.Empty, actual: message);
     }
 
     [Fact]
@@ -48,10 +49,10 @@ public sealed class OutOfCreditsClassifierTests
     {
         var body = Encoding.UTF8.GetBytes("not json");
 
-        var result = OutOfCreditsClassifier.IsOutOfCredits(body, null, out var message);
+        var result = OutOfCreditsClassifier.IsOutOfCredits(body: body, null, message: out var message);
 
         Assert.False(result);
-        Assert.Equal(string.Empty, message);
+        Assert.Equal(expected: string.Empty, actual: message);
     }
 
     [Fact]
@@ -61,11 +62,11 @@ public sealed class OutOfCreditsClassifierTests
         // "message" must be treated as "field absent," not crash the request path.
         var body = Encoding.UTF8.GetBytes("""{"error":{"message":12345}}""");
 
-        var exception = Record.Exception(() => OutOfCreditsClassifier.IsOutOfCredits(body, null, out _));
+        var exception = Record.Exception(() => OutOfCreditsClassifier.IsOutOfCredits(body: body, null, message: out _));
 
         Assert.Null(exception);
-        Assert.False(OutOfCreditsClassifier.IsOutOfCredits(body, null, out var message));
-        Assert.Equal(string.Empty, message);
+        Assert.False(OutOfCreditsClassifier.IsOutOfCredits(body: body, null, message: out var message));
+        Assert.Equal(expected: string.Empty, actual: message);
     }
 
     [Fact]
@@ -73,12 +74,12 @@ public sealed class OutOfCreditsClassifierTests
     {
         var body = Encoding.UTF8.GetBytes("""{"error":{"message":"quota exceeded","code":429}}""");
 
-        var exception = Record.Exception(() => OutOfCreditsClassifier.IsOutOfCredits(body, null, out _));
+        var exception = Record.Exception(() => OutOfCreditsClassifier.IsOutOfCredits(body: body, null, message: out _));
 
         Assert.Null(exception);
         // Falls back to the message-keyword path since the typed code isn't a string - "quota" still matches.
-        Assert.True(OutOfCreditsClassifier.IsOutOfCredits(body, null, out var message));
-        Assert.Equal("quota exceeded", message);
+        Assert.True(OutOfCreditsClassifier.IsOutOfCredits(body: body, null, message: out var message));
+        Assert.Equal(expected: "quota exceeded", actual: message);
     }
 
     [Fact]
@@ -86,28 +87,30 @@ public sealed class OutOfCreditsClassifierTests
     {
         var body = Encoding.UTF8.GetBytes("""{"error":{"message":{"nested":"shape"}}}""");
 
-        var exception = Record.Exception(() => OutOfCreditsClassifier.IsOutOfCredits(body, null, out _));
+        var exception = Record.Exception(() => OutOfCreditsClassifier.IsOutOfCredits(body: body, null, message: out _));
 
         Assert.Null(exception);
-        Assert.False(OutOfCreditsClassifier.IsOutOfCredits(body, null, out var message));
-        Assert.Equal(string.Empty, message);
+        Assert.False(OutOfCreditsClassifier.IsOutOfCredits(body: body, null, message: out var message));
+        Assert.Equal(expected: string.Empty, actual: message);
     }
 
     [Fact]
     public void IsOutOfCredits_EmbeddedMessageSupplied_KeywordMatchesWithoutParsingBody()
     {
-        var result = OutOfCreditsClassifier.IsOutOfCredits([], "Your account is out of credits.", out var message);
+        var result = OutOfCreditsClassifier.IsOutOfCredits(body: [], embeddedMessage: "Your account is out of credits.",
+            message: out var message);
 
         Assert.True(result);
-        Assert.Equal("Your account is out of credits.", message);
+        Assert.Equal(expected: "Your account is out of credits.", actual: message);
     }
 
     [Fact]
     public void IsOutOfCredits_EmbeddedMessageSupplied_NoKeywordMatch_ClassifiesFalse()
     {
-        var result = OutOfCreditsClassifier.IsOutOfCredits([], "messages: at least one message is required", out var message);
+        var result = OutOfCreditsClassifier.IsOutOfCredits(body: [],
+            embeddedMessage: "messages: at least one message is required", message: out var message);
 
         Assert.False(result);
-        Assert.Equal(string.Empty, message);
+        Assert.Equal(expected: string.Empty, actual: message);
     }
 }

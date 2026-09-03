@@ -1,5 +1,5 @@
-using Microsoft.Extensions.Options;
 using System.Text;
+using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Models;
 
@@ -41,46 +41,31 @@ public sealed class ModelRoutingOptions
             }
 
             if (!seenModelNames.Add(entry.ModelName))
-            {
                 errors.Add($"Duplicate ModelName '{entry.ModelName}' in ModelList.");
-            }
 
             if (string.IsNullOrWhiteSpace(entry.Provider) || !Providers.ContainsKey(entry.Provider))
-            {
                 errors.Add($"ModelList entry '{entry.ModelName}' references unknown provider '{entry.Provider}'.");
-            }
 
             if (string.IsNullOrWhiteSpace(entry.ProviderModelId))
-            {
                 errors.Add($"ModelList entry '{entry.ModelName}' must have a non-empty ProviderModelId.");
-            }
         }
 
         foreach (var (name, provider) in Providers)
         {
-            if (!Uri.TryCreate(provider.BaseUrl, UriKind.Absolute, out _))
-            {
+            if (!Uri.TryCreate(uriString: provider.BaseUrl, uriKind: UriKind.Absolute, result: out _))
                 errors.Add($"Provider '{name}' has an invalid BaseUrl '{provider.BaseUrl}'.");
-            }
 
             if (string.IsNullOrWhiteSpace(provider.AuthHeaderName))
-            {
                 errors.Add($"Provider '{name}' must have a non-empty AuthHeaderName.");
-            }
 
             foreach (var header in provider.Headers)
-            {
                 if (string.IsNullOrWhiteSpace(header.Name))
-                {
                     errors.Add($"Provider '{name}' has a custom header with an empty Name.");
-                }
-            }
         }
 
         if (errors.Count > 0)
-        {
-            throw new OptionsValidationException(nameof(ModelRoutingOptions), typeof(ModelRoutingOptions), errors);
-        }
+            throw new OptionsValidationException(optionsName: nameof(ModelRoutingOptions),
+                optionsType: typeof(ModelRoutingOptions), failureMessages: errors);
     }
 }
 
@@ -251,7 +236,7 @@ public sealed record ProviderOptions
         // defensive rather than a live leak - but it stops one the moment ProviderHeader becomes a record
         // or anything enumerates these into a message.
         builder.Append(", Headers = [")
-            .Append(string.Join(", ", Headers.Select(h => $"{h.Name}=<redacted>")))
+            .Append(string.Join(separator: ", ", values: Headers.Select(h => $"{h.Name}=<redacted>")))
             .Append(']');
         builder.Append(", IsFree = ").Append(IsFree);
         builder.Append(", Enabled = ").Append(Enabled);
@@ -278,7 +263,10 @@ public sealed class ProviderHeader
     /// <summary>Gets the literal header value. Takes precedence over <see cref="ValueEnvVar"/> when non-empty.</summary>
     public string? Value { get; init; }
 
-    /// <summary>Gets the name of an environment variable holding the header value; used only when <see cref="Value"/> is empty.</summary>
+    /// <summary>
+    /// Gets the name of an environment variable holding the header value; used only when <see cref="Value"/> is
+    /// empty.
+    /// </summary>
     public string? ValueEnvVar { get; init; }
 
     /// <summary>
@@ -369,4 +357,3 @@ public sealed class ModelRouteEntry
     /// </summary>
     public bool PresentUpstream { get; init; } = true;
 }
-

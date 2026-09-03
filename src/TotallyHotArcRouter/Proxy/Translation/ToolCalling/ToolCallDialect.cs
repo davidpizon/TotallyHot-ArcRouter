@@ -2,7 +2,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 
 /// <summary>
 /// The system-prompt text that teaches a dialect, split around the tool schemas it must contain.
-///
 /// <para>
 /// Two parts rather than one preamble with the schemas appended, because the wording that actually works
 /// puts the schemas <em>in the middle</em>: the schema block is wrapped in its own tags and the reply
@@ -19,7 +18,6 @@ internal sealed record EmulationPrompt(string Preamble, string Postamble);
 /// How one family of models expresses its intent to invoke a tool in plain assistant text, when it
 /// does not emit a native OpenAI <c>tool_calls</c> delta (see
 /// <c>docs/router/tool-call-normalization.md</c>).
-///
 /// <para>
 /// A dialect is deliberately **data, not a code path**: adding a model family is a table entry in
 /// <see cref="ToolCallDialectRegistry"/>, not a new branch in the scanner. This is the whole reason
@@ -27,7 +25,6 @@ internal sealed record EmulationPrompt(string Preamble, string Postamble);
 /// <see langword="static"/> dictionaries and one payload shape in its scanner, which is why it could
 /// not recognize a Mistral or Llama-family echo.
 /// </para>
-///
 /// <para>
 /// The tool-call syntax is a property of the *model's chat template* (which ships inside the GGUF),
 /// not of the server hosting it - so one LM Studio or Ollama process can serve models that disagree
@@ -44,7 +41,10 @@ internal sealed record EmulationPrompt(string Preamble, string Postamble);
 /// case of <see cref="ToolCallDialectRegistry.OpenAiNative"/>, which describes a model that emits real
 /// <c>tool_calls</c> and whose prose must therefore never be rewritten.
 /// </param>
-/// <param name="NameKey">The payload key holding the function name. Every known family uses <c>"name"</c>, but it is configurable rather than assumed.</param>
+/// <param name="NameKey">
+/// The payload key holding the function name. Every known family uses <c>"name"</c>, but it is
+/// configurable rather than assumed.
+/// </param>
 /// <param name="ArgumentsKey">
 /// The payload key holding the arguments. Qwen/Hermes and Mistral use <c>"arguments"</c>; the
 /// Llama-3 JSON form uses <c>"parameters"</c>. Hardcoding <c>"arguments"</c> is precisely why the
@@ -73,4 +73,3 @@ internal sealed record ToolCallDialect(
     /// </summary>
     public bool IsScannable => Delimiters.Count > 0;
 }
-

@@ -20,15 +20,15 @@ public sealed class TelemetryLogEventSink : ILogEventSink
         _publisher = publisher;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public void Emit(LogEvent logEvent)
     {
         ArgumentNullException.ThrowIfNull(logEvent);
 
         var line = new LogLineEvent(
-            logEvent.Timestamp.ToUniversalTime(),
-            NormalizeLevel(logEvent.Level),
-            logEvent.RenderMessage());
+            TimestampUtc: logEvent.Timestamp.ToUniversalTime(),
+            Level: NormalizeLevel(logEvent.Level),
+            Message: logEvent.RenderMessage());
 
         // Emit is a synchronous callback invoked directly on the calling thread by every Log.*() call
         // in the app - it must never block on network I/O. PublishLogLineAsync is itself
@@ -42,15 +42,17 @@ public sealed class TelemetryLogEventSink : ILogEventSink
     /// (see docs/gui/console-tab-plan.md). <see cref="LogEventLevel.Verbose"/> has no dedicated color
     /// in the spec, so it folds into DEBUG.
     /// </summary>
-    public static string NormalizeLevel(LogEventLevel level) => level switch
+    public static string NormalizeLevel(LogEventLevel level)
     {
-        LogEventLevel.Verbose => "DEBUG",
-        LogEventLevel.Debug => "DEBUG",
-        LogEventLevel.Information => "INFO",
-        LogEventLevel.Warning => "WARN",
-        LogEventLevel.Error => "ERROR",
-        LogEventLevel.Fatal => "FATAL",
-        _ => "INFO",
-    };
+        return level switch
+        {
+            LogEventLevel.Verbose => "DEBUG",
+            LogEventLevel.Debug => "DEBUG",
+            LogEventLevel.Information => "INFO",
+            LogEventLevel.Warning => "WARN",
+            LogEventLevel.Error => "ERROR",
+            LogEventLevel.Fatal => "FATAL",
+            _ => "INFO"
+        };
+    }
 }
-

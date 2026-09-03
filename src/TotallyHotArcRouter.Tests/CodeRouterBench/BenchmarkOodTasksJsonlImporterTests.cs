@@ -11,22 +11,25 @@ public class BenchmarkOodTasksJsonlImporterTests
         using var temp = new TempBenchmarkDatabase();
         temp.Database.EnsureCreated();
 
-        var jsonl = """{"task_id":"t1","bench":"swebench","dimension":"code_generation","language":"python","difficulty":"hard"}""" + "\n";
+        var jsonl =
+            """{"task_id":"t1","bench":"swebench","dimension":"code_generation","language":"python","difficulty":"hard"}""" +
+            "\n";
 
         using var connection = temp.Database.OpenConnection();
         using var transaction = connection.BeginTransaction();
-        var rowCount = BenchmarkOodTasksJsonlImporter.Import(new StringReader(jsonl), connection, transaction);
+        var rowCount = BenchmarkOodTasksJsonlImporter.Import(reader: new StringReader(jsonl), connection: connection,
+            transaction: transaction);
         transaction.Commit();
 
-        Assert.Equal(1, rowCount);
+        Assert.Equal(1, actual: rowCount);
 
         using var readCommand = connection.CreateCommand();
         readCommand.CommandText = "SELECT bench, language, difficulty FROM benchmark_ood_tasks WHERE task_id = 't1';";
         using var reader = readCommand.ExecuteReader();
         Assert.True(reader.Read());
-        Assert.Equal("swebench", reader.GetString(0));
-        Assert.Equal("python", reader.GetString(1));
-        Assert.Equal("hard", reader.GetString(2));
+        Assert.Equal(expected: "swebench", actual: reader.GetString(0));
+        Assert.Equal(expected: "python", actual: reader.GetString(1));
+        Assert.Equal(expected: "hard", actual: reader.GetString(2));
     }
 
     [Fact]
@@ -39,7 +42,8 @@ public class BenchmarkOodTasksJsonlImporterTests
 
         using var connection = temp.Database.OpenConnection();
         using var transaction = connection.BeginTransaction();
-        BenchmarkOodTasksJsonlImporter.Import(new StringReader(jsonl), connection, transaction);
+        BenchmarkOodTasksJsonlImporter.Import(reader: new StringReader(jsonl), connection: connection,
+            transaction: transaction);
         transaction.Commit();
 
         using var readCommand = connection.CreateCommand();
@@ -56,13 +60,13 @@ public class BenchmarkOodTasksJsonlImporterTests
         using var temp = new TempBenchmarkDatabase();
         temp.Database.EnsureCreated();
 
-        Import(temp, """{"task_id":"t1","bench":"swebench","dimension":"code_generation"}""" + "\n");
-        Import(temp, """{"task_id":"t2","bench":"swebench","dimension":"code_generation"}""" + "\n");
+        Import(temp: temp, jsonl: """{"task_id":"t1","bench":"swebench","dimension":"code_generation"}""" + "\n");
+        Import(temp: temp, jsonl: """{"task_id":"t2","bench":"swebench","dimension":"code_generation"}""" + "\n");
 
         using var connection = temp.Database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT COUNT(*) FROM benchmark_ood_tasks;";
-        Assert.Equal(1, Convert.ToInt32(command.ExecuteScalar()));
+        Assert.Equal(1, actual: Convert.ToInt32(command.ExecuteScalar()));
     }
 
     [Fact]
@@ -76,15 +80,18 @@ public class BenchmarkOodTasksJsonlImporterTests
 
         var ex = Assert.Throws<FormatException>(() =>
             BenchmarkOodTasksJsonlImporter.Import(
-                new StringReader("""{"task_id":"t1","dimension":"code_generation"}""" + "\n"), connection, transaction));
-        Assert.Contains("bench", ex.Message, StringComparison.OrdinalIgnoreCase);
+                reader: new StringReader("""{"task_id":"t1","dimension":"code_generation"}""" + "\n"),
+                connection: connection, transaction: transaction));
+        Assert.Contains(expectedSubstring: "bench", actualString: ex.Message,
+            comparisonType: StringComparison.OrdinalIgnoreCase);
     }
 
     private static void Import(TempBenchmarkDatabase temp, string jsonl)
     {
         using var connection = temp.Database.OpenConnection();
         using var transaction = connection.BeginTransaction();
-        BenchmarkOodTasksJsonlImporter.Import(new StringReader(jsonl), connection, transaction);
+        BenchmarkOodTasksJsonlImporter.Import(reader: new StringReader(jsonl), connection: connection,
+            transaction: transaction);
         transaction.Commit();
     }
 }

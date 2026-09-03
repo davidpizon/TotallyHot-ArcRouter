@@ -15,10 +15,10 @@ namespace TotallyHot.ArcRouter.Quality.Grading;
 /// </remarks>
 public sealed class QualityGrader : IQualityGrader
 {
-    private readonly IStructuralParser _structuralParser;
     private readonly CompositeStaticAnalyzer _analyzer;
-    private readonly IQualityScorer _scorer;
     private readonly ILogger<QualityGrader> _logger;
+    private readonly IQualityScorer _scorer;
+    private readonly IStructuralParser _structuralParser;
 
     /// <summary>Initializes a new instance of the <see cref="QualityGrader"/> class.</summary>
     /// <param name="structuralParser">The structural parser producing the syntax verdict.</param>
@@ -42,14 +42,14 @@ public sealed class QualityGrader : IQualityGrader
         _logger = logger;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public Task<QualityResult> GradeAsync(QualityRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var syntax = _structuralParser.Check(request.Code, request.Language);
-        var analysis = _analyzer.Report(request.Code, request.Language);
+        var syntax = _structuralParser.Check(code: request.Code, language: request.Language);
+        var analysis = _analyzer.Report(code: request.Code, language: request.Language);
 
         var result = new QualityResult
         {
@@ -62,12 +62,13 @@ public sealed class QualityGrader : IQualityGrader
             SyntaxAuthoritative = syntax.IsAuthoritative,
             AnalysisScore = analysis.Score,
             AnalysisFindings = analysis.Notes,
-            DegradedReason = syntax.IsAuthoritative ? null : "heuristic-syntax-check",
+            DegradedReason = syntax.IsAuthoritative ? null : "heuristic-syntax-check"
         };
 
-        result = result with { UnifiedScore = _scorer.Score(result, request.Dimension) };
+        result = result with { UnifiedScore = _scorer.Score(result: result, dimension: request.Dimension) };
 
         _logger.LogInformation(
+            message:
             "Graded {Language} dim {Dimension} syntax={SyntaxValid} authoritative={Authoritative} -> u={Score:F3} (correlation {CorrelationId}).",
             request.Language,
             request.Dimension,

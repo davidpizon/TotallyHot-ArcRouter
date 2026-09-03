@@ -14,7 +14,7 @@ public enum StepStatus
     Warn,
 
     /// <summary>Purely informational step; no success/failure connotation.</summary>
-    Info,
+    Info
 }
 
 /// <summary>One step in the routing decision log shown in the Live Stream inspector.</summary>
@@ -127,11 +127,8 @@ public sealed record Conversation(
 /// </summary>
 public static class MockData
 {
-    /// <summary>Mock conversation history for the Console tab.</summary>
-    public static IReadOnlyList<Conversation> Conversations => Fixture.Value.Conversations;
-
-    /// <summary>Mock routing decisions for the Live Stream tab.</summary>
-    public static IReadOnlyList<RoutingEntry> Entries => Fixture.Value.Entries;
+    /// <summary>The manifest resource name <c>DashboardMockData.json</c> is embedded under.</summary>
+    private const string MockDataResourceName = "TotallyHot.ArcRouter.Gui.Models.DashboardMockData.json";
 
     /// <summary>
     /// The literal fixture data backing <see cref="Conversations"/> and <see cref="Entries"/>, lazily
@@ -142,10 +139,111 @@ public static class MockData
     /// </summary>
     private static readonly Lazy<MockDataFixture> Fixture = new(LoadFixture);
 
-    /// <summary>The deserialization target for <c>DashboardMockData.json</c>'s top-level shape.</summary>
-    /// <param name="Conversations">Deserializes into <see cref="MockData.Conversations"/>.</param>
-    /// <param name="Entries">Deserializes into <see cref="MockData.Entries"/>.</param>
-    private sealed record MockDataFixture(IReadOnlyList<Conversation> Conversations, IReadOnlyList<RoutingEntry> Entries);
+    /// <summary>
+    /// Deserialization options for the mock data fixture: <see cref="StepStatus"/> is stored as its enum-member name,
+    /// not a number.
+    /// </summary>
+    private static readonly JsonSerializerOptions SerializerOptions = new()
+    {
+        Converters = { new JsonStringEnumConverter() }
+    };
+
+    /// <summary>Mock monthly cost trend for the Cost Analytics tab.</summary>
+    public static readonly IReadOnlyList<CostDataPoint> CostData =
+    [
+        new(Time: "Jun 1", 0m),
+        new(Time: "Jun 3", 4.20m),
+        new(Time: "Jun 5", 9.80m),
+        new(Time: "Jun 7", 17.60m),
+        new(Time: "Jun 9", 26.10m),
+        new(Time: "Jun 11", 38.40m),
+        new(Time: "Jun 13", 51.20m),
+        new(Time: "Jun 15", 67.80m),
+        new(Time: "Jun 17", 82.50m),
+        new(Time: "Jun 19", 99.10m),
+        new(Time: "Jun 21", 112.40m),
+        new(Time: "Jun 23", 124.70m),
+        new(Time: "Jun 25", 133.20m),
+        new(Time: "Jun 27", 138.90m),
+        new(Time: "Jun 29", 141.50m),
+        new(Time: "Jul 1", 142.36m)
+    ];
+
+    /// <summary>Mock per-agent ROI figures for the Cost Analytics tab.</summary>
+    public static readonly IReadOnlyList<AgentRoi> AgentRoi =
+    [
+        new(Agent: "Log Anomaly Detector", 91.67m, 38.20m),
+        new(Agent: "SQL Query Optimizer", 87.69m, 22.40m),
+        new(Agent: "Data Analyst Wrapper", 85.12m, 41.80m),
+        new(Agent: "Customer Support NLP", 84.30m, 18.60m),
+        new(Agent: "Summarization Pipeline", 79.50m, 12.40m),
+        new(Agent: "Embedding Generator", 78.20m, 5.80m),
+        new(Agent: "Code Review Bot", 64.10m, 2.90m)
+    ];
+
+    /// <summary>Mock daily prompt/completion token volumes for the Cost Analytics tab.</summary>
+    public static readonly IReadOnlyList<TokenBucket> TokenBuckets =
+    [
+        new(Slot: "Mon", 2_840_000m, 980_000m),
+        new(Slot: "Tue", 3_120_000m, 1_140_000m),
+        new(Slot: "Wed", 4_200_000m, 1_680_000m),
+        new(Slot: "Thu", 3_890_000m, 1_520_000m),
+        new(Slot: "Fri", 2_960_000m, 1_020_000m),
+        new(Slot: "Sat", 1_840_000m, 620_000m),
+        new(Slot: "Sun", 1_240_000m, 380_000m)
+    ];
+
+    /// <summary>Mock per-model token-volume market share for the Model Distribution tab.</summary>
+    public static readonly IReadOnlyList<ModelShare> ModelShares =
+    [
+        new(Model: "gpt-4o-mini", 38m, Color: "#10b981"),
+        new(Model: "claude-3-haiku", 22m, Color: "#38bdf8"),
+        new(Model: "gemini-1.5-flash", 18m, Color: "#818cf8"),
+        new(Model: "fallback-local", 10m, Color: "#f59e0b"),
+        new(Model: "claude-3-5-sonnet", 7m, Color: "#fb7185"),
+        new(Model: "text-embedding-3-small", 5m, Color: "#a78bfa")
+    ];
+
+    /// <summary>
+    /// Models the mock history draws from, each with an approximate ($/M input, $/M output) price used
+    /// to derive per-turn cost. Deliberately a spread of tiers (cheap routed models through a premium
+    /// model and a $0 local fallback) so the Cost Analytics model-choice bars show a real mix.
+    /// </summary>
+    private static readonly (string Model, decimal InputPerM, decimal OutputPerM)[] HistoryModels =
+    [
+        ("gpt-4o-mini", 0.15m, 0.60m),
+        ("claude-3-haiku", 0.25m, 1.25m),
+        ("gemini-1.5-flash", 0.075m, 0.30m),
+        ("claude-3-5-sonnet", 3.00m, 15.00m),
+        ("fallback-cheapest-local", 0m, 0m)
+    ];
+
+    /// <summary>
+    /// One mock session: how long ago its first turn was, how many turns it has, and how far apart the
+    /// turns are. Chosen so every Cost Analytics time range is populated - two sessions land inside the
+    /// last hour (each turn a distinct point), more inside the day/week/month, and several stretch back
+    /// months for the all-time view.
+    /// </summary>
+    private static readonly (int StartMinutesAgo, int Turns, int SpacingMinutes)[] HistorySessions =
+    [
+        (45, 5, 6), // within the last hour
+        (52, 3, 5), // within the last hour
+        (6 * 60, 5, 9), // within the last day
+        (14 * 60, 4, 12), // within the last day
+        (2 * 24 * 60, 6, 15), // within the last week
+        (4 * 24 * 60, 5, 20), // within the last week
+        (10 * 24 * 60, 6, 18), // within the last month
+        (20 * 24 * 60, 5, 22), // within the last month
+        (45 * 24 * 60, 6, 16), // all-time
+        (75 * 24 * 60, 5, 25), // all-time
+        (110 * 24 * 60, 7, 14) // all-time
+    ];
+
+    /// <summary>Mock conversation history for the Console tab.</summary>
+    public static IReadOnlyList<Conversation> Conversations => Fixture.Value.Conversations;
+
+    /// <summary>Mock routing decisions for the Live Stream tab.</summary>
+    public static IReadOnlyList<RoutingEntry> Entries => Fixture.Value.Entries;
 
     /// <summary>
     /// Reads and deserializes the <c>DashboardMockData.json</c> resource embedded in this assembly under
@@ -160,111 +258,13 @@ public static class MockData
     {
         var assembly = typeof(MockData).Assembly;
         using var stream = assembly.GetManifestResourceStream(MockDataResourceName)
-            ?? throw new InvalidOperationException($"Embedded resource '{MockDataResourceName}' was not found in {assembly.FullName}.");
+                           ?? throw new InvalidOperationException(
+                               $"Embedded resource '{MockDataResourceName}' was not found in {assembly.FullName}.");
 
-        return JsonSerializer.Deserialize<MockDataFixture>(stream, SerializerOptions)
-            ?? throw new InvalidOperationException($"Embedded resource '{MockDataResourceName}' deserialized to null.");
+        return JsonSerializer.Deserialize<MockDataFixture>(utf8Json: stream, options: SerializerOptions)
+               ?? throw new InvalidOperationException(
+                   $"Embedded resource '{MockDataResourceName}' deserialized to null.");
     }
-
-    /// <summary>The manifest resource name <c>DashboardMockData.json</c> is embedded under.</summary>
-    private const string MockDataResourceName = "TotallyHot.ArcRouter.Gui.Models.DashboardMockData.json";
-
-    /// <summary>Deserialization options for the mock data fixture: <see cref="StepStatus"/> is stored as its enum-member name, not a number.</summary>
-    private static readonly JsonSerializerOptions SerializerOptions = new()
-    {
-        Converters = { new JsonStringEnumConverter() },
-    };
-
-    /// <summary>Mock monthly cost trend for the Cost Analytics tab.</summary>
-    public static readonly IReadOnlyList<CostDataPoint> CostData =
-    [
-        new("Jun 1", 0m),
-        new("Jun 3", 4.20m),
-        new("Jun 5", 9.80m),
-        new("Jun 7", 17.60m),
-        new("Jun 9", 26.10m),
-        new("Jun 11", 38.40m),
-        new("Jun 13", 51.20m),
-        new("Jun 15", 67.80m),
-        new("Jun 17", 82.50m),
-        new("Jun 19", 99.10m),
-        new("Jun 21", 112.40m),
-        new("Jun 23", 124.70m),
-        new("Jun 25", 133.20m),
-        new("Jun 27", 138.90m),
-        new("Jun 29", 141.50m),
-        new("Jul 1", 142.36m),
-    ];
-
-    /// <summary>Mock per-agent ROI figures for the Cost Analytics tab.</summary>
-    public static readonly IReadOnlyList<AgentRoi> AgentRoi =
-    [
-        new("Log Anomaly Detector", 91.67m, 38.20m),
-        new("SQL Query Optimizer", 87.69m, 22.40m),
-        new("Data Analyst Wrapper", 85.12m, 41.80m),
-        new("Customer Support NLP", 84.30m, 18.60m),
-        new("Summarization Pipeline", 79.50m, 12.40m),
-        new("Embedding Generator", 78.20m, 5.80m),
-        new("Code Review Bot", 64.10m, 2.90m),
-    ];
-
-    /// <summary>Mock daily prompt/completion token volumes for the Cost Analytics tab.</summary>
-    public static readonly IReadOnlyList<TokenBucket> TokenBuckets =
-    [
-        new("Mon", 2_840_000m, 980_000m),
-        new("Tue", 3_120_000m, 1_140_000m),
-        new("Wed", 4_200_000m, 1_680_000m),
-        new("Thu", 3_890_000m, 1_520_000m),
-        new("Fri", 2_960_000m, 1_020_000m),
-        new("Sat", 1_840_000m, 620_000m),
-        new("Sun", 1_240_000m, 380_000m),
-    ];
-
-    /// <summary>Mock per-model token-volume market share for the Model Distribution tab.</summary>
-    public static readonly IReadOnlyList<ModelShare> ModelShares =
-    [
-        new("gpt-4o-mini", 38m, "#10b981"),
-        new("claude-3-haiku", 22m, "#38bdf8"),
-        new("gemini-1.5-flash", 18m, "#818cf8"),
-        new("fallback-local", 10m, "#f59e0b"),
-        new("claude-3-5-sonnet", 7m, "#fb7185"),
-        new("text-embedding-3-small", 5m, "#a78bfa"),
-    ];
-
-    /// <summary>
-    /// Models the mock history draws from, each with an approximate ($/M input, $/M output) price used
-    /// to derive per-turn cost. Deliberately a spread of tiers (cheap routed models through a premium
-    /// model and a $0 local fallback) so the Cost Analytics model-choice bars show a real mix.
-    /// </summary>
-    private static readonly (string Model, decimal InputPerM, decimal OutputPerM)[] HistoryModels =
-    [
-        ("gpt-4o-mini", 0.15m, 0.60m),
-        ("claude-3-haiku", 0.25m, 1.25m),
-        ("gemini-1.5-flash", 0.075m, 0.30m),
-        ("claude-3-5-sonnet", 3.00m, 15.00m),
-        ("fallback-cheapest-local", 0m, 0m),
-    ];
-
-    /// <summary>
-    /// One mock session: how long ago its first turn was, how many turns it has, and how far apart the
-    /// turns are. Chosen so every Cost Analytics time range is populated - two sessions land inside the
-    /// last hour (each turn a distinct point), more inside the day/week/month, and several stretch back
-    /// months for the all-time view.
-    /// </summary>
-    private static readonly (int StartMinutesAgo, int Turns, int SpacingMinutes)[] HistorySessions =
-    [
-        (45, 5, 6),        // within the last hour
-        (52, 3, 5),        // within the last hour
-        (6 * 60, 5, 9),    // within the last day
-        (14 * 60, 4, 12),  // within the last day
-        (2 * 24 * 60, 6, 15),   // within the last week
-        (4 * 24 * 60, 5, 20),   // within the last week
-        (10 * 24 * 60, 6, 18),  // within the last month
-        (20 * 24 * 60, 5, 22),  // within the last month
-        (45 * 24 * 60, 6, 16),  // all-time
-        (75 * 24 * 60, 5, 25),  // all-time
-        (110 * 24 * 60, 7, 14), // all-time
-    ];
 
     /// <summary>
     /// Builds a deterministic, timestamped corpus of turn-level metrics anchored to <paramref name="now"/>,
@@ -292,15 +292,12 @@ public static class MockData
             var start = now.AddMinutes(-startMinutesAgo);
             // Context fills faster in some sessions than others; the heavier ones (growth ~20%/turn)
             // cross the 90% threshold on their later turns so the Context chart shows real breaches.
-            var contextGrowth = 12m + (s % 3) * 4m;
+            var contextGrowth = 12m + s % 3 * 4m;
 
             for (var t = 0; t < turns; t++)
             {
                 var timestamp = start.AddMinutes(t * spacing);
-                if (timestamp > now)
-                {
-                    break;
-                }
+                if (timestamp > now) break;
 
                 // Fixed exemplar events (see the summary) plus low-probability random texture.
                 var forceFallback = s == 5 && t == 2;
@@ -312,21 +309,21 @@ public static class MockData
 
                 // Prompt tokens compound turn-over-turn within a session (the hockey-stick shape);
                 // a runaway turn injects a large recursive-loop spike (> 2.5x the prior turn).
-                var basePrompt = 1500 + (t * 1200) + random.Next(0, 900);
+                var basePrompt = 1500 + t * 1200 + random.Next(0, 900);
                 var promptTokens = forceRunaway ? basePrompt + random.Next(90_000, 150_000) : basePrompt;
                 var completionTokens = 250 + random.Next(0, 1300);
 
-                var cost = (promptTokens / 1_000_000m * inputPerM) + (completionTokens / 1_000_000m * outputPerM);
+                var cost = promptTokens / 1_000_000m * inputPerM + completionTokens / 1_000_000m * outputPerM;
                 // A demo counterfactual: the baseline would have spent 1.6x-4.0x this turn's cost, except
                 // on a fallback turn where it would have been cheaper (a routing loss). Expressed as a
                 // baseline cost rather than a saved-percentage because that is what the real feed carries.
-                var baselineCost = isFallback ? cost * 0.7m : cost * (1.6m + (random.Next(0, 240) / 100m));
-                var toolSteps = 1 + random.Next(0, Math.Min(6, t + 2));
-                var cacheHit = t == 0 ? 0m : 40m + random.Next(0, 400) / 10m;      // 40.0 - 80.0 %
+                var baselineCost = isFallback ? cost * 0.7m : cost * (1.6m + random.Next(0, 240) / 100m);
+                var toolSteps = 1 + random.Next(0, maxValue: Math.Min(6, val2: t + 2));
+                var cacheHit = t == 0 ? 0m : 40m + random.Next(0, 400) / 10m; // 40.0 - 80.0 %
                 var spike = forceSpike || random.Next(0, 100) < 5;
                 var ttft = spike ? 1800 + random.Next(0, 3200) : 150 + random.Next(0, 450);
                 // Grows per turn; heavier sessions breach the 90% safety line, capped below the edge.
-                var contextPct = Math.Min(97m, 12m + (t * contextGrowth));
+                var contextPct = Math.Min(97m, val2: 12m + t * contextGrowth);
 
                 points.Add(new MetricTurnPoint(
                     TimestampUtc: timestamp,
@@ -347,5 +344,11 @@ public static class MockData
 
         return points;
     }
-}
 
+    /// <summary>The deserialization target for <c>DashboardMockData.json</c>'s top-level shape.</summary>
+    /// <param name="Conversations">Deserializes into <see cref="MockData.Conversations"/>.</param>
+    /// <param name="Entries">Deserializes into <see cref="MockData.Entries"/>.</param>
+    private sealed record MockDataFixture(
+        IReadOnlyList<Conversation> Conversations,
+        IReadOnlyList<RoutingEntry> Entries);
+}

@@ -18,13 +18,13 @@ public class ClusterTermExtractorTests
         IReadOnlyList<IReadOnlyList<string>> documents =
         [
             ["sql sql sql fix the bug", "sql sql sql schema failed again", "sql sql sql migration issue arose"],
-            ["write a proof of correctness", "prove the theorem holds", "induction step verified today"],
+            ["write a proof of correctness", "prove the theorem holds", "induction step verified today"]
         ];
 
-        var terms = ClusterTermExtractor.ExtractTopTerms(documents, topTermsPerCluster: 1);
+        var terms = ClusterTermExtractor.ExtractTopTerms(clusterDocuments: documents, 1);
 
-        Assert.Equal(["sql"], terms[0]);
-        Assert.DoesNotContain("sql", terms[1]);
+        Assert.Equal(expected: ["sql"], actual: terms[0]);
+        Assert.DoesNotContain(expected: "sql", collection: terms[1]);
     }
 
     [Fact]
@@ -33,15 +33,15 @@ public class ClusterTermExtractorTests
         IReadOnlyList<IReadOnlyList<string>> documents =
         [
             ["please fix the sql migration"],
-            ["please prove the theorem"],
+            ["please prove the theorem"]
         ];
 
-        var terms = ClusterTermExtractor.ExtractTopTerms(documents, topTermsPerCluster: 1);
+        var terms = ClusterTermExtractor.ExtractTopTerms(clusterDocuments: documents, 1);
 
         // "please" appears in every cluster's single document, so its IDF weight collapses toward zero -
         // the distinguishing term ("sql"/"migration" vs "prove"/"theorem") should win the single slot.
-        Assert.DoesNotContain("please", terms[0]);
-        Assert.DoesNotContain("please", terms[1]);
+        Assert.DoesNotContain(expected: "please", collection: terms[0]);
+        Assert.DoesNotContain(expected: "please", collection: terms[1]);
     }
 
     [Fact]
@@ -51,7 +51,7 @@ public class ClusterTermExtractorTests
 
         var terms = ClusterTermExtractor.ExtractTopTerms(documents);
 
-        Assert.Equal(2, terms.Count);
+        Assert.Equal(2, actual: terms.Count);
         Assert.Empty(terms[0]);
         Assert.Empty(terms[1]);
     }

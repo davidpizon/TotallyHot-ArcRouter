@@ -19,9 +19,9 @@ public sealed class AnthropicUsageReportService
     private const string Provider = "anthropic";
 
     private readonly HttpClient _httpClient;
+    private readonly ILogger<AnthropicUsageReportService> _logger;
     private readonly ReportedUsageRepository _repository;
     private readonly Func<string?> _resolveAdminApiKey;
-    private readonly ILogger<AnthropicUsageReportService> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="AnthropicUsageReportService"/> class.</summary>
     /// <param name="httpClient">The client used to call Anthropic's usage report endpoint.</param>
@@ -59,23 +59,22 @@ public sealed class AnthropicUsageReportService
     public async Task RunCycleAsync(CancellationToken cancellationToken = default)
     {
         var adminApiKey = _resolveAdminApiKey();
-        if (string.IsNullOrWhiteSpace(adminApiKey))
-        {
-            return;
-        }
+        if (string.IsNullOrWhiteSpace(adminApiKey)) return;
 
         try
         {
-            var client = new AnthropicUsageReportClient(_httpClient, adminApiKey);
+            var client = new AnthropicUsageReportClient(httpClient: _httpClient, adminApiKey: adminApiKey);
             var yesterday = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(-1));
             var startingDay = yesterday.AddDays(-(TrailingWindowDays - 1));
 
-            var rows = await client.GetUsageReportAsync(startingDay, yesterday.AddDays(1), cancellationToken).ConfigureAwait(false);
-            _repository.UpsertReportedUsage(Provider, rows, DateTimeOffset.UtcNow);
+            var rows = await client.GetUsageReportAsync(startingDay: startingDay,
+                endingDayExclusive: yesterday.AddDays(1), cancellationToken: cancellationToken).ConfigureAwait(false);
+            _repository.UpsertReportedUsage(providerKey: Provider, rows: rows, fetchedAtUtc: DateTimeOffset.UtcNow);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "Failed to fetch Anthropic's reported usage; will retry next cycle.");
+            _logger.LogWarning(exception: ex,
+                message: "Failed to fetch Anthropic's reported usage; will retry next cycle.");
         }
     }
 }

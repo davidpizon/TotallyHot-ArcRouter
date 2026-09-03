@@ -7,7 +7,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation;
 /// translator (openai, ollama today) is forwarded unchanged, exactly as <see cref="ProxyMiddleware"/>
 /// already does; this interface is consulted only for providers whose native shape actually differs
 /// from OpenAI's.
-///
 /// <para>
 /// The seam grew beyond a pure body-in/body-out translator when the first real implementation
 /// (Google Gemini, §4.3) landed: Gemini's native API also puts the model id and the streaming choice
@@ -18,7 +17,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation;
 /// sketched in the design doc is recorded there, the same way §4.1 recorded the URL-combining bug it
 /// discovered.
 /// </para>
-///
 /// <para>
 /// The Anthropic retrofit (§4.4) grew it again: "anthropic" is registered here, but unlike every other
 /// translated provider it does not always translate - see <see cref="ShouldTranslate"/>.
@@ -26,7 +24,10 @@ namespace TotallyHot.ArcRouter.Proxy.Translation;
 /// </summary>
 public interface IPayloadTranslator
 {
-    /// <summary>The provider key this translator applies to (matches <see cref="TotallyHot.ArcRouter.Models.ModelRouteEntry.Provider"/>).</summary>
+    /// <summary>
+    /// The provider key this translator applies to (matches
+    /// <see cref="TotallyHot.ArcRouter.Models.ModelRouteEntry.Provider"/>).
+    /// </summary>
     string Provider { get; }
 
     /// <summary>
@@ -40,7 +41,10 @@ public interface IPayloadTranslator
     /// implement this member.
     /// </summary>
     /// <param name="request">The inbound client request (path, headers, etc.) - not yet body-parsed.</param>
-    bool ShouldTranslate(HttpRequest request) => true;
+    bool ShouldTranslate(HttpRequest request)
+    {
+        return true;
+    }
 
     /// <summary>
     /// Builds the absolute upstream URL to forward to. Unlike an OpenAI-shaped provider (where the
@@ -51,7 +55,10 @@ public interface IPayloadTranslator
     /// </summary>
     /// <param name="baseUrl">The provider's configured base URL (host, optionally with a path prefix).</param>
     /// <param name="providerModelId">The upstream model id (already resolved from the client-facing name).</param>
-    /// <param name="isStreaming">Whether the client requested a streaming response (from the request body's <c>stream</c> field).</param>
+    /// <param name="isStreaming">
+    /// Whether the client requested a streaming response (from the request body's <c>stream</c>
+    /// field).
+    /// </param>
     Uri BuildRequestUri(Uri baseUrl, string providerModelId, bool isStreaming);
 
     /// <summary>
@@ -78,7 +85,6 @@ public interface IPayloadTranslator
     /// <see cref="ProxyMiddleware"/> buffer the (small) error body and hand it to
     /// <see cref="TryExtractEmbeddedError"/>; the default <see langword="false"/> leaves the response
     /// on the untouched forwarding path.
-    ///
     /// <para>
     /// This is a separate decision from <see cref="TryExtractEmbeddedError"/> because the buffering has
     /// to happen <em>before</em> there are any bytes to parse, and buffering is observable: a pre-read
@@ -88,14 +94,16 @@ public interface IPayloadTranslator
     /// </para>
     /// </summary>
     /// <param name="statusCode">The upstream response's HTTP status code.</param>
-    bool HandlesEmbeddedErrorAt(int statusCode) => false;
+    bool HandlesEmbeddedErrorAt(int statusCode)
+    {
+        return false;
+    }
 
     /// <summary>
     /// Extracts an error this provider embedded in a response body whose shape
     /// <see cref="TranslateResponse"/> would otherwise mangle into a bogus empty completion (or, on the
     /// SSE path, silently swallow). Called only when <see cref="HandlesEmbeddedErrorAt"/> returned
     /// <see langword="true"/> for the same status code.
-    ///
     /// <para>
     /// This member is what keeps provider-specific error decoding out of <see cref="ProxyMiddleware"/>:
     /// before it existed, the middleware type-tested each concrete translator class and called a
@@ -122,7 +130,10 @@ public interface IPayloadTranslator
 /// genuinely provider-specific judgement rather than transcription - travels with the data instead of
 /// being re-derived by every caller.
 /// </summary>
-/// <param name="Status">The provider's own error status/type token (Gemini's <c>error.status</c>, Anthropic's <c>error.type</c>), or empty when the envelope carried none.</param>
+/// <param name="Status">
+/// The provider's own error status/type token (Gemini's <c>error.status</c>, Anthropic's
+/// <c>error.type</c>), or empty when the envelope carried none.
+/// </param>
 /// <param name="Message">The human-readable error message. Never empty when extraction succeeded.</param>
 /// <param name="IsAuthFailure">
 /// Whether this provider considers the error a credential failure disguised as a non-401 status. Gemini
@@ -137,7 +148,6 @@ public readonly record struct EmbeddedProviderError(string Status, string Messag
 /// native SSE bytes as they arrive and emits OpenAI-shaped <c>chat.completion.chunk</c> SSE bytes to
 /// forward to the client. Not thread-safe and not reusable across requests - obtain one from
 /// <see cref="IPayloadTranslator.CreateStreamTranslator"/> per response.
-///
 /// <para>
 /// Streaming-error semantics mirror LiteLLM's Gemini iterator (the parity reference): an upstream
 /// chunk carrying an embedded provider error (e.g. a 429 <c>RESOURCE_EXHAUSTED</c> delivered as an
@@ -162,4 +172,3 @@ public interface IStreamTranslator
     /// </summary>
     byte[] Flush();
 }
-

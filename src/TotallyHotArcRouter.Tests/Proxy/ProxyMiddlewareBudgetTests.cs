@@ -1,7 +1,7 @@
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging.Abstractions;
 using System.Net;
 using System.Text;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging.Abstractions;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Telemetry;
@@ -26,7 +26,7 @@ public class ProxyMiddlewareBudgetTests
     {
         using var temp = new TempDatabase();
         var budgetStore = temp.CreateBudgetStore();
-        budgetStore.SetBudget("prov-a", dollarCap: 0m, tokenCap: null); // cap of $0 is breached immediately
+        budgetStore.SetBudget(providerKey: "prov-a", 0m, null); // cap of $0 is breached immediately
 
         var resolver = ModelRouteResolverTestFactory.CreateWithModels(
             ("primary", "prov-a", "primary-upstream", $"https://{PrimaryHost}"),
@@ -35,25 +35,23 @@ public class ProxyMiddlewareBudgetTests
         var primaryCalled = false;
         var handler = new RoutingHandlerStub(request =>
         {
-            if (request.RequestUri!.Host == PrimaryHost)
-            {
-                primaryCalled = true;
-            }
+            if (request.RequestUri!.Host == PrimaryHost) primaryCalled = true;
 
             return Ok("served-by-backup");
         });
 
         var capturing = new CapturingPublisher();
-        var context = await RunAsync(resolver, handler, budgetStore, capturing);
+        var context = await RunAsync(resolver: resolver, handler: handler, budgetStore: budgetStore,
+            telemetryPublisher: capturing);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
         Assert.False(primaryCalled); // the breached provider is never attempted
-        Assert.Equal("served-by-backup", await ReadBodyAsync(context));
+        Assert.Equal(expected: "served-by-backup", actual: await ReadBodyAsync(context));
 
         var telemetry = await capturing.WaitAsync();
         Assert.True(telemetry.IsFallback);
-        Assert.Equal("primary", telemetry.RequestedModel); // the client still asked for the primary
-        Assert.Equal("prov-b", telemetry.Provider);
+        Assert.Equal(expected: "primary", actual: telemetry.RequestedModel); // the client still asked for the primary
+        Assert.Equal(expected: "prov-b", actual: telemetry.Provider);
     }
 
     [Fact]
@@ -61,8 +59,8 @@ public class ProxyMiddlewareBudgetTests
     {
         using var temp = new TempDatabase();
         var budgetStore = temp.CreateBudgetStore();
-        budgetStore.SetBudget("prov-a", dollarCap: 0m, tokenCap: null);
-        budgetStore.SetBudget("prov-b", dollarCap: 0m, tokenCap: null);
+        budgetStore.SetBudget(providerKey: "prov-a", 0m, null);
+        budgetStore.SetBudget(providerKey: "prov-b", 0m, null);
 
         var resolver = ModelRouteResolverTestFactory.CreateWithModels(
             ("primary", "prov-a", "primary-upstream", $"https://{PrimaryHost}"),
@@ -75,11 +73,12 @@ public class ProxyMiddlewareBudgetTests
             return Ok("should-not-be-served");
         });
 
-        var context = await RunAsync(resolver, handler, budgetStore);
+        var context = await RunAsync(resolver: resolver, handler: handler, budgetStore: budgetStore);
 
-        Assert.Equal(StatusCodes.Status402PaymentRequired, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status402PaymentRequired, actual: context.Response.StatusCode);
         Assert.False(upstreamCalled);
-        Assert.Contains("budget", await ReadBodyAsync(context), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(expectedSubstring: "budget", actualString: await ReadBodyAsync(context),
+            comparisonType: StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -101,11 +100,12 @@ public class ProxyMiddlewareBudgetTests
             return Ok("should-not-be-served");
         });
 
-        var context = await RunAsync(resolver, handler, enforcer);
+        var context = await RunAsync(resolver: resolver, handler: handler, budgetStore: enforcer);
 
-        Assert.Equal(StatusCodes.Status402PaymentRequired, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status402PaymentRequired, actual: context.Response.StatusCode);
         Assert.False(upstreamCalled);
-        Assert.Contains("budget", await ReadBodyAsync(context), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(expectedSubstring: "budget", actualString: await ReadBodyAsync(context),
+            comparisonType: StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -113,7 +113,7 @@ public class ProxyMiddlewareBudgetTests
     {
         using var temp = new TempDatabase();
         var budgetStore = temp.CreateBudgetStore();
-        budgetStore.SetBudget("openai", dollarCap: 100m, tokenCap: 1_000_000L);
+        budgetStore.SetBudget(providerKey: "openai", 100m, 1_000_000L);
 
         // Provider "openai" so the usage extractor recognizes the OpenAI response shape and records tokens.
         var resolver = ModelRouteResolverTestFactory.CreateWithModels(
@@ -124,27 +124,30 @@ public class ProxyMiddlewareBudgetTests
         {
             Content = new StringContent(
                 """{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5}}""",
-                Encoding.UTF8,
-                "application/json"),
+                encoding: Encoding.UTF8,
+                mediaType: "application/json")
         });
 
-        var context = await RunAsync(resolver, handler, budgetStore);
+        var context = await RunAsync(resolver: resolver, handler: handler, budgetStore: budgetStore);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
 
         var status = budgetStore.GetStatus("openai");
-        Assert.Equal(15L, status.TokensUsed);
+        Assert.Equal(15L, actual: status.TokensUsed);
     }
 
     // -- helpers -------------------------------------------------------------
 
-    private static HttpResponseMessage Ok(string body) =>
-        new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "text/plain") };
+    private static HttpResponseMessage Ok(string body)
+    {
+        return new HttpResponseMessage(HttpStatusCode.OK)
+            { Content = new StringContent(content: body, encoding: Encoding.UTF8, mediaType: "text/plain") };
+    }
 
     private static async Task<string> ReadBodyAsync(HttpContext context)
     {
         context.Response.Body.Position = 0;
-        using var reader = new StreamReader(context.Response.Body, Encoding.UTF8);
+        using var reader = new StreamReader(stream: context.Response.Body, encoding: Encoding.UTF8);
         return await reader.ReadToEndAsync(TestContext.Current.CancellationToken);
     }
 
@@ -155,11 +158,12 @@ public class ProxyMiddlewareBudgetTests
         ITelemetryPublisher? telemetryPublisher = null,
         string requestedModel = "primary")
     {
-        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver);
+        var interceptor =
+            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
         var middleware = new ProxyMiddleware(
-            NullLogger<ProxyMiddleware>.Instance,
-            interceptor,
-            new HttpClient(handler),
+            logger: NullLogger<ProxyMiddleware>.Instance,
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 TelemetryPublisher = telemetryPublisher,
@@ -178,14 +182,17 @@ public class ProxyMiddlewareBudgetTests
         context.Response.Body = new MemoryStream();
         context.RequestAborted = TestContext.Current.CancellationToken;
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
         return context;
     }
 
     private sealed class RoutingHandlerStub(Func<HttpRequestMessage, HttpResponseMessage> handler) : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => Task.FromResult(handler(request));
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(handler(request));
+        }
     }
 
     // Reports "under budget" on the first IsBreached call (the pre-loop all-breached check) and "over budget"
@@ -194,10 +201,17 @@ public class ProxyMiddlewareBudgetTests
     {
         private int _checks;
 
-        public bool IsBreached(string providerKey) => ++_checks > 1;
+        public bool IsBreached(string providerKey)
+        {
+            return ++_checks > 1;
+        }
 
-        public Task RecordUsageAsync(string providerKey, decimal? costUsd, int? promptTokens, int? completionTokens, int? cacheCreationTokens, int? cacheReadTokens, DateTimeOffset usageAtUtc, CancellationToken cancellationToken = default)
-            => Task.CompletedTask;
+        public Task RecordUsageAsync(string providerKey, decimal? costUsd, int? promptTokens, int? completionTokens,
+            int? cacheCreationTokens, int? cacheReadTokens, DateTimeOffset usageAtUtc,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class CapturingPublisher : ITelemetryPublisher
@@ -211,14 +225,17 @@ public class ProxyMiddlewareBudgetTests
             return Task.CompletedTask;
         }
 
-        public Task PublishLogLineAsync(LogLineEvent logLine, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task PublishLogLineAsync(LogLineEvent logLine, CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
 
         public async Task<RoutingTelemetryEvent> WaitAsync()
         {
-            var completed = await Task.WhenAny(_tcs.Task, Task.Delay(TimeSpan.FromSeconds(5)));
-            Assert.True(ReferenceEquals(completed, _tcs.Task), "Timed out waiting for a routing telemetry event.");
+            var completed = await Task.WhenAny(task1: _tcs.Task, task2: Task.Delay(TimeSpan.FromSeconds(5)));
+            Assert.True(condition: ReferenceEquals(objA: completed, objB: _tcs.Task),
+                userMessage: "Timed out waiting for a routing telemetry event.");
             return await _tcs.Task;
         }
     }
 }
-

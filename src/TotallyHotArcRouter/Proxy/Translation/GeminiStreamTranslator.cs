@@ -9,7 +9,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation;
 /// Consumes Gemini's native SSE bytes as they arrive and emits OpenAI <c>chat.completion.chunk</c> SSE
 /// bytes for the client. Created per response by
 /// <see cref="GeminiPayloadTranslator.CreateStreamTranslator"/>; not thread-safe.
-///
 /// <para>
 /// Error semantics mirror LiteLLM's <c>ModelResponseIterator</c> (the parity reference): a chunk with
 /// an embedded <c>error</c> object (e.g. a 429 <c>RESOURCE_EXHAUSTED</c> delivered as an HTTP 200 SSE
@@ -28,36 +27,29 @@ public sealed class GeminiStreamTranslator : IStreamTranslator
     // ingestion so the event delimiter is always "\n\n" (Gemini's compact JSON never contains a raw
     // 0x0D byte - a CR inside a JSON string is the two-char escape \r, not a literal 0x0D).
     private readonly List<byte> _buffer = new();
+    private readonly long _created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+    private bool _hasSeenToolCalls;
 
     // Stable across the whole stream, seeded from the first chunk that carries them.
     private string _id = PayloadTranslationHelpers.GenerateCompletionId();
     private string _model = string.Empty;
-    private long _created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-
-    private bool _roleSent;
-    private int _toolCallIndex;
-    private bool _hasSeenToolCalls;
 
     // An embedded-error event terminates the stream, but only after the valid chunks that preceded it
     // in the same Push have been emitted (otherwise the client loses a good prefix). So the error is
     // held here and re-thrown on the next Push/Flush, once the good bytes are already on the wire.
     private GeminiStreamException? _pendingError;
 
-    /// <inheritdoc />
+    private bool _roleSent;
+    private int _toolCallIndex;
+
+    /// <inheritdoc/>
     public byte[] Push(ReadOnlySpan<byte> upstreamChunk)
     {
-        if (_pendingError is not null)
-        {
-            throw _pendingError;
-        }
+        if (_pendingError is not null) throw _pendingError;
 
         foreach (var b in upstreamChunk)
-        {
             if (b != (byte)'\r')
-            {
                 _buffer.Add(b);
-            }
-        }
 
         using var output = new MemoryStream();
 
@@ -67,8 +59,8 @@ public sealed class GeminiStreamTranslator : IStreamTranslator
         int delimiter;
         while ((delimiter = IndexOfDoubleNewline()) >= 0)
         {
-            var eventBytes = _buffer.GetRange(0, delimiter).ToArray();
-            _buffer.RemoveRange(0, delimiter + 2);
+            var eventBytes = _buffer.GetRange(0, count: delimiter).ToArray();
+            _buffer.RemoveRange(0, count: delimiter + 2);
 
             byte[]? translated;
             try
@@ -81,23 +73,17 @@ public sealed class GeminiStreamTranslator : IStreamTranslator
                 break;
             }
 
-            if (translated is not null)
-            {
-                output.Write(translated, 0, translated.Length);
-            }
+            if (translated is not null) output.Write(buffer: translated, 0, count: translated.Length);
         }
 
         return output.ToArray();
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public byte[] Flush()
     {
         // A held embedded error terminates the stream: no trailing content, no [DONE].
-        if (_pendingError is not null)
-        {
-            throw _pendingError;
-        }
+        if (_pendingError is not null) throw _pendingError;
 
         using var output = new MemoryStream();
 
@@ -107,49 +93,47 @@ public sealed class GeminiStreamTranslator : IStreamTranslator
             var remaining = _buffer.ToArray();
             _buffer.Clear();
             if (TranslateEvent(remaining) is { } translated)
-            {
-                output.Write(translated, 0, translated.Length);
-            }
+                output.Write(buffer: translated, 0, count: translated.Length);
         }
 
-        output.Write(DoneLine, 0, DoneLine.Length);
+        output.Write(buffer: DoneLine, 0, count: DoneLine.Length);
         return output.ToArray();
     }
 
-    /// <summary>Scans the buffered bytes for the first blank-line separator (<c>\n\n</c>) marking the end of one complete SSE event, returning -1 if no complete event is buffered yet.</summary>
+    /// <summary>
+    /// Scans the buffered bytes for the first blank-line separator (<c>\n\n</c>) marking the end of one complete SSE
+    /// event, returning -1 if no complete event is buffered yet.
+    /// </summary>
     private int IndexOfDoubleNewline()
     {
         for (var i = 0; i + 1 < _buffer.Count; i++)
-        {
             if (_buffer[i] == (byte)'\n' && _buffer[i + 1] == (byte)'\n')
-            {
                 return i;
-            }
-        }
 
         return -1;
     }
 
-    /// <summary>Translates one raw SSE event (its <c>data:</c> payload) into an OpenAI SSE chunk line, or null when the event carries nothing client-visible.</summary>
+    /// <summary>
+    /// Translates one raw SSE event (its <c>data:</c> payload) into an OpenAI SSE chunk line, or null when the event
+    /// carries nothing client-visible.
+    /// </summary>
     private byte[]? TranslateEvent(byte[] eventBytes)
     {
         var payload = ExtractDataPayload(eventBytes);
-        if (payload is null || payload == "[DONE]")
-        {
-            return null;
-        }
+        if (payload is null || payload == "[DONE]") return null;
 
         JsonObject chunk;
         try
         {
             chunk = JsonNode.Parse(payload) as JsonObject
-                ?? throw new GeminiStreamException("Gemini stream chunk was not a JSON object.");
+                    ?? throw new GeminiStreamException("Gemini stream chunk was not a JSON object.");
         }
         catch (JsonException ex)
         {
             // A complete event (it had its terminating blank line) that still isn't valid JSON is a
             // genuine protocol error, not a fragment to accumulate - terminate rather than forward raw.
-            throw new GeminiStreamException($"Failed to parse Gemini stream chunk: {ex.Message}", ex);
+            throw new GeminiStreamException(message: $"Failed to parse Gemini stream chunk: {ex.Message}",
+                innerException: ex);
         }
 
         // Embedded provider error (e.g. 429 RESOURCE_EXHAUSTED as an HTTP 200 SSE body) - terminate.
@@ -173,16 +157,13 @@ public sealed class GeminiStreamTranslator : IStreamTranslator
         var contentText = new StringBuilder();
         JsonArray? toolCalls = null;
 
-        if (chunk["candidates"] is JsonArray candidates && candidates.Count > 0 && candidates[0] is JsonObject candidate)
+        if (chunk["candidates"] is JsonArray candidates && candidates.Count > 0 &&
+            candidates[0] is JsonObject candidate)
         {
             if (candidate["content"] is JsonObject content && content["parts"] is JsonArray parts)
-            {
                 foreach (var partNode in parts)
                 {
-                    if (partNode is not JsonObject part)
-                    {
-                        continue;
-                    }
+                    if (partNode is not JsonObject part) continue;
 
                     if (part["text"]?.GetValue<string>() is { } text)
                     {
@@ -195,29 +176,20 @@ public sealed class GeminiStreamTranslator : IStreamTranslator
                         _hasSeenToolCalls = true;
                     }
                 }
-            }
 
             if (candidate["finishReason"]?.GetValue<string>() is { } rawFinish)
-            {
                 finishReason = _hasSeenToolCalls ? "tool_calls" : GeminiPayloadTranslator.MapFinishReason(rawFinish);
-            }
         }
 
-        if (contentText.Length > 0)
-        {
-            delta["content"] = contentText.ToString();
-        }
+        if (contentText.Length > 0) delta["content"] = contentText.ToString();
 
-        if (toolCalls is not null)
-        {
-            delta["tool_calls"] = toolCalls;
-        }
+        if (toolCalls is not null) delta["tool_calls"] = toolCalls;
 
         var choice = new JsonObject
         {
             ["index"] = 0,
             ["delta"] = delta,
-            ["finish_reason"] = finishReason,
+            ["finish_reason"] = finishReason
         };
 
         var openAiChunk = new JsonObject
@@ -226,24 +198,25 @@ public sealed class GeminiStreamTranslator : IStreamTranslator
             ["object"] = "chat.completion.chunk",
             ["created"] = _created,
             ["model"] = _model,
-            ["choices"] = new JsonArray { choice },
+            ["choices"] = new JsonArray { choice }
         };
 
         if (chunk["usageMetadata"] is JsonObject usageMetadata)
-        {
             openAiChunk["usage"] = new JsonObject
             {
                 ["prompt_tokens"] = usageMetadata["promptTokenCount"]?.GetValue<int>() ?? 0,
                 ["completion_tokens"] = usageMetadata["candidatesTokenCount"]?.GetValue<int>() ?? 0,
-                ["total_tokens"] = usageMetadata["totalTokenCount"]?.GetValue<int>() ?? 0,
+                ["total_tokens"] = usageMetadata["totalTokenCount"]?.GetValue<int>() ?? 0
             };
-        }
 
-        var json = JsonSerializer.Serialize(openAiChunk, SerializerOptions);
+        var json = JsonSerializer.Serialize(value: openAiChunk, options: SerializerOptions);
         return Encoding.UTF8.GetBytes($"data: {json}\n\n");
     }
 
-    /// <summary>Converts a Gemini streaming functionCall part into an OpenAI-shaped tool_calls delta entry, assigning it the next tool-call index and serializing its args to a JSON string.</summary>
+    /// <summary>
+    /// Converts a Gemini streaming functionCall part into an OpenAI-shaped tool_calls delta entry, assigning it the
+    /// next tool-call index and serializing its args to a JSON string.
+    /// </summary>
     private JsonObject BuildToolCallDelta(JsonObject functionCall)
     {
         var name = functionCall["name"]?.GetValue<string>() ?? string.Empty;
@@ -258,26 +231,27 @@ public sealed class GeminiStreamTranslator : IStreamTranslator
             ["function"] = new JsonObject
             {
                 ["name"] = name,
-                ["arguments"] = args,
-            },
+                ["arguments"] = args
+            }
         };
     }
 
-    /// <summary>Captures the stream's id and model from the first chunk that carries them, so subsequent chunks (which may omit these fields) reuse the same stable values.</summary>
+    /// <summary>
+    /// Captures the stream's id and model from the first chunk that carries them, so subsequent chunks (which may
+    /// omit these fields) reuse the same stable values.
+    /// </summary>
     private void SeedStreamIdentity(JsonObject chunk)
     {
-        if (chunk["responseId"]?.GetValue<string>() is { Length: > 0 } responseId)
-        {
-            _id = responseId;
-        }
+        if (chunk["responseId"]?.GetValue<string>() is { Length: > 0 } responseId) _id = responseId;
 
-        if (chunk["modelVersion"]?.GetValue<string>() is { Length: > 0 } modelVersion)
-        {
-            _model = modelVersion;
-        }
+        if (chunk["modelVersion"]?.GetValue<string>() is { Length: > 0 } modelVersion) _model = modelVersion;
     }
 
-    /// <summary>Pulls the <c>data:</c> field value out of one SSE event, ignoring comment/other lines. Multiple <c>data:</c> lines are joined with <c>"\n"</c> per the SSE spec, not concatenated directly. Returns null when the event has no data line.</summary>
+    /// <summary>
+    /// Pulls the <c>data:</c> field value out of one SSE event, ignoring comment/other lines. Multiple <c>data:</c>
+    /// lines are joined with <c>"\n"</c> per the SSE spec, not concatenated directly. Returns null when the event has no data
+    /// line.
+    /// </summary>
     private static string? ExtractDataPayload(byte[] eventBytes)
     {
         var text = Encoding.UTF8.GetString(eventBytes);
@@ -285,22 +259,15 @@ public sealed class GeminiStreamTranslator : IStreamTranslator
 
         foreach (var line in text.Split('\n'))
         {
-            if (!line.StartsWith("data:", StringComparison.Ordinal))
-            {
-                continue;
-            }
+            if (!line.StartsWith(value: "data:", comparisonType: StringComparison.Ordinal)) continue;
 
             // Per the SSE spec, multiple data: lines within one event are joined with "\n" (not
             // concatenated directly) - required for a multi-line or pretty-printed JSON payload to
             // parse correctly. No separator before the first line, none trailing after the last.
             if (data is null)
-            {
                 data = new StringBuilder();
-            }
             else
-            {
                 data.Append('\n');
-            }
 
             // SSE allows an optional single space after the colon.
             var value = line.Length > 5 && line[5] == ' ' ? line[6..] : line[5..];
@@ -324,8 +291,8 @@ public sealed class GeminiStreamException : Exception
     }
 
     /// <summary>Initializes a new instance with the given message and inner exception.</summary>
-    public GeminiStreamException(string message, Exception innerException) : base(message, innerException)
+    public GeminiStreamException(string message, Exception innerException) : base(message: message,
+        innerException: innerException)
     {
     }
 }
-

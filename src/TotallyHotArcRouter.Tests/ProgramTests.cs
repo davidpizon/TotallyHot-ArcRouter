@@ -6,216 +6,218 @@ using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Router;
 
-namespace TotallyHot.ArcRouter.Tests
+namespace TotallyHot.ArcRouter.Tests;
+
+public class ProgramTests
 {
-    public class ProgramTests
+    [Fact]
+    public void CreateHostBuilder_BuildsSuccessfully()
     {
-        [Fact]
-        public void CreateHostBuilder_BuildsSuccessfully()
-        {
-            // Arrange
-            var args = new string[] { };
+        // Arrange
+        var args = new string[] { };
 
-            // Act
-            var host = Program.CreateHostBuilder(args).Build();
+        // Act
+        var host = Program.CreateHostBuilder(args).Build();
 
-            // Assert
-            // UseWindowsService() (auto-update plan Phase 1) is a no-op outside the Windows Service
-            // Control Manager, so this same build already exercises it - a separate test would only
-            // re-assert the identical outcome.
-            Assert.NotNull(host);
-        }
+        // Assert
+        // UseWindowsService() (auto-update plan Phase 1) is a no-op outside the Windows Service
+        // Control Manager, so this same build already exercises it - a separate test would only
+        // re-assert the identical outcome.
+        Assert.NotNull(host);
+    }
 
-        // Local Proxy CLI: `TotallyHot.ArcRouter --model <name>` should register the forced
-        // model name for RequestInterceptor to pick up (see RequestInterceptorTests' single-model-serving
-        // coverage) - this test confirms Program.cs's CLI parsing actually reaches DI, black-box, via the
-        // same public CreateHostBuilder API the other tests in this file already use.
-        [Fact]
-        public void CreateHostBuilder_WithModelFlag_RegistersForcedModelName()
-        {
-            var host = Program.CreateHostBuilder(["--model", "gpt-5.4"]).Build();
+    // Local Proxy CLI: `TotallyHot.ArcRouter --model <name>` should register the forced
+    // model name for RequestInterceptor to pick up (see RequestInterceptorTests' single-model-serving
+    // coverage) - this test confirms Program.cs's CLI parsing actually reaches DI, black-box, via the
+    // same public CreateHostBuilder API the other tests in this file already use.
+    [Fact]
+    public void CreateHostBuilder_WithModelFlag_RegistersForcedModelName()
+    {
+        var host = Program.CreateHostBuilder(["--model", "gpt-5.4"]).Build();
 
-            var options = host.Services.GetRequiredService<SingleModelServingOptions>();
+        var options = host.Services.GetRequiredService<SingleModelServingOptions>();
 
-            Assert.Equal("gpt-5.4", options.ForcedModelName);
-        }
+        Assert.Equal(expected: "gpt-5.4", actual: options.ForcedModelName);
+    }
 
-        [Fact]
-        public void CreateHostBuilder_WithoutModelFlag_RegistersNullForcedModelName()
-        {
-            var host = Program.CreateHostBuilder([]).Build();
+    [Fact]
+    public void CreateHostBuilder_WithoutModelFlag_RegistersNullForcedModelName()
+    {
+        var host = Program.CreateHostBuilder([]).Build();
 
-            var options = host.Services.GetRequiredService<SingleModelServingOptions>();
+        var options = host.Services.GetRequiredService<SingleModelServingOptions>();
 
-            Assert.Null(options.ForcedModelName);
-        }
+        Assert.Null(options.ForcedModelName);
+    }
 
-        // The --model=value form (not just the two-token --model value form) must be recognized too -
-        // Host.CreateDefaultBuilder's command-line provider understands both, so ExtractModelArg must too.
-        [Fact]
-        public void CreateHostBuilder_WithModelEqualsFlag_RegistersForcedModelName()
-        {
-            var host = Program.CreateHostBuilder(["--model=gpt-5.4"]).Build();
+    // The --model=value form (not just the two-token --model value form) must be recognized too -
+    // Host.CreateDefaultBuilder's command-line provider understands both, so ExtractModelArg must too.
+    [Fact]
+    public void CreateHostBuilder_WithModelEqualsFlag_RegistersForcedModelName()
+    {
+        var host = Program.CreateHostBuilder(["--model=gpt-5.4"]).Build();
 
-            var options = host.Services.GetRequiredService<SingleModelServingOptions>();
+        var options = host.Services.GetRequiredService<SingleModelServingOptions>();
 
-            Assert.Equal("gpt-5.4", options.ForcedModelName);
-        }
+        Assert.Equal(expected: "gpt-5.4", actual: options.ForcedModelName);
+    }
 
-        // Regression test: Host.CreateDefaultBuilder adds a command-line configuration provider that
-        // binds unrecognized "--key value" or "--key=value" pairs into IConfiguration under "key". If
-        // --model weren't stripped before being passed through, it would leak in as a "model"
-        // configuration key that nothing else expects - assert it doesn't, in both forms.
-        [Fact]
-        public void CreateHostBuilder_WithModelFlag_DoesNotLeakIntoConfiguration()
-        {
-            var host = Program.CreateHostBuilder(["--model", "gpt-5.4"]).Build();
+    // Regression test: Host.CreateDefaultBuilder adds a command-line configuration provider that
+    // binds unrecognized "--key value" or "--key=value" pairs into IConfiguration under "key". If
+    // --model weren't stripped before being passed through, it would leak in as a "model"
+    // configuration key that nothing else expects - assert it doesn't, in both forms.
+    [Fact]
+    public void CreateHostBuilder_WithModelFlag_DoesNotLeakIntoConfiguration()
+    {
+        var host = Program.CreateHostBuilder(["--model", "gpt-5.4"]).Build();
 
-            var configuration = host.Services.GetRequiredService<IConfiguration>();
+        var configuration = host.Services.GetRequiredService<IConfiguration>();
 
-            Assert.Null(configuration["model"]);
-        }
+        Assert.Null(configuration["model"]);
+    }
 
-        [Fact]
-        public void CreateHostBuilder_WithModelEqualsFlag_DoesNotLeakIntoConfiguration()
-        {
-            var host = Program.CreateHostBuilder(["--model=gpt-5.4"]).Build();
+    [Fact]
+    public void CreateHostBuilder_WithModelEqualsFlag_DoesNotLeakIntoConfiguration()
+    {
+        var host = Program.CreateHostBuilder(["--model=gpt-5.4"]).Build();
 
-            var configuration = host.Services.GetRequiredService<IConfiguration>();
+        var configuration = host.Services.GetRequiredService<IConfiguration>();
 
-            Assert.Null(configuration["model"]);
-        }
+        Assert.Null(configuration["model"]);
+    }
 
-        // --model with no value must fail loudly at startup, not silently pass a bogus/empty value
-        // through to Host.CreateDefaultBuilder's command-line configuration provider.
-        [Fact]
-        public void CreateHostBuilder_WithModelFlagAndNoValue_ThrowsArgumentException()
-        {
-            Assert.Throws<ArgumentException>(() => Program.CreateHostBuilder(["--model"]));
-        }
+    // --model with no value must fail loudly at startup, not silently pass a bogus/empty value
+    // through to Host.CreateDefaultBuilder's command-line configuration provider.
+    [Fact]
+    public void CreateHostBuilder_WithModelFlagAndNoValue_ThrowsArgumentException()
+    {
+        Assert.Throws<ArgumentException>(() => Program.CreateHostBuilder(["--model"]));
+    }
 
-        [Fact]
-        public void CreateHostBuilder_WithModelEqualsFlagAndEmptyValue_ThrowsArgumentException()
-        {
-            Assert.Throws<ArgumentException>(() => Program.CreateHostBuilder(["--model="]));
-        }
+    [Fact]
+    public void CreateHostBuilder_WithModelEqualsFlagAndEmptyValue_ThrowsArgumentException()
+    {
+        Assert.Throws<ArgumentException>(() => Program.CreateHostBuilder(["--model="]));
+    }
 
-        // End-to-end regression: RequestInterceptor's construction-time validation actually fires when
-        // wired through the real host, not just when constructed directly in RequestInterceptorTests.
-        // A minimal, explicit in-memory ModelRouting configuration is layered on top of whatever
-        // Host.CreateDefaultBuilder's default appsettings.json discovery does or doesn't find, so this
-        // test's outcome depends only on RequestInterceptor's own validation logic, not on the test
-        // run's working/content-root directory happening to contain the real app's appsettings.json.
-        [Fact]
-        public void CreateHostBuilder_WithUnconfiguredModelFlag_ThrowsWhenRequestInterceptorIsResolved()
-        {
-            var host = BuildHostWithMinimalModelRouting(["--model", "not-a-real-model"]);
+    // End-to-end regression: RequestInterceptor's construction-time validation actually fires when
+    // wired through the real host, not just when constructed directly in RequestInterceptorTests.
+    // A minimal, explicit in-memory ModelRouting configuration is layered on top of whatever
+    // Host.CreateDefaultBuilder's default appsettings.json discovery does or doesn't find, so this
+    // test's outcome depends only on RequestInterceptor's own validation logic, not on the test
+    // run's working/content-root directory happening to contain the real app's appsettings.json.
+    [Fact]
+    public void CreateHostBuilder_WithUnconfiguredModelFlag_ThrowsWhenRequestInterceptorIsResolved()
+    {
+        var host = BuildHostWithMinimalModelRouting(["--model", "not-a-real-model"]);
 
-            Assert.Throws<InvalidOperationException>(() => host.Services.GetRequiredService<RequestInterceptor>());
-        }
+        Assert.Throws<InvalidOperationException>(() => host.Services.GetRequiredService<RequestInterceptor>());
+    }
 
-        [Fact]
-        public void CreateHostBuilder_WithConfiguredModelFlag_ResolvesRequestInterceptorSuccessfully()
-        {
-            var host = BuildHostWithMinimalModelRouting(["--model", "gpt-5.4"]);
+    [Fact]
+    public void CreateHostBuilder_WithConfiguredModelFlag_ResolvesRequestInterceptorSuccessfully()
+    {
+        var host = BuildHostWithMinimalModelRouting(["--model", "gpt-5.4"]);
 
-            Assert.NotNull(host.Services.GetRequiredService<RequestInterceptor>());
-        }
+        Assert.NotNull(host.Services.GetRequiredService<RequestInterceptor>());
+    }
 
-        private static IHost BuildHostWithMinimalModelRouting(string[] args) =>
-            Program.CreateHostBuilder(args)
-                .ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["ModelRouting:Providers:openai:BaseUrl"] = "https://api.openai.com",
-                    ["ModelRouting:Providers:openai:AuthHeaderName"] = "Authorization",
-                    ["ModelRouting:ModelList:0:ModelName"] = "gpt-5.4",
-                    ["ModelRouting:ModelList:0:Provider"] = "openai",
-                    ["ModelRouting:ModelList:0:ProviderModelId"] = "gpt-5.4-test",
-                }))
-                .Build();
-
-        // Regression test: Host.CreateDefaultBuilder enables ServiceProviderOptions.ValidateOnBuild (and
-        // ValidateScopes) only in the Development environment, so a missing/unresolvable dependency in
-        // AddTotallyHotArcRouter's graph is silently tolerated when CreateHostBuilder_BuildsSuccessfully
-        // runs in the default (non-Development) test environment, but throws eagerly at Build() time in
-        // Development. This reproduces Program.cs's ConfigureServices registrations directly under that
-        // stricter mode, without depending on ambient environment variables during test execution.
-        [Fact]
-        public async Task ConfigureServices_ProducesResolvableServiceGraph_UnderValidateOnBuild()
-        {
-            var services = new ServiceCollection();
-            services.AddLogging();
-            services.AddOptions();
-            services.Configure<RoutingOptions>(_ => { });
-            services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
-
-            services.AddTotallyHotArcRouter();
-
-            // await using, not using: resolving IRoutingPolicy below now also constructs
-            // OrchestratorRoutingPolicy's voters (docs/router/orchestrator-live-path-plan.md M1), including
-            // LlmRouterVoter's OnnxTextGenerationClient, which - like OnnxEmbeddingClient elsewhere in this
-            // graph - implements only IAsyncDisposable. A synchronous Dispose() on this scope would throw
-            // when it reached that singleton.
-            await using var provider = services.BuildServiceProvider(new ServiceProviderOptions
+    private static IHost BuildHostWithMinimalModelRouting(string[] args)
+    {
+        return Program.CreateHostBuilder(args)
+            .ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ValidateOnBuild = true,
-                ValidateScopes = true
-            });
+                ["ModelRouting:Providers:openai:BaseUrl"] = "https://api.openai.com",
+                ["ModelRouting:Providers:openai:AuthHeaderName"] = "Authorization",
+                ["ModelRouting:ModelList:0:ModelName"] = "gpt-5.4",
+                ["ModelRouting:ModelList:0:Provider"] = "openai",
+                ["ModelRouting:ModelList:0:ProviderModelId"] = "gpt-5.4-test"
+            }))
+            .Build();
+    }
 
-            Assert.NotNull(provider.GetRequiredService<AgentAsARouter>());
-            Assert.NotNull(provider.GetRequiredService<IRoutingPolicy>());
-        }
+    // Regression test: Host.CreateDefaultBuilder enables ServiceProviderOptions.ValidateOnBuild (and
+    // ValidateScopes) only in the Development environment, so a missing/unresolvable dependency in
+    // AddTotallyHotArcRouter's graph is silently tolerated when CreateHostBuilder_BuildsSuccessfully
+    // runs in the default (non-Development) test environment, but throws eagerly at Build() time in
+    // Development. This reproduces Program.cs's ConfigureServices registrations directly under that
+    // stricter mode, without depending on ambient environment variables during test execution.
+    [Fact]
+    public async Task ConfigureServices_ProducesResolvableServiceGraph_UnderValidateOnBuild()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddOptions();
+        services.Configure<RoutingOptions>(_ => { });
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
 
-        // --sync-benchmark-data (docs/router/coderouterbench-sqlite-migration-plan.md Phase 6): a bare
-        // boolean flag Main strips before CreateHostBuilder ever sees it, so - unlike --model - this can't
-        // be covered indirectly through CreateHostBuilder; ExtractFlag is exercised directly instead.
-        [Fact]
-        public void ExtractFlag_Present_ReturnsTrueAndStripsTheFlag()
+        services.AddTotallyHotArcRouter();
+
+        // await using, not using: resolving IRoutingPolicy below now also constructs
+        // OrchestratorRoutingPolicy's voters (docs/router/orchestrator-live-path-plan.md M1), including
+        // LlmRouterVoter's OnnxTextGenerationClient, which - like OnnxEmbeddingClient elsewhere in this
+        // graph - implements only IAsyncDisposable. A synchronous Dispose() on this scope would throw
+        // when it reached that singleton.
+        await using var provider = services.BuildServiceProvider(new ServiceProviderOptions
         {
-            var (present, remaining) = Program.ExtractFlag(["--sync-benchmark-data"], "--sync-benchmark-data");
+            ValidateOnBuild = true,
+            ValidateScopes = true
+        });
 
-            Assert.True(present);
-            Assert.Empty(remaining);
-        }
+        Assert.NotNull(provider.GetRequiredService<AgentAsARouter>());
+        Assert.NotNull(provider.GetRequiredService<IRoutingPolicy>());
+    }
 
-        [Fact]
-        public void ExtractFlag_PresentAmongOtherArgs_StripsOnlyTheFlag()
-        {
-            var (present, remaining) = Program.ExtractFlag(
-                ["--model", "gpt-5.4", "--sync-benchmark-data"], "--sync-benchmark-data");
+    // --sync-benchmark-data (docs/router/coderouterbench-sqlite-migration-plan.md Phase 6): a bare
+    // boolean flag Main strips before CreateHostBuilder ever sees it, so - unlike --model - this can't
+    // be covered indirectly through CreateHostBuilder; ExtractFlag is exercised directly instead.
+    [Fact]
+    public void ExtractFlag_Present_ReturnsTrueAndStripsTheFlag()
+    {
+        var (present, remaining) =
+            Program.ExtractFlag(args: ["--sync-benchmark-data"], flagName: "--sync-benchmark-data");
 
-            Assert.True(present);
-            Assert.Equal(["--model", "gpt-5.4"], remaining);
-        }
+        Assert.True(present);
+        Assert.Empty(remaining);
+    }
 
-        [Fact]
-        public void ExtractFlag_Absent_ReturnsFalseAndLeavesArgsUnchanged()
-        {
-            var args = new[] { "--model", "gpt-5.4" };
+    [Fact]
+    public void ExtractFlag_PresentAmongOtherArgs_StripsOnlyTheFlag()
+    {
+        var (present, remaining) = Program.ExtractFlag(
+            args: ["--model", "gpt-5.4", "--sync-benchmark-data"], flagName: "--sync-benchmark-data");
 
-            var (present, remaining) = Program.ExtractFlag(args, "--sync-benchmark-data");
+        Assert.True(present);
+        Assert.Equal(expectedSpan: ["--model", "gpt-5.4"], actualArray: remaining);
+    }
 
-            Assert.False(present);
-            Assert.Same(args, remaining);
-        }
+    [Fact]
+    public void ExtractFlag_Absent_ReturnsFalseAndLeavesArgsUnchanged()
+    {
+        var args = new[] { "--model", "gpt-5.4" };
 
-        [Fact]
-        public void ExtractFlag_IsCaseInsensitive()
-        {
-            var (present, _) = Program.ExtractFlag(["--Sync-Benchmark-Data"], "--sync-benchmark-data");
+        var (present, remaining) = Program.ExtractFlag(args: args, flagName: "--sync-benchmark-data");
 
-            Assert.True(present);
-        }
+        Assert.False(present);
+        Assert.Same(expected: args, actual: remaining);
+    }
 
-        [Fact]
-        public void ExtractFlag_RepeatedInArgs_StripsEveryOccurrence()
-        {
-            var (present, remaining) = Program.ExtractFlag(
-                ["--sync-benchmark-data", "--model", "gpt-5.4", "--sync-benchmark-data"], "--sync-benchmark-data");
+    [Fact]
+    public void ExtractFlag_IsCaseInsensitive()
+    {
+        var (present, _) = Program.ExtractFlag(args: ["--Sync-Benchmark-Data"], flagName: "--sync-benchmark-data");
 
-            Assert.True(present);
-            Assert.Equal(["--model", "gpt-5.4"], remaining);
-        }
+        Assert.True(present);
+    }
+
+    [Fact]
+    public void ExtractFlag_RepeatedInArgs_StripsEveryOccurrence()
+    {
+        var (present, remaining) = Program.ExtractFlag(
+            args: ["--sync-benchmark-data", "--model", "gpt-5.4", "--sync-benchmark-data"],
+            flagName: "--sync-benchmark-data");
+
+        Assert.True(present);
+        Assert.Equal(expectedSpan: ["--model", "gpt-5.4"], actualArray: remaining);
     }
 }
-

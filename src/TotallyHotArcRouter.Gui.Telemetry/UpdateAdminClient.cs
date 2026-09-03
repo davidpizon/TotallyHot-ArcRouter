@@ -16,12 +16,15 @@ public sealed class UpdateAdminException : GrpcAdminException
     /// <param name="innerException">The underlying <see cref="RpcException"/>, if any.</param>
     /// <param name="isUnavailable">Whether the failure was specifically the router being unreachable.</param>
     public UpdateAdminException(string message, Exception? innerException = null, bool isUnavailable = false)
-        : base(message, innerException, isUnavailable)
+        : base(message: message, innerException: innerException, isUnavailable: isUnavailable)
     {
     }
 }
 
-/// <summary>Why a check could not resolve a definite answer. Mirrors <c>TotallyHot.ArcRouter.Update.ReleaseCheckUnavailableReason</c>.</summary>
+/// <summary>
+/// Why a check could not resolve a definite answer. Mirrors
+/// <c>TotallyHot.ArcRouter.Update.ReleaseCheckUnavailableReason</c>.
+/// </summary>
 public enum UpdateUnavailableReasonInfo
 {
     /// <summary>The check resolved definitely; not itself a reason.</summary>
@@ -37,22 +40,31 @@ public enum UpdateUnavailableReasonInfo
     AssetOrChecksumMissing,
 
     /// <summary>The GitHub API request itself failed.</summary>
-    NetworkOrApiFailure,
+    NetworkOrApiFailure
 }
 
 /// <summary>The Router's last-known (or freshly forced) self-update check outcome.</summary>
 /// <param name="CurrentVersion">The running Router's own version.</param>
 /// <param name="LatestVersion">The latest published release's version, empty when unknown.</param>
 /// <param name="UpdateAvailable">Whether a newer, verified, installable release is known.</param>
-/// <param name="CheckedAtUtc">When this status was computed, or <see langword="null"/> before the first check has ever run.</param>
-/// <param name="UnavailableReason">Why the check could not resolve, or <see cref="UpdateUnavailableReasonInfo.None"/> on a definite outcome.</param>
+/// <param name="CheckedAtUtc">
+/// When this status was computed, or <see langword="null"/> before the first check has ever
+/// run.
+/// </param>
+/// <param name="UnavailableReason">
+/// Why the check could not resolve, or <see cref="UpdateUnavailableReasonInfo.None"/> on a
+/// definite outcome.
+/// </param>
 /// <param name="UnavailableDetail">A human-readable elaboration of <paramref name="UnavailableReason"/>.</param>
 /// <param name="AssetDownloadUrl">
 /// The installer MSI's direct download URL, set only when <paramref name="UpdateAvailable"/> is
 /// <see langword="true"/>. The GUI downloads this itself via <see cref="IMsiUpdateApplier"/> - the
 /// Router never does.
 /// </param>
-/// <param name="AssetSha256">The MSI's published SHA256 (lowercase hex), set only when <paramref name="UpdateAvailable"/> is <see langword="true"/>.</param>
+/// <param name="AssetSha256">
+/// The MSI's published SHA256 (lowercase hex), set only when <paramref name="UpdateAvailable"/>
+/// is <see langword="true"/>.
+/// </param>
 public sealed record UpdateStatusInfo(
     string CurrentVersion,
     string LatestVersion,
@@ -64,7 +76,10 @@ public sealed record UpdateStatusInfo(
     string? AssetSha256 = null);
 
 /// <summary>The outcome of a "notify the Router an apply is starting" audit call.</summary>
-/// <param name="Acknowledged">Whether the Router recorded the notification. Never gates the apply itself - the GUI proceeds regardless.</param>
+/// <param name="Acknowledged">
+/// Whether the Router recorded the notification. Never gates the apply itself - the GUI
+/// proceeds regardless.
+/// </param>
 public sealed record NotifyApplyStartingInfo(bool Acknowledged);
 
 /// <summary>
@@ -90,7 +105,8 @@ public interface IUpdateAdminClient
     /// apply even if this call fails to reach the Router.
     /// </summary>
     /// <exception cref="UpdateAdminException">The call failed or the router is unreachable.</exception>
-    Task<NotifyApplyStartingInfo> NotifyApplyStartingAsync(string version, CancellationToken cancellationToken = default);
+    Task<NotifyApplyStartingInfo> NotifyApplyStartingAsync(string version,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -101,14 +117,15 @@ public interface IUpdateAdminClient
 /// </summary>
 public sealed class UpdateAdminClient
     : GrpcAdminClientBase<Contract.UpdateAdminService.UpdateAdminServiceClient, UpdateAdminException>,
-      IUpdateAdminClient
+        IUpdateAdminClient
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="UpdateAdminClient"/> class, creating and owning a
     /// channel to <paramref name="serverAddress"/>.
     /// </summary>
     public UpdateAdminClient(string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
-        : base(serverAddress, callInvoker => new Contract.UpdateAdminService.UpdateAdminServiceClient(callInvoker))
+        : base(serverAddress: serverAddress,
+            createClient: callInvoker => new Contract.UpdateAdminService.UpdateAdminServiceClient(callInvoker))
     {
     }
 
@@ -122,79 +139,93 @@ public sealed class UpdateAdminClient
     {
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<UpdateStatusInfo> GetStatusAsync(CancellationToken cancellationToken = default)
     {
         try
         {
             var response = await Client
-                .GetUpdateStatusAsync(new Contract.GetUpdateStatusRequest(), cancellationToken: cancellationToken)
+                .GetUpdateStatusAsync(request: new Contract.GetUpdateStatusRequest(),
+                    cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             return MapStatus(response);
         }
         catch (RpcException ex)
         {
-            throw Wrap(ex, "Could not read the update status");
+            throw Wrap(ex: ex, action: "Could not read the update status");
         }
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<UpdateStatusInfo> CheckNowAsync(CancellationToken cancellationToken = default)
     {
         try
         {
             var response = await Client
-                .CheckForUpdatesNowAsync(new Contract.CheckForUpdatesNowRequest(), cancellationToken: cancellationToken)
+                .CheckForUpdatesNowAsync(request: new Contract.CheckForUpdatesNowRequest(),
+                    cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             return MapStatus(response);
         }
         catch (RpcException ex)
         {
-            throw Wrap(ex, "Update check failed");
+            throw Wrap(ex: ex, action: "Update check failed");
         }
     }
 
-    /// <inheritdoc />
-    public async Task<NotifyApplyStartingInfo> NotifyApplyStartingAsync(string version, CancellationToken cancellationToken = default)
+    /// <inheritdoc/>
+    public async Task<NotifyApplyStartingInfo> NotifyApplyStartingAsync(string version,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(version);
 
         try
         {
             var response = await Client
-                .NotifyApplyStartingAsync(new Contract.NotifyApplyStartingRequest { Version = version }, cancellationToken: cancellationToken)
+                .NotifyApplyStartingAsync(request: new Contract.NotifyApplyStartingRequest { Version = version },
+                    cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             return new NotifyApplyStartingInfo(response.Acknowledged);
         }
         catch (RpcException ex)
         {
-            throw Wrap(ex, "Could not notify the router that an apply is starting");
+            throw Wrap(ex: ex, action: "Could not notify the router that an apply is starting");
         }
     }
 
     /// <summary>Converts a gRPC-contract status response into the client's <see cref="UpdateStatusInfo"/>.</summary>
-    private static UpdateStatusInfo MapStatus(Contract.UpdateStatusResponse response) => new(
-        response.CurrentVersion,
-        response.LatestVersion,
-        response.UpdateAvailable,
-        response.CheckedAtUtc?.ToDateTimeOffset(),
-        MapReason(response.UnavailableReason),
-        response.HasUnavailableDetail ? response.UnavailableDetail : null,
-        response.HasAssetDownloadUrl ? response.AssetDownloadUrl : null,
-        response.HasAssetSha256 ? response.AssetSha256 : null);
+    private static UpdateStatusInfo MapStatus(Contract.UpdateStatusResponse response)
+    {
+        return new UpdateStatusInfo(
+            CurrentVersion: response.CurrentVersion,
+            LatestVersion: response.LatestVersion,
+            UpdateAvailable: response.UpdateAvailable,
+            CheckedAtUtc: response.CheckedAtUtc?.ToDateTimeOffset(),
+            UnavailableReason: MapReason(response.UnavailableReason),
+            UnavailableDetail: response.HasUnavailableDetail ? response.UnavailableDetail : null,
+            AssetDownloadUrl: response.HasAssetDownloadUrl ? response.AssetDownloadUrl : null,
+            AssetSha256: response.HasAssetSha256 ? response.AssetSha256 : null);
+    }
 
     /// <summary>Maps the wire reason enum onto the client's enum.</summary>
-    private static UpdateUnavailableReasonInfo MapReason(Contract.UpdateUnavailableReason reason) => reason switch
+    private static UpdateUnavailableReasonInfo MapReason(Contract.UpdateUnavailableReason reason)
     {
-        Contract.UpdateUnavailableReason.None => UpdateUnavailableReasonInfo.None,
-        Contract.UpdateUnavailableReason.NoReleasesPublished => UpdateUnavailableReasonInfo.NoReleasesPublished,
-        Contract.UpdateUnavailableReason.MalformedTag => UpdateUnavailableReasonInfo.MalformedTag,
-        Contract.UpdateUnavailableReason.AssetOrChecksumMissing => UpdateUnavailableReasonInfo.AssetOrChecksumMissing,
-        Contract.UpdateUnavailableReason.NetworkOrApiFailure => UpdateUnavailableReasonInfo.NetworkOrApiFailure,
-        _ => UpdateUnavailableReasonInfo.None,
-    };
+        return reason switch
+        {
+            Contract.UpdateUnavailableReason.None => UpdateUnavailableReasonInfo.None,
+            Contract.UpdateUnavailableReason.NoReleasesPublished => UpdateUnavailableReasonInfo.NoReleasesPublished,
+            Contract.UpdateUnavailableReason.MalformedTag => UpdateUnavailableReasonInfo.MalformedTag,
+            Contract.UpdateUnavailableReason.AssetOrChecksumMissing => UpdateUnavailableReasonInfo
+                .AssetOrChecksumMissing,
+            Contract.UpdateUnavailableReason.NetworkOrApiFailure => UpdateUnavailableReasonInfo.NetworkOrApiFailure,
+            _ => UpdateUnavailableReasonInfo.None
+        };
+    }
 
-    /// <inheritdoc />
-    protected override UpdateAdminException CreateException(string message, Exception? innerException, bool isUnavailable) =>
-        new(message, innerException, isUnavailable);
+    /// <inheritdoc/>
+    protected override UpdateAdminException CreateException(string message, Exception? innerException,
+        bool isUnavailable)
+    {
+        return new UpdateAdminException(message: message, innerException: innerException, isUnavailable: isUnavailable);
+    }
 }

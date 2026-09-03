@@ -62,5 +62,8 @@ public static class StaticAnalyzerScoring
     /// <param name="floor">The lowest score this call may return.</param>
     /// <param name="penalty">The total deduction to apply before flooring, computed by the caller.</param>
     /// <returns>The floored score.</returns>
-    public static double ClampScore(double floor, double penalty) => Math.Max(floor, 1.0 - penalty);
+    public static double ClampScore(double floor, double penalty)
+    {
+        return Math.Max(val1: floor, val2: 1.0 - penalty);
+    }
 }

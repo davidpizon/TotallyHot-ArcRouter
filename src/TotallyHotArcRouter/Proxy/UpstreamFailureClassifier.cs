@@ -15,7 +15,7 @@ public enum ProviderHealthSignal
     TargetOutage,
 
     /// <summary>Every model on this provider would fail identically - a credential, permission, gateway, or billing failure.</summary>
-    ProviderWideOutage,
+    ProviderWideOutage
 }
 
 /// <summary>
@@ -32,17 +32,27 @@ public enum ProviderWideOutageCause
     /// <summary>A literal 401 - almost always an invalid or expired credential.</summary>
     Unauthorized,
 
-    /// <summary>A non-401 status carrying an embedded credential error, reported by the translator via <see cref="Translation.EmbeddedProviderError.IsAuthFailure"/>. Gemini's 400-with-UNAUTHENTICATED is the case this exists for.</summary>
+    /// <summary>
+    /// A non-401 status carrying an embedded credential error, reported by the translator via
+    /// <see cref="Translation.EmbeddedProviderError.IsAuthFailure"/>. Gemini's 400-with-UNAUTHENTICATED is the case this
+    /// exists for.
+    /// </summary>
     EmbeddedCredentialError,
 
-    /// <summary>A 403 - almost always a permission or API-key-scope problem rather than something specific to the requested model.</summary>
+    /// <summary>
+    /// A 403 - almost always a permission or API-key-scope problem rather than something specific to the requested
+    /// model.
+    /// </summary>
     Forbidden,
 
-    /// <summary>A 405 on a path this proxy itself constructs - almost always a provider-side gateway/WAF rejecting the request at the edge.</summary>
+    /// <summary>
+    /// A 405 on a path this proxy itself constructs - almost always a provider-side gateway/WAF rejecting the request
+    /// at the edge.
+    /// </summary>
     MethodNotAllowed,
 
     /// <summary>The account is out of credits (docs/adr/0004). The whole account is broken, not just this target.</summary>
-    OutOfCredits,
+    OutOfCredits
 }
 
 /// <summary>
@@ -50,11 +60,23 @@ public enum ProviderWideOutageCause
 /// request should fail over to the next candidate.
 /// </summary>
 /// <param name="HealthSignal">What to record against the circuit breaker.</param>
-/// <param name="ProviderWideCause">Why, when <paramref name="HealthSignal"/> is <see cref="ProviderHealthSignal.ProviderWideOutage"/>; otherwise <see cref="ProviderWideOutageCause.None"/>.</param>
+/// <param name="ProviderWideCause">
+/// Why, when <paramref name="HealthSignal"/> is
+/// <see cref="ProviderHealthSignal.ProviderWideOutage"/>; otherwise <see cref="ProviderWideOutageCause.None"/>.
+/// </param>
 /// <param name="IsOutOfCredits">Whether ADR-0004's out-of-credits classifier matched this body.</param>
-/// <param name="OutOfCreditsMessage">The operator-facing message when <paramref name="IsOutOfCredits"/> is set; otherwise empty.</param>
-/// <param name="ShouldRetry">Whether this candidate is worth failing over from, assuming a next candidate exists. Does <em>not</em> account for whether one actually does - the caller still checks that.</param>
-/// <param name="IsSuccessStatus">Whether the status is a literal 2xx. Narrower than <see cref="ProviderHealthSignal.TargetHealthy"/>, which also covers client-fault 4xx like 400/422.</param>
+/// <param name="OutOfCreditsMessage">
+/// The operator-facing message when <paramref name="IsOutOfCredits"/> is set; otherwise
+/// empty.
+/// </param>
+/// <param name="ShouldRetry">
+/// Whether this candidate is worth failing over from, assuming a next candidate exists. Does
+/// <em>not</em> account for whether one actually does - the caller still checks that.
+/// </param>
+/// <param name="IsSuccessStatus">
+/// Whether the status is a literal 2xx. Narrower than
+/// <see cref="ProviderHealthSignal.TargetHealthy"/>, which also covers client-fault 4xx like 400/422.
+/// </param>
 public readonly record struct UpstreamFailureVerdict(
     ProviderHealthSignal HealthSignal,
     ProviderWideOutageCause ProviderWideCause,
@@ -68,7 +90,6 @@ public readonly record struct UpstreamFailureVerdict(
 /// request should fail over. Extracted from <see cref="ProxyMiddleware.InvokeCoreAsync"/>'s candidate
 /// loop, where it sat as ~130 lines of interleaved classification and side effects roughly 350 lines
 /// deep inside a 715-line method.
-///
 /// <para>
 /// Deliberately <see langword="static"/> and free of I/O, logging, and circuit-breaker mutation: this
 /// is the logic failover regressions actually land in (see this file's tests, and the ADR-0004/0005
@@ -84,11 +105,23 @@ public static class UpstreamFailureClassifier
     /// evaluating it has no observable effect.
     /// </summary>
     /// <param name="statusCode">The upstream response's HTTP status code.</param>
-    /// <param name="preReadErrorBody">The buffered error body, when one was pre-read; otherwise <see langword="null"/>. Only ADR-0004's out-of-credits classification reads it.</param>
+    /// <param name="preReadErrorBody">
+    /// The buffered error body, when one was pre-read; otherwise <see langword="null"/>. Only
+    /// ADR-0004's out-of-credits classification reads it.
+    /// </param>
     /// <param name="embeddedErrorMessage">The translator-decoded error message, when one was extracted.</param>
-    /// <param name="isProviderAuthFailure">Whether the translator reported the embedded error as a credential failure (<see cref="Translation.EmbeddedProviderError.IsAuthFailure"/>).</param>
-    /// <param name="nextProviderDiffers">Whether any remaining candidate is on a different provider - a separate quota pool and credential, which is the only thing that makes a 401/403/405/429 worth retrying.</param>
-    /// <param name="isExplicitPrimary">Whether this is an explicit, never-substituted client selection on its first attempt. Per ADR-0005 such a request relays the truth instead of failing over on a provider-wide status.</param>
+    /// <param name="isProviderAuthFailure">
+    /// Whether the translator reported the embedded error as a credential failure (
+    /// <see cref="Translation.EmbeddedProviderError.IsAuthFailure"/>).
+    /// </param>
+    /// <param name="nextProviderDiffers">
+    /// Whether any remaining candidate is on a different provider - a separate quota pool
+    /// and credential, which is the only thing that makes a 401/403/405/429 worth retrying.
+    /// </param>
+    /// <param name="isExplicitPrimary">
+    /// Whether this is an explicit, never-substituted client selection on its first attempt.
+    /// Per ADR-0005 such a request relays the truth instead of failing over on a provider-wide status.
+    /// </param>
     public static UpstreamFailureVerdict Classify(
         int statusCode,
         byte[]? preReadErrorBody,
@@ -103,7 +136,8 @@ public static class UpstreamFailureClassifier
         // false the call never runs, so the out parameter would be unassigned.
         var outOfCreditsMessage = string.Empty;
         var isOutOfCredits = (statusCode == StatusCodes.Status400BadRequest || statusCode == 429) &&
-            OutOfCreditsClassifier.IsOutOfCredits(preReadErrorBody ?? [], embeddedErrorMessage, out outOfCreditsMessage);
+                             OutOfCreditsClassifier.IsOutOfCredits(body: preReadErrorBody ?? [],
+                                 embeddedMessage: embeddedErrorMessage, message: out outOfCreditsMessage);
 
         // Order matters and mirrors the original chain exactly. Out-of-credits is checked ahead of the
         // generic outage bucket below, since a classified-out-of-credits 429 would otherwise fall into
@@ -116,7 +150,7 @@ public static class UpstreamFailureClassifier
             StatusCodes.Status403Forbidden => ProviderWideOutageCause.Forbidden,
             StatusCodes.Status405MethodNotAllowed => ProviderWideOutageCause.MethodNotAllowed,
             _ when isOutOfCredits => ProviderWideOutageCause.OutOfCredits,
-            _ => ProviderWideOutageCause.None,
+            _ => ProviderWideOutageCause.None
         };
 
         var healthSignal = cause is not ProviderWideOutageCause.None
@@ -134,14 +168,14 @@ public static class UpstreamFailureClassifier
         // "target-level trips unaffected" boundary for this same-request live-discovery cascade.
         var shouldRetry = healthSignal is ProviderHealthSignal.ProviderWideOutage
             ? nextProviderDiffers && !isExplicitPrimary
-            : IsRetriableOutageStatus(statusCode, nextProviderDiffers);
+            : IsRetriableOutageStatus(statusCode: statusCode, nextBackupIsDifferentProvider: nextProviderDiffers);
 
         return new UpstreamFailureVerdict(
-            healthSignal,
-            cause,
-            isOutOfCredits,
-            outOfCreditsMessage,
-            shouldRetry,
+            HealthSignal: healthSignal,
+            ProviderWideCause: cause,
+            IsOutOfCredits: isOutOfCredits,
+            OutOfCreditsMessage: outOfCreditsMessage,
+            ShouldRetry: shouldRetry,
             IsSuccessStatus: statusCode is >= 200 and < 300);
     }
 
@@ -153,8 +187,10 @@ public static class UpstreamFailureClassifier
     /// the same provider - each of these statuses is proof <em>this</em> target is unhealthy right now
     /// regardless of what (if anything) the request fails over to next.
     /// </summary>
-    internal static bool IsOutageStatus(int statusCode) =>
-        statusCode is >= 500 and <= 599 || statusCode == 429 || statusCode == StatusCodes.Status404NotFound;
+    internal static bool IsOutageStatus(int statusCode)
+    {
+        return statusCode is >= 500 and <= 599 || statusCode == 429 || statusCode == StatusCodes.Status404NotFound;
+    }
 
     /// <summary>
     /// Whether an upstream status is worth failing over from. A 5xx (provider-side failure) or a 404
@@ -168,20 +204,14 @@ public static class UpstreamFailureClassifier
     /// </summary>
     internal static bool IsRetriableOutageStatus(int statusCode, bool nextBackupIsDifferentProvider)
     {
-        if (statusCode is >= 500 and <= 599)
-        {
-            return true;
-        }
+        if (statusCode is >= 500 and <= 599) return true;
 
-        if (statusCode == StatusCodes.Status404NotFound)
-        {
-            return true;
-        }
+        if (statusCode == StatusCodes.Status404NotFound) return true;
 
         return (statusCode == 429
-            || statusCode == StatusCodes.Status401Unauthorized
-            || statusCode == StatusCodes.Status403Forbidden
-            || statusCode == StatusCodes.Status405MethodNotAllowed)
-            && nextBackupIsDifferentProvider;
+                || statusCode == StatusCodes.Status401Unauthorized
+                || statusCode == StatusCodes.Status403Forbidden
+                || statusCode == StatusCodes.Status405MethodNotAllowed)
+               && nextBackupIsDifferentProvider;
     }
 }

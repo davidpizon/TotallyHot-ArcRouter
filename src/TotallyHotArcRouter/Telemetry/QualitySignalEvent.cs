@@ -17,8 +17,14 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// <param name="Language">The analyzed snippet's language.</param>
 /// <param name="SyntaxValid">Whether the structural check passed.</param>
 /// <param name="SyntaxAuthoritative">Whether a real parser, rather than a heuristic, produced that verdict.</param>
-/// <param name="AnalysisScore">The composed static-analysis score in [0,1], or <see langword="null"/> when every analyzer abstained.</param>
-/// <param name="JudgeScore">The G-Eval judge's grade in [0,1], or <see langword="null"/> when the judge did not contribute.</param>
+/// <param name="AnalysisScore">
+/// The composed static-analysis score in [0,1], or <see langword="null"/> when every analyzer
+/// abstained.
+/// </param>
+/// <param name="JudgeScore">
+/// The G-Eval judge's grade in [0,1], or <see langword="null"/> when the judge did not
+/// contribute.
+/// </param>
 /// <param name="UnifiedScore">The unified score u_i in [0,1] fed into router memory.</param>
 /// <param name="DegradedReason">Why this signal carries less than a full grading, or null when it is complete.</param>
 /// <param name="TimestampUtc">When the signal was produced.</param>

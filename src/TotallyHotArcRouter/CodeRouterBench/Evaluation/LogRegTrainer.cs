@@ -61,45 +61,45 @@ public static class LogRegTrainer
         double l2Regularization = 0.001)
     {
         ArgumentNullException.ThrowIfNull(database);
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(vocabularySize, 0);
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(epochs, 0);
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(learningRate, 0);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value: vocabularySize, 0);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value: epochs, 0);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value: learningRate, 0);
         ArgumentOutOfRangeException.ThrowIfNegative(l2Regularization);
 
         if (!File.Exists(database.DatabasePath))
-        {
             throw new InvalidOperationException(
                 $"The CodeRouterBench corpus database was not found at '{database.DatabasePath}' - is the corpus synced?");
-        }
 
         var examples = LoadOodTrainingExamples(database);
         if (examples.Count == 0)
-        {
             throw new InvalidOperationException(
                 "No (task text, label) pairs could be built from the OOD split - is the corpus synced, " +
                 "and does at least one model resolve at least one OOD task?");
-        }
 
-        var (vocabulary, idf) = BuildVocabulary(examples, vocabularySize);
+        var (vocabulary, idf) = BuildVocabulary(examples: examples, vocabularySize: vocabularySize);
         var vocabularyIndex = BuildVocabularyIndex(vocabulary);
         var features = examples
-            .Select(example => ComputeTfIdf(example.Text, vocabularyIndex, idf))
+            .Select(example => ComputeTfIdf(text: example.Text, vocabularyIndex: vocabularyIndex, idf: idf))
             .ToList();
 
-        var classes = examples.Select(e => e.Label).Distinct(StringComparer.Ordinal).OrderBy(c => c, StringComparer.Ordinal).ToList();
+        var classes = examples.Select(e => e.Label).Distinct(StringComparer.Ordinal)
+            .OrderBy(keySelector: c => c, comparer: StringComparer.Ordinal).ToList();
         var classWeights = new Dictionary<string, double[]>(StringComparer.Ordinal);
         foreach (var modelClass in classes)
         {
             var labels = examples.Select(e => e.Label == modelClass ? 1.0 : 0.0).ToArray();
-            classWeights[modelClass] = TrainOneVsRest(features, labels, vocabulary.Count, epochs, learningRate, l2Regularization);
+            classWeights[modelClass] = TrainOneVsRest(features: features, labels: labels,
+                vocabularySize: vocabulary.Count, epochs: epochs, learningRate: learningRate,
+                l2Regularization: l2Regularization);
         }
 
         return new LogRegModelArtifact(
-            vocabulary,
-            idf,
-            classWeights,
-            IsPlaceholder: false,
-            TrainedFrom: $"split='ood', tasks={examples.Count}, vocabulary={vocabulary.Count}, classes={classes.Count}, trained {DateTimeOffset.UtcNow:O}");
+            Vocabulary: vocabulary,
+            InverseDocumentFrequency: idf,
+            ClassWeights: classWeights,
+            false,
+            TrainedFrom:
+            $"split='ood', tasks={examples.Count}, vocabulary={vocabulary.Count}, classes={classes.Count}, trained {DateTimeOffset.UtcNow:O}");
     }
 
     /// <summary>
@@ -125,10 +125,7 @@ public static class LogRegTrainer
                 var taskId = reader.GetString(0);
                 var rawJson = reader.GetString(1);
                 var text = TryExtractPrompt(rawJson);
-                if (text is not null)
-                {
-                    taskText[taskId] = text;
-                }
+                if (text is not null) taskText[taskId] = text;
             }
         }
 
@@ -149,23 +146,17 @@ public static class LogRegTrainer
 
                 // Ties (equal cost, including two NULL-cost resolvers) break on canonicalized model name
                 // so the winner never depends on SQLite's unspecified row enumeration order.
-                if (!bestResolverPerTask.TryGetValue(taskId, out var current) ||
+                if (!bestResolverPerTask.TryGetValue(key: taskId, value: out var current) ||
                     costUsd < current.CostUsd ||
-                    (costUsd == current.CostUsd && string.CompareOrdinal(model, current.Model) < 0))
-                {
+                    (costUsd == current.CostUsd && string.CompareOrdinal(strA: model, strB: current.Model) < 0))
                     bestResolverPerTask[taskId] = (model, costUsd);
-                }
             }
         }
 
         var examples = new List<OodTrainingExample>();
         foreach (var (taskId, text) in taskText)
-        {
-            if (bestResolverPerTask.TryGetValue(taskId, out var best))
-            {
-                examples.Add(new OodTrainingExample(taskId, text, best.Model));
-            }
-        }
+            if (bestResolverPerTask.TryGetValue(key: taskId, value: out var best))
+                examples.Add(new OodTrainingExample(TaskId: taskId, Text: text, Label: best.Model));
 
         return examples;
     }
@@ -183,7 +174,8 @@ public static class LogRegTrainer
         try
         {
             using var document = JsonDocument.Parse(rawJson);
-            if (document.RootElement.TryGetProperty("prompt", out var prompt) && prompt.ValueKind == JsonValueKind.String)
+            if (document.RootElement.TryGetProperty(propertyName: "prompt", value: out var prompt) &&
+                prompt.ValueKind == JsonValueKind.String)
             {
                 var text = prompt.GetString();
                 return string.IsNullOrWhiteSpace(text) ? null : text;
@@ -211,16 +203,12 @@ public static class LogRegTrainer
     {
         var documentFrequency = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var example in examples)
-        {
-            foreach (var token in LogRegTextTokenizer.Tokenize(example.Text).Distinct(StringComparer.Ordinal))
-            {
-                documentFrequency[token] = documentFrequency.GetValueOrDefault(token) + 1;
-            }
-        }
+        foreach (var token in LogRegTextTokenizer.Tokenize(example.Text).Distinct(StringComparer.Ordinal))
+            documentFrequency[token] = documentFrequency.GetValueOrDefault(token) + 1;
 
         var vocabulary = documentFrequency
             .OrderByDescending(kvp => kvp.Value)
-            .ThenBy(kvp => kvp.Key, StringComparer.Ordinal)
+            .ThenBy(keySelector: kvp => kvp.Key, comparer: StringComparer.Ordinal)
             .Take(vocabularySize)
             .Select(kvp => kvp.Key)
             .ToList();
@@ -243,11 +231,8 @@ public static class LogRegTrainer
     /// <returns>A dictionary mapping each term to its index in <paramref name="vocabulary"/>.</returns>
     internal static Dictionary<string, int> BuildVocabularyIndex(IReadOnlyList<string> vocabulary)
     {
-        var index = new Dictionary<string, int>(vocabulary.Count, StringComparer.Ordinal);
-        for (var i = 0; i < vocabulary.Count; i++)
-        {
-            index[vocabulary[i]] = i;
-        }
+        var index = new Dictionary<string, int>(capacity: vocabulary.Count, comparer: StringComparer.Ordinal);
+        for (var i = 0; i < vocabulary.Count; i++) index[vocabulary[i]] = i;
 
         return index;
     }
@@ -273,19 +258,12 @@ public static class LogRegTrainer
         IReadOnlyList<double> idf)
     {
         var tokens = LogRegTextTokenizer.Tokenize(text);
-        if (tokens.Count == 0)
-        {
-            return [];
-        }
+        if (tokens.Count == 0) return [];
 
         var counts = new Dictionary<int, int>();
         foreach (var token in tokens)
-        {
-            if (vocabularyIndex.TryGetValue(token, out var index))
-            {
+            if (vocabularyIndex.TryGetValue(key: token, value: out var index))
                 counts[index] = counts.GetValueOrDefault(index) + 1;
-            }
-        }
 
         return [.. counts.Select(kvp => (kvp.Key, (double)kvp.Value / tokens.Count * idf[kvp.Key]))];
     }
@@ -312,26 +290,18 @@ public static class LogRegTrainer
             for (var i = 0; i < n; i++)
             {
                 var z = weights[0];
-                foreach (var (index, value) in features[i])
-                {
-                    z += weights[index + 1] * value;
-                }
+                foreach (var (index, value) in features[i]) z += weights[index + 1] * value;
 
                 var prediction = Sigmoid(z);
                 var error = prediction - labels[i];
 
                 gradient[0] += error;
-                foreach (var (index, value) in features[i])
-                {
-                    gradient[index + 1] += error * value;
-                }
+                foreach (var (index, value) in features[i]) gradient[index + 1] += error * value;
             }
 
             weights[0] -= learningRate * gradient[0] / n;
             for (var w = 1; w < weights.Length; w++)
-            {
-                weights[w] -= learningRate * ((gradient[w] / n) + (l2Regularization * weights[w]));
-            }
+                weights[w] -= learningRate * (gradient[w] / n + l2Regularization * weights[w]);
         }
 
         return weights;
@@ -345,7 +315,10 @@ public static class LogRegTrainer
     /// </summary>
     /// <param name="z">The linear score to squash into <c>(0, 1)</c>.</param>
     /// <returns>The sigmoid of <paramref name="z"/>.</returns>
-    private static double Sigmoid(double z) => z >= 0
-        ? 1.0 / (1.0 + Math.Exp(-z))
-        : Math.Exp(z) / (1.0 + Math.Exp(z));
+    private static double Sigmoid(double z)
+    {
+        return z >= 0
+            ? 1.0 / (1.0 + Math.Exp(-z))
+            : Math.Exp(z) / (1.0 + Math.Exp(z));
+    }
 }

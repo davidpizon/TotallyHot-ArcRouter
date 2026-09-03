@@ -16,18 +16,20 @@ public class BenchmarkIdTasksJsonlImporterTests
 
         using var connection = temp.Database.OpenConnection();
         using var transaction = connection.BeginTransaction();
-        var rowCount = BenchmarkIdTasksJsonlImporter.Import(new StringReader(jsonl), "probing", connection, transaction);
+        var rowCount = BenchmarkIdTasksJsonlImporter.Import(reader: new StringReader(jsonl), split: "probing",
+            connection: connection, transaction: transaction);
         transaction.Commit();
 
-        Assert.Equal(1, rowCount);
+        Assert.Equal(1, actual: rowCount);
 
         using var readCommand = connection.CreateCommand();
         readCommand.CommandText = "SELECT split, dimension, raw_json FROM benchmark_id_tasks WHERE task_id = 't1';";
         using var reader = readCommand.ExecuteReader();
         Assert.True(reader.Read());
-        Assert.Equal("probing", reader.GetString(0));
-        Assert.Equal(RouterDimension.CodeGeneration, reader.GetString(1));
-        Assert.Contains("do the thing", reader.GetString(2), StringComparison.Ordinal);
+        Assert.Equal(expected: "probing", actual: reader.GetString(0));
+        Assert.Equal(expected: RouterDimension.CodeGeneration, actual: reader.GetString(1));
+        Assert.Contains(expectedSubstring: "do the thing", actualString: reader.GetString(2),
+            comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
@@ -39,16 +41,18 @@ public class BenchmarkIdTasksJsonlImporterTests
         // "split" here is the probing/id_test discriminator (already captured by the split column, and
         // deliberately given a decoy value); "source_split" is the train/val/test distinction this column
         // must round-trip.
-        var jsonl = """{"task_id":"t1","split":"probing","source_split":"train","dimension":"code_generation"}""" + "\n";
+        var jsonl = """{"task_id":"t1","split":"probing","source_split":"train","dimension":"code_generation"}""" +
+                    "\n";
 
         using var connection = temp.Database.OpenConnection();
         using var transaction = connection.BeginTransaction();
-        BenchmarkIdTasksJsonlImporter.Import(new StringReader(jsonl), "probing", connection, transaction);
+        BenchmarkIdTasksJsonlImporter.Import(reader: new StringReader(jsonl), split: "probing", connection: connection,
+            transaction: transaction);
         transaction.Commit();
 
         using var readCommand = connection.CreateCommand();
         readCommand.CommandText = "SELECT source_split FROM benchmark_id_tasks WHERE task_id = 't1';";
-        Assert.Equal("train", (string)readCommand.ExecuteScalar()!);
+        Assert.Equal(expected: "train", actual: (string)readCommand.ExecuteScalar()!);
     }
 
     [Fact]
@@ -61,12 +65,13 @@ public class BenchmarkIdTasksJsonlImporterTests
 
         using var connection = temp.Database.OpenConnection();
         using var transaction = connection.BeginTransaction();
-        BenchmarkIdTasksJsonlImporter.Import(new StringReader(jsonl), "id_test", connection, transaction);
+        BenchmarkIdTasksJsonlImporter.Import(reader: new StringReader(jsonl), split: "id_test", connection: connection,
+            transaction: transaction);
         transaction.Commit();
 
         using var readCommand = connection.CreateCommand();
         readCommand.CommandText = "SELECT source_split FROM benchmark_id_tasks WHERE task_id = 't1';";
-        Assert.Equal("id_test", (string)readCommand.ExecuteScalar()!);
+        Assert.Equal(expected: "id_test", actual: (string)readCommand.ExecuteScalar()!);
     }
 
     [Fact]
@@ -75,10 +80,10 @@ public class BenchmarkIdTasksJsonlImporterTests
         using var temp = new TempBenchmarkDatabase();
         temp.Database.EnsureCreated();
 
-        Import(temp, """{"task_id":"t1","dimension":"code_generation"}""" + "\n", "probing");
-        Import(temp, """{"task_id":"t2","dimension":"code_generation"}""" + "\n", "probing");
+        Import(temp: temp, jsonl: """{"task_id":"t1","dimension":"code_generation"}""" + "\n", split: "probing");
+        Import(temp: temp, jsonl: """{"task_id":"t2","dimension":"code_generation"}""" + "\n", split: "probing");
 
-        Assert.Equal(1, CountRows(temp, "probing"));
+        Assert.Equal(1, actual: CountRows(temp: temp, split: "probing"));
     }
 
     [Fact]
@@ -92,8 +97,10 @@ public class BenchmarkIdTasksJsonlImporterTests
 
         var ex = Assert.Throws<FormatException>(() =>
             BenchmarkIdTasksJsonlImporter.Import(
-                new StringReader("""{"dimension":"code_generation"}""" + "\n"), "probing", connection, transaction));
-        Assert.Contains("task_id", ex.Message, StringComparison.OrdinalIgnoreCase);
+                reader: new StringReader("""{"dimension":"code_generation"}""" + "\n"), split: "probing",
+                connection: connection, transaction: transaction));
+        Assert.Contains(expectedSubstring: "task_id", actualString: ex.Message,
+            comparisonType: StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -107,17 +114,19 @@ public class BenchmarkIdTasksJsonlImporterTests
 
         using var connection = temp.Database.OpenConnection();
         using var transaction = connection.BeginTransaction();
-        var rowCount = BenchmarkIdTasksJsonlImporter.Import(new StringReader(jsonl), "probing", connection, transaction);
+        var rowCount = BenchmarkIdTasksJsonlImporter.Import(reader: new StringReader(jsonl), split: "probing",
+            connection: connection, transaction: transaction);
         transaction.Commit();
 
-        Assert.Equal(2, rowCount);
+        Assert.Equal(2, actual: rowCount);
     }
 
     private static void Import(TempBenchmarkDatabase temp, string jsonl, string split)
     {
         using var connection = temp.Database.OpenConnection();
         using var transaction = connection.BeginTransaction();
-        BenchmarkIdTasksJsonlImporter.Import(new StringReader(jsonl), split, connection, transaction);
+        BenchmarkIdTasksJsonlImporter.Import(reader: new StringReader(jsonl), split: split, connection: connection,
+            transaction: transaction);
         transaction.Commit();
     }
 
@@ -126,7 +135,7 @@ public class BenchmarkIdTasksJsonlImporterTests
         using var connection = temp.Database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT COUNT(*) FROM benchmark_id_tasks WHERE split = $split;";
-        command.Parameters.AddWithValue("$split", split);
+        command.Parameters.AddWithValue(parameterName: "$split", value: split);
         return Convert.ToInt32(command.ExecuteScalar());
     }
 }

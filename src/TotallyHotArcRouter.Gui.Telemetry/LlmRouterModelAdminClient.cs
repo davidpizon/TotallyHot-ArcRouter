@@ -1,5 +1,5 @@
-using Grpc.Core;
 using System.Runtime.CompilerServices;
+using Grpc.Core;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
@@ -13,7 +13,7 @@ public sealed class LlmRouterModelAdminException : GrpcAdminException
 {
     /// <summary>Initializes a new instance of the <see cref="LlmRouterModelAdminException"/> class.</summary>
     public LlmRouterModelAdminException(string message, Exception? innerException = null, bool isUnavailable = false)
-        : base(message, innerException, isUnavailable)
+        : base(message: message, innerException: innerException, isUnavailable: isUnavailable)
     {
     }
 }
@@ -58,14 +58,17 @@ public enum LlmRouterModelSyncStageInfo
     Completed,
 
     /// <summary>The file's sync failed; any previously cached copy of this file is untouched.</summary>
-    Failed,
+    Failed
 }
 
 /// <summary>One file's progress update during a sync.</summary>
 /// <param name="FileName">The file this update is about.</param>
 /// <param name="Stage">The stage the file is currently in.</param>
 /// <param name="BytesTransferred">Bytes downloaded so far, when known.</param>
-/// <param name="Error">Why the file failed, set only on a terminal <see cref="LlmRouterModelSyncStageInfo.Failed"/> update.</param>
+/// <param name="Error">
+/// Why the file failed, set only on a terminal <see cref="LlmRouterModelSyncStageInfo.Failed"/>
+/// update.
+/// </param>
 /// <param name="TotalBytes">The file's published size in bytes, when known.</param>
 public sealed record LlmRouterModelSyncProgressInfo(
     string FileName,
@@ -133,15 +136,18 @@ public interface ILlmRouterModelAdminClient
 /// <see cref="BenchmarkDataAdminClient"/>.
 /// </summary>
 public sealed class LlmRouterModelAdminClient
-    : GrpcAdminClientBase<Contract.LlmRouterModelAdminService.LlmRouterModelAdminServiceClient, LlmRouterModelAdminException>,
-      ILlmRouterModelAdminClient
+    : GrpcAdminClientBase<Contract.LlmRouterModelAdminService.LlmRouterModelAdminServiceClient,
+            LlmRouterModelAdminException>,
+        ILlmRouterModelAdminClient
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="LlmRouterModelAdminClient"/> class, creating and
     /// owning a channel to <paramref name="serverAddress"/>.
     /// </summary>
     public LlmRouterModelAdminClient(string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
-        : base(serverAddress, callInvoker => new Contract.LlmRouterModelAdminService.LlmRouterModelAdminServiceClient(callInvoker))
+        : base(serverAddress: serverAddress,
+            createClient: callInvoker =>
+                new Contract.LlmRouterModelAdminService.LlmRouterModelAdminServiceClient(callInvoker))
     {
     }
 
@@ -155,24 +161,26 @@ public sealed class LlmRouterModelAdminClient
     {
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<LlmRouterModelStatusInfo> GetStatusAsync(CancellationToken cancellationToken = default)
     {
         try
         {
             var response = await Client
-                .GetLlmRouterModelStatusAsync(new Contract.GetLlmRouterModelStatusRequest(), cancellationToken: cancellationToken)
+                .GetLlmRouterModelStatusAsync(request: new Contract.GetLlmRouterModelStatusRequest(),
+                    cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             return MapStatus(response);
         }
         catch (RpcException ex)
         {
-            throw Wrap(ex, "Could not read the llm_router model status");
+            throw Wrap(ex: ex, action: "Could not read the llm_router model status");
         }
     }
 
-    /// <inheritdoc />
-    public async Task<LlmRouterModelStatusInfo> SetBaseUrlAsync(string baseUrl, CancellationToken cancellationToken = default)
+    /// <inheritdoc/>
+    public async Task<LlmRouterModelStatusInfo> SetBaseUrlAsync(string baseUrl,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(baseUrl);
 
@@ -180,22 +188,23 @@ public sealed class LlmRouterModelAdminClient
         {
             var response = await Client
                 .SetLlmRouterModelBaseUrlAsync(
-                    new Contract.SetLlmRouterModelBaseUrlRequest { BaseUrl = baseUrl },
+                    request: new Contract.SetLlmRouterModelBaseUrlRequest { BaseUrl = baseUrl },
                     cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             return MapStatus(response);
         }
         catch (RpcException ex)
         {
-            throw Wrap(ex, "Could not switch the llm_router model");
+            throw Wrap(ex: ex, action: "Could not switch the llm_router model");
         }
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async IAsyncEnumerable<LlmRouterModelSyncEvent> SyncAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        using var call = Client.SyncLlmRouterModel(new Contract.SyncLlmRouterModelRequest(), cancellationToken: cancellationToken);
+        using var call = Client.SyncLlmRouterModel(request: new Contract.SyncLlmRouterModelRequest(),
+            cancellationToken: cancellationToken);
         var stream = call.ResponseStream;
 
         while (true)
@@ -209,72 +218,89 @@ public sealed class LlmRouterModelAdminClient
             {
                 // Not caught inside a try that also yields: an iterator cannot yield from within a catch
                 // block, so MoveNext's outcome is captured here and acted on outside the try.
-                throw Wrap(ex, "llm_router model sync failed");
+                throw Wrap(ex: ex, action: "llm_router model sync failed");
             }
 
-            if (!hasNext)
-            {
-                yield break;
-            }
+            if (!hasNext) yield break;
 
             yield return MapEvent(stream.Current);
         }
     }
 
     /// <summary>Converts a gRPC-contract status response into the client's <see cref="LlmRouterModelStatusInfo"/>.</summary>
-    private static LlmRouterModelStatusInfo MapStatus(Contract.LlmRouterModelStatusResponse response) => new(
-        response.BaseUrl,
-        [.. response.Files.Select(MapFile)],
-        response.Current);
+    private static LlmRouterModelStatusInfo MapStatus(Contract.LlmRouterModelStatusResponse response)
+    {
+        return new LlmRouterModelStatusInfo(
+            BaseUrl: response.BaseUrl,
+            Files: [.. response.Files.Select(MapFile)],
+            Current: response.Current);
+    }
 
     /// <summary>Converts a gRPC-contract file status into the client's <see cref="LlmRouterModelFileStatusInfo"/>.</summary>
-    private static LlmRouterModelFileStatusInfo MapFile(Contract.LlmRouterModelFile file) => new(
-        file.FileName,
-        file.Synced,
-        file.SizeBytes,
-        file.SyncedAtUtc?.ToDateTimeOffset(),
-        file.ChecksumVerified,
-        file.IsOptional);
+    private static LlmRouterModelFileStatusInfo MapFile(Contract.LlmRouterModelFile file)
+    {
+        return new LlmRouterModelFileStatusInfo(
+            FileName: file.FileName,
+            Synced: file.Synced,
+            SizeBytes: file.SizeBytes,
+            SyncedAtUtc: file.SyncedAtUtc?.ToDateTimeOffset(),
+            ChecksumVerified: file.ChecksumVerified,
+            IsOptional: file.IsOptional);
+    }
 
     /// <summary>Converts a gRPC-contract sync stream message into the client's <see cref="LlmRouterModelSyncEvent"/>.</summary>
     /// <exception cref="LlmRouterModelAdminException">
     /// <paramref name="wire"/> carries none of <c>Plan</c>, <c>Progress</c>, or <c>FinalStatus</c> - a
     /// malformed message the wire contract's <c>oneof</c> should never actually produce.
     /// </exception>
-    private static LlmRouterModelSyncEvent MapEvent(Contract.LlmRouterModelSyncStreamEvent wire) => wire.EventCase switch
+    private static LlmRouterModelSyncEvent MapEvent(Contract.LlmRouterModelSyncStreamEvent wire)
     {
-        Contract.LlmRouterModelSyncStreamEvent.EventOneofCase.Plan =>
-            new LlmRouterModelSyncEvent(
-                Plan: new LlmRouterModelSyncPlanInfo(
-                    [.. wire.Plan.Files.Select(file => new LlmRouterModelSyncPlanFileInfo(file.FileName, file.SizeBytes))],
-                    wire.Plan.TotalBytes),
-                Progress: null,
-                FinalStatus: null),
-        Contract.LlmRouterModelSyncStreamEvent.EventOneofCase.FinalStatus =>
-            new LlmRouterModelSyncEvent(Plan: null, Progress: null, FinalStatus: MapStatus(wire.FinalStatus)),
-        Contract.LlmRouterModelSyncStreamEvent.EventOneofCase.Progress =>
-            new LlmRouterModelSyncEvent(
-                Plan: null,
-                Progress: new LlmRouterModelSyncProgressInfo(
-                    wire.Progress.FileName,
-                    MapStage(wire.Progress.Stage),
-                    wire.Progress.HasBytesTransferred ? wire.Progress.BytesTransferred : null,
-                    wire.Progress.HasError ? wire.Progress.Error : null,
-                    wire.Progress.HasTotalBytes ? wire.Progress.TotalBytes : null),
-                FinalStatus: null),
-        _ => throw new LlmRouterModelAdminException("llm_router model sync stream sent an empty message"),
-    };
+        return wire.EventCase switch
+        {
+            Contract.LlmRouterModelSyncStreamEvent.EventOneofCase.Plan =>
+                new LlmRouterModelSyncEvent(
+                    Plan: new LlmRouterModelSyncPlanInfo(
+                        Files:
+                        [
+                            .. wire.Plan.Files.Select(file =>
+                                new LlmRouterModelSyncPlanFileInfo(FileName: file.FileName, SizeBytes: file.SizeBytes))
+                        ],
+                        TotalBytes: wire.Plan.TotalBytes),
+                    null,
+                    null),
+            Contract.LlmRouterModelSyncStreamEvent.EventOneofCase.FinalStatus =>
+                new LlmRouterModelSyncEvent(null, null, FinalStatus: MapStatus(wire.FinalStatus)),
+            Contract.LlmRouterModelSyncStreamEvent.EventOneofCase.Progress =>
+                new LlmRouterModelSyncEvent(
+                    null,
+                    Progress: new LlmRouterModelSyncProgressInfo(
+                        FileName: wire.Progress.FileName,
+                        Stage: MapStage(wire.Progress.Stage),
+                        BytesTransferred: wire.Progress.HasBytesTransferred ? wire.Progress.BytesTransferred : null,
+                        Error: wire.Progress.HasError ? wire.Progress.Error : null,
+                        TotalBytes: wire.Progress.HasTotalBytes ? wire.Progress.TotalBytes : null),
+                    null),
+            _ => throw new LlmRouterModelAdminException("llm_router model sync stream sent an empty message")
+        };
+    }
 
     /// <summary>Maps the wire sync stage onto the client's enum.</summary>
-    private static LlmRouterModelSyncStageInfo MapStage(Contract.LlmRouterModelSyncStage stage) => stage switch
+    private static LlmRouterModelSyncStageInfo MapStage(Contract.LlmRouterModelSyncStage stage)
     {
-        Contract.LlmRouterModelSyncStage.Downloading => LlmRouterModelSyncStageInfo.Downloading,
-        Contract.LlmRouterModelSyncStage.Verifying => LlmRouterModelSyncStageInfo.Verifying,
-        Contract.LlmRouterModelSyncStage.Completed => LlmRouterModelSyncStageInfo.Completed,
-        _ => LlmRouterModelSyncStageInfo.Failed,
-    };
+        return stage switch
+        {
+            Contract.LlmRouterModelSyncStage.Downloading => LlmRouterModelSyncStageInfo.Downloading,
+            Contract.LlmRouterModelSyncStage.Verifying => LlmRouterModelSyncStageInfo.Verifying,
+            Contract.LlmRouterModelSyncStage.Completed => LlmRouterModelSyncStageInfo.Completed,
+            _ => LlmRouterModelSyncStageInfo.Failed
+        };
+    }
 
-    /// <inheritdoc />
-    protected override LlmRouterModelAdminException CreateException(string message, Exception? innerException, bool isUnavailable) =>
-        new(message, innerException, isUnavailable);
+    /// <inheritdoc/>
+    protected override LlmRouterModelAdminException CreateException(string message, Exception? innerException,
+        bool isUnavailable)
+    {
+        return new LlmRouterModelAdminException(message: message, innerException: innerException,
+            isUnavailable: isUnavailable);
+    }
 }

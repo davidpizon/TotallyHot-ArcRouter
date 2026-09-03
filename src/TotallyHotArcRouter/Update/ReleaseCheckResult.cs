@@ -25,7 +25,7 @@ public enum ReleaseCheckUnavailableReason
     AssetOrChecksumMissing,
 
     /// <summary>The GitHub API request failed - DNS, TLS, timeout, non-success status code, or malformed JSON.</summary>
-    NetworkOrApiFailure,
+    NetworkOrApiFailure
 }
 
 /// <summary>
@@ -36,18 +36,36 @@ public enum ReleaseCheckUnavailableReason
 /// network failure) is represented as a typed, non-throwing result via <see cref="UnavailableReason"/>
 /// rather than an exception, per the auto-update plan's "never throw out of the poller" requirement.
 /// </summary>
-/// <param name="CurrentVersion">The running Router's own version (<c>Directory.Build.props</c>' <c>Version</c>, read from <see cref="System.Reflection.AssemblyInformationalVersionAttribute"/>).</param>
-/// <param name="LatestVersion">The latest published release's version, or <see langword="null"/> when it could not be determined.</param>
+/// <param name="CurrentVersion">
+/// The running Router's own version (<c>Directory.Build.props</c>' <c>Version</c>, read from
+/// <see cref="System.Reflection.AssemblyInformationalVersionAttribute"/>).
+/// </param>
+/// <param name="LatestVersion">
+/// The latest published release's version, or <see langword="null"/> when it could not be
+/// determined.
+/// </param>
 /// <param name="IsUpdateAvailable">
 /// <see langword="true"/> only when <paramref name="LatestVersion"/> is strictly newer than
 /// <paramref name="CurrentVersion"/> under <see cref="Version"/> ordering AND the release's MSI asset
 /// plus its checksum were both found - an update that cannot actually be applied is never reported as
 /// available.
 /// </param>
-/// <param name="AssetDownloadUrl">The MSI installer asset's direct download URL, set only when <paramref name="IsUpdateAvailable"/> is <see langword="true"/>.</param>
-/// <param name="AssetSha256">The MSI asset's published SHA256 checksum (lowercase hex), set only when <paramref name="IsUpdateAvailable"/> is <see langword="true"/>.</param>
-/// <param name="UnavailableReason">Why the check could not produce a definite result; <see cref="ReleaseCheckUnavailableReason.None"/> on a normal, definite outcome (available or not).</param>
-/// <param name="UnavailableDetail">A human-readable elaboration of <paramref name="UnavailableReason"/>, for logs - never thrown, always just carried.</param>
+/// <param name="AssetDownloadUrl">
+/// The MSI installer asset's direct download URL, set only when
+/// <paramref name="IsUpdateAvailable"/> is <see langword="true"/>.
+/// </param>
+/// <param name="AssetSha256">
+/// The MSI asset's published SHA256 checksum (lowercase hex), set only when
+/// <paramref name="IsUpdateAvailable"/> is <see langword="true"/>.
+/// </param>
+/// <param name="UnavailableReason">
+/// Why the check could not produce a definite result;
+/// <see cref="ReleaseCheckUnavailableReason.None"/> on a normal, definite outcome (available or not).
+/// </param>
+/// <param name="UnavailableDetail">
+/// A human-readable elaboration of <paramref name="UnavailableReason"/>, for logs - never
+/// thrown, always just carried.
+/// </param>
 public sealed record ReleaseCheckResult(
     string CurrentVersion,
     string? LatestVersion,
@@ -68,15 +86,17 @@ public sealed record ReleaseCheckResult(
         string latestVersion,
         bool isUpdateAvailable,
         string? assetDownloadUrl,
-        string? assetSha256) =>
-        new(
-            currentVersion,
-            latestVersion,
-            isUpdateAvailable,
-            assetDownloadUrl,
-            assetSha256,
-            ReleaseCheckUnavailableReason.None,
+        string? assetSha256)
+    {
+        return new ReleaseCheckResult(
+            CurrentVersion: currentVersion,
+            LatestVersion: latestVersion,
+            IsUpdateAvailable: isUpdateAvailable,
+            AssetDownloadUrl: assetDownloadUrl,
+            AssetSha256: assetSha256,
+            UnavailableReason: ReleaseCheckUnavailableReason.None,
             null);
+    }
 
     /// <summary>Builds a typed "could not resolve" result - never an exception.</summary>
     /// <param name="currentVersion">The running Router's own version.</param>
@@ -85,6 +105,10 @@ public sealed record ReleaseCheckResult(
     public static ReleaseCheckResult Unavailable(
         string currentVersion,
         ReleaseCheckUnavailableReason reason,
-        string detail) =>
-        new(currentVersion, null, false, null, null, reason, detail);
+        string detail)
+    {
+        return new ReleaseCheckResult(CurrentVersion: currentVersion, null, false, null, null,
+            UnavailableReason: reason,
+            UnavailableDetail: detail);
+    }
 }

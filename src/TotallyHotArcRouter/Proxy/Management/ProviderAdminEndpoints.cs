@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace TotallyHot.ArcRouter.Proxy.Management;
 
 /// <summary>
@@ -37,137 +39,163 @@ public static class ProviderAdminEndpoints
         var group = endpoints.MapGroup("/admin");
 
         if (!string.IsNullOrWhiteSpace(managementToken))
-        {
             group.AddEndpointFilter(async (context, next) =>
             {
                 var provided = context.HttpContext.Request.Headers[TokenHeaderName].ToString();
-                if (!ManagementAccessToken.Verify(provided, managementToken))
-                {
-                    return Error(StatusCodes.Status401Unauthorized, "Missing or invalid management token.", "unauthorized");
-                }
+                if (!ManagementAccessToken.Verify(presented: provided, expected: managementToken))
+                    return Error(statusCode: StatusCodes.Status401Unauthorized,
+                        message: "Missing or invalid management token.", type: "unauthorized");
 
                 return await next(context);
             });
-        }
 
-        group.MapGet("/providers", () => Results.Ok(facade.ListProviders()));
+        group.MapGet(pattern: "/providers", handler: () => Results.Ok(facade.ListProviders()));
 
-        group.MapPut("/providers/{key}", async (string key, ProviderWriteRequest request, CancellationToken cancellationToken) =>
-            ToResult(await facade.UpsertProviderAsync(key, request, cancellationToken)));
+        group.MapPut(pattern: "/providers/{key}",
+            handler: async (string key, ProviderWriteRequest request, CancellationToken cancellationToken) =>
+                ToResult(await facade.UpsertProviderAsync(key: key, request: request,
+                    cancellationToken: cancellationToken)));
 
-        group.MapDelete("/providers/{key}", async (string key, CancellationToken cancellationToken) =>
-            ToResult(await facade.RemoveProviderAsync(key, cancellationToken)));
+        group.MapDelete(pattern: "/providers/{key}", handler: async (string key, CancellationToken cancellationToken) =>
+            ToResult(await facade.RemoveProviderAsync(key: key, cancellationToken: cancellationToken)));
 
         // Sets or clears a provider's monthly budget caps (Governance > Providers). A null cap clears that
         // dimension; both null removes the budget entirely. Persisted to the local database via the budget
         // store, so the cap survives a restart and is enforced live by ProxyMiddleware. Returns the refreshed
         // provider list (now carrying the new caps and current-month spend) like the other mutations.
-        group.MapPut("/providers/{key}/budget", (string key, ProviderBudgetWriteRequest request) =>
-            ToResult(facade.SetBudget(key, request)));
+        group.MapPut(pattern: "/providers/{key}/budget", handler: (string key, ProviderBudgetWriteRequest request) =>
+            ToResult(facade.SetBudget(providerKey: key, request: request)));
 
         // Switches a provider on or off (the Stop/Play control in Governance > Providers). A dedicated route
         // rather than a field on PUT /providers/{key}: that path rebuilds the provider from the write request
         // and would drop a Bedrock provider's Aws* fields. Enforced immediately on the next request - see
         // ProviderOptions.Enabled. Returns the refreshed provider list like the other mutations.
-        group.MapPut("/providers/{key}/enabled", async (string key, ProviderEnabledWriteRequest request, CancellationToken cancellationToken) =>
-            ToResult(await facade.SetEnabledAsync(key, request, cancellationToken)));
+        group.MapPut(pattern: "/providers/{key}/enabled",
+            handler: async (string key, ProviderEnabledWriteRequest request, CancellationToken cancellationToken) =>
+                ToResult(await facade.SetEnabledAsync(key: key, request: request,
+                    cancellationToken: cancellationToken)));
 
-        group.MapPut("/providers/{key}/models/{modelName}", async (string key, string modelName, ModelWriteRequest request, CancellationToken cancellationToken) =>
-            ToResult(await facade.UpsertModelAsync(key, modelName, request, cancellationToken)));
+        group.MapPut(pattern: "/providers/{key}/models/{modelName}", handler: async (string key, string modelName,
+                ModelWriteRequest request, CancellationToken cancellationToken) =>
+            ToResult(await facade.UpsertModelAsync(providerKey: key, modelName: modelName, request: request,
+                cancellationToken: cancellationToken)));
 
-        group.MapDelete("/providers/{key}/models/{modelName}", async (string key, string modelName, CancellationToken cancellationToken) =>
-            ToResult(await facade.RemoveModelAsync(modelName, cancellationToken)));
+        group.MapDelete(pattern: "/providers/{key}/models/{modelName}",
+            handler: async (string key, string modelName, CancellationToken cancellationToken) =>
+                ToResult(await facade.RemoveModelAsync(modelName: modelName, cancellationToken: cancellationToken)));
 
         // Switches a model on or off (the per-model Start/Stop control in Governance > Providers) - the
         // model-level twin of PUT /providers/{key}/enabled, same dedicated-route rationale.
-        group.MapPut("/providers/{key}/models/{modelName}/enabled", async (string key, string modelName, ModelEnabledWriteRequest request, CancellationToken cancellationToken) =>
-            ToResult(await facade.SetModelEnabledAsync(modelName, request, cancellationToken)));
+        group.MapPut(pattern: "/providers/{key}/models/{modelName}/enabled", handler: async (string key,
+                string modelName, ModelEnabledWriteRequest request, CancellationToken cancellationToken) =>
+            ToResult(await facade.SetModelEnabledAsync(modelName: modelName, request: request,
+                cancellationToken: cancellationToken)));
 
         // Pins how a model expresses tool calls, overriding automatic detection - the equivalent of
         // LiteLLM's register_model(..., supports_function_calling=…). A null/empty dialect clears the pin.
         // Synchronous, unlike its neighbours: it writes one already-known row rather than probing anything.
-        group.MapPut("/providers/{key}/models/{modelName}/tool-dialect", (string key, string modelName, ModelToolDialectWriteRequest request) =>
-            ToResult(facade.SetModelToolDialect(key, modelName, request)));
+        group.MapPut(pattern: "/providers/{key}/models/{modelName}/tool-dialect",
+            handler: (string key, string modelName, ModelToolDialectWriteRequest request) =>
+                ToResult(facade.SetModelToolDialect(key: key, modelName: modelName, request: request)));
 
-        group.MapPost("/providers/{key}/discover-models", async (string key, CancellationToken cancellationToken) =>
-        {
-            var result = await facade.DiscoverModelsAsync(key, cancellationToken);
-            return ToResult(result);
-        });
+        group.MapPost(pattern: "/providers/{key}/discover-models",
+            handler: async (string key, CancellationToken cancellationToken) =>
+            {
+                var result = await facade.DiscoverModelsAsync(providerKey: key, cancellationToken: cancellationToken);
+                return ToResult(result);
+            });
 
         // Re-probes which API flavors the provider's endpoint answers (see
         // docs/router/tool-call-normalization.md §3.3). The same scan runs automatically after a provider
         // save; this exists for the cases that misses - a local server that was down at the time, or one
         // that has since gained a native API. Kept as an independently callable building block alongside the
         // consolidated refresh-from-endpoint route below.
-        group.MapPost("/providers/{key}/scan-capabilities", async (string key, CancellationToken cancellationToken) =>
-        {
-            var result = await facade.ScanCapabilitiesAsync(key, cancellationToken);
-            return ToResult(result);
-        });
+        group.MapPost(pattern: "/providers/{key}/scan-capabilities",
+            handler: async (string key, CancellationToken cancellationToken) =>
+            {
+                var result = await facade.ScanCapabilitiesAsync(key: key, cancellationToken: cancellationToken);
+                return ToResult(result);
+            });
 
         // The Governance UI's "Refresh from endpoint" action: discovers the provider's live model list,
         // reconciles it into configuration (adding new models as stopped, flagging missing ones absent -
         // never deleting), then re-scans endpoint flavors and re-runs dialect detection - one request instead
         // of the GUI orchestrating discover-models + scan-capabilities itself.
-        group.MapPost("/providers/{key}/refresh-from-endpoint", async (string key, CancellationToken cancellationToken) =>
-        {
-            var result = await facade.RefreshFromEndpointAsync(key, cancellationToken);
-            return ToResult(result);
-        });
+        group.MapPost(pattern: "/providers/{key}/refresh-from-endpoint",
+            handler: async (string key, CancellationToken cancellationToken) =>
+            {
+                var result = await facade.RefreshFromEndpointAsync(key: key, cancellationToken: cancellationToken);
+                return ToResult(result);
+            });
 
         // The §5.7 resolution ladder's operator-override rung (docs/router/token-tracking-implementation-plan.md
         // Phase 3): runtime-editable, no restart required. GET lists every configured override for the
         // Governance price-overrides pane's read-only diagnosis view; PUT adds/replaces one; DELETE removes one.
-        group.MapGet("/price-overrides", () => ToResult(facade.ListPriceOverrides()));
+        group.MapGet(pattern: "/price-overrides", handler: () => ToResult(facade.ListPriceOverrides()));
 
         // The pane's read-only diagnosis view: per configured model, whether a price resolves today and
         // via an exact or approximate match - what tells an operator which models actually need an override.
-        group.MapGet("/price-resolution", () => ToResult(facade.GetPriceResolutionDiagnosis()));
+        group.MapGet(pattern: "/price-resolution", handler: () => ToResult(facade.GetPriceResolutionDiagnosis()));
 
-        group.MapPut("/price-overrides", (PriceOverrideWriteRequest request) =>
+        group.MapPut(pattern: "/price-overrides", handler: (PriceOverrideWriteRequest request) =>
             ToResult(facade.SetPriceOverride(request)));
 
-        group.MapDelete("/price-overrides", (string sourceName, string aggregatorModelKey) =>
-            ToResult(facade.RemovePriceOverride(sourceName, aggregatorModelKey)));
+        group.MapDelete(pattern: "/price-overrides", handler: (string sourceName, string aggregatorModelKey) =>
+            ToResult(facade.RemovePriceOverride(sourceName: sourceName, aggregatorModelKey: aggregatorModelKey)));
 
         // The Providers card's rate-limit trend chart data source (§5.9): per-dimension remaining-over-time
         // history for the last `hours` hours (default 6). Read-only, so a plain GET like every other query
         // route in this file.
-        group.MapGet("/providers/{key}/rate-limit-history", (string key, double? hours) =>
-            ToResult(facade.GetRateLimitHistory(key, hours ?? 6.0)));
+        group.MapGet(pattern: "/providers/{key}/rate-limit-history", handler: (string key, double? hours) =>
+            ToResult(facade.GetRateLimitHistory(providerKey: key, hours: hours ?? 6.0)));
 
         // Write-only protected-secret surface (docs/router/secrets-at-rest-plan.md §4/§7): stores or clears
         // a reconciliation Admin API key. Deliberately no GET counterpart - the invariant is that no secret
         // that reaches the protected store is ever readable back through any management API. GET
         // /admin/providers reports only the HasStoredAdminKey boolean.
-        group.MapPut("/secrets/{name}", (string name, SecretWriteRequest request) =>
-            ToResult(facade.SetSecret(name, request.Value)));
+        group.MapPut(pattern: "/secrets/{name}", handler: (string name, SecretWriteRequest request) =>
+            ToResult(facade.SetSecret(name: name, value: request.Value)));
 
-        group.MapDelete("/secrets/{name}", (string name) =>
+        group.MapDelete(pattern: "/secrets/{name}", handler: (string name) =>
             ToResult(facade.DeleteSecret(name)));
 
         return endpoints;
     }
 
-    /// <summary>Maps a facade <see cref="ManagementResult{T}"/> to an HTTP response: the value on success, or an OpenAI-shaped error whose status reflects <see cref="ManagementResult{T}.ErrorType"/> on failure.</summary>
+    /// <summary>
+    /// Maps a facade <see cref="ManagementResult{T}"/> to an HTTP response: the value on success, or an OpenAI-shaped
+    /// error whose status reflects <see cref="ManagementResult{T}.ErrorType"/> on failure.
+    /// </summary>
     /// <typeparam name="T">The result's success payload type.</typeparam>
     /// <param name="result">The facade outcome to translate.</param>
-    private static IResult ToResult<T>(ManagementResult<T> result) =>
-        result.Success
+    private static IResult ToResult<T>(ManagementResult<T> result)
+    {
+        return result.Success
             ? Results.Ok(result.Value)
             : result.ErrorType switch
             {
-                ManagementErrorType.NotFound => Error(StatusCodes.Status404NotFound, result.ErrorMessage!, "not_found"),
-                ManagementErrorType.InvalidRequest => Error(StatusCodes.Status400BadRequest, result.ErrorMessage!, "invalid_request_error"),
-                ManagementErrorType.Unavailable => Error(StatusCodes.Status503ServiceUnavailable, result.ErrorMessage!, "unavailable"),
-                _ => Error(StatusCodes.Status500InternalServerError, result.ErrorMessage!, "internal_error"),
+                ManagementErrorType.NotFound => Error(statusCode: StatusCodes.Status404NotFound,
+                    message: result.ErrorMessage!, type: "not_found"),
+                ManagementErrorType.InvalidRequest => Error(statusCode: StatusCodes.Status400BadRequest,
+                    message: result.ErrorMessage!, type: "invalid_request_error"),
+                ManagementErrorType.Unavailable => Error(statusCode: StatusCodes.Status503ServiceUnavailable,
+                    message: result.ErrorMessage!, type: "unavailable"),
+                _ => Error(statusCode: StatusCodes.Status500InternalServerError, message: result.ErrorMessage!,
+                    type: "internal_error")
             };
+    }
 
     /// <summary>Builds an OpenAI-shaped JSON error response with the given status code, message, and error type.</summary>
-    private static IResult Error(int statusCode, string message, string type) =>
-        Results.Json(
-            new { error = new { message, type, code = statusCode.ToString(System.Globalization.CultureInfo.InvariantCulture) } },
+    private static IResult Error(int statusCode, string message, string type)
+    {
+        return Results.Json(
+            data: new
+            {
+                error = new
+                {
+                    message, type, code = statusCode.ToString(CultureInfo.InvariantCulture)
+                }
+            },
             statusCode: statusCode);
+    }
 }
-

@@ -34,8 +34,8 @@ public interface IPriceSourceRegistry
 /// </remarks>
 public sealed class PriceSourceRegistry : IPriceSourceRegistry, IDisposable
 {
-    private readonly HttpClient _httpClient;
     private readonly List<IPriceSourceClient> _allClients = [];
+    private readonly HttpClient _httpClient;
     private readonly PriceSourceToggleStore _toggleStore;
 
     /// <summary>
@@ -61,20 +61,29 @@ public sealed class PriceSourceRegistry : IPriceSourceRegistry, IDisposable
         // legitimate application traffic rather than anonymous scraping (Phase 2). Every source client
         // built below shares this client and therefore these headers.
         _httpClient = new HttpClient();
-        _httpClient.DefaultRequestHeaders.Add("X-Title", "TotallyHot Arc Router");
-        _httpClient.DefaultRequestHeaders.Add("HTTP-Referer", "https://github.com/davidpizon/TotallyHot-ArcRouter");
+        _httpClient.DefaultRequestHeaders.Add(name: "X-Title", value: "TotallyHot Arc Router");
+        _httpClient.DefaultRequestHeaders.Add(name: "HTTP-Referer",
+            value: "https://github.com/davidpizon/TotallyHot-ArcRouter");
 
         // Build a client for every known source, enabled or not - EnabledClients does the filtering. This
         // grows by adding another case below plus an entry in PriceCatalogOptions.KnownSources, not by a
         // rewrite - which is exactly what adding OpenRouter here was.
         _allClients.Add(new LiteLlmPriceSourceClient(
-            _httpClient,
-            catalogOptions.GetSourceUrl(PriceCatalogOptions.LiteLlmSourceName) ?? LiteLlmPriceSourceClient.DefaultUrl,
-            loggerFactory.CreateLogger<LiteLlmPriceSourceClient>()));
+            httpClient: _httpClient,
+            url: catalogOptions.GetSourceUrl(PriceCatalogOptions.LiteLlmSourceName) ??
+                 LiteLlmPriceSourceClient.DefaultUrl,
+            logger: loggerFactory.CreateLogger<LiteLlmPriceSourceClient>()));
         _allClients.Add(new OpenRouterPriceSourceClient(
-            _httpClient,
-            catalogOptions.GetSourceUrl(PriceCatalogOptions.OpenRouterSourceName) ?? OpenRouterPriceSourceClient.DefaultUrl,
-            loggerFactory.CreateLogger<OpenRouterPriceSourceClient>()));
+            httpClient: _httpClient,
+            url: catalogOptions.GetSourceUrl(PriceCatalogOptions.OpenRouterSourceName) ??
+                 OpenRouterPriceSourceClient.DefaultUrl,
+            logger: loggerFactory.CreateLogger<OpenRouterPriceSourceClient>()));
+    }
+
+    /// <inheritdoc/>
+    public void Dispose()
+    {
+        _httpClient.Dispose();
     }
 
     /// <summary>
@@ -84,8 +93,4 @@ public sealed class PriceSourceRegistry : IPriceSourceRegistry, IDisposable
     /// </summary>
     public IReadOnlyList<IPriceSourceClient> EnabledClients =>
         [.. _allClients.Where(client => _toggleStore.IsEnabled(client.Name))];
-
-    /// <inheritdoc />
-    public void Dispose() => _httpClient.Dispose();
 }
-

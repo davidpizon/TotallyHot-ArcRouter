@@ -1,9 +1,9 @@
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging;
-using Moq;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
+using Moq;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 
@@ -13,7 +13,6 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
 /// Coverage for tool-call normalization (<c>docs/router/tool-call-normalization.md</c> Phase 4): rewriting
 /// a model's dialect-framed tool call into a real OpenAI <c>tool_calls</c> shape, and recording what the
 /// response revealed about the model.
-///
 /// <para>
 /// The first half of this suite is <b>the regression contract for the original incident</b>
 /// (<c>unified-api-translation.md</c> §4.5), ported verbatim from <c>ToolCallEchoGuardTranslatorTests</c>
@@ -36,8 +35,8 @@ public class ToolCallNormalizingTranslatorTests
 
         var chunks = ParseChunks(output);
         Assert.Single(chunks);
-        Assert.Equal("Hello there", Delta(chunks[0]).GetProperty("content").GetString());
-        Assert.False(Delta(chunks[0]).TryGetProperty("tool_calls", out _));
+        Assert.Equal(expected: "Hello there", actual: Delta(chunks[0]).GetProperty("content").GetString());
+        Assert.False(Delta(chunks[0]).TryGetProperty(propertyName: "tool_calls", value: out _));
     }
 
     [Fact]
@@ -54,12 +53,13 @@ public class ToolCallNormalizingTranslatorTests
 
         var chunks = ParseChunks(output);
         var toolCall = Delta(chunks[0]).GetProperty("tool_calls")[0];
-        Assert.Equal("get_time", toolCall.GetProperty("function").GetProperty("name").GetString());
-        Assert.Equal("function", toolCall.GetProperty("type").GetString());
-        Assert.Equal(0, toolCall.GetProperty("index").GetInt32());
+        Assert.Equal(expected: "get_time", actual: toolCall.GetProperty("function").GetProperty("name").GetString());
+        Assert.Equal(expected: "function", actual: toolCall.GetProperty("type").GetString());
+        Assert.Equal(0, actual: toolCall.GetProperty("index").GetInt32());
 
-        Assert.Equal("tool_calls", chunks[^1].RootElement.GetProperty("choices")[0].GetProperty("finish_reason").GetString());
-        Assert.EndsWith("[DONE]", output.TrimEnd());
+        Assert.Equal(expected: "tool_calls",
+            actual: chunks[^1].RootElement.GetProperty("choices")[0].GetProperty("finish_reason").GetString());
+        Assert.EndsWith(expectedEndString: "[DONE]", actualString: output.TrimEnd());
     }
 
     [Fact]
@@ -67,11 +67,13 @@ public class ToolCallNormalizingTranslatorTests
     {
         var translator = StreamTranslator();
 
-        var output = Decode(translator.Push(ToBytes(Chunk(content: "<tools>{\"name\": \"get_time\", \"arguments\": {}}</tools>"))));
+        var output =
+            Decode(translator.Push(
+                ToBytes(Chunk(content: "<tools>{\"name\": \"get_time\", \"arguments\": {}}</tools>"))));
         output += Decode(translator.Flush());
 
         var toolCall = Delta(ParseChunks(output)[0]).GetProperty("tool_calls")[0];
-        Assert.Equal("get_time", toolCall.GetProperty("function").GetProperty("name").GetString());
+        Assert.Equal(expected: "get_time", actual: toolCall.GetProperty("function").GetProperty("name").GetString());
     }
 
     [Fact]
@@ -83,27 +85,26 @@ public class ToolCallNormalizingTranslatorTests
         string[] fragments =
         [
             "<tools", ">\n", "{\"", "name", "\":", " \"", "get", "_time", "\",", " \"",
-            "arguments", "\":", " {}", "}\n", "</", "tools", ">",
+            "arguments", "\":", " {}", "}\n", "</", "tools", ">"
         ];
 
         var translator = StreamTranslator();
         var output = new StringBuilder();
 
-        foreach (var fragment in fragments)
-        {
-            output.Append(Decode(translator.Push(ToBytes(Chunk(content: fragment)))));
-        }
+        foreach (var fragment in fragments) output.Append(Decode(translator.Push(ToBytes(Chunk(content: fragment)))));
 
         output.Append(Decode(translator.Push(ToBytes(Chunk(finishReason: "stop")))));
         output.Append(Decode(translator.Flush()));
 
         var chunks = ParseChunks(output.ToString());
-        var toolCallChunk = chunks.FirstOrDefault(c => Delta(c).TryGetProperty("tool_calls", out _));
+        var toolCallChunk =
+            chunks.FirstOrDefault(c => Delta(c).TryGetProperty(propertyName: "tool_calls", value: out _));
         Assert.NotNull(toolCallChunk);
 
         var toolCall = Delta(toolCallChunk!).GetProperty("tool_calls")[0];
-        Assert.Equal("get_time", toolCall.GetProperty("function").GetProperty("name").GetString());
-        Assert.Equal("tool_calls", chunks[^1].RootElement.GetProperty("choices")[0].GetProperty("finish_reason").GetString());
+        Assert.Equal(expected: "get_time", actual: toolCall.GetProperty("function").GetProperty("name").GetString());
+        Assert.Equal(expected: "tool_calls",
+            actual: chunks[^1].RootElement.GetProperty("choices")[0].GetProperty("finish_reason").GetString());
     }
 
     [Fact]
@@ -112,15 +113,16 @@ public class ToolCallNormalizingTranslatorTests
         var translator = StreamTranslator();
 
         var input = Chunk(content: "Sure, checking the time. ") +
-            Chunk(content: "<tool_call>{\"name\": \"get_time\", \"arguments\": {}}</tool_call>") +
-            Chunk(content: " One moment.");
+                    Chunk(content: "<tool_call>{\"name\": \"get_time\", \"arguments\": {}}</tool_call>") +
+                    Chunk(content: " One moment.");
 
         var output = Decode(translator.Push(ToBytes(input)));
         output += Decode(translator.Flush());
 
         var chunks = ParseChunks(output);
-        Assert.Equal("Sure, checking the time.  One moment.", AllContent(chunks));
-        Assert.Contains(chunks, c => Delta(c).TryGetProperty("tool_calls", out _));
+        Assert.Equal(expected: "Sure, checking the time.  One moment.", actual: AllContent(chunks));
+        Assert.Contains(collection: chunks,
+            filter: c => Delta(c).TryGetProperty(propertyName: "tool_calls", value: out _));
     }
 
     [Fact]
@@ -137,11 +139,13 @@ public class ToolCallNormalizingTranslatorTests
 
         var toolCalls = AllToolCalls(ParseChunks(output));
 
-        Assert.Equal(2, toolCalls.Count);
-        Assert.Equal("get_time", toolCalls[0].GetProperty("function").GetProperty("name").GetString());
-        Assert.Equal(0, toolCalls[0].GetProperty("index").GetInt32());
-        Assert.Equal("get_weather", toolCalls[1].GetProperty("function").GetProperty("name").GetString());
-        Assert.Equal(1, toolCalls[1].GetProperty("index").GetInt32());
+        Assert.Equal(2, actual: toolCalls.Count);
+        Assert.Equal(expected: "get_time",
+            actual: toolCalls[0].GetProperty("function").GetProperty("name").GetString());
+        Assert.Equal(0, actual: toolCalls[0].GetProperty("index").GetInt32());
+        Assert.Equal(expected: "get_weather",
+            actual: toolCalls[1].GetProperty("function").GetProperty("name").GetString());
+        Assert.Equal(1, actual: toolCalls[1].GetProperty("index").GetInt32());
     }
 
     [Fact]
@@ -155,8 +159,9 @@ public class ToolCallNormalizingTranslatorTests
         output += Decode(translator.Flush());
 
         var chunks = ParseChunks(output);
-        Assert.Equal("<tool_call>not json</tool_call>", AllContent(chunks));
-        Assert.DoesNotContain(chunks, c => Delta(c).TryGetProperty("tool_calls", out _));
+        Assert.Equal(expected: "<tool_call>not json</tool_call>", actual: AllContent(chunks));
+        Assert.DoesNotContain(collection: chunks,
+            filter: c => Delta(c).TryGetProperty(propertyName: "tool_calls", value: out _));
         VerifyLogsWarning(loggerMock);
     }
 
@@ -168,11 +173,13 @@ public class ToolCallNormalizingTranslatorTests
         var loggerMock = new Mock<ILogger>();
         var translator = StreamTranslator(loggerMock.Object);
 
-        const string schemaEcho = "<tools>{\"type\": \"function\", \"function\": {\"name\": \"get_time\", \"parameters\": {}}}</tools>";
+        const string schemaEcho =
+            "<tools>{\"type\": \"function\", \"function\": {\"name\": \"get_time\", \"parameters\": {}}}</tools>";
         var output = Decode(translator.Push(ToBytes(Chunk(content: schemaEcho))));
         output += Decode(translator.Flush());
 
-        Assert.DoesNotContain(ParseChunks(output), c => Delta(c).TryGetProperty("tool_calls", out _));
+        Assert.DoesNotContain(collection: ParseChunks(output),
+            filter: c => Delta(c).TryGetProperty(propertyName: "tool_calls", value: out _));
         VerifyLogsWarning(loggerMock);
     }
 
@@ -185,7 +192,8 @@ public class ToolCallNormalizingTranslatorTests
         translator.Push(ToBytes(Chunk(content: "<tool_call>{\"name\": \"get_time\", \"arguments\": {}}")));
         var output = Decode(translator.Flush());
 
-        Assert.Equal("<tool_call>{\"name\": \"get_time\", \"arguments\": {}}", AllContent(ParseChunks(output)));
+        Assert.Equal(expected: "<tool_call>{\"name\": \"get_time\", \"arguments\": {}}",
+            actual: AllContent(ParseChunks(output)));
         VerifyLogsWarning(loggerMock);
     }
 
@@ -209,13 +217,14 @@ public class ToolCallNormalizingTranslatorTests
         output += Decode(translator.Flush());
 
         var choices = ParseChunks(output)[0].RootElement.GetProperty("choices");
-        Assert.Equal(2, choices.GetArrayLength());
+        Assert.Equal(2, actual: choices.GetArrayLength());
 
         Assert.Equal(
-            "<tool_call>{\"name\": \"get_time\", \"arguments\": {}}</tool_call>",
-            choices[0].GetProperty("delta").GetProperty("content").GetString());
-        Assert.False(choices[0].GetProperty("delta").TryGetProperty("tool_calls", out _));
-        Assert.Equal("second choice text", choices[1].GetProperty("delta").GetProperty("content").GetString());
+            expected: "<tool_call>{\"name\": \"get_time\", \"arguments\": {}}</tool_call>",
+            actual: choices[0].GetProperty("delta").GetProperty("content").GetString());
+        Assert.False(choices[0].GetProperty("delta").TryGetProperty(propertyName: "tool_calls", value: out _));
+        Assert.Equal(expected: "second choice text",
+            actual: choices[1].GetProperty("delta").GetProperty("content").GetString());
 
         VerifyLogsWarning(loggerMock);
     }
@@ -239,17 +248,22 @@ public class ToolCallNormalizingTranslatorTests
 
         var output = Decode(translator.Push(ToBytes(multiChoiceEventWithExtraLines)));
 
-        Assert.Contains("event: message", output, StringComparison.Ordinal);
-        Assert.Contains("id: evt-1", output, StringComparison.Ordinal);
-        Assert.Contains("\"choices\":[{\"index\":0,\"delta\":{\"content\":\"a\"},\"finish_reason\":null},{\"index\":1,\"delta\":{\"content\":\"b\"},\"finish_reason\":null}]", output, StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "event: message", actualString: output,
+            comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "id: evt-1", actualString: output, comparisonType: StringComparison.Ordinal);
+        Assert.Contains(
+            expectedSubstring:
+            "\"choices\":[{\"index\":0,\"delta\":{\"content\":\"a\"},\"finish_reason\":null},{\"index\":1,\"delta\":{\"content\":\"b\"},\"finish_reason\":null}]",
+            actualString: output, comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
     public void TranslateResponse_NoTagsPresent_ReturnsBodyUnchanged()
     {
-        var body = ToBytes("""{"choices":[{"message":{"role":"assistant","content":"hi there"},"finish_reason":"stop"}]}""");
+        var body = ToBytes(
+            """{"choices":[{"message":{"role":"assistant","content":"hi there"},"finish_reason":"stop"}]}""");
 
-        Assert.Equal(Decode(body), Decode(BufferedTranslator().TranslateResponse(body)));
+        Assert.Equal(expected: Decode(body), actual: Decode(BufferedTranslator().TranslateResponse(body)));
     }
 
     [Fact]
@@ -261,8 +275,9 @@ public class ToolCallNormalizingTranslatorTests
         using var json = JsonDocument.Parse(BufferedTranslator().TranslateResponse(body));
 
         var toolCall = json.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("tool_calls")[0];
-        Assert.Equal("get_time", toolCall.GetProperty("function").GetProperty("name").GetString());
-        Assert.Equal("tool_calls", json.RootElement.GetProperty("choices")[0].GetProperty("finish_reason").GetString());
+        Assert.Equal(expected: "get_time", actual: toolCall.GetProperty("function").GetProperty("name").GetString());
+        Assert.Equal(expected: "tool_calls",
+            actual: json.RootElement.GetProperty("choices")[0].GetProperty("finish_reason").GetString());
     }
 
     [Fact]
@@ -276,8 +291,9 @@ public class ToolCallNormalizingTranslatorTests
         using var json = JsonDocument.Parse(BufferedTranslator().TranslateResponse(body));
 
         var toolCall = json.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("tool_calls")[0];
-        Assert.Equal("get_time", toolCall.GetProperty("function").GetProperty("name").GetString());
-        Assert.Equal("tool_calls", json.RootElement.GetProperty("choices")[0].GetProperty("finish_reason").GetString());
+        Assert.Equal(expected: "get_time", actual: toolCall.GetProperty("function").GetProperty("name").GetString());
+        Assert.Equal(expected: "tool_calls",
+            actual: json.RootElement.GetProperty("choices")[0].GetProperty("finish_reason").GetString());
     }
 
     [Fact]
@@ -287,7 +303,8 @@ public class ToolCallNormalizingTranslatorTests
         var body = ToBytes(
             """{"choices":[{"message":{"role":"assistant","content":"<tool_call>{\"name\": \"get_time\", \"arguments\": {}}</tool_call>"},"finish_reason":"stop"},{"message":{"role":"assistant","content":"second choice"},"finish_reason":"stop"}]}""");
 
-        Assert.Equal(Decode(body), Decode(BufferedTranslator(loggerMock.Object).TranslateResponse(body)));
+        Assert.Equal(expected: Decode(body),
+            actual: Decode(BufferedTranslator(loggerMock.Object).TranslateResponse(body)));
         VerifyLogsWarning(loggerMock);
     }
 
@@ -298,7 +315,8 @@ public class ToolCallNormalizingTranslatorTests
         var body = ToBytes(
             """{"choices":[{"message":{"role":"assistant","content":"<tool_call>not json</tool_call>"},"finish_reason":"stop"}]}""");
 
-        Assert.Equal(Decode(body), Decode(BufferedTranslator(loggerMock.Object).TranslateResponse(body)));
+        Assert.Equal(expected: Decode(body),
+            actual: Decode(BufferedTranslator(loggerMock.Object).TranslateResponse(body)));
         VerifyLogsWarning(loggerMock);
     }
 
@@ -314,7 +332,7 @@ public class ToolCallNormalizingTranslatorTests
         var body = ToBytes(
             """{"choices":[{"message":{"role":"assistant","content":"Mistral models open with the [TOOL_CALLS] token."},"finish_reason":"stop"}]}""");
 
-        Assert.Equal(Decode(body), Decode(BufferedTranslator(logger).TranslateResponse(body)));
+        Assert.Equal(expected: Decode(body), actual: Decode(BufferedTranslator(logger).TranslateResponse(body)));
         Assert.Empty(messages);
     }
 
@@ -327,7 +345,8 @@ public class ToolCallNormalizingTranslatorTests
 
         BufferedTranslator(logger).TranslateResponse(body);
 
-        Assert.Contains("the text after [TOOL_CALLS] did not contain a valid tool call", Assert.Single(messages), StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "the text after [TOOL_CALLS] did not contain a valid tool call",
+            actualString: Assert.Single(messages), comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
@@ -343,8 +362,10 @@ public class ToolCallNormalizingTranslatorTests
         BufferedTranslator(logger).TranslateResponse(body);
 
         var message = Assert.Single(messages);
-        Assert.Contains("unterminated <tool_call> block", message, StringComparison.Ordinal);
-        Assert.DoesNotContain("framed", message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(expectedSubstring: "unterminated <tool_call> block", actualString: message,
+            comparisonType: StringComparison.Ordinal);
+        Assert.DoesNotContain(expectedSubstring: "framed", actualString: message,
+            comparisonType: StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -356,7 +377,8 @@ public class ToolCallNormalizingTranslatorTests
 
         BufferedTranslator(logger).TranslateResponse(body);
 
-        Assert.Contains("<tool_call>...</tool_call> did not contain a valid tool call", Assert.Single(messages), StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "<tool_call>...</tool_call> did not contain a valid tool call",
+            actualString: Assert.Single(messages), comparisonType: StringComparison.Ordinal);
     }
 
     // ----- Beyond the ported contract: the dialects the echo guard could not see -----
@@ -376,18 +398,21 @@ public class ToolCallNormalizingTranslatorTests
 
         var chunks = ParseChunks(output);
         var toolCall = AllToolCalls(chunks).Single();
-        Assert.Equal("get_time", toolCall.GetProperty("function").GetProperty("name").GetString());
-        Assert.Equal("{\"tz\":\"UTC\"}", toolCall.GetProperty("function").GetProperty("arguments").GetString());
+        Assert.Equal(expected: "get_time", actual: toolCall.GetProperty("function").GetProperty("name").GetString());
+        Assert.Equal(expected: "{\"tz\":\"UTC\"}",
+            actual: toolCall.GetProperty("function").GetProperty("arguments").GetString());
 
         // The load-bearing part, and what distinguishes resolving here from resolving in Flush: the call
         // rides on the chunk that *carries* the finish reason, and no chunk ever says "stop". Deferring to
         // Flush would emit finish_reason "stop" first and the tool call after it, which a client reading
         // the finish reason as end-of-turn has every right to act on.
         var finishChunk = Assert.Single(
-            chunks,
-            c => c.RootElement.GetProperty("choices")[0].GetProperty("finish_reason").ValueKind != JsonValueKind.Null);
-        Assert.Equal("tool_calls", finishChunk.RootElement.GetProperty("choices")[0].GetProperty("finish_reason").GetString());
-        Assert.True(Delta(finishChunk).TryGetProperty("tool_calls", out _));
+            collection: chunks,
+            predicate: c =>
+                c.RootElement.GetProperty("choices")[0].GetProperty("finish_reason").ValueKind != JsonValueKind.Null);
+        Assert.Equal(expected: "tool_calls",
+            actual: finishChunk.RootElement.GetProperty("choices")[0].GetProperty("finish_reason").GetString());
+        Assert.True(Delta(finishChunk).TryGetProperty(propertyName: "tool_calls", value: out _));
     }
 
     [Fact]
@@ -403,8 +428,9 @@ public class ToolCallNormalizingTranslatorTests
         output += Decode(translator.Flush());
 
         var toolCall = AllToolCalls(ParseChunks(output)).Single();
-        Assert.Equal("get_time", toolCall.GetProperty("function").GetProperty("name").GetString());
-        Assert.Equal("{\"tz\":\"UTC\"}", toolCall.GetProperty("function").GetProperty("arguments").GetString());
+        Assert.Equal(expected: "get_time", actual: toolCall.GetProperty("function").GetProperty("name").GetString());
+        Assert.Equal(expected: "{\"tz\":\"UTC\"}",
+            actual: toolCall.GetProperty("function").GetProperty("arguments").GetString());
     }
 
     [Fact]
@@ -416,7 +442,7 @@ public class ToolCallNormalizingTranslatorTests
         using var json = JsonDocument.Parse(BufferedTranslator().TranslateResponse(body));
 
         var toolCall = json.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("tool_calls")[0];
-        Assert.Equal("get_time", toolCall.GetProperty("function").GetProperty("name").GetString());
+        Assert.Equal(expected: "get_time", actual: toolCall.GetProperty("function").GetProperty("name").GetString());
     }
 
     [Fact]
@@ -430,7 +456,7 @@ public class ToolCallNormalizingTranslatorTests
 
         var output = Decode(translator.Push(ToBytes(Chunk(content: "<tool_call>" + runaway))));
 
-        Assert.Equal("<tool_call>" + runaway, AllContent(ParseChunks(output)));
+        Assert.Equal(expected: "<tool_call>" + runaway, actual: AllContent(ParseChunks(output)));
         VerifyLogsWarning(loggerMock);
     }
 
@@ -450,11 +476,11 @@ public class ToolCallNormalizingTranslatorTests
         var output = Decode(translator.Push(ToBytes(nativeEvent)));
         output += Decode(translator.Flush());
 
-        Assert.Contains("call_real", output, StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "call_real", actualString: output, comparisonType: StringComparison.Ordinal);
 
         var recorded = Assert.Single(store.Recorded);
-        Assert.Equal("openai-native", recorded.Dialect);
-        Assert.Equal(DetectionConfidence.Observed, recorded.Confidence);
+        Assert.Equal(expected: "openai-native", actual: recorded.Dialect);
+        Assert.Equal(expected: DetectionConfidence.Observed, actual: recorded.Confidence);
     }
 
     [Fact]
@@ -468,7 +494,8 @@ public class ToolCallNormalizingTranslatorTests
             "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_real\",\"type\":\"function\",\"function\":{\"name\":\"get_time\",\"arguments\":\"{}\"}}]},\"finish_reason\":null}]}\n\n";
 
         var output = Decode(translator.Push(ToBytes(nativeEvent)));
-        output += Decode(translator.Push(ToBytes(Chunk(content: "<tool_call>{\"name\": \"get_time\", \"arguments\": {}}</tool_call>"))));
+        output += Decode(translator.Push(
+            ToBytes(Chunk(content: "<tool_call>{\"name\": \"get_time\", \"arguments\": {}}</tool_call>"))));
         output += Decode(translator.Flush());
 
         // Asserted on the decoded JSON content, never on the raw SSE bytes. System.Text.Json's default
@@ -477,7 +504,8 @@ public class ToolCallNormalizingTranslatorTests
         // A raw-text assertion here would therefore pass or fail for reasons that have nothing to do with
         // whether the tag was rewritten.
         var chunks = ParseChunks(output);
-        Assert.Contains("<tool_call>", AllContent(chunks), StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "<tool_call>", actualString: AllContent(chunks),
+            comparisonType: StringComparison.Ordinal);
         Assert.Single(AllToolCalls(chunks));
     }
 
@@ -495,9 +523,9 @@ public class ToolCallNormalizingTranslatorTests
         translator.Flush();
 
         var recorded = Assert.Single(store.Recorded);
-        Assert.Equal("hermes", recorded.Dialect);
-        Assert.Equal(DetectionConfidence.Observed, recorded.Confidence);
-        Assert.Equal(1, recorded.ObservationCount);
+        Assert.Equal(expected: "hermes", actual: recorded.Dialect);
+        Assert.Equal(expected: DetectionConfidence.Observed, actual: recorded.Confidence);
+        Assert.Equal(1, actual: recorded.ObservationCount);
     }
 
     [Fact]
@@ -509,7 +537,8 @@ public class ToolCallNormalizingTranslatorTests
         var store = new FakeToolCallCapabilityStore();
 
         BufferedTranslator(store: store).TranslateResponse(
-            ToBytes("""{"choices":[{"message":{"role":"assistant","content":"The time is 4pm."},"finish_reason":"stop"}]}"""));
+            ToBytes(
+                """{"choices":[{"message":{"role":"assistant","content":"The time is 4pm."},"finish_reason":"stop"}]}"""));
 
         Assert.Empty(store.Recorded);
     }
@@ -521,9 +550,10 @@ public class ToolCallNormalizingTranslatorTests
         // be a database write and a full cache reload per response, on the request path.
         var store = new FakeToolCallCapabilityStore();
         var translator = new ToolCallNormalizingTranslator(
-            new ToolCallNormalizationPlan("lmstudio", "m", [ToolCallDialectRegistry.Hermes], IsObserving: false),
-            store,
-            Mock.Of<ILogger>());
+            plan: new ToolCallNormalizationPlan(ProviderKey: "lmstudio", ModelName: "m",
+                Candidates: [ToolCallDialectRegistry.Hermes], false),
+            capabilityStore: store,
+            logger: Mock.Of<ILogger>());
 
         translator.TranslateResponse(ToBytes(
             """{"choices":[{"message":{"role":"assistant","content":"<tool_call>{\"name\": \"a\", \"arguments\": {}}</tool_call>"},"finish_reason":"stop"}]}"""));
@@ -538,8 +568,8 @@ public class ToolCallNormalizingTranslatorTests
         var body = ToBytes(
             """{"choices":[{"message":{"role":"assistant","content":"<tool_call>{\"name\": \"get_time\", \"arguments\": {}}</tool_call>","tool_calls":[{"id":"call_real","type":"function","function":{"name":"real_call","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}""");
 
-        Assert.Equal(Decode(body), Decode(BufferedTranslator(store: store).TranslateResponse(body)));
-        Assert.Equal("openai-native", Assert.Single(store.Recorded).Dialect);
+        Assert.Equal(expected: Decode(body), actual: Decode(BufferedTranslator(store: store).TranslateResponse(body)));
+        Assert.Equal(expected: "openai-native", actual: Assert.Single(store.Recorded).Dialect);
     }
 
     // ----- End-to-end wiring through the real ProxyMiddleware -----
@@ -550,16 +580,19 @@ public class ToolCallNormalizingTranslatorTests
         // The original repro, now armed by the request's own "tools" field rather than by a provider flag.
         var body = await RunThroughMiddlewareAsync(
             requestBody:
-                """{"model":"qwen2.5.1-coder-7b-instruct","messages":[{"role":"user","content":"time?"}],"stream":true,"tools":[{"type":"function","function":{"name":"get_time","parameters":{"type":"object","properties":{}}}}]}""");
+            """{"model":"qwen2.5.1-coder-7b-instruct","messages":[{"role":"user","content":"time?"}],"stream":true,"tools":[{"type":"function","function":{"name":"get_time","parameters":{"type":"object","properties":{}}}}]}""");
 
         // Both spellings the tag could appear in: the literal one, as the stub upstream wrote it and as a
         // byte-for-byte passthrough would preserve it, and the Unicode-escaped one System.Text.Json emits
         // when a chunk is re-serialized. Checking only the literal form would let this pass merely because
         // the response went through JSON, without the tag ever having been rewritten into a tool call.
-        Assert.DoesNotContain("<tool_call>", body, StringComparison.Ordinal);
-        Assert.DoesNotContain("\\u003Ctool_call", body, StringComparison.Ordinal);
-        Assert.Contains("\"tool_calls\"", body, StringComparison.Ordinal);
-        Assert.Contains("get_time", body, StringComparison.Ordinal);
+        Assert.DoesNotContain(expectedSubstring: "<tool_call>", actualString: body,
+            comparisonType: StringComparison.Ordinal);
+        Assert.DoesNotContain(expectedSubstring: "\\u003Ctool_call", actualString: body,
+            comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "\"tool_calls\"", actualString: body,
+            comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "get_time", actualString: body, comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
@@ -569,10 +602,11 @@ public class ToolCallNormalizingTranslatorTests
         // the reply is the model *explaining* the syntax - routine work for a coding assistant.
         var body = await RunThroughMiddlewareAsync(
             requestBody:
-                """{"model":"qwen2.5.1-coder-7b-instruct","messages":[{"role":"user","content":"explain qwen tool syntax"}],"stream":true}""");
+            """{"model":"qwen2.5.1-coder-7b-instruct","messages":[{"role":"user","content":"explain qwen tool syntax"}],"stream":true}""");
 
-        Assert.Contains("<tool_call>", body, StringComparison.Ordinal);
-        Assert.DoesNotContain("\"tool_calls\"", body, StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "<tool_call>", actualString: body, comparisonType: StringComparison.Ordinal);
+        Assert.DoesNotContain(expectedSubstring: "\"tool_calls\"", actualString: body,
+            comparisonType: StringComparison.Ordinal);
     }
 
     // ----- An empty tool_calls array is not a native call -----
@@ -594,8 +628,9 @@ public class ToolCallNormalizingTranslatorTests
         using var parsed = JsonDocument.Parse(result);
         var message = parsed.RootElement.GetProperty("choices")[0].GetProperty("message");
 
-        Assert.Equal("get_time", message.GetProperty("tool_calls")[0].GetProperty("function").GetProperty("name").GetString());
-        Assert.DoesNotContain(store.Recorded, r => r.Dialect == "openai-native");
+        Assert.Equal(expected: "get_time",
+            actual: message.GetProperty("tool_calls")[0].GetProperty("function").GetProperty("name").GetString());
+        Assert.DoesNotContain(collection: store.Recorded, filter: r => r.Dialect == "openai-native");
     }
 
     [Fact]
@@ -621,28 +656,41 @@ public class ToolCallNormalizingTranslatorTests
         var translator = StreamTranslator(store: store);
 
         var sse = Decode(translator.Push(ToBytes(
-            "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"tool_calls\":[],\"content\":\"<tool_call>{\\\"name\\\": \\\"get_time\\\", \\\"arguments\\\": {}}</tool_call>\"},\"finish_reason\":null}]}\n\n")))
-            + Decode(translator.Flush());
+                      "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"tool_calls\":[],\"content\":\"<tool_call>{\\\"name\\\": \\\"get_time\\\", \\\"arguments\\\": {}}</tool_call>\"},\"finish_reason\":null}]}\n\n")))
+                  + Decode(translator.Flush());
 
         var chunks = ParseChunks(sse);
-        Assert.Equal("get_time", AllToolCalls(chunks)[0].GetProperty("function").GetProperty("name").GetString());
-        Assert.DoesNotContain(store.Recorded, r => r.Dialect == "openai-native");
+        Assert.Equal(expected: "get_time",
+            actual: AllToolCalls(chunks)[0].GetProperty("function").GetProperty("name").GetString());
+        Assert.DoesNotContain(collection: store.Recorded, filter: r => r.Dialect == "openai-native");
     }
 
     // ----- Test helpers -----
 
-    private static ToolCallNormalizationPlan UnionPlan() =>
-        new("lmstudio", "qwen2.5.1-coder-7b-instruct", ToolCallDialectRegistry.ScannableDialects, IsObserving: true);
+    private static ToolCallNormalizationPlan UnionPlan()
+    {
+        return new ToolCallNormalizationPlan(ProviderKey: "lmstudio", ModelName: "qwen2.5.1-coder-7b-instruct",
+            Candidates: ToolCallDialectRegistry.ScannableDialects, true);
+    }
 
     private static ToolCallNormalizingStreamTranslator StreamTranslator(
-        ILogger? logger = null, IToolCallCapabilityStore? store = null) =>
-        new(UnionPlan(), store, logger ?? Mock.Of<ILogger>());
+        ILogger? logger = null, IToolCallCapabilityStore? store = null)
+    {
+        return new ToolCallNormalizingStreamTranslator(plan: UnionPlan(), capabilityStore: store,
+            logger: logger ?? Mock.Of<ILogger>());
+    }
 
     private static ToolCallNormalizingTranslator BufferedTranslator(
-        ILogger? logger = null, IToolCallCapabilityStore? store = null) =>
-        new(UnionPlan(), store, logger ?? Mock.Of<ILogger>());
+        ILogger? logger = null, IToolCallCapabilityStore? store = null)
+    {
+        return new ToolCallNormalizingTranslator(plan: UnionPlan(), capabilityStore: store,
+            logger: logger ?? Mock.Of<ILogger>());
+    }
 
-    /// <summary>Drives one streamed request through the real middleware against a stub upstream that echoes a Hermes-framed tool call.</summary>
+    /// <summary>
+    /// Drives one streamed request through the real middleware against a stub upstream that echoes a Hermes-framed
+    /// tool call.
+    /// </summary>
     private static async Task<string> RunThroughMiddlewareAsync(string requestBody)
     {
         var resolver = ModelRouteResolverTestFactory.Create(
@@ -658,13 +706,14 @@ public class ToolCallNormalizingTranslatorTests
 
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StringContent(echoedSse, Encoding.UTF8, "text/event-stream"),
+            Content = new StringContent(content: echoedSse, encoding: Encoding.UTF8, mediaType: "text/event-stream")
         }));
 
         using var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(),
-            new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver),
-            new HttpClient(handler));
+            logger: Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor: new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(),
+                modelRouteResolver: resolver),
+            httpClient: new HttpClient(handler));
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
@@ -676,44 +725,66 @@ public class ToolCallNormalizingTranslatorTests
         context.Request.ContentLength = requestBytes.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
         context.Response.Body.Position = 0;
-        return await new StreamReader(context.Response.Body, Encoding.UTF8).ReadToEndAsync(TestContext.Current.CancellationToken);
+        return await new StreamReader(stream: context.Response.Body, encoding: Encoding.UTF8).ReadToEndAsync(TestContext
+            .Current.CancellationToken);
     }
 
     private static string Chunk(string? content = null, string? finishReason = null)
     {
         var delta = content is not null ? $"{{\"content\":{JsonSerializer.Serialize(content)}}}" : "{}";
         var finish = finishReason is not null ? $"\"{finishReason}\"" : "null";
-        return $"data: {{\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{{\"index\":0,\"delta\":{delta},\"finish_reason\":{finish}}}]}}\n\n";
+        return
+            $"data: {{\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{{\"index\":0,\"delta\":{delta},\"finish_reason\":{finish}}}]}}\n\n";
     }
 
-    private static byte[] ToBytes(string s) => Encoding.UTF8.GetBytes(s);
+    private static byte[] ToBytes(string s)
+    {
+        return Encoding.UTF8.GetBytes(s);
+    }
 
-    private static string Decode(byte[] bytes) => Encoding.UTF8.GetString(bytes);
+    private static string Decode(byte[] bytes)
+    {
+        return Encoding.UTF8.GetString(bytes);
+    }
 
-    private static JsonElement Delta(JsonDocument chunk) =>
-        chunk.RootElement.GetProperty("choices")[0].GetProperty("delta");
+    private static JsonElement Delta(JsonDocument chunk)
+    {
+        return chunk.RootElement.GetProperty("choices")[0].GetProperty("delta");
+    }
 
-    private static string AllContent(IEnumerable<JsonDocument> chunks) =>
-        string.Concat(chunks
+    private static string AllContent(IEnumerable<JsonDocument> chunks)
+    {
+        return string.Concat(chunks
             .Select(c => Delta(c))
-            .Where(d => d.TryGetProperty("content", out _))
+            .Where(d => d.TryGetProperty(propertyName: "content", value: out _))
             .Select(d => d.GetProperty("content").GetString()));
+    }
 
-    private static List<JsonElement> AllToolCalls(IEnumerable<JsonDocument> chunks) =>
-        [.. chunks
-            .Select(c => Delta(c))
-            .Where(d => d.TryGetProperty("tool_calls", out _))
-            .SelectMany(d => d.GetProperty("tool_calls").EnumerateArray())];
+    private static List<JsonElement> AllToolCalls(IEnumerable<JsonDocument> chunks)
+    {
+        return
+        [
+            .. chunks
+                .Select(c => Delta(c))
+                .Where(d => d.TryGetProperty(propertyName: "tool_calls", value: out _))
+                .SelectMany(d => d.GetProperty("tool_calls").EnumerateArray())
+        ];
+    }
 
-    private static List<JsonDocument> ParseChunks(string sse) =>
-        [.. sse.Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
-            .Where(l => l.StartsWith("data: ", StringComparison.Ordinal))
-            .Select(l => l["data: ".Length..])
-            .Where(l => l != "[DONE]")
-            .Select(l => JsonDocument.Parse(l))];
+    private static List<JsonDocument> ParseChunks(string sse)
+    {
+        return
+        [
+            .. sse.Split(separator: "\n\n", options: StringSplitOptions.RemoveEmptyEntries)
+                .Where(l => l.StartsWith(value: "data: ", comparisonType: StringComparison.Ordinal))
+                .Select(l => l["data: ".Length..])
+                .Where(l => l != "[DONE]")
+                .Select(l => JsonDocument.Parse(l))
+        ];
+    }
 
     /// <summary>
     /// A logger that records each formatted warning, for the tests that assert on <em>which</em> warning
@@ -731,29 +802,37 @@ public class ToolCallNormalizingTranslatorTests
                 It.IsAny<It.IsAnyType>(),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()))
-            .Callback(new InvocationAction(invocation => messages.Add(invocation.Arguments[2]?.ToString() ?? string.Empty)));
+            .Callback(new InvocationAction(invocation =>
+                messages.Add(invocation.Arguments[2]?.ToString() ?? string.Empty)));
 
         return (messages, loggerMock.Object);
     }
 
-    private static void VerifyLogsWarning(Mock<ILogger> loggerMock) =>
+    private static void VerifyLogsWarning(Mock<ILogger> loggerMock)
+    {
         loggerMock.Verify(
-            logger => logger.Log(
+            expression: logger => logger.Log(
                 LogLevel.Warning,
                 It.IsAny<EventId>(),
                 It.IsAny<It.IsAnyType>(),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.AtLeastOnce);
+            times: Times.AtLeastOnce);
+    }
 
     private sealed class DelegatingHandlerStub : HttpMessageHandler
     {
         private readonly Func<HttpRequestMessage, Task<HttpResponseMessage>> _handler;
 
-        public DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler) => _handler = handler;
+        public DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler)
+        {
+            _handler = handler;
+        }
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => _handler(request);
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            return _handler(request);
+        }
     }
 }
-

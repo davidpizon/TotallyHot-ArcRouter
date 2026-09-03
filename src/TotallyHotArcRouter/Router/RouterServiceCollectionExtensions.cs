@@ -1,5 +1,8 @@
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.Router.Embeddings;
+using TotallyHot.ArcRouter.Router.Orchestrator;
+using TotallyHot.ArcRouter.Router.TextGeneration;
 using TotallyHot.ArcRouter.Tools;
 
 namespace TotallyHot.ArcRouter.Router;
@@ -66,20 +69,24 @@ internal static class RouterServiceCollectionExtensions
         services.AddSingleton(sp =>
         {
             var configuration = sp.GetRequiredService<IConfiguration>();
-            var configuredPath = configuration.GetSection(RoutingOptions.SectionName)[nameof(RoutingOptions.EmbeddingMemoryDatabasePath)];
+            var configuredPath =
+                configuration.GetSection(RoutingOptions.SectionName)[
+                    nameof(RoutingOptions.EmbeddingMemoryDatabasePath)];
             var databaseOptions = Options.Create(new RoutingOptions
             {
-                EmbeddingMemoryDatabasePath = configuredPath ?? new RoutingOptions().EmbeddingMemoryDatabasePath,
+                EmbeddingMemoryDatabasePath = configuredPath ?? new RoutingOptions().EmbeddingMemoryDatabasePath
             });
-            return new RouterSettingsStore(new RouterMemoryDatabase(databaseOptions), sp.GetRequiredService<ILogger<RouterSettingsStore>>());
+            return new RouterSettingsStore(database: new RouterMemoryDatabase(databaseOptions),
+                logger: sp.GetRequiredService<ILogger<RouterSettingsStore>>());
         });
-        services.AddSingleton<Router.RouterSettingsReloadToken>();
-        services.AddSingleton<IOptionsChangeTokenSource<RoutingOptions>>(sp => sp.GetRequiredService<Router.RouterSettingsReloadToken>());
-        services.AddSingleton<IConfigureOptions<RoutingOptions>, Router.RouterSettingsConfigureOptions>();
+        services.AddSingleton<RouterSettingsReloadToken>();
+        services.AddSingleton<IOptionsChangeTokenSource<RoutingOptions>>(sp =>
+            sp.GetRequiredService<RouterSettingsReloadToken>());
+        services.AddSingleton<IConfigureOptions<RoutingOptions>, RouterSettingsConfigureOptions>();
 
-        services.AddHttpClient(nameof(Router.Embeddings.OnnxEmbeddingClient));
-        services.AddSingleton<Router.Embeddings.IEmbeddingClient, Router.Embeddings.OnnxEmbeddingClient>();
-        services.AddSingleton<Router.Embeddings.EmbeddingWarmupState>();
+        services.AddHttpClient(nameof(OnnxEmbeddingClient));
+        services.AddSingleton<IEmbeddingClient, OnnxEmbeddingClient>();
+        services.AddSingleton<EmbeddingWarmupState>();
         services.AddSingleton<RouterMemoryDatabase>();
         services.AddSingleton<IMemoryEntryStore, SqliteMemoryEntryStore>();
         services.AddSingleton<EmbeddingMemory>();
@@ -96,8 +103,8 @@ internal static class RouterServiceCollectionExtensions
                 return true;
             })
             .ValidateOnStart();
-        services.AddHttpClient(nameof(Router.TextGeneration.OnnxTextGenerationClient));
-        services.AddSingleton<Router.TextGeneration.ITextGenerationClient, Router.TextGeneration.OnnxTextGenerationClient>();
+        services.AddHttpClient(nameof(OnnxTextGenerationClient));
+        services.AddSingleton<ITextGenerationClient, OnnxTextGenerationClient>();
 
         // The Governance > Benchmark Data panel's "Local Voter Model" section: lets the operator
         // switch llm_router's active model by URL and proactively (re-)sync its files, instead of
@@ -105,13 +112,13 @@ internal static class RouterServiceCollectionExtensions
         // here, right after OnnxTextGenerationClient, purely for readability - DI resolution order is
         // independent of registration order - because the seed-validation failure this store can
         // throw belongs conceptually with the LlmRouterOptions block it seeds from.
-        services.AddOptions<Router.TextGeneration.LlmRouterModelOverrideStoreOptions>()
+        services.AddOptions<LlmRouterModelOverrideStoreOptions>()
             .Configure<IConfiguration>((options, configuration) =>
-                configuration.GetSection(Router.TextGeneration.LlmRouterModelOverrideStoreOptions.SectionName).Bind(options));
-        services.AddSingleton<Router.TextGeneration.ILlmRouterModelOverrideStore, Router.TextGeneration.LlmRouterModelOverrideStore>();
-        services.AddHttpClient(Router.TextGeneration.LlmRouterModelChecksumProbe.HttpClientName);
-        services.AddSingleton<Router.TextGeneration.LlmRouterModelChecksumProbe>();
-        services.AddSingleton<Router.TextGeneration.LlmRouterModelSyncService>();
+                configuration.GetSection(LlmRouterModelOverrideStoreOptions.SectionName).Bind(options));
+        services.AddSingleton<ILlmRouterModelOverrideStore, LlmRouterModelOverrideStore>();
+        services.AddHttpClient(LlmRouterModelChecksumProbe.HttpClientName);
+        services.AddSingleton<LlmRouterModelChecksumProbe>();
+        services.AddSingleton<LlmRouterModelSyncService>();
 
         // PLAN.md Phase L: the Orchestrator ensemble. Registered by concrete type - CompositeRoutingPolicy
         // (still the registered IRoutingPolicy) takes it as a direct constructor dependency and, per
@@ -122,32 +129,32 @@ internal static class RouterServiceCollectionExtensions
         // other consumers can depend on one directly) and again as IRoutingVoter (so
         // OrchestratorRoutingPolicy's IEnumerable<IRoutingVoter> constructor parameter resolves every one
         // of them).
-        services.AddSingleton<Router.Orchestrator.DimBestVoter>();
-        services.AddSingleton<Router.Orchestrator.MemoryKnnVoter>();
-        services.AddSingleton<Router.Orchestrator.LogRegVoter>();
-        services.AddSingleton<Router.Orchestrator.LlmRouterVoter>();
-        services.AddSingleton<Router.Orchestrator.ClusterBestVoter>();
-        services.AddSingleton<Router.Orchestrator.IRoutingVoter>(sp => sp.GetRequiredService<Router.Orchestrator.DimBestVoter>());
-        services.AddSingleton<Router.Orchestrator.IRoutingVoter>(sp => sp.GetRequiredService<Router.Orchestrator.MemoryKnnVoter>());
-        services.AddSingleton<Router.Orchestrator.IRoutingVoter>(sp => sp.GetRequiredService<Router.Orchestrator.LogRegVoter>());
-        services.AddSingleton<Router.Orchestrator.IRoutingVoter>(sp => sp.GetRequiredService<Router.Orchestrator.LlmRouterVoter>());
-        services.AddSingleton<Router.Orchestrator.IRoutingVoter>(sp => sp.GetRequiredService<Router.Orchestrator.ClusterBestVoter>());
-        services.AddSingleton<Router.Orchestrator.OrchestratorRoutingPolicy>();
+        services.AddSingleton<DimBestVoter>();
+        services.AddSingleton<MemoryKnnVoter>();
+        services.AddSingleton<LogRegVoter>();
+        services.AddSingleton<LlmRouterVoter>();
+        services.AddSingleton<ClusterBestVoter>();
+        services.AddSingleton<IRoutingVoter>(sp => sp.GetRequiredService<DimBestVoter>());
+        services.AddSingleton<IRoutingVoter>(sp => sp.GetRequiredService<MemoryKnnVoter>());
+        services.AddSingleton<IRoutingVoter>(sp => sp.GetRequiredService<LogRegVoter>());
+        services.AddSingleton<IRoutingVoter>(sp => sp.GetRequiredService<LlmRouterVoter>());
+        services.AddSingleton<IRoutingVoter>(sp => sp.GetRequiredService<ClusterBestVoter>());
+        services.AddSingleton<OrchestratorRoutingPolicy>();
 
         // docs/router/live-feedback-learning-plan.md Phase 4: trains and hot-swaps the logreg voter's
         // artifact. LogRegRetrainHostedService (registered below, with the other hosted services) is
         // the automatic-threshold trigger; Program.cs's --retrain-logreg flag and Phase 5's Governance
         // button both resolve IEmbeddingLogRegTrainingService directly instead of going through it.
-        services.AddSingleton<Router.Orchestrator.OodBootstrapSampleSource>();
-        services.AddSingleton<Router.Orchestrator.IEmbeddingLogRegTrainingService, Router.Orchestrator.EmbeddingLogRegTrainingService>();
+        services.AddSingleton<OodBootstrapSampleSource>();
+        services.AddSingleton<IEmbeddingLogRegTrainingService, EmbeddingLogRegTrainingService>();
 
         // docs/router/self-organizing-classification-plan.md Phase T2: trains and atomically writes the
         // self-organizing cluster model's artifact. ClusterRetrainHostedService (registered below, with
         // the other hosted services) is the automatic-threshold trigger; Program.cs's --retrain-clusters
         // flag and Phase T5's Governance button both resolve IClusterTrainingService directly instead of
         // going through it.
-        services.AddSingleton<Router.Orchestrator.OodClusterBootstrapSampleSource>();
-        services.AddSingleton<Router.Orchestrator.IClusterTrainingService, Router.Orchestrator.ClusterTrainingService>();
+        services.AddSingleton<OodClusterBootstrapSampleSource>();
+        services.AddSingleton<IClusterTrainingService, ClusterTrainingService>();
 
         // Tools. RunVisibleTests (which shelled out to `dotnet test` in a caller-supplied directory) and
         // EstimateQuality (a placeholder length-and-comment heuristic) were removed along with the

@@ -43,4 +43,3 @@ internal sealed record ToolCallNormalizationPlan(
             .Distinct()
             .ToArray();
 }
-

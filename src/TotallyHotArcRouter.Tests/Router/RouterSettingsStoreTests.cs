@@ -17,7 +17,7 @@ public sealed class RouterSettingsStoreTests
     {
         var store = CreateStore();
 
-        var found = store.TryGetBool(RouterSettingsStore.AdaptiveRoutingEnabledKey, out var value);
+        var found = store.TryGetBool(key: RouterSettingsStore.AdaptiveRoutingEnabledKey, value: out var value);
 
         Assert.False(found);
         Assert.False(value);
@@ -28,10 +28,10 @@ public sealed class RouterSettingsStoreTests
     {
         var store = CreateStore();
 
-        var found = store.TryGetInt(RouterSettingsStore.EmbeddingMemoryCapacityKey, out var value);
+        var found = store.TryGetInt(key: RouterSettingsStore.EmbeddingMemoryCapacityKey, value: out var value);
 
         Assert.False(found);
-        Assert.Equal(0, value);
+        Assert.Equal(0, actual: value);
     }
 
     [Theory]
@@ -41,11 +41,11 @@ public sealed class RouterSettingsStoreTests
     {
         var store = CreateStore();
 
-        store.SetBool(RouterSettingsStore.AdaptiveRoutingEnabledKey, storedValue);
-        var found = store.TryGetBool(RouterSettingsStore.AdaptiveRoutingEnabledKey, out var value);
+        store.SetBool(key: RouterSettingsStore.AdaptiveRoutingEnabledKey, value: storedValue);
+        var found = store.TryGetBool(key: RouterSettingsStore.AdaptiveRoutingEnabledKey, value: out var value);
 
         Assert.True(found);
-        Assert.Equal(storedValue, value);
+        Assert.Equal(expected: storedValue, actual: value);
     }
 
     [Fact]
@@ -53,11 +53,11 @@ public sealed class RouterSettingsStoreTests
     {
         var store = CreateStore();
 
-        store.SetInt(RouterSettingsStore.EmbeddingMemoryCapacityKey, 12_345);
-        var found = store.TryGetInt(RouterSettingsStore.EmbeddingMemoryCapacityKey, out var value);
+        store.SetInt(key: RouterSettingsStore.EmbeddingMemoryCapacityKey, 12_345);
+        var found = store.TryGetInt(key: RouterSettingsStore.EmbeddingMemoryCapacityKey, value: out var value);
 
         Assert.True(found);
-        Assert.Equal(12_345, value);
+        Assert.Equal(12_345, actual: value);
     }
 
     [Fact]
@@ -65,28 +65,31 @@ public sealed class RouterSettingsStoreTests
     {
         var store = CreateStore();
 
-        store.SetInt(RouterSettingsStore.EmbeddingMemoryCapacityKey, 1_000);
-        store.SetInt(RouterSettingsStore.EmbeddingMemoryCapacityKey, 2_000);
-        store.TryGetInt(RouterSettingsStore.EmbeddingMemoryCapacityKey, out var value);
+        store.SetInt(key: RouterSettingsStore.EmbeddingMemoryCapacityKey, 1_000);
+        store.SetInt(key: RouterSettingsStore.EmbeddingMemoryCapacityKey, 2_000);
+        store.TryGetInt(key: RouterSettingsStore.EmbeddingMemoryCapacityKey, value: out var value);
 
-        Assert.Equal(2_000, value);
+        Assert.Equal(2_000, actual: value);
     }
 
     [Fact]
     public void SecondStore_OverSameDatabaseFile_SeesTheFirstStoresWrites()
     {
-        var tempDirectory = Path.Combine(Path.GetTempPath(), "arcrouter-tests", Guid.NewGuid().ToString("N"));
-        var dbPath = Path.Combine(tempDirectory, "router_embedding_memory.db");
+        var tempDirectory = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
+            path3: Guid.NewGuid().ToString("N"));
+        var dbPath = Path.Combine(path1: tempDirectory, path2: "router_embedding_memory.db");
 
         var first = new RouterSettingsStore(
-            new RouterMemoryDatabase(Options.Create(new RoutingOptions { EmbeddingMemoryDatabasePath = dbPath })),
-            NullLogger<RouterSettingsStore>.Instance);
-        first.SetBool(RouterSettingsStore.AdaptiveRoutingEnabledKey, true);
+            database: new RouterMemoryDatabase(Options.Create(new RoutingOptions
+                { EmbeddingMemoryDatabasePath = dbPath })),
+            logger: NullLogger<RouterSettingsStore>.Instance);
+        first.SetBool(key: RouterSettingsStore.AdaptiveRoutingEnabledKey, true);
 
         var second = new RouterSettingsStore(
-            new RouterMemoryDatabase(Options.Create(new RoutingOptions { EmbeddingMemoryDatabasePath = dbPath })),
-            NullLogger<RouterSettingsStore>.Instance);
-        var found = second.TryGetBool(RouterSettingsStore.AdaptiveRoutingEnabledKey, out var value);
+            database: new RouterMemoryDatabase(Options.Create(new RoutingOptions
+                { EmbeddingMemoryDatabasePath = dbPath })),
+            logger: NullLogger<RouterSettingsStore>.Instance);
+        var found = second.TryGetBool(key: RouterSettingsStore.AdaptiveRoutingEnabledKey, value: out var value);
 
         Assert.True(found);
         Assert.True(value);
@@ -94,9 +97,11 @@ public sealed class RouterSettingsStoreTests
 
     private static RouterSettingsStore CreateStore()
     {
-        var tempDirectory = Path.Combine(Path.GetTempPath(), "arcrouter-tests", Guid.NewGuid().ToString("N"));
-        var dbPath = Path.Combine(tempDirectory, "router_embedding_memory.db");
-        var database = new RouterMemoryDatabase(Options.Create(new RoutingOptions { EmbeddingMemoryDatabasePath = dbPath }));
-        return new RouterSettingsStore(database, NullLogger<RouterSettingsStore>.Instance);
+        var tempDirectory = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
+            path3: Guid.NewGuid().ToString("N"));
+        var dbPath = Path.Combine(path1: tempDirectory, path2: "router_embedding_memory.db");
+        var database =
+            new RouterMemoryDatabase(Options.Create(new RoutingOptions { EmbeddingMemoryDatabasePath = dbPath }));
+        return new RouterSettingsStore(database: database, logger: NullLogger<RouterSettingsStore>.Instance);
     }
 }

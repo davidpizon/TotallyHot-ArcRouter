@@ -47,6 +47,27 @@ public sealed class StorageOptions
     /// <summary>Gets the configuration section name used for shared storage settings.</summary>
     public const string SectionName = "Storage";
 
+    // The token every default above leads with. On non-Windows hosts (the project's Docker default is
+    // Linux) PROGRAMDATA is unset, so Environment.ExpandEnvironmentVariables leaves it literal.
+    private const string ProgramDataToken = "%PROGRAMDATA%";
+
+    // Still recognized even though no default uses it any more: an operator's existing appsettings.json
+    // may pin a %LOCALAPPDATA% path, and LegacyStorageMigration builds the pre-move locations from it.
+    private const string LocalAppDataToken = "%LOCALAPPDATA%";
+
+    /// <summary>
+    /// The single machine-wide directory every file above lives in, shared with
+    /// <c>RoutingGateStore</c>'s state file and <c>ManagementAccessToken</c>'s token. Public so
+    /// <see cref="LegacyStorageMigration"/> can tell a default-located file (which it may migrate) from
+    /// one an operator deliberately pointed somewhere else (which it must leave alone).
+    /// </summary>
+    public const string MachineSharedDirectoryName = "TotallyHotArcRouter";
+
+    // The two per-user directories these files lived in before the move to %ProgramData%. Both spellings
+    // existed at once: appsettings.json pinned DatabasePath under the dotless name while the four
+    // compiled defaults used the dotted one, so a real install can have files in either.
+    private static readonly string[] LegacyDirectoryNames = ["TotallyHot.ArcRouter", "TotallyHotArcRouter"];
+
     /// <summary>
     /// Gets the database file path. May contain environment-variable tokens (<c>%PROGRAMDATA%</c> and
     /// <c>%LOCALAPPDATA%</c> are both recognized) and Windows-style separators, all normalized by
@@ -114,27 +135,6 @@ public sealed class StorageOptions
     /// </summary>
     public string RollupTimezone { get; init; } = "UTC";
 
-    // The token every default above leads with. On non-Windows hosts (the project's Docker default is
-    // Linux) PROGRAMDATA is unset, so Environment.ExpandEnvironmentVariables leaves it literal.
-    private const string ProgramDataToken = "%PROGRAMDATA%";
-
-    // Still recognized even though no default uses it any more: an operator's existing appsettings.json
-    // may pin a %LOCALAPPDATA% path, and LegacyStorageMigration builds the pre-move locations from it.
-    private const string LocalAppDataToken = "%LOCALAPPDATA%";
-
-    /// <summary>
-    /// The single machine-wide directory every file above lives in, shared with
-    /// <c>RoutingGateStore</c>'s state file and <c>ManagementAccessToken</c>'s token. Public so
-    /// <see cref="LegacyStorageMigration"/> can tell a default-located file (which it may migrate) from
-    /// one an operator deliberately pointed somewhere else (which it must leave alone).
-    /// </summary>
-    public const string MachineSharedDirectoryName = "TotallyHotArcRouter";
-
-    // The two per-user directories these files lived in before the move to %ProgramData%. Both spellings
-    // existed at once: appsettings.json pinned DatabasePath under the dotless name while the four
-    // compiled defaults used the dotted one, so a real install can have files in either.
-    private static readonly string[] LegacyDirectoryNames = ["TotallyHot.ArcRouter", "TotallyHotArcRouter"];
-
     /// <summary>
     /// Expands environment-variable tokens in <see cref="DatabasePath"/>, normalizes separators, and
     /// returns an absolute path. A relative value is combined with <see cref="AppContext.BaseDirectory"/>.
@@ -148,31 +148,46 @@ public sealed class StorageOptions
     /// backslashes to the platform separator, so the same default works on Windows and in the Linux
     /// container.
     /// </remarks>
-    public string ResolveDatabasePath() => ResolvePath(DatabasePath);
+    public string ResolveDatabasePath()
+    {
+        return ResolvePath(DatabasePath);
+    }
 
     /// <summary>
     /// Expands environment-variable tokens in <see cref="BenchmarkDatabasePath"/>, normalizes separators,
     /// and returns an absolute path, via the same rules as <see cref="ResolveDatabasePath"/>.
     /// </summary>
-    public string ResolveBenchmarkDatabasePath() => ResolvePath(BenchmarkDatabasePath);
+    public string ResolveBenchmarkDatabasePath()
+    {
+        return ResolvePath(BenchmarkDatabasePath);
+    }
 
     /// <summary>
     /// Expands environment-variable tokens in <see cref="LogRegModelPath"/>, normalizes separators, and
     /// returns an absolute path, via the same rules as <see cref="ResolveDatabasePath"/>.
     /// </summary>
-    public string ResolveLogRegModelPath() => ResolvePath(LogRegModelPath);
+    public string ResolveLogRegModelPath()
+    {
+        return ResolvePath(LogRegModelPath);
+    }
 
     /// <summary>
     /// Expands environment-variable tokens in <see cref="TranscriptDatabasePath"/>, normalizes
     /// separators, and returns an absolute path, via the same rules as <see cref="ResolveDatabasePath"/>.
     /// </summary>
-    public string ResolveTranscriptDatabasePath() => ResolvePath(TranscriptDatabasePath);
+    public string ResolveTranscriptDatabasePath()
+    {
+        return ResolvePath(TranscriptDatabasePath);
+    }
 
     /// <summary>
     /// Expands environment-variable tokens in <see cref="ClusterModelPath"/>, normalizes separators, and
     /// returns an absolute path, via the same rules as <see cref="ResolveDatabasePath"/>.
     /// </summary>
-    public string ResolveClusterModelPath() => ResolvePath(ClusterModelPath);
+    public string ResolveClusterModelPath()
+    {
+        return ResolvePath(ClusterModelPath);
+    }
 
     /// <summary>
     /// Shared expansion/normalization logic behind <see cref="ResolveDatabasePath"/> and
@@ -184,25 +199,23 @@ public sealed class StorageOptions
 
         // Fall back to the platform's shared-application-data folder if the token survived (PROGRAMDATA
         // unset), rather than creating a file literally named "%PROGRAMDATA%".
-        if (expanded.Contains(ProgramDataToken, StringComparison.OrdinalIgnoreCase))
-        {
-            expanded = expanded.Replace(ProgramDataToken, MachineSharedRoot(), StringComparison.OrdinalIgnoreCase);
-        }
+        if (expanded.Contains(value: ProgramDataToken, comparisonType: StringComparison.OrdinalIgnoreCase))
+            expanded = expanded.Replace(oldValue: ProgramDataToken, newValue: MachineSharedRoot(),
+                comparisonType: StringComparison.OrdinalIgnoreCase);
 
         // Same substitution for the pre-move token, which no default uses any more but a pinned
         // appsettings.json value (and every path LegacyStorageMigration probes) still can.
-        if (expanded.Contains(LocalAppDataToken, StringComparison.OrdinalIgnoreCase))
-        {
-            expanded = expanded.Replace(LocalAppDataToken, PerUserRoot(), StringComparison.OrdinalIgnoreCase);
-        }
+        if (expanded.Contains(value: LocalAppDataToken, comparisonType: StringComparison.OrdinalIgnoreCase))
+            expanded = expanded.Replace(oldValue: LocalAppDataToken, newValue: PerUserRoot(),
+                comparisonType: StringComparison.OrdinalIgnoreCase);
 
         // Treat Windows-style backslashes as separators everywhere, so a backslash path resolves (and its
         // directory is created) on Linux too.
-        expanded = expanded.Replace('\\', Path.DirectorySeparatorChar);
+        expanded = expanded.Replace('\\', newChar: Path.DirectorySeparatorChar);
 
         return Path.IsPathRooted(expanded)
             ? expanded
-            : Path.Combine(AppContext.BaseDirectory, expanded);
+            : Path.Combine(path1: AppContext.BaseDirectory, path2: expanded);
     }
 
     /// <summary>
@@ -224,10 +237,7 @@ public sealed class StorageOptions
 
         // Some minimal Linux environments (e.g. a CI runner with no XDG/HOME) return an empty folder here;
         // fall back to the writable application base directory rather than rooting at "/".
-        if (string.IsNullOrEmpty(root))
-        {
-            root = AppContext.BaseDirectory;
-        }
+        if (string.IsNullOrEmpty(root)) root = AppContext.BaseDirectory;
 
         return root.TrimEnd('/', '\\');
     }
@@ -240,10 +250,7 @@ public sealed class StorageOptions
     {
         var root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
 
-        if (string.IsNullOrEmpty(root))
-        {
-            root = AppContext.BaseDirectory;
-        }
+        if (string.IsNullOrEmpty(root)) root = AppContext.BaseDirectory;
 
         return root.TrimEnd('/', '\\');
     }
@@ -252,15 +259,18 @@ public sealed class StorageOptions
     /// Gets the resolved machine-wide directory the defaults above live in
     /// (<c>%ProgramData%\TotallyHotArcRouter</c> on Windows).
     /// </summary>
-    public static string ResolveMachineSharedDirectory() =>
-        Path.Combine(MachineSharedRoot(), MachineSharedDirectoryName);
+    public static string ResolveMachineSharedDirectory()
+    {
+        return Path.Combine(path1: MachineSharedRoot(), path2: MachineSharedDirectoryName);
+    }
 
     /// <summary>
     /// Gets the resolved per-user directories these files lived in before the move to
     /// <c>%ProgramData%</c>, newest spelling first. <see cref="LegacyStorageMigration"/> probes each in
     /// order for a file to adopt.
     /// </summary>
-    public static IReadOnlyList<string> ResolveLegacyDirectories() =>
-        [.. LegacyDirectoryNames.Select(name => Path.Combine(PerUserRoot(), name))];
+    public static IReadOnlyList<string> ResolveLegacyDirectories()
+    {
+        return [.. LegacyDirectoryNames.Select(name => Path.Combine(path1: PerUserRoot(), path2: name))];
+    }
 }
-

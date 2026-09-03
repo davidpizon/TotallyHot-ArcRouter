@@ -21,7 +21,10 @@ namespace TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 /// (<see cref="Router.Embeddings.IEmbeddingClient.ModelIdentity"/>), so a consumer can refuse to mix an
 /// index built by one embedding model with a query embedded by another.
 /// </param>
-/// <param name="Entries">Every indexed OOD task, keyed implicitly by <see cref="KnnRetrievalEntry.TaskId"/> — ids must be unique.</param>
+/// <param name="Entries">
+/// Every indexed OOD task, keyed implicitly by <see cref="KnnRetrievalEntry.TaskId"/> — ids must be
+/// unique.
+/// </param>
 /// <param name="TrainedFrom">A human-readable provenance string: the split, task count, embedding model, and build date.</param>
 public sealed record KnnRetrievalArtifact(
     int EmbeddingDimension,

@@ -15,14 +15,16 @@ public class BenchmarkSummaryJsonImporterTests
 
         using var connection = temp.Database.OpenConnection();
         using var transaction = connection.BeginTransaction();
-        var rowCount = BenchmarkSummaryJsonImporter.Import(json, connection, transaction);
+        var rowCount =
+            BenchmarkSummaryJsonImporter.Import(json: json, connection: connection, transaction: transaction);
         transaction.Commit();
 
-        Assert.Equal(2, rowCount);
+        Assert.Equal(2, actual: rowCount);
 
         using var readCommand = connection.CreateCommand();
         readCommand.CommandText = "SELECT raw_json FROM benchmark_summary WHERE key = 'totals';";
-        Assert.Contains("9999", (string)readCommand.ExecuteScalar()!, StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "9999", actualString: (string)readCommand.ExecuteScalar()!,
+            comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
@@ -33,14 +35,16 @@ public class BenchmarkSummaryJsonImporterTests
 
         using var connection = temp.Database.OpenConnection();
         using var transaction = connection.BeginTransaction();
-        var rowCount = BenchmarkSummaryJsonImporter.Import("[1,2,3]", connection, transaction);
+        var rowCount =
+            BenchmarkSummaryJsonImporter.Import(json: "[1,2,3]", connection: connection, transaction: transaction);
         transaction.Commit();
 
-        Assert.Equal(1, rowCount);
+        Assert.Equal(1, actual: rowCount);
 
         using var readCommand = connection.CreateCommand();
         readCommand.CommandText = "SELECT key FROM benchmark_summary;";
-        Assert.Equal(BenchmarkSummaryJsonImporter.WholeDocumentKey, (string)readCommand.ExecuteScalar()!);
+        Assert.Equal(expected: BenchmarkSummaryJsonImporter.WholeDocumentKey,
+            actual: (string)readCommand.ExecuteScalar()!);
     }
 
     [Fact]
@@ -49,20 +53,20 @@ public class BenchmarkSummaryJsonImporterTests
         using var temp = new TempBenchmarkDatabase();
         temp.Database.EnsureCreated();
 
-        Import(temp, """{ "a": 1, "b": 2 }""");
-        Import(temp, """{ "c": 3 }""");
+        Import(temp: temp, """{ "a": 1, "b": 2 }""");
+        Import(temp: temp, """{ "c": 3 }""");
 
         using var connection = temp.Database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT COUNT(*) FROM benchmark_summary;";
-        Assert.Equal(1, Convert.ToInt32(command.ExecuteScalar()));
+        Assert.Equal(1, actual: Convert.ToInt32(command.ExecuteScalar()));
     }
 
     private static void Import(TempBenchmarkDatabase temp, string json)
     {
         using var connection = temp.Database.OpenConnection();
         using var transaction = connection.BeginTransaction();
-        BenchmarkSummaryJsonImporter.Import(json, connection, transaction);
+        BenchmarkSummaryJsonImporter.Import(json: json, connection: connection, transaction: transaction);
         transaction.Commit();
     }
 }

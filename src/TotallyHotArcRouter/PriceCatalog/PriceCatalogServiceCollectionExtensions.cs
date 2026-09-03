@@ -125,8 +125,8 @@ internal static class PriceCatalogServiceCollectionExtensions
                 configuration.GetSection(CostReconciliationOptions.SectionName).Bind(options));
         services.AddSingleton<IProviderCostReconciliationStore, ProviderCostReconciliationStore>();
         services.AddSingleton<IReadOnlyList<IProviderCostReconciler>>(sp => BuildCostReconcilers(sp));
-        services.AddSingleton<IEnumerable<IProviderCostReconciler>>(
-            sp => sp.GetRequiredService<IReadOnlyList<IProviderCostReconciler>>());
+        services.AddSingleton<IEnumerable<IProviderCostReconciler>>(sp =>
+            sp.GetRequiredService<IReadOnlyList<IProviderCostReconciler>>());
         // Rebuilds the reconciler list from scratch on every reconciliation cycle
         // (docs/router/secrets-at-rest-plan.md §7) rather than the fixed list above, which is captured
         // once at DI construction: an operator who saves a stored Admin API key from the GUI needs the
@@ -140,16 +140,19 @@ internal static class PriceCatalogServiceCollectionExtensions
         // BuildCostReconcilers), so a key saved from the GUI takes effect without a restart, and an
         // account with none configured (Claude Pro/Max) simply gets a permanent no-op.
         services.AddSingleton(sp => new AnthropicUsageReportService(
-            sp.GetRequiredService<HttpClient>(),
-            sp.GetRequiredService<ReportedUsageRepository>(),
-            () =>
+            httpClient: sp.GetRequiredService<HttpClient>(),
+            repository: sp.GetRequiredService<ReportedUsageRepository>(),
+            resolveAdminApiKey: () =>
             {
                 var reconciliationOptions = sp.GetRequiredService<IOptions<CostReconciliationOptions>>().Value;
                 var environment = sp.GetRequiredService<IEnvironmentVariableProvider>();
                 var secretReader = sp.GetService<ISecretReader>();
-                return TryResolveAdminApiKey(reconciliationOptions, environment, secretReader, "anthropic", out var key) ? key : null;
+                return TryResolveAdminApiKey(options: reconciliationOptions, environment: environment,
+                    secretReader: secretReader, provider: "anthropic", adminApiKey: out var key)
+                    ? key
+                    : null;
             },
-            sp.GetRequiredService<ILogger<AnthropicUsageReportService>>()));
+            logger: sp.GetRequiredService<ILogger<AnthropicUsageReportService>>()));
         // Per-(provider, model) tool-call dialect capabilities (docs/router/tool-call-normalization.md
         // Phase 1). Shares agent_telemetry.db with the price catalog, so it has the same
         // empty-until-schema-ready lifecycle as the two stores above: StartupHealthCheckHostedService
@@ -191,15 +194,15 @@ internal static class PriceCatalogServiceCollectionExtensions
 
         var reconcilers = new List<IProviderCostReconciler>();
 
-        if (TryResolveAdminApiKey(options, environment, secretReader, "openai", out var openAiKey))
-        {
-            reconcilers.Add(new OpenAiCostReconciler(httpClient, openAiKey, sp.GetService<ILogger<OpenAiCostReconciler>>()));
-        }
+        if (TryResolveAdminApiKey(options: options, environment: environment, secretReader: secretReader,
+                provider: "openai", adminApiKey: out var openAiKey))
+            reconcilers.Add(new OpenAiCostReconciler(httpClient: httpClient, adminApiKey: openAiKey,
+                logger: sp.GetService<ILogger<OpenAiCostReconciler>>()));
 
-        if (TryResolveAdminApiKey(options, environment, secretReader, "anthropic", out var anthropicKey))
-        {
-            reconcilers.Add(new AnthropicCostReconciler(httpClient, anthropicKey, sp.GetService<ILogger<AnthropicCostReconciler>>()));
-        }
+        if (TryResolveAdminApiKey(options: options, environment: environment, secretReader: secretReader,
+                provider: "anthropic", adminApiKey: out var anthropicKey))
+            reconcilers.Add(new AnthropicCostReconciler(httpClient: httpClient, adminApiKey: anthropicKey,
+                logger: sp.GetService<ILogger<AnthropicCostReconciler>>()));
 
         return reconcilers;
     }
@@ -220,29 +223,30 @@ internal static class PriceCatalogServiceCollectionExtensions
         adminApiKey = string.Empty;
 
         if (secretReader is not null &&
-            secretReader.TryRead(AdminApiKeySecretName(provider), out var stored) &&
+            secretReader.TryRead(name: AdminApiKeySecretName(provider), value: out var stored) &&
             !string.IsNullOrWhiteSpace(stored))
         {
             adminApiKey = stored;
             return true;
         }
 
-        if (!options.Providers.TryGetValue(provider, out var providerOptions) ||
+        if (!options.Providers.TryGetValue(key: provider, value: out var providerOptions) ||
             string.IsNullOrWhiteSpace(providerOptions.AdminApiKeyEnvVar))
-        {
             return false;
-        }
 
         var resolved = environment.GetVariable(providerOptions.AdminApiKeyEnvVar);
-        if (string.IsNullOrWhiteSpace(resolved))
-        {
-            return false;
-        }
+        if (string.IsNullOrWhiteSpace(resolved)) return false;
 
         adminApiKey = resolved;
         return true;
     }
 
-    /// <summary>The protected-store name for a provider's reconciliation Admin API key (docs/router/secrets-at-rest-plan.md §3's naming convention).</summary>
-    internal static string AdminApiKeySecretName(string provider) => $"reconciliation:{provider}:admin-key";
+    /// <summary>
+    /// The protected-store name for a provider's reconciliation Admin API key (docs/router/secrets-at-rest-plan.md
+    /// §3's naming convention).
+    /// </summary>
+    internal static string AdminApiKeySecretName(string provider)
+    {
+        return $"reconciliation:{provider}:admin-key";
+    }
 }

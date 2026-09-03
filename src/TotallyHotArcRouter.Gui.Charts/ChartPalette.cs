@@ -21,24 +21,17 @@ public static class ChartPalette
         "#6366f1", // indigo-2
         "#ec4899", // pink
         "#f97316", // orange
-        "#06b6d4", // cyan-2
+        "#06b6d4" // cyan-2
     ];
 
     /// <summary>Maps a model/agent name to a stable palette color.</summary>
     public static string ColorFor(string? key)
     {
-        if (string.IsNullOrEmpty(key))
-        {
-            return Palette[0];
-        }
+        if (string.IsNullOrEmpty(key)) return Palette[0];
 
         var hash = 2166136261u;
-        foreach (var c in key)
-        {
-            hash = (hash ^ c) * 16777619u;
-        }
+        foreach (var c in key) hash = (hash ^ c) * 16777619u;
 
         return Palette[(int)(hash % (uint)Palette.Length)];
     }
 }
-

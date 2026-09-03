@@ -13,9 +13,10 @@ public class PublishedChecksumHasherTests
         using var stream = new MemoryStream(content);
 
         var hash = PublishedChecksumHasher.Compute(
-            stream, content.LongLength, PublishedChecksumAlgorithm.GitBlobSha1, TestContext.Current.CancellationToken);
+            content: stream, length: content.LongLength, algorithm: PublishedChecksumAlgorithm.GitBlobSha1,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(GitBlobHash.Compute(content), hash);
+        Assert.Equal(expected: GitBlobHash.Compute(content), actual: hash);
     }
 
     [Fact]
@@ -25,9 +26,10 @@ public class PublishedChecksumHasherTests
         using var stream = new MemoryStream(content);
 
         var hash = PublishedChecksumHasher.Compute(
-            stream, content.LongLength, PublishedChecksumAlgorithm.LfsSha256, TestContext.Current.CancellationToken);
+            content: stream, length: content.LongLength, algorithm: PublishedChecksumAlgorithm.LfsSha256,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(ContentSha256Hash.Compute(content), hash);
+        Assert.Equal(expected: ContentSha256Hash.Compute(content), actual: hash);
     }
 
     [Fact]
@@ -38,10 +40,13 @@ public class PublishedChecksumHasherTests
         var content = Encoding.UTF8.GetBytes("hello\n");
 
         var gitBlobSha1 = PublishedChecksumHasher.Compute(
-            new MemoryStream(content), content.LongLength, PublishedChecksumAlgorithm.GitBlobSha1, TestContext.Current.CancellationToken);
+            content: new MemoryStream(content), length: content.LongLength,
+            algorithm: PublishedChecksumAlgorithm.GitBlobSha1,
+            cancellationToken: TestContext.Current.CancellationToken);
         var lfsSha256 = PublishedChecksumHasher.Compute(
-            new MemoryStream(content), content.LongLength, PublishedChecksumAlgorithm.LfsSha256, TestContext.Current.CancellationToken);
+            content: new MemoryStream(content), length: content.LongLength,
+            algorithm: PublishedChecksumAlgorithm.LfsSha256, cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.NotEqual(gitBlobSha1, lfsSha256);
+        Assert.NotEqual(expected: gitBlobSha1, actual: lfsSha256);
     }
 }

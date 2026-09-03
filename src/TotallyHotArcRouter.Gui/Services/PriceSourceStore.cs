@@ -13,12 +13,15 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 public sealed class PriceSourceStore : IDisposable
 {
     private readonly IPriceSourceAdminClient _client;
-    private readonly IDisposable? _ownedClient;
     private readonly ILogger<PriceSourceStore>? _logger;
+    private readonly IDisposable? _ownedClient;
 
     /// <summary>Initializes a new instance of the <see cref="PriceSourceStore"/> class.</summary>
     /// <param name="logger">Optional logger.</param>
-    /// <param name="serverAddress">The proxy's TLS gRPC endpoint; defaults to <see cref="TelemetryChannelFactory.DefaultServerAddress"/>.</param>
+    /// <param name="serverAddress">
+    /// The proxy's TLS gRPC endpoint; defaults to
+    /// <see cref="TelemetryChannelFactory.DefaultServerAddress"/>.
+    /// </param>
     public PriceSourceStore(
         ILogger<PriceSourceStore>? logger = null,
         string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
@@ -63,10 +66,7 @@ public sealed class PriceSourceStore : IDisposable
     public TimeSpan? TimeUntilNextPull =>
         Schedule is null
             ? null
-            : Max(Schedule.NextPullUtc - DateTimeOffset.UtcNow, TimeSpan.Zero);
-
-    /// <summary>Returns the larger of two <see cref="TimeSpan"/> values.</summary>
-    private static TimeSpan Max(TimeSpan left, TimeSpan right) => left > right ? left : right;
+            : Max(left: Schedule.NextPullUtc - DateTimeOffset.UtcNow, right: TimeSpan.Zero);
 
     /// <summary>The per-source results of the most recent manual pull, or empty if none has run.</summary>
     public IReadOnlyList<PriceRefreshOutcome> LastRefreshOutcomes { get; private set; } = [];
@@ -87,6 +87,18 @@ public sealed class PriceSourceStore : IDisposable
 
     /// <summary>Whether a manual pull is currently running, so the UI can disable the button.</summary>
     public bool IsRefreshing { get; private set; }
+
+    /// <inheritdoc/>
+    public void Dispose()
+    {
+        _ownedClient?.Dispose();
+    }
+
+    /// <summary>Returns the larger of two <see cref="TimeSpan"/> values.</summary>
+    private static TimeSpan Max(TimeSpan left, TimeSpan right)
+    {
+        return left > right ? left : right;
+    }
 
     /// <summary>Raised after any of the above change.</summary>
     public event Action? Changed;
@@ -110,7 +122,7 @@ public sealed class PriceSourceStore : IDisposable
         {
             IsReachable = false;
             LastError = ex.Message;
-            _logger?.LogWarning(ex, "Failed to load price sources from the router.");
+            _logger?.LogWarning(exception: ex, message: "Failed to load price sources from the router.");
         }
         finally
         {
@@ -132,7 +144,8 @@ public sealed class PriceSourceStore : IDisposable
     {
         try
         {
-            var list = await _client.SetEnabledAsync(name, enabled, cancellationToken);
+            var list = await _client.SetEnabledAsync(name: name, enabled: enabled,
+                cancellationToken: cancellationToken);
             Sources = list.Sources;
             Schedule = list.Schedule;
         }
@@ -153,8 +166,10 @@ public sealed class PriceSourceStore : IDisposable
     /// list. <see cref="IsRefreshing"/> is true for the duration.
     /// </summary>
     /// <exception cref="PriceSourceAdminException">The pull could not be started or the router is unreachable.</exception>
-    public Task RefreshAsync(CancellationToken cancellationToken = default) =>
-        RunCycleAsync(() => _client.RefreshAsync(cancellationToken));
+    public Task RefreshAsync(CancellationToken cancellationToken = default)
+    {
+        return RunCycleAsync(() => _client.RefreshAsync(cancellationToken));
+    }
 
     /// <summary>
     /// Rewrites every source's rank from <paramref name="namesInPriorityOrder"/>'s position, then recomputes
@@ -169,8 +184,11 @@ public sealed class PriceSourceStore : IDisposable
     /// The reorder was rejected (the name set didn't match every existing source), or the router is
     /// unreachable.
     /// </exception>
-    public Task ReorderAsync(IReadOnlyList<string> namesInPriorityOrder, CancellationToken cancellationToken = default) =>
-        RunCycleAsync(() => _client.ReorderAsync(namesInPriorityOrder, cancellationToken));
+    public Task ReorderAsync(IReadOnlyList<string> namesInPriorityOrder, CancellationToken cancellationToken = default)
+    {
+        return RunCycleAsync(() =>
+            _client.ReorderAsync(namesInPriorityOrder: namesInPriorityOrder, cancellationToken: cancellationToken));
+    }
 
     /// <summary>
     /// Shared implementation behind <see cref="RefreshAsync"/> and <see cref="ReorderAsync"/>: runs the
@@ -225,18 +243,11 @@ public sealed class PriceSourceStore : IDisposable
     /// </remarks>
     private void RecordFailure(PriceSourceAdminException ex)
     {
-        if (!ex.IsUnavailable)
-        {
-            return;
-        }
+        if (!ex.IsUnavailable) return;
 
         IsReachable = false;
         LastError = ex.Message;
-        _logger?.LogWarning(ex, "The router became unreachable during a price-source operation.");
+        _logger?.LogWarning(exception: ex, message: "The router became unreachable during a price-source operation.");
         Changed?.Invoke();
     }
-
-    /// <inheritdoc />
-    public void Dispose() => _ownedClient?.Dispose();
 }
-

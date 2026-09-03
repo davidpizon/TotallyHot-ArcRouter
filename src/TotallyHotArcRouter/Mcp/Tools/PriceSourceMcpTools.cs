@@ -1,5 +1,5 @@
-using ModelContextProtocol.Server;
 using System.ComponentModel;
+using ModelContextProtocol.Server;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Telemetry;
 
@@ -14,9 +14,9 @@ namespace TotallyHot.ArcRouter.Mcp.Tools;
 [McpServerToolType]
 public sealed class PriceSourceMcpTools
 {
-    private readonly PriceSourceToggleStore _toggleStore;
     private readonly PriceCatalogIngestionService _ingestionService;
     private readonly IModelPriceLookup _priceLookup;
+    private readonly PriceSourceToggleStore _toggleStore;
 
     /// <summary>Initializes a new instance of the <see cref="PriceSourceMcpTools"/> class.</summary>
     public PriceSourceMcpTools(
@@ -35,17 +35,23 @@ public sealed class PriceSourceMcpTools
 
     /// <summary>Lists every known price-source feed with its state, rank, and price-row count.</summary>
     [McpServerTool(Name = "list_price_sources")]
-    [Description("Lists every known price-source feed with its enabled state, priority rank, and how many price rows it owns.")]
-    public IReadOnlyList<PriceSourceState> ListPriceSources() => _toggleStore.List();
+    [Description(
+        "Lists every known price-source feed with its enabled state, priority rank, and how many price rows it owns.")]
+    public IReadOnlyList<PriceSourceState> ListPriceSources()
+    {
+        return _toggleStore.List();
+    }
 
     /// <summary>Enables or disables a price-source feed.</summary>
     [McpServerTool(Name = "set_price_source_enabled")]
     [Description("Enables or disables a price-source feed. Disabling cancels its in-flight fetch, if any.")]
     public object SetPriceSourceEnabled(
-        [Description("The source's registry name.")] string sourceName,
-        [Description("Whether the source should be polled and served.")] bool enabled)
+        [Description("The source's registry name.")]
+        string sourceName,
+        [Description("Whether the source should be polled and served.")]
+        bool enabled)
     {
-        var found = _toggleStore.SetEnabled(sourceName, enabled);
+        var found = _toggleStore.SetEnabled(sourceName: sourceName, enabled: enabled);
         return found
             ? new { success = true }
             : new { error = $"Price source '{sourceName}' not found.", type = "NotFound" };
@@ -57,16 +63,19 @@ public sealed class PriceSourceMcpTools
     /// drag-to-reorder so an MCP-driven reorder takes effect just as immediately.
     /// </summary>
     [McpServerTool(Name = "reorder_price_sources")]
-    [Description("Rewrites every price source's priority rank from the given name order (highest priority first). The name set must match every existing source exactly once.")]
+    [Description(
+        "Rewrites every price source's priority rank from the given name order (highest priority first). The name set must match every existing source exactly once.")]
     public async Task<object> ReorderPriceSourcesAsync(
-        [Description("Every source's registry name, in the desired priority order.")] IReadOnlyList<string> namesInPriorityOrder,
+        [Description("Every source's registry name, in the desired priority order.")]
+        IReadOnlyList<string> namesInPriorityOrder,
         CancellationToken cancellationToken)
     {
         var applied = _toggleStore.Reorder(namesInPriorityOrder);
         if (!applied)
-        {
-            return new { error = "The name set does not match every existing price source exactly once.", type = "InvalidRequest" };
-        }
+            return new
+            {
+                error = "The name set does not match every existing price source exactly once.", type = "InvalidRequest"
+            };
 
         await _ingestionService.RecomputeWinnersAsync(cancellationToken).ConfigureAwait(false);
         return new { success = true };
@@ -75,15 +84,21 @@ public sealed class PriceSourceMcpTools
     /// <summary>Runs one price-catalog ingestion cycle now.</summary>
     [McpServerTool(Name = "refresh_price_sources")]
     [Description("Runs one price-catalog ingestion cycle now, fetching every enabled source.")]
-    public Task<IngestionCycleSummary> RefreshPriceSourcesAsync(CancellationToken cancellationToken) =>
-        _ingestionService.RunCycleAsync(cancellationToken);
+    public Task<IngestionCycleSummary> RefreshPriceSourcesAsync(CancellationToken cancellationToken)
+    {
+        return _ingestionService.RunCycleAsync(cancellationToken);
+    }
 
     /// <summary>Looks up a model's current per-token price from the catalog.</summary>
     [McpServerTool(Name = "get_model_price")]
-    [Description("Looks up a model's current per-token price from the catalog. Returns null when the catalog has no fresh price for it.")]
+    [Description(
+        "Looks up a model's current per-token price from the catalog. Returns null when the catalog has no fresh price for it.")]
     public ModelPrice? GetModelPrice(
-        [Description("The client-facing model name.")] string modelName,
-        [Description("The provider key the model routes to.")] string provider) =>
-        _priceLookup.TryGetPrice(new ModelKey(ModelName: modelName, Provider: provider));
+        [Description("The client-facing model name.")]
+        string modelName,
+        [Description("The provider key the model routes to.")]
+        string provider)
+    {
+        return _priceLookup.TryGetPrice(new ModelKey(ModelName: modelName, Provider: provider));
+    }
 }
-

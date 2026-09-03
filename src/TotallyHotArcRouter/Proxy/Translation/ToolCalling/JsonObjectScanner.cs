@@ -46,17 +46,10 @@ internal static class JsonObjectScanner
                 if (inString)
                 {
                     if (escapeNext)
-                    {
                         escapeNext = false;
-                    }
                     else if (c == '\\')
-                    {
                         escapeNext = true;
-                    }
-                    else if (c == '"')
-                    {
-                        inString = false;
-                    }
+                    else if (c == '"') inString = false;
 
                     continue;
                 }
@@ -93,6 +86,8 @@ internal static class JsonObjectScanner
 
 /// <summary>One tool call extracted from a dialect-framed region of a model's reply.</summary>
 /// <param name="Name">The function name.</param>
-/// <param name="ArgumentsJson">The arguments, as a serialized JSON string (matching OpenAI's <c>tool_calls</c> delta shape).</param>
+/// <param name="ArgumentsJson">
+/// The arguments, as a serialized JSON string (matching OpenAI's <c>tool_calls</c> delta
+/// shape).
+/// </param>
 internal sealed record ExtractedToolCall(string Name, string ArgumentsJson);
-

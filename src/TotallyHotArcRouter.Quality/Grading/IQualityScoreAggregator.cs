@@ -30,7 +30,8 @@ public interface IQualityScoreAggregator
     /// <param name="judgeScore">The judge's grade, normalized to [0,1].</param>
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <returns><see langword="true"/> when a held result was completed by this call; otherwise <see langword="false"/>.</returns>
-    Task<bool> CompleteWithJudgeAsync(string correlationId, double judgeScore, CancellationToken cancellationToken = default);
+    Task<bool> CompleteWithJudgeAsync(string correlationId, double judgeScore,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Releases a held result immediately with its static score alone, because the judge is known not to be

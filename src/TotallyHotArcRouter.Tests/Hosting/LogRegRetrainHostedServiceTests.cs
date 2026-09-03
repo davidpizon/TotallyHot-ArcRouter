@@ -21,11 +21,11 @@ public class LogRegRetrainHostedServiceTests
     {
         var trainingService = new RecordingTrainingService();
         var memoryStore = new FakeMemoryEntryStore(entryCount: 10);
-        var service = CreateService(trainingService, memoryStore, threshold: 500, enabled: true);
+        var service = CreateService(trainingService: trainingService, memoryStore: memoryStore, 500, true);
 
         await service.CheckAndRetrainAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(0, trainingService.CallCount);
+        Assert.Equal(0, actual: trainingService.CallCount);
     }
 
     [Fact]
@@ -33,11 +33,11 @@ public class LogRegRetrainHostedServiceTests
     {
         var trainingService = new RecordingTrainingService();
         var memoryStore = new FakeMemoryEntryStore(entryCount: 500);
-        var service = CreateService(trainingService, memoryStore, threshold: 500, enabled: true);
+        var service = CreateService(trainingService: trainingService, memoryStore: memoryStore, 500, true);
 
         await service.CheckAndRetrainAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(1, trainingService.CallCount);
+        Assert.Equal(1, actual: trainingService.CallCount);
     }
 
     [Fact]
@@ -45,33 +45,37 @@ public class LogRegRetrainHostedServiceTests
     {
         var trainingService = new RecordingTrainingService();
         var memoryStore = new FakeMemoryEntryStore(entryCount: 10_000);
-        var service = CreateService(trainingService, memoryStore, threshold: 500, enabled: false);
+        var service = CreateService(trainingService: trainingService, memoryStore: memoryStore, 500, false);
 
         await service.CheckAndRetrainAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(0, trainingService.CallCount);
+        Assert.Equal(0, actual: trainingService.CallCount);
     }
 
     private static LogRegRetrainHostedService CreateService(
         IEmbeddingLogRegTrainingService trainingService, IMemoryEntryStore memoryStore, int threshold, bool enabled)
     {
-        var modelPath = Path.Combine(Path.GetTempPath(), "arcrouter-tests", Guid.NewGuid().ToString("N"), "logreg_voter_model.json");
+        var modelPath = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
+            path3: Guid.NewGuid().ToString("N"), path4: "logreg_voter_model.json");
         return new LogRegRetrainHostedService(
-            NullLogger<LogRegRetrainHostedService>.Instance,
-            trainingService,
-            memoryStore,
-            Options.Create(new RoutingOptions { LogRegRetrainThreshold = threshold, EnableAutomaticLogRegRetrain = enabled }),
-            Options.Create(new StorageOptions { LogRegModelPath = modelPath }));
+            logger: NullLogger<LogRegRetrainHostedService>.Instance,
+            trainingService: trainingService,
+            memoryEntryStore: memoryStore,
+            routingOptions: Options.Create(new RoutingOptions
+                { LogRegRetrainThreshold = threshold, EnableAutomaticLogRegRetrain = enabled }),
+            storageOptions: Options.Create(new StorageOptions { LogRegModelPath = modelPath }));
     }
 
     private sealed class RecordingTrainingService : IEmbeddingLogRegTrainingService
     {
         public int CallCount { get; private set; }
 
-        public Task<LogRegTrainingOutcome> RetrainAsync(IProgress<int>? bootstrapProgress = null, CancellationToken cancellationToken = default)
+        public Task<LogRegTrainingOutcome> RetrainAsync(IProgress<int>? bootstrapProgress = null,
+            CancellationToken cancellationToken = default)
         {
             CallCount++;
-            return Task.FromResult(new LogRegTrainingOutcome(LogRegTrainingResultKind.Trained, "test", 0, 0, 0, 0));
+            return Task.FromResult(new LogRegTrainingOutcome(Kind: LogRegTrainingResultKind.Trained, Message: "test", 0,
+                0, 0, 0));
         }
     }
 
@@ -79,15 +83,23 @@ public class LogRegRetrainHostedServiceTests
     {
         public Task<IReadOnlyList<MemoryEntry>> LoadAllAsync(CancellationToken cancellationToken = default)
         {
-            IReadOnlyList<MemoryEntry> entries = [.. Enumerable.Range(0, entryCount)
-                .Select(i => new MemoryEntry(i, [1, 0], "model-a", 1.0, 0.01, null, DateTimeOffset.UtcNow))];
+            IReadOnlyList<MemoryEntry> entries =
+            [
+                .. Enumerable.Range(0, count: entryCount)
+                    .Select(i => new MemoryEntry(Id: i, TaskEmbedding: [1, 0], ChosenModel: "model-a", 1.0, 0.01, null,
+                        CreatedAtUtc: DateTimeOffset.UtcNow))
+            ];
             return Task.FromResult(entries);
         }
 
-        public Task<MemoryEntry> AppendAsync(MemoryEntry entry, CancellationToken cancellationToken = default) =>
+        public Task<MemoryEntry> AppendAsync(MemoryEntry entry, CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
 
-        public Task DeleteAsync(long id, CancellationToken cancellationToken = default) =>
+        public Task DeleteAsync(long id, CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
     }
 }

@@ -1,5 +1,5 @@
-using Microsoft.Extensions.Options;
 using System.ComponentModel.DataAnnotations;
+using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Models;
 
@@ -388,48 +388,41 @@ public sealed class RoutingOptions
     /// <exception cref="OptionsValidationException">Thrown when the routing option values are inconsistent.</exception>
     public void EnsureValid()
     {
-        if (!RouterConstants.SupportedModels.Contains(DefaultModel, StringComparer.OrdinalIgnoreCase))
-        {
+        if (!RouterConstants.SupportedModels.Contains(value: DefaultModel, comparer: StringComparer.OrdinalIgnoreCase))
             throw new OptionsValidationException(
-                nameof(RoutingOptions),
-                typeof(RoutingOptions),
-                [$"DefaultModel '{DefaultModel}' is not in the supported model list."]);
-        }
+                optionsName: nameof(RoutingOptions),
+                optionsType: typeof(RoutingOptions),
+                failureMessages: [$"DefaultModel '{DefaultModel}' is not in the supported model list."]);
 
         if (!EnableExploration && ExplorationRate != 0)
-        {
             throw new OptionsValidationException(
-                nameof(RoutingOptions),
-                typeof(RoutingOptions),
-                ["ExplorationRate must be 0 when exploration is disabled."]);
-        }
+                optionsName: nameof(RoutingOptions),
+                optionsType: typeof(RoutingOptions),
+                failureMessages: ["ExplorationRate must be 0 when exploration is disabled."]);
 
         if (string.IsNullOrWhiteSpace(EmbeddingMemoryDatabasePath))
-        {
             throw new OptionsValidationException(
-                nameof(RoutingOptions),
-                typeof(RoutingOptions),
-                ["EmbeddingMemoryDatabasePath is required."]);
-        }
+                optionsName: nameof(RoutingOptions),
+                optionsType: typeof(RoutingOptions),
+                failureMessages: ["EmbeddingMemoryDatabasePath is required."]);
 
         // Null means "no Always-m baseline declared" and is valid; a present-but-blank value is not - it
         // reads as a configured baseline while naming no model, which would silently report no savings
         // rather than surfacing the typo.
         if (AlwaysBaselineModel is not null && string.IsNullOrWhiteSpace(AlwaysBaselineModel))
-        {
             throw new OptionsValidationException(
-                nameof(RoutingOptions),
-                typeof(RoutingOptions),
+                optionsName: nameof(RoutingOptions),
+                optionsType: typeof(RoutingOptions),
+                failureMessages:
                 ["AlwaysBaselineModel must name a model when set; omit it entirely to declare no baseline."]);
-        }
 
         if (ClusterCountMax < ClusterCountMin)
-        {
             throw new OptionsValidationException(
-                nameof(RoutingOptions),
-                typeof(RoutingOptions),
-                [$"ClusterCountMax ({ClusterCountMax}) must be greater than or equal to ClusterCountMin ({ClusterCountMin})."]);
-        }
+                optionsName: nameof(RoutingOptions),
+                optionsType: typeof(RoutingOptions),
+                failureMessages:
+                [
+                    $"ClusterCountMax ({ClusterCountMax}) must be greater than or equal to ClusterCountMin ({ClusterCountMin})."
+                ]);
     }
 }
-

@@ -1,7 +1,8 @@
-using Google.Protobuf.WellKnownTypes;
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Threading.Channels;
+using Google.Protobuf.WellKnownTypes;
+using TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Telemetry;
 
@@ -25,8 +26,8 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// </remarks>
 public sealed class TelemetryBroadcaster
 {
-    private readonly ConcurrentDictionary<ChannelWriter<Contract.TelemetryEvent>, byte> _writers = new();
     private readonly ILogger<TelemetryBroadcaster>? _logger;
+    private readonly ConcurrentDictionary<ChannelWriter<TelemetryEvent>, byte> _writers = new();
 
     /// <param name="logger">Optional; used only to debug-log best-effort write failures, never to fail a publish.</param>
     public TelemetryBroadcaster(ILogger<TelemetryBroadcaster>? logger = null)
@@ -35,17 +36,17 @@ public sealed class TelemetryBroadcaster
     }
 
     /// <summary>Registers a writer to receive every subsequently published event, for one <c>StreamEvents</c> call's lifetime.</summary>
-    public void Register(ChannelWriter<Contract.TelemetryEvent> writer)
+    public void Register(ChannelWriter<TelemetryEvent> writer)
     {
         ArgumentNullException.ThrowIfNull(writer);
         _writers[writer] = 0;
     }
 
     /// <summary>Unregisters a writer, e.g. when its <c>StreamEvents</c> call ends (client disconnect or cancellation).</summary>
-    public void Unregister(ChannelWriter<Contract.TelemetryEvent> writer)
+    public void Unregister(ChannelWriter<TelemetryEvent> writer)
     {
         ArgumentNullException.ThrowIfNull(writer);
-        _writers.TryRemove(writer, out _);
+        _writers.TryRemove(key: writer, value: out _);
     }
 
     /// <summary>
@@ -56,14 +57,17 @@ public sealed class TelemetryBroadcaster
     public void Publish(RoutingTelemetryEvent telemetryEvent)
     {
         ArgumentNullException.ThrowIfNull(telemetryEvent);
-        WriteToAll(new Contract.TelemetryEvent { RoutingTelemetry = ToWire(telemetryEvent) });
+        WriteToAll(new TelemetryEvent { RoutingTelemetry = ToWire(telemetryEvent) });
     }
 
-    /// <summary>Publishes a log line to every registered writer. Same fault-isolation contract as <see cref="Publish(RoutingTelemetryEvent)"/>.</summary>
+    /// <summary>
+    /// Publishes a log line to every registered writer. Same fault-isolation contract as
+    /// <see cref="Publish(RoutingTelemetryEvent)"/>.
+    /// </summary>
     public void PublishLogLine(LogLineEvent logLine)
     {
         ArgumentNullException.ThrowIfNull(logLine);
-        WriteToAll(new Contract.TelemetryEvent { LogLine = ToWire(logLine) });
+        WriteToAll(new TelemetryEvent { LogLine = ToWire(logLine) });
     }
 
     /// <summary>
@@ -73,17 +77,16 @@ public sealed class TelemetryBroadcaster
     public void Publish(QualitySignalEvent signal)
     {
         ArgumentNullException.ThrowIfNull(signal);
-        WriteToAll(new Contract.TelemetryEvent { QualitySignal = ToWire(signal) });
+        WriteToAll(new TelemetryEvent { QualitySignal = ToWire(signal) });
     }
 
     /// <summary>
     /// Writes the envelope to every registered writer's bounded channel, isolating each writer's
     /// failures so a disconnected or gone client never disrupts the others or the caller.
     /// </summary>
-    private void WriteToAll(Contract.TelemetryEvent envelope)
+    private void WriteToAll(TelemetryEvent envelope)
     {
         foreach (var writer in _writers.Keys)
-        {
             try
             {
                 // Every registered writer wraps a bounded, drop-oldest-when-full Channel<T> (see
@@ -96,9 +99,9 @@ public sealed class TelemetryBroadcaster
             {
                 // Telemetry is best-effort observability, never a request-handling dependency: a
                 // disconnected/gone client must never surface here.
-                _logger?.LogDebug(ex, "Failed to write a telemetry event to a registered stream; continuing without it.");
+                _logger?.LogDebug(exception: ex,
+                    message: "Failed to write a telemetry event to a registered stream; continuing without it.");
             }
-        }
     }
 
     /// <summary>
@@ -129,44 +132,24 @@ public sealed class TelemetryBroadcaster
             // "absent" case to represent - writing them unconditionally keeps a zero on the wire as a
             // stated zero rather than something a receiver has to infer.
             RouterTokens = e.RouterTokens,
-            RouterCostUsd = e.RouterCostUsd.ToString(CultureInfo.InvariantCulture),
+            RouterCostUsd = e.RouterCostUsd.ToString(CultureInfo.InvariantCulture)
         };
 
-        if (e.PromptTokens is int promptTokens)
-        {
-            wire.PromptTokens = promptTokens;
-        }
+        if (e.PromptTokens is int promptTokens) wire.PromptTokens = promptTokens;
 
-        if (e.CompletionTokens is int completionTokens)
-        {
-            wire.CompletionTokens = completionTokens;
-        }
+        if (e.CompletionTokens is int completionTokens) wire.CompletionTokens = completionTokens;
 
-        if (e.CacheCreationTokens is int cacheCreationTokens)
-        {
-            wire.CacheCreationTokens = cacheCreationTokens;
-        }
+        if (e.CacheCreationTokens is int cacheCreationTokens) wire.CacheCreationTokens = cacheCreationTokens;
 
-        if (e.CacheReadTokens is int cacheReadTokens)
-        {
-            wire.CacheReadTokens = cacheReadTokens;
-        }
+        if (e.CacheReadTokens is int cacheReadTokens) wire.CacheReadTokens = cacheReadTokens;
 
         if (e.EstimatedCostUsd is decimal estimatedCostUsd)
-        {
             // Decimal-as-string, not double: see "Decimal encoding" in docs/router/grpc-migration.md.
             wire.EstimatedCostUsd = estimatedCostUsd.ToString(CultureInfo.InvariantCulture);
-        }
 
-        if (e.RequestSummary is not null)
-        {
-            wire.RequestSummary = e.RequestSummary;
-        }
+        if (e.RequestSummary is not null) wire.RequestSummary = e.RequestSummary;
 
-        if (e.ResponseSummary is not null)
-        {
-            wire.ResponseSummary = e.ResponseSummary;
-        }
+        if (e.ResponseSummary is not null) wire.ResponseSummary = e.ResponseSummary;
 
         // Always set, unlike the nullable fields above: CostConfidence is a non-nullable enum on the C#
         // side - RoutingTelemetryEvent's constructor defaults it to Unknown when the caller omits it - so
@@ -179,12 +162,15 @@ public sealed class TelemetryBroadcaster
     /// <summary>
     /// Converts a <see cref="LogLineEvent"/> into its gRPC wire representation.
     /// </summary>
-    private static Contract.LogLineEvent ToWire(LogLineEvent e) => new()
+    private static Contract.LogLineEvent ToWire(LogLineEvent e)
     {
-        TimestampUtc = Timestamp.FromDateTimeOffset(e.TimestampUtc),
-        Level = e.Level,
-        Message = e.Message,
-    };
+        return new Contract.LogLineEvent
+        {
+            TimestampUtc = Timestamp.FromDateTimeOffset(e.TimestampUtc),
+            Level = e.Level,
+            Message = e.Message
+        };
+    }
 
     /// <summary>
     /// Converts a <see cref="QualitySignalEvent"/> into its gRPC wire representation.
@@ -201,27 +187,17 @@ public sealed class TelemetryBroadcaster
             SyntaxValid = e.SyntaxValid,
             SyntaxAuthoritative = e.SyntaxAuthoritative,
             UnifiedScore = e.UnifiedScore,
-            TimestampUtc = Timestamp.FromDateTimeOffset(e.TimestampUtc),
+            TimestampUtc = Timestamp.FromDateTimeOffset(e.TimestampUtc)
         };
 
         // The three optional fields are left unset rather than defaulted, so a reader can tell "the
         // analyzers all abstained" and "the judge did not contribute" apart from a genuine score of zero.
-        if (e.AnalysisScore is double analysisScore)
-        {
-            wire.AnalysisScore = analysisScore;
-        }
+        if (e.AnalysisScore is double analysisScore) wire.AnalysisScore = analysisScore;
 
-        if (e.JudgeScore is double judgeScore)
-        {
-            wire.JudgeScore = judgeScore;
-        }
+        if (e.JudgeScore is double judgeScore) wire.JudgeScore = judgeScore;
 
-        if (e.DegradedReason is { } degradedReason)
-        {
-            wire.DegradedReason = degradedReason;
-        }
+        if (e.DegradedReason is { } degradedReason) wire.DegradedReason = degradedReason;
 
         return wire;
     }
 }
-

@@ -20,108 +20,115 @@ public class UtilityRoutingPolicyTests
     public async Task SelectModelAsync_ColdStart_PicksCheapestCatalogPricedCandidate()
     {
         var catalog = new StubPriceCatalog();
-        catalog.SetPrice("cheap", "openai", input: 1m, output: 1m);
-        catalog.SetPrice("expensive", "openai", input: 5m, output: 5m);
-        var policy = Build(catalog, new RouterMemory());
+        catalog.SetPrice(modelName: "cheap", provider: "openai", 1m, 1m);
+        catalog.SetPrice(modelName: "expensive", provider: "openai", 5m, 5m);
+        var policy = Build(catalog: catalog, memory: new RouterMemory());
 
-        var selected = await policy.SelectModelAsync(Context("cheap", "expensive"), TestContext.Current.CancellationToken);
+        var selected = await policy.SelectModelAsync(context: Context("cheap", "expensive"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("cheap", selected);
+        Assert.Equal(expected: "cheap", actual: selected);
     }
 
     [Fact]
     public async Task SelectModelAsync_MemoryPopulated_PicksArgmaxOfRewardFormula()
     {
         var catalog = new StubPriceCatalog();
-        catalog.SetPrice("cheap-mediocre", "openai", input: 1m, output: 1m);
-        catalog.SetPrice("pricier-better", "openai", input: 5m, output: 5m);
+        catalog.SetPrice(modelName: "cheap-mediocre", provider: "openai", 1m, 1m);
+        catalog.SetPrice(modelName: "pricier-better", provider: "openai", 5m, 5m);
         var memory = new RouterMemory();
-        await memory.AddScoreAsync(Dimension, "cheap-mediocre", 0.4);
-        await memory.AddScoreAsync(Dimension, "pricier-better", 0.9);
-        var policy = Build(catalog, memory);
+        await memory.AddScoreAsync(dimension: Dimension, model: "cheap-mediocre", 0.4);
+        await memory.AddScoreAsync(dimension: Dimension, model: "pricier-better", 0.9);
+        var policy = Build(catalog: catalog, memory: memory);
 
         // reward(cheap-mediocre) = 1*0.4 + (-0.1)*1  = 0.3
         // reward(pricier-better) = 1*0.9 + (-0.1)*5  = 0.4
-        var selected = await policy.SelectModelAsync(Context("cheap-mediocre", "pricier-better"), TestContext.Current.CancellationToken);
+        var selected = await policy.SelectModelAsync(context: Context("cheap-mediocre", "pricier-better"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("pricier-better", selected);
+        Assert.Equal(expected: "pricier-better", actual: selected);
     }
 
     [Fact]
     public async Task SelectModelAsync_CandidateBelowQualityFloor_ExcludedEvenWhenCheapest()
     {
         var catalog = new StubPriceCatalog();
-        catalog.SetPrice("cheap-but-bad", "openai", input: 1m, output: 1m);
-        catalog.SetPrice("pricier-ok", "openai", input: 10m, output: 10m);
+        catalog.SetPrice(modelName: "cheap-but-bad", provider: "openai", 1m, 1m);
+        catalog.SetPrice(modelName: "pricier-ok", provider: "openai", 10m, 10m);
         var memory = new RouterMemory();
-        await memory.AddScoreAsync(Dimension, "cheap-but-bad", 0.05); // below the 0.3 default floor
-        await memory.AddScoreAsync(Dimension, "pricier-ok", 0.5);
-        var policy = Build(catalog, memory);
+        await memory.AddScoreAsync(dimension: Dimension, model: "cheap-but-bad", 0.05); // below the 0.3 default floor
+        await memory.AddScoreAsync(dimension: Dimension, model: "pricier-ok", 0.5);
+        var policy = Build(catalog: catalog, memory: memory);
 
-        var selected = await policy.SelectModelAsync(Context("cheap-but-bad", "pricier-ok"), TestContext.Current.CancellationToken);
+        var selected = await policy.SelectModelAsync(context: Context("cheap-but-bad", "pricier-ok"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("pricier-ok", selected);
+        Assert.Equal(expected: "pricier-ok", actual: selected);
     }
 
     [Fact]
     public async Task SelectModelAsync_CandidateWithNoPrice_ExcludedFromCostRanking()
     {
         var catalog = new StubPriceCatalog();
-        catalog.SetPrice("priced", "openai", input: 20m, output: 20m); // deliberately the pricier option
-        var policy = Build(catalog, new RouterMemory());
+        catalog.SetPrice(modelName: "priced", provider: "openai", 20m, 20m); // deliberately the pricier option
+        var policy = Build(catalog: catalog, memory: new RouterMemory());
 
-        var selected = await policy.SelectModelAsync(Context("priced", "unpriced"), TestContext.Current.CancellationToken);
+        var selected = await policy.SelectModelAsync(context: Context("priced", "unpriced"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("priced", selected);
+        Assert.Equal(expected: "priced", actual: selected);
     }
 
     [Fact]
     public async Task SelectModelAsync_CandidateWithPriceOlderThan24Hours_ExcludedFromCostRanking()
     {
         var catalog = new StubPriceCatalog();
-        catalog.SetPrice("priced", "openai", input: 20m, output: 20m);
-        catalog.SetPrice("stale", "openai", input: 1m, output: 1m, age: TimeSpan.FromHours(25));
-        var policy = Build(catalog, new RouterMemory());
+        catalog.SetPrice(modelName: "priced", provider: "openai", 20m, 20m);
+        catalog.SetPrice(modelName: "stale", provider: "openai", 1m, 1m, age: TimeSpan.FromHours(25));
+        var policy = Build(catalog: catalog, memory: new RouterMemory());
 
-        var selected = await policy.SelectModelAsync(Context("priced", "stale"), TestContext.Current.CancellationToken);
+        var selected = await policy.SelectModelAsync(context: Context("priced", "stale"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("priced", selected);
+        Assert.Equal(expected: "priced", actual: selected);
     }
 
     [Fact]
     public async Task SelectModelAsync_FreeProvider_IsCostRankedAtZero_ExemptFromFreshnessGate()
     {
         var catalog = new StubPriceCatalog();
-        catalog.SetPrice("paid", "openai", input: 100m, output: 100m);
+        catalog.SetPrice(modelName: "paid", provider: "openai", 100m, 100m);
         var context = new RoutingContext(
-            Dimension,
-            IsUtility: true,
+            Dimension: Dimension,
+            true,
             Candidates:
             [
-                new RoutingCandidate("paid", "openai", IsFree: false),
-                new RoutingCandidate("free", "lmstudio", IsFree: true),
+                new RoutingCandidate(ModelName: "paid", Provider: "openai", false),
+                new RoutingCandidate(ModelName: "free", Provider: "lmstudio", true)
             ]);
-        var policy = Build(catalog, new RouterMemory());
+        var policy = Build(catalog: catalog, memory: new RouterMemory());
 
-        var selected = await policy.SelectModelAsync(context, TestContext.Current.CancellationToken);
+        var selected =
+            await policy.SelectModelAsync(context: context, cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("free", selected);
+        Assert.Equal(expected: "free", actual: selected);
     }
 
     [Fact]
     public async Task SelectModelAsync_UnobservedCandidate_IsNotGateDropped()
     {
         var catalog = new StubPriceCatalog();
-        catalog.SetPrice("observed-below-floor", "openai", input: 1m, output: 1m);
-        catalog.SetPrice("unobserved", "openai", input: 1m, output: 1m);
+        catalog.SetPrice(modelName: "observed-below-floor", provider: "openai", 1m, 1m);
+        catalog.SetPrice(modelName: "unobserved", provider: "openai", 1m, 1m);
         var memory = new RouterMemory();
-        await memory.AddScoreAsync(Dimension, "observed-below-floor", 0.05); // gate-dropped
+        await memory.AddScoreAsync(dimension: Dimension, model: "observed-below-floor", 0.05); // gate-dropped
         // "unobserved" never scored - must survive the gate (s == null is not "bad").
-        var policy = Build(catalog, memory);
+        var policy = Build(catalog: catalog, memory: memory);
 
-        var selected = await policy.SelectModelAsync(Context("observed-below-floor", "unobserved"), TestContext.Current.CancellationToken);
+        var selected = await policy.SelectModelAsync(context: Context("observed-below-floor", "unobserved"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("unobserved", selected);
+        Assert.Equal(expected: "unobserved", actual: selected);
     }
 
     [Fact]
@@ -134,13 +141,15 @@ public class UtilityRoutingPolicyTests
         // as worse than an observed negative score.
         var options = Options.Create(new RoutingOptions { UtilityMinQualityScore = -1 });
         var memory = new RouterMemory();
-        await memory.AddScoreAsync(Dimension, "bad-observed", -0.5);
+        await memory.AddScoreAsync(dimension: Dimension, model: "bad-observed", -0.5);
         // "unobserved" never scored - defaults to quality 0 per the type-level reward semantics.
-        var policy = new UtilityRoutingPolicy(new StubPriceCatalog(), memory, options, NullLogger<UtilityRoutingPolicy>.Instance);
+        var policy = new UtilityRoutingPolicy(priceCatalog: new StubPriceCatalog(), memory: memory, options: options,
+            logger: NullLogger<UtilityRoutingPolicy>.Instance);
 
-        var selected = await policy.SelectModelAsync(Context("bad-observed", "unobserved"), TestContext.Current.CancellationToken);
+        var selected = await policy.SelectModelAsync(context: Context("bad-observed", "unobserved"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("unobserved", selected);
+        Assert.Equal(expected: "unobserved", actual: selected);
     }
 
     [Fact]
@@ -151,53 +160,71 @@ public class UtilityRoutingPolicyTests
         // §B3.4 the gate exists to keep a known-bad model out of rotation, so the gate-passing but
         // unpriced candidate must win over the cheaper gate-failing one.
         var catalog = new StubPriceCatalog();
-        catalog.SetPrice("cheap-but-bad", "openai", input: 1m, output: 1m);
+        catalog.SetPrice(modelName: "cheap-but-bad", provider: "openai", 1m, 1m);
         var memory = new RouterMemory();
-        await memory.AddScoreAsync(Dimension, "cheap-but-bad", 0.05); // below the 0.3 default floor
+        await memory.AddScoreAsync(dimension: Dimension, model: "cheap-but-bad", 0.05); // below the 0.3 default floor
         // "unobserved" never scored and never priced - still preferred over a gate-failing priced model.
-        var policy = Build(catalog, memory);
+        var policy = Build(catalog: catalog, memory: memory);
 
-        var selected = await policy.SelectModelAsync(Context("cheap-but-bad", "unobserved"), TestContext.Current.CancellationToken);
+        var selected = await policy.SelectModelAsync(context: Context("cheap-but-bad", "unobserved"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("unobserved", selected);
+        Assert.Equal(expected: "unobserved", actual: selected);
     }
 
     [Fact]
     public async Task SelectModelAsync_CancelledToken_ThrowsBeforeSelecting()
     {
-        var policy = Build(new StubPriceCatalog(), new RouterMemory());
+        var policy = Build(catalog: new StubPriceCatalog(), memory: new RouterMemory());
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();
 
-        await Assert.ThrowsAsync<OperationCanceledException>(
-            () => policy.SelectModelAsync(Context("only"), cts.Token));
+        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+            policy.SelectModelAsync(context: Context("only"), cancellationToken: cts.Token));
     }
 
-    private static UtilityRoutingPolicy Build(IModelPriceCatalog catalog, RouterMemory memory) =>
-        new(catalog, memory, Options.Create(new RoutingOptions()), NullLogger<UtilityRoutingPolicy>.Instance);
+    private static UtilityRoutingPolicy Build(IModelPriceCatalog catalog, RouterMemory memory)
+    {
+        return new UtilityRoutingPolicy(priceCatalog: catalog, memory: memory,
+            options: Options.Create(new RoutingOptions()),
+            logger: NullLogger<UtilityRoutingPolicy>.Instance);
+    }
 
-    private static RoutingContext Context(params string[] modelNames) =>
-        new(
-            Dimension,
-            IsUtility: true,
-            Candidates: modelNames.Select(name => new RoutingCandidate(name, "openai", IsFree: false)).ToList());
+    private static RoutingContext Context(params string[] modelNames)
+    {
+        return new RoutingContext(
+            Dimension: Dimension,
+            true,
+            Candidates: modelNames.Select(name => new RoutingCandidate(ModelName: name, Provider: "openai", false))
+                .ToList());
+    }
 
-    /// <summary>An in-memory <see cref="IModelPriceCatalog"/> stub with a configurable per-key age, so tests can assert the 24h freshness floor directly.</summary>
+    /// <summary>
+    /// An in-memory <see cref="IModelPriceCatalog"/> stub with a configurable per-key age, so tests can assert the
+    /// 24h freshness floor directly.
+    /// </summary>
     private sealed class StubPriceCatalog : IModelPriceCatalog
     {
         private readonly Dictionary<ModelKey, (ModelPrice Price, TimeSpan Age)> _prices = [];
 
-        public void SetPrice(string modelName, string provider, decimal input, decimal output, TimeSpan? age = null) =>
-            _prices[new ModelKey(modelName, provider)] = (new ModelPrice(input, output), age ?? TimeSpan.Zero);
+        public ModelPrice? GetBestPriceForModel(ModelKey key, PriceContext context)
+        {
+            return _prices.TryGetValue(key: key, value: out var entry) ? entry.Price : null;
+        }
 
-        public ModelPrice? GetBestPriceForModel(ModelKey key, PriceContext context) =>
-            _prices.TryGetValue(key, out var entry) ? entry.Price : null;
-
-        public ModelPrice? GetFreshPriceForRouting(ModelKey key, PriceContext context, TimeSpan maxAge) =>
-            _prices.TryGetValue(key, out var entry) && entry.Age <= maxAge ? entry.Price : null;
+        public ModelPrice? GetFreshPriceForRouting(ModelKey key, PriceContext context, TimeSpan maxAge)
+        {
+            return _prices.TryGetValue(key: key, value: out var entry) && entry.Age <= maxAge ? entry.Price : null;
+        }
 
         public void Invalidate()
         {
+        }
+
+        public void SetPrice(string modelName, string provider, decimal input, decimal output, TimeSpan? age = null)
+        {
+            _prices[new ModelKey(ModelName: modelName, Provider: provider)] = (
+                new ModelPrice(InputPerMillionTokens: input, OutputPerMillionTokens: output), age ?? TimeSpan.Zero);
         }
     }
 }

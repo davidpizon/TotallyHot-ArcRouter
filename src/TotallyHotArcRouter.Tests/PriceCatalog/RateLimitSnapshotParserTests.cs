@@ -10,30 +10,31 @@ public class RateLimitSnapshotParserTests
     {
         var rows = new[]
         {
-            new RateLimitHeaderRow("anthropic-ratelimit-requests-limit", "50"),
-            new RateLimitHeaderRow("anthropic-ratelimit-requests-remaining", "49"),
-            new RateLimitHeaderRow("anthropic-ratelimit-requests-reset", "2026-03-01T12:00:00Z"),
-            new RateLimitHeaderRow("anthropic-ratelimit-input-tokens-limit", "200000"),
-            new RateLimitHeaderRow("anthropic-ratelimit-input-tokens-remaining", "150000"),
-            new RateLimitHeaderRow("anthropic-ratelimit-output-tokens-remaining", "8000"),
-            new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "158000"),
+            new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-requests-limit", HeaderValue: "50"),
+            new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-requests-remaining", HeaderValue: "49"),
+            new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-requests-reset",
+                HeaderValue: "2026-03-01T12:00:00Z"),
+            new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-input-tokens-limit", HeaderValue: "200000"),
+            new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-input-tokens-remaining", HeaderValue: "150000"),
+            new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-output-tokens-remaining", HeaderValue: "8000"),
+            new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-tokens-remaining", HeaderValue: "158000")
         };
 
         var view = RateLimitSnapshotParser.Parse(rows);
 
-        Assert.Equal(4, view.StandardDimensions.Count);
+        Assert.Equal(4, actual: view.StandardDimensions.Count);
         var requests = view.StandardDimensions["requests"];
-        Assert.Equal(50, requests.Limit);
-        Assert.Equal(49, requests.Remaining);
-        Assert.Equal(DateTimeOffset.Parse("2026-03-01T12:00:00Z"), requests.ResetAt);
+        Assert.Equal(50, actual: requests.Limit);
+        Assert.Equal(49, actual: requests.Remaining);
+        Assert.Equal(expected: DateTimeOffset.Parse("2026-03-01T12:00:00Z"), actual: requests.ResetAt);
 
         var inputTokens = view.StandardDimensions["input-tokens"];
-        Assert.Equal(200000, inputTokens.Limit);
-        Assert.Equal(150000, inputTokens.Remaining);
+        Assert.Equal(200000, actual: inputTokens.Limit);
+        Assert.Equal(150000, actual: inputTokens.Remaining);
         Assert.Null(inputTokens.ResetAt);
 
-        Assert.Equal(8000, view.StandardDimensions["output-tokens"].Remaining);
-        Assert.Equal(158000, view.StandardDimensions["tokens"].Remaining);
+        Assert.Equal(8000, actual: view.StandardDimensions["output-tokens"].Remaining);
+        Assert.Equal(158000, actual: view.StandardDimensions["tokens"].Remaining);
     }
 
     [Fact]
@@ -41,28 +42,31 @@ public class RateLimitSnapshotParserTests
     {
         var rows = new[]
         {
-            new RateLimitHeaderRow("anthropic-ratelimit-unified-status", "allowed"),
-            new RateLimitHeaderRow("anthropic-ratelimit-unified-reset", "2026-03-01T17:00:00Z"),
-            new RateLimitHeaderRow("anthropic-ratelimit-unified-5h-status", "allowed"),
-            new RateLimitHeaderRow("anthropic-ratelimit-unified-5h-remaining", "42"),
-            new RateLimitHeaderRow("anthropic-ratelimit-unified-5h-reset", "2026-03-01T13:00:00Z"),
-            new RateLimitHeaderRow("anthropic-ratelimit-unified-7d-status", "allowed"),
-            new RateLimitHeaderRow("anthropic-ratelimit-unified-representative-claim", "org-123"),
+            new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-unified-status", HeaderValue: "allowed"),
+            new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-unified-reset",
+                HeaderValue: "2026-03-01T17:00:00Z"),
+            new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-unified-5h-status", HeaderValue: "allowed"),
+            new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-unified-5h-remaining", HeaderValue: "42"),
+            new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-unified-5h-reset",
+                HeaderValue: "2026-03-01T13:00:00Z"),
+            new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-unified-7d-status", HeaderValue: "allowed"),
+            new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-unified-representative-claim",
+                HeaderValue: "org-123")
         };
 
         var view = RateLimitSnapshotParser.Parse(rows);
 
-        Assert.Equal("allowed", view.UnifiedStatus);
-        Assert.Equal(DateTimeOffset.Parse("2026-03-01T17:00:00Z"), view.UnifiedResetAt);
-        Assert.Equal("org-123", view.RepresentativeClaim);
+        Assert.Equal(expected: "allowed", actual: view.UnifiedStatus);
+        Assert.Equal(expected: DateTimeOffset.Parse("2026-03-01T17:00:00Z"), actual: view.UnifiedResetAt);
+        Assert.Equal(expected: "org-123", actual: view.RepresentativeClaim);
 
-        Assert.Equal(2, view.UnifiedWindows.Count);
+        Assert.Equal(2, actual: view.UnifiedWindows.Count);
         var fiveHour = view.UnifiedWindows["5h"];
-        Assert.Equal("allowed", fiveHour.Status);
-        Assert.Equal(42, fiveHour.Remaining);
-        Assert.Equal(DateTimeOffset.Parse("2026-03-01T13:00:00Z"), fiveHour.ResetAt);
+        Assert.Equal(expected: "allowed", actual: fiveHour.Status);
+        Assert.Equal(42, actual: fiveHour.Remaining);
+        Assert.Equal(expected: DateTimeOffset.Parse("2026-03-01T13:00:00Z"), actual: fiveHour.ResetAt);
 
-        Assert.Equal("allowed", view.UnifiedWindows["7d"].Status);
+        Assert.Equal(expected: "allowed", actual: view.UnifiedWindows["7d"].Status);
     }
 
     [Fact]
@@ -70,14 +74,14 @@ public class RateLimitSnapshotParserTests
     {
         var rows = new[]
         {
-            new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000"),
-            new RateLimitHeaderRow("anthropic-ratelimit-unified-status", "allowed"),
+            new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-tokens-remaining", HeaderValue: "1000"),
+            new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-unified-status", HeaderValue: "allowed")
         };
 
         var view = RateLimitSnapshotParser.Parse(rows);
 
         Assert.True(view.StandardDimensions.ContainsKey("tokens"));
-        Assert.Equal("allowed", view.UnifiedStatus);
+        Assert.Equal(expected: "allowed", actual: view.UnifiedStatus);
     }
 
     [Fact]
@@ -85,28 +89,29 @@ public class RateLimitSnapshotParserTests
     {
         var rows = new[]
         {
-            new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "not-a-number"),
-            new RateLimitHeaderRow("anthropic-ratelimit-requests-reset", "not-a-date"),
+            new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-tokens-remaining", HeaderValue: "not-a-number"),
+            new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-requests-reset", HeaderValue: "not-a-date")
         };
 
         var view = RateLimitSnapshotParser.Parse(rows);
 
         Assert.Null(view.StandardDimensions["tokens"].Remaining);
         Assert.Null(view.StandardDimensions["requests"].ResetAt);
-        Assert.Equal("not-a-number", view.RawHeaders["anthropic-ratelimit-tokens-remaining"]);
-        Assert.Equal("not-a-date", view.RawHeaders["anthropic-ratelimit-requests-reset"]);
+        Assert.Equal(expected: "not-a-number", actual: view.RawHeaders["anthropic-ratelimit-tokens-remaining"]);
+        Assert.Equal(expected: "not-a-date", actual: view.RawHeaders["anthropic-ratelimit-requests-reset"]);
     }
 
     [Fact]
     public void Parse_UnrecognizedHeader_IsKeptInRawHeadersOnly()
     {
-        var rows = new[] { new RateLimitHeaderRow("anthropic-ratelimit-some-future-thing", "value") };
+        var rows = new[]
+            { new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-some-future-thing", HeaderValue: "value") };
 
         var view = RateLimitSnapshotParser.Parse(rows);
 
         Assert.Empty(view.StandardDimensions);
         Assert.Empty(view.UnifiedWindows);
-        Assert.Equal("value", view.RawHeaders["anthropic-ratelimit-some-future-thing"]);
+        Assert.Equal(expected: "value", actual: view.RawHeaders["anthropic-ratelimit-some-future-thing"]);
     }
 
     [Fact]
@@ -126,27 +131,27 @@ public class RateLimitSnapshotParserTests
     {
         var rows = new[]
         {
-            new RateLimitHeaderRow("x-ratelimit-limit-requests", "5000"),
-            new RateLimitHeaderRow("x-ratelimit-remaining-requests", "4999"),
-            new RateLimitHeaderRow("x-ratelimit-reset-requests", "6ms"),
-            new RateLimitHeaderRow("x-ratelimit-limit-tokens", "160000"),
-            new RateLimitHeaderRow("x-ratelimit-remaining-tokens", "159975"),
-            new RateLimitHeaderRow("x-ratelimit-reset-tokens", "6m0s"),
+            new RateLimitHeaderRow(HeaderName: "x-ratelimit-limit-requests", HeaderValue: "5000"),
+            new RateLimitHeaderRow(HeaderName: "x-ratelimit-remaining-requests", HeaderValue: "4999"),
+            new RateLimitHeaderRow(HeaderName: "x-ratelimit-reset-requests", HeaderValue: "6ms"),
+            new RateLimitHeaderRow(HeaderName: "x-ratelimit-limit-tokens", HeaderValue: "160000"),
+            new RateLimitHeaderRow(HeaderName: "x-ratelimit-remaining-tokens", HeaderValue: "159975"),
+            new RateLimitHeaderRow(HeaderName: "x-ratelimit-reset-tokens", HeaderValue: "6m0s")
         };
         var observedAt = DateTimeOffset.Parse("2026-03-01T12:00:00Z");
 
-        var view = RateLimitSnapshotParser.Parse(rows, observedAt);
+        var view = RateLimitSnapshotParser.Parse(rows: rows, observedAtUtc: observedAt);
 
-        Assert.Equal(2, view.StandardDimensions.Count);
+        Assert.Equal(2, actual: view.StandardDimensions.Count);
         var requests = view.StandardDimensions["requests"];
-        Assert.Equal(5000, requests.Limit);
-        Assert.Equal(4999, requests.Remaining);
-        Assert.Equal(observedAt + TimeSpan.FromMilliseconds(6), requests.ResetAt);
+        Assert.Equal(5000, actual: requests.Limit);
+        Assert.Equal(4999, actual: requests.Remaining);
+        Assert.Equal(expected: observedAt + TimeSpan.FromMilliseconds(6), actual: requests.ResetAt);
 
         var tokens = view.StandardDimensions["tokens"];
-        Assert.Equal(160000, tokens.Limit);
-        Assert.Equal(159975, tokens.Remaining);
-        Assert.Equal(observedAt + TimeSpan.FromMinutes(6), tokens.ResetAt);
+        Assert.Equal(160000, actual: tokens.Limit);
+        Assert.Equal(159975, actual: tokens.Remaining);
+        Assert.Equal(expected: observedAt + TimeSpan.FromMinutes(6), actual: tokens.ResetAt);
     }
 
     [Theory]
@@ -157,28 +162,30 @@ public class RateLimitSnapshotParserTests
     public void Parse_OpenAiResetHeader_ParsesCompoundGoDurations(string durationText, double expectedSeconds)
     {
         var observedAt = DateTimeOffset.Parse("2026-03-01T00:00:00Z");
-        var rows = new[] { new RateLimitHeaderRow("x-ratelimit-reset-tokens", durationText) };
+        var rows = new[] { new RateLimitHeaderRow(HeaderName: "x-ratelimit-reset-tokens", HeaderValue: durationText) };
 
-        var view = RateLimitSnapshotParser.Parse(rows, observedAt);
+        var view = RateLimitSnapshotParser.Parse(rows: rows, observedAtUtc: observedAt);
 
-        Assert.Equal(observedAt + TimeSpan.FromSeconds(expectedSeconds), view.StandardDimensions["tokens"].ResetAt);
+        Assert.Equal(expected: observedAt + TimeSpan.FromSeconds(expectedSeconds),
+            actual: view.StandardDimensions["tokens"].ResetAt);
     }
 
     [Fact]
     public void Parse_OpenAiResetHeader_MalformedDuration_SurfacesAsNullResetAt()
     {
-        var rows = new[] { new RateLimitHeaderRow("x-ratelimit-reset-tokens", "not-a-duration") };
+        var rows = new[]
+            { new RateLimitHeaderRow(HeaderName: "x-ratelimit-reset-tokens", HeaderValue: "not-a-duration") };
 
-        var view = RateLimitSnapshotParser.Parse(rows, DateTimeOffset.UtcNow);
+        var view = RateLimitSnapshotParser.Parse(rows: rows, observedAtUtc: DateTimeOffset.UtcNow);
 
         Assert.Null(view.StandardDimensions["tokens"].ResetAt);
-        Assert.Equal("not-a-duration", view.RawHeaders["x-ratelimit-reset-tokens"]);
+        Assert.Equal(expected: "not-a-duration", actual: view.RawHeaders["x-ratelimit-reset-tokens"]);
     }
 
     [Fact]
     public void Parse_OpenAiResetHeader_NoObservedAtSupplied_ResetAtStaysNull()
     {
-        var rows = new[] { new RateLimitHeaderRow("x-ratelimit-reset-tokens", "6m0s") };
+        var rows = new[] { new RateLimitHeaderRow(HeaderName: "x-ratelimit-reset-tokens", HeaderValue: "6m0s") };
 
         var view = RateLimitSnapshotParser.Parse(rows);
 
@@ -190,13 +197,13 @@ public class RateLimitSnapshotParserTests
     {
         var rows = new[]
         {
-            new RateLimitHeaderRow("anthropic-ratelimit-input-tokens-remaining", "150000"),
-            new RateLimitHeaderRow("x-ratelimit-remaining-tokens", "159975"),
+            new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-input-tokens-remaining", HeaderValue: "150000"),
+            new RateLimitHeaderRow(HeaderName: "x-ratelimit-remaining-tokens", HeaderValue: "159975")
         };
 
         var view = RateLimitSnapshotParser.Parse(rows);
 
-        Assert.Equal(150000, view.StandardDimensions["input-tokens"].Remaining);
-        Assert.Equal(159975, view.StandardDimensions["tokens"].Remaining);
+        Assert.Equal(150000, actual: view.StandardDimensions["input-tokens"].Remaining);
+        Assert.Equal(159975, actual: view.StandardDimensions["tokens"].Remaining);
     }
 }

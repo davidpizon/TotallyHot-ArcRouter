@@ -2,7 +2,10 @@ using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 
 namespace TotallyHot.ArcRouter.Tests.CodeRouterBench.Evaluation;
 
-/// <summary>Unit tests for <see cref="RegretReplayEngine"/>, <see cref="RegretReplayResult"/>, and <see cref="AlwaysModelBaseline"/>.</summary>
+/// <summary>
+/// Unit tests for <see cref="RegretReplayEngine"/>, <see cref="RegretReplayResult"/>, and
+/// <see cref="AlwaysModelBaseline"/>.
+/// </summary>
 public class RegretReplayEngineTests
 {
     // Canonical weights: r = 1*s + (-0.1)*cost.
@@ -15,30 +18,31 @@ public class RegretReplayEngineTests
         // Task 2: opus scores 0.6 @ $0.02 (r=0.598), sonnet scores 0.4 @ $0.01 (r=0.399) -> oracle is opus.
         RegretTaskOutcome[] tasks =
         [
-            new("t1", "code_generation", new Dictionary<string, RegretOutcomeCell>
+            new(TaskId: "t1", Dimension: "code_generation", Cells: new Dictionary<string, RegretOutcomeCell>
             {
-                ["claude-opus-4-6"] = new(Score: 0.8, CostUsd: 0.02, TotalTokens: 1000),
-                ["claude-sonnet-4-5"] = new(Score: 1.0, CostUsd: 0.01, TotalTokens: 800),
+                ["claude-opus-4-6"] = new(0.8, 0.02, 1000),
+                ["claude-sonnet-4-5"] = new(1.0, 0.01, 800)
             }),
-            new("t2", "bug_fixing", new Dictionary<string, RegretOutcomeCell>
+            new(TaskId: "t2", Dimension: "bug_fixing", Cells: new Dictionary<string, RegretOutcomeCell>
             {
-                ["claude-opus-4-6"] = new(Score: 0.6, CostUsd: 0.02, TotalTokens: 1200),
-                ["claude-sonnet-4-5"] = new(Score: 0.4, CostUsd: 0.01, TotalTokens: 900),
-            }),
+                ["claude-opus-4-6"] = new(0.6, 0.02, 1200),
+                ["claude-sonnet-4-5"] = new(0.4, 0.01, 900)
+            })
         ];
 
-        var result = RegretReplayEngine.Replay(tasks, new AlwaysModelBaseline("claude-opus-4-6"), Weights);
+        var result = RegretReplayEngine.Replay(tasks: tasks, router: new AlwaysModelBaseline("claude-opus-4-6"),
+            weights: Weights);
 
         // r*_1 = 0.999, r_1(opus) = 0.798 -> regret 0.201
         // r*_2 = 0.598, r_2(opus) = 0.598 -> regret 0.0
-        Assert.Equal(0.201, result.CumulativeRegret, precision: 6);
-        Assert.Equal(0.7, result.AvgPerf, precision: 6); // (0.8 + 0.6) / 2
-        Assert.Equal(2200, result.TotalTokens);
-        Assert.Equal(0.04, result.TotalCostUsd, precision: 6);
-        Assert.Equal(0.7 * 100 / 0.04, result.PerfPerDollar!.Value, precision: 3);
-        Assert.Equal(2, result.ScoredTaskCount);
-        Assert.Equal(0, result.SkippedTaskCount);
-        Assert.Equal("always_claude-opus-4-6", result.RouterName);
+        Assert.Equal(0.201, actual: result.CumulativeRegret, 6);
+        Assert.Equal(0.7, actual: result.AvgPerf, 6); // (0.8 + 0.6) / 2
+        Assert.Equal(2200, actual: result.TotalTokens);
+        Assert.Equal(0.04, actual: result.TotalCostUsd, 6);
+        Assert.Equal(expected: 0.7 * 100 / 0.04, actual: result.PerfPerDollar!.Value, 3);
+        Assert.Equal(2, actual: result.ScoredTaskCount);
+        Assert.Equal(0, actual: result.SkippedTaskCount);
+        Assert.Equal(expected: "always_claude-opus-4-6", actual: result.RouterName);
     }
 
     [Fact]
@@ -46,22 +50,23 @@ public class RegretReplayEngineTests
     {
         RegretTaskOutcome[] tasks =
         [
-            new("t1", "code_generation", new Dictionary<string, RegretOutcomeCell>
+            new(TaskId: "t1", Dimension: "code_generation", Cells: new Dictionary<string, RegretOutcomeCell>
             {
-                ["claude-opus-4-6"] = new(Score: 0.8, CostUsd: 0.02, TotalTokens: 1000),
+                ["claude-opus-4-6"] = new(0.8, 0.02, 1000)
             }),
-            new("t2", "code_generation", new Dictionary<string, RegretOutcomeCell>
+            new(TaskId: "t2", Dimension: "code_generation", Cells: new Dictionary<string, RegretOutcomeCell>
             {
                 // Opus was never scored on this task - Always-Opus cannot route it.
-                ["glm-5"] = new(Score: 0.5, CostUsd: 0.01, TotalTokens: 500),
-            }),
+                ["glm-5"] = new(0.5, 0.01, 500)
+            })
         ];
 
-        var result = RegretReplayEngine.Replay(tasks, new AlwaysModelBaseline("claude-opus-4-6"), Weights);
+        var result = RegretReplayEngine.Replay(tasks: tasks, router: new AlwaysModelBaseline("claude-opus-4-6"),
+            weights: Weights);
 
-        Assert.Equal(1, result.ScoredTaskCount);
-        Assert.Equal(1, result.SkippedTaskCount);
-        Assert.Equal(0.8, result.AvgPerf, precision: 6);
+        Assert.Equal(1, actual: result.ScoredTaskCount);
+        Assert.Equal(1, actual: result.SkippedTaskCount);
+        Assert.Equal(0.8, actual: result.AvgPerf, 6);
     }
 
     [Fact]
@@ -70,13 +75,13 @@ public class RegretReplayEngineTests
         var spy = new LeakDetectingBaseline();
         RegretTaskOutcome[] tasks =
         [
-            new("t1", "code_generation", new Dictionary<string, RegretOutcomeCell>
+            new(TaskId: "t1", Dimension: "code_generation", Cells: new Dictionary<string, RegretOutcomeCell>
             {
-                ["claude-opus-4-6"] = new(Score: 0.9, CostUsd: 0.02, TotalTokens: 100),
-            }),
+                ["claude-opus-4-6"] = new(0.9, 0.02, 100)
+            })
         ];
 
-        RegretReplayEngine.Replay(tasks, spy, Weights);
+        RegretReplayEngine.Replay(tasks: tasks, router: spy, weights: Weights);
 
         Assert.True(spy.ObservedOnlyContextSignals);
     }
@@ -86,13 +91,14 @@ public class RegretReplayEngineTests
     {
         RegretTaskOutcome[] tasks =
         [
-            new("t1", "code_generation", new Dictionary<string, RegretOutcomeCell>
+            new(TaskId: "t1", Dimension: "code_generation", Cells: new Dictionary<string, RegretOutcomeCell>
             {
-                ["free-model"] = new(Score: 1.0, CostUsd: 0.0, TotalTokens: 100),
-            }),
+                ["free-model"] = new(1.0, 0.0, 100)
+            })
         ];
 
-        var result = RegretReplayEngine.Replay(tasks, new AlwaysModelBaseline("free-model"), Weights);
+        var result = RegretReplayEngine.Replay(tasks: tasks, router: new AlwaysModelBaseline("free-model"),
+            weights: Weights);
 
         Assert.Null(result.PerfPerDollar);
     }
@@ -103,31 +109,33 @@ public class RegretReplayEngineTests
         var spy = new UpdateSpyBaseline();
         RegretTaskOutcome[] tasks =
         [
-            new("t1", "code_generation", new Dictionary<string, RegretOutcomeCell>
+            new(TaskId: "t1", Dimension: "code_generation", Cells: new Dictionary<string, RegretOutcomeCell>
             {
-                ["claude-opus-4-6"] = new(Score: 0.8, CostUsd: 0.02, TotalTokens: 1000),
-                ["claude-sonnet-4-5"] = new(Score: 1.0, CostUsd: 0.01, TotalTokens: 800),
-            }),
+                ["claude-opus-4-6"] = new(0.8, 0.02, 1000),
+                ["claude-sonnet-4-5"] = new(1.0, 0.01, 800)
+            })
         ];
 
-        RegretReplayEngine.Replay(tasks, spy, Weights);
+        RegretReplayEngine.Replay(tasks: tasks, router: spy, weights: Weights);
 
         var (context, selectedModelId, reward) = Assert.Single(spy.Updates);
-        Assert.Equal("t1", context.TaskId);
-        Assert.Equal("claude-opus-4-6", selectedModelId);
-        Assert.Equal(Weights.Reward(new RegretOutcomeCell(0.8, 0.02, 1000)), reward, precision: 9);
+        Assert.Equal(expected: "t1", actual: context.TaskId);
+        Assert.Equal(expected: "claude-opus-4-6", actual: selectedModelId);
+        Assert.Equal(expected: Weights.Reward(new RegretOutcomeCell(0.8, 0.02, 1000)), actual: reward, 9);
     }
 
     [Fact]
     public void Record_SelectedModelNotInOutcome_Throws()
     {
         var result = new RegretReplayResult { RouterName = "test" };
-        var outcome = new RegretTaskOutcome("t1", "code_generation", new Dictionary<string, RegretOutcomeCell>
-        {
-            ["claude-opus-4-6"] = new(Score: 0.5, CostUsd: 0.01, TotalTokens: 100),
-        });
+        var outcome = new RegretTaskOutcome(TaskId: "t1", Dimension: "code_generation",
+            Cells: new Dictionary<string, RegretOutcomeCell>
+            {
+                ["claude-opus-4-6"] = new(0.5, 0.01, 100)
+            });
 
-        Assert.Throws<ArgumentException>(() => result.Record(outcome, "not-a-candidate", Weights));
+        Assert.Throws<ArgumentException>(() =>
+            result.Record(outcome: outcome, selectedModelId: "not-a-candidate", weights: Weights));
     }
 
     // Confirms IRegretBaselineRouter.Route only ever receives dimension + candidate ids, never the
@@ -141,8 +149,8 @@ public class RegretReplayEngineTests
         public string? Route(RegretReplayContext context)
         {
             ObservedOnlyContextSignals = context.TaskId == "t1"
-                && context.Dimension == "code_generation"
-                && context.CandidateModelIds is ["claude-opus-4-6"];
+                                         && context.Dimension == "code_generation"
+                                         && context.CandidateModelIds is ["claude-opus-4-6"];
             return context.CandidateModelIds[0];
         }
     }
@@ -155,11 +163,16 @@ public class RegretReplayEngineTests
 
         public string Name => "update_spy";
 
-        public string? Route(RegretReplayContext context) => context.CandidateModelIds
-            .OrderBy(id => id, StringComparer.Ordinal)
-            .First();
+        public string? Route(RegretReplayContext context)
+        {
+            return context.CandidateModelIds
+                .OrderBy(keySelector: id => id, comparer: StringComparer.Ordinal)
+                .First();
+        }
 
-        public void Update(RegretReplayContext context, string selectedModelId, double reward) =>
+        public void Update(RegretReplayContext context, string selectedModelId, double reward)
+        {
             Updates.Add((context, selectedModelId, reward));
+        }
     }
 }

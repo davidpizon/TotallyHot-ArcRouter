@@ -1,8 +1,8 @@
+using System.Text;
 using AwesomeAssertions;
 using Grpc.Core;
 using Grpc.Core.Interceptors;
 using Grpc.Core.Testing;
-using System.Text;
 
 namespace TotallyHot.ArcRouter.Gui.Telemetry.Tests;
 
@@ -16,14 +16,18 @@ public class TelemetryAuthClientInterceptorTests
     private const string TokenHeaderName = "x-admin-token";
 
     private static readonly Method<string, string> TestMethod = new(
-        MethodType.Unary,
-        "TestService",
-        "TestMethod",
-        Marshallers.Create<string>(s => Encoding.UTF8.GetBytes(s), bytes => Encoding.UTF8.GetString(bytes)),
-        Marshallers.Create<string>(s => Encoding.UTF8.GetBytes(s), bytes => Encoding.UTF8.GetString(bytes)));
+        type: MethodType.Unary,
+        serviceName: "TestService",
+        name: "TestMethod",
+        requestMarshaller: Marshallers.Create<string>(serializer: s => Encoding.UTF8.GetBytes(s),
+            deserializer: bytes => Encoding.UTF8.GetString(bytes)),
+        responseMarshaller: Marshallers.Create<string>(serializer: s => Encoding.UTF8.GetBytes(s),
+            deserializer: bytes => Encoding.UTF8.GetString(bytes)));
 
-    private static ClientInterceptorContext<string, string> NewContext() =>
-        new(TestMethod, host: null, new CallOptions());
+    private static ClientInterceptorContext<string, string> NewContext()
+    {
+        return new ClientInterceptorContext<string, string>(method: TestMethod, null, options: new CallOptions());
+    }
 
     [Fact]
     public void Attaches_the_supplied_token_as_a_header()
@@ -31,7 +35,7 @@ public class TelemetryAuthClientInterceptorTests
         var interceptor = new TelemetryAuthClientInterceptor(token: "my-token");
         ClientInterceptorContext<string, string>? captured = null;
 
-        interceptor.BlockingUnaryCall("request", NewContext(), (_, ctx) =>
+        interceptor.BlockingUnaryCall(request: "request", context: NewContext(), continuation: (_, ctx) =>
         {
             captured = ctx;
             return "response";
@@ -43,14 +47,14 @@ public class TelemetryAuthClientInterceptorTests
     [Fact]
     public void Reads_the_token_from_the_given_file_when_none_is_supplied()
     {
-        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".txt");
+        var path = Path.Combine(path1: Path.GetTempPath(), path2: Guid.NewGuid() + ".txt");
         try
         {
-            File.WriteAllText(path, "file-token");
+            File.WriteAllText(path: path, contents: "file-token");
             var interceptor = new TelemetryAuthClientInterceptor(tokenPath: path);
             ClientInterceptorContext<string, string>? captured = null;
 
-            interceptor.BlockingUnaryCall("request", NewContext(), (_, ctx) =>
+            interceptor.BlockingUnaryCall(request: "request", context: NewContext(), continuation: (_, ctx) =>
             {
                 captured = ctx;
                 return "response";
@@ -67,14 +71,14 @@ public class TelemetryAuthClientInterceptorTests
     [Fact]
     public void Picks_up_a_token_file_created_after_construction()
     {
-        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".txt");
+        var path = Path.Combine(path1: Path.GetTempPath(), path2: Guid.NewGuid() + ".txt");
         try
         {
             var interceptor = new TelemetryAuthClientInterceptor(tokenPath: path);
-            File.WriteAllText(path, "late-token");
+            File.WriteAllText(path: path, contents: "late-token");
             ClientInterceptorContext<string, string>? captured = null;
 
-            interceptor.BlockingUnaryCall("request", NewContext(), (_, ctx) =>
+            interceptor.BlockingUnaryCall(request: "request", context: NewContext(), continuation: (_, ctx) =>
             {
                 captured = ctx;
                 return "response";
@@ -91,11 +95,11 @@ public class TelemetryAuthClientInterceptorTests
     [Fact]
     public void Leaves_the_call_untouched_when_no_token_file_exists()
     {
-        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".txt");
+        var path = Path.Combine(path1: Path.GetTempPath(), path2: Guid.NewGuid() + ".txt");
         var interceptor = new TelemetryAuthClientInterceptor(tokenPath: path);
         ClientInterceptorContext<string, string>? captured = null;
 
-        interceptor.BlockingUnaryCall("request", NewContext(), (_, ctx) =>
+        interceptor.BlockingUnaryCall(request: "request", context: NewContext(), continuation: (_, ctx) =>
         {
             captured = ctx;
             return "response";
@@ -105,31 +109,22 @@ public class TelemetryAuthClientInterceptorTests
             .Should().BeTrue();
     }
 
-    private sealed class FakeClientStreamWriter<T> : IClientStreamWriter<T>
-    {
-        public WriteOptions? WriteOptions { get; set; }
-
-        public Task CompleteAsync() => Task.CompletedTask;
-
-        public Task WriteAsync(T message) => Task.CompletedTask;
-    }
-
     [Fact]
     public void AsyncClientStreamingCall_attaches_the_supplied_token_as_a_header()
     {
         var interceptor = new TelemetryAuthClientInterceptor(token: "my-token");
         ClientInterceptorContext<string, string>? captured = null;
 
-        using var call = interceptor.AsyncClientStreamingCall(NewContext(), ctx =>
+        using var call = interceptor.AsyncClientStreamingCall(context: NewContext(), continuation: ctx =>
         {
             captured = ctx;
             return TestCalls.AsyncClientStreamingCall(
-                new FakeClientStreamWriter<string>(),
-                Task.FromResult("response"),
-                Task.FromResult(Metadata.Empty),
-                () => Status.DefaultSuccess,
-                () => [],
-                () => { });
+                requestStream: new FakeClientStreamWriter<string>(),
+                responseAsync: Task.FromResult("response"),
+                responseHeadersAsync: Task.FromResult(Metadata.Empty),
+                getStatusFunc: () => Status.DefaultSuccess,
+                getTrailersFunc: () => [],
+                disposeAction: () => { });
         });
 
         captured!.Value.Options.Headers!.Get(TokenHeaderName)!.Value.Should().Be("my-token");
@@ -141,25 +136,43 @@ public class TelemetryAuthClientInterceptorTests
         var interceptor = new TelemetryAuthClientInterceptor(token: "my-token");
         ClientInterceptorContext<string, string>? captured = null;
 
-        using var call = interceptor.AsyncDuplexStreamingCall(NewContext(), ctx =>
+        using var call = interceptor.AsyncDuplexStreamingCall(context: NewContext(), continuation: ctx =>
         {
             captured = ctx;
             return TestCalls.AsyncDuplexStreamingCall(
-                new FakeClientStreamWriter<string>(),
-                new FakeAsyncStreamReader<string>(),
-                Task.FromResult(Metadata.Empty),
-                () => Status.DefaultSuccess,
-                () => [],
-                () => { });
+                requestStream: new FakeClientStreamWriter<string>(),
+                responseStream: new FakeAsyncStreamReader<string>(),
+                responseHeadersAsync: Task.FromResult(Metadata.Empty),
+                getStatusFunc: () => Status.DefaultSuccess,
+                getTrailersFunc: () => [],
+                disposeAction: () => { });
         });
 
         captured!.Value.Options.Headers!.Get(TokenHeaderName)!.Value.Should().Be("my-token");
+    }
+
+    private sealed class FakeClientStreamWriter<T> : IClientStreamWriter<T>
+    {
+        public WriteOptions? WriteOptions { get; set; }
+
+        public Task CompleteAsync()
+        {
+            return Task.CompletedTask;
+        }
+
+        public Task WriteAsync(T message)
+        {
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class FakeAsyncStreamReader<T> : IAsyncStreamReader<T>
     {
         public T Current => default!;
 
-        public Task<bool> MoveNext(CancellationToken cancellationToken) => Task.FromResult(false);
+        public Task<bool> MoveNext(CancellationToken cancellationToken)
+        {
+            return Task.FromResult(false);
+        }
     }
 }

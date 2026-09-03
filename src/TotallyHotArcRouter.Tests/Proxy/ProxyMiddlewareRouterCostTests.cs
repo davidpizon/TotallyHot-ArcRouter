@@ -1,9 +1,9 @@
+using System.Net;
+using System.Text;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
-using System.Net;
-using System.Text;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Router.Embeddings;
@@ -20,21 +20,23 @@ namespace TotallyHot.ArcRouter.Tests.Proxy;
 /// </summary>
 public class ProxyMiddlewareRouterCostTests
 {
-    private const string RequestBodyJson = """{"model":"gpt-5.4","messages":[{"role":"user","content":"hello there"}]}""";
+    private const string RequestBodyJson =
+        """{"model":"gpt-5.4","messages":[{"role":"user","content":"hello there"}]}""";
 
     [Fact]
     public async Task InvokeAsync_EmbeddingComputed_PublishesRouterTokensPricedAtTheSelfHostedRate()
     {
         var publisher = new CapturingTelemetryPublisher();
-        var middleware = BuildMiddleware(publisher, new FakeEmbeddingClient([1f, 2f, 3f], tokenCount: 250));
+        var middleware = BuildMiddleware(publisher: publisher,
+            embeddingClient: new FakeEmbeddingClient(embedding: [1f, 2f, 3f], 250));
 
-        await middleware.InvokeAsync(BuildContext(), _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: BuildContext(), next: _ => Task.CompletedTask);
 
         var published = await publisher.WaitForEventAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(250, published.RouterTokens);
+        Assert.Equal(250, actual: published.RouterTokens);
 
         // 250 tokens at the manuscript's $0.054/M self-hosted rate.
-        Assert.Equal(250m / 1_000_000m * 0.054m, published.RouterCostUsd);
+        Assert.Equal(expected: 250m / 1_000_000m * 0.054m, actual: published.RouterCostUsd);
     }
 
     [Fact]
@@ -43,13 +45,13 @@ public class ProxyMiddlewareRouterCostTests
         // Zero here is a measurement, not a gap: with no embedding client the router genuinely spent
         // nothing deciding, so net savings equal gross rather than being unknown.
         var publisher = new CapturingTelemetryPublisher();
-        var middleware = BuildMiddleware(publisher, embeddingClient: null);
+        var middleware = BuildMiddleware(publisher: publisher, null);
 
-        await middleware.InvokeAsync(BuildContext(), _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: BuildContext(), next: _ => Task.CompletedTask);
 
         var published = await publisher.WaitForEventAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(0, published.RouterTokens);
-        Assert.Equal(0m, published.RouterCostUsd);
+        Assert.Equal(0, actual: published.RouterTokens);
+        Assert.Equal(0m, actual: published.RouterCostUsd);
     }
 
     [Fact]
@@ -59,15 +61,15 @@ public class ProxyMiddlewareRouterCostTests
         // has to actually reach the published figure rather than the compiled-in manuscript default.
         var publisher = new CapturingTelemetryPublisher();
         var middleware = BuildMiddleware(
-            publisher,
-            new FakeEmbeddingClient([1f], tokenCount: 1_000_000),
-            new RoutingOptions { SelfHostedRouterPricePerMillionTokens = 2.5m });
+            publisher: publisher,
+            embeddingClient: new FakeEmbeddingClient(embedding: [1f], 1_000_000),
+            routingOptions: new RoutingOptions { SelfHostedRouterPricePerMillionTokens = 2.5m });
 
-        await middleware.InvokeAsync(BuildContext(), _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: BuildContext(), next: _ => Task.CompletedTask);
 
         var published = await publisher.WaitForEventAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(1_000_000, published.RouterTokens);
-        Assert.Equal(2.5m, published.RouterCostUsd);
+        Assert.Equal(1_000_000, actual: published.RouterTokens);
+        Assert.Equal(2.5m, actual: published.RouterCostUsd);
     }
 
     private static ProxyMiddleware BuildMiddleware(
@@ -86,20 +88,21 @@ public class ProxyMiddlewareRouterCostTests
         }
 
         var interceptor = new RequestInterceptor(
-            Mock.Of<ILogger<RequestInterceptor>>(),
-            resolver,
+            logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver,
             embeddingClient: embeddingClient,
             embeddingWarmupState: warmupState);
 
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StringContent("""{"choices":[{"message":{"role":"assistant","content":"hi"}}]}""", Encoding.UTF8, "application/json"),
+            Content = new StringContent("""{"choices":[{"message":{"role":"assistant","content":"hi"}}]}""",
+                encoding: Encoding.UTF8, mediaType: "application/json")
         }));
 
         return new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(),
-            interceptor,
-            new HttpClient(handler),
+            logger: Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 TelemetryPublisher = publisher,
@@ -125,8 +128,10 @@ public class ProxyMiddlewareRouterCostTests
     /// <summary>Returns a fixed vector and a caller-chosen token count, standing in for ONNX inference.</summary>
     private sealed class FakeEmbeddingClient(float[] embedding, int tokenCount) : IEmbeddingClient
     {
-        public Task<EmbeddingResult> EmbedAsync(string text, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new EmbeddingResult(embedding, tokenCount));
+        public Task<EmbeddingResult> EmbedAsync(string text, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(new EmbeddingResult(Vector: embedding, TokenCount: tokenCount));
+        }
     }
 
     /// <summary>Captures the single event this test's one request publishes.</summary>
@@ -141,19 +146,27 @@ public class ProxyMiddlewareRouterCostTests
             return Task.CompletedTask;
         }
 
-        public Task PublishLogLineAsync(LogLineEvent logLine, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task PublishLogLineAsync(LogLineEvent logLine, CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
 
         public async Task<RoutingTelemetryEvent> WaitForEventAsync(TimeSpan timeout)
         {
-            var completed = await Task.WhenAny(_tcs.Task, Task.Delay(timeout));
-            Assert.True(ReferenceEquals(completed, _tcs.Task), "Timed out waiting for a routing telemetry event to be published.");
+            var completed = await Task.WhenAny(task1: _tcs.Task, task2: Task.Delay(timeout));
+            Assert.True(condition: ReferenceEquals(objA: completed, objB: _tcs.Task),
+                userMessage: "Timed out waiting for a routing telemetry event to be published.");
             return await _tcs.Task;
         }
     }
 
-    private sealed class DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler) : HttpMessageHandler
+    private sealed class DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler)
+        : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            handler(request);
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            return handler(request);
+        }
     }
 }

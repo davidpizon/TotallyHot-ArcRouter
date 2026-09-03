@@ -6,8 +6,9 @@ namespace TotallyHot.ArcRouter.Quality.Grading;
 /// </summary>
 public sealed class NullQualityScoreObserver : IQualityScoreObserver
 {
-    /// <inheritdoc />
-    public Task ObserveAsync(QualityResult result, CancellationToken cancellationToken = default) =>
-        Task.CompletedTask;
+    /// <inheritdoc/>
+    public Task ObserveAsync(QualityResult result, CancellationToken cancellationToken = default)
+    {
+        return Task.CompletedTask;
+    }
 }
-

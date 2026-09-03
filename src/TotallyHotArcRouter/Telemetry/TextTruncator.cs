@@ -17,14 +17,10 @@ public static class TextTruncator
     /// </summary>
     public static string? Truncate(string? text, int maxLength = DefaultMaxLength)
     {
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(maxLength, 0);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value: maxLength, 0);
 
-        if (text is null || text.Length <= maxLength)
-        {
-            return text;
-        }
+        if (text is null || text.Length <= maxLength) return text;
 
-        return string.Concat(text.AsSpan(0, maxLength), "…");
+        return string.Concat(str0: text.AsSpan(0, length: maxLength), str1: "…");
     }
 }
-

@@ -16,5 +16,8 @@ internal sealed class FakeHttpClientFactory : IHttpClientFactory
         _handler = handler;
     }
 
-    public HttpClient CreateClient(string name) => new(_handler, disposeHandler: false);
+    public HttpClient CreateClient(string name)
+    {
+        return new HttpClient(handler: _handler, false);
+    }
 }

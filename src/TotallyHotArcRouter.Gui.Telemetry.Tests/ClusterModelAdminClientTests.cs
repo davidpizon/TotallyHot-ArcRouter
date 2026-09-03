@@ -27,8 +27,8 @@ public class ClusterModelAdminClientTests
                 EntriesSinceLastRetrain = 42,
                 RetentionDays = 30,
                 MaxTranscriptRows = 50_000,
-                CurrentTranscriptRowCount = 100,
-            },
+                CurrentTranscriptRowCount = 100
+            }
         };
         using var client = new ClusterModelAdminClient(stub);
 
@@ -44,7 +44,7 @@ public class ClusterModelAdminClientTests
     [Fact]
     public async Task GetStatusAsync_with_artifact_maps_clusters_and_trained_at()
     {
-        var trainedAt = new DateTimeOffset(2026, 7, 16, 12, 0, 0, TimeSpan.Zero);
+        var trainedAt = new DateTimeOffset(2026, 7, 16, 12, 0, 0, offset: TimeSpan.Zero);
         var stub = new StubClient
         {
             StatusResponse = new Contract.ClusterModelStatusResponse
@@ -60,8 +60,8 @@ public class ClusterModelAdminClientTests
                 MaxTranscriptRows = 50_000,
                 CurrentTranscriptRowCount = 8,
                 ClusterSizes = { 10, 15 },
-                ClusterNames = { "mostly bug_fixing: sql, migration", "mostly test_generation" },
-            },
+                ClusterNames = { "mostly bug_fixing: sql, migration", "mostly test_generation" }
+            }
         };
         using var client = new ClusterModelAdminClient(stub);
 
@@ -86,11 +86,11 @@ public class ClusterModelAdminClientTests
             [
                 new Contract.ClusterRetrainStreamEvent
                 {
-                    BootstrapProgress = new Contract.ClusterRetrainBootstrapProgress { TasksEmbedded = 5 },
+                    BootstrapProgress = new Contract.ClusterRetrainBootstrapProgress { TasksEmbedded = 5 }
                 },
                 new Contract.ClusterRetrainStreamEvent
                 {
-                    BootstrapProgress = new Contract.ClusterRetrainBootstrapProgress { TasksEmbedded = 10 },
+                    BootstrapProgress = new Contract.ClusterRetrainBootstrapProgress { TasksEmbedded = 10 }
                 },
                 new Contract.ClusterRetrainStreamEvent
                 {
@@ -98,18 +98,15 @@ public class ClusterModelAdminClientTests
                     {
                         Kind = Contract.ClusterRetrainResultKind.Trained,
                         Message = "Trained 2 clusters.",
-                        Status = new Contract.ClusterModelStatusResponse { ArtifactPresent = true, ChosenK = 2 },
-                    },
-                },
-            ],
+                        Status = new Contract.ClusterModelStatusResponse { ArtifactPresent = true, ChosenK = 2 }
+                    }
+                }
+            ]
         };
         using var client = new ClusterModelAdminClient(stub);
 
         var events = new List<ClusterRetrainEvent>();
-        await foreach (var e in client.RetrainAsync(TestContext.Current.CancellationToken))
-        {
-            events.Add(e);
-        }
+        await foreach (var e in client.RetrainAsync(TestContext.Current.CancellationToken)) events.Add(e);
 
         events.Should().HaveCount(3);
         events[0].BootstrapProgress!.TasksEmbedded.Should().Be(5);
@@ -135,18 +132,19 @@ public class ClusterModelAdminClientTests
     {
         var stub = new StubClient
         {
-            RetrainEvents = [new Contract.ClusterRetrainStreamEvent
-            {
-                Result = new Contract.ClusterRetrainResult { Kind = wireKind, Message = "m", Status = new Contract.ClusterModelStatusResponse() },
-            }],
+            RetrainEvents =
+            [
+                new Contract.ClusterRetrainStreamEvent
+                {
+                    Result = new Contract.ClusterRetrainResult
+                        { Kind = wireKind, Message = "m", Status = new Contract.ClusterModelStatusResponse() }
+                }
+            ]
         };
         using var client = new ClusterModelAdminClient(stub);
 
         var events = new List<ClusterRetrainEvent>();
-        await foreach (var e in client.RetrainAsync(TestContext.Current.CancellationToken))
-        {
-            events.Add(e);
-        }
+        await foreach (var e in client.RetrainAsync(TestContext.Current.CancellationToken)) events.Add(e);
 
         events.Single().Result!.Kind.Should().Be(expected);
     }
@@ -158,10 +156,7 @@ public class ClusterModelAdminClientTests
         using var client = new ClusterModelAdminClient(stub);
 
         var events = new List<ClusterRetrainEvent>();
-        await foreach (var e in client.RetrainAsync(TestContext.Current.CancellationToken))
-        {
-            events.Add(e);
-        }
+        await foreach (var e in client.RetrainAsync(TestContext.Current.CancellationToken)) events.Add(e);
 
         var single = events.Single();
         single.BootstrapProgress.Should().BeNull();
@@ -171,7 +166,8 @@ public class ClusterModelAdminClientTests
     [Fact]
     public async Task RetrainAsync_wraps_a_mid_stream_failure()
     {
-        var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.Unavailable, "failed to connect")) };
+        var stub = new StubClient
+            { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new ClusterModelAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<ClusterModelAdminException>(async () =>
@@ -188,10 +184,12 @@ public class ClusterModelAdminClientTests
     [Fact]
     public async Task Unavailable_becomes_a_plain_language_message()
     {
-        var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.Unavailable, "failed to connect")) };
+        var stub = new StubClient
+            { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new ClusterModelAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<ClusterModelAdminException>(() => client.GetStatusAsync(TestContext.Current.CancellationToken));
+        var ex = await Assert.ThrowsAsync<ClusterModelAdminException>(() =>
+            client.GetStatusAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read the cluster model status: the router is not reachable.");
         ex.IsUnavailable.Should().BeTrue();
@@ -200,10 +198,12 @@ public class ClusterModelAdminClientTests
     [Fact]
     public async Task A_server_rejection_keeps_the_servers_own_detail_and_is_not_flagged_unavailable()
     {
-        var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.Internal, "boom")) };
+        var stub = new StubClient
+            { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
         using var client = new ClusterModelAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<ClusterModelAdminException>(() => client.GetStatusAsync(TestContext.Current.CancellationToken));
+        var ex = await Assert.ThrowsAsync<ClusterModelAdminException>(() =>
+            client.GetStatusAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read the cluster model status: boom");
         ex.IsUnavailable.Should().BeFalse();
@@ -243,10 +243,7 @@ public class ClusterModelAdminClientTests
         public Task<bool> MoveNext(CancellationToken cancellationToken)
         {
             _index++;
-            if (_index >= messages.Count)
-            {
-                return Task.FromResult(false);
-            }
+            if (_index >= messages.Count) return Task.FromResult(false);
 
             Current = messages[_index];
             return Task.FromResult(true);
@@ -267,8 +264,10 @@ public class ClusterModelAdminClientTests
 
         public override AsyncUnaryCall<Contract.ClusterModelStatusResponse> GetClusterModelStatusAsync(
             Contract.GetClusterModelStatusRequest request,
-            CallOptions options) =>
-            Call(StatusResponse);
+            CallOptions options)
+        {
+            return Call(StatusResponse);
+        }
 
         public override AsyncServerStreamingCall<Contract.ClusterRetrainStreamEvent> RetrainClusterModel(
             Contract.RetrainClusterModelRequest request,
@@ -279,26 +278,32 @@ public class ClusterModelAdminClientTests
                 : new ThrowingStreamReader(Failure);
 
             return new AsyncServerStreamingCall<Contract.ClusterRetrainStreamEvent>(
-                reader,
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => [],
-                () => { });
+                responseStream: reader,
+                responseHeadersAsync: Task.FromResult(new Metadata()),
+                getStatusFunc: () => Status.DefaultSuccess,
+                getTrailersFunc: () => [],
+                disposeAction: () => { });
         }
 
-        private AsyncUnaryCall<T> Call<T>(T response) =>
-            new(
-                Failure is null ? Task.FromResult(response) : Task.FromException<T>(Failure),
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => [],
-                () => { });
+        private AsyncUnaryCall<T> Call<T>(T response)
+        {
+            return new AsyncUnaryCall<T>(
+                responseAsync: Failure is null ? Task.FromResult(response) : Task.FromException<T>(Failure),
+                responseHeadersAsync: Task.FromResult(new Metadata()),
+                getStatusFunc: () => Status.DefaultSuccess,
+                getTrailersFunc: () => [],
+                disposeAction: () => { });
+        }
 
-        private sealed class ThrowingStreamReader(RpcException failure) : IAsyncStreamReader<Contract.ClusterRetrainStreamEvent>
+        private sealed class ThrowingStreamReader(RpcException failure)
+            : IAsyncStreamReader<Contract.ClusterRetrainStreamEvent>
         {
             public Contract.ClusterRetrainStreamEvent Current => throw failure;
 
-            public Task<bool> MoveNext(CancellationToken cancellationToken) => Task.FromException<bool>(failure);
+            public Task<bool> MoveNext(CancellationToken cancellationToken)
+            {
+                return Task.FromException<bool>(failure);
+            }
         }
     }
 }

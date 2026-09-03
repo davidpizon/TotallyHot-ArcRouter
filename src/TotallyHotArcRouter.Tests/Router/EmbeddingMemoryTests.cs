@@ -17,52 +17,55 @@ public class EmbeddingMemoryTests
     public async Task FindNearest_ReturnsOnlyEntriesMeetingSimilarityThreshold()
     {
         var store = new FakeMemoryEntryStore();
-        var memory = CreateMemory(store, similarityThreshold: 0.9, maxNeighborCount: 10);
+        var memory = CreateMemory(store: store, 0.9, 10);
         await memory.InitializeAsync(TestContext.Current.CancellationToken);
 
-        await memory.AddEntryAsync(UnitVector(1, 0, 0), "model-exact", 0.8, 0.01, null, TestContext.Current.CancellationToken);
-        await memory.AddEntryAsync(UnitVector(0, 1, 0), "model-orthogonal", 0.8, 0.01, null, TestContext.Current.CancellationToken);
+        await memory.AddEntryAsync(taskEmbedding: UnitVector(1, 0, 0), chosenModel: "model-exact", 0.8, 0.01, null,
+            cancellationToken: TestContext.Current.CancellationToken);
+        await memory.AddEntryAsync(taskEmbedding: UnitVector(0, 1, 0), chosenModel: "model-orthogonal", 0.8, 0.01, null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var results = memory.FindNearest(UnitVector(1, 0, 0));
 
         var match = Assert.Single(results);
-        Assert.Equal("model-exact", match.Entry.ChosenModel);
-        Assert.Equal(1.0, match.Similarity, 3);
+        Assert.Equal(expected: "model-exact", actual: match.Entry.ChosenModel);
+        Assert.Equal(1.0, actual: match.Similarity, 3);
     }
 
     [Fact]
     public async Task FindNearest_LimitsResultsToMaxNeighborCount()
     {
         var store = new FakeMemoryEntryStore();
-        var memory = CreateMemory(store, similarityThreshold: 0.0, maxNeighborCount: 2);
+        var memory = CreateMemory(store: store, 0.0, 2);
         await memory.InitializeAsync(TestContext.Current.CancellationToken);
 
         for (var i = 0; i < 5; i++)
-        {
-            await memory.AddEntryAsync(UnitVector(1, 0, 0), $"model-{i}", 0.5, 0.01, null, TestContext.Current.CancellationToken);
-        }
+            await memory.AddEntryAsync(taskEmbedding: UnitVector(1, 0, 0), chosenModel: $"model-{i}", 0.5, 0.01, null,
+                cancellationToken: TestContext.Current.CancellationToken);
 
         var results = memory.FindNearest(UnitVector(1, 0, 0));
 
-        Assert.Equal(2, results.Count);
+        Assert.Equal(2, actual: results.Count);
     }
 
     [Fact]
     public async Task FindNearest_OrdersBySimilarityDescending()
     {
         var store = new FakeMemoryEntryStore();
-        var memory = CreateMemory(store, similarityThreshold: -1.0, maxNeighborCount: 10);
+        var memory = CreateMemory(store: store, -1.0, 10);
         await memory.InitializeAsync(TestContext.Current.CancellationToken);
 
         // A slightly-off vector (lower cosine similarity) is added before the exact match, so ordering
         // can only come from the similarity sort, not insertion order.
-        await memory.AddEntryAsync(UnitVector(1, 1, 0), "model-close", 0.5, 0.01, null, TestContext.Current.CancellationToken);
-        await memory.AddEntryAsync(UnitVector(1, 0, 0), "model-exact", 0.5, 0.01, null, TestContext.Current.CancellationToken);
+        await memory.AddEntryAsync(taskEmbedding: UnitVector(1, 1, 0), chosenModel: "model-close", 0.5, 0.01, null,
+            cancellationToken: TestContext.Current.CancellationToken);
+        await memory.AddEntryAsync(taskEmbedding: UnitVector(1, 0, 0), chosenModel: "model-exact", 0.5, 0.01, null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var results = memory.FindNearest(UnitVector(1, 0, 0));
 
-        Assert.Equal("model-exact", results[0].Entry.ChosenModel);
-        Assert.Equal("model-close", results[1].Entry.ChosenModel);
+        Assert.Equal(expected: "model-exact", actual: results[0].Entry.ChosenModel);
+        Assert.Equal(expected: "model-close", actual: results[1].Entry.ChosenModel);
         Assert.True(results[0].Similarity > results[1].Similarity);
     }
 
@@ -70,34 +73,40 @@ public class EmbeddingMemoryTests
     public async Task AddEntryAsync_OverCapacity_EvictsOldestEntriesFirst()
     {
         var store = new FakeMemoryEntryStore();
-        var memory = CreateMemory(store, similarityThreshold: -1.0, maxNeighborCount: 10, capacity: 3);
+        var memory = CreateMemory(store: store, -1.0, 10, 3);
         await memory.InitializeAsync(TestContext.Current.CancellationToken);
 
-        await memory.AddEntryAsync(UnitVector(1, 0, 0), "model-oldest", 0.5, 0.01, null, TestContext.Current.CancellationToken);
-        await memory.AddEntryAsync(UnitVector(1, 0, 0), "model-second", 0.5, 0.01, null, TestContext.Current.CancellationToken);
-        await memory.AddEntryAsync(UnitVector(1, 0, 0), "model-third", 0.5, 0.01, null, TestContext.Current.CancellationToken);
-        await memory.AddEntryAsync(UnitVector(1, 0, 0), "model-newest", 0.5, 0.01, null, TestContext.Current.CancellationToken);
+        await memory.AddEntryAsync(taskEmbedding: UnitVector(1, 0, 0), chosenModel: "model-oldest", 0.5, 0.01, null,
+            cancellationToken: TestContext.Current.CancellationToken);
+        await memory.AddEntryAsync(taskEmbedding: UnitVector(1, 0, 0), chosenModel: "model-second", 0.5, 0.01, null,
+            cancellationToken: TestContext.Current.CancellationToken);
+        await memory.AddEntryAsync(taskEmbedding: UnitVector(1, 0, 0), chosenModel: "model-third", 0.5, 0.01, null,
+            cancellationToken: TestContext.Current.CancellationToken);
+        await memory.AddEntryAsync(taskEmbedding: UnitVector(1, 0, 0), chosenModel: "model-newest", 0.5, 0.01, null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var remainingModels = store.Entries.Select(e => e.ChosenModel).ToList();
 
-        Assert.DoesNotContain("model-oldest", remainingModels);
-        Assert.Equal(3, remainingModels.Count);
-        Assert.Contains("model-newest", remainingModels);
+        Assert.DoesNotContain(expected: "model-oldest", collection: remainingModels);
+        Assert.Equal(3, actual: remainingModels.Count);
+        Assert.Contains(expected: "model-newest", collection: remainingModels);
     }
 
     [Fact]
     public async Task InitializeAsync_LoadsPriorEntriesFromStore()
     {
         var store = new FakeMemoryEntryStore();
-        await store.AppendAsync(new MemoryEntry(0, UnitVector(1, 0, 0), "model-preexisting", 0.5, 0.01, null, DateTimeOffset.UtcNow), TestContext.Current.CancellationToken);
+        await store.AppendAsync(
+            entry: new MemoryEntry(0, TaskEmbedding: UnitVector(1, 0, 0), ChosenModel: "model-preexisting", 0.5, 0.01,
+                null, CreatedAtUtc: DateTimeOffset.UtcNow), cancellationToken: TestContext.Current.CancellationToken);
 
-        var memory = CreateMemory(store, similarityThreshold: 0.9, maxNeighborCount: 10);
+        var memory = CreateMemory(store: store, 0.9, 10);
         await memory.InitializeAsync(TestContext.Current.CancellationToken);
 
         var results = memory.FindNearest(UnitVector(1, 0, 0));
 
         var match = Assert.Single(results);
-        Assert.Equal("model-preexisting", match.Entry.ChosenModel);
+        Assert.Equal(expected: "model-preexisting", actual: match.Entry.ChosenModel);
     }
 
     [Fact]
@@ -105,21 +114,22 @@ public class EmbeddingMemoryTests
     {
         var store = new FakeMemoryEntryStore();
         for (var i = 0; i < 5; i++)
-        {
-            await store.AppendAsync(new MemoryEntry(0, UnitVector(1, 0, 0), $"model-{i}", 0.5, 0.01, null, DateTimeOffset.UtcNow), TestContext.Current.CancellationToken);
-        }
+            await store.AppendAsync(
+                entry: new MemoryEntry(0, TaskEmbedding: UnitVector(1, 0, 0), ChosenModel: $"model-{i}", 0.5, 0.01,
+                    null, CreatedAtUtc: DateTimeOffset.UtcNow),
+                cancellationToken: TestContext.Current.CancellationToken);
 
-        var memory = CreateMemory(store, similarityThreshold: -1.0, maxNeighborCount: 10, capacity: 3);
+        var memory = CreateMemory(store: store, -1.0, 10, 3);
         await memory.InitializeAsync(TestContext.Current.CancellationToken);
 
         var remainingModels = store.Entries.Select(e => e.ChosenModel).ToList();
-        Assert.Equal(3, remainingModels.Count);
-        Assert.DoesNotContain("model-0", remainingModels);
-        Assert.DoesNotContain("model-1", remainingModels);
-        Assert.Contains("model-4", remainingModels);
+        Assert.Equal(3, actual: remainingModels.Count);
+        Assert.DoesNotContain(expected: "model-0", collection: remainingModels);
+        Assert.DoesNotContain(expected: "model-1", collection: remainingModels);
+        Assert.Contains(expected: "model-4", collection: remainingModels);
 
         var results = memory.FindNearest(UnitVector(1, 0, 0));
-        Assert.Equal(3, results.Count);
+        Assert.Equal(3, actual: results.Count);
     }
 
     /// <summary>
@@ -137,20 +147,24 @@ public class EmbeddingMemoryTests
         {
             EmbeddingSimilarityThreshold = -1.0,
             MaxNeighborCount = 10,
-            EmbeddingMemoryCapacity = 20_000,
+            EmbeddingMemoryCapacity = 20_000
         });
-        var memory = new EmbeddingMemory(store, monitor, new StubEmbeddingClient(), NullLogger<EmbeddingMemory>.Instance);
+        var memory = new EmbeddingMemory(store: store, optionsMonitor: monitor,
+            embeddingClient: new StubEmbeddingClient(), logger: NullLogger<EmbeddingMemory>.Instance);
         await memory.InitializeAsync(TestContext.Current.CancellationToken);
 
-        await memory.AddEntryAsync(UnitVector(1, 0, 0), "model-oldest", 0.5, 0.01, null, TestContext.Current.CancellationToken);
-        await memory.AddEntryAsync(UnitVector(1, 0, 0), "model-second", 0.5, 0.01, null, TestContext.Current.CancellationToken);
-        await memory.AddEntryAsync(UnitVector(1, 0, 0), "model-newest", 0.5, 0.01, null, TestContext.Current.CancellationToken);
+        await memory.AddEntryAsync(taskEmbedding: UnitVector(1, 0, 0), chosenModel: "model-oldest", 0.5, 0.01, null,
+            cancellationToken: TestContext.Current.CancellationToken);
+        await memory.AddEntryAsync(taskEmbedding: UnitVector(1, 0, 0), chosenModel: "model-second", 0.5, 0.01, null,
+            cancellationToken: TestContext.Current.CancellationToken);
+        await memory.AddEntryAsync(taskEmbedding: UnitVector(1, 0, 0), chosenModel: "model-newest", 0.5, 0.01, null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         monitor.Set(new RoutingOptions
         {
             EmbeddingSimilarityThreshold = -1.0,
             MaxNeighborCount = 10,
-            EmbeddingMemoryCapacity = 1,
+            EmbeddingMemoryCapacity = 1
         });
 
         // The OnChange callback fires the trim without awaiting it (see EmbeddingMemory's remarks), so
@@ -159,7 +173,7 @@ public class EmbeddingMemoryTests
         await memory.TrimToCurrentCapacityAsync(TestContext.Current.CancellationToken);
 
         var remainingModel = Assert.Single(store.Entries);
-        Assert.Equal("model-newest", remainingModel.ChosenModel);
+        Assert.Equal(expected: "model-newest", actual: remainingModel.ChosenModel);
         Assert.Single(memory.FindNearest(UnitVector(1, 0, 0)));
     }
 
@@ -168,21 +182,23 @@ public class EmbeddingMemoryTests
         double similarityThreshold,
         int maxNeighborCount,
         int capacity = 20_000,
-        string? modelIdentity = null) =>
-        new(
-            store,
-            new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions
+        string? modelIdentity = null)
+    {
+        return new EmbeddingMemory(
+            store: store,
+            optionsMonitor: new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions
             {
                 EmbeddingSimilarityThreshold = similarityThreshold,
                 MaxNeighborCount = maxNeighborCount,
-                EmbeddingMemoryCapacity = capacity,
+                EmbeddingMemoryCapacity = capacity
             }),
-            new StubEmbeddingClient(modelIdentity),
-            NullLogger<EmbeddingMemory>.Instance);
+            embeddingClient: new StubEmbeddingClient(modelIdentity),
+            logger: NullLogger<EmbeddingMemory>.Instance);
+    }
 
     private static float[] UnitVector(float x, float y, float z)
     {
-        var length = MathF.Sqrt((x * x) + (y * y) + (z * z));
+        var length = MathF.Sqrt(x * x + y * y + z * z);
         return [x / length, y / length, z / length];
     }
 
@@ -193,8 +209,10 @@ public class EmbeddingMemoryTests
 
         public IReadOnlyList<MemoryEntry> Entries => _entries;
 
-        public Task<IReadOnlyList<MemoryEntry>> LoadAllAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<MemoryEntry>>([.. _entries]);
+        public Task<IReadOnlyList<MemoryEntry>> LoadAllAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<IReadOnlyList<MemoryEntry>>([.. _entries]);
+        }
 
         public Task<MemoryEntry> AppendAsync(MemoryEntry entry, CancellationToken cancellationToken = default)
         {

@@ -1,8 +1,12 @@
 using TotallyHot.ArcRouter.PriceCatalog;
+using TotallyHot.ArcRouter.PriceCatalog.Sources;
 
 namespace TotallyHot.ArcRouter.Tests.PriceCatalog;
 
-/// <summary>Covers <see cref="PriceSourceRepository"/>'s source-toggle CRUD (enable/disable, rank, and the D4 fresh-price count).</summary>
+/// <summary>
+/// Covers <see cref="PriceSourceRepository"/>'s source-toggle CRUD (enable/disable, rank, and the D4 fresh-price
+/// count).
+/// </summary>
 public class PriceSourceRepositoryTests
 {
     [Fact]
@@ -13,13 +17,15 @@ public class PriceSourceRepositoryTests
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
         var sourceRepository = temp.CreateSourceRepository();
-        repository.UpsertPrices("litellm", 0, new[] { Price("gpt-4o", "openai", 2.50m, 10.00m) }, DateTimeOffset.UtcNow);
+        repository.UpsertPrices(sourceName: "litellm", 0,
+            prices: new[] { Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m) },
+            asOfUtc: DateTimeOffset.UtcNow);
 
-        Assert.Equal(1, sourceRepository.CountFreshPrices(TimeSpan.FromHours(24)));
+        Assert.Equal(1, actual: sourceRepository.CountFreshPrices(TimeSpan.FromHours(24)));
 
-        sourceRepository.SetSourceEnabled("litellm", enabled: false);
+        sourceRepository.SetSourceEnabled(sourceName: "litellm", false);
 
-        Assert.Equal(0, sourceRepository.CountFreshPrices(TimeSpan.FromHours(24)));
+        Assert.Equal(0, actual: sourceRepository.CountFreshPrices(TimeSpan.FromHours(24)));
     }
 
     [Fact]
@@ -30,13 +36,15 @@ public class PriceSourceRepositoryTests
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
         var sourceRepository = temp.CreateSourceRepository();
-        repository.UpsertPrices("litellm", 0, new[] { Price("gpt-4o", "openai", 2.50m, 10.00m) }, DateTimeOffset.UtcNow);
-        sourceRepository.SetSourceEnabled("litellm", enabled: false);
+        repository.UpsertPrices(sourceName: "litellm", 0,
+            prices: new[] { Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m) },
+            asOfUtc: DateTimeOffset.UtcNow);
+        sourceRepository.SetSourceEnabled(sourceName: "litellm", false);
 
         var source = sourceRepository.GetSourceStates().Single(s => s.Name == "litellm");
 
         Assert.False(source.Enabled);
-        Assert.Equal(1, source.PriceCount);
+        Assert.Equal(1, actual: source.PriceCount);
     }
 
     [Fact]
@@ -46,7 +54,7 @@ public class PriceSourceRepositoryTests
         var repository = temp.CreateSourceRepository();
 
         // openpipe, not openrouter: openrouter is a real, seeded source now.
-        Assert.False(repository.SetSourceEnabled("openpipe", enabled: true));
+        Assert.False(repository.SetSourceEnabled(sourceName: "openpipe", true));
     }
 
     [Fact]
@@ -62,8 +70,8 @@ public class PriceSourceRepositoryTests
         var states = repository.GetSourceStates();
         var openRouter = states.Single(s => s.Name == PriceCatalogOptions.OpenRouterSourceName);
         var liteLlm = states.Single(s => s.Name == PriceCatalogOptions.LiteLlmSourceName);
-        Assert.Equal(1, openRouter.PriorityScore);
-        Assert.Equal(0, liteLlm.PriorityScore);
+        Assert.Equal(1, actual: openRouter.PriorityScore);
+        Assert.Equal(0, actual: liteLlm.PriorityScore);
     }
 
     [Fact]
@@ -71,15 +79,17 @@ public class PriceSourceRepositoryTests
     {
         using var temp = new TempDatabase();
         var repository = temp.CreateSourceRepository();
-        var before = repository.GetSourceStates().ToDictionary(s => s.Name, s => s.PriorityScore);
+        var before = repository.GetSourceStates()
+            .ToDictionary(keySelector: s => s.Name, elementSelector: s => s.PriorityScore);
 
         var reordered = repository.ReorderSources([PriceCatalogOptions.LiteLlmSourceName]);
 
         // A partial list would leave the unlisted source's rank stale relative to the ones that moved -
         // rejected outright rather than applied best-effort.
         Assert.False(reordered);
-        var after = repository.GetSourceStates().ToDictionary(s => s.Name, s => s.PriorityScore);
-        Assert.Equal(before, after);
+        var after = repository.GetSourceStates()
+            .ToDictionary(keySelector: s => s.Name, elementSelector: s => s.PriorityScore);
+        Assert.Equal(expected: before, actual: after);
     }
 
     [Fact]
@@ -106,6 +116,10 @@ public class PriceSourceRepositoryTests
         Assert.False(reordered);
     }
 
-    private static TotallyHot.ArcRouter.PriceCatalog.Sources.NormalizedPrice Price(string model, string provider, decimal input, decimal output) =>
-        new(model, provider, input, output, CachedInputPrice: null, BatchInputPrice: null, BatchOutputPrice: null);
+    private static NormalizedPrice Price(string model, string provider, decimal input, decimal output)
+    {
+        return new NormalizedPrice(ModelIdentifier: model, Provider: provider, StandardInputPrice: input,
+            StandardOutputPrice: output,
+            null, null, null);
+    }
 }

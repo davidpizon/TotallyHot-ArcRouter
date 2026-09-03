@@ -22,11 +22,17 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// <param name="Language">The Phase H heuristic language label, or <see langword="null"/>.</param>
 /// <param name="IsUtility">Whether the request was classified as utility traffic.</param>
 /// <param name="PromptText">The newest user message's extracted text, or <see langword="null"/> when unavailable.</param>
-/// <param name="ResponseText">The extracted response text, or <see langword="null"/> until the response completes (or extraction fails).</param>
+/// <param name="ResponseText">
+/// The extracted response text, or <see langword="null"/> until the response completes (or
+/// extraction fails).
+/// </param>
 /// <param name="Score">The verifier's observed quality score in [0, 1], or <see langword="null"/> until backfilled.</param>
 /// <param name="Cost">The estimated dollar cost of serving this request, or <see langword="null"/> when unknown.</param>
 /// <param name="IsExploratory">Whether the routing decision was an epsilon-greedy exploratory pick.</param>
-/// <param name="Propensity">The propensity of the model actually chosen, under the policy's own arm-selection distribution.</param>
+/// <param name="Propensity">
+/// The propensity of the model actually chosen, under the policy's own arm-selection
+/// distribution.
+/// </param>
 /// <param name="InputTokens">The request's prompt token count, or <see langword="null"/> when unknown.</param>
 /// <param name="OutputTokens">The response's completion token count, or <see langword="null"/> when unknown.</param>
 /// <param name="MemoryEntryId">

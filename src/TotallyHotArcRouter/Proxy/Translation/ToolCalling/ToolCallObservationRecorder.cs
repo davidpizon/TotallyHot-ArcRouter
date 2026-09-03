@@ -3,7 +3,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// <summary>
 /// Writes back what one response revealed about how its model expresses a tool call - tier 4 of
 /// <c>docs/router/tool-call-normalization.md</c> §3.2. One instance per response; not thread-safe.
-///
 /// <para>
 /// <b>Only an evidence-bearing response is recorded.</b> A tools-carrying request whose response is
 /// ordinary prose is the overwhelmingly common case - the model simply had no reason to call a tool - and
@@ -37,8 +36,10 @@ internal sealed class ToolCallObservationRecorder
     /// Records that the model emitted real OpenAI <c>tool_calls</c> and needs no rewriting - so every
     /// later request for it reverts to unarmed byte-for-byte passthrough (performance rule 2).
     /// </summary>
-    public void RecordNative() =>
-        Record(ToolCallDialectRegistry.OpenAiNative.Name, "Response carried native tool_calls.");
+    public void RecordNative()
+    {
+        Record(dialectName: ToolCallDialectRegistry.OpenAiNative.Name, evidence: "Response carried native tool_calls.");
+    }
 
     /// <summary>
     /// Records that <paramref name="dialect"/>'s framing matched and yielded a well-shaped call, so later
@@ -48,16 +49,14 @@ internal sealed class ToolCallObservationRecorder
     public void RecordMatch(ToolCallDialect dialect)
     {
         if (_plan.IsEmulating)
-        {
             // The model framed a call in this dialect because TotallyHot.ArcRouter's own injected system prompt
             // instructed it to (Phase 5). Recording that as an observation would be circular, and worse
             // than useless: DetectionConfidence.Observed outranks the `emulated` row that produced the
             // instructions, so the next request would arrive un-emulated, the instructions would be gone,
             // and the model would emit nothing - a classification that erases the reason it was made.
             return;
-        }
 
-        Record(dialect.Name, $"Response framed a tool call in the {dialect.Name} dialect.");
+        Record(dialectName: dialect.Name, evidence: $"Response framed a tool call in the {dialect.Name} dialect.");
     }
 
     /// <summary>
@@ -66,10 +65,7 @@ internal sealed class ToolCallObservationRecorder
     /// </summary>
     private void Record(string dialectName, string evidence)
     {
-        if (!_plan.IsObserving || _recorded || _store is null)
-        {
-            return;
-        }
+        if (!_plan.IsObserving || _recorded || _store is null) return;
 
         _recorded = true;
 
@@ -82,12 +78,11 @@ internal sealed class ToolCallObservationRecorder
         // both write 1 - and concurrent first-responses are exactly the case this path exists for. It also
         // keeps a database read off the request path.
         _store.TryRecordModelCapability(new ModelToolCapability(
-            _plan.ProviderKey,
-            _plan.ModelName,
-            dialectName,
-            DetectionConfidence.Observed,
-            evidence,
-            ObservationCount: 1));
+            ProviderKey: _plan.ProviderKey,
+            ModelName: _plan.ModelName,
+            Dialect: dialectName,
+            Confidence: DetectionConfidence.Observed,
+            Evidence: evidence,
+            1));
     }
 }
-

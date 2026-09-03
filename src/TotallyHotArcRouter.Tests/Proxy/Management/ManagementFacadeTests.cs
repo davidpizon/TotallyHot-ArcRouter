@@ -1,6 +1,8 @@
+using System.Text.Json;
 using Moq;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
+using TotallyHot.ArcRouter.PriceCatalog.Sources;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Tests.PriceCatalog;
@@ -15,19 +17,25 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Management;
 /// </summary>
 public sealed class ManagementFacadeTests
 {
-    private static ModelRoutingOptions SeedOptions() => new()
+    private static ModelRoutingOptions SeedOptions()
     {
-        Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+        return new ModelRoutingOptions
         {
-            ["openai"] = new ProviderOptions
+            Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                BaseUrl = "https://api.openai.com",
-                AuthHeaderName = "Authorization",
-                Headers = [new ProviderHeader { Name = "X-Literal", Value = "literal-secret" }]
-            }
-        },
-        ModelList = [new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "openai", ProviderModelId = "gpt-5.4" }]
-    };
+                ["openai"] = new()
+                {
+                    BaseUrl = "https://api.openai.com",
+                    AuthHeaderName = "Authorization",
+                    Headers = [new ProviderHeader { Name = "X-Literal", Value = "literal-secret" }]
+                }
+            },
+            ModelList =
+            [
+                new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "openai", ProviderModelId = "gpt-5.4" }
+            ]
+        };
+    }
 
     private static ManagementFacade CreateFacade(
         IProviderConfigStore? store = null,
@@ -35,19 +43,21 @@ public sealed class ManagementFacadeTests
         PriceRepository? priceRepository = null,
         RateLimitRepository? rateLimitRepository = null,
         ModelAliasOverrideStore? overrideStore = null,
-        TimeSpan? rateLimitStalenessThreshold = null) =>
-        new(
-            store ?? new InMemoryProviderConfigStore(SeedOptions()),
-            Mock.Of<IEnvironmentVariableProvider>(),
-            new HttpClient(),
-            new ManagementFacadeDependencies
+        TimeSpan? rateLimitStalenessThreshold = null)
+    {
+        return new ManagementFacade(
+            store: store ?? new InMemoryProviderConfigStore(SeedOptions()),
+            environment: Mock.Of<IEnvironmentVariableProvider>(),
+            httpClient: new HttpClient(),
+            dependencies: new ManagementFacadeDependencies
             {
                 BudgetStore = budgetStore,
                 PriceRepository = priceRepository,
                 RateLimitRepository = rateLimitRepository,
                 OverrideStore = overrideStore,
-                RateLimitStalenessThreshold = rateLimitStalenessThreshold,
+                RateLimitStalenessThreshold = rateLimitStalenessThreshold
             });
+    }
 
     [Fact]
     public void ListProviders_NeverReturnsALockedHeaderValue()
@@ -57,8 +67,8 @@ public sealed class ManagementFacadeTests
         var response = facade.ListProviders();
 
         var header = Assert.Single(Assert.Single(response.Providers).Headers);
-        Assert.Equal("X-Literal", header.Name);
-        Assert.Equal(HeaderValueSource.Literal, header.Source);
+        Assert.Equal(expected: "X-Literal", actual: header.Name);
+        Assert.Equal(expected: HeaderValueSource.Literal, actual: header.Source);
         Assert.Null(header.ValueEnvVar);
         Assert.True(header.Locked);
         // The whole point of the lock: "literal-secret" is stored, is still sent upstream, and is not in
@@ -73,7 +83,7 @@ public sealed class ManagementFacadeTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["anthropic"] = new ProviderOptions
+                ["anthropic"] = new()
                 {
                     BaseUrl = "https://api.anthropic.com",
                     Headers = [new ProviderHeader { Name = "anthropic-version", Value = "2023-06-01", Locked = false }]
@@ -84,9 +94,9 @@ public sealed class ManagementFacadeTests
         var header = Assert.Single(Assert.Single(CreateFacade(store).ListProviders().Providers).Headers);
 
         // Public configuration must come back readable, or the editor cannot show it.
-        Assert.Equal(HeaderValueSource.Literal, header.Source);
+        Assert.Equal(expected: HeaderValueSource.Literal, actual: header.Source);
         Assert.False(header.Locked);
-        Assert.Equal("2023-06-01", header.Value);
+        Assert.Equal(expected: "2023-06-01", actual: header.Value);
     }
 
     [Fact]
@@ -94,14 +104,14 @@ public sealed class ManagementFacadeTests
     {
         // The migration guarantee: a header persisted without the flag has unknown provenance, so it must
         // stay hidden rather than become visible on upgrade.
-        var legacy = System.Text.Json.JsonSerializer.Deserialize<ProviderHeader>(
+        var legacy = JsonSerializer.Deserialize<ProviderHeader>(
             """{"Name":"X-Legacy","Value":"who-knows"}""")!;
 
         var store = new InMemoryProviderConfigStore(new ModelRoutingOptions
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["openai"] = new ProviderOptions { BaseUrl = "https://api.openai.com", Headers = [legacy] }
+                ["openai"] = new() { BaseUrl = "https://api.openai.com", Headers = [legacy] }
             }
         });
 
@@ -119,7 +129,7 @@ public sealed class ManagementFacadeTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["openai"] = new ProviderOptions
+                ["openai"] = new()
                 {
                     BaseUrl = "https://api.openai.com",
                     Headers = [new ProviderHeader { Name = "X-Env", ValueEnvVar = "SOME_VAR" }]
@@ -131,8 +141,8 @@ public sealed class ManagementFacadeTests
 
         var header = Assert.Single(Assert.Single(facade.ListProviders().Providers).Headers);
 
-        Assert.Equal(HeaderValueSource.EnvVar, header.Source);
-        Assert.Equal("SOME_VAR", header.ValueEnvVar);
+        Assert.Equal(expected: HeaderValueSource.EnvVar, actual: header.Source);
+        Assert.Equal(expected: "SOME_VAR", actual: header.ValueEnvVar);
     }
 
     [Fact]
@@ -145,10 +155,13 @@ public sealed class ManagementFacadeTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["openai"] = new ProviderOptions
+                ["openai"] = new()
                 {
                     BaseUrl = "https://api.openai.com",
-                    Headers = [new ProviderHeader { Name = "X-Both", Value = "literal-secret", ValueEnvVar = "SOME_VAR" }]
+                    Headers =
+                    [
+                        new ProviderHeader { Name = "X-Both", Value = "literal-secret", ValueEnvVar = "SOME_VAR" }
+                    ]
                 }
             },
             ModelList = []
@@ -157,7 +170,7 @@ public sealed class ManagementFacadeTests
 
         var header = Assert.Single(Assert.Single(facade.ListProviders().Providers).Headers);
 
-        Assert.Equal(HeaderValueSource.Literal, header.Source);
+        Assert.Equal(expected: HeaderValueSource.Literal, actual: header.Source);
         Assert.Null(header.ValueEnvVar);
     }
 
@@ -171,14 +184,15 @@ public sealed class ManagementFacadeTests
         // back blank must mean "keep what's there".
         var request = new ProviderWriteRequest(
             BaseUrl: "https://api.openai.com",
-            AuthHeaderName: null,
-            Headers: [new HeaderWriteRequest(Name: "X-Literal", Value: null, ValueEnvVar: null)]);
+            null,
+            Headers: [new HeaderWriteRequest(Name: "X-Literal", null, null)]);
 
-        var result = await facade.UpsertProviderAsync("openai", request, TestContext.Current.CancellationToken);
+        var result = await facade.UpsertProviderAsync(key: "openai", request: request,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         var stored = store.Snapshot.Options.Providers["openai"].Headers.Single();
-        Assert.Equal("literal-secret", stored.Value);
+        Assert.Equal(expected: "literal-secret", actual: stored.Value);
         Assert.Null(stored.ValueEnvVar);
     }
 
@@ -192,14 +206,15 @@ public sealed class ManagementFacadeTests
         // with a blank value must still preserve the stored secret, not treat it as a different header.
         var request = new ProviderWriteRequest(
             BaseUrl: "https://api.openai.com",
-            AuthHeaderName: null,
-            Headers: [new HeaderWriteRequest(Name: "x-literal", Value: null, ValueEnvVar: null)]);
+            null,
+            Headers: [new HeaderWriteRequest(Name: "x-literal", null, null)]);
 
-        var result = await facade.UpsertProviderAsync("openai", request, TestContext.Current.CancellationToken);
+        var result = await facade.UpsertProviderAsync(key: "openai", request: request,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         var stored = store.Snapshot.Options.Providers["openai"].Headers.Single();
-        Assert.Equal("literal-secret", stored.Value);
+        Assert.Equal(expected: "literal-secret", actual: stored.Value);
     }
 
     [Fact]
@@ -210,12 +225,13 @@ public sealed class ManagementFacadeTests
 
         var request = new ProviderWriteRequest(
             BaseUrl: "https://api.openai.com",
-            AuthHeaderName: null,
-            Headers: [new HeaderWriteRequest(Name: "X-Literal", Value: "new-secret", ValueEnvVar: null)]);
+            null,
+            Headers: [new HeaderWriteRequest(Name: "X-Literal", Value: "new-secret", null)]);
 
-        await facade.UpsertProviderAsync("openai", request, TestContext.Current.CancellationToken);
+        await facade.UpsertProviderAsync(key: "openai", request: request,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("new-secret", store.Snapshot.Options.Providers["openai"].Headers.Single().Value);
+        Assert.Equal(expected: "new-secret", actual: store.Snapshot.Options.Providers["openai"].Headers.Single().Value);
     }
 
     [Fact]
@@ -227,13 +243,14 @@ public sealed class ManagementFacadeTests
         // A locked header's value was never returned, so the caller could not resend it: blank keeps it.
         var request = new ProviderWriteRequest(
             BaseUrl: "https://api.openai.com",
-            AuthHeaderName: null,
-            Headers: [new HeaderWriteRequest(Name: "X-Literal", Value: null, ValueEnvVar: null, Locked: true)]);
+            null,
+            Headers: [new HeaderWriteRequest(Name: "X-Literal", null, null, true)]);
 
-        await facade.UpsertProviderAsync("openai", request, TestContext.Current.CancellationToken);
+        await facade.UpsertProviderAsync(key: "openai", request: request,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var stored = store.Snapshot.Options.Providers["openai"].Headers.Single();
-        Assert.Equal("literal-secret", stored.Value);
+        Assert.Equal(expected: "literal-secret", actual: stored.Value);
         Assert.True(stored.Locked);
     }
 
@@ -247,10 +264,11 @@ public sealed class ManagementFacadeTests
         // empty, so blank means blank. Preserving here would leave a secret the operator believes is gone.
         var request = new ProviderWriteRequest(
             BaseUrl: "https://api.openai.com",
-            AuthHeaderName: null,
-            Headers: [new HeaderWriteRequest(Name: "X-Literal", Value: null, ValueEnvVar: null, Locked: false)]);
+            null,
+            Headers: [new HeaderWriteRequest(Name: "X-Literal", null, null, false)]);
 
-        await facade.UpsertProviderAsync("openai", request, TestContext.Current.CancellationToken);
+        await facade.UpsertProviderAsync(key: "openai", request: request,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var stored = store.Snapshot.Options.Providers["openai"].Headers.Single();
         Assert.Null(stored.Value);
@@ -264,7 +282,7 @@ public sealed class ManagementFacadeTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["openai"] = new ProviderOptions
+                ["openai"] = new()
                 {
                     BaseUrl = "https://api.openai.com",
                     Headers = [new ProviderHeader { Name = "X-Literal", Value = "was-public", Locked = false }]
@@ -275,13 +293,14 @@ public sealed class ManagementFacadeTests
 
         var request = new ProviderWriteRequest(
             BaseUrl: "https://api.openai.com",
-            AuthHeaderName: null,
-            Headers: [new HeaderWriteRequest(Name: "X-Literal", Value: null, ValueEnvVar: null, Locked: true)]);
+            null,
+            Headers: [new HeaderWriteRequest(Name: "X-Literal", null, null, true)]);
 
-        await facade.UpsertProviderAsync("openai", request, TestContext.Current.CancellationToken);
+        await facade.UpsertProviderAsync(key: "openai", request: request,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var stored = store.Snapshot.Options.Providers["openai"].Headers.Single();
-        Assert.Equal("was-public", stored.Value);
+        Assert.Equal(expected: "was-public", actual: stored.Value);
         Assert.True(stored.Locked);
     }
 
@@ -295,17 +314,18 @@ public sealed class ManagementFacadeTests
         // write-only meaning rather than silently becoming readable.
         var request = new ProviderWriteRequest(
             BaseUrl: "https://api.openai.com",
-            AuthHeaderName: null,
+            null,
             Headers:
             [
-                new HeaderWriteRequest(Name: "X-Literal", Value: null, ValueEnvVar: null),
-                new HeaderWriteRequest(Name: "X-New", Value: "fresh-secret", ValueEnvVar: null)
+                new HeaderWriteRequest(Name: "X-Literal", null, null),
+                new HeaderWriteRequest(Name: "X-New", Value: "fresh-secret", null)
             ]);
 
-        await facade.UpsertProviderAsync("openai", request, TestContext.Current.CancellationToken);
+        await facade.UpsertProviderAsync(key: "openai", request: request,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var stored = store.Snapshot.Options.Providers["openai"].Headers;
-        Assert.Equal("literal-secret", stored.Single(h => h.Name == "X-Literal").Value);
+        Assert.Equal(expected: "literal-secret", actual: stored.Single(h => h.Name == "X-Literal").Value);
         Assert.True(stored.Single(h => h.Name == "X-New").Locked);
     }
 
@@ -318,10 +338,11 @@ public sealed class ManagementFacadeTests
         // An env-var header holds a variable name, not a secret - there is nothing for a lock to withhold.
         var request = new ProviderWriteRequest(
             BaseUrl: "https://api.openai.com",
-            AuthHeaderName: null,
-            Headers: [new HeaderWriteRequest(Name: "X-Literal", Value: null, ValueEnvVar: "SOME_VAR", Locked: true)]);
+            null,
+            Headers: [new HeaderWriteRequest(Name: "X-Literal", null, ValueEnvVar: "SOME_VAR", true)]);
 
-        await facade.UpsertProviderAsync("openai", request, TestContext.Current.CancellationToken);
+        await facade.UpsertProviderAsync(key: "openai", request: request,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(store.Snapshot.Options.Providers["openai"].Headers.Single().Locked);
     }
@@ -334,14 +355,15 @@ public sealed class ManagementFacadeTests
 
         var request = new ProviderWriteRequest(
             BaseUrl: "https://api.openai.com",
-            AuthHeaderName: null,
-            Headers: [new HeaderWriteRequest(Name: "X-Literal", Value: null, ValueEnvVar: "SOME_VAR")]);
+            null,
+            Headers: [new HeaderWriteRequest(Name: "X-Literal", null, ValueEnvVar: "SOME_VAR")]);
 
-        await facade.UpsertProviderAsync("openai", request, TestContext.Current.CancellationToken);
+        await facade.UpsertProviderAsync(key: "openai", request: request,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var stored = store.Snapshot.Options.Providers["openai"].Headers.Single();
         Assert.Null(stored.Value);
-        Assert.Equal("SOME_VAR", stored.ValueEnvVar);
+        Assert.Equal(expected: "SOME_VAR", actual: stored.ValueEnvVar);
     }
 
     [Fact]
@@ -349,10 +371,11 @@ public sealed class ManagementFacadeTests
     {
         var facade = CreateFacade();
 
-        var result = await facade.RemoveProviderAsync("nope", TestContext.Current.CancellationToken);
+        var result =
+            await facade.RemoveProviderAsync(key: "nope", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
-        Assert.Equal(ManagementErrorType.NotFound, result.ErrorType);
+        Assert.Equal(expected: ManagementErrorType.NotFound, actual: result.ErrorType);
     }
 
     [Fact]
@@ -362,7 +385,8 @@ public sealed class ManagementFacadeTests
 
         // The seed's only model routes to "openai". Removal takes the model with it rather than being
         // rejected, so the response reflects a config with neither the provider nor its model left.
-        var result = await facade.RemoveProviderAsync("openai", TestContext.Current.CancellationToken);
+        var result =
+            await facade.RemoveProviderAsync(key: "openai", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.Empty(result.Value!.Providers);
@@ -373,10 +397,11 @@ public sealed class ManagementFacadeTests
     {
         var facade = CreateFacade();
 
-        var result = await facade.RemoveModelAsync("no-such-model", TestContext.Current.CancellationToken);
+        var result = await facade.RemoveModelAsync(modelName: "no-such-model",
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
-        Assert.Equal(ManagementErrorType.NotFound, result.ErrorType);
+        Assert.Equal(expected: ManagementErrorType.NotFound, actual: result.ErrorType);
     }
 
     [Fact]
@@ -384,10 +409,10 @@ public sealed class ManagementFacadeTests
     {
         var facade = CreateFacade(budgetStore: null);
 
-        var result = facade.SetBudget("openai", new ProviderBudgetWriteRequest(10m, null));
+        var result = facade.SetBudget(providerKey: "openai", request: new ProviderBudgetWriteRequest(10m, null));
 
         Assert.False(result.Success);
-        Assert.Equal(ManagementErrorType.Unavailable, result.ErrorType);
+        Assert.Equal(expected: ManagementErrorType.Unavailable, actual: result.ErrorType);
     }
 
     [Fact]
@@ -396,10 +421,10 @@ public sealed class ManagementFacadeTests
         using var temp = new TempDatabase();
         var facade = CreateFacade(budgetStore: temp.CreateBudgetStore());
 
-        var result = facade.SetBudget("openai", new ProviderBudgetWriteRequest(-1m, null));
+        var result = facade.SetBudget(providerKey: "openai", request: new ProviderBudgetWriteRequest(-1m, null));
 
         Assert.False(result.Success);
-        Assert.Equal(ManagementErrorType.InvalidRequest, result.ErrorType);
+        Assert.Equal(expected: ManagementErrorType.InvalidRequest, actual: result.ErrorType);
     }
 
     [Fact]
@@ -408,10 +433,10 @@ public sealed class ManagementFacadeTests
         using var temp = new TempDatabase();
         var facade = CreateFacade(budgetStore: temp.CreateBudgetStore());
 
-        var result = facade.SetBudget("nope", new ProviderBudgetWriteRequest(10m, null));
+        var result = facade.SetBudget(providerKey: "nope", request: new ProviderBudgetWriteRequest(10m, null));
 
         Assert.False(result.Success);
-        Assert.Equal(ManagementErrorType.NotFound, result.ErrorType);
+        Assert.Equal(expected: ManagementErrorType.NotFound, actual: result.ErrorType);
     }
 
     [Fact]
@@ -422,7 +447,7 @@ public sealed class ManagementFacadeTests
         var result = facade.GetPriceResolutionDiagnosis();
 
         Assert.False(result.Success);
-        Assert.Equal(ManagementErrorType.Unavailable, result.ErrorType);
+        Assert.Equal(expected: ManagementErrorType.Unavailable, actual: result.ErrorType);
     }
 
     [Fact]
@@ -435,7 +460,7 @@ public sealed class ManagementFacadeTests
 
         Assert.True(result.Success);
         var row = Assert.Single(result.Value!);
-        Assert.Equal("gpt-5.4", row.ModelName);
+        Assert.Equal(expected: "gpt-5.4", actual: row.ModelName);
         Assert.False(row.Resolved);
         Assert.False(row.IsApproximate);
     }
@@ -445,10 +470,10 @@ public sealed class ManagementFacadeTests
     {
         using var temp = new TempDatabase();
         var repository = temp.CreateRepository();
-        var price = new TotallyHot.ArcRouter.PriceCatalog.Sources.NormalizedPrice(
-            ModelIdentifier: "gpt-5.4", Provider: "openai", StandardInputPrice: 2m, StandardOutputPrice: 6m,
-            CachedInputPrice: null, BatchInputPrice: null, BatchOutputPrice: null);
-        repository.UpsertPrices("litellm", 0, [price], DateTimeOffset.UtcNow);
+        var price = new NormalizedPrice(
+            ModelIdentifier: "gpt-5.4", Provider: "openai", 2m, 6m,
+            null, null, null);
+        repository.UpsertPrices(sourceName: "litellm", 0, prices: [price], asOfUtc: DateTimeOffset.UtcNow);
         var facade = CreateFacade(priceRepository: repository);
 
         var row = Assert.Single(facade.GetPriceResolutionDiagnosis().Value!);
@@ -465,7 +490,7 @@ public sealed class ManagementFacadeTests
         var result = facade.ListPriceOverrides();
 
         Assert.False(result.Success);
-        Assert.Equal(ManagementErrorType.Unavailable, result.ErrorType);
+        Assert.Equal(expected: ManagementErrorType.Unavailable, actual: result.ErrorType);
     }
 
     [Fact]
@@ -474,10 +499,11 @@ public sealed class ManagementFacadeTests
         using var temp = new TempDatabase();
         var facade = CreateFacade(overrideStore: temp.CreateOverrideStore());
 
-        var result = facade.SetPriceOverride(new PriceOverrideWriteRequest("LiteLLM", "big-pickle", "not-configured"));
+        var result = facade.SetPriceOverride(new PriceOverrideWriteRequest(SourceName: "LiteLLM",
+            AggregatorModelKey: "big-pickle", ModelName: "not-configured"));
 
         Assert.False(result.Success);
-        Assert.Equal(ManagementErrorType.InvalidRequest, result.ErrorType);
+        Assert.Equal(expected: ManagementErrorType.InvalidRequest, actual: result.ErrorType);
     }
 
     [Fact]
@@ -486,10 +512,11 @@ public sealed class ManagementFacadeTests
         using var temp = new TempDatabase();
         var facade = CreateFacade(overrideStore: temp.CreateOverrideStore());
 
-        var result = facade.SetPriceOverride(new PriceOverrideWriteRequest("", "big-pickle", "gpt-5.4"));
+        var result = facade.SetPriceOverride(new PriceOverrideWriteRequest(SourceName: "",
+            AggregatorModelKey: "big-pickle", ModelName: "gpt-5.4"));
 
         Assert.False(result.Success);
-        Assert.Equal(ManagementErrorType.InvalidRequest, result.ErrorType);
+        Assert.Equal(expected: ManagementErrorType.InvalidRequest, actual: result.ErrorType);
     }
 
     [Fact]
@@ -498,12 +525,15 @@ public sealed class ManagementFacadeTests
         using var temp = new TempDatabase();
         var facade = CreateFacade(overrideStore: temp.CreateOverrideStore());
 
-        var result = facade.SetPriceOverride(new PriceOverrideWriteRequest("LiteLLM", "big-pickle", "gpt-5.4"));
+        var result = facade.SetPriceOverride(new PriceOverrideWriteRequest(SourceName: "LiteLLM",
+            AggregatorModelKey: "big-pickle", ModelName: "gpt-5.4"));
 
         Assert.True(result.Success);
         var o = Assert.Single(result.Value!);
-        Assert.Equal(new ModelAliasOverride("LiteLLM", "big-pickle", "gpt-5.4"), o);
-        Assert.Equal(o, Assert.Single(facade.ListPriceOverrides().Value!));
+        Assert.Equal(
+            expected: new ModelAliasOverride(SourceName: "LiteLLM", AggregatorModelKey: "big-pickle",
+                ModelName: "gpt-5.4"), actual: o);
+        Assert.Equal(expected: o, actual: Assert.Single(facade.ListPriceOverrides().Value!));
     }
 
     [Fact]
@@ -512,10 +542,10 @@ public sealed class ManagementFacadeTests
         using var temp = new TempDatabase();
         var facade = CreateFacade(overrideStore: temp.CreateOverrideStore());
 
-        var result = facade.RemovePriceOverride("LiteLLM", "big-pickle");
+        var result = facade.RemovePriceOverride(sourceName: "LiteLLM", aggregatorModelKey: "big-pickle");
 
         Assert.False(result.Success);
-        Assert.Equal(ManagementErrorType.NotFound, result.ErrorType);
+        Assert.Equal(expected: ManagementErrorType.NotFound, actual: result.ErrorType);
     }
 
     [Fact]
@@ -523,9 +553,10 @@ public sealed class ManagementFacadeTests
     {
         using var temp = new TempDatabase();
         var facade = CreateFacade(overrideStore: temp.CreateOverrideStore());
-        facade.SetPriceOverride(new PriceOverrideWriteRequest("LiteLLM", "big-pickle", "gpt-5.4"));
+        facade.SetPriceOverride(new PriceOverrideWriteRequest(SourceName: "LiteLLM", AggregatorModelKey: "big-pickle",
+            ModelName: "gpt-5.4"));
 
-        var result = facade.RemovePriceOverride("LiteLLM", "big-pickle");
+        var result = facade.RemovePriceOverride(sourceName: "LiteLLM", aggregatorModelKey: "big-pickle");
 
         Assert.True(result.Success);
         Assert.Empty(result.Value!);
@@ -538,12 +569,12 @@ public sealed class ManagementFacadeTests
         var budgetStore = temp.CreateBudgetStore();
         var facade = CreateFacade(budgetStore: budgetStore);
 
-        var result = facade.SetBudget("openai", new ProviderBudgetWriteRequest(500m, 1_000_000L));
+        var result = facade.SetBudget(providerKey: "openai", request: new ProviderBudgetWriteRequest(500m, 1_000_000L));
 
         Assert.True(result.Success);
         var provider = result.Value!.Providers.Single();
-        Assert.Equal(500m, provider.DollarCap);
-        Assert.Equal(1_000_000L, provider.TokenCap);
+        Assert.Equal(500m, actual: provider.DollarCap);
+        Assert.Equal(1_000_000L, actual: provider.TokenCap);
     }
 
     [Fact]
@@ -572,18 +603,18 @@ public sealed class ManagementFacadeTests
     {
         using var temp = new TempDatabase();
         var repository = temp.CreateRateLimitRepository();
-        var observedAt = new DateTimeOffset(2026, 3, 1, 12, 0, 0, TimeSpan.Zero);
+        var observedAt = new DateTimeOffset(2026, 3, 1, 12, 0, 0, offset: TimeSpan.Zero);
         repository.UpsertRateLimitHeaders(
-            "openai",
-            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
-            observedAt);
+            providerKey: "openai",
+            headers: [new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-tokens-remaining", HeaderValue: "1000")],
+            observedAtUtc: observedAt);
         var facade = CreateFacade(rateLimitRepository: repository);
 
         var provider = facade.ListProviders().Providers.Single();
 
         Assert.NotNull(provider.RateLimit);
-        Assert.Equal(observedAt, provider.RateLimit!.ObservedAtUtc);
-        Assert.Equal(1000, provider.RateLimit.Snapshot.StandardDimensions["tokens"].Remaining);
+        Assert.Equal(expected: observedAt, actual: provider.RateLimit!.ObservedAtUtc);
+        Assert.Equal(1000, actual: provider.RateLimit.Snapshot.StandardDimensions["tokens"].Remaining);
     }
 
     [Fact]
@@ -592,9 +623,9 @@ public sealed class ManagementFacadeTests
         using var temp = new TempDatabase();
         var repository = temp.CreateRateLimitRepository();
         repository.UpsertRateLimitHeaders(
-            "openai",
-            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
-            DateTimeOffset.UtcNow.AddMinutes(-1));
+            providerKey: "openai",
+            headers: [new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-tokens-remaining", HeaderValue: "1000")],
+            observedAtUtc: DateTimeOffset.UtcNow.AddMinutes(-1));
         var facade = CreateFacade(rateLimitRepository: repository);
 
         var provider = facade.ListProviders().Providers.Single();
@@ -608,10 +639,11 @@ public sealed class ManagementFacadeTests
         using var temp = new TempDatabase();
         var repository = temp.CreateRateLimitRepository();
         repository.UpsertRateLimitHeaders(
-            "openai",
-            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
-            DateTimeOffset.UtcNow.AddMinutes(-30));
-        var facade = CreateFacade(rateLimitRepository: repository, rateLimitStalenessThreshold: TimeSpan.FromMinutes(15));
+            providerKey: "openai",
+            headers: [new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-tokens-remaining", HeaderValue: "1000")],
+            observedAtUtc: DateTimeOffset.UtcNow.AddMinutes(-30));
+        var facade = CreateFacade(rateLimitRepository: repository,
+            rateLimitStalenessThreshold: TimeSpan.FromMinutes(15));
 
         var provider = facade.ListProviders().Providers.Single();
 
@@ -629,9 +661,9 @@ public sealed class ManagementFacadeTests
         var repository = temp.CreateRateLimitRepository();
         var observedAt = DateTimeOffset.UtcNow.AddMinutes(-2);
         repository.UpsertRateLimitHeaders(
-            "openai",
-            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
-            observedAt);
+            providerKey: "openai",
+            headers: [new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-tokens-remaining", HeaderValue: "1000")],
+            observedAtUtc: observedAt);
         var facade = CreateFacade(rateLimitRepository: repository);
 
         var first = facade.ListProviders().Providers.Single().RateLimit;
@@ -639,9 +671,9 @@ public sealed class ManagementFacadeTests
 
         Assert.NotNull(first);
         Assert.NotNull(second);
-        Assert.Equal(observedAt, first!.ObservedAtUtc);
-        Assert.Equal(observedAt, second!.ObservedAtUtc);
-        Assert.Equal(1000, second.Snapshot.StandardDimensions["tokens"].Remaining);
+        Assert.Equal(expected: observedAt, actual: first!.ObservedAtUtc);
+        Assert.Equal(expected: observedAt, actual: second!.ObservedAtUtc);
+        Assert.Equal(1000, actual: second.Snapshot.StandardDimensions["tokens"].Remaining);
     }
 
     [Fact]
@@ -652,13 +684,13 @@ public sealed class ManagementFacadeTests
         var earlier = DateTimeOffset.UtcNow.AddMinutes(-20);
         var later = DateTimeOffset.UtcNow.AddMinutes(-10);
         repository.UpsertRateLimitHeaders(
-            "openai",
-            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "10000")],
-            earlier);
+            providerKey: "openai",
+            headers: [new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-tokens-remaining", HeaderValue: "10000")],
+            observedAtUtc: earlier);
         repository.UpsertRateLimitHeaders(
-            "openai",
-            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "8000")],
-            later);
+            providerKey: "openai",
+            headers: [new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-tokens-remaining", HeaderValue: "8000")],
+            observedAtUtc: later);
         var facade = CreateFacade(rateLimitRepository: repository);
 
         var rateLimit = facade.ListProviders().Providers.Single().RateLimit!;
@@ -674,9 +706,9 @@ public sealed class ManagementFacadeTests
         using var temp = new TempDatabase();
         var repository = temp.CreateRateLimitRepository();
         repository.UpsertRateLimitHeaders(
-            "openai",
-            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
-            DateTimeOffset.UtcNow.AddMinutes(-1));
+            providerKey: "openai",
+            headers: [new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-tokens-remaining", HeaderValue: "1000")],
+            observedAtUtc: DateTimeOffset.UtcNow.AddMinutes(-1));
         var facade = CreateFacade(rateLimitRepository: repository);
 
         var rateLimit = facade.ListProviders().Providers.Single().RateLimit!;
@@ -690,10 +722,10 @@ public sealed class ManagementFacadeTests
         using var temp = new TempDatabase();
         var facade = CreateFacade(rateLimitRepository: temp.CreateRateLimitRepository());
 
-        var result = facade.GetRateLimitHistory("does-not-exist", hours: 6);
+        var result = facade.GetRateLimitHistory(providerKey: "does-not-exist", 6);
 
         Assert.False(result.Success);
-        Assert.Equal(ManagementErrorType.NotFound, result.ErrorType);
+        Assert.Equal(expected: ManagementErrorType.NotFound, actual: result.ErrorType);
     }
 
     [Fact]
@@ -701,10 +733,10 @@ public sealed class ManagementFacadeTests
     {
         var facade = CreateFacade(rateLimitRepository: null);
 
-        var result = facade.GetRateLimitHistory("openai", hours: 6);
+        var result = facade.GetRateLimitHistory(providerKey: "openai", 6);
 
         Assert.False(result.Success);
-        Assert.Equal(ManagementErrorType.Unavailable, result.ErrorType);
+        Assert.Equal(expected: ManagementErrorType.Unavailable, actual: result.ErrorType);
     }
 
     [Fact]
@@ -715,25 +747,25 @@ public sealed class ManagementFacadeTests
         var first = DateTimeOffset.UtcNow.AddMinutes(-5);
         var second = DateTimeOffset.UtcNow.AddMinutes(-3);
         repository.UpsertRateLimitHeaders(
-            "openai",
-            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
-            first);
+            providerKey: "openai",
+            headers: [new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-tokens-remaining", HeaderValue: "1000")],
+            observedAtUtc: first);
         repository.UpsertRateLimitHeaders(
-            "openai",
-            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "900")],
-            second);
+            providerKey: "openai",
+            headers: [new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-tokens-remaining", HeaderValue: "900")],
+            observedAtUtc: second);
         var facade = CreateFacade(rateLimitRepository: repository);
 
-        var result = facade.GetRateLimitHistory("openai", hours: 1);
+        var result = facade.GetRateLimitHistory(providerKey: "openai", 1);
 
         Assert.True(result.Success);
         var points = result.Value!.Dimensions["tokens"];
-        Assert.Equal(3, points.Count);
-        Assert.Equal(1000, points[0].Remaining);
+        Assert.Equal(3, actual: points.Count);
+        Assert.Equal(1000, actual: points[0].Remaining);
         Assert.Null(points[1].Remaining);
         Assert.Null(points[1].Limit);
-        Assert.Equal(points[0].BucketUtc.AddMinutes(1), points[1].BucketUtc);
-        Assert.Equal(900, points[2].Remaining);
+        Assert.Equal(expected: points[0].BucketUtc.AddMinutes(1), actual: points[1].BucketUtc);
+        Assert.Equal(900, actual: points[2].Remaining);
     }
 
     [Fact]
@@ -744,22 +776,22 @@ public sealed class ManagementFacadeTests
         var first = DateTimeOffset.UtcNow.AddMinutes(-2);
         var second = DateTimeOffset.UtcNow.AddMinutes(-1);
         repository.UpsertRateLimitHeaders(
-            "openai",
-            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000")],
-            first);
+            providerKey: "openai",
+            headers: [new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-tokens-remaining", HeaderValue: "1000")],
+            observedAtUtc: first);
         repository.UpsertRateLimitHeaders(
-            "openai",
-            [new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "900")],
-            second);
+            providerKey: "openai",
+            headers: [new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-tokens-remaining", HeaderValue: "900")],
+            observedAtUtc: second);
         var facade = CreateFacade(rateLimitRepository: repository);
 
-        var result = facade.GetRateLimitHistory("openai", hours: 1);
+        var result = facade.GetRateLimitHistory(providerKey: "openai", 1);
 
         Assert.True(result.Success);
         var points = result.Value!.Dimensions["tokens"];
-        Assert.Equal(2, points.Count);
-        Assert.Equal(1000, points[0].Remaining);
-        Assert.Equal(900, points[1].Remaining);
+        Assert.Equal(2, actual: points.Count);
+        Assert.Equal(1000, actual: points[0].Remaining);
+        Assert.Equal(900, actual: points[1].Remaining);
     }
 
     [Fact]
@@ -774,32 +806,33 @@ public sealed class ManagementFacadeTests
         var first = DateTimeOffset.UtcNow.AddMinutes(-2);
         var second = DateTimeOffset.UtcNow.AddMinutes(-1);
         repository.UpsertRateLimitHeaders(
-            "openai",
+            providerKey: "openai",
+            headers:
             [
-                new RateLimitHeaderRow("anthropic-ratelimit-tokens-remaining", "1000"),
-                new RateLimitHeaderRow("anthropic-ratelimit-requests-remaining", "50"),
+                new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-tokens-remaining", HeaderValue: "1000"),
+                new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-requests-remaining", HeaderValue: "50")
             ],
-            first);
+            observedAtUtc: first);
         repository.UpsertRateLimitHeaders(
-            "openai",
-            [new RateLimitHeaderRow("anthropic-ratelimit-requests-remaining", "49")],
-            second);
+            providerKey: "openai",
+            headers: [new RateLimitHeaderRow(HeaderName: "anthropic-ratelimit-requests-remaining", HeaderValue: "49")],
+            observedAtUtc: second);
         var facade = CreateFacade(rateLimitRepository: repository);
 
-        var result = facade.GetRateLimitHistory("openai", hours: 1);
+        var result = facade.GetRateLimitHistory(providerKey: "openai", 1);
 
         Assert.True(result.Success);
         var tokenPoints = result.Value!.Dimensions["tokens"];
-        Assert.Equal(2, tokenPoints.Count);
-        Assert.Equal(1000, tokenPoints[0].Remaining);
+        Assert.Equal(2, actual: tokenPoints.Count);
+        Assert.Equal(1000, actual: tokenPoints[0].Remaining);
         Assert.Null(tokenPoints[1].Remaining);
         Assert.Null(tokenPoints[1].Limit);
-        Assert.Equal(tokenPoints[0].BucketUtc.AddMinutes(1), tokenPoints[1].BucketUtc);
+        Assert.Equal(expected: tokenPoints[0].BucketUtc.AddMinutes(1), actual: tokenPoints[1].BucketUtc);
 
         var requestPoints = result.Value.Dimensions["requests"];
-        Assert.Equal(2, requestPoints.Count);
-        Assert.Equal(50, requestPoints[0].Remaining);
-        Assert.Equal(49, requestPoints[1].Remaining);
+        Assert.Equal(2, actual: requestPoints.Count);
+        Assert.Equal(50, actual: requestPoints[0].Remaining);
+        Assert.Equal(49, actual: requestPoints[1].Remaining);
     }
 
     [Fact]
@@ -818,13 +851,13 @@ public sealed class ManagementFacadeTests
     {
         using var temp = new TempDatabase();
         var budgetStore = temp.CreateBudgetStore();
-        var usageAt = new DateTimeOffset(2026, 3, 1, 8, 0, 0, TimeSpan.Zero);
-        await budgetStore.RecordUsageAsync("openai", 1m, 10, 5, null, null, usageAt, TestContext.Current.CancellationToken);
+        var usageAt = new DateTimeOffset(2026, 3, 1, 8, 0, 0, offset: TimeSpan.Zero);
+        await budgetStore.RecordUsageAsync(providerKey: "openai", 1m, 10, 5, null, null, usageAtUtc: usageAt,
+            cancellationToken: TestContext.Current.CancellationToken);
         var facade = CreateFacade(budgetStore: budgetStore);
 
         var provider = facade.ListProviders().Providers.Single();
 
-        Assert.Equal(usageAt, provider.UsageLastRecordedAtUtc);
+        Assert.Equal(expected: usageAt, actual: provider.UsageLastRecordedAtUtc);
     }
 }
-

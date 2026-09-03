@@ -34,13 +34,13 @@ public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore, IModelCo
     // an accidental payload from being persisted whole.
     private const int MaxEvidenceLength = 200;
 
-    private readonly ToolCallCapabilityRepository _repository;
-    private readonly ILogger<ToolCallCapabilityStore> _logger;
-
     // The three capability tables' snapshots bundled into one record (docs/router/code-smell-refactoring-plan.md
     // M2) so Reload's swap is a single atomic reference assignment via SnapshotCache<T>, rather than three
     // separately-swapped volatile fields a reader could observe half-updated across.
     private readonly SnapshotCache<CapabilitySnapshots> _cache = new(CapabilitySnapshots.Empty);
+    private readonly ILogger<ToolCallCapabilityStore> _logger;
+
+    private readonly ToolCallCapabilityRepository _repository;
 
     /// <summary>Initializes a new instance of the <see cref="ToolCallCapabilityStore"/> class with empty snapshots.</summary>
     public ToolCallCapabilityStore(ToolCallCapabilityRepository repository, ILogger<ToolCallCapabilityStore> logger)
@@ -52,61 +52,39 @@ public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore, IModelCo
         _logger = logger;
     }
 
-    /// <summary>Raised after a capability has been persisted and the snapshot swapped.</summary>
-    public event Action? Changed;
-
-    /// <summary>
-    /// Re-reads all three capability tables and swaps the snapshots. Called once at startup, and after each
-    /// write so the cache reflects what was actually persisted rather than what was requested - which
-    /// matters here because a write can be silently rejected by the confidence gate.
-    /// </summary>
-    public void Reload() =>
-        _cache.Rebuild(() => new CapabilitySnapshots(
-            Models: _repository.GetModelCapabilities()
-                .ToDictionary(c => new ModelCapabilityKey(c.ProviderKey, c.ModelName), c => c),
-            Providers: _repository.GetProviderCapabilities()
-                .ToDictionary(c => c.ProviderKey, c => c, StringComparer.OrdinalIgnoreCase),
-            ContextWindows: _repository.GetModelContextWindows()
-                .ToDictionary(w => new ModelCapabilityKey(w.ProviderKey, w.ModelName), w => w)));
-
-    /// <inheritdoc />
-    public ModelToolCapability? GetModelCapability(string providerKey, string modelName)
-    {
-        if (string.IsNullOrWhiteSpace(providerKey) || string.IsNullOrWhiteSpace(modelName))
-        {
-            return null;
-        }
-
-        return _cache.Current.Models.TryGetValue(new ModelCapabilityKey(providerKey, modelName), out var capability)
-            ? capability
-            : null;
-    }
-
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public ModelContextWindow? GetModelContextWindow(string providerKey, string modelName)
     {
-        if (string.IsNullOrWhiteSpace(providerKey) || string.IsNullOrWhiteSpace(modelName))
-        {
-            return null;
-        }
+        if (string.IsNullOrWhiteSpace(providerKey) || string.IsNullOrWhiteSpace(modelName)) return null;
 
-        return _cache.Current.ContextWindows.TryGetValue(new ModelCapabilityKey(providerKey, modelName), out var window)
+        return _cache.Current.ContextWindows.TryGetValue(
+            key: new ModelCapabilityKey(providerKey: providerKey, modelName: modelName), value: out var window)
             ? window
             : null;
     }
 
-    /// <inheritdoc />
-    public ProviderEndpointCapabilities? GetProviderCapabilities(string providerKey)
+    /// <inheritdoc/>
+    public ModelToolCapability? GetModelCapability(string providerKey, string modelName)
     {
-        if (string.IsNullOrWhiteSpace(providerKey))
-        {
-            return null;
-        }
+        if (string.IsNullOrWhiteSpace(providerKey) || string.IsNullOrWhiteSpace(modelName)) return null;
 
-        return _cache.Current.Providers.TryGetValue(providerKey, out var capabilities) ? capabilities : null;
+        return _cache.Current.Models.TryGetValue(
+            key: new ModelCapabilityKey(providerKey: providerKey, modelName: modelName), value: out var capability)
+            ? capability
+            : null;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
+    public ProviderEndpointCapabilities? GetProviderCapabilities(string providerKey)
+    {
+        if (string.IsNullOrWhiteSpace(providerKey)) return null;
+
+        return _cache.Current.Providers.TryGetValue(key: providerKey, value: out var capabilities)
+            ? capabilities
+            : null;
+    }
+
+    /// <inheritdoc/>
     public bool TryRecordModelCapability(ModelToolCapability capability)
     {
         ArgumentNullException.ThrowIfNull(capability);
@@ -120,14 +98,14 @@ public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore, IModelCo
         // found on disk is corruption that must not take the proxy down mid-request. This mirrors
         // ProviderBudgetStore.SetBudget, which likewise throws ArgumentOutOfRangeException on a negative cap
         // rather than silently coercing it.
-        ArgumentOutOfRangeException.ThrowIfNegative(capability.ObservationCount, nameof(capability));
+        ArgumentOutOfRangeException.ThrowIfNegative(value: capability.ObservationCount, paramName: nameof(capability));
 
         // A default(DateTimeOffset) reads back as "very old" and would make the row look indefinitely
         // stale, so stamp it here rather than making every caller remember to.
         var stamped = capability with
         {
             Evidence = Truncate(capability.Evidence),
-            DetectedAtUtc = capability.DetectedAtUtc == default ? DateTimeOffset.UtcNow : capability.DetectedAtUtc,
+            DetectedAtUtc = capability.DetectedAtUtc == default ? DateTimeOffset.UtcNow : capability.DetectedAtUtc
         };
 
         var written = _repository.TryUpsertModelCapability(stamped);
@@ -145,6 +123,7 @@ public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore, IModelCo
             Reload();
 
             _logger.LogDebug(
+                message:
                 "Tool-call capability for {Provider}/{Model} was not recorded as {Dialect}: an existing higher-confidence classification takes precedence.",
                 SanitizeForLog(stamped.ProviderKey),
                 SanitizeForLog(stamped.ModelName),
@@ -155,7 +134,7 @@ public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore, IModelCo
         Reload();
 
         _logger.LogInformation(
-            "Tool-call dialect for {Provider}/{Model} recorded as {Dialect} ({Confidence}).",
+            message: "Tool-call dialect for {Provider}/{Model} recorded as {Dialect} ({Confidence}).",
             SanitizeForLog(stamped.ProviderKey),
             SanitizeForLog(stamped.ModelName),
             SanitizeForLog(stamped.Dialect),
@@ -163,6 +142,30 @@ public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore, IModelCo
 
         Changed?.Invoke();
         return true;
+    }
+
+    /// <summary>Raised after a capability has been persisted and the snapshot swapped.</summary>
+    public event Action? Changed;
+
+    /// <summary>
+    /// Re-reads all three capability tables and swaps the snapshots. Called once at startup, and after each
+    /// write so the cache reflects what was actually persisted rather than what was requested - which
+    /// matters here because a write can be silently rejected by the confidence gate.
+    /// </summary>
+    public void Reload()
+    {
+        _cache.Rebuild(() => new CapabilitySnapshots(
+            Models: _repository.GetModelCapabilities()
+                .ToDictionary(
+                    keySelector: c => new ModelCapabilityKey(providerKey: c.ProviderKey, modelName: c.ModelName),
+                    elementSelector: c => c),
+            Providers: _repository.GetProviderCapabilities()
+                .ToDictionary(keySelector: c => c.ProviderKey, elementSelector: c => c,
+                    comparer: StringComparer.OrdinalIgnoreCase),
+            ContextWindows: _repository.GetModelContextWindows()
+                .ToDictionary(
+                    keySelector: w => new ModelCapabilityKey(providerKey: w.ProviderKey, modelName: w.ModelName),
+                    elementSelector: w => w)));
     }
 
     /// <summary>
@@ -186,10 +189,11 @@ public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore, IModelCo
         ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
         ArgumentException.ThrowIfNullOrWhiteSpace(modelName);
 
-        _repository.DeleteModelCapability(providerKey, modelName);
+        _repository.DeleteModelCapability(providerKey: providerKey, modelName: modelName);
         Reload();
 
         _logger.LogInformation(
+            message:
             "Tool-call dialect override for {Provider}/{Model} was cleared; the model returns to automatic detection.",
             SanitizeForLog(providerKey),
             SanitizeForLog(modelName));
@@ -215,6 +219,7 @@ public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore, IModelCo
         Reload();
 
         _logger.LogInformation(
+            message:
             "Endpoint capabilities for provider {Provider} scanned: openai={OpenAi}, lmstudio={LmStudio}, ollama={Ollama}, anthropic={Anthropic}.",
             SanitizeForLog(stamped.ProviderKey),
             stamped.OpenAiCompatible,
@@ -248,20 +253,21 @@ public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore, IModelCo
         ArgumentNullException.ThrowIfNull(window);
         ArgumentException.ThrowIfNullOrWhiteSpace(window.ProviderKey);
         ArgumentException.ThrowIfNullOrWhiteSpace(window.ModelName);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(window.ContextLength, nameof(window));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(value: window.ContextLength, paramName: nameof(window));
 
         // A default(DateTimeOffset) reads back as "very old" and would make the row look indefinitely
         // stale, so stamp it here rather than making every caller remember to - same as the dialect path.
         var stamped = window with
         {
             Evidence = Truncate(window.Evidence),
-            DetectedAtUtc = window.DetectedAtUtc == default ? DateTimeOffset.UtcNow : window.DetectedAtUtc,
+            DetectedAtUtc = window.DetectedAtUtc == default ? DateTimeOffset.UtcNow : window.DetectedAtUtc
         };
 
         _repository.UpsertModelContextWindow(stamped);
         Reload();
 
         _logger.LogInformation(
+            message:
             "Context window for {Provider}/{Model} recorded as {ContextLength} tokens (architecture {Architecture}).",
             SanitizeForLog(stamped.ProviderKey),
             SanitizeForLog(stamped.ModelName),
@@ -272,10 +278,12 @@ public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore, IModelCo
     }
 
     /// <summary>Caps evidence length, so an accidentally-passed payload is not persisted whole.</summary>
-    private static string? Truncate(string? evidence) =>
-        evidence is { Length: > MaxEvidenceLength }
+    private static string? Truncate(string? evidence)
+    {
+        return evidence is { Length: > MaxEvidenceLength }
             ? evidence[..MaxEvidenceLength]
             : evidence;
+    }
 
     /// <summary>
     /// Strips CR/LF from a config-controlled key before it enters a log template, so a crafted provider or
@@ -283,8 +291,10 @@ public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore, IModelCo
     /// tainted value directly is the sanitizer shape the analysis recognizes - mirrors
     /// <c>ProxyMiddleware</c>'s and <c>ProviderBudgetStore</c>'s own <c>SanitizeForLog</c>.
     /// </summary>
-    private static string SanitizeForLog(string value) =>
-        value.Replace("\r", " ").Replace("\n", " ");
+    private static string SanitizeForLog(string value)
+    {
+        return value.Replace(oldValue: "\r", newValue: " ").Replace(oldValue: "\n", newValue: " ");
+    }
 }
 
 /// <summary>
@@ -305,9 +315,9 @@ internal sealed record CapabilitySnapshots(
 {
     /// <summary>The all-empty snapshot every store starts with before its first <see cref="ToolCallCapabilityStore.Reload"/>.</summary>
     public static CapabilitySnapshots Empty { get; } = new(
-        new Dictionary<ModelCapabilityKey, ModelToolCapability>(),
-        new Dictionary<string, ProviderEndpointCapabilities>(StringComparer.OrdinalIgnoreCase),
-        new Dictionary<ModelCapabilityKey, ModelContextWindow>());
+        Models: new Dictionary<ModelCapabilityKey, ModelToolCapability>(),
+        Providers: new Dictionary<string, ProviderEndpointCapabilities>(StringComparer.OrdinalIgnoreCase),
+        ContextWindows: new Dictionary<ModelCapabilityKey, ModelContextWindow>());
 }
 
 /// <summary>
@@ -343,9 +353,11 @@ public readonly record struct ModelCapabilityKey
     /// against a value as unequal, so a <c>default</c> key compares correctly rather than throwing.
     /// </summary>
     /// <param name="other">The key to compare against.</param>
-    public bool Equals(ModelCapabilityKey other) =>
-        StringComparer.OrdinalIgnoreCase.Equals(ProviderKey, other.ProviderKey) &&
-        StringComparer.OrdinalIgnoreCase.Equals(ModelName, other.ModelName);
+    public bool Equals(ModelCapabilityKey other)
+    {
+        return StringComparer.OrdinalIgnoreCase.Equals(x: ProviderKey, y: other.ProviderKey) &&
+               StringComparer.OrdinalIgnoreCase.Equals(x: ModelName, y: other.ModelName);
+    }
 
     /// <summary>
     /// Hashes both halves case-insensitively, tolerating nulls.
@@ -359,8 +371,10 @@ public readonly record struct ModelCapabilityKey
     /// not assumed), which would turn merely inserting a default key into a dictionary into a crash. A key
     /// type that is public - as this one is, to satisfy the public store's signature - has to be total here.
     /// </remarks>
-    public override int GetHashCode() => HashCode.Combine(
-        ProviderKey is null ? 0 : StringComparer.OrdinalIgnoreCase.GetHashCode(ProviderKey),
-        ModelName is null ? 0 : StringComparer.OrdinalIgnoreCase.GetHashCode(ModelName));
+    public override int GetHashCode()
+    {
+        return HashCode.Combine(
+            value1: ProviderKey is null ? 0 : StringComparer.OrdinalIgnoreCase.GetHashCode(ProviderKey),
+            value2: ModelName is null ? 0 : StringComparer.OrdinalIgnoreCase.GetHashCode(ModelName));
+    }
 }
-

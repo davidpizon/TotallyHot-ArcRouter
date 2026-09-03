@@ -1,9 +1,10 @@
-using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
+using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tests.Proxy;
@@ -19,7 +20,6 @@ namespace TotallyHot.ArcRouter.Tests.Integration;
 /// <see cref="Assert.SkipUnless"/> when it isn't reachable at <see cref="SidecarBaseUrl"/>, rather
 /// than failing, since "sidecar not running" is an expected, non-broken state in CI and on most
 /// contributors' machines.
-///
 /// All four pillars are now built and covered by real parity tests here: unified API
 /// translation passthrough, basic token/cost tracking, the Local Proxy CLI single-model override, and -
 /// originally the Simple Local Fallbacks work, since superseded by the Circuit Breaker
@@ -29,7 +29,7 @@ namespace TotallyHot.ArcRouter.Tests.Integration;
 /// the live sidecar.
 /// </summary>
 [Collection("ProxyLifecycle")]
-[Trait("Category", "Integration")]
+[Trait(name: "Category", value: "Integration")]
 public class LiteLlmParityTests
 {
     // Explicit IPv4 loopback rather than "localhost": on Windows, "localhost" resolves to IPv6 (::1)
@@ -38,6 +38,7 @@ public class LiteLlmParityTests
     // silently skip. 127.0.0.1 pins the loopback the sidecar is actually reachable on.
     private const string SidecarBaseUrl = "http://127.0.0.1:4000";
     private const string SidecarHealthUrl = SidecarBaseUrl + "/health/liveliness";
+
     private const string SkipReason =
         "litellm-sidecar not reachable at " + SidecarBaseUrl + " - run `docker compose up` in " +
         "litellm-sidecar/ first (see litellm-sidecar/README.md). This sidecar is dev/test-only " +
@@ -55,7 +56,7 @@ public class LiteLlmParityTests
     [Fact]
     public async Task Proxy_ForwardsChatCompletion_ToLiteLlmSidecar_AndReturnsItsMockResponse()
     {
-        Assert.SkipUnless(await IsSidecarReachableAsync(), SkipReason);
+        Assert.SkipUnless(condition: await IsSidecarReachableAsync(), reason: SkipReason);
 
         var modelRouteResolver = ModelRouteResolverTestFactory.Create(
             modelName: TestModel,
@@ -67,27 +68,30 @@ public class LiteLlmParityTests
         await using var proxy = await StartProxyAsync(modelRouteResolver);
 
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-        using var request = BuildChatCompletionRequest(proxy.BaseUrl, TestModel);
-        using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+        using var request = BuildChatCompletionRequest(baseUrl: proxy.BaseUrl, model: TestModel);
+        using var response =
+            await client.SendAsync(request: request, cancellationToken: TestContext.Current.CancellationToken);
         var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(expected: HttpStatusCode.OK, actual: response.StatusCode);
 
         using var json = JsonDocument.Parse(body);
-        var content = json.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString();
+        var content = json.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content")
+            .GetString();
 
         // The mock text is litellm-sidecar/config.yaml's own fixture, not something TotallyHot.ArcRouter
         // generates - proving this string round-tripped means the proxy forwarded the rewritten
         // request to the sidecar and streamed its real response back unmodified, i.e. the "Unified
         // API Translation" pillar's request/response passthrough works for a real OpenAI-shaped
         // upstream (what litellm's mock_response always returns, regardless of configured provider).
-        Assert.Contains($"mock response from {TestModel}", content, StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: $"mock response from {TestModel}", actualString: content,
+            comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
     public async Task Proxy_TracksCostAndUsage_FromLiteLlmSidecarsRealUsagePayload()
     {
-        Assert.SkipUnless(await IsSidecarReachableAsync(), SkipReason);
+        Assert.SkipUnless(condition: await IsSidecarReachableAsync(), reason: SkipReason);
 
         var modelRouteResolver = ModelRouteResolverTestFactory.Create(
             modelName: TestModel,
@@ -97,14 +101,16 @@ public class LiteLlmParityTests
             providerName: "openai");
 
         var capturingPublisher = new CapturingTelemetryPublisher();
-        await using var proxy = await StartProxyAsync(modelRouteResolver, capturingPublisher);
+        await using var proxy = await StartProxyAsync(modelRouteResolver: modelRouteResolver,
+            telemetryPublisher: capturingPublisher);
 
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-        using var request = BuildChatCompletionRequest(proxy.BaseUrl, TestModel);
-        using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+        using var request = BuildChatCompletionRequest(baseUrl: proxy.BaseUrl, model: TestModel);
+        using var response =
+            await client.SendAsync(request: request, cancellationToken: TestContext.Current.CancellationToken);
         await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(expected: HttpStatusCode.OK, actual: response.StatusCode);
 
         var published = await capturingPublisher.WaitForEventAsync(TimeSpan.FromSeconds(5));
 
@@ -129,7 +135,7 @@ public class LiteLlmParityTests
     [Fact]
     public async Task Proxy_UnknownModel_OutsideSingleModelServing_IsAgenticallyRoutedNotRejected()
     {
-        Assert.SkipUnless(await IsSidecarReachableAsync(), SkipReason);
+        Assert.SkipUnless(condition: await IsSidecarReachableAsync(), reason: SkipReason);
 
         const string unknownModel = "definitely-not-a-configured-model";
 
@@ -144,8 +150,9 @@ public class LiteLlmParityTests
 
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
 
-        using var proxyRequest = BuildChatCompletionRequest(proxy.BaseUrl, unknownModel);
-        using var proxyResponse = await client.SendAsync(proxyRequest, TestContext.Current.CancellationToken);
+        using var proxyRequest = BuildChatCompletionRequest(baseUrl: proxy.BaseUrl, model: unknownModel);
+        using var proxyResponse = await client.SendAsync(request: proxyRequest,
+            cancellationToken: TestContext.Current.CancellationToken);
         var proxyBody = await proxyResponse.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
         // docs/router/utility-model-routing.md's generalized fallback: outside single-model serving, an
@@ -153,14 +160,14 @@ public class LiteLlmParityTests
         // only one configured (TestModel) - rather than rejected with a litellm-style 400 error envelope.
         // This is a deliberate TotallyHot.ArcRouter/LiteLLM divergence (litellm has no such fallback), not a
         // parity gap, so this test no longer compares error shapes against the sidecar directly.
-        Assert.Equal(HttpStatusCode.OK, proxyResponse.StatusCode);
+        Assert.Equal(expected: HttpStatusCode.OK, actual: proxyResponse.StatusCode);
         Assert.False(string.IsNullOrEmpty(proxyBody));
     }
 
     [Fact]
     public async Task Cli_SingleModelServing_ForcesClientRequestToConfiguredModel_LikeLiteLlmModelFlag()
     {
-        Assert.SkipUnless(await IsSidecarReachableAsync(), SkipReason);
+        Assert.SkipUnless(condition: await IsSidecarReachableAsync(), reason: SkipReason);
 
         // Only TestModel is configured; single-model serving (the --model CLI flag) is what makes the
         // proxy ignore whatever model the client asks for and route every request to this one model,
@@ -172,30 +179,35 @@ public class LiteLlmParityTests
             apiKey: SidecarMasterKey,
             providerName: "openai");
 
-        await using var proxy = await StartProxyAsync(modelRouteResolver, forcedModelName: TestModel);
+        await using var proxy =
+            await StartProxyAsync(modelRouteResolver: modelRouteResolver, forcedModelName: TestModel);
 
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
         // The client deliberately asks for a DIFFERENT model than the one --model forces. Under normal
         // multi-model routing this unconfigured name would 400; single-model serving must override it.
-        using var request = BuildChatCompletionRequest(proxy.BaseUrl, "some-other-model-the-client-picked");
-        using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+        using var request =
+            BuildChatCompletionRequest(baseUrl: proxy.BaseUrl, model: "some-other-model-the-client-picked");
+        using var response =
+            await client.SendAsync(request: request, cancellationToken: TestContext.Current.CancellationToken);
         var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(expected: HttpStatusCode.OK, actual: response.StatusCode);
 
         using var json = JsonDocument.Parse(body);
-        var content = json.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString();
+        var content = json.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content")
+            .GetString();
 
         // Despite the client naming a different model, the sidecar returns TestModel's own mock_response -
         // proving the --model flag force-routed the request to the single configured model rather than
         // honoring (and rejecting) the client's requested model.
-        Assert.Contains($"mock response from {TestModel}", content, StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: $"mock response from {TestModel}", actualString: content,
+            comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
     public async Task Proxy_FallsBackToBackupProvider_OnPrimaryOutage_LikeLiteLlm()
     {
-        Assert.SkipUnless(await IsSidecarReachableAsync(), SkipReason);
+        Assert.SkipUnless(condition: await IsSidecarReachableAsync(), reason: SkipReason);
 
         // Primary points at a dead loopback port (nothing listens on :9, the discard port) so the very
         // first forward gets a connection refusal - a total upstream outage. The only other configured
@@ -208,19 +220,22 @@ public class LiteLlmParityTests
 
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
         // The client asks for the primary (outage) model; the proxy must transparently fail over.
-        using var request = BuildChatCompletionRequest(proxy.BaseUrl, "primary-outage-model");
-        using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+        using var request = BuildChatCompletionRequest(baseUrl: proxy.BaseUrl, model: "primary-outage-model");
+        using var response =
+            await client.SendAsync(request: request, cancellationToken: TestContext.Current.CancellationToken);
         var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(expected: HttpStatusCode.OK, actual: response.StatusCode);
 
         using var json = JsonDocument.Parse(body);
-        var content = json.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString();
+        var content = json.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content")
+            .GetString();
 
         // The backup (sidecar) served the request: its own mock_response for TestModel came back, proving
         // the primary's outage was transparently cascaded to the configured backup provider - like
         // LiteLLM's `fallbacks`.
-        Assert.Contains($"mock response from {TestModel}", content, StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: $"mock response from {TestModel}", actualString: content,
+            comparisonType: StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -232,31 +247,31 @@ public class LiteLlmParityTests
     /// </summary>
     private static IModelRouteResolver CreateOutageFallbackResolver()
     {
-        var options = new TotallyHot.ArcRouter.Models.ModelRoutingOptions
+        var options = new ModelRoutingOptions
         {
-            Providers = new Dictionary<string, TotallyHot.ArcRouter.Models.ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+            Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["dead-primary"] = new TotallyHot.ArcRouter.Models.ProviderOptions
+                ["dead-primary"] = new()
                 {
                     // Port 9 (discard) on loopback: nothing listens, so the forward is refused immediately.
                     BaseUrl = "http://127.0.0.1:9",
-                    Headers = [new TotallyHot.ArcRouter.Models.ProviderHeader { Name = "Authorization", Value = "Bearer unused-primary-key" }]
+                    Headers = [new ProviderHeader { Name = "Authorization", Value = "Bearer unused-primary-key" }]
                 },
-                ["live-backup"] = new TotallyHot.ArcRouter.Models.ProviderOptions
+                ["live-backup"] = new()
                 {
                     BaseUrl = SidecarBaseUrl,
-                    Headers = [new TotallyHot.ArcRouter.Models.ProviderHeader { Name = "Authorization", Value = $"Bearer {SidecarMasterKey}" }]
+                    Headers = [new ProviderHeader { Name = "Authorization", Value = $"Bearer {SidecarMasterKey}" }]
                 }
             },
             ModelList =
             [
-                new TotallyHot.ArcRouter.Models.ModelRouteEntry
+                new ModelRouteEntry
                 {
                     ModelName = "primary-outage-model",
                     Provider = "dead-primary",
                     ProviderModelId = "primary-upstream-id"
                 },
-                new TotallyHot.ArcRouter.Models.ModelRouteEntry
+                new ModelRouteEntry
                 {
                     ModelName = "backup-live-model",
                     Provider = "live-backup",
@@ -265,7 +280,8 @@ public class LiteLlmParityTests
             ]
         };
 
-        return new ModelRouteResolver(new InMemoryProviderConfigStore(options), Mock.Of<IEnvironmentVariableProvider>());
+        return new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
     }
 
     private static HttpRequestMessage BuildChatCompletionRequest(string baseUrl, string model)
@@ -276,11 +292,12 @@ public class LiteLlmParityTests
             messages = new[] { new { role = "user", content = "hi" } }
         });
 
-        var request = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}v1/chat/completions")
+        var request = new HttpRequestMessage(method: HttpMethod.Post, requestUri: $"{baseUrl}v1/chat/completions")
         {
-            Content = new StringContent(payload, Encoding.UTF8, "application/json")
+            Content = new StringContent(content: payload, encoding: Encoding.UTF8, mediaType: "application/json")
         };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "client-side-placeholder-token");
+        request.Headers.Authorization =
+            new AuthenticationHeaderValue(scheme: "Bearer", parameter: "client-side-placeholder-token");
         return request;
     }
 
@@ -296,7 +313,8 @@ public class LiteLlmParityTests
         try
         {
             using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-            using var response = await client.GetAsync(SidecarHealthUrl, CancellationToken.None);
+            using var response =
+                await client.GetAsync(requestUri: SidecarHealthUrl, cancellationToken: CancellationToken.None);
             return response.IsSuccessStatusCode;
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
@@ -316,12 +334,12 @@ public class LiteLlmParityTests
             ? null
             : new SingleModelServingOptions { ForcedModelName = forcedModelName };
         var interceptor = new RequestInterceptor(
-            NullLogger<RequestInterceptor>.Instance,
-            modelRouteResolver,
-            singleModelServingOptions);
+            logger: NullLogger<RequestInterceptor>.Instance,
+            modelRouteResolver: modelRouteResolver,
+            singleModelServingOptions: singleModelServingOptions);
         var middleware = new ProxyMiddleware(
-            NullLogger<ProxyMiddleware>.Instance,
-            interceptor,
+            logger: NullLogger<ProxyMiddleware>.Instance,
+            interceptor: interceptor,
             dependencies: new ProxyMiddlewareDependencies
             {
                 TelemetryPublisher = telemetryPublisher
@@ -331,11 +349,12 @@ public class LiteLlmParityTests
         // port: 0 / grpcPort: 0 bind ephemeral loopback ports (see ProxyServer's constructor remarks)
         // so this test never flakes on a fixed port already being in use, unlike the disabled
         // ProxyInterceptionTests.Proxy_InterceptsAndForwards_Request_ToUpstream's hardcoded :5001.
-        var server = new ProxyServer(NullLogger<ProxyServer>.Instance, middleware, port: 0, grpcPort: 0);
+        var server = new ProxyServer(logger: NullLogger<ProxyServer>.Instance, proxyMiddleware: middleware, 0, 0);
         await server.StartAsync(TestContext.Current.CancellationToken);
 
-        var address = server.Addresses.First(a => a.StartsWith("http://", StringComparison.Ordinal));
-        return new TestProxy(server, address.EndsWith('/') ? address : address + "/");
+        var address =
+            server.Addresses.First(a => a.StartsWith(value: "http://", comparisonType: StringComparison.Ordinal));
+        return new TestProxy(Server: server, BaseUrl: address.EndsWith('/') ? address : address + "/");
     }
 
     private sealed record TestProxy(ProxyServer Server, string BaseUrl) : IAsyncDisposable
@@ -350,7 +369,10 @@ public class LiteLlmParityTests
         }
     }
 
-    /// <summary>Captures the single <see cref="RoutingTelemetryEvent"/> a test's one request publishes, so the test can assert on it directly instead of re-deriving it from the HTTP response.</summary>
+    /// <summary>
+    /// Captures the single <see cref="RoutingTelemetryEvent"/> a test's one request publishes, so the test can assert
+    /// on it directly instead of re-deriving it from the HTTP response.
+    /// </summary>
     private sealed class CapturingTelemetryPublisher : ITelemetryPublisher
     {
         private readonly TaskCompletionSource<RoutingTelemetryEvent> _tcs =
@@ -362,14 +384,17 @@ public class LiteLlmParityTests
             return Task.CompletedTask;
         }
 
-        public Task PublishLogLineAsync(LogLineEvent logLine, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task PublishLogLineAsync(LogLineEvent logLine, CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
 
         public async Task<RoutingTelemetryEvent> WaitForEventAsync(TimeSpan timeout)
         {
-            var completed = await Task.WhenAny(_tcs.Task, Task.Delay(timeout));
-            Assert.True(ReferenceEquals(completed, _tcs.Task), "Timed out waiting for a routing telemetry event to be published.");
+            var completed = await Task.WhenAny(task1: _tcs.Task, task2: Task.Delay(timeout));
+            Assert.True(condition: ReferenceEquals(objA: completed, objB: _tcs.Task),
+                userMessage: "Timed out waiting for a routing telemetry event to be published.");
             return await _tcs.Task;
         }
     }
 }
-

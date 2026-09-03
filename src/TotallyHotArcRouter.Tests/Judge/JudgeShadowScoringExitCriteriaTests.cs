@@ -25,15 +25,15 @@ public class JudgeShadowScoringExitCriteriaTests
             RequestCorrelationId = "corr-1",
             Dimension = "algorithm",
             Model = "claude-opus-4-6",
-            UnifiedScore = 0.6789,
+            UnifiedScore = 0.6789
         };
 
-        var withoutJudge = await RunCompositeAndCaptureMemoryEntryAsync(result, includeJudgeObserver: false);
-        var withJudge = await RunCompositeAndCaptureMemoryEntryAsync(result, includeJudgeObserver: true);
+        var withoutJudge = await RunCompositeAndCaptureMemoryEntryAsync(result: result, false);
+        var withJudge = await RunCompositeAndCaptureMemoryEntryAsync(result: result, true);
 
-        Assert.Equal(withoutJudge.ChosenModel, withJudge.ChosenModel);
-        Assert.Equal(withoutJudge.Score, withJudge.Score);
-        Assert.Equal(withoutJudge.Cost, withJudge.Cost);
+        Assert.Equal(expected: withoutJudge.ChosenModel, actual: withJudge.ChosenModel);
+        Assert.Equal(expected: withoutJudge.Score, actual: withJudge.Score);
+        Assert.Equal(expected: withoutJudge.Cost, actual: withJudge.Cost);
         Assert.False(withoutJudge.IsJudgeScored);
         Assert.False(withJudge.IsJudgeScored);
     }
@@ -49,82 +49,89 @@ public class JudgeShadowScoringExitCriteriaTests
         // the fan-out unconditionally and ObserveAsync returns early while the flag is off. So this fan-out
         // deliberately *includes* the observer - proving the gate holds where it actually lives.
         var judgeObserver = new JudgeShadowScoreObserver(
-            queue,
-            new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions { Enabled = false }),
-            NullLogger<JudgeShadowScoreObserver>.Instance);
+            queue: queue,
+            options: new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions { Enabled = false }),
+            logger: NullLogger<JudgeShadowScoreObserver>.Instance);
 
         var store = new FakeMemoryEntryStore();
         var memory = CreateMemory(store);
         await memory.InitializeAsync(TestContext.Current.CancellationToken);
 
-        var pendingCache = new PendingTaskEmbeddingCache(Options.Create(new RoutingOptions { PendingEmbeddingCacheCapacity = 100, PendingEmbeddingCacheTtlSeconds = 300 }));
-        pendingCache.Set("corr-1", [1f, 0f, 0f]);
+        var pendingCache = new PendingTaskEmbeddingCache(Options.Create(new RoutingOptions
+            { PendingEmbeddingCacheCapacity = 100, PendingEmbeddingCacheTtlSeconds = 300 }));
+        pendingCache.Set(correlationId: "corr-1", embedding: [1f, 0f, 0f]);
         var embeddingObserver = new EmbeddingMemoryScoreObserver(
-            memory,
-            pendingCache,
-            new PendingRequestCostCache(Options.Create(new RoutingOptions())),
-            new PendingRequestProvenanceCache(Options.Create(new RoutingOptions())),
-            NullLogger<EmbeddingMemoryScoreObserver>.Instance);
+            memory: memory,
+            pendingCache: pendingCache,
+            pendingCostCache: new PendingRequestCostCache(Options.Create(new RoutingOptions())),
+            pendingProvenanceCache: new PendingRequestProvenanceCache(Options.Create(new RoutingOptions())),
+            logger: NullLogger<EmbeddingMemoryScoreObserver>.Instance);
 
         var composite = new CompositeRouterScoreObserver(
-            [embeddingObserver, judgeObserver],
-            NullLogger<CompositeRouterScoreObserver>.Instance);
+            observers: [embeddingObserver, judgeObserver],
+            logger: NullLogger<CompositeRouterScoreObserver>.Instance);
 
         var result = new QualityResult
         {
             RequestCorrelationId = "corr-1",
             Dimension = "algorithm",
             Model = "claude-opus-4-6",
-            UnifiedScore = 0.5,
+            UnifiedScore = 0.5
         };
 
-        cache.Set("corr-1", "response text that should never be touched");
-        await composite.ObserveAsync(result, TestContext.Current.CancellationToken);
+        cache.Set(correlationId: "corr-1", text: "response text that should never be touched");
+        await composite.ObserveAsync(result: result, cancellationToken: TestContext.Current.CancellationToken);
 
         // Nothing observed the shadow-judge cache or queue: the entry set above is still there untouched,
         // and the queue never received a job.
-        Assert.Equal(1, cache.Count);
-        Assert.Equal(0, queue.DroppedCount);
+        Assert.Equal(1, actual: cache.Count);
+        Assert.Equal(0, actual: queue.DroppedCount);
     }
 
-    private static async Task<MemoryEntry> RunCompositeAndCaptureMemoryEntryAsync(QualityResult result, bool includeJudgeObserver)
+    private static async Task<MemoryEntry> RunCompositeAndCaptureMemoryEntryAsync(QualityResult result,
+        bool includeJudgeObserver)
     {
         var store = new FakeMemoryEntryStore();
         var memory = CreateMemory(store);
         await memory.InitializeAsync(TestContext.Current.CancellationToken);
 
-        var pendingCache = new PendingTaskEmbeddingCache(Options.Create(new RoutingOptions { PendingEmbeddingCacheCapacity = 100, PendingEmbeddingCacheTtlSeconds = 300 }));
-        pendingCache.Set(result.RequestCorrelationId, [1f, 0f, 0f]);
+        var pendingCache = new PendingTaskEmbeddingCache(Options.Create(new RoutingOptions
+            { PendingEmbeddingCacheCapacity = 100, PendingEmbeddingCacheTtlSeconds = 300 }));
+        pendingCache.Set(correlationId: result.RequestCorrelationId, embedding: [1f, 0f, 0f]);
         var embeddingObserver = new EmbeddingMemoryScoreObserver(
-            memory,
-            pendingCache,
-            new PendingRequestCostCache(Options.Create(new RoutingOptions())),
-            new PendingRequestProvenanceCache(Options.Create(new RoutingOptions())),
-            NullLogger<EmbeddingMemoryScoreObserver>.Instance);
+            memory: memory,
+            pendingCache: pendingCache,
+            pendingCostCache: new PendingRequestCostCache(Options.Create(new RoutingOptions())),
+            pendingProvenanceCache: new PendingRequestProvenanceCache(Options.Create(new RoutingOptions())),
+            logger: NullLogger<EmbeddingMemoryScoreObserver>.Instance);
 
         var observers = new List<IQualityScoreObserver> { embeddingObserver };
         if (includeJudgeObserver)
         {
             var queue = new JudgeShadowScoreQueue(Options.Create(new JudgeOptions { QueueCapacity = 10 }));
             observers.Add(new JudgeShadowScoreObserver(
-                queue,
-                new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions { Enabled = true }),
-                NullLogger<JudgeShadowScoreObserver>.Instance));
+                queue: queue,
+                options: new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions { Enabled = true }),
+                logger: NullLogger<JudgeShadowScoreObserver>.Instance));
         }
 
-        var composite = new CompositeRouterScoreObserver(observers, NullLogger<CompositeRouterScoreObserver>.Instance);
+        var composite = new CompositeRouterScoreObserver(observers: observers,
+            logger: NullLogger<CompositeRouterScoreObserver>.Instance);
 
-        await composite.ObserveAsync(result, TestContext.Current.CancellationToken);
+        await composite.ObserveAsync(result: result, cancellationToken: TestContext.Current.CancellationToken);
 
         return Assert.Single(store.Entries);
     }
 
-    private static EmbeddingMemory CreateMemory(IMemoryEntryStore store) =>
-        new(
-            store,
-            new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions { EmbeddingSimilarityThreshold = 0.0, MaxNeighborCount = 10, EmbeddingMemoryCapacity = 100 }),
-            new StubEmbeddingClient(),
-            NullLogger<EmbeddingMemory>.Instance);
+    private static EmbeddingMemory CreateMemory(IMemoryEntryStore store)
+    {
+        return new EmbeddingMemory(
+            store: store,
+            optionsMonitor: new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions
+                { EmbeddingSimilarityThreshold = 0.0, MaxNeighborCount = 10, EmbeddingMemoryCapacity = 100 }),
+            embeddingClient: new StubEmbeddingClient(),
+            logger: NullLogger<EmbeddingMemory>.Instance);
+    }
 
     private sealed class FakeMemoryEntryStore : IMemoryEntryStore
     {
@@ -133,8 +140,10 @@ public class JudgeShadowScoringExitCriteriaTests
 
         public IReadOnlyList<MemoryEntry> Entries => _entries;
 
-        public Task<IReadOnlyList<MemoryEntry>> LoadAllAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<MemoryEntry>>([.. _entries]);
+        public Task<IReadOnlyList<MemoryEntry>> LoadAllAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<IReadOnlyList<MemoryEntry>>([.. _entries]);
+        }
 
         public Task<MemoryEntry> AppendAsync(MemoryEntry entry, CancellationToken cancellationToken = default)
         {

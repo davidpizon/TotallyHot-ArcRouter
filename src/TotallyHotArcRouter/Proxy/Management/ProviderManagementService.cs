@@ -1,5 +1,5 @@
-using Microsoft.Extensions.Options;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 
@@ -36,17 +36,17 @@ internal sealed class ProviderManagementService
     // ExplicitCapabilityScanBudget: the endpoint flavors are what the operator actually asked for, and this
     // detection is the free extra that rides along on the metadata those flavors expose.
     private static readonly TimeSpan ModelProbeBudget = TimeSpan.FromSeconds(10);
-
-    private readonly IProviderConfigStore _store;
+    private readonly Func<ProvidersResponse> _buildProvidersResponse;
+    private readonly ToolCallCapabilityStore? _capabilityStore;
+    private readonly ModelDialectResolver _dialectResolver;
+    private readonly ProviderEndpointScanner? _endpointScanner;
     private readonly IEnvironmentVariableProvider _environment;
     private readonly HttpClient _httpClient;
-    private readonly ProviderEndpointScanner? _endpointScanner;
-    private readonly ToolCallCapabilityStore? _capabilityStore;
-    private readonly ISecretWriter? _secretWriter;
-    private readonly ISecretReader? _secretReader;
     private readonly IProviderInteractionStatusStore? _interactionStatus;
-    private readonly ModelDialectResolver _dialectResolver;
-    private readonly Func<ProvidersResponse> _buildProvidersResponse;
+    private readonly ISecretReader? _secretReader;
+    private readonly ISecretWriter? _secretWriter;
+
+    private readonly IProviderConfigStore _store;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ProviderManagementService"/> class.
@@ -76,7 +76,7 @@ internal sealed class ProviderManagementService
         _secretWriter = dependencies?.SecretWriter;
         _secretReader = dependencies?.SecretReader;
         _interactionStatus = dependencies?.InteractionStatusStore;
-        _dialectResolver = new ModelDialectResolver(httpClient, environment);
+        _dialectResolver = new ModelDialectResolver(httpClient: httpClient, environment: environment);
         _buildProvidersResponse = buildProvidersResponse;
     }
 
@@ -85,9 +85,11 @@ internal sealed class ProviderManagementService
         string key, ProviderWriteRequest request, CancellationToken cancellationToken = default)
     {
         var current = _store.Snapshot.Options;
-        current.Providers.TryGetValue(key, out var existing);
-        var provider = MergeProvider(key, request, existing);
-        var result = await MutateAsync(() => _store.UpsertProviderAsync(key, provider, cancellationToken)).ConfigureAwait(false);
+        current.Providers.TryGetValue(key: key, value: out var existing);
+        var provider = MergeProvider(providerKey: key, request: request, existing: existing);
+        var result = await MutateAsync(() =>
+                _store.UpsertProviderAsync(key: key, provider: provider, cancellationToken: cancellationToken))
+            .ConfigureAwait(false);
 
         // Refresh the endpoint-capability record for the provider that was just saved, so tier-1 dialect
         // detection has something to read without the operator having to trigger a scan by hand. Strictly
@@ -95,9 +97,8 @@ internal sealed class ProviderManagementService
         // CapabilityScanBudget, and swallows everything - a provider that is merely unreachable right now
         // must still be configurable.
         if (result.Success)
-        {
-            await TryScanCapabilitiesAsync(key, provider, cancellationToken).ConfigureAwait(false);
-        }
+            await TryScanCapabilitiesAsync(key: key, provider: provider, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
 
         return result;
     }
@@ -118,33 +119,32 @@ internal sealed class ProviderManagementService
         string key, CancellationToken cancellationToken = default)
     {
         if (_endpointScanner is null || _capabilityStore is null)
-        {
             return ManagementResult<ProviderEndpointCapabilities>.Fail(
-                ManagementErrorType.Unavailable, "Endpoint capability scanning is not available.");
-        }
+                errorType: ManagementErrorType.Unavailable, message: "Endpoint capability scanning is not available.");
 
-        if (!_store.Snapshot.Options.Providers.TryGetValue(key, out var provider))
-        {
+        if (!_store.Snapshot.Options.Providers.TryGetValue(key: key, value: out var provider))
             return ManagementResult<ProviderEndpointCapabilities>.Fail(
-                ManagementErrorType.NotFound, $"Provider '{key}' not found.");
-        }
+                errorType: ManagementErrorType.NotFound, message: $"Provider '{key}' not found.");
 
         var capabilities = await ScanAndPersistCapabilitiesAsync(
-            key, provider, ExplicitCapabilityScanBudget, cancellationToken).ConfigureAwait(false);
+            key: key, provider: provider, budgetDuration: ExplicitCapabilityScanBudget,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
 
-        RecordScanOutcome(key, "Scan capabilities", capabilities);
+        RecordScanOutcome(key: key, operation: "Scan capabilities", capabilities: capabilities);
 
         // Tier 1-3 dialect detection for every model on this provider, now that the flags saying which
         // native metadata APIs are reachable have just been refreshed. Best-effort and non-blocking on the
         // result: the operator asked which flavors the endpoint answers, and that question has been
         // answered above regardless of what detection manages to learn.
-        await TryResolveModelMetadataAsync(key, provider, capabilities, ModelsFor(key), cancellationToken).ConfigureAwait(false);
+        await TryResolveModelMetadataAsync(providerKey: key, provider: provider, endpointCapabilities: capabilities,
+            models: ModelsFor(key), cancellationToken: cancellationToken).ConfigureAwait(false);
 
         return ManagementResult<ProviderEndpointCapabilities>.Ok(capabilities);
     }
 
     /// <summary>
-    /// Records a capability scan's outcome against <see cref="_interactionStatus"/>: a <see cref="ProviderEndpointCapabilities.ScanError"/>
+    /// Records a capability scan's outcome against <see cref="_interactionStatus"/>: a
+    /// <see cref="ProviderEndpointCapabilities.ScanError"/>
     /// is always a failure; otherwise the scan is a success even when no flavor was detected (the endpoint
     /// answered - it just isn't any of the flavors this router recognizes).
     /// </summary>
@@ -154,13 +154,9 @@ internal sealed class ProviderManagementService
     private void RecordScanOutcome(string key, string operation, ProviderEndpointCapabilities capabilities)
     {
         if (capabilities.ScanError is { } scanError)
-        {
-            _interactionStatus?.RecordFailure(key, operation, scanError);
-        }
+            _interactionStatus?.RecordFailure(providerKey: key, operation: operation, message: scanError);
         else
-        {
-            _interactionStatus?.RecordSuccess(key, operation);
-        }
+            _interactionStatus?.RecordSuccess(providerKey: key, operation: operation);
     }
 
     /// <summary>
@@ -196,26 +192,23 @@ internal sealed class ProviderManagementService
         ArgumentNullException.ThrowIfNull(request);
 
         if (_capabilityStore is null)
-        {
             return ManagementResult<ProvidersResponse>.Fail(
-                ManagementErrorType.Unavailable, "Tool-call capability overrides are not available.");
-        }
+                errorType: ManagementErrorType.Unavailable,
+                message: "Tool-call capability overrides are not available.");
 
         if (!_store.Snapshot.Options.Providers.ContainsKey(key))
-        {
             return ManagementResult<ProvidersResponse>.Fail(
-                ManagementErrorType.NotFound, $"Provider '{key}' not found.");
-        }
+                errorType: ManagementErrorType.NotFound, message: $"Provider '{key}' not found.");
 
-        if (!ModelsFor(key).Any(m => string.Equals(m.ModelName, modelName, StringComparison.OrdinalIgnoreCase)))
-        {
+        if (!ModelsFor(key).Any(m =>
+                string.Equals(a: m.ModelName, b: modelName, comparisonType: StringComparison.OrdinalIgnoreCase)))
             return ManagementResult<ProvidersResponse>.Fail(
-                ManagementErrorType.NotFound, $"Model '{modelName}' not found on provider '{key}'.");
-        }
+                errorType: ManagementErrorType.NotFound,
+                message: $"Model '{modelName}' not found on provider '{key}'.");
 
         if (string.IsNullOrWhiteSpace(request.Dialect))
         {
-            _capabilityStore.ClearModelCapability(key, modelName);
+            _capabilityStore.ClearModelCapability(providerKey: key, modelName: modelName);
             return ManagementResult<ProvidersResponse>.Ok(_buildProvidersResponse());
         }
 
@@ -223,18 +216,16 @@ internal sealed class ProviderManagementService
         // know degrades to "not scanned" when found on disk, which is the right call for a row a *newer*
         // build wrote - but accepting one here would let a typo silently disable tool calling for the model
         // while the UI showed the pin as applied.
-        if (!ToolCallDialectRegistry.TryGet(request.Dialect, out _))
-        {
+        if (!ToolCallDialectRegistry.TryGet(name: request.Dialect, dialect: out _))
             return ManagementResult<ProvidersResponse>.Fail(
-                ManagementErrorType.InvalidRequest,
-                $"Unknown tool-call dialect '{request.Dialect}'.");
-        }
+                errorType: ManagementErrorType.InvalidRequest,
+                message: $"Unknown tool-call dialect '{request.Dialect}'.");
 
         _capabilityStore.TryRecordModelCapability(new ModelToolCapability(
-            key,
-            modelName,
-            request.Dialect,
-            DetectionConfidence.Operator,
+            ProviderKey: key,
+            ModelName: modelName,
+            Dialect: request.Dialect,
+            Confidence: DetectionConfidence.Operator,
             Evidence: "Set by an operator."));
 
         return ManagementResult<ProvidersResponse>.Ok(_buildProvidersResponse());
@@ -259,7 +250,8 @@ internal sealed class ProviderManagementService
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         budget.CancelAfter(budgetDuration);
 
-        var capabilities = await _endpointScanner!.ScanAsync(key, provider, budget.Token).ConfigureAwait(false);
+        var capabilities = await _endpointScanner!
+            .ScanAsync(providerKey: key, provider: provider, cancellationToken: budget.Token).ConfigureAwait(false);
 
         // A canceled caller means we stopped asking, not that the provider failed to answer. The scanner is
         // deliberately fail-open and reports cancellation as an all-false payload with a ScanError, so
@@ -279,19 +271,18 @@ internal sealed class ProviderManagementService
     private async Task TryScanCapabilitiesAsync(
         string key, ProviderOptions provider, CancellationToken cancellationToken)
     {
-        if (_endpointScanner is null || _capabilityStore is null)
-        {
-            return;
-        }
+        if (_endpointScanner is null || _capabilityStore is null) return;
 
         try
         {
             var capabilities = await ScanAndPersistCapabilitiesAsync(
-                key, provider, CapabilityScanBudget, cancellationToken).ConfigureAwait(false);
+                key: key, provider: provider, budgetDuration: CapabilityScanBudget,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
 
             // Same best-effort spirit, and inside the same try: a provider save must not start depending on
             // a metadata probe succeeding.
-            await TryResolveModelMetadataAsync(key, provider, capabilities, ModelsFor(key), cancellationToken)
+            await TryResolveModelMetadataAsync(providerKey: key, provider: provider, endpointCapabilities: capabilities,
+                    models: ModelsFor(key), cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (Exception)
@@ -307,14 +298,15 @@ internal sealed class ProviderManagementService
     /// provider ever wrote to the protected store (<c>docs/router/secrets-at-rest-plan.md</c> §5). Rejected
     /// (404-shaped) if unknown. Historical metrics are retained.
     /// </summary>
-    public async Task<ManagementResult<ProvidersResponse>> RemoveProviderAsync(string key, CancellationToken cancellationToken = default)
+    public async Task<ManagementResult<ProvidersResponse>> RemoveProviderAsync(string key,
+        CancellationToken cancellationToken = default)
     {
         if (!_store.Snapshot.Options.Providers.ContainsKey(key))
-        {
-            return ManagementResult<ProvidersResponse>.Fail(ManagementErrorType.NotFound, $"Provider '{key}' not found.");
-        }
+            return ManagementResult<ProvidersResponse>.Fail(errorType: ManagementErrorType.NotFound,
+                message: $"Provider '{key}' not found.");
 
-        var result = await MutateAsync(() => _store.RemoveProviderAsync(key, cancellationToken)).ConfigureAwait(false);
+        var result = await MutateAsync(() => _store.RemoveProviderAsync(key: key, cancellationToken: cancellationToken))
+            .ConfigureAwait(false);
 
         // Best-effort: the provider's configuration is already gone by this point, so a store failure here
         // (e.g. non-Windows) would only leave orphaned ciphertext behind, never resurrect the provider.
@@ -327,13 +319,13 @@ internal sealed class ProviderManagementService
         return result;
     }
 
-    /// <summary>Removes every protected-store entry named under <paramref name="providerKey"/>'s prefix, swallowing a store that is unavailable on this platform.</summary>
+    /// <summary>
+    /// Removes every protected-store entry named under <paramref name="providerKey"/>'s prefix, swallowing a store
+    /// that is unavailable on this platform.
+    /// </summary>
     private void TryDeleteProviderSecrets(string providerKey)
     {
-        if (_secretWriter is null)
-        {
-            return;
-        }
+        if (_secretWriter is null) return;
 
         try
         {
@@ -345,8 +337,14 @@ internal sealed class ProviderManagementService
         }
     }
 
-    /// <summary>The protected-store name prefix for every secret belonging to <paramref name="providerKey"/> (<c>docs/router/secrets-at-rest-plan.md</c> §3's naming convention).</summary>
-    private static string SecretRefPrefix(string providerKey) => $"provider:{providerKey}:header:";
+    /// <summary>
+    /// The protected-store name prefix for every secret belonging to <paramref name="providerKey"/> (
+    /// <c>docs/router/secrets-at-rest-plan.md</c> §3's naming convention).
+    /// </summary>
+    private static string SecretRefPrefix(string providerKey)
+    {
+        return $"provider:{providerKey}:header:";
+    }
 
     /// <summary>Adds or replaces a model route under a provider.</summary>
     /// <remarks>
@@ -364,7 +362,8 @@ internal sealed class ProviderManagementService
         string providerKey, string modelName, ModelWriteRequest request, CancellationToken cancellationToken = default)
     {
         var existing = _store.Snapshot.Options.ModelList
-            .FirstOrDefault(m => string.Equals(m.ModelName, modelName, StringComparison.OrdinalIgnoreCase));
+            .FirstOrDefault(m =>
+                string.Equals(a: m.ModelName, b: modelName, comparisonType: StringComparison.OrdinalIgnoreCase));
 
         var entry = new ModelRouteEntry
         {
@@ -375,29 +374,32 @@ internal sealed class ProviderManagementService
             PresentUpstream = existing?.PresentUpstream ?? true
         };
 
-        var result = await MutateAsync(() => _store.UpsertModelAsync(entry, cancellationToken)).ConfigureAwait(false);
+        var result =
+            await MutateAsync(() => _store.UpsertModelAsync(entry: entry, cancellationToken: cancellationToken))
+                .ConfigureAwait(false);
 
         // Classify the model that was just added, so the request path has a dialect before the model's first
         // real request rather than having to learn one from it. Uses the provider's already-scanned endpoint
         // flags - no scan is triggered here, since adding a model says nothing new about the provider.
-        if (result.Success && _store.Snapshot.Options.Providers.TryGetValue(providerKey, out var provider))
-        {
+        if (result.Success && _store.Snapshot.Options.Providers.TryGetValue(key: providerKey, value: out var provider))
             await TryResolveModelMetadataAsync(
-                providerKey,
-                provider,
-                _capabilityStore?.GetProviderCapabilities(providerKey),
-                [entry],
-                cancellationToken).ConfigureAwait(false);
-        }
+                providerKey: providerKey,
+                provider: provider,
+                endpointCapabilities: _capabilityStore?.GetProviderCapabilities(providerKey),
+                models: [entry],
+                cancellationToken: cancellationToken).ConfigureAwait(false);
 
         return result;
     }
 
     /// <summary>Every model route that forwards to <paramref name="providerKey"/>.</summary>
-    private IReadOnlyList<ModelRouteEntry> ModelsFor(string providerKey) =>
-        _store.Snapshot.Options.ModelList
-            .Where(model => string.Equals(model.Provider, providerKey, StringComparison.OrdinalIgnoreCase))
+    private IReadOnlyList<ModelRouteEntry> ModelsFor(string providerKey)
+    {
+        return _store.Snapshot.Options.ModelList
+            .Where(model => string.Equals(a: model.Provider, b: providerKey,
+                comparisonType: StringComparison.OrdinalIgnoreCase))
             .ToList();
+    }
 
     /// <summary>
     /// Runs tier 1-3 metadata detection over <paramref name="models"/> and records whatever it learns -
@@ -424,10 +426,7 @@ internal sealed class ProviderManagementService
         IReadOnlyList<ModelRouteEntry> models,
         CancellationToken cancellationToken)
     {
-        if (_capabilityStore is null || models.Count == 0)
-        {
-            return;
-        }
+        if (_capabilityStore is null || models.Count == 0) return;
 
         try
         {
@@ -439,35 +438,26 @@ internal sealed class ProviderManagementService
                 // Checked per model rather than relying on the probes to fail fast, so a budget that has
                 // already elapsed stops the loop instead of firing a doomed request for every remaining
                 // model.
-                if (budget.IsCancellationRequested)
-                {
-                    break;
-                }
+                if (budget.IsCancellationRequested) break;
 
                 var probe = await _dialectResolver.ResolveAsync(
-                    providerKey,
-                    provider,
-                    endpointCapabilities,
-                    model.ModelName,
-                    model.ProviderModelId,
-                    budget.Token).ConfigureAwait(false);
+                    providerKey: providerKey,
+                    provider: provider,
+                    endpointCapabilities: endpointCapabilities,
+                    modelName: model.ModelName,
+                    providerModelId: model.ProviderModelId,
+                    cancellationToken: budget.Token).ConfigureAwait(false);
 
                 // The caller aborting is not an observation about this model, and unlike the endpoint scan
                 // there is no record here worth degrading - so stop rather than persist a partial pass.
                 cancellationToken.ThrowIfCancellationRequested();
 
-                if (probe.Capability is not null)
-                {
-                    _capabilityStore.TryRecordModelCapability(probe.Capability);
-                }
+                if (probe.Capability is not null) _capabilityStore.TryRecordModelCapability(probe.Capability);
 
                 // Recorded independently of the dialect: the probe deliberately reports a window even on the
                 // paths that classify nothing, so gating this on Capability would discard exactly the
                 // readings tier 1 is best at producing.
-                if (probe.ContextWindow is not null)
-                {
-                    _capabilityStore.SetModelContextWindow(probe.ContextWindow);
-                }
+                if (probe.ContextWindow is not null) _capabilityStore.SetModelContextWindow(probe.ContextWindow);
             }
         }
         catch (Exception)
@@ -480,14 +470,16 @@ internal sealed class ProviderManagementService
     }
 
     /// <summary>Removes a model route by name.</summary>
-    public async Task<ManagementResult<ProvidersResponse>> RemoveModelAsync(string modelName, CancellationToken cancellationToken = default)
+    public async Task<ManagementResult<ProvidersResponse>> RemoveModelAsync(string modelName,
+        CancellationToken cancellationToken = default)
     {
-        if (!_store.Snapshot.Options.ModelList.Any(m => string.Equals(m.ModelName, modelName, StringComparison.OrdinalIgnoreCase)))
-        {
-            return ManagementResult<ProvidersResponse>.Fail(ManagementErrorType.NotFound, $"Model '{modelName}' not found.");
-        }
+        if (!_store.Snapshot.Options.ModelList.Any(m =>
+                string.Equals(a: m.ModelName, b: modelName, comparisonType: StringComparison.OrdinalIgnoreCase)))
+            return ManagementResult<ProvidersResponse>.Fail(errorType: ManagementErrorType.NotFound,
+                message: $"Model '{modelName}' not found.");
 
-        return await MutateAsync(() => _store.RemoveModelAsync(modelName, cancellationToken)).ConfigureAwait(false);
+        return await MutateAsync(() =>
+            _store.RemoveModelAsync(modelName: modelName, cancellationToken: cancellationToken)).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -502,12 +494,12 @@ internal sealed class ProviderManagementService
         string modelName, ModelEnabledWriteRequest request, CancellationToken cancellationToken = default)
     {
         var existing = _store.Snapshot.Options.ModelList
-            .FirstOrDefault(m => string.Equals(m.ModelName, modelName, StringComparison.OrdinalIgnoreCase));
+            .FirstOrDefault(m =>
+                string.Equals(a: m.ModelName, b: modelName, comparisonType: StringComparison.OrdinalIgnoreCase));
 
         if (existing is null)
-        {
-            return ManagementResult<ProvidersResponse>.Fail(ManagementErrorType.NotFound, $"Model '{modelName}' not found.");
-        }
+            return ManagementResult<ProvidersResponse>.Fail(errorType: ManagementErrorType.NotFound,
+                message: $"Model '{modelName}' not found.");
 
         var entry = new ModelRouteEntry
         {
@@ -518,7 +510,8 @@ internal sealed class ProviderManagementService
             PresentUpstream = existing.PresentUpstream
         };
 
-        return await MutateAsync(() => _store.UpsertModelAsync(entry, cancellationToken)).ConfigureAwait(false);
+        return await MutateAsync(() => _store.UpsertModelAsync(entry: entry, cancellationToken: cancellationToken))
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -531,36 +524,37 @@ internal sealed class ProviderManagementService
     public async Task<ManagementResult<ProvidersResponse>> SetEnabledAsync(
         string key, ProviderEnabledWriteRequest request, CancellationToken cancellationToken = default)
     {
-        if (!_store.Snapshot.Options.Providers.TryGetValue(key, out var existing))
-        {
-            return ManagementResult<ProvidersResponse>.Fail(ManagementErrorType.NotFound, $"Provider '{key}' not found.");
-        }
+        if (!_store.Snapshot.Options.Providers.TryGetValue(key: key, value: out var existing))
+            return ManagementResult<ProvidersResponse>.Fail(errorType: ManagementErrorType.NotFound,
+                message: $"Provider '{key}' not found.");
 
-        var provider = WithEnabled(existing, request.Enabled);
-        return await MutateAsync(() => _store.UpsertProviderAsync(key, provider, cancellationToken)).ConfigureAwait(false);
+        var provider = WithEnabled(source: existing, enabled: request.Enabled);
+        return await MutateAsync(() =>
+                _store.UpsertProviderAsync(key: key, provider: provider, cancellationToken: cancellationToken))
+            .ConfigureAwait(false);
     }
 
-    /// <summary>Queries a provider's own OpenAI-shaped model list (best-effort; reports <c>Supported: false</c> when unavailable).</summary>
-    public async Task<ManagementResult<DiscoverModelsResponse>> DiscoverModelsAsync(string providerKey, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Queries a provider's own OpenAI-shaped model list (best-effort; reports <c>Supported: false</c> when
+    /// unavailable).
+    /// </summary>
+    public async Task<ManagementResult<DiscoverModelsResponse>> DiscoverModelsAsync(string providerKey,
+        CancellationToken cancellationToken = default)
     {
-        if (!_store.Snapshot.Options.Providers.TryGetValue(providerKey, out var provider))
-        {
-            return ManagementResult<DiscoverModelsResponse>.Fail(ManagementErrorType.NotFound, $"Provider '{providerKey}' not found.");
-        }
+        if (!_store.Snapshot.Options.Providers.TryGetValue(key: providerKey, value: out var provider))
+            return ManagementResult<DiscoverModelsResponse>.Fail(errorType: ManagementErrorType.NotFound,
+                message: $"Provider '{providerKey}' not found.");
 
-        var result = await DiscoverModelsCoreAsync(provider, cancellationToken).ConfigureAwait(false);
+        var result = await DiscoverModelsCoreAsync(provider: provider, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
 
         // Supported: false with no Error is simply "this provider has no OpenAI-shaped /v1/models" (hosted
         // Anthropic, Bedrock) - expected and not a failure. Only a populated Error - a real transport/auth
         // problem - is worth flagging on the card.
         if (result.Error is { } error)
-        {
-            _interactionStatus?.RecordFailure(providerKey, "Discover models", error);
-        }
+            _interactionStatus?.RecordFailure(providerKey: providerKey, operation: "Discover models", message: error);
         else
-        {
-            _interactionStatus?.RecordSuccess(providerKey, "Discover models");
-        }
+            _interactionStatus?.RecordSuccess(providerKey: providerKey, operation: "Discover models");
 
         return ManagementResult<DiscoverModelsResponse>.Ok(result);
     }
@@ -587,26 +581,27 @@ internal sealed class ProviderManagementService
     public async Task<ManagementResult<ProvidersResponse>> RefreshFromEndpointAsync(
         string key, CancellationToken cancellationToken = default)
     {
-        if (!_store.Snapshot.Options.Providers.TryGetValue(key, out var provider))
-        {
-            return ManagementResult<ProvidersResponse>.Fail(ManagementErrorType.NotFound, $"Provider '{key}' not found.");
-        }
+        if (!_store.Snapshot.Options.Providers.TryGetValue(key: key, value: out var provider))
+            return ManagementResult<ProvidersResponse>.Fail(errorType: ManagementErrorType.NotFound,
+                message: $"Provider '{key}' not found.");
 
-        var discovery = await DiscoverModelsCoreAsync(provider, cancellationToken).ConfigureAwait(false);
+        var discovery = await DiscoverModelsCoreAsync(provider: provider, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
         if (discovery.Supported)
-        {
-            await ReconcileModelsAsync(key, discovery.Models, cancellationToken).ConfigureAwait(false);
-        }
+            await ReconcileModelsAsync(providerKey: key, discoveredIds: discovery.Models,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
 
         ProviderEndpointCapabilities? capabilities = null;
         if (_endpointScanner is not null && _capabilityStore is not null)
         {
             capabilities = await ScanAndPersistCapabilitiesAsync(
-                key, provider, ExplicitCapabilityScanBudget, cancellationToken).ConfigureAwait(false);
-            await TryResolveModelMetadataAsync(key, provider, capabilities, ModelsFor(key), cancellationToken).ConfigureAwait(false);
+                key: key, provider: provider, budgetDuration: ExplicitCapabilityScanBudget,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+            await TryResolveModelMetadataAsync(providerKey: key, provider: provider, endpointCapabilities: capabilities,
+                models: ModelsFor(key), cancellationToken: cancellationToken).ConfigureAwait(false);
         }
 
-        RecordRefreshOutcome(key, discovery, capabilities);
+        RecordRefreshOutcome(key: key, discovery: discovery, capabilities: capabilities);
 
         return ManagementResult<ProvidersResponse>.Ok(_buildProvidersResponse());
     }
@@ -623,24 +618,30 @@ internal sealed class ProviderManagementService
     /// </summary>
     /// <param name="key">The provider key that was refreshed.</param>
     /// <param name="discovery">The model-discovery result.</param>
-    /// <param name="capabilities">The capability scan's result, or <see langword="null"/> when no scan ran (no scanner/capability store wired up).</param>
-    private void RecordRefreshOutcome(string key, DiscoverModelsResponse discovery, ProviderEndpointCapabilities? capabilities)
+    /// <param name="capabilities">
+    /// The capability scan's result, or <see langword="null"/> when no scan ran (no
+    /// scanner/capability store wired up).
+    /// </param>
+    private void RecordRefreshOutcome(string key, DiscoverModelsResponse discovery,
+        ProviderEndpointCapabilities? capabilities)
     {
         if (discovery.Error is null)
         {
-            _interactionStatus?.RecordSuccess(key, "Refresh from endpoint");
+            _interactionStatus?.RecordSuccess(providerKey: key, operation: "Refresh from endpoint");
             return;
         }
 
         var flavorDetected = capabilities is { ScanError: null } detected &&
-            (detected.OpenAiCompatible || detected.AnthropicCompatible || detected.LmStudioNative || detected.OllamaNative);
+                             (detected.OpenAiCompatible || detected.AnthropicCompatible || detected.LmStudioNative ||
+                              detected.OllamaNative);
         if (flavorDetected)
         {
-            _interactionStatus?.RecordSuccess(key, "Refresh from endpoint");
+            _interactionStatus?.RecordSuccess(providerKey: key, operation: "Refresh from endpoint");
             return;
         }
 
-        _interactionStatus?.RecordFailure(key, "Refresh from endpoint", discovery.Error);
+        _interactionStatus?.RecordFailure(providerKey: key, operation: "Refresh from endpoint",
+            message: discovery.Error);
     }
 
     /// <summary>
@@ -662,19 +663,16 @@ internal sealed class ProviderManagementService
     private async Task ReconcileModelsAsync(
         string providerKey, IReadOnlyList<string> discoveredIds, CancellationToken cancellationToken)
     {
-        var discovered = new HashSet<string>(discoveredIds, StringComparer.Ordinal);
+        var discovered = new HashSet<string>(collection: discoveredIds, comparer: StringComparer.Ordinal);
         var configured = ModelsFor(providerKey);
 
         foreach (var entry in configured)
         {
             var isPresent = discovered.Contains(entry.ProviderModelId);
-            if (entry.PresentUpstream == isPresent)
-            {
-                continue;
-            }
+            if (entry.PresentUpstream == isPresent) continue;
 
             await _store.UpsertModelAsync(
-                new ModelRouteEntry
+                entry: new ModelRouteEntry
                 {
                     ModelName = entry.ModelName,
                     Provider = entry.Provider,
@@ -682,23 +680,25 @@ internal sealed class ProviderManagementService
                     Enabled = entry.Enabled,
                     PresentUpstream = isPresent
                 },
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken: cancellationToken).ConfigureAwait(false);
         }
 
-        var configuredIds = new HashSet<string>(configured.Select(e => e.ProviderModelId), StringComparer.Ordinal);
+        var configuredIds = new HashSet<string>(collection: configured.Select(e => e.ProviderModelId),
+            comparer: StringComparer.Ordinal);
         foreach (var id in discoveredIds)
         {
-            if (configuredIds.Contains(id))
-            {
-                continue;
-            }
+            if (configuredIds.Contains(id)) continue;
 
             // Auto-added, but never auto-started: the router notices the model exists, the operator decides
             // whether it should receive traffic. Same "id becomes both the client-facing name and provider
             // id" convention the old manual "click a discovered id to add it" affordance used.
             await _store.UpsertModelAsync(
-                new ModelRouteEntry { ModelName = id, Provider = providerKey, ProviderModelId = id, Enabled = false, PresentUpstream = true },
-                cancellationToken).ConfigureAwait(false);
+                entry: new ModelRouteEntry
+                {
+                    ModelName = id, Provider = providerKey, ProviderModelId = id, Enabled = false,
+                    PresentUpstream = true
+                },
+                cancellationToken: cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -732,16 +732,19 @@ internal sealed class ProviderManagementService
             // empty/whitespace becomes null. Without this a caller sending "" or " " would persist it, and
             // since a value that doesn't parse as a ProviderType member reads as "Other" in the editor
             // anyway, the only thing storing it achieves is junk in model-routing.json.
-            ProviderType = request.ProviderType is null ? baseline.ProviderType : NormalizeNameField(request.ProviderType),
+            ProviderType = request.ProviderType is null
+                ? baseline.ProviderType
+                : NormalizeNameField(request.ProviderType),
             AuthHeaderName = request.AuthHeaderName ?? baseline.AuthHeaderName,
             // The caller always sends the full header set (a null list means "keep existing", e.g. a
             // legacy/partial caller); a provided list replaces it wholesale, one header at a time through
             // ResolveHeader so a blank value preserves what's already stored under that name.
             Headers = request.Headers is null
                 ? baseline.Headers
-                : ResolveHeaders(providerKey, request.Headers, baseline.Headers),
+                : ResolveHeaders(providerKey: providerKey, requests: request.Headers,
+                    existingHeaders: baseline.Headers),
             IsFree = request.IsFree ?? baseline.IsFree,
-            Enabled = request.Enabled ?? baseline.Enabled,
+            Enabled = request.Enabled ?? baseline.Enabled
         };
     }
 
@@ -757,17 +760,14 @@ internal sealed class ProviderManagementService
     {
         var resolved = requests
             .Where(h => !string.IsNullOrWhiteSpace(h.Name))
-            .Select(h => ResolveHeader(providerKey, h, existingHeaders))
+            .Select(h => ResolveHeader(providerKey: providerKey, request: h, existingHeaders: existingHeaders))
             .ToList();
 
-        var resolvedNames = new HashSet<string>(resolved.Select(h => h.Name), StringComparer.OrdinalIgnoreCase);
+        var resolvedNames = new HashSet<string>(collection: resolved.Select(h => h.Name),
+            comparer: StringComparer.OrdinalIgnoreCase);
         foreach (var existing in existingHeaders)
-        {
             if (!string.IsNullOrWhiteSpace(existing.ValueSecretRef) && !resolvedNames.Contains(existing.Name))
-            {
-                DeleteExistingSecret(providerKey, existing, existing.Name);
-            }
-        }
+                DeleteExistingSecret(providerKey: providerKey, existing: existing, headerName: existing.Name);
 
         return resolved;
     }
@@ -781,15 +781,19 @@ internal sealed class ProviderManagementService
     /// toggle. Now that <see cref="ProviderOptions"/> is a record, <c>with</c> carries everything across by
     /// construction and the hazard is gone from both methods at once.
     /// </remarks>
-    private static ProviderOptions WithEnabled(ProviderOptions source, bool enabled) =>
-        source with { Enabled = enabled };
+    private static ProviderOptions WithEnabled(ProviderOptions source, bool enabled)
+    {
+        return source with { Enabled = enabled };
+    }
 
     /// <summary>
     /// Normalizes a provider display name: empty or whitespace-only strings become null, so clearing the
     /// field in the UI results in a consistent null rather than an empty string; any other value is trimmed.
     /// </summary>
-    private static string? NormalizeNameField(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    private static string? NormalizeNameField(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
 
     /// <summary>
     /// Resolves one incoming header write to the <see cref="ProviderHeader"/> to store: a non-blank
@@ -811,8 +815,12 @@ internal sealed class ProviderManagementService
     /// </summary>
     /// <param name="providerKey">The provider key being upserted, used to name this header's protected-store entry.</param>
     /// <param name="request">The incoming header write.</param>
-    /// <param name="existingHeaders">The provider's current headers, consulted for the preserve-on-blank and secret-cleanup rules.</param>
-    private ProviderHeader ResolveHeader(string providerKey, HeaderWriteRequest request, IReadOnlyList<ProviderHeader> existingHeaders)
+    /// <param name="existingHeaders">
+    /// The provider's current headers, consulted for the preserve-on-blank and secret-cleanup
+    /// rules.
+    /// </param>
+    private ProviderHeader ResolveHeader(string providerKey, HeaderWriteRequest request,
+        IReadOnlyList<ProviderHeader> existingHeaders)
     {
         var name = request.Name!.Trim();
 
@@ -824,18 +832,21 @@ internal sealed class ProviderManagementService
         // header when looking up the value to preserve or clean up - otherwise a casing mismatch between
         // what was stored and what the caller resends silently drops the stored secret instead of keeping
         // it, or leaves its protected-store entry orphaned.
-        var existing = existingHeaders.FirstOrDefault(h => string.Equals(h.Name, name, StringComparison.OrdinalIgnoreCase));
+        var existing = existingHeaders.FirstOrDefault(h =>
+            string.Equals(a: h.Name, b: name, comparisonType: StringComparison.OrdinalIgnoreCase));
 
         if (!string.IsNullOrWhiteSpace(request.Value))
         {
-            if (locked && TryWriteSecret(providerKey, name, request.Value))
-            {
-                return new ProviderHeader { Name = name, Value = null, ValueEnvVar = null, ValueSecretRef = SecretRefName(providerKey, name), Locked = true };
-            }
+            if (locked && TryWriteSecret(providerKey: providerKey, headerName: name, value: request.Value))
+                return new ProviderHeader
+                {
+                    Name = name, Value = null, ValueEnvVar = null,
+                    ValueSecretRef = SecretRefName(providerKey: providerKey, headerName: name), Locked = true
+                };
 
             // Either unlocked (public configuration, stored verbatim) or the store is unavailable on this
             // platform - either way this header no longer references the store, so drop any stale entry.
-            DeleteExistingSecret(providerKey, existing, name);
+            DeleteExistingSecret(providerKey: providerKey, existing: existing, headerName: name);
             return new ProviderHeader { Name = name, Value = request.Value, ValueEnvVar = null, Locked = locked };
         }
 
@@ -843,13 +854,14 @@ internal sealed class ProviderManagementService
         // there is nothing to withhold and it always stores unlocked.
         if (!string.IsNullOrWhiteSpace(request.ValueEnvVar))
         {
-            DeleteExistingSecret(providerKey, existing, name);
-            return new ProviderHeader { Name = name, Value = null, ValueEnvVar = request.ValueEnvVar.Trim(), Locked = false };
+            DeleteExistingSecret(providerKey: providerKey, existing: existing, headerName: name);
+            return new ProviderHeader
+                { Name = name, Value = null, ValueEnvVar = request.ValueEnvVar.Trim(), Locked = false };
         }
 
         if (request.Locked is false)
         {
-            DeleteExistingSecret(providerKey, existing, name);
+            DeleteExistingSecret(providerKey: providerKey, existing: existing, headerName: name);
             return new ProviderHeader { Name = name, Value = null, ValueEnvVar = null, Locked = false };
         }
 
@@ -864,24 +876,31 @@ internal sealed class ProviderManagementService
             ValueSecretRef = preservedSecretRef,
             // Only a literal or a protected-store reference can be a secret, so a preserved env-var (or
             // valueless) header stores unlocked no matter what the caller asked for.
-            Locked = (!string.IsNullOrWhiteSpace(preservedValue) || !string.IsNullOrWhiteSpace(preservedSecretRef)) && locked
+            Locked = (!string.IsNullOrWhiteSpace(preservedValue) || !string.IsNullOrWhiteSpace(preservedSecretRef)) &&
+                     locked
         };
     }
 
-    /// <summary>The protected-store name for one provider header (<c>docs/router/secrets-at-rest-plan.md</c> §3's naming convention).</summary>
-    private static string SecretRefName(string providerKey, string headerName) => $"provider:{providerKey}:header:{headerName}";
+    /// <summary>
+    /// The protected-store name for one provider header (<c>docs/router/secrets-at-rest-plan.md</c> §3's naming
+    /// convention).
+    /// </summary>
+    private static string SecretRefName(string providerKey, string headerName)
+    {
+        return $"provider:{providerKey}:header:{headerName}";
+    }
 
-    /// <summary>Writes <paramref name="value"/> to the protected store under this header's name. Returns <see langword="false"/> when no store is configured or it is unavailable on this platform.</summary>
+    /// <summary>
+    /// Writes <paramref name="value"/> to the protected store under this header's name. Returns
+    /// <see langword="false"/> when no store is configured or it is unavailable on this platform.
+    /// </summary>
     private bool TryWriteSecret(string providerKey, string headerName, string value)
     {
-        if (_secretWriter is null)
-        {
-            return false;
-        }
+        if (_secretWriter is null) return false;
 
         try
         {
-            _secretWriter.Write(SecretRefName(providerKey, headerName), value);
+            _secretWriter.Write(name: SecretRefName(providerKey: providerKey, headerName: headerName), value: value);
             return true;
         }
         catch (PlatformNotSupportedException)
@@ -890,17 +909,17 @@ internal sealed class ProviderManagementService
         }
     }
 
-    /// <summary>Deletes <paramref name="existing"/>'s protected-store entry, if it has one, swallowing a store that is unavailable on this platform.</summary>
+    /// <summary>
+    /// Deletes <paramref name="existing"/>'s protected-store entry, if it has one, swallowing a store that is
+    /// unavailable on this platform.
+    /// </summary>
     private void DeleteExistingSecret(string providerKey, ProviderHeader? existing, string headerName)
     {
-        if (_secretWriter is null || string.IsNullOrWhiteSpace(existing?.ValueSecretRef))
-        {
-            return;
-        }
+        if (_secretWriter is null || string.IsNullOrWhiteSpace(existing?.ValueSecretRef)) return;
 
         try
         {
-            _secretWriter.Delete(SecretRefName(providerKey, headerName));
+            _secretWriter.Delete(SecretRefName(providerKey: providerKey, headerName: headerName));
         }
         catch (PlatformNotSupportedException)
         {
@@ -908,7 +927,10 @@ internal sealed class ProviderManagementService
         }
     }
 
-    /// <summary>Runs a store mutation and maps it to a <see cref="ManagementResult{T}"/>, translating validation/argument failures into <see cref="ManagementErrorType.InvalidRequest"/>.</summary>
+    /// <summary>
+    /// Runs a store mutation and maps it to a <see cref="ManagementResult{T}"/>, translating validation/argument
+    /// failures into <see cref="ManagementErrorType.InvalidRequest"/>.
+    /// </summary>
     private async Task<ManagementResult<ProvidersResponse>> MutateAsync(Func<Task> mutation)
     {
         try
@@ -918,53 +940,59 @@ internal sealed class ProviderManagementService
         }
         catch (OptionsValidationException ex)
         {
-            return ManagementResult<ProvidersResponse>.Fail(ManagementErrorType.InvalidRequest, string.Join("; ", ex.Failures));
+            return ManagementResult<ProvidersResponse>.Fail(errorType: ManagementErrorType.InvalidRequest,
+                message: string.Join(separator: "; ", values: ex.Failures));
         }
         catch (ArgumentException ex)
         {
             // Bad input reaching the store (e.g. a blank key/model name) is a client error, not a fault.
-            return ManagementResult<ProvidersResponse>.Fail(ManagementErrorType.InvalidRequest, ex.Message);
+            return ManagementResult<ProvidersResponse>.Fail(errorType: ManagementErrorType.InvalidRequest,
+                message: ex.Message);
         }
     }
 
-    /// <summary>Queries a provider's live OpenAI-shaped model list, sending the same auth/extra headers the forwarding path uses.</summary>
-    private async Task<DiscoverModelsResponse> DiscoverModelsCoreAsync(ProviderOptions provider, CancellationToken cancellationToken)
+    /// <summary>
+    /// Queries a provider's live OpenAI-shaped model list, sending the same auth/extra headers the forwarding path
+    /// uses.
+    /// </summary>
+    private async Task<DiscoverModelsResponse> DiscoverModelsCoreAsync(ProviderOptions provider,
+        CancellationToken cancellationToken)
     {
         Uri target;
         try
         {
-            target = new Uri(ProviderUrlBuilder.BuildModelsUrl(provider.BaseUrl), UriKind.Absolute);
+            target = new Uri(uriString: ProviderUrlBuilder.BuildModelsUrl(provider.BaseUrl), uriKind: UriKind.Absolute);
         }
         catch (UriFormatException ex)
         {
-            return new DiscoverModelsResponse(Supported: false, Models: [], Error: $"Invalid BaseUrl: {ex.Message}");
+            return new DiscoverModelsResponse(false, Models: [], Error: $"Invalid BaseUrl: {ex.Message}");
         }
 
-        using var requestMessage = new HttpRequestMessage(HttpMethod.Get, target);
+        using var requestMessage = new HttpRequestMessage(method: HttpMethod.Get, requestUri: target);
 
         // The provider's credentials and configured custom headers, sent identically to the forwarding path.
         // This is how a provider that requires an extra header for discovery gets it (e.g. Anthropic's
         // anthropic-version) without any provider-specific code here.
-        ProviderCredentialResolver.ApplyToRequest(requestMessage, provider, _environment, _secretReader);
+        ProviderCredentialResolver.ApplyToRequest(request: requestMessage, provider: provider,
+            environment: _environment, secretReader: _secretReader);
 
         try
         {
-            using var response = await _httpClient.SendAsync(requestMessage, cancellationToken).ConfigureAwait(false);
+            using var response = await _httpClient
+                .SendAsync(request: requestMessage, cancellationToken: cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
-            {
                 return new DiscoverModelsResponse(
-                    Supported: false,
+                    false,
                     Models: [],
                     Error: $"Provider returned {(int)response.StatusCode} for {target}.");
-            }
 
             var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             var models = ParseModelIds(body);
-            return new DiscoverModelsResponse(Supported: true, Models: models, Error: null);
+            return new DiscoverModelsResponse(true, Models: models, null);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
-            return new DiscoverModelsResponse(Supported: false, Models: [], Error: ex.Message);
+            return new DiscoverModelsResponse(false, Models: [], Error: ex.Message);
         }
     }
 
@@ -972,23 +1000,16 @@ internal sealed class ProviderManagementService
     private static IReadOnlyList<string> ParseModelIds(string body)
     {
         using var document = JsonDocument.Parse(body);
-        if (!document.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array)
-        {
-            return [];
-        }
+        if (!document.RootElement.TryGetProperty(propertyName: "data", value: out var data) ||
+            data.ValueKind != JsonValueKind.Array) return [];
 
         var ids = new List<string>();
         foreach (var item in data.EnumerateArray())
-        {
-            if (item.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String)
+            if (item.TryGetProperty(propertyName: "id", value: out var id) && id.ValueKind == JsonValueKind.String)
             {
                 var value = id.GetString();
-                if (!string.IsNullOrWhiteSpace(value))
-                {
-                    ids.Add(value);
-                }
+                if (!string.IsNullOrWhiteSpace(value)) ids.Add(value);
             }
-        }
 
         return ids;
     }

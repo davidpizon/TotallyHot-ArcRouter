@@ -1,4 +1,7 @@
+using System.Net;
+using System.Text;
 using AwesomeAssertions;
+using TotallyHot.ArcRouter.Gui.Admin;
 using TotallyHot.ArcRouter.Gui.Services;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
@@ -56,12 +59,12 @@ public sealed class ProviderAdminStoreTests
     public async Task UpsertProviderAsync_propagates_a_ProviderAdminException_when_unreachable()
     {
         var store = new ProviderAdminStore(managementAddress: UnreachableAddress);
-        var body = new TotallyHot.ArcRouter.Gui.Admin.ProviderWriteRequest(
+        var body = new ProviderWriteRequest(
             BaseUrl: "https://example.com", AuthHeaderName: "Authorization");
 
-        var act = () => store.UpsertProviderAsync("test", body);
+        var act = () => store.UpsertProviderAsync(key: "test", body: body);
 
-        await act.Should().ThrowAsync<TotallyHot.ArcRouter.Gui.Admin.ProviderAdminException>();
+        await act.Should().ThrowAsync<ProviderAdminException>();
     }
 
     [Fact]
@@ -78,7 +81,8 @@ public sealed class ProviderAdminStoreTests
     {
         var store = new ProviderAdminStore(managementAddress: UnreachableAddress);
 
-        var act = () => store.LoadRateLimitHistoryAsync("openai", cancellationToken: TestContext.Current.CancellationToken);
+        var act = () =>
+            store.LoadRateLimitHistoryAsync(key: "openai", cancellationToken: TestContext.Current.CancellationToken);
 
         await act.Should().NotThrowAsync();
     }
@@ -90,9 +94,11 @@ public sealed class ProviderAdminStoreTests
         // request timeout surfaces as a raw TaskCanceledException instead. Called fire-and-forget from
         // ProvidersAdmin.razor, this method must swallow that too rather than let it become an
         // unobserved task exception.
-        var store = new ProviderAdminStore(managementAddress: "http://127.0.0.1:59991", transport: new TimingOutHandler());
+        var store = new ProviderAdminStore(managementAddress: "http://127.0.0.1:59991",
+            transport: new TimingOutHandler());
 
-        var act = () => store.LoadRateLimitHistoryAsync("openai", cancellationToken: TestContext.Current.CancellationToken);
+        var act = () =>
+            store.LoadRateLimitHistoryAsync(key: "openai", cancellationToken: TestContext.Current.CancellationToken);
 
         await act.Should().NotThrowAsync();
     }
@@ -104,33 +110,38 @@ public sealed class ProviderAdminStoreTests
         // several can complete around the same time and write into the shared cache concurrently -
         // RateLimitHistory is backed by a ConcurrentDictionary specifically so this doesn't throw or drop
         // entries.
-        const string HistoryJson = """{"dimensions":{"tokens":[{"bucketUtc":"2026-03-01T12:00:00Z","remaining":1000,"limit":2000}]}}""";
-        var store = new ProviderAdminStore(managementAddress: "http://127.0.0.1:59991", transport: new StubHandler(HistoryJson));
+        const string HistoryJson =
+            """{"dimensions":{"tokens":[{"bucketUtc":"2026-03-01T12:00:00Z","remaining":1000,"limit":2000}]}}""";
+        var store = new ProviderAdminStore(managementAddress: "http://127.0.0.1:59991",
+            transport: new StubHandler(HistoryJson));
         var providerKeys = Enumerable.Range(0, 50).Select(i => $"provider-{i}").ToArray();
 
         await Task.WhenAll(providerKeys.Select(key =>
-            store.LoadRateLimitHistoryAsync(key, cancellationToken: TestContext.Current.CancellationToken)));
+            store.LoadRateLimitHistoryAsync(key: key, cancellationToken: TestContext.Current.CancellationToken)));
 
         store.RateLimitHistory.Should().HaveCount(providerKeys.Length);
-        foreach (var key in providerKeys)
-        {
-            store.RateLimitHistory.Should().ContainKey(key);
-        }
+        foreach (var key in providerKeys) store.RateLimitHistory.Should().ContainKey(key);
     }
 
     private sealed class TimingOutHandler : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
             throw new TaskCanceledException("Simulated request timeout.");
+        }
     }
 
     private sealed class StubHandler(string jsonBody) : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json"),
+                Content = new StringContent(content: jsonBody, encoding: Encoding.UTF8,
+                    mediaType: "application/json")
             });
+        }
     }
 }
-

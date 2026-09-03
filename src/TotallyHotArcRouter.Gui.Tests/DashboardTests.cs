@@ -3,6 +3,7 @@ using Bunit;
 using TotallyHot.ArcRouter.Gui.Components;
 using TotallyHot.ArcRouter.Gui.Services;
 using TotallyHot.ArcRouter.Gui.Telemetry;
+using TestContext = Xunit.TestContext;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
@@ -13,18 +14,19 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 /// </summary>
 public sealed class DashboardTests
 {
-    private static Bunit.BunitContext NewContext(PersistedSessionStore? persistedSessionStore = null)
+    private static BunitContext NewContext(PersistedSessionStore? persistedSessionStore = null)
     {
-        var ctx = new Bunit.BunitContext();
+        var ctx = new BunitContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
         ctx.Services.AddSingleton(new LiveDataStore(serverAddress: "https://127.0.0.1:59996"));
-        ctx.Services.AddSingleton(persistedSessionStore ?? new PersistedSessionStore(serverAddress: "https://127.0.0.1:59996"));
+        ctx.Services.AddSingleton(persistedSessionStore ??
+                                  new PersistedSessionStore(serverAddress: "https://127.0.0.1:59996"));
         ctx.Services.AddSingleton(new ProviderAdminStore(managementAddress: "http://127.0.0.1:59994"));
         ctx.Services.AddSingleton(new UsageStore(managementAddress: "http://127.0.0.1:59993"));
         ctx.Services.AddSingleton(new RouterSettingsAdminStore(serverAddress: "https://127.0.0.1:59995"));
         ctx.Services.AddSingleton(new UpdateStore(serverAddress: "https://127.0.0.1:59992"));
         ctx.Services.AddSingleton(new ToastService());
-        var settingsPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".json");
+        var settingsPath = Path.Combine(path1: Path.GetTempPath(), path2: Guid.NewGuid() + ".json");
         ctx.Services.AddSingleton<IGuiSettingsStore>(new GuiSettingsStore(settingsPath));
         ctx.Services.AddSingleton(_ => new TempFileCleanup(settingsPath));
         ctx.Services.GetRequiredService<TempFileCleanup>();
@@ -112,11 +114,11 @@ public sealed class DashboardTests
         var client = new FakePersistedSessionsClient
         {
             Result = new PersistedSessionsResult(
-                TranscriptCaptureEnabled: true,
-                Transcripts: [CreateTranscript(sessionId: "persisted-only")]),
+                true,
+                Transcripts: [CreateTranscript(sessionId: "persisted-only")])
         };
         var store = new PersistedSessionStore(client);
-        await store.LoadAsync(Xunit.TestContext.Current.CancellationToken);
+        await store.LoadAsync(TestContext.Current.CancellationToken);
         using var ctx = NewContext(store);
 
         var cut = ctx.Render<Dashboard>();
@@ -132,11 +134,11 @@ public sealed class DashboardTests
         var client = new FakePersistedSessionsClient
         {
             Result = new PersistedSessionsResult(
-                TranscriptCaptureEnabled: true,
-                Transcripts: [CreateTranscript(sessionId: "persisted-only")]),
+                true,
+                Transcripts: [CreateTranscript(sessionId: "persisted-only")])
         };
         var store = new PersistedSessionStore(client);
-        await store.LoadAsync(Xunit.TestContext.Current.CancellationToken);
+        await store.LoadAsync(TestContext.Current.CancellationToken);
         using var ctx = NewContext(store);
 
         var cut = ctx.Render<Dashboard>();
@@ -144,25 +146,29 @@ public sealed class DashboardTests
         cut.Markup.Should().NotContain("No conversations yet.");
     }
 
-    private static PersistedTranscriptDto CreateTranscript(string sessionId, int turnNumber = 1) => new(
-        SessionId: sessionId,
-        CorrelationId: $"{sessionId}:{turnNumber}",
-        CreatedAtUtc: DateTimeOffset.UtcNow,
-        RequestedModel: "gpt-5.4",
-        RoutedModel: "kimi-k2.5",
-        PromptText: "hello",
-        ResponseText: "hi",
-        CostUsd: 0.01m,
-        InputTokens: 10,
-        OutputTokens: 5,
-        MemoryEntryId: null);
+    private static PersistedTranscriptDto CreateTranscript(string sessionId, int turnNumber = 1)
+    {
+        return new PersistedTranscriptDto(
+            SessionId: sessionId,
+            CorrelationId: $"{sessionId}:{turnNumber}",
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            RequestedModel: "gpt-5.4",
+            RoutedModel: "kimi-k2.5",
+            PromptText: "hello",
+            ResponseText: "hi",
+            0.01m,
+            10,
+            5,
+            null);
+    }
 
     private sealed class FakePersistedSessionsClient : IPersistedSessionsClient
     {
-        public PersistedSessionsResult Result { get; set; } = new(true, []);
+        public PersistedSessionsResult Result { get; set; } = new(true, Transcripts: []);
 
-        public Task<PersistedSessionsResult> ListAsync(int limit, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Result);
+        public Task<PersistedSessionsResult> ListAsync(int limit, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Result);
+        }
     }
 }
-

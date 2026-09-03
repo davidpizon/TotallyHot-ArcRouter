@@ -12,8 +12,8 @@ namespace TotallyHot.ArcRouter.Tests.Router;
 public class AgentAsARouterTests
 {
     private readonly Mock<ILogger<AgentAsARouter>> _loggerMock;
-    private readonly Mock<IOptions<RoutingOptions>> _optionsMock;
     private readonly RouterMemory _memory;
+    private readonly Mock<IOptions<RoutingOptions>> _optionsMock;
     private readonly RoutingOptions _routingOptions;
 
     public AgentAsARouterTests()
@@ -35,17 +35,18 @@ public class AgentAsARouterTests
         _optionsMock.Setup(o => o.Value).Returns(new RoutingOptions { EnableExploration = false, ExplorationRate = 0 });
 
         var dimension = "test_dimension";
-        await _memory.AddScoreAsync(dimension, "model1", 0.7);
-        await _memory.AddScoreAsync(dimension, "model2", 0.9);
+        await _memory.AddScoreAsync(dimension: dimension, model: "model1", 0.7);
+        await _memory.AddScoreAsync(dimension: dimension, model: "model2", 0.9);
 
-        var router = new AgentAsARouter(_loggerMock.Object, _optionsMock.Object, _memory);
+        var router = new AgentAsARouter(logger: _loggerMock.Object, options: _optionsMock.Object, memory: _memory);
 
         // Act
-        var decision = await router.SelectModelAsync(dimension, TestContext.Current.CancellationToken);
+        var decision = await router.SelectModelAsync(dimension: dimension,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         // Assert
-        Assert.Equal("model2", decision.SelectedModel);
-        Assert.Contains("Selected best model", decision.Rationale);
+        Assert.Equal(expected: "model2", actual: decision.SelectedModel);
+        Assert.Contains(expectedSubstring: "Selected best model", actualString: decision.Rationale);
     }
 
     [Fact]
@@ -55,14 +56,15 @@ public class AgentAsARouterTests
         var options = new RoutingOptions { EnableExploration = true, ExplorationRate = 1.0 }; // Force exploration
         _optionsMock.Setup(o => o.Value).Returns(options);
 
-        var router = new AgentAsARouter(_loggerMock.Object, _optionsMock.Object, _memory);
+        var router = new AgentAsARouter(logger: _loggerMock.Object, options: _optionsMock.Object, memory: _memory);
 
         // Act
-        var decision = await router.SelectModelAsync("test_dimension", TestContext.Current.CancellationToken);
+        var decision = await router.SelectModelAsync(dimension: "test_dimension",
+            cancellationToken: TestContext.Current.CancellationToken);
 
         // Assert
-        Assert.Contains(decision.SelectedModel, RouterConstants.SupportedModels);
-        Assert.Equal("Exploration: randomly selected model to gather new data.", decision.Rationale);
+        Assert.Contains(expected: decision.SelectedModel, collection: RouterConstants.SupportedModels);
+        Assert.Equal(expected: "Exploration: randomly selected model to gather new data.", actual: decision.Rationale);
     }
 
     [Fact]
@@ -70,41 +72,44 @@ public class AgentAsARouterTests
     {
         // Arrange
         _optionsMock.Setup(o => o.Value).Returns(new RoutingOptions { EnableExploration = false, ExplorationRate = 0 });
-        var router = new AgentAsARouter(_loggerMock.Object, _optionsMock.Object, _memory);
+        var router = new AgentAsARouter(logger: _loggerMock.Object, options: _optionsMock.Object, memory: _memory);
 
         // Act
-        var decision = await router.SelectModelAsync("unknown_dimension", TestContext.Current.CancellationToken);
+        var decision = await router.SelectModelAsync(dimension: "unknown_dimension",
+            cancellationToken: TestContext.Current.CancellationToken);
 
         // Assert
-        Assert.Equal(_routingOptions.DefaultModel, decision.SelectedModel);
-        Assert.Equal(RouterConstants.FallbackReason, decision.Rationale);
+        Assert.Equal(expected: _routingOptions.DefaultModel, actual: decision.SelectedModel);
+        Assert.Equal(expected: RouterConstants.FallbackReason, actual: decision.Rationale);
     }
 
     [Fact]
     public async Task Observe_AddsScoreToMemory()
     {
         // Arrange
-        var router = new AgentAsARouter(_loggerMock.Object, _optionsMock.Object, _memory);
+        var router = new AgentAsARouter(logger: _loggerMock.Object, options: _optionsMock.Object, memory: _memory);
         var dimension = "test_dimension";
         var model = "test_model";
         var score = 0.95;
 
         // Act
-        await router.ObserveAsync(dimension, model, score);
-        var averageScore = _memory.GetAverageScore(dimension, model);
+        await router.ObserveAsync(dimension: dimension, model: model, score: score);
+        var averageScore = _memory.GetAverageScore(dimension: dimension, model: model);
 
         // Assert
-        Assert.Equal(score, averageScore);
+        Assert.Equal(expected: score, actual: averageScore);
     }
 
     [Fact]
     public async Task Observe_Throws_OnInvalidScore()
     {
         // Arrange
-        var router = new AgentAsARouter(_loggerMock.Object, _optionsMock.Object, _memory);
+        var router = new AgentAsARouter(logger: _loggerMock.Object, options: _optionsMock.Object, memory: _memory);
 
         // Act & Assert
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => router.ObserveAsync("dim", "mod", -0.1));
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => router.ObserveAsync("dim", "mod", 1.1));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            router.ObserveAsync(dimension: "dim", model: "mod", -0.1));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            router.ObserveAsync(dimension: "dim", model: "mod", 1.1));
     }
 }

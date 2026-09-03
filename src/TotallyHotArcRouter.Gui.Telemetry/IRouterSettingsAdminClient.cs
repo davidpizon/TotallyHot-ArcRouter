@@ -15,10 +15,16 @@ public interface IRouterSettingsAdminClient
     /// <param name="adaptiveRoutingEnabled">Whether adaptive routing is enabled.</param>
     /// <param name="embeddingMemoryCapacity">The embedding-memory capacity; rejected when out of range.</param>
     /// <param name="judgeEnabled">Whether the G-Eval shadow judge is enabled.</param>
-    /// <param name="judgeModelName">The chosen judge backbone, or an empty string for automatic selection; rejected when it names a model that is not currently eligible.</param>
+    /// <param name="judgeModelName">
+    /// The chosen judge backbone, or an empty string for automatic selection; rejected when it
+    /// names a model that is not currently eligible.
+    /// </param>
     /// <param name="transcriptCaptureEnabled">Whether the opt-in transcript store captures raw prompt/response text.</param>
     /// <param name="cancellationToken">A cancellation token.</param>
-    /// <exception cref="RouterSettingsAdminException">The call was rejected (e.g. an out-of-range capacity, or an ineligible judge model) or the router is unreachable.</exception>
+    /// <exception cref="RouterSettingsAdminException">
+    /// The call was rejected (e.g. an out-of-range capacity, or an ineligible
+    /// judge model) or the router is unreachable.
+    /// </exception>
     Task<RouterSettingsInfo> UpdateAsync(
         bool adaptiveRoutingEnabled,
         int embeddingMemoryCapacity,

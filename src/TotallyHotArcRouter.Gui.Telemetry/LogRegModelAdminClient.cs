@@ -1,5 +1,5 @@
-using Grpc.Core;
 using System.Runtime.CompilerServices;
+using Grpc.Core;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
@@ -13,7 +13,7 @@ public sealed class LogRegModelAdminException : GrpcAdminException
 {
     /// <summary>Initializes a new instance of the <see cref="LogRegModelAdminException"/> class.</summary>
     public LogRegModelAdminException(string message, Exception? innerException = null, bool isUnavailable = false)
-        : base(message, innerException, isUnavailable)
+        : base(message: message, innerException: innerException, isUnavailable: isUnavailable)
     {
     }
 }
@@ -28,7 +28,7 @@ public enum LogRegRetrainResultKindInfo
     Declined,
 
     /// <summary>A retrain was already in progress; this call was skipped rather than queued.</summary>
-    AlreadyRunning,
+    AlreadyRunning
 }
 
 /// <summary>
@@ -38,15 +38,24 @@ public enum LogRegRetrainResultKindInfo
 /// describe the retrain configuration, not the model itself.
 /// </summary>
 /// <param name="ArtifactPresent">Whether a trained artifact currently exists on disk.</param>
-/// <param name="EmbeddingDimension">The embedding dimension the current artifact was trained at, or 0 if no artifact exists.</param>
+/// <param name="EmbeddingDimension">
+/// The embedding dimension the current artifact was trained at, or 0 if no artifact
+/// exists.
+/// </param>
 /// <param name="TrainedAtUtc">The artifact file's on-disk last-write time, or <see langword="null"/> if none exists.</param>
 /// <param name="TrainedFrom">Human-readable provenance: source mix, sample counts, and the training date.</param>
 /// <param name="BootstrapTaskCount">The number of OOD bootstrap tasks that contributed to the current artifact.</param>
 /// <param name="MemoryEntryCount">The number of live memory entries that contributed to the current artifact.</param>
 /// <param name="ModelsRepresented">The number of distinct models with trained weights in the current artifact.</param>
-/// <param name="EntriesSinceLastRetrain">Live memory entries accumulated since the current artifact's <see cref="MemoryEntryCount"/> was recorded, or every live entry if no artifact exists.</param>
+/// <param name="EntriesSinceLastRetrain">
+/// Live memory entries accumulated since the current artifact's
+/// <see cref="MemoryEntryCount"/> was recorded, or every live entry if no artifact exists.
+/// </param>
 /// <param name="RetrainThreshold">The configured live memory entry count that triggers an automatic retrain.</param>
-/// <param name="LiveSampleWeight">The configured weight applied to live samples relative to bootstrap samples during training.</param>
+/// <param name="LiveSampleWeight">
+/// The configured weight applied to live samples relative to bootstrap samples during
+/// training.
+/// </param>
 public sealed record LogRegModelStatusInfo(
     bool ArtifactPresent,
     int EmbeddingDimension,
@@ -67,7 +76,10 @@ public sealed record LogRegRetrainBootstrapProgressInfo(int TasksEmbedded);
 /// <param name="Kind">The result category.</param>
 /// <param name="Message">A human-readable explanation, suitable for the panel's status line.</param>
 /// <param name="Status">The status computed immediately after the retrain attempt.</param>
-public sealed record LogRegRetrainResultInfo(LogRegRetrainResultKindInfo Kind, string Message, LogRegModelStatusInfo Status);
+public sealed record LogRegRetrainResultInfo(
+    LogRegRetrainResultKindInfo Kind,
+    string Message,
+    LogRegModelStatusInfo Status);
 
 /// <summary>
 /// One message on the retrain stream: a <see cref="BootstrapProgress"/> tick, or - exactly once, as the
@@ -76,7 +88,9 @@ public sealed record LogRegRetrainResultInfo(LogRegRetrainResultKindInfo Kind, s
 /// </summary>
 /// <param name="BootstrapProgress">A bootstrap-embedding progress tick, or <see langword="null"/> for the result message.</param>
 /// <param name="Result">The retrain's outcome, set only on the final message.</param>
-public sealed record LogRegRetrainEvent(LogRegRetrainBootstrapProgressInfo? BootstrapProgress, LogRegRetrainResultInfo? Result);
+public sealed record LogRegRetrainEvent(
+    LogRegRetrainBootstrapProgressInfo? BootstrapProgress,
+    LogRegRetrainResultInfo? Result);
 
 /// <summary>
 /// Client for the proxy's <c>RouterModelAdminService</c> - the Governance → Router Model panel's read and
@@ -85,14 +99,16 @@ public sealed record LogRegRetrainEvent(LogRegRetrainBootstrapProgressInfo? Boot
 /// </summary>
 public sealed class LogRegModelAdminClient
     : GrpcAdminClientBase<Contract.RouterModelAdminService.RouterModelAdminServiceClient, LogRegModelAdminException>,
-      ILogRegModelAdminClient
+        ILogRegModelAdminClient
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="LogRegModelAdminClient"/> class, creating and owning a
     /// channel to <paramref name="serverAddress"/>.
     /// </summary>
     public LogRegModelAdminClient(string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
-        : base(serverAddress, callInvoker => new Contract.RouterModelAdminService.RouterModelAdminServiceClient(callInvoker))
+        : base(serverAddress: serverAddress,
+            createClient: callInvoker =>
+                new Contract.RouterModelAdminService.RouterModelAdminServiceClient(callInvoker))
     {
     }
 
@@ -106,27 +122,29 @@ public sealed class LogRegModelAdminClient
     {
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<LogRegModelStatusInfo> GetStatusAsync(CancellationToken cancellationToken = default)
     {
         try
         {
             var response = await Client
-                .GetLogRegModelStatusAsync(new Contract.GetLogRegModelStatusRequest(), cancellationToken: cancellationToken)
+                .GetLogRegModelStatusAsync(request: new Contract.GetLogRegModelStatusRequest(),
+                    cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             return MapStatus(response);
         }
         catch (RpcException ex)
         {
-            throw Wrap(ex, "Could not read the logreg model status");
+            throw Wrap(ex: ex, action: "Could not read the logreg model status");
         }
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async IAsyncEnumerable<LogRegRetrainEvent> RetrainAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        using var call = Client.RetrainLogRegModel(new Contract.RetrainLogRegModelRequest(), cancellationToken: cancellationToken);
+        using var call = Client.RetrainLogRegModel(request: new Contract.RetrainLogRegModelRequest(),
+            cancellationToken: cancellationToken);
         var stream = call.ResponseStream;
 
         while (true)
@@ -140,63 +158,74 @@ public sealed class LogRegModelAdminClient
             {
                 // Not caught inside a try that also yields: an iterator cannot yield from within a catch
                 // block, so MoveNext's outcome is captured here and acted on outside the try.
-                throw Wrap(ex, "Logreg model retrain failed");
+                throw Wrap(ex: ex, action: "Logreg model retrain failed");
             }
 
-            if (!hasNext)
-            {
-                yield break;
-            }
+            if (!hasNext) yield break;
 
             yield return MapEvent(stream.Current);
         }
     }
 
     /// <summary>Converts a gRPC-contract status response into the client's <see cref="LogRegModelStatusInfo"/>.</summary>
-    private static LogRegModelStatusInfo MapStatus(Contract.LogRegModelStatusResponse response) => new(
-        response.ArtifactPresent,
-        response.EmbeddingDimension,
-        response.TrainedAtUtc?.ToDateTimeOffset(),
-        response.TrainedFrom,
-        response.BootstrapTaskCount,
-        response.MemoryEntryCount,
-        response.ModelsRepresented,
-        response.EntriesSinceLastRetrain,
-        response.RetrainThreshold,
-        response.LiveSampleWeight);
+    private static LogRegModelStatusInfo MapStatus(Contract.LogRegModelStatusResponse response)
+    {
+        return new LogRegModelStatusInfo(
+            ArtifactPresent: response.ArtifactPresent,
+            EmbeddingDimension: response.EmbeddingDimension,
+            TrainedAtUtc: response.TrainedAtUtc?.ToDateTimeOffset(),
+            TrainedFrom: response.TrainedFrom,
+            BootstrapTaskCount: response.BootstrapTaskCount,
+            MemoryEntryCount: response.MemoryEntryCount,
+            ModelsRepresented: response.ModelsRepresented,
+            EntriesSinceLastRetrain: response.EntriesSinceLastRetrain,
+            RetrainThreshold: response.RetrainThreshold,
+            LiveSampleWeight: response.LiveSampleWeight);
+    }
 
     /// <summary>
     /// Converts a gRPC-contract retrain stream message into the client's <see cref="LogRegRetrainEvent"/>.
     /// Switches explicitly on every defined <see cref="Contract.LogRegRetrainStreamEvent.EventOneofCase"/>,
     /// including <c>None</c> - mirrors <c>ClusterModelAdminClient.MapEvent</c>'s reasoning.
     /// </summary>
-    private static LogRegRetrainEvent MapEvent(Contract.LogRegRetrainStreamEvent wire) => wire.EventCase switch
+    private static LogRegRetrainEvent MapEvent(Contract.LogRegRetrainStreamEvent wire)
     {
-        Contract.LogRegRetrainStreamEvent.EventOneofCase.BootstrapProgress =>
-            new LogRegRetrainEvent(
-                new LogRegRetrainBootstrapProgressInfo(wire.BootstrapProgress.TasksEmbedded),
-                Result: null),
-        Contract.LogRegRetrainStreamEvent.EventOneofCase.Result =>
-            new LogRegRetrainEvent(
-                BootstrapProgress: null,
-                new LogRegRetrainResultInfo(MapResultKind(wire.Result.Kind), wire.Result.Message, MapStatus(wire.Result.Status))),
-        _ => new LogRegRetrainEvent(BootstrapProgress: null, Result: null),
-    };
+        return wire.EventCase switch
+        {
+            Contract.LogRegRetrainStreamEvent.EventOneofCase.BootstrapProgress =>
+                new LogRegRetrainEvent(
+                    BootstrapProgress: new LogRegRetrainBootstrapProgressInfo(wire.BootstrapProgress.TasksEmbedded),
+                    null),
+            Contract.LogRegRetrainStreamEvent.EventOneofCase.Result =>
+                new LogRegRetrainEvent(
+                    null,
+                    Result: new LogRegRetrainResultInfo(Kind: MapResultKind(wire.Result.Kind),
+                        Message: wire.Result.Message, Status: MapStatus(wire.Result.Status))),
+            _ => new LogRegRetrainEvent(null, null)
+        };
+    }
 
     /// <summary>
     /// Maps the wire result kind onto the client's enum. <c>LOG_REG_RETRAIN_RESULT_KIND_UNSPECIFIED</c> and
     /// any future value degrade to <see cref="LogRegRetrainResultKindInfo.Declined"/> - the panel treats an
     /// unrecognized outcome as "nothing was written" rather than implying success.
     /// </summary>
-    private static LogRegRetrainResultKindInfo MapResultKind(Contract.LogRegRetrainResultKind kind) => kind switch
+    private static LogRegRetrainResultKindInfo MapResultKind(Contract.LogRegRetrainResultKind kind)
     {
-        Contract.LogRegRetrainResultKind.Trained => LogRegRetrainResultKindInfo.Trained,
-        Contract.LogRegRetrainResultKind.Declined => LogRegRetrainResultKindInfo.Declined,
-        Contract.LogRegRetrainResultKind.AlreadyRunning => LogRegRetrainResultKindInfo.AlreadyRunning,
-        _ => LogRegRetrainResultKindInfo.Declined,
-    };
+        return kind switch
+        {
+            Contract.LogRegRetrainResultKind.Trained => LogRegRetrainResultKindInfo.Trained,
+            Contract.LogRegRetrainResultKind.Declined => LogRegRetrainResultKindInfo.Declined,
+            Contract.LogRegRetrainResultKind.AlreadyRunning => LogRegRetrainResultKindInfo.AlreadyRunning,
+            _ => LogRegRetrainResultKindInfo.Declined
+        };
+    }
 
-    /// <inheritdoc />
-    protected override LogRegModelAdminException CreateException(string message, Exception? innerException, bool isUnavailable) =>
-        new(message, innerException, isUnavailable);
+    /// <inheritdoc/>
+    protected override LogRegModelAdminException CreateException(string message, Exception? innerException,
+        bool isUnavailable)
+    {
+        return new LogRegModelAdminException(message: message, innerException: innerException,
+            isUnavailable: isUnavailable);
+    }
 }
