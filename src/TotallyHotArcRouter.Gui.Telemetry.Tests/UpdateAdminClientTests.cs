@@ -126,6 +126,8 @@ public class UpdateAdminClientTests
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "down")) };
         using var client = new UpdateAdminClient(stub);
 
+        // Awaited by ThrowAsync below, still inside client's using scope.
+        // ReSharper disable once AccessToDisposedClosure
         var act = async () => await client.GetStatusAsync(TestContext.Current.CancellationToken);
 
         var ex = await act.Should().ThrowAsync<UpdateAdminException>();
@@ -139,6 +141,8 @@ public class UpdateAdminClientTests
         { Failure = new RpcException(new Status(statusCode: StatusCode.FailedPrecondition, detail: "no update")) };
         using var client = new UpdateAdminClient(stub);
 
+        // Awaited by ThrowAsync below, still inside client's using scope.
+        // ReSharper disable once AccessToDisposedClosure
         var act = async () =>
             await client.NotifyApplyStartingAsync(version: "2.0.0",
                 cancellationToken: TestContext.Current.CancellationToken);
@@ -154,6 +158,8 @@ public class UpdateAdminClientTests
         { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
         using var client = new UpdateAdminClient(stub);
 
+        // Awaited by ThrowAsync below, still inside client's using scope.
+        // ReSharper disable once AccessToDisposedClosure
         var act = async () => await client.CheckNowAsync(TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<UpdateAdminException>();

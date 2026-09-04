@@ -503,6 +503,8 @@ public class GeminiProviderTests
 
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
+            // The handler runs during the InvokeAsync below, still inside cts's using scope.
+            // ReSharper disable once AccessToDisposedClosure
             Content = new StreamContent(new ThrowingReadStream(cts))
         }));
 

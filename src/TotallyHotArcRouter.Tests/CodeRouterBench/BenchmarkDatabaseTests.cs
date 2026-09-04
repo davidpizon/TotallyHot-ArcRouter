@@ -13,7 +13,7 @@ public class BenchmarkDatabaseTests
         var alreadyExisted = temp.Database.EnsureCreated();
 
         Assert.False(alreadyExisted);
-        Assert.True(File.Exists(temp.Path_));
+        Assert.True(File.Exists(temp.DatabasePath));
     }
 
     [Fact]

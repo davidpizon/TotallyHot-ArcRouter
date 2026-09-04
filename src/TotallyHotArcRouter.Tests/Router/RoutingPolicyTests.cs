@@ -8,7 +8,7 @@ namespace TotallyHot.ArcRouter.Tests.Router;
 /// correct-enough decision (the selected model, non-exploratory, propensity 1.0) wrapped around whatever
 /// <see cref="IRoutingPolicy.SelectModelAsync(RoutingContext, RoutingSignals?, CancellationToken)"/> returns.
 /// </summary>
-public class IRoutingPolicyTests
+public class RoutingPolicyTests
 {
     [Fact]
     public async Task DecideOutcomeAsync_DefaultImplementation_WrapsSelectModelAsyncResult()

@@ -189,7 +189,7 @@ public class ModelPriceCatalogTests
             SqliteConnection.ClearPool(connection);
         }
 
-        Directory.Delete(path: Path.GetDirectoryName(temp.Path_)!, true);
+        Directory.Delete(path: Path.GetDirectoryName(temp.DatabasePath)!, true);
 
         Assert.Null(catalog.GetBestPriceForModel(key: Key, context: PriceContext.Standard));
     }

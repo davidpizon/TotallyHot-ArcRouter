@@ -33,8 +33,8 @@ public class OodBootstrapSampleSourceTests
 
         Assert.Equal(1, actual: taskCount);
         Assert.Equal(2, actual: samples.Count);
-        Assert.Contains(collection: samples, filter: s => s.ModelKey == "model-a" && s.Score == 1.0);
-        Assert.Contains(collection: samples, filter: s => s.ModelKey == "model-b" && s.Score == 0.0);
+        Assert.Contains(collection: samples, filter: s => s.ModelKey == "model-a" && Math.Abs(s.Score - 1.0) < 1e-9);
+        Assert.Contains(collection: samples, filter: s => s.ModelKey == "model-b" && Math.Abs(s.Score) < 1e-9);
         Assert.All(collection: samples, action: s => Assert.Equal(1.0, actual: s.Weight));
     }
 

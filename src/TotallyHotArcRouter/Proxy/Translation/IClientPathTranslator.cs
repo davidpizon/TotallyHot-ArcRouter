@@ -20,6 +20,4 @@ namespace TotallyHot.ArcRouter.Proxy.Translation;
 /// should be an identity placeholder rather than a real implementation.
 /// </para>
 /// </summary>
-internal interface IClientPathTranslator : IPayloadTranslator
-{
-}
+internal interface IClientPathTranslator : IPayloadTranslator;

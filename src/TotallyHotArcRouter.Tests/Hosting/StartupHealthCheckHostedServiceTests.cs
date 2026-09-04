@@ -230,7 +230,7 @@ public class StartupHealthCheckHostedServiceTests
 
     private static RouterMemoryDatabase CreateRouterMemoryDatabase(TempDatabase temp)
     {
-        var directory = Path.GetDirectoryName(temp.Path_)!;
+        var directory = Path.GetDirectoryName(temp.DatabasePath)!;
         var dbPath = Path.Combine(path1: directory, path2: "router_embedding_memory.db");
         return new RouterMemoryDatabase(Options.Create(new RoutingOptions { EmbeddingMemoryDatabasePath = dbPath }));
     }
@@ -246,14 +246,14 @@ public class StartupHealthCheckHostedServiceTests
 
     private static BenchmarkDatabase CreateBenchmarkDatabase(TempDatabase temp)
     {
-        var directory = Path.GetDirectoryName(temp.Path_)!;
+        var directory = Path.GetDirectoryName(temp.DatabasePath)!;
         var dbPath = Path.Combine(path1: directory, path2: "coderouterbench.db");
         return new BenchmarkDatabase(Options.Create(new StorageOptions { BenchmarkDatabasePath = dbPath }));
     }
 
     private static TranscriptDatabase CreateTranscriptDatabase(TempDatabase temp)
     {
-        var directory = Path.GetDirectoryName(temp.Path_)!;
+        var directory = Path.GetDirectoryName(temp.DatabasePath)!;
         var dbPath = Path.Combine(path1: directory, path2: "transcripts.db");
         return new TranscriptDatabase(Options.Create(new StorageOptions { TranscriptDatabasePath = dbPath }));
     }

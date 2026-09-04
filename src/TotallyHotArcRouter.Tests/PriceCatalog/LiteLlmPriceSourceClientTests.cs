@@ -44,15 +44,15 @@ public class LiteLlmPriceSourceClientTests
     {
         var prices = NormalizeFixture();
 
-        var gpt4o = Assert.Single(collection: prices, predicate: p => p.ModelIdentifier == "gpt-4o");
+        var gpt4Omni = Assert.Single(collection: prices, predicate: p => p.ModelIdentifier == "gpt-4o");
 
-        Assert.Equal(expected: "openai", actual: gpt4o.Provider);
-        Assert.Equal(2.5m, actual: gpt4o.StandardInputPrice);
-        Assert.Equal(10.0m, actual: gpt4o.StandardOutputPrice);
-        Assert.Equal(1.25m, actual: gpt4o.CachedInputPrice);
-        Assert.Equal(3.125m, actual: gpt4o.CacheWriteInputPrice);
-        Assert.Equal(1.25m, actual: gpt4o.BatchInputPrice);
-        Assert.Equal(5.0m, actual: gpt4o.BatchOutputPrice);
+        Assert.Equal(expected: "openai", actual: gpt4Omni.Provider);
+        Assert.Equal(2.5m, actual: gpt4Omni.StandardInputPrice);
+        Assert.Equal(10.0m, actual: gpt4Omni.StandardOutputPrice);
+        Assert.Equal(1.25m, actual: gpt4Omni.CachedInputPrice);
+        Assert.Equal(3.125m, actual: gpt4Omni.CacheWriteInputPrice);
+        Assert.Equal(1.25m, actual: gpt4Omni.BatchInputPrice);
+        Assert.Equal(5.0m, actual: gpt4Omni.BatchOutputPrice);
     }
 
     [Fact]

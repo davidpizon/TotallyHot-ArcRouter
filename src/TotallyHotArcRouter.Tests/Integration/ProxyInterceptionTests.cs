@@ -27,6 +27,8 @@ public class ProxyInterceptionTests
         {
             try
             {
+                // upstreamTask is awaited below, before this scope exits.
+                // ReSharper disable once AccessToDisposedClosure
                 var context = await upstream.GetContextAsync().WaitAsync(TestContext.Current.CancellationToken);
                 using var reader = new StreamReader(stream: context.Request.InputStream,
                     encoding: context.Request.ContentEncoding);
@@ -51,12 +53,12 @@ public class ProxyInterceptionTests
         try
         {
             var interceptor = host.Services.GetRequiredService<RequestInterceptor>();
-            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            using var client = new HttpClient();
+            client.Timeout = TimeSpan.FromSeconds(5);
             using var request = new HttpRequestMessage(method: HttpMethod.Post,
-                requestUri: "http://127.0.0.1:5001/v1/chat/completions")
-            {
-                Content = new StringContent(content: "payload", encoding: Encoding.UTF8, mediaType: "text/plain")
-            };
+                requestUri: "http://127.0.0.1:5001/v1/chat/completions");
+            request.Content =
+                new StringContent(content: "payload", encoding: Encoding.UTF8, mediaType: "text/plain");
 
             request.Headers.Host = $"127.0.0.1:{upstreamPort}";
 

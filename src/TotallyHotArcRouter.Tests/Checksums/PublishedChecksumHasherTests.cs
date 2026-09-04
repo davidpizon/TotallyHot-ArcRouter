@@ -1,4 +1,3 @@
-using System.Text;
 using TotallyHot.ArcRouter.Checksums;
 
 namespace TotallyHot.ArcRouter.Tests.Checksums;

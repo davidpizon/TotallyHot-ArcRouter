@@ -289,8 +289,8 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
 
         var rows = await harness.ComparisonStore.LoadSinceAsync(
             since: DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken);
-        var low = Assert.Single(collection: rows, predicate: r => r.ObservedScore == 0.2);
-        var high = Assert.Single(collection: rows, predicate: r => r.ObservedScore == 0.8);
+        var low = Assert.Single(collection: rows, predicate: r => Math.Abs(r.ObservedScore - 0.2) < 1e-9);
+        var high = Assert.Single(collection: rows, predicate: r => Math.Abs(r.ObservedScore - 0.8) < 1e-9);
         Assert.Equal(0.8, actual: low.BaselinePredictedScore!.Value, 10);
         Assert.Equal(0.2, actual: high.BaselinePredictedScore!.Value, 10);
     }

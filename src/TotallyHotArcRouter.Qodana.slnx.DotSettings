@@ -78,4 +78,23 @@
   <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=UnusedType_002EGlobal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
   <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=EventNeverSubscribedTo_002EGlobal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
 
+  <!--
+    Naming, in the two places ReSharper's defaults disagree with this codebase rather than with .NET.
+
+    Local constants: ReSharper defaults them to camelCase, which is the outlier. Microsoft's own C#
+    guidelines and every constant in this repository use PascalCase regardless of scope. The rule is
+    aligned here rather than renaming constants against the convention all their neighbours follow.
+  -->
+  <s:String x:Key="/Default/CodeStyle/Naming/CSharpNaming/PredefinedNamingRules/=LocalConstants/@EntryIndexedValue">&lt;Policy Inspect="True" Prefix="" Suffix="" Style="AaBb" /&gt;</s:String>
+
+  <!--
+    Abbreviations. "AI" is load-bearing, not cosmetic: ProviderType.OpenAI and ProviderType.AzureOpenAI
+    are persisted by member name - ProviderTemplate.DisplayName's remarks record that the display label
+    is deliberately separate from the stored value - so taking the rename to OpenAi/AzureOpenAi would
+    silently invalidate every provider configuration already on disk. "BE" is big-endian, in
+    BedrockProviderTests' WriteUInt32BE helper.
+  -->
+  <s:Boolean x:Key="/Default/CodeStyle/Naming/CSharpNaming/Abbreviations/=AI/@EntryIndexedValue">True</s:Boolean>
+  <s:Boolean x:Key="/Default/CodeStyle/Naming/CSharpNaming/Abbreviations/=BE/@EntryIndexedValue">True</s:Boolean>
+
 </wpf:ResourceDictionary>

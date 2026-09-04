@@ -17,11 +17,11 @@ internal sealed class TempBenchmarkDatabase : IDisposable
     {
         var directory = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
             path3: Guid.NewGuid().ToString("N"));
-        Path_ = Path.Combine(path1: directory, path2: "coderouterbench.db");
-        Database = new BenchmarkDatabase(Options.Create(new StorageOptions { BenchmarkDatabasePath = Path_ }));
+        DatabasePath = Path.Combine(path1: directory, path2: "coderouterbench.db");
+        Database = new BenchmarkDatabase(Options.Create(new StorageOptions { BenchmarkDatabasePath = DatabasePath }));
     }
 
-    public string Path_ { get; }
+    public string DatabasePath { get; }
 
     public BenchmarkDatabase Database { get; }
 
@@ -33,7 +33,7 @@ internal sealed class TempBenchmarkDatabase : IDisposable
         // ObjectDisposedException there. Guarded on the file already existing - a test that never called
         // EnsureCreated() never opened a pooled connection (and its directory may not even exist), so
         // there's nothing to clear.
-        if (File.Exists(Path_))
+        if (File.Exists(DatabasePath))
             try
             {
                 using var connection = Database.OpenConnection();
@@ -44,7 +44,7 @@ internal sealed class TempBenchmarkDatabase : IDisposable
                 // Best-effort cleanup; a database mid-teardown on a busy CI box is not a test failure.
             }
 
-        var directory = Path.GetDirectoryName(Path_);
+        var directory = Path.GetDirectoryName(DatabasePath);
         try
         {
             if (directory is not null && Directory.Exists(directory)) Directory.Delete(path: directory, true);

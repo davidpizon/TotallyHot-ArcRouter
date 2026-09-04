@@ -21,6 +21,4 @@ namespace TotallyHot.ArcRouter.Proxy.Translation;
 /// request-reshaping path.
 /// </para>
 /// </summary>
-internal interface IResponseOnlyTranslator : IPayloadTranslator
-{
-}
+internal interface IResponseOnlyTranslator : IPayloadTranslator;
