@@ -193,7 +193,7 @@ public class TelemetryBroadcasterTests
         // TelemetryBroadcaster.ToWire always sets it - unlike the fields above, its absence here isn't
         // a "not set" case to assert.
         Assert.True(wire.HasCostConfidence);
-        Assert.Equal(expected: CostConfidence.Unknown.ToString(), actual: wire.CostConfidence);
+        Assert.Equal(expected: nameof(CostConfidence.Unknown), actual: wire.CostConfidence);
     }
 
     [Fact]

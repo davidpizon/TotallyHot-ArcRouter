@@ -88,7 +88,7 @@ public class ProxyMiddlewareFallbackTests
         Assert.Equal(expected: RoutingSubstitutionReason.Failover, actual: telemetry.SubstitutionReason);
         Assert.Equal(expected: "primary", actual: context.Response.Headers["X-ArcRouter-Requested-Model"].ToString());
         Assert.Equal(expected: "backup", actual: context.Response.Headers["X-ArcRouter-Routed-Model"].ToString());
-        Assert.Equal(expected: RoutingSubstitutionReason.Failover.ToString(),
+        Assert.Equal(expected: nameof(RoutingSubstitutionReason.Failover),
             actual: context.Response.Headers["X-ArcRouter-Substitution-Reason"].ToString());
     }
 

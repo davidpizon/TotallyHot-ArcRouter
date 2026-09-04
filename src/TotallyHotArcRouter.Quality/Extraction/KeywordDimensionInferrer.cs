@@ -104,9 +104,9 @@ public sealed class KeywordDimensionInferrer : IDimensionInferrer
     private static bool IsGoLanguageContext(string text, int goIndex)
     {
         var precededByContextWord =
-            (goIndex >= 3 && text.AsSpan(start: goIndex - 3, 3).SequenceEqual("to ")) ||
-            (goIndex >= 3 && text.AsSpan(start: goIndex - 3, 3).SequenceEqual("in ")) ||
-            (goIndex >= 5 && text.AsSpan(start: goIndex - 5, 5).SequenceEqual("from "));
+            (goIndex >= 3 && text.AsSpan(start: goIndex - 3, 3) is "to ") ||
+            (goIndex >= 3 && text.AsSpan(start: goIndex - 3, 3) is "in ") ||
+            (goIndex >= 5 && text.AsSpan(start: goIndex - 5, 5) is "from ");
 
         if (!precededByContextWord) return false;
 

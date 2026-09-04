@@ -78,7 +78,6 @@ public sealed class TranscriptRetentionService : BackgroundService
 
         var rowCount = await _transcriptStore.GetRowCountAsync(cancellationToken).ConfigureAwait(false);
         var deletedByOverage = 0;
-        int deletedByAge;
 
         // First, enforce the max-rows bound by deleting oldest-first if over the limit
         if (rowCount > _options.MaxRows)
@@ -91,7 +90,7 @@ public sealed class TranscriptRetentionService : BackgroundService
 
         // Then, delete rows past the retention age
         var cutoffTime = DateTimeOffset.UtcNow - TimeSpan.FromDays(_options.RetentionDays);
-        deletedByAge = await _transcriptStore
+        var deletedByAge = await _transcriptStore
             .DeleteBeforeAsync(cutoff: cutoffTime, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 

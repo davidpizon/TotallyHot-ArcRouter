@@ -77,7 +77,7 @@ public class ProxyMiddlewareTests
         // (docs/router/orchestrator-live-path-plan.md §M2.2).
         Assert.Equal(expected: "gpt-5.4", actual: context.Response.Headers["X-ArcRouter-Requested-Model"].ToString());
         Assert.Equal(expected: "gpt-5.4", actual: context.Response.Headers["X-ArcRouter-Routed-Model"].ToString());
-        Assert.Equal(expected: RoutingSubstitutionReason.None.ToString(),
+        Assert.Equal(expected: nameof(RoutingSubstitutionReason.None),
             actual: context.Response.Headers["X-ArcRouter-Substitution-Reason"].ToString());
 
         context.Response.Body.Position = 0;

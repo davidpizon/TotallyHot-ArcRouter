@@ -38,7 +38,7 @@ public sealed record BenchmarkDataStatus(BenchmarkDataState State, string? Reaso
 public sealed class BenchmarkDataStatusService
 {
     private readonly BenchmarkFileLedger _ledger;
-    private readonly object _lock = new();
+    private readonly Lock _lock = new();
     private readonly ILogger<BenchmarkDataStatusService> _logger;
     private readonly BenchmarkSyncOptions _options;
     private readonly BenchmarkChecksumProbe _probe;

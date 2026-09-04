@@ -75,7 +75,6 @@ public sealed class JudgeShadowScoreRetentionService : BackgroundService
 
         var rowCount = await _store.GetRowCountAsync(cancellationToken).ConfigureAwait(false);
         var deletedByOverage = 0;
-        int deletedByAge;
 
         // First, enforce the max-rows bound by deleting oldest-first if over the limit.
         if (rowCount > _options.CurrentValue.MaxRows)
@@ -87,7 +86,7 @@ public sealed class JudgeShadowScoreRetentionService : BackgroundService
 
         // Then, delete rows past the retention age.
         var cutoffTime = DateTimeOffset.UtcNow - TimeSpan.FromDays(_options.CurrentValue.RetentionDays);
-        deletedByAge = await _store.DeleteBeforeAsync(cutoff: cutoffTime, cancellationToken: cancellationToken)
+        var deletedByAge = await _store.DeleteBeforeAsync(cutoff: cutoffTime, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
         if (deletedByOverage > 0 || deletedByAge > 0)

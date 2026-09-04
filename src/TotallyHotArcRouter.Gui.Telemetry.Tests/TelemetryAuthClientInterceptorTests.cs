@@ -19,9 +19,9 @@ public class TelemetryAuthClientInterceptorTests
         type: MethodType.Unary,
         serviceName: "TestService",
         name: "TestMethod",
-        requestMarshaller: Marshallers.Create<string>(serializer: Encoding.UTF8.GetBytes,
+        requestMarshaller: Marshallers.Create(serializer: Encoding.UTF8.GetBytes,
             deserializer: Encoding.UTF8.GetString),
-        responseMarshaller: Marshallers.Create<string>(serializer: Encoding.UTF8.GetBytes,
+        responseMarshaller: Marshallers.Create(serializer: Encoding.UTF8.GetBytes,
             deserializer: Encoding.UTF8.GetString));
 
     private static ClientInterceptorContext<string, string> NewContext()
