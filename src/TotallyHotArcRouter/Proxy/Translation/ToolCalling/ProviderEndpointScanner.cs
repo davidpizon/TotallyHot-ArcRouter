@@ -214,11 +214,9 @@ public sealed class ProviderEndpointScanner
         if (!Uri.TryCreate(uriString: url, uriKind: UriKind.Absolute, result: out var target))
             return (false, $"Invalid probe URL '{url}'.");
 
-        using var request = new HttpRequestMessage(method: HttpMethod.Post, requestUri: target)
-        {
-            Content = new StringContent(content: AnthropicMessagesProbeBody, encoding: Encoding.UTF8,
-                mediaType: "application/json")
-        };
+        using var request = new HttpRequestMessage(method: HttpMethod.Post, requestUri: target);
+        request.Content = new StringContent(content: AnthropicMessagesProbeBody, encoding: Encoding.UTF8,
+            mediaType: "application/json");
 
         var rejectedHeaders =
             ProviderCredentialResolver.ApplyToRequest(request: request, provider: provider, environment: _environment);

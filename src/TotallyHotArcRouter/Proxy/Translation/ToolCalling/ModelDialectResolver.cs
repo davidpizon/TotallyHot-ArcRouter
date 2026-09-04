@@ -349,10 +349,8 @@ public sealed class ModelDialectResolver
 
         try
         {
-            using var request = new HttpRequestMessage(method: HttpMethod.Post, requestUri: target)
-            {
-                Content = JsonContent.Create(new { model = modelId })
-            };
+            using var request = new HttpRequestMessage(method: HttpMethod.Post, requestUri: target);
+            request.Content = JsonContent.Create(new { model = modelId });
             ProviderCredentialResolver.ApplyToRequest(request: request, provider: provider, environment: _environment);
 
             using var response = await _httpClient.SendAsync(request: request, cancellationToken: cancellationToken)

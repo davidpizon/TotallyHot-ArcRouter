@@ -57,8 +57,8 @@ public sealed class ProviderAdminClient
     public async Task<IReadOnlyList<ProviderAdminView>> UpsertProviderAsync(string key, ProviderWriteRequest body,
         CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(method: HttpMethod.Put, requestUri: $"admin/providers/{Escape(key)}")
-        { Content = JsonBody(body) };
+        using var request = new HttpRequestMessage(method: HttpMethod.Put, requestUri: $"admin/providers/{Escape(key)}");
+        request.Content = JsonBody(body);
         return await SendForProvidersAsync(request: request, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
     }
@@ -89,8 +89,8 @@ public sealed class ProviderAdminClient
     {
         using var request =
             new HttpRequestMessage(method: HttpMethod.Put,
-                    requestUri: $"admin/providers/{Escape(key)}/models/{Escape(modelName)}")
-            { Content = JsonBody(body) };
+                    requestUri: $"admin/providers/{Escape(key)}/models/{Escape(modelName)}");
+        request.Content = JsonBody(body);
         return await SendForProvidersAsync(request: request, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
     }
@@ -121,8 +121,8 @@ public sealed class ProviderAdminClient
         ModelEnabledWriteRequest body, CancellationToken cancellationToken = default)
     {
         using var request = new HttpRequestMessage(method: HttpMethod.Put,
-                requestUri: $"admin/providers/{Escape(key)}/models/{Escape(modelName)}/enabled")
-        { Content = JsonBody(body) };
+                requestUri: $"admin/providers/{Escape(key)}/models/{Escape(modelName)}/enabled");
+        request.Content = JsonBody(body);
         return await SendForProvidersAsync(request: request, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
     }
@@ -141,8 +141,8 @@ public sealed class ProviderAdminClient
         ModelToolDialectWriteRequest body, CancellationToken cancellationToken = default)
     {
         using var request = new HttpRequestMessage(method: HttpMethod.Put,
-                requestUri: $"admin/providers/{Escape(key)}/models/{Escape(modelName)}/tool-dialect")
-        { Content = JsonBody(body) };
+                requestUri: $"admin/providers/{Escape(key)}/models/{Escape(modelName)}/tool-dialect");
+        request.Content = JsonBody(body);
         return await SendForProvidersAsync(request: request, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
     }
@@ -157,8 +157,8 @@ public sealed class ProviderAdminClient
         CancellationToken cancellationToken = default)
     {
         using var request =
-            new HttpRequestMessage(method: HttpMethod.Put, requestUri: $"admin/providers/{Escape(key)}/budget")
-            { Content = JsonBody(body) };
+            new HttpRequestMessage(method: HttpMethod.Put, requestUri: $"admin/providers/{Escape(key)}/budget");
+        request.Content = JsonBody(body);
         return await SendForProvidersAsync(request: request, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
     }
@@ -173,8 +173,8 @@ public sealed class ProviderAdminClient
         CancellationToken cancellationToken = default)
     {
         using var request =
-            new HttpRequestMessage(method: HttpMethod.Put, requestUri: $"admin/providers/{Escape(key)}/enabled")
-            { Content = JsonBody(body) };
+            new HttpRequestMessage(method: HttpMethod.Put, requestUri: $"admin/providers/{Escape(key)}/enabled");
+        request.Content = JsonBody(body);
         return await SendForProvidersAsync(request: request, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
     }
@@ -271,8 +271,8 @@ public sealed class ProviderAdminClient
     public async Task<IReadOnlyList<PriceOverrideView>> SetPriceOverrideAsync(PriceOverrideWriteRequest body,
         CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(method: HttpMethod.Put, requestUri: "admin/price-overrides")
-        { Content = JsonBody(body) };
+        using var request = new HttpRequestMessage(method: HttpMethod.Put, requestUri: "admin/price-overrides");
+        request.Content = JsonBody(body);
         using var response =
             await SendAsync(request: request, cancellationToken: cancellationToken).ConfigureAwait(false);
         var responseBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
@@ -349,10 +349,8 @@ public sealed class ProviderAdminClient
     public async Task SetAdminApiKeyAsync(string provider, string value, CancellationToken cancellationToken = default)
     {
         using var request = new HttpRequestMessage(method: HttpMethod.Put,
-            requestUri: $"admin/secrets/{Escape(AdminApiKeySecretName(provider))}")
-        {
-            Content = JsonBody(new SecretWriteRequest(value))
-        };
+            requestUri: $"admin/secrets/{Escape(AdminApiKeySecretName(provider))}");
+        request.Content = JsonBody(new SecretWriteRequest(value));
         using var response =
             await SendAsync(request: request, cancellationToken: cancellationToken).ConfigureAwait(false);
     }

@@ -139,11 +139,9 @@ public sealed class GEvalJudgeClient : IJudgeClient
 
         var url = ProviderUrlBuilder.BuildPassthroughUrl(baseUrl: route.UpstreamBaseUrl,
             requestPath: ChatCompletionsPath, null);
-        using var httpRequest = new HttpRequestMessage(method: HttpMethod.Post, requestUri: url)
-        {
-            Content = JsonContent.Create(inputValue: chatRequest,
-                jsonTypeInfo: JudgeJsonContext.Default.ChatCompletionRequest)
-        };
+        using var httpRequest = new HttpRequestMessage(method: HttpMethod.Post, requestUri: url);
+        httpRequest.Content = JsonContent.Create(inputValue: chatRequest,
+            jsonTypeInfo: JudgeJsonContext.Default.ChatCompletionRequest);
 
         // Applied by hand rather than via ProviderCredentialResolver.ApplyToRequest: the route already
         // carries these values resolved, so re-resolving them would need this client to hold an

@@ -24,9 +24,9 @@ exclude:
   # through reflection, which the inspection cannot see - so it reports every wire field as unused.
   # Acting on it would delete the fields and silently break the API.
   #
-  # This does not blind the scan to genuinely dead contracts: UnusedType.Global and
-  # ClassNeverInstantiated.Global stay enabled, so a record nothing constructs is still reported as a
-  # whole. Only the per-property claim is dropped.
+  # An earlier revision of this file claimed UnusedType.Global and ClassNeverInstantiated.Global were
+  # left on as a safety net for genuinely dead contracts. That was wrong, and they are scoped below
+  # for the same reason: they misfire on exactly these reflection-constructed types.
   - name: NotAccessedPositionalProperty.Global
   - name: NotAccessedPositionalProperty.Local
 
@@ -71,6 +71,34 @@ exclude:
   # PropertyCanBeMadeInitOnly stays enabled and has been applied - `init` keeps a setter, so binding
   # and System.Text.Json both still work; it is only the setter's removal that breaks them.
   - name: AutoPropertyCanBeMadeGetOnly.Global
+
+  # ------------------------------------------------------------------------------------------------
+  # "This public member/type is unused" - the whole family.
+  #
+  # The scan cannot see two of this codebase's largest callers, so "unused" is not a claim it is in a
+  # position to make about public API:
+  #
+  #   1. TotallyHotArcRouter.Gui and .Gui.Tests are deliberately absent from
+  #      src/TotallyHotArcRouter.Qodana.slnx - they target net10.0-windows and cannot build in the
+  #      Linux container this linter runs in (see that file's own header). 68 of the 132 production
+  #      findings in this family name an identifier that appears in those two projects.
+  #   2. The rest are constructed or written by a framework through reflection: System.Text.Json
+  #      (HuggingFaceTreeEntry and friends exist only as ReadFromJsonAsync<T> targets), ASP.NET Core
+  #      model binding (SecretWriteRequest, ModelEnabledWriteRequest are minimal-API handler
+  #      parameters), and the configuration binder.
+  #
+  # Acting on these would delete or restrict API the GUI actually calls, and nothing would catch it:
+  # the Windows GUI build/test job in dotnet-ci.yml is `if: false`, so no CI job compiles that code.
+  # Re-enabling that job, or bringing the GUI into a scan that can build it, is what would make this
+  # family trustworthy again - at which point these entries should be removed and the findings re-read.
+  - name: MemberCanBePrivate.Global
+  - name: UnusedMemberInSuper.Global
+  - name: ClassNeverInstantiated.Global
+  - name: UnusedMethodReturnValue.Global
+  - name: UnusedMember.Global
+  - name: UnusedAutoPropertyAccessor.Global
+  - name: UnusedType.Global
+  - name: EventNeverSubscribedTo.Global
 
 dotnet:
   solution: src/TotallyHotArcRouter.Qodana.slnx
