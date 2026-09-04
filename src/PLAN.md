@@ -33,7 +33,7 @@ training-linked transcript history (`sessions-tab-training-data-plan.md`) have a
 | Live-feedback Phases 1–5 — importer repair, feedback capture, embedding-backed `logreg`, training, Governance admin surface | [`../docs/router/live-feedback-learning-plan.md`](../docs/router/live-feedback-learning-plan.md) |
 | Routing ROI — regret vs `dim_best`, one-minute full drain, hard pause under load | [`../docs/router/routing-roi-regret-plan.md`](../docs/router/routing-roi-regret-plan.md), [`../docs/router/self-organizing-classification-plan.md`](../docs/router/self-organizing-classification-plan.md) (Phase T4 status block) |
 | Phases T1–T6 — transcript capture, self-organizing clustering, `cluster_best` voter, baseline comparison, Cluster Model admin pane, System Settings adaptive-routing toggle | [`../docs/router/self-organizing-classification-plan.md`](../docs/router/self-organizing-classification-plan.md) |
-| Phase N (N1–N5) — regret metrics core (`RegretReplayResult`), the no-leakage streaming replay engine (`RegretReplayEngine`), all six comparison baselines (Always-*m* / DimensionBest / LinUCB / LinTS / kNN Retrieval / LogReg), and the Orchestrator arm + comparison report (measured; exit criterion not met — see below) | [`../docs/router/regret-evaluation-harness-plan.md`](../docs/router/regret-evaluation-harness-plan.md) (N1–N5 status notes) |
+| Phase N (N1–N6) — regret metrics core (`RegretReplayResult`), the no-leakage streaming replay engine (`RegretReplayEngine`), all six comparison baselines (Always-*m* / DimensionBest / LinUCB / LinTS / kNN Retrieval / LogReg), the Orchestrator arm + comparison report (measured; exit criterion not met — see below), and the on-demand CLI/GUI re-run surface (`IRegretHarnessRunner`, `--run-regret-harness`, the Regret Harness Governance panel) | [`../docs/router/regret-evaluation-harness-plan.md`](../docs/router/regret-evaluation-harness-plan.md) (N1–N6 status notes) |
 | Phase Q0 — quality rescan over saved task data (`QualityRescanService`, `scorer_version` column, `Quality:ScorerVersion`, prompt carried onto `QualityRequest`), off by default | [`../docs/router/quality-verifier-architecture.md`](../docs/router/quality-verifier-architecture.md) §3.3, [`../docs/research/code-quality-metrics-assessment.md`](../docs/research/code-quality-metrics-assessment.md) |
 | Phase G1 — shadow judge observer (`PendingResponseTextCache`, `JudgeShadowScoreObserver`/`GEvalJudgeClient`/`JudgeModelSelector`/drain worker, `judge_shadow_scores` side table, `is_judge_scored` provenance columns), off by default, judging on a free Providers-screen model | [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md) |
 | Auto-update Phases 0-1 — versioning source of truth, Windows Service hosting — plus update *detection* (`GitHubReleaseCheckClient`, `UpdateCheckHostedService`, `UpdateAdminService` gRPC surface) as originally shipped in Phase 2. Phase 2's *apply* mechanism (a separate `TotallyHotArcRouter.Updater` helper project) is superseded — the GUI now downloads/verifies/launches a single signed MSI installer instead | [`../docs/router/auto-update-plan.md`](../docs/router/auto-update-plan.md) (historical apply design), [`../docs/router/packaging-and-distribution.md`](../docs/router/packaging-and-distribution.md) (current MSI design), [`../docs/router/version-compatibility.md`](../docs/router/version-compatibility.md) (current Router↔GUI versioning) |
@@ -43,23 +43,24 @@ training-linked transcript history (`sessions-tab-training-data-plan.md`) have a
 
 - **Measurement is built, has been run, and the ensemble's claimed advantage is not reproduced by it.**
   An earlier revision of this bullet said "nothing computes `R_ij`, the per-task oracle, `CumReg`,
-  `AvgPerf`, `TotTok`, or `Perf/$`" — that is no longer true. **N1–N5 shipped:** `RegretReplayResult`
+  `AvgPerf`, `TotTok`, or `Perf/$`" — that is no longer true. **N1–N6 shipped:** `RegretReplayResult`
   computes all five metrics against the per-task oracle `a*_i = argmax_j R_ij`, `RegretReplayEngine` runs
   the offline streaming replay with no-leakage enforced at the call boundary, all six comparison baselines
   exist (Always-*m*, DimensionBest, LinUCB, LinTS, kNN Retrieval, LogReg — the last two OOD-only, since
-  the ID split publishes no task text), and the Orchestrator arm (`OrchestratorArmFactory`) replays the
+  the ID split publishes no task text), the Orchestrator arm (`OrchestratorArmFactory`) replays the
   real `OrchestratorRoutingPolicy` — with only `dim_best` and `logreg` wired, since an isolated offline run
-  has no live traffic to honestly back `memory_kNN`/`cluster_best`/`llm_router`. **The measured result: the
-  exit criterion is not met.** On the real synced corpus, the Orchestrator arm ties `dim_best` bit-for-bit
-  on both splits (structurally — `logreg`'s weight cannot outvote `dim_best`'s at their production values)
-  rather than beating it, and on OOD a bandit (`linucb`) beats `dim_best`/the Orchestrator on `CumReg`,
-  contradicting the paper's expected ordering outright. This is published, not hidden — see
-  `regret-evaluation-harness-plan.md`'s N5 status note for the full numbers and why a reduced-voter offline
-  harness was always going to struggle to show the ensemble's advantage. **Remaining (N6):** the CLI/GUI
-  surface for re-running the harness on demand → **Phase N (N6)**. Closing the *substance* of this gap —
-  demonstrating the ensemble actually beats DimensionBest — needs either a live-traffic regret arm or a
-  richer offline bootstrap for the three excluded voters; neither is scheduled, and this is now a load-
-  bearing fact about the router's actual, measured state, not a formatting gap in an unrun harness.
+  has no live traffic to honestly back `memory_kNN`/`cluster_best`/`llm_router` — and the whole harness can
+  now be re-run on demand (`IRegretHarnessRunner`, the `--run-regret-harness` CLI flag, and the Governance
+  UI's Regret Harness panel). **The measured result: the exit criterion is not met.** On the real synced
+  corpus, the Orchestrator arm ties `dim_best` bit-for-bit on both splits (structurally — `logreg`'s weight
+  cannot outvote `dim_best`'s at their production values) rather than beating it, and on OOD a bandit
+  (`linucb`) beats `dim_best`/the Orchestrator on `CumReg`, contradicting the paper's expected ordering
+  outright. This is published, not hidden — see `regret-evaluation-harness-plan.md`'s N5 status note for
+  the full numbers and why a reduced-voter offline harness was always going to struggle to show the
+  ensemble's advantage. Closing the *substance* of this gap — demonstrating the ensemble actually beats
+  DimensionBest — needs either a live-traffic regret arm or a richer offline bootstrap for the three
+  excluded voters; neither is scheduled, and this is now a load-bearing fact about the router's actual,
+  measured state, not a formatting gap in an unrun harness.
 - ~~**Live traffic is not yet usable as a training corpus.**~~ **Closed by Phases T1–T6.** Transcripts
   are captured opt-in with full provenance (`IsExploratory`, propensity, real cost), skipped embeddings
   are recovered by backfill, the learned cluster taxonomy is trained, voted on (`cluster_best`), and
@@ -123,36 +124,23 @@ training-linked transcript history (`sessions-tab-training-data-plan.md`) have a
 
 ```mermaid
 flowchart LR
-    subgraph shipped["Shipped — the live C-A-F loop, G1, and N1–N5"]
+    subgraph shipped["Shipped — the live C-A-F loop, G1, and N1–N6"]
         LOOP["Classifier → 5-voter Orchestrator →<br/>model → Verifier → RouterMemory/EmbeddingMemory →<br/>back into the voters"]
         G1["G1: shadow judge<br/>(accumulates, influences nothing)"]
-        N15["N1–N5: metrics core, replay engine,<br/>all 6 baselines, Orchestrator arm<br/>(measured; exit criterion not met)"]
+        N16["N1–N6: metrics core, replay engine,<br/>all 6 baselines, Orchestrator arm,<br/>on-demand CLI/GUI re-run<br/>(measured; exit criterion not met)"]
         LOOP -.-> G1
     end
 
-    N["Phase N (N6): CLI/GUI surface"]
     G23["G2 → G3: judge calibration,<br/>then judge as verifier for<br/>non-executable dimensions"]
 
-    LOOP --> N --> G23
-    N15 --> N
+    LOOP --> G23
+    N16 --> G23
     G1 -.->|"shadow data gates"| G23
 ```
 
 ## Remaining work, in order
 
-1. **Phase N (N6) — finish the regret evaluation harness's tooling.** N1–N5 shipped (see the shipped-work
-   table above), including the Orchestrator arm's real measurement run — whose result was that the exit
-   criterion is **not met** as currently scoped (regret-evaluation-harness-plan.md's N5 status note has the
-   numbers and why). What remains is only the CLI/GUI surface for re-running the harness on demand; closing
-   the *substance* gap (an Orchestrator that actually beats DimensionBest) is unscheduled and needs either
-   a live-traffic regret arm or a richer offline bootstrap for `memory_kNN`/`cluster_best`/`llm_router`.
-   Detail below; full component spec and per-sub-phase status notes:
-   [`../docs/router/regret-evaluation-harness-plan.md`](../docs/router/regret-evaluation-harness-plan.md)
-   (N1–N6). Live-feedback Phase 6's remaining item (relocating the TF-IDF `LogRegTrainer` machinery into
-   a Phase-N-facing namespace) landed with N4. Phase G1 (shipped; see the shipped-work table above)
-   already accumulates shadow judge data passively in the background while this harness is built, so
-   G2's gate has volume by the time it's ready.
-2. **Phases Q1–Q5 — empirical quality metrics.** Q0 shipped (see the table above). What remains:
+1. **Phases Q1–Q5 — empirical quality metrics.** Q0 shipped (see the table above). What remains:
    **Q1** generalizes the scorer from two graders to N (`DimensionWeightOptions` keyed grader map,
    per-grader contributions on `QualityResult`, a K-way join, per-grader `DegradedReason`) with the exit
    criterion that a single configured judge produces a byte-identical `UnifiedScore`; **Q2** adds the free
@@ -163,7 +151,7 @@ flowchart LR
    re-weighting; **Q5** replaces `DimBestVoter`'s argmax-over-raw-mean with a sample-size-aware estimator,
    accepted only if `RegretReplayEngine` shows `CumReg` improving. Rationale and per-source verdicts:
    [`../docs/research/code-quality-metrics-assessment.md`](../docs/research/code-quality-metrics-assessment.md).
-3. **Phases G2 → G3 — judge calibration, then judge-as-verifier.**
+2. **Phases G2 → G3 — judge calibration, then judge-as-verifier.**
    [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md). G2's
    agreement/calibration analysis runs once G1 has accumulated shadow data; G3 (the judge as scorer of
    record for non-executable dimensions only, with `is_judge_scored` provenance) is gated on G2's
@@ -195,8 +183,13 @@ solve itself, but N never required them to complete.
 - ~~Wire `OrchestratorRoutingPolicy` in as its own arm and produce the comparison report~~ — **shipped
   (N5)**, via `OrchestratorArmFactory`/`OrchestratorArmBaseline` (only `dim_best`+`logreg` wired — an
   isolated offline run has no live traffic to honestly back the other three voters) and
-  `RegretComparisonReportBuilder`. **Remaining (N6):** the CLI/GUI surface for re-running the harness on
-  demand.
+  `RegretComparisonReportBuilder`.
+- ~~CLI/GUI surface for re-running the harness on demand~~ — **shipped (N6)**, via
+  `IRegretHarnessRunner`/`RegretHarnessRunner`, the headless `--run-regret-harness` CLI flag, the
+  `RegretHarnessAdminService` gRPC surface, and the Governance UI's Regret Harness panel. Read-only —
+  never mutates a live voter or writes an artifact. Detail:
+  [`../docs/router/regret-evaluation-harness-plan.md`](../docs/router/regret-evaluation-harness-plan.md)'s
+  N6 status note.
 - **Exit — the real acceptance criterion for this whole plan — measured, not met.** On the real synced
   corpus (2026-08-25), the Orchestrator arm ties `dim_best` bit-for-bit on both ID test and OOD rather than
   beating it on `CumReg`, and on OOD a bandit (`linucb`) beats both, contradicting the paper's expected

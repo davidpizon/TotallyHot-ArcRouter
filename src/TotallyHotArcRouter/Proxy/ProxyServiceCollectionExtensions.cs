@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.CodeRouterBench;
+using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 using TotallyHot.ArcRouter.Hosting;
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Mcp;
@@ -381,7 +382,10 @@ internal static class ProxyServiceCollectionExtensions
 
                     // Backs the GUI system tray's "Enable Routing"/"Disable Routing" gRPC API. The same
                     // singleton ProxyMiddleware checks, so a toggle from the tray takes effect immediately.
-                    RoutingGateAdmin = new RoutingGateAdminDependencies(sp.GetRequiredService<IRoutingGate>())
+                    RoutingGateAdmin = new RoutingGateAdminDependencies(sp.GetRequiredService<IRoutingGate>()),
+
+                    // Backs the Governance UI's Regret Harness panel gRPC API (Phase N6).
+                    RegretHarnessAdmin = new RegretHarnessAdminDependencies(sp.GetRequiredService<IRegretHarnessRunner>())
                 });
         });
 

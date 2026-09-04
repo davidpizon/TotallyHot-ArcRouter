@@ -689,6 +689,83 @@ message LogRegRetrainStreamEvent {
   }
 }
 
+// The Governance UI's Regret Harness panel (docs/router/regret-evaluation-harness-plan.md N6): re-runs
+// the N5 comparison report on demand and reports the last run's result. Unlike ClusterModelAdminService/
+// RouterModelAdminService above, a run never mutates a live voter or writes an artifact - it is
+// read-only and informational, so GetRegretHarnessStatus reports an in-memory "last run" (reset on
+// process restart) rather than anything read from disk. Same shape otherwise (unary status read plus one
+// streaming mutation-shaped RPC), sharing the :5002 TLS loopback endpoint.
+service RegretHarnessAdminService {
+  // Returns the last completed run's report, or the honest "no run yet this process" state.
+  rpc GetRegretHarnessStatus (GetRegretHarnessStatusRequest) returns (RegretHarnessStatusResponse);
+
+  // Runs IRegretHarnessRunner.RunAsync, streaming one RegretHarnessStageProgress event per coarse stage
+  // (RegretHarnessRunner.cs's five stages - deliberately coarser than the logreg/cluster retrains' per-task
+  // tick, see that type's remarks), then exactly one RegretHarnessRunResult as the final message.
+  rpc RunRegretHarness (RunRegretHarnessRequest) returns (stream RegretHarnessStreamEvent);
+}
+
+message GetRegretHarnessStatusRequest {}
+
+message RunRegretHarnessRequest {}
+
+enum RegretHarnessRunResultKind {
+  REGRET_HARNESS_RUN_RESULT_KIND_UNSPECIFIED = 0;
+  REGRET_HARNESS_RUN_RESULT_KIND_COMPLETED = 1;
+  REGRET_HARNESS_RUN_RESULT_KIND_DECLINED = 2;
+  REGRET_HARNESS_RUN_RESULT_KIND_ALREADY_RUNNING = 3;
+}
+
+// Mirrors RegretHarnessStage (RegretHarnessRunner.cs) exactly.
+enum RegretHarnessStage {
+  REGRET_HARNESS_STAGE_UNSPECIFIED = 0;
+  REGRET_HARNESS_STAGE_LOADING_CORPUS = 1;
+  REGRET_HARNESS_STAGE_TRAINING_LOG_REG = 2;
+  REGRET_HARNESS_STAGE_BUILDING_KNN_INDEX = 3;
+  REGRET_HARNESS_STAGE_BUILDING_ORCHESTRATOR_ARM = 4;
+  REGRET_HARNESS_STAGE_BUILDING_REPORTS = 5;
+}
+
+// One split's formatted comparison report - RegretComparisonReportBuilder.FormatMarkdownTable's output
+// verbatim, the same "publish these numbers" convention the N5 reconciliation test's changelog entries
+// already use.
+message RegretHarnessSplitReport {
+  string split_name = 1;
+  string markdown_table = 2;
+}
+
+// The last completed run's report, or the honest "no run yet this process" state (has_run = false, every
+// other field at its proto3 zero value).
+message RegretHarnessStatusResponse {
+  bool has_run = 1;
+  google.protobuf.Timestamp ran_at_utc = 2;
+  string message = 3;
+  repeated RegretHarnessSplitReport splits = 4;
+}
+
+// One coarse stage-progress tick during a run - IRegretHarnessRunner.RunAsync's IProgress<RegretHarnessStage> callback.
+message RegretHarnessStageProgress {
+  RegretHarnessStage stage = 1;
+}
+
+// The run's outcome: which RegretHarnessRunResultKind category it fell into, a human-readable message,
+// when it completed, and - only on Completed - the formatted report for each split.
+message RegretHarnessRunResult {
+  RegretHarnessRunResultKind kind = 1;
+  string message = 2;
+  google.protobuf.Timestamp ran_at_utc = 3;
+  repeated RegretHarnessSplitReport splits = 4;
+}
+
+// One message on the RunRegretHarness stream: zero or more stage_progress events, followed by exactly
+// one result as the final message.
+message RegretHarnessStreamEvent {
+  oneof event {
+    RegretHarnessStageProgress stage_progress = 1;
+    RegretHarnessRunResult result = 2;
+  }
+}
+
 // Envelope: exactly one of these is set per message, matching SignalR's per-message-type dispatch
 // ("RoutingTelemetry" / "LogLine" client methods) with a single Protobuf idiom.
 message TelemetryEvent {

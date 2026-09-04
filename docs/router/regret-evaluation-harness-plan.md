@@ -5,9 +5,10 @@ Orchestrator ("the ensemble beats every single voter," "loop-complete routing be
 an assertion into a measurement, replaying CodeRouterBench through the router's actual decision code and
 a family of comparison baselines under one reward.
 
-**Status:** in progress — N1-N5 shipped (see their status notes below); N6 remains. N5's own exit
-criterion (Orchestrator beats DimensionBest, and reproduces the paper's regret ordering) was measured and
-**not met** as this harness is currently scoped — see N5's status note for the real numbers and why.
+**Status:** N1-N6 shipped (see their status notes below). N5's own exit criterion (Orchestrator beats
+DimensionBest, and reproduces the paper's regret ordering) was measured and **not met** as this harness is
+currently scoped — see N5's status note for the real numbers and why; N6 only adds a way to re-run that
+same (unmet) measurement on demand, it does not change the result.
 **Ordering:**
 after `docs/router/live-feedback-learning-plan.md` Phases 1-4 (shipped) — see that plan's own note that
 measuring voters which structurally cannot fire would produce a benchmark of `dim_best` wearing an
@@ -413,8 +414,31 @@ Landed incrementally; each is independently testable and mergeable.
   yet demonstrate the ensemble's claimed advantage, and closing that gap (a live-traffic arm, or a richer
   offline bootstrap for the other three voters) is now a load-bearing fact about what remains, not an
   assumption.
-- **N6 — CLI/GUI surface for re-running the harness on demand.** Follows the `--sync-benchmark-data` /
-  Governance-pane pattern once N1-N5 are proven; not required for the exit criterion itself.
+- **N6 — CLI/GUI surface for re-running the harness on demand — shipped.** `IRegretHarnessRunner`/
+  `RegretHarnessRunner` (`src/TotallyHotArcRouter/CodeRouterBench/Evaluation/`) wraps N5's exact recipe
+  (corpus-readiness guard, then `DimensionModelScoreMatrix`/`IdSplitRegretTaskOutcomeLoader`/
+  `OodRegretTaskOutcomeLoader`, `LogRegTrainer.Train`, `KnnRetrievalIndexBuilder.BuildAsync`,
+  `OrchestratorArmFactory.Build`, `RegretComparisonReportBuilder.BuildReport`/`FormatMarkdownTable` for
+  both splits) behind a `SemaphoreSlim`-guarded `RunAsync`, reachable three ways: the headless
+  `--run-regret-harness` CLI flag (`Program.cs`, following `--sync-benchmark-data`'s exact shape),
+  `RegretHarnessAdminService`'s gRPC surface (`RegretHarnessAdminGrpcService`, mapped unconditionally like
+  `RoutingModeAdminGrpcService` since its one dependency is never an optional feature), and the Governance
+  UI's new Regret Harness panel (`RegretHarnessAdmin.razor`, backed by `RegretHarnessAdminStore`/
+  `RegretHarnessAdminClient`). Read-only and informational throughout — a run never mutates a live voter
+  or writes an artifact the router depends on, and it uses the production `IEmbeddingClient` the same way
+  `--retrain-logreg`/`--retrain-clusters` already do, with no extra confirmation gate. Two settled
+  deviations from the retrain flows' pattern:
+  - *Coarse stage progress, not per-task progress.* `KnnRetrievalIndexBuilder.BuildAsync` (the one step
+    that embeds many items) has no `IProgress<int>` hook of its own, unlike `OodBootstrapSampleSource.LoadAsync`.
+    Adding one to an already-tested baseline builder for this diagnostic-only feature was judged not worth
+    the churn, so `RegretHarnessRunner` reports five coarse stages (`LoadingCorpus → TrainingLogReg →
+    BuildingKnnIndex → BuildingOrchestratorArm → BuildingReports`) instead of a live embedded-task counter.
+  - *In-memory-only last-run status.* Unlike the logreg/cluster artifacts, a harness run produces no file
+    to recover status from after a process restart — `RegretHarnessRunner.LastResult` is a plain in-memory
+    property. Acceptable because this feature is diagnostic, not load-bearing state; a GUI reconnect within
+    the same process sees the last run, a process restart does not.
+  Verified against the real synced corpus: `RegretHarnessRunnerReconciliationTests` reproduces N5's own
+  ID-test tie (`dim_best`/`orchestrator` both `CumReg = 244.3459`) bit-for-bit through the new runner.
 
 ## Exit (whole phase, echoing PLAN.md)
 

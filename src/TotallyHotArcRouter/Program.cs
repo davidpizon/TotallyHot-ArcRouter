@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using Serilog;
 using TotallyHot.ArcRouter.CodeRouterBench;
+using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 using TotallyHot.ArcRouter.Hosting;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Router.Orchestrator;
@@ -41,7 +42,14 @@ public static class Program
 
             // docs/router/self-organizing-classification-plan.md Phase T2g: the cluster model's own
             // headless retrain trigger, stripped for the same reason.
-            var (runClusterRetrain, remainingArgs) = ExtractFlag(args: afterLogRegFlag, flagName: "--retrain-clusters");
+            var (runClusterRetrain, afterClusterFlag) =
+                ExtractFlag(args: afterLogRegFlag, flagName: "--retrain-clusters");
+
+            // docs/router/regret-evaluation-harness-plan.md N6: headless regret-harness run trigger,
+            // stripped for the same reason - it must never reach the command-line configuration provider
+            // as a stray "run-regret-harness" key.
+            var (runRegretHarness, remainingArgs) =
+                ExtractFlag(args: afterClusterFlag, flagName: "--run-regret-harness");
 
             // `using` (not a bare local) so the sync/retrain paths below, which return without ever calling
             // RunAsync, still dispose the container and everything singleton-scoped in it - SQLite
@@ -63,6 +71,12 @@ public static class Program
             if (runClusterRetrain)
             {
                 await RunClusterRetrainAsync(host.Services);
+                return;
+            }
+
+            if (runRegretHarness)
+            {
+                await RunRegretHarnessAsync(host.Services);
                 return;
             }
 
@@ -281,5 +295,40 @@ public static class Program
             outcome.Message);
 
         if (outcome.Kind != ClusterTrainingResultKind.Trained) Environment.ExitCode = 1;
+    }
+
+    /// <summary>
+    /// Runs one regret-evaluation harness pass to completion (docs/router/regret-evaluation-harness-plan.md
+    /// N6), following <see cref="RunClusterRetrainAsync"/>'s headless-CLI shape: resolved directly from the
+    /// built (but not started) host, no Kestrel, process exits once the run completes. Sets a non-zero
+    /// <see cref="Environment.ExitCode"/> when the run declined or was already running, so a CI or
+    /// scheduled-task caller can detect it. Unlike the retrains above, a completed run has nothing to hot-swap
+    /// - both split reports are written straight to the console for a human to read or copy into the plan
+    /// doc's changelog, mirroring <c>N5ComparisonReportReconciliationTests</c>'s own publish convention.
+    /// </summary>
+    private static async Task RunRegretHarnessAsync(IServiceProvider services)
+    {
+        var logger = services.GetRequiredService<ILogger<IRegretHarnessRunner>>();
+        var runner = services.GetRequiredService<IRegretHarnessRunner>();
+
+        var progress = new Progress<RegretHarnessStage>(stage =>
+            logger.LogInformation(message: "Regret harness run: entering stage {Stage}.", stage));
+
+        var outcome = await runner.RunAsync(stageProgress: progress, cancellationToken: CancellationToken.None);
+
+        logger.LogInformation(message: "Regret harness run finished with outcome {Kind}: {Message}", outcome.Kind,
+            outcome.Message);
+
+        if (outcome.Kind != RegretHarnessRunResultKind.Completed)
+        {
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        foreach (var split in outcome.Splits)
+        {
+            Console.WriteLine(split.MarkdownTable);
+            Console.WriteLine();
+        }
     }
 }

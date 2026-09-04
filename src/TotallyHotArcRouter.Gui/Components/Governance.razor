@@ -56,10 +56,16 @@
             <ClusterModelAdmin/>
         </div>
     }
-    else
+    else if (_view == GovView.RouterModel)
     {
         <div class="flex-1 min-h-0">
             <RouterModelAdmin/>
+        </div>
+    }
+    else
+    {
+        <div class="flex-1 min-h-0">
+            <RegretHarnessAdmin/>
         </div>
     }
 </div>
@@ -75,7 +81,8 @@
         BenchmarkData,
         RoutingMode,
         ClusterModel,
-        RouterModel
+        RouterModel,
+        RegretHarness
     }
 
     private static readonly (GovView View, string Label)[] Views =
@@ -87,7 +94,8 @@
         (GovView.BenchmarkData, "Benchmark Data"),
         (GovView.RoutingMode, "Routing Mode"),
         (GovView.ClusterModel, "Cluster Model"),
-        (GovView.RouterModel, "Router Model")
+        (GovView.RouterModel, "Router Model"),
+        (GovView.RegretHarness, "Regret Harness")
     ];
 
     private GovView _view = GovView.Providers;
