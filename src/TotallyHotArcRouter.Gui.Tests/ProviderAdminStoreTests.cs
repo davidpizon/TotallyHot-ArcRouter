@@ -110,10 +110,10 @@ public sealed class ProviderAdminStoreTests
         // several can complete around the same time and write into the shared cache concurrently -
         // RateLimitHistory is backed by a ConcurrentDictionary specifically so this doesn't throw or drop
         // entries.
-        const string HistoryJson =
+        const string historyJson =
             """{"dimensions":{"tokens":[{"bucketUtc":"2026-03-01T12:00:00Z","remaining":1000,"limit":2000}]}}""";
         var store = new ProviderAdminStore(managementAddress: "http://127.0.0.1:59991",
-            transport: new StubHandler(HistoryJson));
+            transport: new StubHandler(historyJson));
         var providerKeys = Enumerable.Range(0, 50).Select(i => $"provider-{i}").ToArray();
 
         await Task.WhenAll(providerKeys.Select(key =>

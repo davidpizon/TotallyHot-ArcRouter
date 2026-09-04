@@ -360,7 +360,6 @@ public sealed class UsageQueryClientTests
 
     private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler
     {
-        private readonly Func<HttpRequestMessage, HttpResponseMessage> _responder = responder;
 
         public HttpRequestMessage? LastRequest { get; private set; }
 
@@ -368,18 +367,17 @@ public sealed class UsageQueryClientTests
             CancellationToken cancellationToken)
         {
             LastRequest = request;
-            return Task.FromResult(_responder(request));
+            return Task.FromResult(responder(request));
         }
     }
 
     private sealed class ThrowingHandler(HttpRequestException exception) : HttpMessageHandler
     {
-        private readonly HttpRequestException _exception = exception;
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
-            throw _exception;
+            throw exception;
         }
     }
 }

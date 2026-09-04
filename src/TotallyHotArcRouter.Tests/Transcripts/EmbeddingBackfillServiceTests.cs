@@ -105,8 +105,6 @@ public class EmbeddingBackfillServiceTests
 
     private sealed class FakeTranscriptStore(IReadOnlyList<long> unembeddedIds, TranscriptRecord? getTranscriptResult = null) : ITranscriptStore
     {
-        private readonly TranscriptRecord? _getTranscriptResult = getTranscriptResult;
-        private readonly IReadOnlyList<long> _unembeddedIds = unembeddedIds;
 
         public Dictionary<long, long> LinkedEntries { get; } = [];
 
@@ -124,12 +122,12 @@ public class EmbeddingBackfillServiceTests
         public Task<IReadOnlyList<long>> LoadUnembeddedScoredAsync(int limit,
             CancellationToken cancellationToken = default)
         {
-            return Task.FromResult(_unembeddedIds);
+            return Task.FromResult(unembeddedIds);
         }
 
         public Task<TranscriptRecord?> GetTranscriptAsync(long id, CancellationToken cancellationToken = default)
         {
-            return Task.FromResult(_getTranscriptResult);
+            return Task.FromResult(getTranscriptResult);
         }
 
         public Task LinkMemoryEntryAsync(long transcriptId, long memoryEntryId,

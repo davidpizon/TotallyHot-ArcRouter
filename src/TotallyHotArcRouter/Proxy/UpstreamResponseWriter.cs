@@ -71,7 +71,6 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
     // handle gracefully by finding nothing), never a failure of the actual client-facing forward, which is
     // unaffected by this cap - every byte is still copied to the client regardless.
     internal const int MaxCapturedResponseBytes = 4 * 1024 * 1024;
-    private readonly ILogger _logger = logger;
 
     /// <summary>
     /// Writes the committed response and returns what reached the client.
@@ -168,7 +167,7 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
             // throwing, since they write incrementally and so have necessarily already started the response
             // by the time anything could go wrong. Nothing has been committed yet, so this can still become
             // a clean 502 instead of silently returning a 200 with an empty body.
-            _logger.LogWarning(exception: ex,
+            logger.LogWarning(exception: ex,
                 message:
                 "Buffered upstream read failed before any response bytes were sent to the client; reporting an upstream error instead of an empty success.");
             await ProxyMiddleware.WriteUpstreamErrorResponseAsync(context: context,
@@ -289,7 +288,7 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
             // via cancellationToken.IsCancellationRequested, mirroring IsTransportOutage's identical
             // distinction for the SendAsync case) is deliberately left to propagate, so the caller can still
             // turn it into a real 502 instead of silently committing a 200 with an empty body.
-            _logger.LogWarning(exception: ex,
+            logger.LogWarning(exception: ex,
                 message:
                 "Buffered response to the client was interrupted by a client disconnect; the forward was terminated early.");
             return new CapturedResponse(ClientShapeBytes: [], null, null);
@@ -350,18 +349,18 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
         }
         catch (GeminiStreamException ex)
         {
-            _logger.LogWarning(exception: ex,
+            logger.LogWarning(exception: ex,
                 message:
                 "Gemini streaming response terminated by an embedded provider error; the client stream was truncated.");
         }
         catch (AnthropicStreamException ex)
         {
-            _logger.LogWarning(exception: ex,
+            logger.LogWarning(exception: ex,
                 message: "Anthropic streaming response terminated by an error event; the client stream was truncated.");
         }
         catch (Exception ex) when (ProxyMiddleware.IsStreamAbort(ex))
         {
-            _logger.LogWarning(exception: ex,
+            logger.LogWarning(exception: ex,
                 message:
                 "Streaming response to the client was interrupted (client disconnected, or the connection was aborted); the forward was terminated early.");
         }
@@ -412,7 +411,7 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
             // Mirrors TranslateAndCaptureStreamAsync's identical fail-open handling: the response has
             // already started, so there is nothing left to do but stop copying and return whatever was
             // captured so far.
-            _logger.LogWarning(exception: ex,
+            logger.LogWarning(exception: ex,
                 message:
                 "Streaming response to the client was interrupted (client disconnected, or the connection was aborted); the forward was terminated early.");
         }
@@ -446,16 +445,19 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
     /// <see cref="TranslateAndCaptureStreamAsync"/> and <see cref="CopyAndCaptureAsync"/> each drove
     /// independently (streamed and raw copy-through call shapes) before this type existed - both enforce
     /// the same rule, just triggered from different loops. <see cref="TranslateAndCaptureBufferedAsync"/>
-    /// deliberately does not use this type - see its remarks. <see cref="_trackTail"/> disables the tail
-    /// scanner for a capture that never consults one (the secondary native-bytes copy in
+    /// deliberately does not use this type - see its remarks. <paramref name="trackTail"/> disables the
+    /// tail scanner for a capture that never consults one (the secondary native-bytes copy in
     /// <see cref="TranslateAndCaptureStreamAsync"/>), so a capacity-exceeding chunk there doesn't pay for a
     /// scanner allocation nothing will ever read.
     /// </summary>
+    /// <param name="captureCap">Maximum number of bytes to retain in the capture buffer.</param>
+    /// <param name="trackTail">
+    /// Whether to allocate an <see cref="IncrementalUsageScanner"/> over the trailing window once a chunk
+    /// first exceeds the cap. False for a capture whose tail nothing reads.
+    /// </param>
     private sealed class ResponseCaptureAccumulator(int captureCap, bool trackTail = true) : IDisposable
     {
         private readonly MemoryStream _capture = new();
-        private readonly int _captureCap = captureCap;
-        private readonly bool _trackTail = trackTail;
 
         /// <summary>
         /// The tail scanner allocated once a chunk first exceeded the cap, or <see langword="null"/> if none has (yet),
@@ -479,12 +481,12 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
         {
             if (chunk.IsEmpty) return;
 
-            var remainingCapacity = _captureCap - (int)_capture.Length;
+            var remainingCapacity = captureCap - (int)_capture.Length;
             if (remainingCapacity > 0)
                 await _capture.WriteAsync(buffer: chunk[..Math.Min(val1: chunk.Length, val2: remainingCapacity)],
                     cancellationToken: cancellationToken);
 
-            if (_trackTail && remainingCapacity < chunk.Length)
+            if (trackTail && remainingCapacity < chunk.Length)
             {
                 TailScanner ??= new IncrementalUsageScanner();
                 TailScanner.Append(chunk.Span);

@@ -93,9 +93,9 @@ public class ConstrainedToolCallTests
     {
         // Without an entry the tool would have no legal arguments shape at all, making it uncallable
         // despite being described to the model in the prompt.
-        const string NoArgsTool = """{"type":"function","function":{"name":"ping","description":"Pings."}}""";
+        const string noArgsTool = """{"type":"function","function":{"name":"ping","description":"Pings."}}""";
 
-        var branch = Assert.Single(CallBranches(Rewrite(RequestWithTools(NoArgsTool))));
+        var branch = Assert.Single(CallBranches(Rewrite(RequestWithTools(noArgsTool))));
 
         Assert.Equal(expected: "ping", actual: branch["properties"]!["name"]!["const"]!.GetValue<string>());
         Assert.Equal(expected: "object", actual: branch["properties"]!["arguments"]!["type"]!.GetValue<string>());

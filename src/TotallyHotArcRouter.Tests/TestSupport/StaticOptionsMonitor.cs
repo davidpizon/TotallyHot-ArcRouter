@@ -58,11 +58,10 @@ public sealed class StaticOptionsMonitor<TOptions> : IOptionsMonitor<TOptions>
     /// </summary>
     private sealed class Unsubscriber(Action unsubscribe) : IDisposable
     {
-        private readonly Action _unsubscribe = unsubscribe;
 
         public void Dispose()
         {
-            _unsubscribe();
+            unsubscribe();
         }
     }
 }

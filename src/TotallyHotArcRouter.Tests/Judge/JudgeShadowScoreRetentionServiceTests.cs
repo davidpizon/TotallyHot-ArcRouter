@@ -67,7 +67,6 @@ public class JudgeShadowScoreRetentionServiceTests
 
     private sealed class FakeJudgeShadowScoreStore(int rowCount) : IJudgeShadowScoreStore
     {
-        private readonly int _rowCount = rowCount;
 
         public int DeleteOldestCount { get; private set; }
         public int LastDeleteOldestArgument { get; private set; }
@@ -82,7 +81,7 @@ public class JudgeShadowScoreRetentionServiceTests
 
         public Task<int> GetRowCountAsync(CancellationToken cancellationToken = default)
         {
-            return Task.FromResult(_rowCount);
+            return Task.FromResult(rowCount);
         }
 
         public Task<int> DeleteOldestAsync(int count, CancellationToken cancellationToken = default)

@@ -206,8 +206,6 @@ public class LlmRouterVoterTests
 
     private sealed class FakeTextGenerationClient(string? response = null, Exception? exception = null) : ITextGenerationClient
     {
-        private readonly Exception? _exception = exception;
-        private readonly string? _response = response;
 
         public bool WasCalled { get; private set; }
 
@@ -216,9 +214,9 @@ public class LlmRouterVoterTests
             WasCalled = true;
             cancellationToken.ThrowIfCancellationRequested();
 
-            return _exception is not null
-                ? Task.FromException<string>(_exception)
-                : Task.FromResult(_response ?? string.Empty);
+            return exception is not null
+                ? Task.FromException<string>(exception)
+                : Task.FromResult(response ?? string.Empty);
         }
     }
 }

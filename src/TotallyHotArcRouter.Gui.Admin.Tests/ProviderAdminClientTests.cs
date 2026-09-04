@@ -524,7 +524,7 @@ public sealed class ProviderAdminClientTests
     [Fact]
     public async Task GetRateLimitHistoryAsync_DeserializesDimensionsAndSendsExpectedUrl()
     {
-        const string HistoryJson = """
+        const string historyJson = """
                                    {
                                      "dimensions": {
                                        "tokens": [
@@ -534,7 +534,7 @@ public sealed class ProviderAdminClientTests
                                      }
                                    }
                                    """;
-        var handler = new StubHandler(_ => Json(HistoryJson));
+        var handler = new StubHandler(_ => Json(historyJson));
         var client = CreateClient(handler);
 
         var response = await client.GetRateLimitHistoryAsync(key: "openai", 3.5,
@@ -572,7 +572,6 @@ public sealed class ProviderAdminClientTests
 
     private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler
     {
-        private readonly Func<HttpRequestMessage, HttpResponseMessage> _responder = responder;
 
         public HttpRequestMessage? LastRequest { get; private set; }
 
@@ -583,19 +582,18 @@ public sealed class ProviderAdminClientTests
         {
             LastRequest = request;
             LastBody = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
-            return _responder(request);
+            return responder(request);
         }
     }
 
     /// <summary>A transport that always fails, standing in for a network-level failure (DNS, connection refused, etc.).</summary>
     private sealed class ThrowingHandler(HttpRequestException exception) : HttpMessageHandler
     {
-        private readonly HttpRequestException _exception = exception;
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
-            throw _exception;
+            throw exception;
         }
     }
 }

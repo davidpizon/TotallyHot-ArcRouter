@@ -9,10 +9,9 @@ namespace TotallyHot.ArcRouter.Tests.CodeRouterBench;
 /// </summary>
 internal sealed class FakeHttpClientFactory(HttpMessageHandler handler) : IHttpClientFactory
 {
-    private readonly HttpMessageHandler _handler = handler;
 
     public HttpClient CreateClient(string name)
     {
-        return new HttpClient(handler: _handler, false);
+        return new HttpClient(handler: handler, false);
     }
 }

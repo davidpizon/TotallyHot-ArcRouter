@@ -68,7 +68,6 @@ public class TranscriptRetentionServiceTests
 
     private sealed class FakeTranscriptStore(int rowCount) : ITranscriptStore
     {
-        private readonly int _rowCount = rowCount;
 
         public int DeleteOldestCount { get; private set; }
         public int LastDeleteOldestArgument { get; private set; }
@@ -106,7 +105,7 @@ public class TranscriptRetentionServiceTests
 
         public Task<int> GetRowCountAsync(CancellationToken cancellationToken = default)
         {
-            return Task.FromResult(_rowCount);
+            return Task.FromResult(rowCount);
         }
 
         public Task<int> DeleteOldestAsync(int count, CancellationToken cancellationToken = default)

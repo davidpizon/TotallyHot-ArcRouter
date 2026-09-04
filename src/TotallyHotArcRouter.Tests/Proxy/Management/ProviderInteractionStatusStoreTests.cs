@@ -168,11 +168,10 @@ public sealed class ProviderInteractionStatusStoreTests
     /// </summary>
     private sealed class ManualTimeProvider(DateTimeOffset start) : TimeProvider
     {
-        private readonly DateTimeOffset _now = start;
 
         public override DateTimeOffset GetUtcNow()
         {
-            return _now;
+            return start;
         }
     }
 }

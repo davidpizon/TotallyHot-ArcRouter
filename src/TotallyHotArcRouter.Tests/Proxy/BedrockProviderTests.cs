@@ -679,11 +679,10 @@ public class BedrockProviderTests
 
     private sealed class FakeBedrockRuntimeClientFactory(IAmazonBedrockRuntime client) : IBedrockRuntimeClientFactory
     {
-        private readonly IAmazonBedrockRuntime _client = client;
 
         public IAmazonBedrockRuntime Create(ResolvedModelRoute route)
         {
-            return _client;
+            return client;
         }
     }
 

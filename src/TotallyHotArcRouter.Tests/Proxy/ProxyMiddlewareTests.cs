@@ -1710,7 +1710,6 @@ public class ProxyMiddlewareTests
     /// </summary>
     private sealed class AbortsAfterFirstReadStream(byte[] firstChunk) : Stream
     {
-        private readonly byte[] _firstChunk = firstChunk;
         private bool _served;
 
         public override bool CanRead => true;
@@ -1729,8 +1728,8 @@ public class ProxyMiddlewareTests
             if (!_served)
             {
                 _served = true;
-                _firstChunk.CopyTo(buffer);
-                return ValueTask.FromResult(_firstChunk.Length);
+                firstChunk.CopyTo(buffer);
+                return ValueTask.FromResult(firstChunk.Length);
             }
 
             throw new IOException(
@@ -1767,12 +1766,11 @@ public class ProxyMiddlewareTests
 
     private sealed class DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler) : HttpMessageHandler
     {
-        private readonly Func<HttpRequestMessage, Task<HttpResponseMessage>> _handler = handler;
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
-            return _handler(request);
+            return handler(request);
         }
     }
 }

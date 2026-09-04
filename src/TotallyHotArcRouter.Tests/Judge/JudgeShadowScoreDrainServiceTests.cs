@@ -138,8 +138,6 @@ public class JudgeShadowScoreDrainServiceTests
 
     private sealed class FakeJudgeClient(JudgeScoreResult? result = null, Exception? exception = null) : IJudgeClient
     {
-        private readonly Exception? _exception = exception;
-        private readonly JudgeScoreResult? _result = result;
 
         public bool WasCalled { get; private set; }
 
@@ -147,9 +145,9 @@ public class JudgeShadowScoreDrainServiceTests
             CancellationToken cancellationToken = default)
         {
             WasCalled = true;
-            return _exception is not null
-                ? Task.FromException<JudgeScoreResult?>(_exception)
-                : Task.FromResult(_result);
+            return exception is not null
+                ? Task.FromException<JudgeScoreResult?>(exception)
+                : Task.FromResult(result);
         }
     }
 
