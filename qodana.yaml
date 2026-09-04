@@ -11,5 +11,50 @@ profile:
 include:
   - name: CheckDependencyLicenses
 
+# Every entry here is an inspection whose finding is wrong for this codebase, with the reason recorded.
+# Nothing is listed to make a number go down: a finding that is merely tedious to fix is fixed in the
+# code, not silenced here.
+exclude:
+  # ------------------------------------------------------------------------------------------------
+  # Record positional properties that only a serializer ever reads.
+  #
+  # These fire on the JSON wire contracts: ProviderAdminModels.cs alone is 37 records behind the
+  # proxy's /admin/* API, and LocalEndpointResponder's records are the /v1/models, /api/tags and
+  # /api/show payloads. Their properties are constructed in C# and then read by System.Text.Json
+  # through reflection, which the inspection cannot see - so it reports every wire field as unused.
+  # Acting on it would delete the fields and silently break the API.
+  #
+  # This does not blind the scan to genuinely dead contracts: UnusedType.Global and
+  # ClassNeverInstantiated.Global stay enabled, so a record nothing constructs is still reported as a
+  # whole. Only the per-property claim is dropped.
+  - name: NotAccessedPositionalProperty.Global
+  - name: NotAccessedPositionalProperty.Local
+
+  # ------------------------------------------------------------------------------------------------
+  # Short-lived HttpClient, in test projects only.
+  #
+  # The inspection guards against socket exhaustion from churning real HttpClients in production. In
+  # these tests the client is bound to an in-memory TestServer handler and is deliberately scoped to
+  # one test so cases cannot leak state into each other - there is no socket to exhaust, and sharing
+  # one client across tests would trade a non-problem for real cross-test coupling.
+  #
+  # Scoped to the test projects: a short-lived HttpClient in production code is still reported.
+  # Both path spellings are listed because the linter reports paths relative to the analyzed solution
+  # (src/TotallyHotArcRouter.Qodana.slnx), not the repository root.
+  - name: ShortLivedHttpClient
+    paths:
+      - src/TotallyHotArcRouter.Tests
+      - src/TotallyHotArcRouter.Quality.Tests
+      - src/TotallyHotArcRouter.Gui.Admin.Tests
+      - src/TotallyHotArcRouter.Gui.Charts.Tests
+      - src/TotallyHotArcRouter.Gui.Console.Tests
+      - src/TotallyHotArcRouter.Gui.Telemetry.Tests
+      - TotallyHotArcRouter.Tests
+      - TotallyHotArcRouter.Quality.Tests
+      - TotallyHotArcRouter.Gui.Admin.Tests
+      - TotallyHotArcRouter.Gui.Charts.Tests
+      - TotallyHotArcRouter.Gui.Console.Tests
+      - TotallyHotArcRouter.Gui.Telemetry.Tests
+
 dotnet:
   solution: src/TotallyHotArcRouter.Qodana.slnx

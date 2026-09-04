@@ -78,7 +78,7 @@ public sealed class TranscriptRetentionService : BackgroundService
 
         var rowCount = await _transcriptStore.GetRowCountAsync(cancellationToken).ConfigureAwait(false);
         var deletedByOverage = 0;
-        var deletedByAge = 0;
+        int deletedByAge;
 
         // First, enforce the max-rows bound by deleting oldest-first if over the limit
         if (rowCount > _options.MaxRows)

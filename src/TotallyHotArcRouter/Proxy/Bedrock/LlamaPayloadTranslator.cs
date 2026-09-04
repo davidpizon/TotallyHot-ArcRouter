@@ -53,11 +53,11 @@ public sealed class LlamaPayloadTranslator : IBedrockPayloadTranslator
 
         var llama = new JsonObject { ["prompt"] = BuildPrompt(messages) };
 
-        if (root["temperature"] is JsonNode temperature) llama["temperature"] = temperature.DeepClone();
+        if (root["temperature"] is { } temperature) llama["temperature"] = temperature.DeepClone();
 
-        if (root["top_p"] is JsonNode topP) llama["top_p"] = topP.DeepClone();
+        if (root["top_p"] is { } topP) llama["top_p"] = topP.DeepClone();
 
-        llama["max_gen_len"] = (root["max_tokens"] ?? root["max_completion_tokens"]) is JsonNode maxTokens
+        llama["max_gen_len"] = (root["max_tokens"] ?? root["max_completion_tokens"]) is { } maxTokens
             ? maxTokens.DeepClone()
             : DefaultMaxGenLen;
 
@@ -148,6 +148,10 @@ public sealed class LlamaPayloadTranslator : IBedrockPayloadTranslator
                     templateRole = "user";
                     text = $"Tool result: {text}";
                     break;
+                // ReSharper disable once RedundantCaseLabel
+                // "user" is listed even though `default` already catches it: it documents the expected
+                // role alongside the catch-all, rather than leaving readers to infer that the normal
+                // case and the unknown-role fallback happen to share a body.
                 case "user":
                 default:
                     templateRole = "user";

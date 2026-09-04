@@ -104,7 +104,17 @@ public sealed class EmbeddingMemory : IDisposable
 
         await TrimToCurrentCapacityAsync(cancellationToken).ConfigureAwait(false);
 
-        _logger.LogInformation(message: "Initialized embedding memory with {EntryCount} entries.", _entries.Count);
+        // Read under the lock like every other _entries access. The trim above can still be running
+        // concurrently on another thread - OnOptionsChanged starts TrimToCurrentCapacityAsync
+        // fire-and-forget - and List<T>.Count read against a concurrent RemoveRange is a data race, not
+        // just a stale number.
+        int entryCount;
+        lock (_syncLock)
+        {
+            entryCount = _entries.Count;
+        }
+
+        _logger.LogInformation(message: "Initialized embedding memory with {EntryCount} entries.", entryCount);
     }
 
     /// <summary>

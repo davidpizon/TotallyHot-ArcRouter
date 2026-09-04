@@ -116,7 +116,9 @@ public sealed class UsageLedger : IUsageLedger
             return;
         }
 
-        var inserted = false;
+        // Not initialized: every path that reaches the `if (inserted ...)` below has run the
+        // ExecuteNonQuery assignment at the end of the try, because the catch returns.
+        bool inserted;
         try
         {
             var dedupKey = BuildDedupKey(entry);

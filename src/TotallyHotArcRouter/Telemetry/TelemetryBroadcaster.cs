@@ -135,15 +135,15 @@ public sealed class TelemetryBroadcaster
             RouterCostUsd = e.RouterCostUsd.ToString(CultureInfo.InvariantCulture)
         };
 
-        if (e.PromptTokens is int promptTokens) wire.PromptTokens = promptTokens;
+        if (e.PromptTokens is { } promptTokens) wire.PromptTokens = promptTokens;
 
-        if (e.CompletionTokens is int completionTokens) wire.CompletionTokens = completionTokens;
+        if (e.CompletionTokens is { } completionTokens) wire.CompletionTokens = completionTokens;
 
-        if (e.CacheCreationTokens is int cacheCreationTokens) wire.CacheCreationTokens = cacheCreationTokens;
+        if (e.CacheCreationTokens is { } cacheCreationTokens) wire.CacheCreationTokens = cacheCreationTokens;
 
-        if (e.CacheReadTokens is int cacheReadTokens) wire.CacheReadTokens = cacheReadTokens;
+        if (e.CacheReadTokens is { } cacheReadTokens) wire.CacheReadTokens = cacheReadTokens;
 
-        if (e.EstimatedCostUsd is decimal estimatedCostUsd)
+        if (e.EstimatedCostUsd is { } estimatedCostUsd)
             // Decimal-as-string, not double: see "Decimal encoding" in docs/router/grpc-migration.md.
             wire.EstimatedCostUsd = estimatedCostUsd.ToString(CultureInfo.InvariantCulture);
 
@@ -192,9 +192,9 @@ public sealed class TelemetryBroadcaster
 
         // The three optional fields are left unset rather than defaulted, so a reader can tell "the
         // analyzers all abstained" and "the judge did not contribute" apart from a genuine score of zero.
-        if (e.AnalysisScore is double analysisScore) wire.AnalysisScore = analysisScore;
+        if (e.AnalysisScore is { } analysisScore) wire.AnalysisScore = analysisScore;
 
-        if (e.JudgeScore is double judgeScore) wire.JudgeScore = judgeScore;
+        if (e.JudgeScore is { } judgeScore) wire.JudgeScore = judgeScore;
 
         if (e.DegradedReason is { } degradedReason) wire.DegradedReason = degradedReason;
 

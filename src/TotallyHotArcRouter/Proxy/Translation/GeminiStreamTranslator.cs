@@ -220,7 +220,7 @@ public sealed class GeminiStreamTranslator : IStreamTranslator
     private JsonObject BuildToolCallDelta(JsonObject functionCall)
     {
         var name = functionCall["name"]?.GetValue<string>() ?? string.Empty;
-        var args = functionCall["args"] is JsonNode argsNode ? argsNode.ToJsonString(SerializerOptions) : "{}";
+        var args = functionCall["args"] is { } argsNode ? argsNode.ToJsonString(SerializerOptions) : "{}";
         var index = _toolCallIndex++;
 
         return new JsonObject

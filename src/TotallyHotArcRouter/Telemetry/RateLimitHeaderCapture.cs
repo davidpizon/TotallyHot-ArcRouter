@@ -96,6 +96,10 @@ public sealed class RateLimitHeaderCapture : IRateLimitHeaderCapture, IDisposabl
     public Task CaptureAsync(string providerKey, HttpResponseHeaders headers,
         CancellationToken cancellationToken = default)
     {
+        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
+        // Nullable annotations are a compile-time contract, not a runtime guarantee - this runs on the response
+        // path for every provider, and the guard degrades a null to a no-op rather than throwing inside
+        // telemetry capture, which must never break the request it is observing.
         if (string.IsNullOrWhiteSpace(providerKey) || headers is null) return Task.CompletedTask;
 
         var matched = new List<RateLimitHeaderRow>();

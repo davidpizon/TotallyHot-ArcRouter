@@ -803,7 +803,7 @@ internal sealed class RequestTelemetryPublisher
         AddTokens(value: cacheCreationTokens, kind: "cache_creation");
         AddTokens(value: cacheReadTokens, kind: "cache_read");
 
-        if (estimatedCostUsd is decimal cost)
+        if (estimatedCostUsd is { } cost)
             UsageMetrics.CostUsdTotal.Add(
                 delta: (double)cost,
                 tag1: new KeyValuePair<string, object?>(key: "provider", value: provider),

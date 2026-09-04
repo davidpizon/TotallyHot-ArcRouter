@@ -189,9 +189,9 @@ public sealed class LlmRouterModelAdminGrpcService : Contract.LlmRouterModelAdmi
                 Stage = MapStage(value.Stage)
             };
 
-            if (value.BytesTransferred is long bytes) wire.BytesTransferred = bytes;
+            if (value.BytesTransferred is { } bytes) wire.BytesTransferred = bytes;
 
-            if (value.TotalBytes is long totalBytes) wire.TotalBytes = totalBytes;
+            if (value.TotalBytes is { } totalBytes) wire.TotalBytes = totalBytes;
 
             _stream.WriteAsync(new Contract.LlmRouterModelSyncStreamEvent { Progress = wire }).GetAwaiter().GetResult();
         }

@@ -77,6 +77,9 @@ public sealed class CodeBlockSignalExtractor : ISignalExtractor
         return new QualityRequest(
             Code: code,
             Language: language,
+            // ReSharper disable once NullCoalescingConditionIsAlwaysNotNullAccordingToAPIContract
+            // Nullable annotations are a compile-time contract, not a runtime guarantee - the context is
+            // built by callers outside this assembly.
             Prompt: context.Prompt ?? string.Empty,
             Dimension: dimension,
             Model: context.Model,

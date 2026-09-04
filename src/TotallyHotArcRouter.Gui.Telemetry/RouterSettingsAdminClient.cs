@@ -118,6 +118,9 @@ public sealed class RouterSettingsAdminClient
                         AdaptiveRoutingEnabled = adaptiveRoutingEnabled,
                         EmbeddingMemoryCapacity = embeddingMemoryCapacity,
                         JudgeEnabled = judgeEnabled,
+                        // ReSharper disable once NullCoalescingConditionIsAlwaysNotNullAccordingToAPIContract
+                        // Nullable annotations are a compile-time contract, not a runtime guarantee across this
+                        // admin call's public surface.
                         JudgeModelName = judgeModelName ?? string.Empty,
                         TranscriptCaptureEnabled = transcriptCaptureEnabled
                     },

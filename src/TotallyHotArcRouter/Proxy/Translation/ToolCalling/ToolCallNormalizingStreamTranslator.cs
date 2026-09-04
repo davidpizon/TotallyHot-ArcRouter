@@ -656,8 +656,10 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
         foreach (var candidate in candidates)
         {
             var limit = Math.Min(val1: text.Length, val2: candidate.Length - 1);
+            // `length > best` with `best` starting at 0 and only ever growing already guarantees
+            // length >= 1, so the old `length > 0 &&` guard could never be false.
             for (var length = limit; length > best; length--)
-                if (length > 0 && string.CompareOrdinal(strA: text, indexA: text.Length - length, strB: candidate, 0,
+                if (string.CompareOrdinal(strA: text, indexA: text.Length - length, strB: candidate, 0,
                         length: length) == 0)
                 {
                     best = length;

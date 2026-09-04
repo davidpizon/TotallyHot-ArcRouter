@@ -170,8 +170,6 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
             await asyncHost.DisposeAsync().ConfigureAwait(false);
         else
             _host.Dispose();
-
-        GC.SuppressFinalize(this);
     }
 
     /// <inheritdoc/>

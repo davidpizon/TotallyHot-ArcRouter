@@ -146,6 +146,10 @@ public static class LogRegTrainer
 
                 // Ties (equal cost, including two NULL-cost resolvers) break on canonicalized model name
                 // so the winner never depends on SQLite's unspecified row enumeration order.
+                // ReSharper disable once CompareOfFloatsByEqualityOperator
+                // Exact equality is deliberate: this detects an actual tie so the name comparison can
+                // break it. An epsilon would fold genuinely-different costs into a "tie" and hand the
+                // win to the alphabetically-smaller model instead of the cheaper one.
                 if (!bestResolverPerTask.TryGetValue(key: taskId, value: out var current) ||
                     costUsd < current.CostUsd ||
                     (costUsd == current.CostUsd && string.CompareOrdinal(strA: model, strB: current.Model) < 0))

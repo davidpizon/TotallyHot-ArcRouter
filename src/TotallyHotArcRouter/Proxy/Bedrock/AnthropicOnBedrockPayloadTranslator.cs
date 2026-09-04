@@ -68,13 +68,13 @@ public sealed class AnthropicOnBedrockPayloadTranslator : IBedrockPayloadTransla
         if (AnthropicPayloadTranslator.TranslateToolChoice(root["tool_choice"]) is { } toolChoice)
             bedrock["tool_choice"] = toolChoice;
 
-        if (root["temperature"] is JsonNode temperature) bedrock["temperature"] = temperature.DeepClone();
+        if (root["temperature"] is { } temperature) bedrock["temperature"] = temperature.DeepClone();
 
-        if (root["top_p"] is JsonNode topP) bedrock["top_p"] = topP.DeepClone();
+        if (root["top_p"] is { } topP) bedrock["top_p"] = topP.DeepClone();
 
-        if (root["top_k"] is JsonNode topK) bedrock["top_k"] = topK.DeepClone();
+        if (root["top_k"] is { } topK) bedrock["top_k"] = topK.DeepClone();
 
-        bedrock["max_tokens"] = (root["max_tokens"] ?? root["max_completion_tokens"]) is JsonNode maxTokens
+        bedrock["max_tokens"] = (root["max_tokens"] ?? root["max_completion_tokens"]) is { } maxTokens
             ? maxTokens.DeepClone()
             : DefaultMaxTokens;
 

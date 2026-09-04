@@ -191,6 +191,9 @@ public sealed class GEvalJudgeClient : IJudgeClient
     /// </summary>
     private static string BuildPrompt(string dimension, string responseText)
     {
+        // ReSharper disable once NullCoalescingConditionIsAlwaysNotNullAccordingToAPIContract
+        // Nullable annotations are a compile-time contract, not a runtime guarantee - the dimension
+        // originates in scored telemetry, where it can be absent.
         var criteria = DimensionCriteria.TryGetValue(key: dimension ?? string.Empty, value: out var dimensionCriteria)
             ? dimensionCriteria
             : DefaultCriteria;

@@ -180,6 +180,9 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         // true today: there is no manual-price mechanism in the codebase yet, so this condition reduces to
         // the fetched-freshness check. A future manual-override feature must update this to consult it.
         const bool noManualPricesConfigured = true;
+        // ReSharper disable once RedundantLogicalConditionalExpressionOperand
+        // Deliberately redundant while the constant is true - see the comment above. It is the seam a
+        // manual-override feature has to change, and dropping it would hide that requirement.
         if (!ranCycle && noManualPricesConfigured && _repository.CountFreshPrices(FreshnessFloor) == 0)
             // Only reached when no source ran (check 2 found none enabled); a cycle that ran already
             // logged this via RunCycleAsync.

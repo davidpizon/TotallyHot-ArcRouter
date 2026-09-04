@@ -59,11 +59,11 @@ public sealed class TitanPayloadTranslator : IBedrockPayloadTranslator
 
         var config = new JsonObject();
 
-        if (root["temperature"] is JsonNode temperature) config["temperature"] = temperature.DeepClone();
+        if (root["temperature"] is { } temperature) config["temperature"] = temperature.DeepClone();
 
-        if (root["top_p"] is JsonNode topP) config["topP"] = topP.DeepClone();
+        if (root["top_p"] is { } topP) config["topP"] = topP.DeepClone();
 
-        config["maxTokenCount"] = (root["max_tokens"] ?? root["max_completion_tokens"]) is JsonNode maxTokens
+        config["maxTokenCount"] = (root["max_tokens"] ?? root["max_completion_tokens"]) is { } maxTokens
             ? maxTokens.DeepClone()
             : DefaultMaxTokenCount;
 
@@ -178,6 +178,10 @@ public sealed class TitanPayloadTranslator : IBedrockPayloadTranslator
 
                     break;
 
+                // ReSharper disable once RedundantCaseLabel
+                // "user" is listed even though `default` already catches it: it documents the expected
+                // role alongside the catch-all, rather than leaving readers to infer that the normal
+                // case and the unknown-role fallback happen to share a body.
                 case "user":
                 default:
                     builder.Append("User: ").Append(text).Append('\n');
@@ -201,6 +205,10 @@ public sealed class TitanPayloadTranslator : IBedrockPayloadTranslator
             "STOP_CRITERIA_MET" => "stop",
             "LENGTH" => "length",
             "CONTENT_FILTERED" => "content_filter",
+            // ReSharper disable once RedundantSwitchExpressionArms
+            // Spelled out even though `_` already maps it to "stop": this switch enumerates AWS's
+            // documented completionReason values, so the list is the documentation. Folding this arm
+            // into the catch-all would erase the record that AWS defines this value at all.
             "RAG_QUERY_WHEN_RAG_DISABLED" => "stop",
             _ => "stop"
         };

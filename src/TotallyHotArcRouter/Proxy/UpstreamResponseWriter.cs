@@ -318,6 +318,10 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
             captureNativeBytes ? new ResponseCaptureAccumulator(captureCap: captureCap, false) : null;
         var buffer = ArrayPool<byte>.Shared.Rent(81920);
 
+        // ReSharper disable AccessToDisposedClosure
+        // `capture` is a `using` local of this method and EmitAsync is a local function that is only
+        // ever awaited from the try block below, so the closure never outlives the scope that disposes
+        // it. The inspection cannot prove that lifetime and assumes the closure may escape.
         async Task EmitAsync(byte[] translated)
         {
             if (translated.Length == 0) return;
@@ -327,6 +331,7 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
 
             await capture.AddAsync(chunk: translated, cancellationToken: cancellationToken);
         }
+        // ReSharper restore AccessToDisposedClosure
 
         try
         {

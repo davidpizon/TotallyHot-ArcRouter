@@ -10,6 +10,12 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// budget expired on the live path (docs/router/self-organizing-classification-plan.md Phase T1d). Runs
 /// on a 5-minute check interval, mirroring <see cref="Hosting.LogRegRetrainHostedService"/>'s shape.
 /// A no-op when <see cref="TranscriptOptions.EnableEmbeddingBackfill"/> is <see langword="false"/>.
+/// <para>
+/// Deliberately applies no <see cref="RoutingOptions.EmbeddingBudgetMs"/> to its embedding calls,
+/// unlike <c>RequestInterceptor.TryComputeEmbeddingAsync</c> on the live path. That budget exists so the
+/// routing hot path never blocks on learning; this loop is the recovery for samples that budget already
+/// dropped, and cutting it off on the same deadline would leave them permanently unembedded.
+/// </para>
 /// </summary>
 public sealed class EmbeddingBackfillService : BackgroundService
 {
@@ -19,7 +25,6 @@ public sealed class EmbeddingBackfillService : BackgroundService
 
     private readonly ILogger<EmbeddingBackfillService> _logger;
     private readonly IMemoryEntryStore _memoryEntryStore;
-    private readonly RoutingOptions _routingOptions;
     private readonly TranscriptOptions _transcriptOptions;
     private readonly ITranscriptStore _transcriptStore;
 
@@ -29,28 +34,24 @@ public sealed class EmbeddingBackfillService : BackgroundService
     /// <param name="embeddingClient">Computes embeddings for prompt text.</param>
     /// <param name="memoryEntryStore">Persists backfilled memory entries.</param>
     /// <param name="transcriptOptions">Provides the embedding backfill enable flag and other transcript settings.</param>
-    /// <param name="routingOptions">Provides the embedding budget timeout.</param>
     public EmbeddingBackfillService(
         ILogger<EmbeddingBackfillService> logger,
         ITranscriptStore transcriptStore,
         IEmbeddingClient embeddingClient,
         IMemoryEntryStore memoryEntryStore,
-        IOptions<TranscriptOptions> transcriptOptions,
-        IOptions<RoutingOptions> routingOptions)
+        IOptions<TranscriptOptions> transcriptOptions)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(transcriptStore);
         ArgumentNullException.ThrowIfNull(embeddingClient);
         ArgumentNullException.ThrowIfNull(memoryEntryStore);
         ArgumentNullException.ThrowIfNull(transcriptOptions);
-        ArgumentNullException.ThrowIfNull(routingOptions);
 
         _logger = logger;
         _transcriptStore = transcriptStore;
         _embeddingClient = embeddingClient;
         _memoryEntryStore = memoryEntryStore;
         _transcriptOptions = transcriptOptions.Value;
-        _routingOptions = routingOptions.Value;
     }
 
     /// <inheritdoc/>

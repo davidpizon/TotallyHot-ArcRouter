@@ -189,11 +189,11 @@ public sealed class BenchmarkDataAdminGrpcService : Contract.BenchmarkDataAdminS
                 Stage = MapStage(value.Stage)
             };
 
-            if (value.BytesTransferred is long bytes) wire.BytesTransferred = bytes;
+            if (value.BytesTransferred is { } bytes) wire.BytesTransferred = bytes;
 
-            if (value.RowsImported is int rows) wire.RowsImported = rows;
+            if (value.RowsImported is { } rows) wire.RowsImported = rows;
 
-            if (value.TotalBytes is long totalBytes) wire.TotalBytes = totalBytes;
+            if (value.TotalBytes is { } totalBytes) wire.TotalBytes = totalBytes;
 
             _stream.WriteAsync(new Contract.BenchmarkSyncStreamEvent { Progress = wire }).GetAwaiter().GetResult();
         }

@@ -110,6 +110,9 @@ public sealed class PriceCatalogOptions
     /// </summary>
     public string? GetSourceUrl(string sourceName)
     {
+        // ReSharper disable once ConditionalAccessQualifierIsNonNullableAccordingToAPIContract
+        // Nullable annotations are a compile-time contract, not a runtime guarantee - Sources is bound from
+        // configuration, where a key present with no body deserializes to a null value.
         return Sources.TryGetValue(key: sourceName, value: out var source) && !string.IsNullOrWhiteSpace(source?.Url)
             ? source.Url
             : null;

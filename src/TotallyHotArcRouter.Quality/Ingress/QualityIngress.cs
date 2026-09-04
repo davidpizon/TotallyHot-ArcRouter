@@ -42,6 +42,10 @@ public sealed class QualityIngress : IQualityIngress
     {
         try
         {
+            // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
+            // Nullable annotations are a compile-time contract, not a runtime guarantee - this is a public
+            // entry point and a caller compiled without nullable checks, or against an older signature,
+            // can still hand it null. The guard is what turns that into a no-op instead of a throw.
             if (context is null || !_options.Enabled) return;
 
             if (_options.SamplingRate < 1.0 && Random.Shared.NextDouble() >= _options.SamplingRate) return;

@@ -22,6 +22,9 @@ public sealed class KeywordDimensionInferrer : IDimensionInferrer
     /// <inheritdoc/>
     public string Infer(string prompt, CodeLanguage language)
     {
+        // ReSharper disable once NullCoalescingConditionIsAlwaysNotNullAccordingToAPIContract
+        // Nullable annotations are a compile-time contract, not a runtime guarantee - this implements a
+        // public interface method any caller can reach with null.
         var p = (prompt ?? string.Empty).ToLowerInvariant();
 
         if (ContainsAny(haystack: p, "port to", "port from", "translate to", "translate from", "convert from",

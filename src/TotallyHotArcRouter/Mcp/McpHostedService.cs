@@ -86,8 +86,6 @@ public sealed class McpHostedService : IHostedService, IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         if (_server is not null) await _server.DisposeAsync().ConfigureAwait(false);
-
-        GC.SuppressFinalize(this);
     }
 
     /// <summary>

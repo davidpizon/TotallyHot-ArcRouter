@@ -88,7 +88,7 @@ public sealed class SpendTracker : ISpendTracker
             // rather than folded in as 0 - the aggregate-level twin of ModelPrice never estimating from
             // unverified rates: an aggregate that silently sums only the priced subset is just as
             // misleading as a single request's null collapsing into a confident zero.
-            if (estimatedCostUsd is decimal knownCost)
+            if (estimatedCostUsd is { } knownCost)
                 _totalCostUsd += knownCost;
             else
                 _unpricedRequests++;
@@ -102,7 +102,7 @@ public sealed class SpendTracker : ISpendTracker
         // ToString("F6")) so CostUsd/RunningTotalUsd stay structured decimal properties for any
         // sink that captures them, not culture-dependent, query-unfriendly strings - the ":F6" format
         // specifier only affects the rendered text, not the captured property value.
-        if (estimatedCostUsd is decimal cost)
+        if (estimatedCostUsd is { } cost)
             _logger.LogInformation(
                 message:
                 "[SPEND] model={Model} cost=${CostUsd:F6} runningTotal=${RunningTotalUsd:F6} requests={RequestCount}",

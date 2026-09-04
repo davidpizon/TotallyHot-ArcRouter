@@ -509,7 +509,10 @@ public class RequestInterceptor
             var buildResult = _routingCandidateBuilder.Build(jsonObject: jsonObject, route: route,
                 substitutionReasonSoFar: substitutionReason, liveDimension: liveDimension);
             candidates = buildResult.Candidates;
-            route = buildResult.Route;
+            // buildResult.Route is deliberately not read back into `route`: the resolved route reaches
+            // the caller through buildResult.Candidates, which the Success(...) return below receives,
+            // and nothing between here and that return consults `route` again. Assigning it was a dead
+            // store that only looked like it carried the substitution forward.
             substitutionReason = buildResult.SubstitutionReason;
             explicitCircuitTripBlockMessage = buildResult.ExplicitCircuitTripBlockMessage;
         }

@@ -234,17 +234,39 @@ public sealed class UsageRollupStore : IUsageRollupStore, IDisposable
     private static UsageRollupBucket Summarize(DateTimeOffset bucketStartUtc, string bucketWidth, string groupKey,
         IEnumerable<RawRow> rows)
     {
+        // One pass over the sequence, not seven. Every caller passes an IGrouping, whose repeats were
+        // cheap but pointless; the parameter type still admits a lazy sequence, which the previous
+        // seven separate aggregates would have genuinely re-enumerated seven times.
+        long requests = 0,
+            unpricedRequests = 0,
+            promptTokens = 0,
+            completionTokens = 0,
+            cacheCreationTokens = 0,
+            cacheReadTokens = 0;
+        var costUsd = 0m;
+
+        foreach (var row in rows)
+        {
+            requests += row.Requests;
+            unpricedRequests += row.UnpricedRequests;
+            promptTokens += row.PromptTokens;
+            completionTokens += row.CompletionTokens;
+            cacheCreationTokens += row.CacheCreationTokens;
+            cacheReadTokens += row.CacheReadTokens;
+            costUsd += row.CostUsd;
+        }
+
         return new UsageRollupBucket(
             BucketStartUtc: bucketStartUtc,
             BucketWidth: bucketWidth,
             GroupKey: groupKey,
-            Requests: rows.Sum(r => r.Requests),
-            UnpricedRequests: rows.Sum(r => r.UnpricedRequests),
-            PromptTokens: rows.Sum(r => r.PromptTokens),
-            CompletionTokens: rows.Sum(r => r.CompletionTokens),
-            CacheCreationTokens: rows.Sum(r => r.CacheCreationTokens),
-            CacheReadTokens: rows.Sum(r => r.CacheReadTokens),
-            CostUsd: rows.Aggregate(0m, func: (acc, r) => acc + r.CostUsd));
+            Requests: requests,
+            UnpricedRequests: unpricedRequests,
+            PromptTokens: promptTokens,
+            CompletionTokens: completionTokens,
+            CacheCreationTokens: cacheCreationTokens,
+            CacheReadTokens: cacheReadTokens,
+            CostUsd: costUsd);
     }
 
     /// <summary>

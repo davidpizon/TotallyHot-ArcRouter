@@ -392,6 +392,11 @@ public sealed class ProviderConfigStore : IProviderConfigStore, IDisposable
     /// </summary>
     private static ModelRoutingOptions Normalize(ModelRoutingOptions options)
     {
+        // ReSharper disable ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
+        // Nullable annotations are a compile-time contract, not a runtime guarantee - these collections come
+        // straight out of JSON deserialization of a user-editable file, which happily produces null for
+        // a non-nullable-annotated property. That is exactly the "hand-edited or partial file" case the
+        // summary above describes, so the checks are load-bearing.
         return new ModelRoutingOptions
         {
             Providers = options.Providers is null
@@ -400,5 +405,6 @@ public sealed class ProviderConfigStore : IProviderConfigStore, IDisposable
                     comparer: StringComparer.OrdinalIgnoreCase),
             ModelList = options.ModelList is null ? [] : [.. options.ModelList]
         };
+        // ReSharper restore ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
     }
 }

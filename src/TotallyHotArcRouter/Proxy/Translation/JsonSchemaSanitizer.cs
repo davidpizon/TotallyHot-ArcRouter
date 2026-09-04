@@ -72,7 +72,7 @@ internal static class JsonSchemaSanitizer
     {
         foreach (var keyword in profile.RemovedKeywords) schema.Remove(keyword);
 
-        if (profile.ConvertConstToEnum && schema["const"] is JsonNode constValue)
+        if (profile.ConvertConstToEnum && schema["const"] is { } constValue)
         {
             var clonedConst = constValue.DeepClone();
             schema.Remove("const");

@@ -419,6 +419,9 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
             var model = remainder[(separator + 1)..];
             if (model.Length == 0) continue;
 
+            // ReSharper disable once CompareOfFloatsByEqualityOperator
+            // Exact equality is deliberate: it detects an actual tie so the name comparison can break it
+            // deterministically. An epsilon would fold genuinely-different scores into a "tie".
             if (score > bestScore || (score == bestScore && string.CompareOrdinal(strA: model, strB: best) < 0))
             {
                 bestScore = score;

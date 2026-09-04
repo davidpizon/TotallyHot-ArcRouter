@@ -172,6 +172,10 @@ public sealed class GeminiPayloadTranslator : IPayloadTranslator
                     AppendToolResult(contents: contents, message: message);
                     break;
 
+                // ReSharper disable once RedundantCaseLabel
+                // "user" is listed even though `default` already catches it: it documents the expected
+                // role alongside the catch-all, rather than leaving readers to infer that the normal
+                // case and the unknown-role fallback happen to share a body.
                 case "user":
                 default:
                     AppendTextContent(contents: contents, role: "user",
@@ -358,17 +362,17 @@ public sealed class GeminiPayloadTranslator : IPayloadTranslator
     {
         var config = new JsonObject();
 
-        if (root["temperature"] is JsonNode temperature) config["temperature"] = temperature.DeepClone();
+        if (root["temperature"] is { } temperature) config["temperature"] = temperature.DeepClone();
 
-        if (root["top_p"] is JsonNode topP) config["topP"] = topP.DeepClone();
+        if (root["top_p"] is { } topP) config["topP"] = topP.DeepClone();
 
-        if (root["top_k"] is JsonNode topK) config["topK"] = topK.DeepClone();
+        if (root["top_k"] is { } topK) config["topK"] = topK.DeepClone();
 
         // OpenAI has both max_tokens (legacy) and max_completion_tokens; either maps to maxOutputTokens.
-        if ((root["max_completion_tokens"] ?? root["max_tokens"]) is JsonNode maxTokens)
+        if ((root["max_completion_tokens"] ?? root["max_tokens"]) is { } maxTokens)
             config["maxOutputTokens"] = maxTokens.DeepClone();
 
-        if (root["n"] is JsonNode candidateCount) config["candidateCount"] = candidateCount.DeepClone();
+        if (root["n"] is { } candidateCount) config["candidateCount"] = candidateCount.DeepClone();
 
         // OpenAI `stop` is a string, an array of strings, or null. Gemini's stopSequences must be
         // strings, so emit only string / string-array values and ignore anything else (null, number,
@@ -447,7 +451,7 @@ public sealed class GeminiPayloadTranslator : IPayloadTranslator
     private static JsonObject BuildToolCall(JsonObject functionCall, int index)
     {
         var name = functionCall["name"]?.GetValue<string>() ?? string.Empty;
-        var args = functionCall["args"] is JsonNode argsNode
+        var args = functionCall["args"] is { } argsNode
             ? argsNode.ToJsonString(SerializerOptions)
             : "{}";
 

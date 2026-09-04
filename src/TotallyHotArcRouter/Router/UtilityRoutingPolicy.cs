@@ -92,7 +92,7 @@ public sealed class UtilityRoutingPolicy : IRoutingPolicy
 
         var qualityGated = scored
             // The quality gate (§B3.4): only an *observed* score below the floor is excluded.
-            .Where(x => x.Quality is not double q || q >= _options.UtilityMinQualityScore)
+            .Where(x => x.Quality is not { } q || q >= _options.UtilityMinQualityScore)
             .ToList();
 
         var pricedAndGated = qualityGated

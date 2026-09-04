@@ -79,14 +79,14 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
 
         if (TranslateToolChoice(root["tool_choice"]) is { } toolChoice) anthropic["tool_choice"] = toolChoice;
 
-        if (root["temperature"] is JsonNode temperature) anthropic["temperature"] = temperature.DeepClone();
+        if (root["temperature"] is { } temperature) anthropic["temperature"] = temperature.DeepClone();
 
-        if (root["top_p"] is JsonNode topP) anthropic["top_p"] = topP.DeepClone();
+        if (root["top_p"] is { } topP) anthropic["top_p"] = topP.DeepClone();
 
-        if (root["top_k"] is JsonNode topK) anthropic["top_k"] = topK.DeepClone();
+        if (root["top_k"] is { } topK) anthropic["top_k"] = topK.DeepClone();
 
         // Anthropic's max_tokens is mandatory, unlike OpenAI's optional max_tokens/max_completion_tokens.
-        anthropic["max_tokens"] = (root["max_tokens"] ?? root["max_completion_tokens"]) is JsonNode maxTokens
+        anthropic["max_tokens"] = (root["max_tokens"] ?? root["max_completion_tokens"]) is { } maxTokens
             ? maxTokens.DeepClone()
             : DefaultMaxTokens;
 
@@ -110,7 +110,7 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
 
         // Anthropic's own streaming signal is a body field (unlike Gemini's URL-encoded choice), and it
         // happens to share OpenAI's exact name and boolean semantics - passed straight through.
-        if (root["stream"] is JsonNode stream) anthropic["stream"] = stream.DeepClone();
+        if (root["stream"] is { } stream) anthropic["stream"] = stream.DeepClone();
 
         // Extended-thinking opt-in has no OpenAI-standard field; a client that wants it sends Anthropic's
         // own already-shaped `thinking: {type, budget_tokens}` object as a pass-through extension field
@@ -280,6 +280,10 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
                     AppendToolResult(messages: result, message: message);
                     break;
 
+                // ReSharper disable once RedundantCaseLabel
+                // "user" is listed even though `default` already catches it: it documents the expected
+                // role alongside the catch-all, rather than leaving readers to infer that the normal
+                // case and the unknown-role fallback happen to share a body.
                 case "user":
                 default:
                     AppendUserContent(messages: result, message: message);
@@ -484,7 +488,7 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
     {
         var id = block["id"]?.GetValue<string>() is { Length: > 0 } blockId ? blockId : $"toolu_{Guid.NewGuid():N}";
         var name = block["name"]?.GetValue<string>() ?? string.Empty;
-        var arguments = block["input"] is JsonNode inputNode ? inputNode.ToJsonString(SerializerOptions) : "{}";
+        var arguments = block["input"] is { } inputNode ? inputNode.ToJsonString(SerializerOptions) : "{}";
 
         return new JsonObject
         {

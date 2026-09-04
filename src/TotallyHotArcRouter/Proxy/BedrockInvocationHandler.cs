@@ -268,6 +268,10 @@ internal sealed class BedrockInvocationHandler
         using var capture = new MemoryStream();
         IncrementalUsageScanner? tailScanner = null;
 
+        // ReSharper disable AccessToDisposedClosure
+        // `capture` is a `using` local of this method and EmitAsync is a local function that is only
+        // ever awaited from the try block below, so the closure never outlives the scope that disposes
+        // it. The inspection cannot prove that lifetime and assumes the closure may escape.
         async Task EmitAsync(byte[] translated)
         {
             if (translated.Length == 0) return;
@@ -290,6 +294,7 @@ internal sealed class BedrockInvocationHandler
                 tailScanner.Append(translated);
             }
         }
+        // ReSharper restore AccessToDisposedClosure
 
         try
         {

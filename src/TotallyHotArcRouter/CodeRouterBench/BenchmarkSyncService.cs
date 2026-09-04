@@ -370,7 +370,7 @@ public sealed class BenchmarkSyncService
         };
 
         var fileSizeBytes = new FileInfo(filePath).Length;
-        if (spec.ExpectedRowCount is int expected && rowCount != expected)
+        if (spec.ExpectedRowCount is { } expected && rowCount != expected)
             throw new FormatException($"'{spec.FileName}' has {rowCount} data row(s) but expected {expected}.");
 
         _ledger.Upsert(
