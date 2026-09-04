@@ -54,6 +54,9 @@ public static class ModelNameCanonicalizer
     // A small, fixed set of version/tier suffixes aggregators commonly append that a router's own
     // ModelList entry never carries. Not exhaustive by design - an unrecognized suffix simply falls through
     // to the next rung rather than being guessed at.
+    // ReSharper disable once RedundantVerbatimStringPrefix
+    // Kept on every regex literal even when the current pattern has no backslash: it is what stops
+    // a later `\d` or `\s` from being read as a C# escape instead of a regex one.
     private static readonly Regex VersionSuffix = new(pattern: @"(-latest|-preview|-exp|-beta|:free)$",
         options: RegexOptions.Compiled | RegexOptions.IgnoreCase);
 

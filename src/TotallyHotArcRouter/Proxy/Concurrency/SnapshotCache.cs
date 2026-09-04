@@ -27,7 +27,7 @@ namespace TotallyHot.ArcRouter.Proxy.Concurrency;
 internal sealed class SnapshotCache<T>
     where T : class
 {
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
     private volatile T _current;
 
     /// <summary>Initializes a new instance of the <see cref="SnapshotCache{T}"/> class with a starting snapshot.</summary>

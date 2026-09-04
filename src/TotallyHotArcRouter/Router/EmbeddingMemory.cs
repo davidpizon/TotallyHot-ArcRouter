@@ -28,7 +28,7 @@ public sealed class EmbeddingMemory : IDisposable
     private readonly ILogger<EmbeddingMemory> _logger;
     private readonly IOptionsMonitor<RoutingOptions> _optionsMonitor;
     private readonly IMemoryEntryStore _store;
-    private readonly object _syncLock = new();
+    private readonly Lock _syncLock = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="EmbeddingMemory"/> class.

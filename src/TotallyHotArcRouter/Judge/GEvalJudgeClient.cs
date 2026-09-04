@@ -79,6 +79,9 @@ public sealed class GEvalJudgeClient : IJudgeClient
                 "Explanation quality: is the explanation accurate, clear, and appropriately complete for the question asked?"
         };
 
+    // ReSharper disable once RedundantVerbatimStringPrefix
+    // Kept on every regex literal even when the current pattern has no backslash: it is what stops
+    // a later `\d` or `\s` from being read as a C# escape instead of a regex one.
     private static readonly Regex ScoreDigitPattern = new(pattern: @"[1-5]", options: RegexOptions.Compiled);
 
     private readonly IHttpClientFactory _httpClientFactory;

@@ -35,7 +35,7 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 public sealed class LogRegVoter : IRoutingVoter
 {
     private readonly IEmbeddingClient? _embeddingClient;
-    private readonly object _loadLock = new();
+    private readonly Lock _loadLock = new();
     private readonly ILogger<LogRegVoter> _logger;
     private readonly string _modelPath;
 

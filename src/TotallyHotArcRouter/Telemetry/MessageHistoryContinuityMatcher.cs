@@ -56,7 +56,7 @@ public sealed class MessageHistoryContinuityMatcher : IConversationContinuityMat
 {
     private static readonly TimeSpan StalenessWindow = TimeSpan.FromMinutes(30);
 
-    private readonly object _lock = new();
+    private readonly Lock _lock = new();
     private readonly TimeProvider _timeProvider;
     private readonly List<TrackedConversation> _tracked = [];
 

@@ -76,9 +76,8 @@ public static class BenchmarkIdResultsCsvImporter
         var costSourceParam = insert.Parameters.Add(parameterName: "$costSource", type: SqliteType.Text);
 
         var rowCount = 0;
-        string? line;
         var rowNumber = 1;
-        while ((line = reader.ReadLine()) is not null)
+        while (reader.ReadLine() is { } line)
         {
             rowNumber++;
             if (string.IsNullOrWhiteSpace(line)) continue;

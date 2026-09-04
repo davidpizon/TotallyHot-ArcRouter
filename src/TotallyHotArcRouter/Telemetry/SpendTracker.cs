@@ -51,7 +51,7 @@ public sealed class SpendTracker : ISpendTracker
     private readonly SpendTrackingOptions _options;
 
     // Guards the four running totals below (fast, synchronous - never held across an await).
-    private readonly object _totalsLock = new();
+    private readonly Lock _totalsLock = new();
 
     private int _requestCount;
     private long _totalCompletionTokens;

@@ -38,7 +38,7 @@ public sealed class DimBestVoter : IRoutingVoter
     private readonly BenchmarkDatabase _database;
     private readonly string _liveMemoryPrefix;
     private readonly ILogger<DimBestVoter> _logger;
-    private readonly object _matrixLock = new();
+    private readonly Lock _matrixLock = new();
     private readonly RouterMemory _routerMemory;
     private DimensionLedger? _ledger;
     private bool _matrixLoadAttempted;

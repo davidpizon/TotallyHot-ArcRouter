@@ -15,7 +15,7 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
 {
     private readonly TranscriptDatabase _database;
     private readonly IOptionsMonitor<TranscriptOptions> _options;
-    private readonly object _schemaLock = new();
+    private readonly Lock _schemaLock = new();
     private volatile bool _schemaEnsured;
 
     /// <summary>

@@ -33,6 +33,9 @@ public static partial class LogRegTextTokenizer
 
     /// <summary>The compiled pattern for a token: a run of at least two lowercase letters or digits.</summary>
     /// <returns>The generated, culture-invariant <see cref="Regex"/> instance.</returns>
+    // ReSharper disable once RedundantVerbatimStringPrefix
+    // Kept on every regex literal even when the current pattern has no backslash: it is what stops
+    // a later `\d` or `\s` from being read as a C# escape instead of a regex one.
     [GeneratedRegex(pattern: @"[a-z0-9]{2,}", options: RegexOptions.CultureInvariant)]
     private static partial Regex TokenPattern();
 }

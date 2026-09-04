@@ -32,7 +32,7 @@ public sealed class PriceSourceToggleStore : IDisposable
 
     // Guards only _sourceTokens/_disposed below - an unrelated concern to the snapshot cache, which owns its
     // own private gate (SnapshotCache<T>'s invariant explicitly calls out why the two must not share one).
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
     private readonly ILogger<PriceSourceToggleStore> _logger;
     private readonly PriceSourceRepository _repository;
 

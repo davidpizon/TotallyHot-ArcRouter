@@ -9,7 +9,7 @@ namespace TotallyHot.ArcRouter.Gui.Console;
 public sealed class LogBuffer
 {
     private readonly Queue<LogLineDto> _lines = new();
-    private readonly object _lock = new();
+    private readonly Lock _lock = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LogBuffer"/> class.

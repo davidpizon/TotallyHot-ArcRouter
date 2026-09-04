@@ -56,9 +56,8 @@ public static class BenchmarkIdTasksJsonlImporter
         var rawJsonParam = insert.Parameters.Add(parameterName: "$rawJson", type: SqliteType.Text);
 
         var rowCount = 0;
-        string? line;
         var lineNumber = 0;
-        while ((line = reader.ReadLine()) is not null)
+        while (reader.ReadLine() is { } line)
         {
             lineNumber++;
             if (string.IsNullOrWhiteSpace(line)) continue;

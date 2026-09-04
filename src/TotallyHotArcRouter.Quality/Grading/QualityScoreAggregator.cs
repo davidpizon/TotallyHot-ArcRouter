@@ -36,7 +36,7 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
     /// single lock is easier to reason about correctly than finer-grained locking. Revisit only if
     /// judge-scoring volume grows enough to make this lock a measurable bottleneck.
     /// </summary>
-    private readonly object _lock = new();
+    private readonly Lock _lock = new();
 
     private readonly ILogger<QualityScoreAggregator> _logger;
 

@@ -160,7 +160,7 @@ public sealed class ModelRouteResolver : IModelRouteResolver
     private readonly IEnvironmentVariableProvider _environment;
 
     // Guards a rebuild of the cached lookup below when the store's snapshot version advances.
-    private readonly object _rebuildLock = new();
+    private readonly Lock _rebuildLock = new();
     private readonly ISecretReader? _secretReader;
     private readonly IProviderConfigStore _store;
     private volatile int _cachedVersion = -1;

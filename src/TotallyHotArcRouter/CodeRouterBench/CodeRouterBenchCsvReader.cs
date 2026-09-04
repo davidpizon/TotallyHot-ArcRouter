@@ -56,9 +56,8 @@ public static class CodeRouterBenchCsvReader
             val2: Math.Max(val1: modelIndex, val2: scoreIndex)) + 1;
 
         List<CodeRouterBenchResultRow> rows = [];
-        string? line;
         var rowNumber = 1;
-        while ((line = reader.ReadLine()) is not null)
+        while (reader.ReadLine() is { } line)
         {
             rowNumber++;
 

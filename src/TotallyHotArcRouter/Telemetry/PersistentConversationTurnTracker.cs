@@ -20,7 +20,7 @@ public sealed class PersistentConversationTurnTracker : IConversationTurnTracker
     private static readonly TimeSpan IdleEviction = TimeSpan.FromHours(12);
     private readonly IUsageLedger _ledger;
 
-    private readonly object _lock = new();
+    private readonly Lock _lock = new();
     private readonly Dictionary<string, TrackedSession> _sessions = new(StringComparer.Ordinal);
     private readonly TimeProvider _timeProvider;
 
