@@ -5,119 +5,33 @@
 version: "1.0"
 image: jetbrains/qodana-cdnet:2026.2
 
-# Every inspection turned off below is one whose finding is wrong for this codebase, with the reason
-# recorded. Nothing is disabled to make a number go down: a finding that is merely tedious to fix is
-# fixed in the code, not silenced here.
+# WHERE THE INSPECTION DECISIONS LIVE: not here.
 #
-# NOTE ON FORM: an earlier revision listed these under a top-level `exclude:` with `name:` and no
-# `paths:`. That silently did nothing - the run on 98a3c95 still reported all 366 of them. The
-# `profile.base` + `inspections` form below is the documented way to disable an inspection outright;
-# `exclude` is kept only for the one entry that genuinely needs path scoping.
+# Per JetBrains' own documentation, "the Qodana Community for .NET linter does not support profiles
+# and their configuration options". It reads ReSharper `.DotSettings` files instead, so that is where
+# every "this inspection is wrong for this codebase" decision is recorded, each with its reason:
+#
+#   src/TotallyHotArcRouter.Qodana.slnx.DotSettings
+#       - solution-wide severities
+#   src/TotallyHotArcRouter.Tests/TotallyHotArcRouter.Tests.csproj.DotSettings
+#       - scoped to the test project, so the same finding in production code is still reported
+#
+# Do not re-express those decisions here. Two earlier revisions of this file tried, and both were
+# accepted without complaint and silently ignored - which is the trap worth naming: a qodana.yaml
+# that looks like it disables an inspection produces exactly the same report as one that says
+# nothing at all, so the mistake stays invisible until you count the findings.
+#
+#   - a top-level `exclude:` list keyed by `name:` (run on 98a3c95) - still reported all 366.
+#   - a `profile.base` + `inspections` block (run on 6660580) - still reported all 366. `base` is
+#     not in the schema either way; the documented keys are `profile.name` and `profile.path`.
+#
+# Nothing is turned off to make a number go down. A finding that is merely tedious to fix is fixed in
+# the code instead.
 profile:
-  base:
-    name: qodana.recommended
-  inspections:
-    # --------------------------------------------------------------------------------------------
-    # Record positional properties that only a serializer ever reads.
-    #
-    # These fire on the JSON wire contracts: ProviderAdminModels.cs alone is 37 records behind the
-    # proxy's /admin/* API, and LocalEndpointResponder's records are the /v1/models, /api/tags and
-    # /api/show payloads. Their properties are constructed in C# and then read by System.Text.Json
-    # through reflection, which the inspection cannot see - so it reports every wire field as
-    # unused. Acting on it would delete the fields and silently break the API.
-    - inspection: NotAccessedPositionalProperty.Global
-      enabled: false
-    - inspection: NotAccessedPositionalProperty.Local
-      enabled: false
-
-    # --------------------------------------------------------------------------------------------
-    # "This property needs no setter."
-    #
-    # All 13 sites are places where the writer is not C# code the analyzer can follow:
-    #   - 11 are options classes bound with `configuration.GetSection(...).Bind(options)`. The
-    #     binder assigns through the property setter by reflection, so removing the setter does not
-    #     fail the build - it makes the option silently keep its default and ignore
-    #     appsettings.json, which no test would catch.
-    #   - 2 are DialectDelimiter's validating overrides of a positional record's properties. That
-    #     file's own comment records why `init` is load-bearing there: `with` copies set `init`
-    #     properties directly, bypassing the field initializer that performs the validation.
-    #
-    # PropertyCanBeMadeInitOnly stays enabled and has been applied - `init` keeps a setter, so
-    # binding and System.Text.Json both still work; only removing the setter breaks them.
-    - inspection: AutoPropertyCanBeMadeGetOnly.Global
-      enabled: false
-
-    # --------------------------------------------------------------------------------------------
-    # "This public member/type is unused" - the whole family.
-    #
-    # The scan cannot see two of this codebase's largest callers, so "unused" is not a claim it is
-    # in a position to make about public API:
-    #
-    #   1. TotallyHotArcRouter.Gui and .Gui.Tests are deliberately absent from
-    #      src/TotallyHotArcRouter.Qodana.slnx - they target net10.0-windows and cannot build in
-    #      the Linux container this linter runs in (see that file's own header). 68 of the 132
-    #      production findings in this family name an identifier that appears in those two projects.
-    #   2. The rest are constructed or written by a framework through reflection: System.Text.Json
-    #      (HuggingFaceTreeEntry and friends exist only as ReadFromJsonAsync<T> targets), ASP.NET
-    #      Core model binding (SecretWriteRequest, ModelEnabledWriteRequest are minimal-API handler
-    #      parameters), and the configuration binder.
-    #
-    # Acting on these would delete or restrict API the GUI actually calls, and nothing would catch
-    # it: the Windows GUI build/test job in dotnet-ci.yml is `if: false`, so no CI job compiles that
-    # code. Re-enabling that job, or bringing the GUI into a scan that can build it, is what would
-    # make this family trustworthy again - at which point these entries should be removed and the
-    # findings re-read.
-    #
-    # An earlier revision of this file claimed UnusedType.Global and ClassNeverInstantiated.Global
-    # were left enabled as a safety net for genuinely dead contracts. That was wrong - they misfire
-    # on the same reflection-constructed types, which is why they are listed here too.
-    - inspection: MemberCanBePrivate.Global
-      enabled: false
-    - inspection: UnusedMemberInSuper.Global
-      enabled: false
-    - inspection: ClassNeverInstantiated.Global
-      enabled: false
-    - inspection: UnusedMethodReturnValue.Global
-      enabled: false
-    - inspection: UnusedMember.Global
-      enabled: false
-    - inspection: UnusedAutoPropertyAccessor.Global
-      enabled: false
-    - inspection: UnusedType.Global
-      enabled: false
-    - inspection: EventNeverSubscribedTo.Global
-      enabled: false
+  name: qodana.recommended
 
 include:
   - name: CheckDependencyLicenses
-
-exclude:
-  # ------------------------------------------------------------------------------------------------
-  # Short-lived HttpClient, in test projects only - the one entry that needs path scoping rather than
-  # an outright disable, which is why it stays in `exclude`.
-  #
-  # The inspection guards against socket exhaustion from churning real HttpClients in production. In
-  # these tests the client is bound to an in-memory TestServer handler and is deliberately scoped to
-  # one test so cases cannot leak state into each other - there is no socket to exhaust, and sharing
-  # one client across tests would trade a non-problem for real cross-test coupling. A short-lived
-  # HttpClient in production code is still reported.
-  #
-  # Both path spellings are listed because the linter reports paths relative to the analyzed solution
-  # (src/TotallyHotArcRouter.Qodana.slnx), not the repository root.
-  - name: ShortLivedHttpClient
-    paths:
-      - src/TotallyHotArcRouter.Tests
-      - src/TotallyHotArcRouter.Quality.Tests
-      - src/TotallyHotArcRouter.Gui.Admin.Tests
-      - src/TotallyHotArcRouter.Gui.Charts.Tests
-      - src/TotallyHotArcRouter.Gui.Console.Tests
-      - src/TotallyHotArcRouter.Gui.Telemetry.Tests
-      - TotallyHotArcRouter.Tests
-      - TotallyHotArcRouter.Quality.Tests
-      - TotallyHotArcRouter.Gui.Admin.Tests
-      - TotallyHotArcRouter.Gui.Charts.Tests
-      - TotallyHotArcRouter.Gui.Console.Tests
-      - TotallyHotArcRouter.Gui.Telemetry.Tests
 
 dotnet:
   solution: src/TotallyHotArcRouter.Qodana.slnx
