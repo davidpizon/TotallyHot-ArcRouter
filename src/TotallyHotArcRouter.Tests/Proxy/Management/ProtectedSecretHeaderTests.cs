@@ -314,7 +314,7 @@ public sealed class ProtectedSecretHeaderTests
     }
 
     [Fact]
-    public async Task ListProviders_WholeResponseJson_NeverContainsAProtectedHeaderValue()
+    public void ListProviders_WholeResponseJson_NeverContainsAProtectedHeaderValue()
     {
         if (!IsWindows) return;
 

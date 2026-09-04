@@ -171,7 +171,9 @@ public class ClusterBestVoterTests
         Assert.True((await voter.VoteAsync(context: context, cancellationToken: TestContext.Current.CancellationToken))
             .IsAbstain);
 
-        File.WriteAllText(path: path, contents: ClusterModelArtifactSerializer.Serialize(TwoClusterArtifact));
+        await File.WriteAllTextAsync(path: path,
+            contents: ClusterModelArtifactSerializer.Serialize(TwoClusterArtifact),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         // Without Reload(), the cached "no model" result is reused - the artifact is not picked up mid-run.
         Assert.True((await voter.VoteAsync(context: context, cancellationToken: TestContext.Current.CancellationToken))

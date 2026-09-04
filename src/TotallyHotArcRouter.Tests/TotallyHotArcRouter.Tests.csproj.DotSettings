@@ -78,4 +78,18 @@
   <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract/@EntryIndexedValue">DO_NOT_SHOW</s:String>
   <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=ConditionalAccessQualifierIsNonNullableAccordingToAPIContract/@EntryIndexedValue">DO_NOT_SHOW</s:String>
 
+  <!--
+    "This method has an async overload."
+
+    Both remaining sites are SqliteCommand.ExecuteReader, and taking the advice would be a pure loss.
+    Microsoft.Data.Sqlite's async methods are not asynchronous: SQLite exposes no async I/O, so
+    ExecuteReaderAsync and ReadAsync call straight through to their synchronous counterparts and
+    hand back an already-completed Task. Converting buys no thread release and costs a state machine
+    and a Task allocation per call, on a path a test runs in a loop.
+
+    Genuine async overloads elsewhere - File.WriteAllTextAsync, StreamReader.ReadToEndAsync,
+    CancellationTokenSource.CancelAsync - were applied rather than suppressed.
+  -->
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=MethodHasAsyncOverload/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+
 </wpf:ResourceDictionary>

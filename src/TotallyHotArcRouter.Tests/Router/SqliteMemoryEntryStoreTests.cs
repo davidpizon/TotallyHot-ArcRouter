@@ -115,7 +115,7 @@ public class SqliteMemoryEntryStoreTests : IDisposable
     public async Task EnsureCreated_PreExistingDatabaseWithoutProvenanceColumns_MigratesWithDefaults()
     {
         await using var connection = _database.OpenConnection();
-        using (var drop = connection.CreateCommand())
+        await using (var drop = connection.CreateCommand())
         {
             // Simulate a pre-migration database: recreate memory_entries without the two new columns,
             // then seed one row exactly as a pre-existing install would have it.
@@ -176,8 +176,8 @@ public class SqliteMemoryEntryStoreTests : IDisposable
     [Fact]
     public async Task EnsureCreated_PreExistingDatabaseWithoutIsJudgeScoredColumn_MigratesWithDefault()
     {
-        using (var connection = _database.OpenConnection())
-        using (var alter = connection.CreateCommand())
+        await using (var connection = _database.OpenConnection())
+        await using (var alter = connection.CreateCommand())
         {
             alter.CommandText = "ALTER TABLE memory_entries DROP COLUMN is_judge_scored;";
             alter.ExecuteNonQuery();

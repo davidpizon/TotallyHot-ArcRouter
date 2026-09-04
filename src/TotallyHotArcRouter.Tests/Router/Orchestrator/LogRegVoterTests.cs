@@ -143,7 +143,9 @@ public class LogRegVoterTests
         Assert.True((await voter.VoteAsync(context: context, cancellationToken: TestContext.Current.CancellationToken))
             .IsAbstain);
 
-        File.WriteAllText(path: path, contents: EmbeddingLogRegModelArtifactSerializer.Serialize(TestModel));
+        await File.WriteAllTextAsync(path: path,
+            contents: EmbeddingLogRegModelArtifactSerializer.Serialize(TestModel),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         // Without Reload(), the cached "no model" result is reused - the artifact is not picked up mid-run.
         Assert.True((await voter.VoteAsync(context: context, cancellationToken: TestContext.Current.CancellationToken))

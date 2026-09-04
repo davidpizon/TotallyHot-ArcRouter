@@ -276,8 +276,9 @@ public sealed class LlmRouterModelOverrideStoreTests : IDisposable
         var expectedSlug = reference.Snapshot.Override.CacheDirectorySlug;
 
         // Now hand-tamper the persisted file with a path-traversal slug and reload.
-        File.WriteAllText(path: _tempPath,
-            contents: $$"""{"BaseUrl":"{{baseUrl}}","CacheDirectorySlug":"../../evil"}""");
+        await File.WriteAllTextAsync(path: _tempPath,
+            contents: $$"""{"BaseUrl":"{{baseUrl}}","CacheDirectorySlug":"../../evil"}""",
+            cancellationToken: TestContext.Current.CancellationToken);
         var store = CreateStore(DefaultOptions());
 
         Assert.Equal(expected: baseUrl, actual: store.Snapshot.Override.BaseUrl);

@@ -84,8 +84,8 @@ public sealed class MemoryEntryEmbeddingModelTests
 
         // Drop the column to simulate a database created before this provenance existed, then re-run the
         // schema/migration path exactly as startup would.
-        using (var connection = temp.Database.OpenConnection())
-        using (var drop = connection.CreateCommand())
+        await using (var connection = temp.Database.OpenConnection())
+        await using (var drop = connection.CreateCommand())
         {
             drop.CommandText = "ALTER TABLE memory_entries DROP COLUMN embedding_model;";
             drop.ExecuteNonQuery();

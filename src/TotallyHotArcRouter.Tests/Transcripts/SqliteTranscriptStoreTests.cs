@@ -154,7 +154,7 @@ public class SqliteTranscriptStoreTests : IDisposable
         // CREATE TABLE IF NOT EXISTS is blind to it - without the explicit PRAGMA migration every read
         // would fail with "no such column".
         Directory.CreateDirectory(_tempDirectory);
-        using (var connection = new SqliteConnection($"Data Source={_dbPath}"))
+        await using (var connection = new SqliteConnection($"Data Source={_dbPath}"))
         {
             connection.Open();
             await using var create = connection.CreateCommand();

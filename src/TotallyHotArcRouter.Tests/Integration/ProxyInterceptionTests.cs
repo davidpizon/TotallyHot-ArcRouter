@@ -32,7 +32,7 @@ public class ProxyInterceptionTests
                 var context = await upstream.GetContextAsync().WaitAsync(TestContext.Current.CancellationToken);
                 using var reader = new StreamReader(stream: context.Request.InputStream,
                     encoding: context.Request.ContentEncoding);
-                var requestBody = await reader.ReadToEndAsync();
+                var requestBody = await reader.ReadToEndAsync(TestContext.Current.CancellationToken);
 
                 context.Response.StatusCode = (int)HttpStatusCode.OK;
                 context.Response.Headers.Add(name: "X-Upstream", value: "ok");
@@ -77,7 +77,7 @@ public class ProxyInterceptionTests
         finally
         {
             upstream.Stop();
-            timeoutCts.Cancel();
+            await timeoutCts.CancelAsync();
             await host.StopAsync(TestContext.Current.CancellationToken);
         }
     }
